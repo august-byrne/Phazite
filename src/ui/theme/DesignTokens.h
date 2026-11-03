@@ -235,6 +235,26 @@ namespace TrackTint
     inline constexpr float selectedHeader = 0.5f;
 } // namespace TrackTint
 
+// A track's header's left edge in the playlist (ui/playlist/TrackHeader.h), and its automation lanes': the strip in its
+// color, and how far each folder it is in moves it right, which the folder's rail, as wide as a strip, runs down (pixels).
+namespace TrackStrip
+{
+    inline constexpr int width = 8;
+    inline constexpr int indent = 12;
+} // namespace TrackStrip
+
+// Tracks dragged in the playlist: the headers of those that move, this opaque while they move (an alpha); the accent line
+// where they would go, this thick, from a dot this wide at the depth in folders they would go to; and a folder they would
+// go into, outlined in the accent this thick, over a wash of it (an alpha).
+namespace TrackDropTint
+{
+    inline constexpr float moving = 0.45f;
+    inline constexpr float line = 2.0f;
+    inline constexpr float dot = 7.0f;
+    inline constexpr float outline = 2.0f;
+    inline constexpr float wash = 0.12f;
+} // namespace TrackDropTint
+
 // How a folder's row in the playlist shows its tracks' clips (model/arrangement/PlaylistModel.h: getFolderSummary()): a thin
 // lane for each track that holds clips, at most this tall (pixels), between this much room above and below; each clip a bar
 // in its track's color (alphas, a muted one fainter), a pixel apart from the next lane's.
@@ -341,17 +361,25 @@ namespace FadeTint
 
 // How the audio clip editor shows its clip (ui/audioclip/AudioClipEditor.h): over the panels' background, the clip in a
 // wash of its track's color with its audio in that color, and the audio its edges trim off in the muted text color
-// (alphas); the line at each edge, and the grip in its middle, which a drag trims; the square handles at its top, which
-// a drag fades; and how near the pointer must come to an edge or a handle to take it (pixels).
+// (alphas); each edge a bracket, its line (thicker under the pointer) with ticks this long into the clip along its top and
+// bottom, and a grip in its middle, which a drag trims; the round handles at its top, which a drag fades, larger under the
+// pointer, ringed in the text color; the hollow handle in the middle of each fade's curve, which a drag up or down bends, as
+// an automation lane's line bends, filled under the pointer (radii), shown on a fade at least so wide; how far a drag of
+// half the clip's height bends a fade, from straight to all the way (a bend of 1); and how near the pointer must come to
+// an edge or a handle to take it (pixels).
 namespace AudioClipTint
 {
     inline constexpr float clipWash = 0.16f;
     inline constexpr float trimmedAudio = 0.35f;
-    inline constexpr float edgeWidth = 2.0f;
-    inline constexpr int gripWidth = 6;
-    inline constexpr int gripHeight = 28;
-    inline constexpr int handleSize = 10;
-    inline constexpr int grabDistance = 6;
+    inline constexpr float edgeWidth = 2.0f, hoveredEdgeWidth = 3.0f;
+    inline constexpr float bracketLength = 10.0f;
+    inline constexpr int gripWidth = 8;
+    inline constexpr int gripHeight = 36;
+    inline constexpr float handleRadius = 6.0f, hoveredHandleRadius = 7.5f, handleRing = 1.5f;
+    inline constexpr float bendRadius = 5.0f, hoveredBendRadius = 6.5f;
+    inline constexpr float minimumBendWidth = 24.0f;
+    inline constexpr float bendPerHalfHeight = 1.0f;
+    inline constexpr int grabDistance = 8;
 } // namespace AudioClipTint
 
 // A track's arm switch (ui/components/ArmButton.h): its dot, as a part of the button's height, and the dot's outline while

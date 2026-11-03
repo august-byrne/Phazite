@@ -254,6 +254,11 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     addTrackButton.setButtonText ("Track");
     addTrackButton.onClick = [this] { getCommands().invoke ("track.add"); };
     addTrackButton.setEnabled (false); // until a project is open
+    collapseAllButton.setComponentID ("track.collapseAll");
+    collapseAllButton.setQuiet (true);
+    collapseAllButton.setMouseClickGrabsKeyboardFocus (false);
+    collapseAllButton.onClick = [this] { getCommands().invoke ("track.collapseAll"); };
+    collapseAllButton.setEnabled (false);
 
     // While a section is dragged, where it would go shows across the tracks too.
     sectionsStrip.onDragChanged = [this] { lanes->repaint(); };
@@ -273,8 +278,8 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
         lanes->addAndMakeVisible (layer);
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &sectionsStrip, &chordLaneHeader, &chordLane, &headerColumn,
-                                                             lanes.get() })
+    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &collapseAllButton, &sectionsStrip, &chordLaneHeader,
+                                                             &chordLane, &headerColumn, lanes.get() })
         addAndMakeVisible (c);
 
     selection.addChangeListener (this);
@@ -307,7 +312,8 @@ void Playlist::showProject()
 
     // Another project's tracks and clips can have the same IDs: nothing of what was shown stays.
     scrollY = 0;
-    dropRow = -1;
+    trackDrop.reset();
+    headersFaded = false;
     selectionAnchor = {};
     lastClip = {};
     gesture = nullptr;
@@ -331,6 +337,7 @@ void Playlist::showProject()
     chordLane.showProject();
     chordLaneHeader.update();
     addTrackButton.setEnabled (open);
+    collapseAllButton.setEnabled (open);
     addTrackRow->setVisible (open);
     rebuild();
 }
@@ -440,13 +447,7 @@ void Playlist::paint (juce::Graphics& g)
 
 void Playlist::paintOverChildren (juce::Graphics& g)
 {
-    if (dropRow < 0)
-        return;
-
-    // A line where the dragged track would go.
-    const auto y = dropRow < (int) rows.size() ? getRowTop (rows[(size_t) dropRow]) : pinnedHeight + contentHeight - scrollY;
-    g.setColour (getPalette (*this).accent);
-    g.fillRect (headerColumn.getX(), lanes->getY() + y - 1, lanes->getRight() - headerColumn.getX(), 3);
+    paintTrackDrop (g);
 }
 
 void Playlist::resized()
@@ -460,7 +461,9 @@ void Playlist::resized()
     // The time bar: the song's sections over the bar numbers. Left of it, over the track headers, the button
     // that adds a track.
     auto timeBar = area.removeFromTop (SectionsStrip::preferredHeight + rulerHeight).withTrimmedRight (verticalBarWidth);
-    addTrackButton.setBounds (timeBar.removeFromLeft (headerWidth).reduced (Space::s, Space::s).withWidth (96));
+    auto corner = timeBar.removeFromLeft (headerWidth).reduced (Space::s, Space::s);
+    collapseAllButton.setBounds (corner.removeFromRight (corner.getHeight()));
+    addTrackButton.setBounds (corner.withWidth (96));
     sectionsStrip.setBounds (timeBar.removeFromTop (SectionsStrip::preferredHeight));
     ruler.setBounds (timeBar);
 

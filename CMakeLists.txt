@@ -202,6 +202,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/Outlines.h
     src/model/arrangement/PlaylistModel.cpp
     src/model/arrangement/PlaylistModel.h
+    src/model/arrangement/PlaylistValues.h
     src/model/arrangement/Sections.cpp
     src/model/arrangement/Selection.cpp
     src/model/arrangement/SongRange.cpp
@@ -450,6 +451,8 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/audio-lines.svg
         resources/icons/lucide/chevron-down.svg
         resources/icons/lucide/chevron-right.svg
+        resources/icons/lucide/chevrons-down-up.svg
+        resources/icons/lucide/chevrons-up-down.svg
         resources/icons/lucide/circle.svg
         resources/icons/lucide/clock-arrow-down.svg
         resources/icons/lucide/clock.svg
@@ -457,9 +460,9 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/copy.svg
         resources/icons/lucide/download.svg
         resources/icons/lucide/eraser.svg
+        resources/icons/lucide/folder-open.svg
         resources/icons/lucide/folder-plus.svg
         resources/icons/lucide/folder.svg
-        resources/icons/lucide/grip-vertical.svg
         resources/icons/lucide/headphones.svg
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/layout-dashboard.svg

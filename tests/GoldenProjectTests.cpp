@@ -164,7 +164,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     REQUIRE (audio != nullptr);
     phazite::setClipFade (*audio, true, te::TimeDuration::fromSeconds (0.25));
     phazite::setClipFade (*audio, false, te::TimeDuration::fromSeconds (0.5));
-    phazite::setFadeShape ({ audio }, te::AudioFadeCurve::convex);
+    phazite::setFadeShape ({ audio }, phazite::convexFade);
     phazite::setChannelPan (*tone, -0.5f);
 
     // Folders: Keys and Pad in a collapsed folder, and Tone in a bus at -3 dB.

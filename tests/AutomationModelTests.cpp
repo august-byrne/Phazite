@@ -756,7 +756,8 @@ TEST_CASE ("A return's row is in the playlist while the return has lanes, after 
     CHECK (phazite::getTrackRow (context, id).has_value()); // still the playlist's, as a track in a collapsed folder is
 
     // With a lane, it shows after the tracks, wherever it is in the song's list of tracks.
-    phazite::moveTracksAfter (context, { id }, {});
+    phazite::moveTracksTo (context, { id }, phazite::getAllPlaylistTracks (context).front(), phazite::TrackDrop::before);
+    REQUIRE (phazite::getAllPlaylistTracks (context).front() == id);
     phazite::showAutomationLane (context, phazite::getVolume (context, id).getRef());
     const auto rows = phazite::getPlaylistRows (context);
     REQUIRE (rows.size() == 3);

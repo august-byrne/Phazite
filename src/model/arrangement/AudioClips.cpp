@@ -102,21 +102,6 @@ namespace
         return juce::jlimit (minClipTempo, maxClipTempo, tempo);
     }
 
-    juce::String getShapeName (te::AudioFadeCurve::Type type)
-    {
-        switch (type)
-        {
-            case te::AudioFadeCurve::convex:
-                return schema::fadeIsConvex;
-            case te::AudioFadeCurve::concave:
-                return schema::fadeIsConcave;
-            case te::AudioFadeCurve::sCurve:
-                return schema::fadeIsSCurve;
-            case te::AudioFadeCurve::linear:
-            default:
-                return schema::fadeIsLinear;
-        }
-    }
 } // namespace
 
 //==============================================================================
@@ -201,22 +186,6 @@ double getClipFade (const juce::ValueTree& clipState, bool fadeIn)
     return (double) clipState.getProperty (fadeIn ? schema::clipFadeIn : schema::clipFadeOut, 0.0);
 }
 
-te::AudioFadeCurve::Type getFadeShape (const juce::ValueTree& clipState, bool fadeIn)
-{
-    const auto name = clipState[fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape].toString();
-
-    if (name == schema::fadeIsConvex)
-        return te::AudioFadeCurve::convex;
-
-    if (name == schema::fadeIsConcave)
-        return te::AudioFadeCurve::concave;
-
-    if (name == schema::fadeIsSCurve)
-        return te::AudioFadeCurve::sCurve;
-
-    return te::AudioFadeCurve::linear;
-}
-
 void setClipFade (te::Edit& edit, juce::ValueTree clipState, bool fadeIn, double seconds)
 {
     const auto& property = fadeIn ? schema::clipFadeIn : schema::clipFadeOut;
@@ -227,6 +196,50 @@ void setClipFade (te::Edit& edit, juce::ValueTree clipState, bool fadeIn, double
         clipState.removeProperty (property, getUndo (edit));
 
     mirror::reconcileClip (edit, getClipID (clipState));
+}
+
+FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn)
+{
+    const auto shape = clipState[fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape].toString();
+    const auto bend = (float) clipState.getProperty (fadeIn ? schema::clipFadeInBend : schema::clipFadeOutBend, 0.0f);
+    return { shape == schema::fadeIsSCurve ? FadeShape::sCurve : FadeShape::curve, juce::jlimit (-1.0f, 1.0f, bend) };
+}
+
+void setClipFadeCurve (te::Edit& edit, juce::ValueTree clipState, bool fadeIn, FadeCurve curve)
+{
+    // What is as at first isn't written: a straight curve.
+    auto* um = getUndo (edit);
+    const auto& shapeProperty = fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape;
+    const auto& bendProperty = fadeIn ? schema::clipFadeInBend : schema::clipFadeOutBend;
+    const auto bend = juce::jlimit (-1.0f, 1.0f, curve.bend);
+
+    if (curve.shape == FadeShape::sCurve)
+        clipState.setProperty (shapeProperty, schema::fadeIsSCurve, um);
+    else
+        clipState.removeProperty (shapeProperty, um);
+
+    if (juce::exactlyEqual (bend, 0.0f))
+        clipState.removeProperty (bendProperty, um);
+    else
+        clipState.setProperty (bendProperty, bend, um);
+
+    mirror::reconcileClip (edit, getClipID (clipState));
+}
+
+te::AudioFadeCurve::Type getNearestFadeType (FadeCurve curve)
+{
+    if (std::abs (curve.bend) < 0.5f)
+        return te::AudioFadeCurve::linear;
+
+    if (curve.shape == FadeShape::sCurve)
+        return curve.bend > 0.0f ? te::AudioFadeCurve::sCurve : te::AudioFadeCurve::linear;
+
+    return curve.bend > 0.0f ? te::AudioFadeCurve::convex : te::AudioFadeCurve::concave;
+}
+
+engine::FadeCurve toEngineFade (FadeCurve curve)
+{
+    return { curve.shape == FadeShape::sCurve ? engine::FadeShape::sCurve : engine::FadeShape::curve, curve.bend };
 }
 
 //==============================================================================
@@ -417,10 +430,5 @@ void toggleClipsFollowTempo (const juce::Array<te::Clip*>& clips)
     toggleAll (
         getAudioClipsAmong (clips), [] (te::AudioClipBase* clip) { return getClipTempo (*clip) > 0.0; },
         [] (te::AudioClipBase* clip, bool on) { setClipFollowsTempo (*clip, on); });
-}
-
-juce::String getSavedFadeShape (te::AudioFadeCurve::Type type)
-{
-    return getShapeName (type);
 }
 } // namespace phazite

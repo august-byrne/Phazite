@@ -106,6 +106,89 @@ namespace
         parent.addChild (state, index, getUndo (edit));
     }
 
+    // The tracks that move, in the playlist's order: those given, but those inside a folder that moves, which go with it.
+    std::vector<juce::ValueTree> getMovingStates (const juce::Array<te::Track*>& tracks)
+    {
+        std::vector<juce::ValueTree> given, moving;
+
+        for (auto* track : tracks)
+            if (const auto state = findTrackState (*track); state.isValid())
+                given.push_back (state);
+
+        const auto isGiven = [&given] (const juce::ValueTree& state)
+        { return std::find (given.begin(), given.end(), state) != given.end(); };
+
+        if (given.empty())
+            return moving;
+
+        for (const auto& state : getTrackStates (tracks.getFirst()->edit))
+        {
+            auto inMovingFolder = false;
+
+            for (auto parent = state.getParent(); parent.hasType (schema::TRACK) && ! inMovingFolder; parent = parent.getParent())
+                inMovingFolder = isGiven (parent);
+
+            if (isGiven (state) && ! inMovingFolder)
+                moving.push_back (state);
+        }
+
+        return moving;
+    }
+
+    // Where moving tracks dropped at a track go: the element they go into, and the child of it they go before (invalid: after
+    // its last), as the song is before they move. Nothing for a folder that would go into itself or a folder inside it.
+    struct DropPlace
+    {
+        juce::ValueTree parent, before;
+    };
+
+    std::optional<DropPlace> findDropPlace (const std::vector<juce::ValueTree>& moving, const juce::ValueTree& target, TrackDrop drop)
+    {
+        const auto isMoving = [&moving] (const juce::ValueTree& state)
+        { return std::find (moving.begin(), moving.end(), state) != moving.end(); };
+
+        DropPlace place;
+
+        if (drop == TrackDrop::into)
+        {
+            if (! isFolderState (target))
+                return {};
+
+            place.parent = target;
+        }
+        else
+        {
+            place.parent = target.getParent();
+
+            // Before the first child from there on that doesn't move itself.
+            for (auto i = place.parent.indexOf (target) + (drop == TrackDrop::after ? 1 : 0);
+                 i < place.parent.getNumChildren() && ! place.before.isValid(); ++i)
+                if (const auto child = place.parent.getChild (i); ! isMoving (child))
+                    place.before = child;
+        }
+
+        if (! target.isValid() || ! place.parent.isValid())
+            return {};
+
+        for (auto parent = place.parent; parent.hasType (schema::TRACK); parent = parent.getParent())
+            if (isMoving (parent))
+                return {};
+
+        return place;
+    }
+
+    // The tracks that have a row in the playlist, or can have one: its tracks and folders, and the returns and the master,
+    // whose rows show while they have automation lanes.
+    juce::Array<te::Track*> getRowTracks (te::Edit& edit)
+    {
+        auto tracks = getPlaylistTracks (edit);
+
+        if (auto* master = edit.getMasterTrack())
+            tracks.add (master);
+
+        return tracks;
+    }
+
     // Moves a track right after another one, in its folder, or else first in the list.
     void moveTrackAfter (te::Track& track, const te::Track* previous)
     {
@@ -781,6 +864,40 @@ void toggleTracksPinned (const juce::Array<te::Track*>& tracks)
     toggleAll (tracks, [] (te::Track* track) { return isPinned (*track); }, [] (te::Track* track, bool on) { setPinned (*track, on); });
 }
 
+bool isAnyRowExpanded (te::Edit& edit)
+{
+    for (auto* track : getRowTracks (edit))
+    {
+        // A return's or the master's own row shows only with lanes.
+        const auto lanes = getLanes (*track);
+        const auto hasRow = ! track->isMasterTrack() && ! isReturnTrack (*track);
+
+        if ((hasRow || ! lanes.empty()) && ! isCollapsed (*track))
+            return true;
+
+        if (std::any_of (lanes.begin(), lanes.end(), [] (const AutomationLane& lane) { return ! lane.collapsed; }))
+            return true;
+    }
+
+    return false;
+}
+
+void setAllRowsCollapsed (te::Edit& edit, bool collapsed)
+{
+    for (auto* track : getRowTracks (edit))
+    {
+        setCollapsed (*track, collapsed);
+
+        for (const auto& lane : getLanes (*track))
+            setLaneCollapsed (*track, lane.parameter, collapsed);
+    }
+}
+
+void toggleAllRowsCollapsed (te::Edit& edit)
+{
+    setAllRowsCollapsed (edit, isAnyRowExpanded (edit));
+}
+
 juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, Selection* selection)
 {
     juce::Array<te::Track*> copies;
@@ -881,6 +998,31 @@ void moveTracksAfter (const juce::Array<te::Track*>& moving, te::Track* previous
     mirror::reconcileTracks (edit);
 }
 
+bool canMoveTracksTo (const juce::Array<te::Track*>& tracks, const te::Track& target, TrackDrop drop)
+{
+    const auto moving = getMovingStates (tracks);
+    return ! moving.empty() && findDropPlace (moving, findTrackState (target), drop).has_value();
+}
+
+void moveTracksTo (const juce::Array<te::Track*>& tracks, const te::Track& target, TrackDrop drop)
+{
+    const auto moving = getMovingStates (tracks);
+    const auto place = moving.empty() ? std::nullopt : findDropPlace (moving, findTrackState (target), drop);
+
+    if (! place.has_value())
+        return;
+
+    auto& edit = target.edit;
+    const UndoStep step (edit, moving.size() > 1 ? "Move Tracks" : "Move Track");
+
+    // Each goes before the same child, which doesn't move, so that they keep their order.
+    for (const auto& state : moving)
+        moveTrackState (edit, state, place->parent,
+                        place->before.isValid() ? place->parent.indexOf (place->before) : place->parent.getNumChildren());
+
+    mirror::reconcileTracks (edit);
+}
+
 void deleteTracks (const juce::Array<te::Track*>& tracks, Selection* selection)
 {
     // A folder takes the tracks inside it along, so those aren't deleted on their own.
@@ -968,6 +1110,20 @@ void addTrackCommands (CommandRegistry& registry, Selection& selection)
                     .perform = [&selection] { toggleTracksCollapsed (getSelectedTracks (selection)); },
                     .isEnabled = [&selection] { return hasSelectedTracks (selection); },
                     .isTicked = [&selection] { return areAllTracksCollapsed (getSelectedTracks (selection)); } });
+
+    registry.add ({ .id = "track.collapseAll",
+                    .name = "Collapse All",
+                    .category = "Track",
+                    .description = "Makes every track, folder and automation lane a thin row, or, when they all are, shows them "
+                                   "all at full height again.",
+                    .synonyms = { "fold all", "unfold all", "expand all", "collapse everything", "minimize all" },
+                    .perform = withEdit (selection, [] (te::Edit& edit) { toggleAllRowsCollapsed (edit); }),
+                    .isEnabled = hasEdit,
+                    .currentName = [&selection]
+                    {
+                        auto* edit = selection.getEdit();
+                        return edit == nullptr || isAnyRowExpanded (*edit) ? juce::String ("Collapse All") : juce::String ("Expand All");
+                    } });
 
     registry.add ({ .id = "track.pin",
                     .name = "Pin Track",

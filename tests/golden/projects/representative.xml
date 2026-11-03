@@ -220,9 +220,9 @@
              name="Tone"
              pan="-0.5">
         <CLIP fadeIn="0.25"
-              fadeInShape="convex"
+              fadeInBend="1"
               fadeOut="0.5"
-              fadeOutShape="convex"
+              fadeOutBend="1"
               file="Audio/Tone.wav"
               fileEnd="2"
               fileStart="0"

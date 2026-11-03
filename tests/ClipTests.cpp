@@ -446,7 +446,7 @@ TEST_CASE ("A crossfade overlaps two touching audio clips, as far as their audio
     CHECK (second->getPosition().getStart().inSeconds() == doctest::Approx (0.5));
     CHECK (second->getFadeIn().inSeconds() == doctest::Approx (0.0));
 
-    phazite::setFadeShape ({ first, second }, te::AudioFadeCurve::sCurve);
+    phazite::setFadeShape ({ first, second }, phazite::sCurveFade);
     CHECK (first->getFadeOutType() == te::AudioFadeCurve::sCurve);
     CHECK (second->getFadeInType() == te::AudioFadeCurve::sCurve);
 }
@@ -501,7 +501,7 @@ TEST_CASE ("Aliases, audio clips and fade shapes")
     CHECK_FALSE (phazite::hasAliases ({ &midi }));
     CHECK_FALSE (phazite::hasAliases ({}));
     CHECK_FALSE (phazite::hasAudioClips ({ &midi }));
-    CHECK_FALSE (phazite::hasFadeShape ({ &midi }, te::AudioFadeCurve::linear)); // there is no audio clip
+    CHECK_FALSE (phazite::hasFadeShape ({ &midi }, phazite::linearFade)); // there is no audio clip
 
     const auto aliases = phazite::copyClips ({ &midi }, true);
     REQUIRE (aliases.size() == 1);
@@ -516,12 +516,12 @@ TEST_CASE ("Aliases, audio clips and fade shapes")
     const juce::Array<te::Clip*> both { &midi, audio };
     CHECK (phazite::hasAudioClips (both));
 
-    phazite::setFadeShape (both, te::AudioFadeCurve::convex);
-    CHECK (phazite::hasFadeShape (both, te::AudioFadeCurve::convex));
-    CHECK_FALSE (phazite::hasFadeShape (both, te::AudioFadeCurve::linear));
+    phazite::setFadeShape (both, phazite::convexFade);
+    CHECK (phazite::hasFadeShape (both, phazite::convexFade));
+    CHECK_FALSE (phazite::hasFadeShape (both, phazite::linearFade));
 
-    phazite::findClipState (*audio).removeProperty (phazite::schema::clipFadeOutShape, nullptr); // in and out differ: out is linear
-    CHECK_FALSE (phazite::hasFadeShape (both, te::AudioFadeCurve::convex));
+    phazite::findClipState (*audio).removeProperty (phazite::schema::clipFadeOutBend, nullptr); // in and out differ: out is straight
+    CHECK_FALSE (phazite::hasFadeShape (both, phazite::convexFade));
 }
 
 TEST_CASE ("A double-click's MIDI clip lasts a bar of the time signature there, as one undo step")

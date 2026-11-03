@@ -54,7 +54,7 @@ public:
     void quantizeSelection() override; // the selected clips' starts
 
     void paint (juce::Graphics&) override;
-    void paintOverChildren (juce::Graphics&) override; // where a dragged track would go
+    void paintOverChildren (juce::Graphics&) override; // where dragged tracks would go
     void resized() override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
@@ -100,9 +100,10 @@ private:
     ChordLane chordLane;         // under the time bar, above the tracks
     ChordLaneHeader chordLaneHeader;
 
-    IconButton addTrackButton { "Add track", Icon::plus }; // over the track headers, left of the time bar
-    ClipID lastClip;                                       // the clip the Draw and Paint tools place copies of
-    bool loopsSelection = false;                           // with a keymap whose selection loops: the loop is the selected time range's
+    IconButton addTrackButton { "Add track", Icon::plus };              // over the track headers, left of the time bar
+    IconButton collapseAllButton { "Collapse all", Icon::collapseAll }; // beside it: every row thin, or every one expanded
+    ClipID lastClip;                                                    // the clip the Draw and Paint tools place copies of
+    bool loopsSelection = false; // with a keymap whose selection loops: the loop is the selected time range's
 
     // The header column holds the pinned headers in a band at the top, and below it the scrolling
     // headers, inside headerContent, with a row after them that adds a track; the lanes hold the clips in two
@@ -136,9 +137,25 @@ private:
     bool focusMode = false;
     std::optional<BeatPosition> fileDropBeat; // where files dragged over the playlist would go
     int fileDropRow = -1;
-    bool deviceDropping = false;      // a device from the browser is dragged over the playlist, to fileDropRow
-    TrackID selectionAnchor;          // where Shift-click ranges start
-    int dropRow = -1;                 // while a track is dragged: the row it would go before (rows.size() for the end)
+    bool deviceDropping = false; // a device from the browser is dragged over the playlist, to fileDropRow
+    TrackID selectionAnchor;     // where Shift-click ranges start
+
+    // While tracks are dragged by a header: where they would go, at a row's track (TrackDrop, model/arrangement/PlaylistModel.h);
+    // nothing where they can't go. Before or after a track by the half of it the pointer is in; on a folder, into it in its
+    // middle, and before or after it in its top and bottom quarters (before its first track while that shows); under the
+    // tracks, at the end.
+    struct TrackDropPlace
+    {
+        int row = -1;
+        TrackDrop drop = TrackDrop::before;
+    };
+
+    std::optional<TrackDropPlace> trackDrop;
+    std::optional<TrackDropPlace> findTrackDrop (int y) const; // y in the lanes
+    void fadeMovingHeaders (bool);                             // the selected tracks' while they move, and those in them
+    bool headersFaded = false;
+    void paintTrackDrop (juce::Graphics&) const;
+
     std::unique_ptr<Gesture> gesture; // what the mouse is doing in the lanes, from mouse down to mouse up
     juce::Rectangle<int> rubberBand;  // the Select and Zoom tools' rectangle, in the lanes
 
@@ -158,6 +175,7 @@ private:
     void rebuild();                             // after tracks were added, deleted, moved or changed
     void layOutRows();
     void updateHeaders();
+    void updateCollapseAllButton(); // Collapse All while any row is expanded, Expand All otherwise
 
     // The automation lanes (PlaylistAutomation.cpp).
     void refreshLanes(); // the rows' lanes as the model has them now, laid out; it scrolls to show a lane shown just now
@@ -242,7 +260,6 @@ private:
     void trackDragged (TrackHeader&, const juce::MouseEvent&) override;
     bool trackDraggedOut (TrackHeader&, const juce::MouseEvent&) override;
     void trackDragEnded (TrackHeader&, const juce::MouseEvent&) override;
-    void trackSelectionDragged (TrackHeader&, const juce::MouseEvent&) override;
     void trackHeightChanged() override; // the row's height, as the model keeps it now
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection or the range changed

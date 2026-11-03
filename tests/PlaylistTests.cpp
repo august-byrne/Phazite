@@ -43,6 +43,7 @@ struct PlaylistScreen
         tracks = te::getAudioTracks (*edit);
         phazite::getSongUndoManager (*edit).clearUndoHistory();
 
+        phazite::addTrackCommands (registry, selection); // Collapse All's
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
         playlist.addCommands (registry);
         setEdit (context, edit.get());
@@ -317,46 +318,61 @@ TEST_CASE ("The playlist paints, with sections, a clip and a selected track")
     CHECK (image.getWidth() == 1000);
 }
 
-TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge resizes it")
+TEST_CASE ("A track's header moves the selected tracks from anywhere on it, a double-click collapses it, and its edge resizes it")
 {
     PlaylistScreen screen;
     auto headers = phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist);
     REQUIRE (headers.size() == 3);
     auto& header = *headers[0];
     REQUIRE (header.getTrack() == phazite::getTrackID (*screen.tracks[0]));
+    CHECK (phazite::test::findComponentWithTitle (header, "Collapse track") == nullptr); // no chevron, and no handle
 
     phazite::test::Mouse mouse (screen.playlist);
     const auto inPlaylist = [&screen, &header] (juce::Point<int> p) { return screen.playlist.getLocalPoint (&header, p); };
-    const auto down = juce::Point<int> (0, 2 * phazite::ui::TrackHeight::standard + 40); // near the boundary under the third track
+    const auto standard = phazite::ui::TrackHeight::standard;
 
-    // Dragging the middle of the header moves nothing: it selects the tracks the mouse passes.
+    // Dragged from its middle into the lower half of the third track, it goes after that one, faded while it moves.
     const auto middle = inPlaylist (header.getLocalBounds().getCentre());
     mouse.press (middle);
-    mouse.dragTo (middle + down);
+    mouse.dragTo (middle + juce::Point<int> (0, 2 * standard + 10));
+    CHECK (header.getAlpha() < 1.0f);
+    CHECK (headers[1]->getAlpha() == 1.0f);
     mouse.release();
+    mouse.pause();
     phazite::test::dispatchPendingMessages();
-    CHECK (te::getAudioTracks (*screen.edit) == screen.tracks);
-    CHECK (phazite::getSelectedTracks (screen.selection).size() == 3);
+    CHECK (header.getAlpha() == 1.0f);
+    using Tracks = juce::Array<te::AudioTrack*>;
+    CHECK (te::getAudioTracks (*screen.edit) == Tracks { screen.tracks[1], screen.tracks[2], screen.tracks[0] });
+    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Move Track"));
 
-    // Dragging the handle moves the track (selected alone by a click first): it goes last.
-    mouse.click (middle);
+    // Several selected tracks move together, in their order in the playlist, by any of their headers: the third track
+    // added to the selection, both dragged by the first's into the upper half of the top row, go before it.
+    auto& third = *headers[2];
+    mouse.click (screen.playlist.getLocalPoint (&third, third.getLocalBounds().getCentre()), juce::ModifierKeys::ctrlModifier);
+    REQUIRE (phazite::getSelectedTracks (screen.selection).size() == 2);
+    const auto last = inPlaylist (header.getLocalBounds().getCentre());
+    mouse.press (last);
+    mouse.dragTo (last - juce::Point<int> (0, 2 * standard + standard / 4));
+    mouse.release();
+    mouse.pause();
     phazite::test::dispatchPendingMessages();
+    CHECK (te::getAudioTracks (*screen.edit) == Tracks { screen.tracks[2], screen.tracks[0], screen.tracks[1] });
+    CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Move Tracks"));
+
+    // A click without a drag selects it alone; a double-click collapses it to a thin row, which shows its name.
+    mouse.click (inPlaylist (header.getLocalBounds().getCentre()));
     CHECK (phazite::getSelectedTracks (screen.selection).size() == 1);
-    const auto grip = inPlaylist (header.getGripArea().getCentre());
-    mouse.press (grip);
-    mouse.dragTo (grip + down);
-    mouse.release();
-    phazite::test::dispatchPendingMessages();
-    CHECK (te::getAudioTracks (*screen.edit).getLast() == screen.tracks[0]);
-
-    // The arrow collapses the track to a thin row, which shows its name.
-    auto* collapse = phazite::test::findComponentWithTitle (header, "Collapse track");
-    REQUIRE (collapse != nullptr);
-    mouse.click (inPlaylist (collapse->getBounds().getCentre()));
+    mouse.doubleClick (inPlaylist (header.getLocalBounds().getCentre()));
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::isCollapsed (*screen.tracks[0]));
     CHECK (header.getHeight() == phazite::ui::TrackHeight::collapsed);
-    CHECK (phazite::test::findComponentWithTitle (header, "Expand track") != nullptr);
+    CHECK (te::getAudioTracks (*screen.edit) == Tracks { screen.tracks[2], screen.tracks[0], screen.tracks[1] }); // nothing moved
+    mouse.doubleClick (inPlaylist (header.getLocalBounds().getCentre()));
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (phazite::isCollapsed (*screen.tracks[0]));
+    mouse.doubleClick (inPlaylist (header.getLocalBounds().getCentre()));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::isCollapsed (*screen.tracks[0]));
 
     // Dragging its bottom edge down expands it to where the edge is let go.
     const auto edge = inPlaylist ({ header.getWidth() / 2, header.getHeight() - 2 });
@@ -366,6 +382,98 @@ TEST_CASE ("Only a track's handle moves it, its arrow collapses it, and its edge
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (phazite::isCollapsed (*screen.tracks[0]));
     CHECK (header.getHeight() == phazite::ui::TrackHeight::collapsed + 30);
+}
+
+TEST_CASE (
+    "Tracks dropped on a folder's middle go into it, at its top edge before it, at its bottom edge first in it, and never a folder into itself")
+{
+    PlaylistScreen screen;
+    auto* folder = phazite::groupIntoFolder ({ screen.tracks[2] }, nullptr); // 0, 1, the folder (2)
+    REQUIRE (folder != nullptr);
+    phazite::test::dispatchPendingMessages();
+
+    phazite::test::Mouse mouse (screen.playlist);
+    using Tracks = juce::Array<te::Track*>;
+    const auto order = [&screen] { return phazite::getPlaylistTracks (*screen.edit); };
+    const auto headerOf = [&screen] (const te::Track& track) -> phazite::ui::TrackHeader&
+    {
+        for (auto* header : phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist))
+            if (header->getTrack() == phazite::getTrackID (track))
+                return *header;
+
+        FAIL ("no header for the track");
+        return *phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist)[0];
+    };
+
+    // Dragged by its middle (which selects it alone) to a height below the top of a track's row.
+    const auto drag = [&screen, &mouse, &headerOf] (const te::Track& track, const te::Track& to, int below)
+    {
+        auto& header = headerOf (track);
+        auto& target = headerOf (to);
+        const auto from = screen.playlist.getLocalPoint (&header, header.getLocalBounds().getCentre());
+        mouse.press (from);
+        mouse.dragTo ({ from.x, screen.playlist.getLocalPoint (&target, juce::Point<int> (0, below)).y });
+        mouse.release();
+        mouse.pause();
+        phazite::test::dispatchPendingMessages();
+    };
+
+    // The folder's row is 40 pixels tall: dropped in its middle, the first track goes in it, after its track.
+    const auto folderHeight = phazite::ui::TrackHeight::folder;
+    drag (*screen.tracks[0], *folder, folderHeight / 2);
+    CHECK (order() == Tracks { screen.tracks[1], folder, screen.tracks[2], screen.tracks[0] });
+    CHECK (phazite::isInside (screen.context, phazite::getTrackID (*screen.tracks[0]), phazite::getTrackID (*folder)));
+
+    // Its bottom edge, while its tracks show: first in it.
+    drag (*screen.tracks[1], *folder, folderHeight - 3);
+    CHECK (order() == Tracks { folder, screen.tracks[1], screen.tracks[2], screen.tracks[0] });
+
+    // Its top edge: before it, out of it.
+    drag (*screen.tracks[0], *folder, 3);
+    CHECK (order() == Tracks { screen.tracks[0], folder, screen.tracks[1], screen.tracks[2] });
+    CHECK_FALSE (phazite::isInside (screen.context, phazite::getTrackID (*screen.tracks[0]), phazite::getTrackID (*folder)));
+
+    // The folder among its own tracks: nothing moves. Under the last track: at the end, out of the folder.
+    const auto standard = phazite::ui::TrackHeight::standard;
+    drag (*folder, *screen.tracks[1], standard * 3 / 4);
+    CHECK (order() == Tracks { screen.tracks[0], folder, screen.tracks[1], screen.tracks[2] });
+    drag (*screen.tracks[1], *screen.tracks[2], standard * 2);
+    CHECK (order() == Tracks { screen.tracks[0], folder, screen.tracks[2], screen.tracks[1] });
+    CHECK_FALSE (phazite::isInside (screen.context, phazite::getTrackID (*screen.tracks[1]), phazite::getTrackID (*folder)));
+    CHECK (phazite::getTrackRow (screen.context, phazite::getTrackID (*screen.tracks[2]))->folderColours.size() == 1);
+}
+
+TEST_CASE ("The button over the track headers, and Alt+U, collapse every track and lane, and expand them all again")
+{
+    PlaylistScreen screen;
+    phazite::showAutomationLane (screen.context, phazite::getVolume (screen.context, phazite::getTrackID (*screen.tracks[0])).getRef());
+    phazite::test::dispatchPendingMessages();
+    auto* button = phazite::test::findComponentWithTitle (screen.playlist, "Collapse all");
+    REQUIRE (button != nullptr);
+    CHECK (button->isShowing());
+
+    phazite::test::Mouse mouse (*button);
+    mouse.click (button->getLocalBounds().getCentre());
+    phazite::test::dispatchPendingMessages();
+
+    for (auto* track : screen.tracks)
+        CHECK (phazite::isCollapsed (*track));
+
+    CHECK (phazite::getAutomationLanes (screen.context, phazite::getTrackID (*screen.tracks[0]))[0].collapsed);
+    CHECK (phazite::test::findComponentWithTitle (screen.playlist, "Expand all") == button);
+    CHECK (phazite::getCurrentName (*screen.registry.find ("track.collapseAll")) == juce::String ("Expand All"));
+    CHECK_FALSE (phazite::getSongUndoManager (*screen.edit).canUndo()); // view state
+
+    // Alt+U, as in Ableton Live.
+    screen.window.pressKey (juce::KeyPress ('u', juce::ModifierKeys::altModifier, 0));
+    screen.window.releaseKeys();
+    phazite::test::dispatchPendingMessages();
+
+    for (auto* track : screen.tracks)
+        CHECK_FALSE (phazite::isCollapsed (*track));
+
+    CHECK_FALSE (phazite::getAutomationLanes (screen.context, phazite::getTrackID (*screen.tracks[0]))[0].collapsed);
+    CHECK (phazite::test::findComponentWithTitle (screen.playlist, "Collapse all") == button);
 }
 
 TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip used, and right-click deletes it")

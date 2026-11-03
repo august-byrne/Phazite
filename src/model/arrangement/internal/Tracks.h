@@ -5,6 +5,7 @@
 // still Tracktion's: their clips and devices.
 #pragma once
 
+#include "model/arrangement/PlaylistValues.h"
 #include "model/arrangement/TrackColours.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
@@ -176,6 +177,13 @@ void toggleTracksCollapsed (const juce::Array<te::Track*>&);
 bool areAllTracksPinned (const juce::Array<te::Track*>&);
 void toggleTracksPinned (const juce::Array<te::Track*>&);
 
+// Every row of the playlist collapsed, or every one expanded, as Collapse All does (view state, no undo step): the tracks
+// and folders (a collapsed folder hides its tracks), the master's and the returns' rows, and every automation lane; and
+// whether any of them is expanded, which tells Collapse All which it does.
+bool isAnyRowExpanded (te::Edit&);
+void setAllRowsCollapsed (te::Edit&, bool collapsed);
+void toggleAllRowsCollapsed (te::Edit&); // collapses them all while any is expanded, or else expands them all
+
 // Copies each track right after its original, and returns the copies. With a selection given, the copies are selected
 // instead of what was; without one, what is selected stays as it was.
 juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>&, Selection*);
@@ -192,6 +200,12 @@ void setTrackColours (const juce::Array<te::Track*>&, juce::Colour);
 
 // Moves tracks, in their order, to right after another (nullptr: to the start), as one undo step ("Move Track(s)").
 void moveTracksAfter (const juce::Array<te::Track*>& moving, te::Track* previous);
+
+// Moves tracks where a drag in the playlist drops them (TrackDrop, PlaylistValues.h), in their order in the playlist, a
+// folder with the tracks inside it, as one undo step ("Move Track(s)"). Nothing moves where a folder would go into itself
+// or into a folder inside it; canMoveTracksTo() says whether they can go there.
+bool canMoveTracksTo (const juce::Array<te::Track*>& moving, const te::Track& target, TrackDrop);
+void moveTracksTo (const juce::Array<te::Track*>& moving, const te::Track& target, TrackDrop);
 
 // Deletes tracks; a folder goes with the tracks inside it, and devices whose sidechain listened to one of them listen
 // to their own sound again. With a selection manager, the track that takes the first one's place is selected, as in

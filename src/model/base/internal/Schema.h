@@ -557,15 +557,15 @@ inline const juce::Identifier clipReversed { "reversed" };
 // float, default 0: how much louder or quieter it plays, in decibels.
 inline const juce::Identifier clipGain { "gain" };
 
-// double, 0 or more, default 0: how long it fades in, and out, in seconds; and the shapes of the fades: fadeIsLinear,
-// fadeIsConvex, fadeIsConcave or fadeIsSCurve, default linear.
+// double, 0 or more, default 0: how long it fades in, and out, in seconds; the shapes of the fades (PlaylistModel.h:
+// FadeCurve), fadeIsCurve or fadeIsSCurve, default a curve; and how far each bends, a float from -1 to 1, default 0 (straight).
 inline const juce::Identifier clipFadeIn { "fadeIn" };
 inline const juce::Identifier clipFadeOut { "fadeOut" };
 inline const juce::Identifier clipFadeInShape { "fadeInShape" };
 inline const juce::Identifier clipFadeOutShape { "fadeOutShape" };
-inline constexpr const char* fadeIsLinear = "linear";
-inline constexpr const char* fadeIsConvex = "convex";
-inline constexpr const char* fadeIsConcave = "concave";
+inline const juce::Identifier clipFadeInBend { "fadeInBend" };
+inline const juce::Identifier clipFadeOutBend { "fadeOutBend" };
+inline constexpr const char* fadeIsCurve = "curve";
 inline constexpr const char* fadeIsSCurve = "sCurve";
 
 //==============================================================================

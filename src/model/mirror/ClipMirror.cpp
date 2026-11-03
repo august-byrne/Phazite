@@ -217,10 +217,10 @@ namespace
         if (! juce::exactlyEqual ((double) clip->state.getProperty (te::IDs::fadeOut, 0.0), fadeOut))
             clip->state.setProperty (te::IDs::fadeOut, fadeOut, undo);
 
-        if (const auto shape = getFadeShape (clipState, true); clip->getFadeInType() != shape)
+        if (const auto shape = getNearestFadeType (getClipFadeCurve (clipState, true)); clip->getFadeInType() != shape)
             clip->setFadeInType (shape);
 
-        if (const auto shape = getFadeShape (clipState, false); clip->getFadeOutType() != shape)
+        if (const auto shape = getNearestFadeType (getClipFadeCurve (clipState, false)); clip->getFadeOutType() != shape)
             clip->setFadeOutType (shape);
     }
 

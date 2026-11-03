@@ -863,7 +863,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSubMenu ("Grid", gridMenu);
 
             menu.addSeparator();
-            add (menu, { "view.focusMode", "track.pin", "track.collapse", "track.taller", "track.shorter" });
+            add (menu, { "view.focusMode", "track.pin", "track.collapse", "track.collapseAll", "track.taller", "track.shorter" });
             menu.addSeparator();
             add (menu, { "view.detachBrowser", "view.detachInspector", "view.detachEditor" });
             menu.addSeparator();

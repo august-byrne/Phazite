@@ -33,6 +33,7 @@ after start:
   track.groupIntoFolder: off "Group into Folder"
   track.ungroup: off "Ungroup Folder"
   track.collapse: off "Collapse Track"
+  track.collapseAll: on "Collapse All"
   track.pin: off "Pin Track"
   track.selectPrevious: on "Select Track Above"
   track.selectNext: on "Select Track Below"

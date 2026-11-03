@@ -4,10 +4,13 @@
 // clip's whole audio file, as wide as the editor, and never scrolls or zooms (the owner, 2026-10-30): the clip's part of it
 // in its track's color, with what its edges trim off shaded; its ruler counts the song's bars where the audio plays, so
 // that what is trimmed lines up with the song. Down the left, how the clip plays it: its gain, its pitch and fine tuning,
-// Reverse, and Follow Tempo with the tempo the audio was played at. On the audio, the clip's edges trim it, the handles at
-// its top corners fade it, and a drag on the clip's part moves it along the audio, the clip staying where it is in the
-// song (as the Slip tool does in the playlist); a double-click on a fade's handle takes the fade away. It has no tools to
-// choose: those handles are its one way. It works by IDs, through the model's AudioClipModel.h and PlaylistModel.h.
+// Reverse, and Follow Tempo with the tempo the audio was played at. On the audio, the clip's edges, brackets with a grip,
+// trim it, the round handles at its top corners fade it, and a drag on the clip's part moves it along the audio, the clip
+// staying where it is in the song (as the Slip tool does in the playlist); a double-click on a fade's handle takes the fade
+// away. Each fade's curve bends by the handle in its middle, dragged up or down, as an automation lane's line bends: a
+// double-click straightens it, and a right-click switches it between a curve and an S-curve (PlaylistValues.h: FadeCurve). It
+// has no tools to choose: those handles are its one way. It works by IDs, through the model's AudioClipModel.h and
+// PlaylistModel.h.
 #pragma once
 
 #include "model/arrangement/AudioClipModel.h"
@@ -42,11 +45,13 @@ public:
         trimStart,
         trimEnd,
         fadeIn,
-        fadeOut
+        fadeOut,
+        bendIn, // in the middle of the fade's curve, while it is wide enough to bend
+        bendOut
     };
 
-    juce::Rectangle<int> getHandleBounds (Handle) const;
-    juce::Component& getWaveformComponent() noexcept; // where the clip's audio is drawn, for tests
+    juce::Rectangle<int> getHandleBounds (Handle) const; // empty for one that doesn't show
+    juce::Component& getWaveformComponent() noexcept;    // where the clip's audio is drawn, for tests
 
     // TimelineEditor. The view shows the clip's whole audio, always; nothing here is selected to nudge or quantize.
     bool isViewFixed() const override { return true; }

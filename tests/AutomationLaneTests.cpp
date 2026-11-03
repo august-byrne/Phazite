@@ -354,22 +354,33 @@ TEST_CASE ("Dragging over empty lane space selects the points in the rectangle, 
     CHECK (screen.getBeats() == std::vector { 2.0 });
 }
 
-TEST_CASE ("A lane's chevron collapses it to a thin row, as a collapsed track's lanes are, and the master's row has one too")
+TEST_CASE (
+    "A double-click on a lane's header collapses it to a thin row, as a collapsed track's lanes are, and on the master's row its lanes")
 {
     LaneScreen screen;
     auto& context = screen.context;
     const auto track = screen.trackID (0);
-    CHECK (phazite::test::findComponentWithTitle (screen.playlist, "Hide lane") == nullptr); // lanes collapse; nothing hides
+    CHECK (phazite::test::findComponentWithTitle (screen.playlist, "Hide lane") == nullptr);     // lanes collapse; nothing hides
+    CHECK (phazite::test::findComponentWithTitle (screen.playlist, "Collapse lane") == nullptr); // no chevron: a double-click
 
-    auto* chevron = phazite::test::findComponentWithTitle (screen.playlist, "Collapse lane");
-    REQUIRE (chevron != nullptr);
-    phazite::test::Mouse mouse (*chevron);
-    mouse.click (chevron->getLocalBounds().getCentre());
+    // On its name too, which is no button while the lane has automation.
+    phazite::addAutomationPoint (context, screen.volume, { BeatPosition::fromBeats (2.0), 0.5f });
+    phazite::test::dispatchPendingMessages();
+    auto* header = phazite::test::findComponentWithTitle (screen.playlist, "Automation lane: Volume");
+    REQUIRE (header != nullptr);
+    phazite::test::Mouse mouse (*header);
+    mouse.doubleClick ({ header->getWidth() / 2, header->getHeight() / 3 });
     phazite::test::dispatchPendingMessages();
     REQUIRE (phazite::getAutomationLanes (context, track).size() == 1);
     CHECK (phazite::getAutomationLanes (context, track)[0].collapsed);
     CHECK (screen.lane().isShowing());
     CHECK (screen.lane().getHeight() == phazite::ui::TrackHeight::collapsed);
+    mouse.doubleClick ({ header->getWidth() / 2, header->getHeight() / 3 });
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (phazite::getAutomationLanes (context, track)[0].collapsed);
+    mouse.doubleClick ({ header->getWidth() / 2, header->getHeight() / 3 });
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getAutomationLanes (context, track)[0].collapsed);
 
     // A double-click on the thin lane expands it.
     phazite::test::Mouse onLane (screen.lane());
@@ -386,17 +397,15 @@ TEST_CASE ("A lane's chevron collapses it to a thin row, as a collapsed track's 
     phazite::setCollapsed (context, track, false);
     phazite::test::dispatchPendingMessages();
 
-    // The master's volume: its lane shows under a row named Master, below the tracks, whose chevron collapses its lanes.
+    // The master's volume: its lane shows under a row named Master, below the tracks, which a double-click collapses.
     phazite::showAutomationLane (context, phazite::getMasterVolume (context).getRef());
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::getMasterRow (context).has_value());
     auto* master = phazite::test::findComponentWithTitle (screen.playlist, "Master");
     REQUIRE (master != nullptr);
     CHECK (master->isShowing());
-    auto* masterChevron = phazite::test::findComponentWithTitle (*master, "Collapse master's lanes");
-    REQUIRE (masterChevron != nullptr);
-    phazite::test::Mouse onChevron (*masterChevron);
-    onChevron.click (masterChevron->getLocalBounds().getCentre());
+    phazite::test::Mouse onMasterRow (*master);
+    onMasterRow.doubleClick (master->getLocalBounds().getCentre());
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::getMasterRow (context)->collapsed);
 

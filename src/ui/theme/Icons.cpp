@@ -36,12 +36,14 @@ namespace
                 return "repeat.svg";
             case Icon::metronome:
                 return "metronome.svg";
-            case Icon::grip:
-                return "grip-vertical.svg";
             case Icon::expanded:
                 return "chevron-down.svg";
             case Icon::folded:
                 return "chevron-right.svg";
+            case Icon::collapseAll:
+                return "chevrons-down-up.svg";
+            case Icon::expandAll:
+                return "chevrons-up-down.svg";
             case Icon::smartTool:
                 return "mouse-pointer-2.svg";
             case Icon::draw:
@@ -62,6 +64,8 @@ namespace
                 return "zoom-in.svg";
             case Icon::folder:
                 return "folder.svg";
+            case Icon::openFolder:
+                return "folder-open.svg";
             case Icon::addFolder:
                 return "folder-plus.svg";
             case Icon::returnTrack:

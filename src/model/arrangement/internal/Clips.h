@@ -6,6 +6,7 @@
 // same IDs.
 #pragma once
 
+#include "model/arrangement/PlaylistValues.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -86,7 +87,7 @@ bool hasAudioClips (const juce::Array<te::Clip*>&); // whether any of them holds
 
 // Whether there is an audio clip among these, and every audio clip among them fades in and out in this shape. MIDI
 // clips don't count.
-bool hasFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
+bool hasFadeShape (const juce::Array<te::Clip*>&, FadeCurve);
 
 // A copy of each clip, on the same track and in the same place, for the caller to move. As aliases,
 // the copies stay linked to their originals: editing the notes of one edits them all.
@@ -113,8 +114,10 @@ void setClipFade (te::AudioClipBase&, bool fadeIn, te::TimeDuration);
 // far as its audio goes, and the first fades out as the second fades in. A length of 0 puts them back.
 void setCrossfade (te::AudioClipBase& first, te::AudioClipBase& second, te::TimePosition boundary, te::TimeDuration length);
 
-// Gives the audio clips among these fade-ins and fade-outs of a shape.
-void setFadeShape (const juce::Array<te::Clip*>&, te::AudioFadeCurve::Type);
+// Gives the audio clips among these fade-ins and fade-outs of a shape (PlaylistValues.h: FadeCurve); and one of an audio
+// clip's fades a shape, as one undo step ("Change Fade Shape").
+void setFadeShape (const juce::Array<te::Clip*>&, FadeCurve);
+void setFadeCurve (te::Clip&, bool fadeIn, FadeCurve);
 
 // Adds an empty MIDI clip, named after its track or as given, and selects it if a selection manager is given.
 te::MidiClip* insertMidiClip (te::ClipTrack&, te::BeatRange, Selection*, const juce::String& name = {});

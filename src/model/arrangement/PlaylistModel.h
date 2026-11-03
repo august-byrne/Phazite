@@ -6,6 +6,7 @@
 // Clips.h); while a gesture is open (SongGesture.h), its edits join its one step.
 #pragma once
 
+#include "PlaylistValues.h"
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
 
@@ -35,12 +36,13 @@ struct TrackRow
     juce::String name {};
     juce::Colour colour {}; // its own, or else its row's in the palette
     TrackType kind = TrackType::track;
-    int depth = 0;                  // how many folders it is in
-    bool pinned = false;            // it stays in view while the others scroll
-    bool collapsed = false;         // a thin row, a folder whose tracks are hidden, or the master with thin lanes
-    std::optional<int> savedHeight; // as the project keeps it, in pixels (view state); the playlist keeps it in range
-    bool hasInstrument = false;     // a double-click on it adds a MIDI clip
-    bool frozen = false;            // it plays a file of its sound (model/mixer/FreezeModel.h): its clips look frosted
+    int depth = 0;                              // how many folders it is in
+    std::vector<juce::Colour> folderColours {}; // those folders' colors, the outermost first
+    bool pinned = false;                        // it stays in view while the others scroll
+    bool collapsed = false;                     // a thin row, a folder whose tracks are hidden, or the master with thin lanes
+    std::optional<int> savedHeight;             // as the project keeps it, in pixels (view state); the playlist keeps it in range
+    bool hasInstrument = false;                 // a double-click on it adds a MIDI clip
+    bool frozen = false;                        // it plays a file of its sound (model/mixer/FreezeModel.h): its clips look frosted
 };
 
 std::vector<TrackRow> getPlaylistRows (const ProjectContext&);
@@ -73,16 +75,20 @@ struct FolderSummary
 
 FolderSummary getFolderSummary (const ProjectContext&, TrackID folder);
 
-// View state, written without undo steps (Tracks.h).
+// View state, written without undo steps (Tracks.h). Whether any row or automation lane is expanded, which the command
+// Collapse All (track.collapseAll) collapses, or else expands them all.
 void setCollapsed (ProjectContext&, TrackID, bool);
 void setSavedTrackHeight (ProjectContext&, TrackID, int height);
+bool isAnyRowExpanded (const ProjectContext&);
 
 // Track edits, each one undo step (Tracks.h): a name (an empty one gives the track its number back); a color; tracks
-// moved, in their order, to right after another (an empty ID: to the start); and a track or folder added after the
+// moved, in their order in the playlist, where a drag drops them (PlaylistValues.h: TrackDrop), a folder with its tracks,
+// nothing moving where a folder would go into itself (canMoveTracksTo() tells); and a track or folder added after the
 // last, and selected.
 void renameTrack (ProjectContext&, TrackID, const juce::String& name);
 void setTrackColours (ProjectContext&, const std::vector<TrackID>&, juce::Colour);
-void moveTracksAfter (ProjectContext&, const std::vector<TrackID>& moving, TrackID previous);
+bool canMoveTracksTo (const ProjectContext&, const std::vector<TrackID>& moving, TrackID target, TrackDrop);
+void moveTracksTo (ProjectContext&, const std::vector<TrackID>& moving, TrackID target, TrackDrop);
 TrackID addTrackAtEnd (ProjectContext&, bool folder);
 
 //==============================================================================
@@ -91,14 +97,6 @@ enum class ClipType
 {
     midi,
     audio
-};
-
-enum class FadeShape
-{
-    linear,
-    convex,
-    concave,
-    sCurve
 };
 
 struct ClipInfo
@@ -113,9 +111,9 @@ struct ClipInfo
     bool followsTempo = false; // an audio clip that stretches with the song's tempo (AudioClipModel.h)
     int takes = 0, take = 0;   // an audio clip recorded round a looped range: its takes, and the one it plays, from 1 (RecordingModel.h)
 
-    // An audio clip's fades, each as a part of the clip's length (0 to 1), and their shapes.
+    // An audio clip's fades, each as a part of the clip's length (0 to 1), and their shapes (PlaylistValues.h).
     double fadeIn = 0.0, fadeOut = 0.0;
-    FadeShape fadeInShape = FadeShape::linear, fadeOutShape = FadeShape::linear;
+    FadeCurve fadeInCurve {}, fadeOutCurve {};
 };
 
 std::vector<ClipInfo> getClips (const ProjectContext&, TrackID); // left to right
@@ -139,8 +137,8 @@ struct ClipSubRow
 
 std::vector<ClipSubRow> getClipSubRows (const std::vector<ClipInfo>&);
 
-// A fade's gain at a point through it, from 0 (its start) to 1 (its end), as Tracktion plays it.
-float getFadeGain (FadeShape, float alpha);
+// A fade's gain at a point through it, from 0 (its start) to 1 (its end), as Phazite's engine plays it.
+float getFadeGain (FadeCurve, float alpha);
 
 // A MIDI clip's notes as the playlist draws them: each one's pitch, and where it starts and ends, in beats from the
 // clip's start (outside the clip for notes it doesn't play).
@@ -165,6 +163,10 @@ void trimClipEnd (ProjectContext&, ClipID, BeatPosition);
 
 // An audio clip's fade, from its start (fadeIn) or end to a place in the song.
 void fadeClipTo (ProjectContext&, ClipID, bool fadeIn, BeatPosition);
+
+// An audio clip's fade's shape: its own undo step ("Change Fade Shape"), unless a gesture is open, whose step it joins (as
+// a drag of the fade's bend does).
+void setFadeCurve (ProjectContext&, ClipID, bool fadeIn, FadeCurve);
 
 // Slip: what is inside a clip moves by the time between two places, from its offset when the drag began (in seconds:
 // getSlipOffset()), while the clip stays where it is.

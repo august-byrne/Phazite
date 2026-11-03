@@ -64,5 +64,5 @@ private:
 
 // Shades what a fade takes away from an audio clip, above its curve from silence (at x0) to full volume (at x1) between
 // a top and a bottom, as the playlist and the audio clip editor draw fades.
-void paintFade (juce::Graphics&, float x0, float x1, float top, float bottom, FadeShape);
+void paintFade (juce::Graphics&, float x0, float x1, float top, float bottom, FadeCurve);
 } // namespace phazite::ui

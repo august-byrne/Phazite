@@ -622,7 +622,7 @@ bool hasAudioClips (const juce::Array<te::Clip*>& clips)
     return std::any_of (clips.begin(), clips.end(), [] (te::Clip* clip) { return dynamic_cast<te::AudioClipBase*> (clip) != nullptr; });
 }
 
-bool hasFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type type)
+bool hasFadeShape (const juce::Array<te::Clip*>& clips, FadeCurve curve)
 {
     auto any = false;
 
@@ -630,7 +630,7 @@ bool hasFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type
     {
         if (const auto clipState = findClipState (*clip); isAudioState (clipState))
         {
-            if (getFadeShape (clipState, true) != type || getFadeShape (clipState, false) != type)
+            if (! (getClipFadeCurve (clipState, true) == curve && getClipFadeCurve (clipState, false) == curve))
                 return false;
 
             any = true;
@@ -775,22 +775,24 @@ void setCrossfade (te::AudioClipBase& first, te::AudioClipBase& second, te::Time
     setClipFade (edit, secondState, true, (half * 2.0).inSeconds());
 }
 
-void setFadeShape (const juce::Array<te::Clip*>& clips, te::AudioFadeCurve::Type shape)
+void setFadeShape (const juce::Array<te::Clip*>& clips, FadeCurve curve)
 {
     for (auto* clip : clips)
     {
         if (auto clipState = findClipState (*clip); isAudioState (clipState))
         {
-            for (const auto& property : { schema::clipFadeInShape, schema::clipFadeOutShape })
-            {
-                if (shape == te::AudioFadeCurve::linear)
-                    clipState.removeProperty (property, getUndo (clip->edit));
-                else
-                    clipState.setProperty (property, getSavedFadeShape (shape), getUndo (clip->edit));
-            }
-
-            mirror::reconcileClip (clip->edit, getClipID (clipState));
+            setClipFadeCurve (clip->edit, clipState, true, curve);
+            setClipFadeCurve (clip->edit, clipState, false, curve);
         }
+    }
+}
+
+void setFadeCurve (te::Clip& clip, bool fadeIn, FadeCurve curve)
+{
+    if (auto clipState = findClipState (clip); isAudioState (clipState))
+    {
+        const UndoStep step (clip.edit, "Change Fade Shape");
+        setClipFadeCurve (clip.edit, clipState, fadeIn, curve);
     }
 }
 

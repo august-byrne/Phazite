@@ -58,6 +58,7 @@ void Playlist::rebuild()
     updateHeaders();
     updateLanes();
     updateClips();
+    updateCollapseAllButton();
     ruler.repaint();
     noteLanes();
 }

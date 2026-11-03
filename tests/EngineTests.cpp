@@ -725,22 +725,37 @@ engine::AudioRegion makeRegion (std::shared_ptr<engine::AudioFile> file, std::in
 }
 } // namespace
 
-TEST_CASE ("A fade's shapes start silent and end at their level: linear, convex quick at first, concave slow, S-curve between")
+TEST_CASE ("A fade's curves start silent and end at their level: straight, convex quick at first, concave slow, S-curves between")
 {
     using engine::FadeShape;
+    const auto gain = [] (FadeShape shape, float bend, float along) { return engine::getFadeGain ({ shape, bend }, along); };
 
-    for (const auto shape : { FadeShape::linear, FadeShape::convex, FadeShape::concave, FadeShape::sCurve })
+    for (const auto shape : { FadeShape::curve, FadeShape::sCurve })
     {
-        CHECK (engine::getFadeGain (shape, 0.0f) == doctest::Approx (0.0f));
-        CHECK (engine::getFadeGain (shape, 1.0f) == doctest::Approx (1.0f));
+        for (const auto bend : { -1.0f, -0.5f, 0.0f, 0.3f, 1.0f })
+        {
+            CHECK (gain (shape, bend, 0.0f) == doctest::Approx (0.0f));
+            CHECK (gain (shape, bend, 1.0f) == doctest::Approx (1.0f));
+
+            // Rising all the way.
+            for (auto along = 0.05f; along < 1.0f; along += 0.05f)
+                CHECK (gain (shape, bend, along) > gain (shape, bend, along - 0.05f));
+        }
+
+        CHECK (gain (shape, 0.0f, 0.3f) == doctest::Approx (0.3f));
     }
 
-    CHECK (engine::getFadeGain (FadeShape::linear, 0.5f) == doctest::Approx (0.5f));
-    CHECK (engine::getFadeGain (FadeShape::convex, 0.5f) == doctest::Approx (std::sqrt (0.5f)));
-    CHECK (engine::getFadeGain (FadeShape::concave, 0.5f) == doctest::Approx (1.0f - std::sqrt (0.5f)));
-    CHECK (engine::getFadeGain (FadeShape::sCurve, 0.5f) == doctest::Approx (0.5f));
-    CHECK (engine::getFadeGain (FadeShape::sCurve, 0.25f) < engine::getFadeGain (FadeShape::linear, 0.25f));
-    CHECK (engine::getFadeGain (FadeShape::sCurve, 0.75f) > engine::getFadeGain (FadeShape::linear, 0.75f));
+    // Bent all the way: a quarter of a sine, quick at first or slow; an S-curve slow at both ends, or quick the other way.
+    CHECK (gain (FadeShape::curve, 1.0f, 0.5f) == doctest::Approx (std::sqrt (0.5f)));
+    CHECK (gain (FadeShape::curve, -1.0f, 0.5f) == doctest::Approx (1.0f - std::sqrt (0.5f)));
+    CHECK (gain (FadeShape::sCurve, 1.0f, 0.5f) == doctest::Approx (0.5f));
+    CHECK (gain (FadeShape::sCurve, 1.0f, 0.25f) < 0.25f);
+    CHECK (gain (FadeShape::sCurve, 1.0f, 0.75f) > 0.75f);
+    CHECK (gain (FadeShape::sCurve, -1.0f, 0.25f) > 0.25f);
+    CHECK (gain (FadeShape::sCurve, -1.0f, 0.75f) < 0.75f);
+
+    // Half way bent is half way from straight.
+    CHECK (gain (FadeShape::curve, 0.5f, 0.5f) == doctest::Approx (0.25f + 0.5f * std::sqrt (0.5f)));
 }
 
 TEST_CASE ("An audio region plays its part of a file on its samples, at its gain, through its fades, and nothing outside")
@@ -751,7 +766,7 @@ TEST_CASE ("An audio region plays its part of a file on its samples, at its gain
     region.gain = 0.5f;
     region.fadeIn = 100;
     region.fadeOut = 100;
-    region.fadeOutShape = engine::FadeShape::convex;
+    region.fadeOutCurve = { engine::FadeShape::curve, 1.0f }; // convex
 
     const auto out = playRegion (region, 0, 600);
     CHECK (out.getMagnitude (0, 100) == 0.0f);

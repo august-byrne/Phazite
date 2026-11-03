@@ -131,23 +131,6 @@ namespace
 
         return devices::ModulatorKind::lfo;
     }
-
-    // A fade's shape, by its name in the song (Schema.h: clipFadeInShape).
-    engine::FadeShape getEngineFadeShape (const juce::ValueTree& clipState, bool fadeIn)
-    {
-        const auto name = clipState[fadeIn ? schema::clipFadeInShape : schema::clipFadeOutShape].toString();
-
-        if (name == schema::fadeIsConvex)
-            return engine::FadeShape::convex;
-
-        if (name == schema::fadeIsConcave)
-            return engine::FadeShape::concave;
-
-        if (name == schema::fadeIsSCurve)
-            return engine::FadeShape::sCurve;
-
-        return engine::FadeShape::linear;
-    }
 } // namespace
 
 SongPlayer::SongPlayer (te::Edit& e)
@@ -1147,8 +1130,8 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
 
         region.fadeIn = (int) std::llround (fadeIn * preparedRate);
         region.fadeOut = (int) std::llround (fadeOut * preparedRate);
-        region.fadeInShape = getEngineFadeShape (clip, true);
-        region.fadeOutShape = getEngineFadeShape (clip, false);
+        region.fadeInCurve = toEngineFade (getClipFadeCurve (clip, true));
+        region.fadeOutCurve = toEngineFade (getClipFadeCurve (clip, false));
         file->keep ((std::int64_t) region.fileStart);
         strip.audio.push_back (std::move (region));
     }

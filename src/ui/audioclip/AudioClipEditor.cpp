@@ -53,6 +53,8 @@ struct AudioClipEditor::Waveform : public juce::Component
         trimEnd,
         fadeIn,
         fadeOut,
+        bendIn, // the handle in the middle of the fade's curve
+        bendOut,
         audio // inside the clip: moves its audio
     };
 
@@ -63,6 +65,9 @@ struct AudioClipEditor::Waveform : public juce::Component
     std::unique_ptr<TimelineGesture> gesture; // from mouse down to mouse up
     bool dragged = false;                     // past the threshold: not a click
     double slipStartOffset = 0.0;             // the clip's offset when the drag began, for moving its part along the audio
+    FadeCurve curveAtStart;                   // the bent fade's, when the drag began
+
+    static bool isBend (Zone zone) { return zone == Zone::bendIn || zone == Zone::bendOut; }
 
     float beatToX (BeatPosition beat) const { return (float) editor.getView().beatToX (beat); }
     BeatPosition xToBeat (float x) const { return editor.getView().xToBeat (x); }
@@ -87,16 +92,38 @@ struct AudioClipEditor::Waveform : public juce::Component
         return { x0, 0.0f, x1 - x0, (float) getHeight() };
     }
 
-    // A fade's handle: at the top, where the fade reaches full volume, within the clip.
-    juce::Rectangle<float> getFadeHandle (bool fadeIn) const
+    const FadeCurve& getCurve (bool fadeIn) const { return fadeIn ? editor.info->clip.fadeInCurve : editor.info->clip.fadeOutCurve; }
+
+    // Where a fade reaches full volume; it starts, silent, at the clip's edge.
+    float getFadeEnd (bool fadeIn) const
     {
         const auto area = getClipArea();
-        const auto size = (float) AudioClipTint::handleSize;
         const auto fade = (float) (fadeIn ? editor.info->clip.fadeIn : editor.info->clip.fadeOut) * area.getWidth();
-        const auto x = fadeIn ? area.getX() + fade : area.getRight() - fade;
-        const auto centre =
-            juce::jlimit (area.getX() + size / 2.0f, std::max (area.getX() + size / 2.0f, area.getRight() - size / 2.0f), x);
-        return { centre - size / 2.0f, (float) Space::xs, size, size };
+        return fadeIn ? area.getX() + fade : area.getRight() - fade;
+    }
+
+    // A fade's handle: at the top, where the fade reaches full volume, within the clip.
+    juce::Point<float> getFadeHandle (bool fadeIn) const
+    {
+        const auto area = getClipArea();
+        const auto radius = AudioClipTint::handleRadius;
+        const auto x = juce::jlimit (area.getX() + radius, std::max (area.getX() + radius, area.getRight() - radius), getFadeEnd (fadeIn));
+        return { x, radius + (float) Space::xs };
+    }
+
+    // The handle that bends a fade: on its curve, half way along it, while the fade is wide enough to bend.
+    std::optional<juce::Point<float>> getBendHandle (bool fadeIn) const
+    {
+        const auto area = getClipArea();
+        const auto silent = fadeIn ? area.getX() : area.getRight();
+        const auto full = getFadeEnd (fadeIn);
+
+        if (std::abs (full - silent) < AudioClipTint::minimumBendWidth)
+            return {};
+
+        // As paintFade() draws it, from the bottom (silence) to the top.
+        const auto height = (float) getHeight();
+        return juce::Point<float> ((silent + full) / 2.0f, height - height * getFadeGain (getCurve (fadeIn), 0.5f));
     }
 
     // An edge's grip, in the middle of its height.
@@ -114,13 +141,17 @@ struct AudioClipEditor::Waveform : public juce::Component
             return Zone::none;
 
         const auto grab = (float) AudioClipTint::grabDistance;
+        const auto isNear = [point, grab] (juce::Point<float> centre, float radius)
+        { return point.getDistanceFrom (centre) <= radius + grab / 2.0f; };
 
         // The handles first, which sit inside the clip's edges.
-        if (getFadeHandle (true).expanded (grab / 2.0f).contains (point))
-            return Zone::fadeIn;
+        for (const auto fadeIn : { true, false })
+            if (const auto bend = getBendHandle (fadeIn); bend.has_value() && isNear (*bend, AudioClipTint::bendRadius))
+                return fadeIn ? Zone::bendIn : Zone::bendOut;
 
-        if (getFadeHandle (false).expanded (grab / 2.0f).contains (point))
-            return Zone::fadeOut;
+        for (const auto fadeIn : { true, false })
+            if (isNear (getFadeHandle (fadeIn), AudioClipTint::handleRadius))
+                return fadeIn ? Zone::fadeIn : Zone::fadeOut;
 
         const auto area = getClipArea();
 
@@ -145,6 +176,12 @@ struct AudioClipEditor::Waveform : public juce::Component
                 return "Drag to fade the clip in, and double-click to take the fade away.";
             case Zone::fadeOut:
                 return "Drag to fade the clip out, and double-click to take the fade away.";
+            case Zone::bendIn:
+                return "Drag up or down to bend the fade in, double-click to straighten it, and right-click to switch between a curve "
+                       "and an S-curve.";
+            case Zone::bendOut:
+                return "Drag up or down to bend the fade out, double-click to straighten it, and right-click to switch between a "
+                       "curve and an S-curve.";
             case Zone::audio:
                 return "Drag the clip along its audio to play another part of it: the clip stays where it is in the song. Hold Alt "
                        "to move it freely. Right-click for the fades' shape.";
@@ -165,6 +202,7 @@ struct AudioClipEditor::Waveform : public juce::Component
         setDescription (describe (zone));
         setMouseCursor (zone == Zone::audio  ? juce::MouseCursor::DraggingHandCursor
                         : zone == Zone::none ? juce::MouseCursor::NormalCursor
+                        : isBend (zone)      ? juce::MouseCursor::UpDownResizeCursor
                                              : juce::MouseCursor::LeftRightResizeCursor);
     }
 
@@ -228,32 +266,54 @@ struct AudioClipEditor::Waveform : public juce::Component
 
         if (shown.clip.fadeIn > 0.0)
             paintFade (g, clipArea.getX(), clipArea.getX() + (float) shown.clip.fadeIn * width, 0.0f, (float) getHeight(),
-                       shown.clip.fadeInShape);
+                       shown.clip.fadeInCurve);
 
         if (shown.clip.fadeOut > 0.0)
             paintFade (g, clipArea.getRight(), clipArea.getRight() - (float) shown.clip.fadeOut * width, 0.0f, (float) getHeight(),
-                       shown.clip.fadeOutShape);
+                       shown.clip.fadeOutCurve);
 
-        // Its edges, with their grips, and the fades' handles; the one under the pointer in the text color, which stands out
-        // on a track of any color.
-        const auto highlight = [&] (Zone zone) { return hovered == zone || dragging == zone ? p.text : colour; };
+        // Its edges as brackets, with their grips, and the fades' handles; the one under the pointer in the text color, which
+        // stands out on a track of any color.
+        const auto isLit = [this] (Zone zone) { return hovered == zone || dragging == zone; };
+        const auto height = (float) getHeight();
 
         for (const auto start : { true, false })
         {
-            const auto zone = start ? Zone::trimStart : Zone::trimEnd;
-            const auto x = start ? clipArea.getX() : clipArea.getRight();
-            g.setColour (highlight (zone));
-            g.fillRect (juce::Rectangle<float> (x - AudioClipTint::edgeWidth / 2.0f, 0.0f, AudioClipTint::edgeWidth, (float) getHeight()));
+            const auto lit = isLit (start ? Zone::trimStart : Zone::trimEnd);
+            const auto line = lit ? AudioClipTint::hoveredEdgeWidth : AudioClipTint::edgeWidth;
+            const auto x = start ? clipArea.getX() - line / 2.0f : clipArea.getRight() + line / 2.0f;
+            const auto tickX = start ? x : x - AudioClipTint::bracketLength;
+            g.setColour (lit ? p.text : colour);
+            g.fillRect (juce::Rectangle<float> (start ? x : x - line, 0.0f, line, height));
+            g.fillRect (juce::Rectangle<float> (tickX, 0.0f, AudioClipTint::bracketLength, line));
+            g.fillRect (juce::Rectangle<float> (tickX, height - line, AudioClipTint::bracketLength, line));
             g.fillRoundedRectangle (getGrip (start), cornerRadius);
         }
 
         for (const auto fadeIn : { true, false })
         {
-            const auto handle = getFadeHandle (fadeIn);
-            g.setColour (highlight (fadeIn ? Zone::fadeIn : Zone::fadeOut));
-            g.fillRect (handle);
+            const auto lit = isLit (fadeIn ? Zone::fadeIn : Zone::fadeOut);
+            const auto radius = lit ? AudioClipTint::hoveredHandleRadius : AudioClipTint::handleRadius;
+            const auto circle = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (getFadeHandle (fadeIn));
+            g.setColour (lit ? p.text : colour);
+            g.fillEllipse (circle);
             g.setColour (p.text);
-            g.drawRect (handle, 1.0f);
+            g.drawEllipse (circle, AudioClipTint::handleRing);
+        }
+
+        // The bends' handles, hollow as an automation lane's, filled under the pointer.
+        for (const auto fadeIn : { true, false })
+        {
+            if (const auto centre = getBendHandle (fadeIn))
+            {
+                const auto lit = isLit (fadeIn ? Zone::bendIn : Zone::bendOut);
+                const auto radius = lit ? AudioClipTint::hoveredBendRadius : AudioClipTint::bendRadius;
+                const auto ring = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (*centre);
+                g.setColour (lit ? p.text : p.background);
+                g.fillEllipse (ring);
+                g.setColour (p.text);
+                g.drawEllipse (ring, AudioClipTint::handleRing);
+            }
         }
 
         // While Tracktion prepares the audio, or without its file, say so.
@@ -283,7 +343,11 @@ struct AudioClipEditor::Waveform : public juce::Component
 
         if (e.mods.isPopupMenu())
         {
-            showMenu();
+            if (isBend (hovered))
+                showShapeMenu (hovered == Zone::bendIn);
+            else
+                showMenu();
+
             return;
         }
 
@@ -292,6 +356,9 @@ struct AudioClipEditor::Waveform : public juce::Component
         gesture->startPosition = e.getPosition();
         gesture->startBeat = xToBeat (e.position.x);
         slipStartOffset = getSlipOffset (editor.context, editor.clip);
+
+        if (isBend (dragging))
+            curveAtStart = getCurve (dragging == Zone::bendIn);
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
@@ -309,6 +376,8 @@ struct AudioClipEditor::Waveform : public juce::Component
                                                 : dragging == Zone::trimEnd ? "Trim Clip End"
                                                 : dragging == Zone::fadeIn  ? "Fade In"
                                                 : dragging == Zone::fadeOut ? "Fade Out"
+                                                : dragging == Zone::bendIn  ? "Bend Fade In"
+                                                : dragging == Zone::bendOut ? "Bend Fade Out"
                                                                             : "Slip Clip");
         }
 
@@ -330,6 +399,18 @@ struct AudioClipEditor::Waveform : public juce::Component
             case Zone::fadeOut:
                 fadeClipTo (song, edited, dragging == Zone::fadeIn, beat);
                 break;
+
+            case Zone::bendIn:
+            case Zone::bendOut:
+            {
+                // Up bows the curve up, to full volume sooner, whichever way the fade goes; half the clip's height bends it all
+                // the way from straight.
+                const auto up = ((float) gesture->startPosition.y - e.position.y) / std::max (1.0f, (float) getHeight() / 2.0f);
+                auto curve = curveAtStart;
+                curve.bend = juce::jlimit (-1.0f, 1.0f, curveAtStart.bend + up * AudioClipTint::bendPerHalfHeight);
+                setFadeCurve (song, edited, dragging == Zone::bendIn, curve);
+                break;
+            }
 
             case Zone::audio:
             {
@@ -359,10 +440,24 @@ struct AudioClipEditor::Waveform : public juce::Component
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        // A fade's handle: no fade any more.
         const auto zone = getZoneAt (e.position);
 
-        if (! editor.info.has_value() || (zone != Zone::fadeIn && zone != Zone::fadeOut))
+        if (! editor.info.has_value())
+            return;
+
+        // A bend's handle: straight again, its shape kept for the next bend.
+        if (isBend (zone))
+        {
+            const auto fadeIn = zone == Zone::bendIn;
+            auto curve = getCurve (fadeIn);
+            curve.bend = 0.0f;
+            setFadeCurve (editor.context, editor.clip, fadeIn, curve);
+            editor.refresh();
+            return;
+        }
+
+        // A fade's handle: no fade any more.
+        if (zone != Zone::fadeIn && zone != Zone::fadeOut)
             return;
 
         const auto fadeIn = zone == Zone::fadeIn;
@@ -391,6 +486,27 @@ struct AudioClipEditor::Waveform : public juce::Component
         addCommandItems (menu, editor.getCommands(), { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" });
         menu.showMenuAsync (juce::PopupMenu::Options());
     }
+
+    // A bend's handle's: one fade's shape, a curve or an S-curve, bent as far as it is (a straight one all the way, so that
+    // the change shows).
+    void showShapeMenu (bool fadeIn)
+    {
+        const auto current = getCurve (fadeIn);
+        auto& song = editor.context;
+        const auto edited = editor.clip;
+        juce::PopupMenu menu;
+        menu.addSectionHeader (fadeIn ? "Fade In" : "Fade Out");
+
+        for (const auto& [shape, name] : { std::pair { FadeShape::curve, "Curve" }, std::pair { FadeShape::sCurve, "S-Curve" } })
+        {
+            const FadeCurve chosen { shape, juce::exactlyEqual (current.bend, 0.0f) ? 1.0f : current.bend };
+            menu.addItem (juce::PopupMenu::Item (name)
+                              .setTicked (current.shape == shape)
+                              .setAction ([&song, edited, fadeIn, chosen] { setFadeCurve (song, edited, fadeIn, chosen); }));
+        }
+
+        menu.showMenuAsync (juce::PopupMenu::Options());
+    }
 };
 
 //==============================================================================
@@ -406,8 +522,8 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Audio clip editor");
-    setDescription ("The selected audio clip's whole audio. Drag the clip's edges to trim it, the squares at its top to fade it, and "
-                    "the clip along its audio to play another part of it");
+    setDescription ("The selected audio clip's whole audio. Drag the clip's edges to trim it, the round handles at its top to fade "
+                    "it, the handle in a fade's middle to bend it, and the clip along its audio to play another part of it");
 
     // The view shows the clip's whole audio, always: no scroll bar, and no turning pages while the song plays.
     setFollowingPlayback (false);
@@ -616,6 +732,9 @@ juce::Rectangle<int> AudioClipEditor::getHandleBounds (Handle handle) const
     if (! info.has_value())
         return {};
 
+    const auto around = [] (juce::Point<float> centre, float radius)
+    { return juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre).toNearestInt(); };
+
     switch (handle)
     {
         case Handle::trimStart:
@@ -623,10 +742,16 @@ juce::Rectangle<int> AudioClipEditor::getHandleBounds (Handle handle) const
         case Handle::trimEnd:
             return waveform->getGrip (false).toNearestInt();
         case Handle::fadeIn:
-            return waveform->getFadeHandle (true).toNearestInt();
+            return around (waveform->getFadeHandle (true), AudioClipTint::handleRadius);
         case Handle::fadeOut:
+            return around (waveform->getFadeHandle (false), AudioClipTint::handleRadius);
+        case Handle::bendIn:
+        case Handle::bendOut:
         default:
-            return waveform->getFadeHandle (false).toNearestInt();
+            if (const auto centre = waveform->getBendHandle (handle == Handle::bendIn))
+                return around (*centre, AudioClipTint::bendRadius);
+
+            return {};
     }
 }
 

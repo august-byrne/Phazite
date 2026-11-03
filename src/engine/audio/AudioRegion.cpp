@@ -37,24 +37,32 @@ namespace
     }
 } // namespace
 
-float getFadeGain (FadeShape shape, float along) noexcept
+float getFadeGain (FadeCurve curve, float along) noexcept
 {
     const auto alpha = std::clamp (along, 0.0f, 1.0f);
+    const auto bend = std::clamp (curve.bend, -1.0f, 1.0f);
     const auto quarter = alpha * juce::MathConstants<float>::halfPi;
 
-    switch (shape)
+    if (juce::exactlyEqual (bend, 0.0f))
+        return alpha;
+
+    // The shape bent all the way: Tracktion's convex, concave and S-curve fades; an S-curve bent the other way is the line's
+    // mirror image of it, quick at both ends.
+    auto bent = 0.0f;
+
+    if (curve.shape == FadeShape::curve)
     {
-        case FadeShape::linear:
-            return alpha;
-        case FadeShape::convex:
-            return std::sin (quarter);
-        case FadeShape::concave:
-            return 1.0f - std::cos (quarter);
-        case FadeShape::sCurve:
-            return (1.0f - alpha) * (1.0f - std::cos (quarter)) + alpha * std::sin (quarter);
+        bent = bend > 0.0f ? std::sin (quarter) : 1.0f - std::cos (quarter);
+    }
+    else
+    {
+        const auto s = (1.0f - alpha) * (1.0f - std::cos (quarter)) + alpha * std::sin (quarter);
+        bent = bend > 0.0f ? s : 2.0f * alpha - s;
     }
 
-    return alpha;
+    // Written so that bent all the way, it is that shape to the last bit.
+    const auto amount = std::abs (bend);
+    return (1.0f - amount) * alpha + amount * bent;
 }
 
 void AudioRegion::play (float* const* channels, std::int64_t songSample, int numSamples, double engineRate, bool isRender,
@@ -147,10 +155,10 @@ void AudioRegion::play (float* const* channels, std::int64_t songSample, int num
             auto g = gain;
 
             if (t < fadeIn)
-                g *= getFadeGain (fadeInShape, (float) t / (float) fadeIn);
+                g *= getFadeGain (fadeInCurve, (float) t / (float) fadeIn);
 
             if (t >= length - fadeOut)
-                g *= getFadeGain (fadeOutShape, (float) (length - t) / (float) fadeOut);
+                g *= getFadeGain (fadeOutCurve, (float) (length - t) / (float) fadeOut);
 
             if (fadingIn > 0)
                 g *= (float) (jumpFade - --fadingIn) / (float) jumpFade;

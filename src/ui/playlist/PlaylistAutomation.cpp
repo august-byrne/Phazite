@@ -15,10 +15,7 @@ namespace phazite::ui
 namespace
 {
     constexpr int resizeEdgeHeight = 4;       // a lane header's bottom edge, which resizes the lane when dragged
-    constexpr int colourStripWidth = 8;       // as a track header's
-    constexpr int indentPerLevel = 12;        // as a track header's
     constexpr int modeButtonWidth = 52;       // "Touch", "Latch"
-    constexpr int collapseButtonSize = 20;    // as a track header's chevron
     constexpr int pixelsPerValue = 2;         // how finely a lane's line is drawn
     constexpr float bendPerLaneHeight = 1.0f; // a drag half the lane's height bends a line from straight to the most it bends
     constexpr float fineFactor = 0.2f;        // Shift moves a value a fifth as far
@@ -904,27 +901,28 @@ Playlist::AutomationLaneHeader::AutomationLaneHeader (Playlist& p, TrackID t, co
       track (t),
       parameter (shown)
 {
-    setDescription ("An automation lane. The chevron collapses it to a thin row; in a lane without automation, click the name "
-                    "to show another of the track's parameters; the mode chooses how moving the track's controls while the "
-                    "song plays writes their automation. Drag the bottom edge to resize the lane, and right-click for its menu.");
+    setDescription ("An automation lane. Double-click to collapse it to a thin row, or to expand it; in a lane without "
+                    "automation, click the parameter's name to show another of the track's; the mode chooses how moving the "
+                    "track's controls while the song plays writes their automation. Drag the bottom edge to resize the lane, "
+                    "and right-click for its menu.");
 
-    collapseButton.setQuiet (true);
-    collapseButton.onClick = [this] { playlist.setLaneCollapsed (track, parameter, ! collapsed); };
-    nameButton.onClick = [this]
-    {
-        if (! automated)
-            showParameterMenu();
-    };
+    // The header handles clicks on the name.
+    nameLabel.setFont (juce::FontOptions (TextSize::body));
+    nameLabel.setInterceptsMouseClicks (false, false);
+    parameterButton.setTooltip ("Shows another of the track's parameters in this lane, which has no automation yet");
+    parameterButton.onClick = [this] { showParameterMenu(); };
     modeButton.setTooltip ("How moving the track's controls while the song plays writes their automation: Read plays it, "
                            "Touch writes while a control is held, Latch from the first move until playback stops, and Write "
                            "overwrites from when playback starts");
     modeButton.onClick = [this] { showModeMenu(); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &collapseButton, &nameButton, &modeButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &parameterButton, &modeButton })
     {
         c->setMouseClickGrabsKeyboardFocus (false);
         addAndMakeVisible (c);
     }
+
+    addAndMakeVisible (nameLabel);
 }
 
 void Playlist::AutomationLaneHeader::update (const TrackRow& shown, const LaneRow& lane)
@@ -934,14 +932,12 @@ void Playlist::AutomationLaneHeader::update (const TrackRow& shown, const LaneRo
     const auto target = getAutomationTarget (playlist.context, parameter);
     automated = target.has_value() && target->automated;
     const auto name = target.has_value() ? describeTarget (*target) : juce::String ("Automation");
-    nameButton.setButtonText (name);
-    nameButton.setTooltip (automated ? "The parameter this lane's automation sets"
-                                     : "Shows another of the track's parameters in this lane, which has no automation yet");
+    nameLabel.setText (name, juce::dontSendNotification);
+    nameLabel.setVisible (automated);
+    parameterButton.setButtonText (name);
+    parameterButton.setTitle ("Lane's parameter: " + name);
+    parameterButton.setVisible (! automated);
     setTitle ("Automation lane: " + name);
-
-    collapseButton.setIcon (collapsed ? Icon::folded : Icon::expanded);
-    collapseButton.setTitle (collapsed ? "Expand lane" : "Collapse lane");
-    collapseButton.setTooltip (collapsed ? "Shows the lane at its full height" : "Makes the lane a thin row; its automation still plays");
 
     const auto mode = getAutomationMode (playlist.context, track);
     modeButton.setButtonText (getModeName (mode));
@@ -950,6 +946,7 @@ void Playlist::AutomationLaneHeader::update (const TrackRow& shown, const LaneRo
     // A mode that writes stands out, as an armed track does.
     const auto& p = getPalette (*this);
     modeButton.setColour (juce::TextButton::textColourOffId, mode == AutomationMode::read ? p.textMuted : p.danger);
+    nameLabel.setColour (juce::Label::textColourId, getInkFor (p.surface.interpolatedWith (row.colour, LaneTint::header)));
     resized();
     repaint();
 }
@@ -957,26 +954,22 @@ void Playlist::AutomationLaneHeader::update (const TrackRow& shown, const LaneRo
 void Playlist::AutomationLaneHeader::paint (juce::Graphics& g)
 {
     const auto& p = getPalette (*this);
-    auto area = getLocalBounds();
+    auto area = getLocalBounds().withTrimmedLeft (getTrackStripsWidth (row));
     g.setColour (p.surface.interpolatedWith (row.colour, LaneTint::header));
     g.fillRect (area);
-    g.setColour (row.colour);
-    g.fillRect (area.removeFromLeft (colourStripWidth).withTrimmedBottom (1));
+    paintTrackStrips (g, *this, row);
     g.setColour (p.border);
-    g.fillRect (getLocalBounds().removeFromBottom (1));
+    g.fillRect (area.removeFromBottom (1));
 }
 
 void Playlist::AutomationLaneHeader::resized()
 {
+    // Its name lined up with its track's; a collapsed lane has room for its name only.
     auto area = getLocalBounds()
-                    .withTrimmedLeft (colourStripWidth + Space::xs + row.depth * indentPerLevel + indentPerLevel)
+                    .withTrimmedLeft (getTrackStripsWidth (row) + Space::s)
                     .withTrimmedRight (Space::xs)
                     .withTrimmedBottom (resizeEdgeHeight);
     auto top = area.removeFromTop (std::min (area.getHeight(), controlHeight));
-
-    // The chevron first, as on a track's header; a collapsed lane has room for its name only beside it.
-    const auto size = std::min (collapseButtonSize, top.getHeight());
-    collapseButton.setBounds (top.removeFromLeft (collapseButtonSize).withSizeKeepingCentre (size, size));
     modeButton.setVisible (! collapsed);
 
     if (! collapsed)
@@ -985,7 +978,12 @@ void Playlist::AutomationLaneHeader::resized()
         top.removeFromRight (Space::xs);
     }
 
-    nameButton.setBounds (top.reduced (0, 2));
+    nameLabel.setBounds (top);
+
+    // The button only as wide as its text, so that the rest of the header takes double-clicks.
+    const auto buttonArea = top.reduced (0, 2);
+    parameterButton.changeWidthToFitText (buttonArea.getHeight());
+    parameterButton.setBounds (buttonArea.withWidth (std::min (buttonArea.getWidth(), parameterButton.getWidth())));
 }
 
 bool Playlist::AutomationLaneHeader::isOnResizeEdge (juce::Point<int> position) const
@@ -1039,6 +1037,20 @@ void Playlist::AutomationLaneHeader::mouseUp (const juce::MouseEvent&)
     resizing = false;
 }
 
+void Playlist::AutomationLaneHeader::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    // As a track's header: the bottom edge resets the height, and anywhere else the lane collapses or expands.
+    if (isOnResizeEdge (e.getPosition()))
+    {
+        setAutomationLaneHeight (playlist.context, parameter, AutomationLane::defaultHeight);
+        playlist.refreshLanes();
+    }
+    else
+    {
+        playlist.setLaneCollapsed (track, parameter, ! collapsed);
+    }
+}
+
 void Playlist::AutomationLaneHeader::showParameterMenu()
 {
     // The track's parameters, a submenu for each of its devices, the one shown ticked. Choosing one shows it here.
@@ -1072,7 +1084,7 @@ void Playlist::AutomationLaneHeader::showParameterMenu()
     }
 
     addDevice();
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&nameButton));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&parameterButton));
 }
 
 void Playlist::AutomationLaneHeader::showModeMenu()
@@ -1160,6 +1172,7 @@ void Playlist::refreshLanes()
     rebuildLanes();
     layOutRows();
     updateLanes();
+    updateCollapseAllButton();
     noteLanes();
 }
 

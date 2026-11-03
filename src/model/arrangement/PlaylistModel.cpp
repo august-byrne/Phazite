@@ -70,39 +70,8 @@ namespace
         return ids;
     }
 
-    FadeShape toFadeShape (te::AudioFadeCurve::Type type)
-    {
-        switch (type)
-        {
-            case te::AudioFadeCurve::convex:
-                return FadeShape::convex;
-            case te::AudioFadeCurve::concave:
-                return FadeShape::concave;
-            case te::AudioFadeCurve::sCurve:
-                return FadeShape::sCurve;
-            case te::AudioFadeCurve::linear:
-            default:
-                return FadeShape::linear;
-        }
-    }
-
-    te::AudioFadeCurve::Type toFadeType (FadeShape shape)
-    {
-        switch (shape)
-        {
-            case FadeShape::convex:
-                return te::AudioFadeCurve::convex;
-            case FadeShape::concave:
-                return te::AudioFadeCurve::concave;
-            case FadeShape::sCurve:
-                return te::AudioFadeCurve::sCurve;
-            case FadeShape::linear:
-            default:
-                return te::AudioFadeCurve::linear;
-        }
-    }
-
-    // A track's row; its color is its row's in the palette unless it has its own. The master's is gray.
+    // A track's row; its color is its row's in the palette unless it has its own. The master's is gray. Without the colors
+    // of the folders it is in, which getPlaylistRows() knows from the folders before it.
     TrackRow makeRow (te::Track& track, int index)
     {
         TrackRow row;
@@ -148,8 +117,10 @@ namespace
         info.muted = clip.isMuted();
         info.linked = hasAliases ({ &clip });
 
-        // The song's own place for one of its clips, without rounding through seconds.
-        if (const auto clipState = findClipState (clip); clipState.isValid())
+        // The song's own place for one of its clips, without rounding through seconds, and its fades' shapes.
+        const auto clipState = findClipState (clip);
+
+        if (clipState.isValid())
             info.range = getClipRange (clip.edit, clipState);
 
         if (auto* audio = dynamic_cast<te::AudioClipBase*> (&clip))
@@ -160,8 +131,11 @@ namespace
                 info.fadeOut = audio->getFadeOut().inSeconds() / length;
             }
 
-            info.fadeInShape = toFadeShape (audio->getFadeInType());
-            info.fadeOutShape = toFadeShape (audio->getFadeOutType());
+            if (clipState.isValid())
+            {
+                info.fadeInCurve = getClipFadeCurve (clipState, true);
+                info.fadeOutCurve = getClipFadeCurve (clipState, false);
+            }
             info.followsTempo = getClipTempo (*audio) > 0.0;
 
             if (const auto takes = getClipTakeCount (*audio); takes > 1)
@@ -200,15 +174,23 @@ std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
 
     const auto tracks = getPlaylistTracks (*edit);
     std::vector<TrackRow> returns;
+    std::vector<juce::Colour> folders; // the colors of the folders the row goes in, by depth: each folder comes before its tracks
 
     for (int i = 0; i < tracks.size(); ++i)
     {
         if (isHiddenInCollapsedFolder (*tracks[i]))
             continue;
 
+        auto row = makeRow (*tracks[i], i);
+        folders.resize ((size_t) row.depth);
+        row.folderColours = folders;
+
+        if (row.kind == TrackType::folder)
+            folders.push_back (row.colour);
+
         // A return holds no clips: its row shows only while it has automation lanes, after the tracks, where the master's shows
         // too (docs/design.md, section 6).
-        if (auto row = makeRow (*tracks[i], i); row.kind != TrackType::returnTrack)
+        if (row.kind != TrackType::returnTrack)
             rows.push_back (std::move (row));
         else if (! getLanes (*tracks[i]).empty())
             returns.push_back (std::move (row));
@@ -226,7 +208,14 @@ std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
     if (track == nullptr)
         return {};
 
-    return makeRow (*track, getPlaylistTracks (*edit).indexOf (track));
+    const auto tracks = getPlaylistTracks (*edit);
+    auto row = makeRow (*track, tracks.indexOf (track));
+
+    for (auto folder = findTrackState (*track).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
+        if (auto* folderTrack = te::findTrackForID (*edit, toTracktion (getTrackID (folder))))
+            row.folderColours.insert (row.folderColours.begin(), getTrackColour (*folderTrack, tracks.indexOf (folderTrack)));
+
+    return row;
 }
 
 std::optional<TrackRow> getMasterRow (const ProjectContext& context)
@@ -293,6 +282,12 @@ void setSavedTrackHeight (ProjectContext& context, TrackID id, int height)
         setSavedTrackHeight (*track, height);
 }
 
+bool isAnyRowExpanded (const ProjectContext& context)
+{
+    auto* edit = getEdit (context);
+    return edit != nullptr && isAnyRowExpanded (*edit);
+}
+
 void renameTrack (ProjectContext& context, TrackID id, const juce::String& name)
 {
     if (auto* track = findTrack (context, id))
@@ -305,10 +300,18 @@ void setTrackColours (ProjectContext& context, const std::vector<TrackID>& ids, 
         setTrackColours (tracks, colour);
 }
 
-void moveTracksAfter (ProjectContext& context, const std::vector<TrackID>& moving, TrackID previous)
+bool canMoveTracksTo (const ProjectContext& context, const std::vector<TrackID>& moving, TrackID target, TrackDrop drop)
+{
+    const auto tracks = findTracks (context, moving);
+    auto* to = findTrack (context, target);
+    return ! tracks.isEmpty() && to != nullptr && canMoveTracksTo (tracks, *to, drop);
+}
+
+void moveTracksTo (ProjectContext& context, const std::vector<TrackID>& moving, TrackID target, TrackDrop drop)
 {
     if (const auto tracks = findTracks (context, moving); ! tracks.isEmpty())
-        moveTracksAfter (tracks, findTrack (context, previous));
+        if (auto* to = findTrack (context, target))
+            moveTracksTo (tracks, *to, drop);
 }
 
 TrackID addTrackAtEnd (ProjectContext& context, bool folder)
@@ -431,9 +434,9 @@ std::vector<ClipSubRow> getClipSubRows (const std::vector<ClipInfo>& clips)
     return subRows;
 }
 
-float getFadeGain (FadeShape shape, float alpha)
+float getFadeGain (FadeCurve curve, float alpha)
 {
-    return te::AudioFadeCurve::alphaToGainForType (toFadeType (shape), alpha);
+    return engine::getFadeGain (toEngineFade (curve), alpha);
 }
 
 std::vector<NoteShape> getNoteShapes (const ProjectContext& context, ClipID id)
@@ -495,6 +498,12 @@ void fadeClipTo (ProjectContext& context, ClipID id, bool fadeIn, BeatPosition a
     const auto time = audio->edit.tempoSequence.toTime (toTracktion (at));
     const auto position = audio->getPosition();
     setClipFade (*audio, fadeIn, fadeIn ? time - position.getStart() : position.getEnd() - time);
+}
+
+void setFadeCurve (ProjectContext& context, ClipID id, bool fadeIn, FadeCurve curve)
+{
+    if (auto* clip = findClip (context, id))
+        setFadeCurve (*clip, fadeIn, curve);
 }
 
 double getSlipOffset (const ProjectContext& context, ClipID id)

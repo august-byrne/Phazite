@@ -9,6 +9,8 @@
 #pragma once
 
 #include "devices/stretch/Stretch.h"
+#include "engine/audio/AudioRegion.h"
+#include "model/arrangement/PlaylistValues.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <vector>
@@ -46,11 +48,14 @@ BeatRange getAudioClipRange (const te::Edit&, const juce::ValueTree& clipState);
 // Where it starts and the part of its file it plays, in the caller's undo step, and Tracktion's clip follows.
 void setAudioPart (te::Edit&, juce::ValueTree clipState, BeatPosition start, FilePart);
 
-// How long it fades in and out, in seconds, and the fades' shapes, as Tracktion's types.
+// How long it fades in and out, in seconds, and the fades' shapes, in the caller's undo step; Tracktion's fade type nearest
+// a shape, for Tracktion's clip, which plays nothing; and the shape as Phazite's engine plays it.
 double getClipFade (const juce::ValueTree& clipState, bool fadeIn);
-te::AudioFadeCurve::Type getFadeShape (const juce::ValueTree& clipState, bool fadeIn);
 void setClipFade (te::Edit&, juce::ValueTree clipState, bool fadeIn, double seconds);
-juce::String getSavedFadeShape (te::AudioFadeCurve::Type); // as the song saves it (Schema.h: fadeIsLinear...)
+FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn);
+void setClipFadeCurve (te::Edit&, juce::ValueTree clipState, bool fadeIn, FadeCurve);
+te::AudioFadeCurve::Type getNearestFadeType (FadeCurve);
+engine::FadeCurve toEngineFade (FadeCurve);
 
 //==============================================================================
 // The same, from Tracktion's clip.

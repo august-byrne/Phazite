@@ -60,6 +60,7 @@
     "device.group": [ "command + G" ],
     "device.ungroup": [ "command + shift + G" ],
     "track.collapse": [ "U" ],
+    "track.collapseAll": [ "alt + U" ],
     "track.solo": [ "S" ],
     "track.arm": [ "C" ],
     "track.freeze": [ "command + alt + shift + F" ],

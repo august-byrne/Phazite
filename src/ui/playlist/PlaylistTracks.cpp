@@ -5,6 +5,7 @@
 #include "ui/devices/SidechainMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/input/LibraryDrag.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
 {
@@ -87,7 +88,7 @@ void Playlist::showTrackMenu (TrackID track)
     auto& bridge = getCommands();
     juce::PopupMenu menu;
 
-    // The master's row is there for its lanes, which its chevron collapses: it has no menu.
+    // The master's row is there for its lanes, which a double-click on it collapses: it has no menu.
     const auto row = getRowOf (track);
 
     if (row >= 0 && rows[(size_t) row].track.kind == TrackType::master)
@@ -141,17 +142,9 @@ void Playlist::trackDragged (TrackHeader&, const juce::MouseEvent& e)
     const auto position = e.getEventRelativeTo (lanes.get()).getPosition();
     beginDragAutoRepeat (autoRepeatInterval);
     autoScroll (position, lanes->getLocalBounds().withTrimmedTop (pinnedHeight), ScrollDirections::upAndDown);
-    const auto y = position.y;
 
-    // The track would go to the nearest boundary between rows, as they are on screen.
-    const auto boundary = [this] (size_t i) { return i < rows.size() ? getRowTop (rows[i]) : pinnedHeight + contentHeight - scrollY; };
-    size_t nearest = 0;
-
-    for (size_t i = 1; i <= rows.size(); ++i)
-        if (std::abs (y - boundary (i)) < std::abs (y - boundary (nearest)))
-            nearest = i;
-
-    dropRow = (int) nearest;
+    fadeMovingHeaders (true);
+    trackDrop = findTrackDrop (position.y);
     repaint();
 }
 
@@ -162,56 +155,139 @@ bool Playlist::trackDraggedOut (TrackHeader& header, const juce::MouseEvent& e)
     if (e.getEventRelativeTo (this).position.x >= 0.0f || isDragAndDropActive())
         return false;
 
-    dropRow = -1;
+    trackDrop.reset();
+    fadeMovingHeaders (false);
     repaint();
     startDragging (makeTrackDrag (header.getTrack()), &header, juce::ScaledImage (header.createComponentSnapshot (header.getLocalBounds())),
                    true);
     return true;
 }
 
-void Playlist::trackSelectionDragged (TrackHeader& header, const juce::MouseEvent& e)
-{
-    // From the track the drag started on to the one under the pointer, as a Shift+click would.
-    const auto position = e.getEventRelativeTo (lanes.get()).getPosition();
-    beginDragAutoRepeat (autoRepeatInterval);
-    autoScroll (position, lanes->getLocalBounds().withTrimmedTop (pinnedHeight), ScrollDirections::upAndDown);
-
-    const auto from = getRowOf (header.getTrack());
-    auto to = getRowAt (juce::jlimit (0, lanes->getHeight() - 1, position.y));
-
-    if (from < 0)
-        return;
-
-    if (to < 0) // below the last row
-        to = (int) rows.size() - 1;
-
-    selection.clear();
-
-    for (auto i = std::min (from, to); i <= std::max (from, to); ++i)
-        selection.add (rows[(size_t) i].track.id);
-
-    selectionAnchor = header.getTrack();
-}
-
 void Playlist::trackDragEnded (TrackHeader&, const juce::MouseEvent&)
 {
-    const auto target = dropRow;
-    dropRow = -1;
+    const auto place = trackDrop;
+    trackDrop.reset();
+    fadeMovingHeaders (false);
     repaint();
 
-    const auto moving = selection.getTracks();
+    if (context.hasProject() && place.has_value() && juce::isPositiveAndBelow (place->row, (int) rows.size()))
+        moveTracksTo (context, selection.getTracks(), rows[(size_t) place->row].track.id, place->drop);
+}
 
-    if (! context.hasProject() || target < 0 || moving.empty())
+std::optional<Playlist::TrackDropPlace> Playlist::findTrackDrop (int y) const
+{
+    // Among the tracks and folders: the returns' and the master's rows come after them, wherever the returns are in the
+    // song's list of tracks.
+    const auto isTrackRow = [] (const Row& row) { return row.track.kind == TrackType::track || row.track.kind == TrackType::folder; };
+    auto last = -1;
+
+    for (int i = 0; i < (int) rows.size(); ++i)
+        if (isTrackRow (rows[(size_t) i]))
+            last = i;
+
+    if (last < 0)
+        return {};
+
+    const auto index = getRowAt (y);
+    TrackDropPlace place;
+
+    if (index < 0 || index > last)
+    {
+        // Under them: at the end, after the last top-level one.
+        for (auto i = last; i >= 0 && place.row < 0; --i)
+            if (rows[(size_t) i].track.depth == 0)
+                place = { i, TrackDrop::after };
+    }
+    else if (const auto& row = rows[(size_t) index]; row.track.kind == TrackType::folder)
+    {
+        // Its lanes count as its bottom quarter.
+        const auto offset = y - getRowTop (row);
+        const auto firstInside = index < last && rows[(size_t) index + 1].track.depth > row.track.depth;
+
+        if (offset < row.height / 4)
+            place = { index, TrackDrop::before };
+        else if (offset < row.height - row.height / 4)
+            place = { index, TrackDrop::into };
+        else
+            place = firstInside ? TrackDropPlace { index + 1, TrackDrop::before } : TrackDropPlace { index, TrackDrop::after };
+    }
+    else
+    {
+        place = { index, y - getRowTop (row) < row.height / 2 ? TrackDrop::before : TrackDrop::after };
+    }
+
+    if (place.row < 0 || ! canMoveTracksTo (context, selection.getTracks(), rows[(size_t) place.row].track.id, place.drop))
+        return {};
+
+    return place;
+}
+
+void Playlist::fadeMovingHeaders (bool fade)
+{
+    if (std::exchange (headersFaded, fade) == fade)
         return;
 
-    // The tracks go, in order, after the nearest track above the drop point that isn't moving.
-    TrackID previous;
+    // The selected tracks, and those inside the selected folders, which move with them.
+    const auto selected = selection.getTracks();
 
-    for (auto i = target - 1; i >= 0 && ! previous.isValid(); --i)
-        if (const auto id = rows[(size_t) i].track.id; ! selection.isSelected (id))
-            previous = id;
+    for (auto* header : headers)
+    {
+        const auto id = header->getTrack();
+        const auto moves = fade
+                           && std::any_of (selected.begin(), selected.end(),
+                                           [this, id] (TrackID track) { return track == id || isInside (context, id, track); });
+        header->setAlpha (moves ? TrackDropTint::moving : 1.0f);
+    }
+}
 
-    moveTracksAfter (context, moving, previous);
+void Playlist::paintTrackDrop (juce::Graphics& g) const
+{
+    if (! trackDrop.has_value() || ! juce::isPositiveAndBelow (trackDrop->row, (int) rows.size()))
+        return;
+
+    const auto& p = getPalette (*this);
+    const auto& row = rows[(size_t) trackDrop->row];
+    const auto left = (float) headerColumn.getX();
+    const auto right = (float) lanes->getRight();
+    const auto top = (float) (lanes->getY() + getRowTop (row));
+    g.reduceClipRegion (headerColumn.getBounds().getUnion (lanes->getBounds()));
+
+    // Into a folder: its row outlined, over a wash.
+    if (trackDrop->drop == TrackDrop::into)
+    {
+        const juce::Rectangle<float> area (left, top, right - left, (float) row.height);
+        g.setColour (p.accent.withAlpha (TrackDropTint::wash));
+        g.fillRect (area);
+        g.setColour (p.accent);
+        g.drawRect (area, TrackDropTint::outline);
+        return;
+    }
+
+    // Before or after a track: a line from the depth in folders the tracks go to. After a folder, past its tracks.
+    auto bottom = (size_t) trackDrop->row;
+
+    if (trackDrop->drop == TrackDrop::after)
+        while (bottom + 1 < rows.size() && rows[bottom + 1].track.depth > row.track.depth)
+            ++bottom;
+
+    const auto y =
+        trackDrop->drop == TrackDrop::before ? top : (float) (lanes->getY() + getRowTop (rows[bottom]) + rows[bottom].getTotalHeight());
+    const auto x = left + (float) (row.track.depth * TrackStrip::indent);
+    const auto dot = TrackDropTint::dot;
+    g.setColour (p.accent);
+    g.fillRect (juce::Rectangle<float> (x, y - TrackDropTint::line / 2.0f, right - x, TrackDropTint::line));
+    g.fillEllipse (juce::Rectangle<float> (dot, dot).withCentre ({ x + dot / 2.0f, y }));
+}
+
+void Playlist::updateCollapseAllButton()
+{
+    const auto expanded = isAnyRowExpanded (context);
+    collapseAllButton.setIcon (expanded ? Icon::collapseAll : Icon::expandAll);
+    collapseAllButton.setTitle (expanded ? "Collapse all" : "Expand all");
+    collapseAllButton.setTooltip (withShortcut (getCommands(),
+                                                expanded ? "Makes every track, folder and automation lane a thin row"
+                                                         : "Shows every track, folder and automation lane at its full height",
+                                                "track.collapseAll"));
 }
 
 //==============================================================================
@@ -294,5 +370,6 @@ void Playlist::refreshShortcutTexts()
 {
     TimelineEditor::refreshShortcutTexts();
     addTrackButton.setTooltip (withShortcut (getCommands(), "Adds an empty track below the selected one", "track.add"));
+    updateCollapseAllButton();
 }
 } // namespace phazite::ui

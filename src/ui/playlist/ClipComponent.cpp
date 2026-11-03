@@ -190,17 +190,17 @@ void ClipComponent::paintFades (juce::Graphics& g, juce::Rectangle<int> area)
     const auto fadeOut = (float) info.fadeOut * width;
 
     if (fadeIn > 0.0f)
-        paintFade (g, 0.0f, fadeIn, 0.0f, height, info.fadeInShape);
+        paintFade (g, 0.0f, fadeIn, 0.0f, height, info.fadeInCurve);
 
     if (fadeOut > 0.0f)
-        paintFade (g, width, width - fadeOut, 0.0f, height, info.fadeOutShape);
+        paintFade (g, width, width - fadeOut, 0.0f, height, info.fadeOutCurve);
 }
 
-void paintFade (juce::Graphics& g, float x0, float x1, float top, float bottom, FadeShape shape)
+void paintFade (juce::Graphics& g, float x0, float x1, float top, float bottom, FadeCurve shape)
 {
     // The curve, from x0 (silence) to x1 (full volume), and the part of the clip above it.
     juce::Path curve;
-    constexpr int steps = 16;
+    constexpr int steps = 32;
 
     for (int i = 0; i <= steps; ++i)
     {

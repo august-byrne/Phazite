@@ -395,23 +395,22 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
                     .isTicked = [&selection] { return isSelectionMuted (selection); } });
 
     // Fade shapes, for the selected audio clips' fade-ins and fade-outs.
-    struct FadeShape
+    struct NamedFade
     {
-        te::AudioFadeCurve::Type type;
+        FadeCurve curve;
         const char* id;
         const char* name;
         const char* description;
     };
 
     for (const auto& shape :
-         { FadeShape { te::AudioFadeCurve::linear, "clip.fadeLinear", "Linear Fades", "Fades in a straight line." },
-           FadeShape { te::AudioFadeCurve::convex, "clip.fadeConvex", "Convex Fades",
-                       "Fades that change fast near silence and slow near full volume." },
-           FadeShape { te::AudioFadeCurve::concave, "clip.fadeConcave", "Concave Fades",
+         { NamedFade { linearFade, "clip.fadeLinear", "Linear Fades", "Fades in a straight line." },
+           NamedFade { convexFade, "clip.fadeConvex", "Convex Fades", "Fades that change fast near silence and slow near full volume." },
+           NamedFade { concaveFade, "clip.fadeConcave", "Concave Fades",
                        "Fades that change slowly near silence and fast near full volume." },
-           FadeShape { te::AudioFadeCurve::sCurve, "clip.fadeSCurve", "S-Curve Fades", "Fades that start and end gently, like an S." } })
+           NamedFade { sCurveFade, "clip.fadeSCurve", "S-Curve Fades", "Fades that start and end gently, like an S." } })
     {
-        const auto type = shape.type;
+        const auto type = shape.curve;
         registry.add ({ .id = shape.id,
                         .name = shape.name,
                         .category = "Clip",

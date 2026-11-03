@@ -205,6 +205,68 @@ TEST_CASE ("In the audio clip editor, the clip's edges trim it and its handles f
     CHECK (std::abs (screen.xOf (screen.get().content.getStart().inBeats()) - audioStartX) <= 1);
 }
 
+TEST_CASE ("In the audio clip editor, the handle in a fade's middle bends it up or down, and a double-click straightens it")
+{
+    EditorScreen screen;
+    screen.editor.showClip (screen.vocal);
+    phazite::test::dispatchPendingMessages();
+    auto& waveform = screen.waveform();
+    phazite::test::Mouse mouse (waveform);
+    using Handle = phazite::ui::AudioClipEditor::Handle;
+    const auto height = waveform.getHeight();
+
+    // Without a fade, there is nothing to bend; a fade in over two beats has the handle half way along it, half way up.
+    CHECK (screen.editor.getHandleBounds (Handle::bendIn).isEmpty());
+    phazite::fadeClipTo (screen.context, screen.vocal, true, BeatPosition::fromBeats (6.0));
+    phazite::test::dispatchPendingMessages();
+    const auto straight = screen.editor.getHandleBounds (Handle::bendIn).getCentre();
+    REQUIRE_FALSE (screen.editor.getHandleBounds (Handle::bendIn).isEmpty());
+    CHECK (std::abs (straight.x - screen.xOf (5.0)) <= 1);
+    CHECK (std::abs (straight.y - height / 2) <= 1);
+    CHECK (screen.editor.getHandleBounds (Handle::bendOut).isEmpty());
+
+    // Dragged up a quarter of the height, the curve bends half way to convex, as one undo step, and its handle goes up with it.
+    mouse.press (straight);
+    mouse.dragTo (straight - juce::Point<int> (0, height / 8));
+    mouse.dragTo (straight - juce::Point<int> (0, height / 4));
+    mouse.release();
+    mouse.pause();
+    const auto bent = screen.get().clip.fadeInCurve;
+    CHECK (bent.shape == phazite::FadeShape::curve);
+    CHECK (bent.bend == doctest::Approx (0.5f).epsilon (0.03));
+    CHECK (screen.describeUndo() == juce::String ("Undo Bend Fade In"));
+    CHECK (screen.editor.getHandleBounds (Handle::bendIn).getCentreY() < straight.y - height / 20);
+    CHECK (screen.get().clip.fadeOutCurve == phazite::linearFade); // the other fade is as it was
+
+    // Down past straight, as far as it goes: concave.
+    const auto up = screen.editor.getHandleBounds (Handle::bendIn).getCentre();
+    mouse.press (up);
+    mouse.dragTo (up + juce::Point<int> (0, height / 2));
+    mouse.dragTo (up + juce::Point<int> (0, height));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.get().clip.fadeInCurve == phazite::concaveFade);
+    CHECK (screen.editor.getHandleBounds (Handle::bendIn).getCentreY() > straight.y + height / 20);
+
+    // A double-click on it straightens it, as one undo step.
+    mouse.doubleClick (screen.editor.getHandleBounds (Handle::bendIn).getCentre());
+    CHECK (screen.get().clip.fadeInCurve == phazite::linearFade);
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Fade Shape"));
+    phazite::undo (*screen.edit);
+    CHECK (screen.get().clip.fadeInCurve == phazite::concaveFade);
+
+    // An S-curve bends by the same handle, which stays half way up: dragged down, it turns quick at both ends.
+    phazite::setFadeCurve (screen.context, screen.vocal, true, phazite::sCurveFade);
+    phazite::test::dispatchPendingMessages();
+    const auto s = screen.editor.getHandleBounds (Handle::bendIn).getCentre();
+    CHECK (std::abs (s.y - height / 2) <= 1);
+    mouse.press (s);
+    mouse.dragTo (s + juce::Point<int> (0, height / 2));
+    mouse.dragTo (s + juce::Point<int> (0, height));
+    mouse.release();
+    CHECK (screen.get().clip.fadeInCurve == phazite::FadeCurve { phazite::FadeShape::sCurve, -1.0f });
+}
+
 TEST_CASE ("The audio clip editor shows the clip's whole audio and stays on it: no scrolling or zooming, wherever the clip goes")
 {
     // The owner (2026-10-30): it scrolled like a playlist, so the clip could be lost in it, and selecting the clip again

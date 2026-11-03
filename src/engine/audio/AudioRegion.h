@@ -12,17 +12,23 @@
 
 namespace phazite::engine
 {
-// A fade's shape, as Phazite's audio clips name them: linear, convex (quick at first), concave (slow at first) and S-curve.
+// A fade's shape, as Phazite's audio clips have them: a curve or an S-curve, bent from -1 to 1. A curve bent to 1 is convex
+// (quick at first: a quarter of a sine), to -1 concave (slow at first); an S-curve bent to 1 starts and ends slowly, to -1
+// quickly. Either is straight at 0, and between, it is that much of the way from straight to its shape at 1 or -1.
 enum class FadeShape
 {
-    linear,
-    convex,
-    concave,
+    curve,
     sCurve
 };
 
+struct FadeCurve
+{
+    FadeShape shape = FadeShape::curve;
+    float bend = 0.0f;
+};
+
 // A fade in's gain, along it from 0 (its start) to 1; a fade out's is the same at 1 - along.
-float getFadeGain (FadeShape, float along) noexcept;
+float getFadeGain (FadeCurve, float along) noexcept;
 
 // What a region keeps from one block to the next, by its clip's ID from plan to plan: where it played to, to tell a jump
 // (after which it fades in over 40 samples rather than click), and where it is in a file at another rate.
@@ -42,7 +48,7 @@ struct AudioRegion
     double fileStart = 0.0;             // the file's sample, at its own rate, that plays at the region's start
     float gain = 1.0f;
     int fadeIn = 0, fadeOut = 0; // in samples, fitted to the region
-    FadeShape fadeInShape = FadeShape::linear, fadeOutShape = FadeShape::linear;
+    FadeCurve fadeInCurve, fadeOutCurve;
 
     std::int64_t getEnd() const noexcept { return start + length; }
 

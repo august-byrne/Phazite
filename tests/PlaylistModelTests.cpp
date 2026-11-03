@@ -8,7 +8,9 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -184,9 +186,9 @@ TEST_CASE ("Tracks by ID are renamed, colored, moved and added, each as one undo
     CHECK (phazite::getPlaylistRows (context)[1].colour == juce::Colours::red);
     CHECK (undo.getUndoDescription() == juce::String ("Change Track Colors"));
 
-    phazite::moveTracksAfter (context, { idOf (*song.a) }, idOf (*song.b));
+    phazite::moveTracksTo (context, { idOf (*song.a) }, idOf (*song.b), phazite::TrackDrop::after);
     CHECK (phazite::getAllPlaylistTracks (context) == std::vector { idOf (*song.b), idOf (*song.a) });
-    phazite::moveTracksAfter (context, { idOf (*song.a) }, {}); // to the start
+    phazite::moveTracksTo (context, { idOf (*song.a) }, idOf (*song.b), phazite::TrackDrop::before);
     CHECK (phazite::getAllPlaylistTracks (context) == std::vector { idOf (*song.a), idOf (*song.b) });
     CHECK (undo.getUndoDescription() == juce::String ("Move Track"));
 
@@ -196,6 +198,100 @@ TEST_CASE ("Tracks by ID are renamed, colored, moved and added, each as one undo
     CHECK (phazite::getPlaylistRows (context).back().kind == phazite::TrackType::folder);
     CHECK (context.getSongSelection().isSelected (added));
     CHECK (undo.getUndoDescription() == juce::String ("Add Folder"));
+}
+
+TEST_CASE ("Dragged tracks go before or after a track, into a folder after its last, and never a folder into itself")
+{
+    Song song;
+    auto& context = song.context;
+    phazite::ensureTracks (*song.edit, 4);
+    const auto tracks = te::getAudioTracks (*song.edit);
+    const auto c = idOf (*tracks[2]), d = idOf (*tracks[3]);
+    const auto a = idOf (*song.a), b = idOf (*song.b);
+    auto* folderTrack = phazite::groupIntoFolder ({ tracks[2] }, nullptr); // A, B, Folder (C), D
+    REQUIRE (folderTrack != nullptr);
+    const auto folder = idOf (*folderTrack);
+    const auto order = [&context] { return phazite::getAllPlaylistTracks (context); };
+    REQUIRE (order() == std::vector { a, b, folder, c, d });
+
+    // Into the folder, after its last track; and before a track in it, which puts it in the folder too.
+    phazite::moveTracksTo (context, { a }, folder, phazite::TrackDrop::into);
+    CHECK (order() == std::vector { b, folder, c, a, d });
+    CHECK (phazite::isInside (context, a, folder));
+    phazite::moveTracksTo (context, { d }, c, phazite::TrackDrop::before);
+    CHECK (order() == std::vector { b, folder, d, c, a });
+    CHECK (phazite::getTrackRow (context, d)->depth == 1);
+
+    // After the folder: out of it, past its tracks. Several go in their order in the playlist, whatever order they are given
+    // in, and a track next to the place that moves itself counts as not there.
+    phazite::moveTracksTo (context, { a, d }, folder, phazite::TrackDrop::after);
+    CHECK (order() == std::vector { b, folder, c, d, a });
+    CHECK_FALSE (phazite::isInside (context, d, folder));
+    phazite::moveTracksTo (context, { b, d }, d, phazite::TrackDrop::after);
+    CHECK (order() == std::vector { folder, c, b, d, a });
+
+    // A folder takes its tracks along, also when they are given too; it can't go into itself or into a track of its own.
+    CHECK_FALSE (phazite::canMoveTracksTo (context, { folder }, folder, phazite::TrackDrop::into));
+    CHECK_FALSE (phazite::canMoveTracksTo (context, { folder }, c, phazite::TrackDrop::after));
+    CHECK_FALSE (phazite::canMoveTracksTo (context, { a }, b, phazite::TrackDrop::into)); // not a folder
+    CHECK (phazite::canMoveTracksTo (context, { folder, c }, a, phazite::TrackDrop::after));
+    phazite::moveTracksTo (context, { folder, c }, a, phazite::TrackDrop::after);
+    CHECK (order() == std::vector { b, d, a, folder, c });
+    CHECK (phazite::isInside (context, c, folder));
+
+    // Each move is one undo step.
+    phazite::undo (*song.edit);
+    CHECK (order() == std::vector { folder, c, b, d, a });
+}
+
+TEST_CASE ("Each row knows the colors of the folders it is in, outermost first")
+{
+    Song song;
+    auto& context = song.context;
+    auto* inner = phazite::groupIntoFolder ({ song.b }, nullptr);
+    REQUIRE (inner != nullptr);
+    auto* outer = phazite::groupIntoFolder ({ inner }, nullptr);
+    REQUIRE (outer != nullptr);
+    phazite::setTrackColours (context, { idOf (*outer) }, juce::Colours::red);
+    phazite::setTrackColours (context, { idOf (*inner) }, juce::Colours::blue);
+
+    const auto rows = phazite::getPlaylistRows (context); // A, outer, inner, B
+    REQUIRE (rows.size() == 4);
+    CHECK (rows[0].folderColours.empty());
+    CHECK (rows[1].folderColours.empty());
+    CHECK (rows[2].folderColours == std::vector { juce::Colours::red });
+    CHECK (rows[3].folderColours == std::vector { juce::Colours::red, juce::Colours::blue });
+    CHECK (phazite::getTrackRow (context, idOf (*song.b))->folderColours == rows[3].folderColours);
+}
+
+TEST_CASE ("Collapse All collapses every row and lane while any is expanded, and expands them all otherwise, without undo steps")
+{
+    Song song;
+    auto& context = song.context;
+    auto* folder = phazite::groupIntoFolder ({ song.b }, nullptr);
+    REQUIRE (folder != nullptr);
+    phazite::showAutomationLane (context, phazite::getVolume (context, idOf (*song.a)).getRef());
+    phazite::getSongUndoManager (*song.edit).clearUndoHistory();
+    REQUIRE (phazite::isAnyRowExpanded (context));
+
+    phazite::toggleAllRowsCollapsed (*song.edit);
+    CHECK_FALSE (phazite::isAnyRowExpanded (context));
+    CHECK (phazite::getTrackRow (context, idOf (*song.a))->collapsed);
+    CHECK (phazite::getTrackRow (context, idOf (*folder))->collapsed);
+    CHECK (phazite::getTrackRow (context, idOf (*song.b))->collapsed); // hidden in its folder, collapsed too
+    CHECK (phazite::getAutomationLanes (context, idOf (*song.a))[0].collapsed);
+
+    // A lane expanded again counts: the next Collapse All collapses it.
+    phazite::setAutomationLaneCollapsed (context, phazite::getVolume (context, idOf (*song.a)).getRef(), false);
+    CHECK (phazite::isAnyRowExpanded (context));
+    phazite::toggleAllRowsCollapsed (*song.edit);
+    CHECK_FALSE (phazite::isAnyRowExpanded (context));
+
+    phazite::toggleAllRowsCollapsed (*song.edit);
+    CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->collapsed);
+    CHECK_FALSE (phazite::getTrackRow (context, idOf (*folder))->collapsed);
+    CHECK_FALSE (phazite::getAutomationLanes (context, idOf (*song.a))[0].collapsed);
+    CHECK_FALSE (phazite::getSongUndoManager (*song.edit).canUndo());
 }
 
 TEST_CASE ("Clips by ID: what the playlist draws of them, and the tools' edits")
@@ -281,7 +377,8 @@ TEST_CASE ("Audio clips by ID are faded, crossfaded and slipped")
     // A fade in to a quarter of the clip, as a part of its length.
     phazite::fadeClipTo (context, first, true, beat (2.0));
     CHECK (phazite::getClip (context, first)->fadeIn == doctest::Approx (0.25));
-    CHECK (phazite::getFadeGain (phazite::FadeShape::linear, 0.5f) == doctest::Approx (0.5f));
+    CHECK (phazite::getFadeGain (phazite::linearFade, 0.5f) == doctest::Approx (0.5f));
+    CHECK (phazite::getFadeGain (phazite::convexFade, 0.5f) == doctest::Approx (std::sqrt (0.5f)));
 
     // Split in two, the halves meet in the middle, where a drag a beat to the right crossfades them over two beats.
     const auto halves = phazite::splitClips (context, { first }, beat (4.0));

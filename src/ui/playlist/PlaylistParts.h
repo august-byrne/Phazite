@@ -151,14 +151,15 @@ struct Playlist::AutomationLaneView : public juce::Component,
 };
 
 //==============================================================================
-// An automation lane's header, under its track's header: a chevron that collapses the lane to a thin row, as a track's
-// does, the parameter it shows (in a lane without automation, click for another of the track's), and the track's write
-// mode. Dragging its bottom edge resizes the lane, collapsing it as a track collapses; right-clicking shows its menu.
+// An automation lane's header, under its track's header, with the track's color and its folders' rails running on down its
+// left edge (paintTrackStrips()): the parameter it shows (in a lane without automation, a button that shows another of the
+// track's), and the track's write mode. A double-click collapses the lane to a thin row, or expands it, as a track's
+// header does; dragging its bottom edge resizes the lane, collapsing it as a track collapses; right-clicking shows its menu.
 struct Playlist::AutomationLaneHeader : public juce::Component
 {
     AutomationLaneHeader (Playlist&, TrackID, const ParameterRef&);
 
-    // The track's color, depth and write mode, the parameter's name, and whether the lane is collapsed.
+    // The track's color, folders and write mode, the parameter's name, and whether the lane is collapsed.
     void update (const TrackRow&, const LaneRow&);
 
     void paint (juce::Graphics&) override;
@@ -167,14 +168,15 @@ struct Playlist::AutomationLaneHeader : public juce::Component
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
     Playlist& playlist;
     const TrackID track;
     const ParameterRef parameter;
     TrackRow row;
     bool collapsed = false, automated = false;
-    IconButton collapseButton { "Collapse lane", Icon::expanded };
-    juce::TextButton nameButton, modeButton;
+    juce::Label nameLabel;                        // with automation: the parameter it sets
+    juce::TextButton parameterButton, modeButton; // without: the parameter it shows, which a click changes
     bool resizing = false;
     int heightAtDragStart = 0;
 

@@ -20,9 +20,10 @@ enum class Icon
     magnet,
     loop,
     metronome,
-    grip,     // a handle to drag something by
-    expanded, // a chevron pointing down: something open that can fold
-    folded,   // pointing right: folded
+    expanded,    // a chevron pointing down: something open that can fold
+    folded,      // pointing right: folded
+    collapseAll, // two chevrons pointing together: every row made a thin one
+    expandAll,   // pointing apart: every row at its full height
     // The playlist's tools
     smartTool,
     draw,
@@ -35,6 +36,7 @@ enum class Icon
     zoom,
     // The browser
     folder,
+    openFolder, // a folder in the playlist whose tracks show
     addFolder,
     returnTrack, // a return track, which takes back what the sends to it feed it: the Return key's arrow
     favorite,

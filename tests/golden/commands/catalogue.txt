@@ -32,6 +32,7 @@ track.addFolder | Add Folder | Track | Adds an empty folder below the selected t
 track.groupIntoFolder | Group into Folder | Track | Puts the selected tracks into a new folder. A folder becomes a bus when it holds an effect. | group, folder, bus, submix | enabled-when undo
 track.ungroup | Ungroup Folder | Track | Takes the tracks out of the selected folders, and deletes the folders. | remove folder, ungroup, unfolder | enabled-when undo
 track.collapse | Collapse Track | Track | Makes the selected tracks thin rows that show only their names, or full height again. A collapsed folder hides its tracks. | fold, unfold, expand, hide, minimize, folder | enabled-when ticked
+track.collapseAll | Collapse All | Track | Makes every track, folder and automation lane a thin row, or, when they all are, shows them all at full height again. | fold all, unfold all, expand all, collapse everything, minimize all | enabled-when current-name
 track.pin | Pin Track | Track | Keeps the selected tracks in view at the top of the playlist while the others scroll. | stick, keep visible, unpin | enabled-when ticked
 track.selectPrevious | Select Track Above | Track | Selects the track above the selected one. | previous track, up | enabled-when repeats
 track.selectNext | Select Track Below | Track | Selects the track below the selected one. | next track, down | enabled-when repeats

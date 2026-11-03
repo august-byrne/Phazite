@@ -60,6 +60,7 @@
     "device.group": [ "command + G" ],
     "device.ungroup": [ "command + shift + G" ],
     "track.collapse": [ "U" ],
+    "track.collapseAll": [ "alt + U" ],
     "track.selectPrevious": [ "cursor up" ],
     "track.selectNext": [ "cursor down" ],
     "track.taller": [ "alt + =" ],

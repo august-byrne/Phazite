@@ -32,6 +32,7 @@ track.addFolder
 track.groupIntoFolder | ctrl + G
 track.ungroup | ctrl + shift + G
 track.collapse | U
+track.collapseAll | alt + U
 track.pin
 track.selectPrevious | cursor up
 track.selectNext | cursor down
