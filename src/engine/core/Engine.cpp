@@ -994,29 +994,49 @@ void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs
 //==============================================================================
 juce::AudioBuffer<float> Engine::render (int numSamples)
 {
+    juce::AudioBuffer<float> audio (2, numSamples);
+    beginRender();
+    renderPart (audio.getArrayOfWritePointers(), numSamples);
+    endRender();
+    return audio;
+}
+
+void Engine::beginRender()
+{
     // Ahead by as much as its sound comes out late (delay compensation), so that it starts on time.
     rendering = true;
     play();
-    auto toSkip = plans.get() != nullptr ? getOutputLatency (*plans.get()) : 0;
+    renderSkip = plans.get() != nullptr ? getOutputLatency (*plans.get()) : 0;
+    renderBlock.setSize (2, maximumBlockSize);
+    renderTaken = renderFilled = 0;
+}
 
-    juce::AudioBuffer<float> audio (2, numSamples), block (2, maximumBlockSize);
-
+void Engine::renderPart (float* const* channels, int numSamples)
+{
     for (int written = 0; written < numSamples;)
     {
-        float* channels[] = { block.getWritePointer (0), block.getWritePointer (1) };
-        process (channels, 2, maximumBlockSize);
+        // The next block, once the last is all taken: its start skipped while the render is still ahead.
+        if (renderTaken == renderFilled)
+        {
+            process (renderBlock.getArrayOfWritePointers(), 2, maximumBlockSize);
+            renderFilled = maximumBlockSize;
+            renderTaken = std::min (renderSkip, maximumBlockSize);
+            renderSkip -= renderTaken;
+            continue;
+        }
 
-        const auto skipped = std::min (toSkip, maximumBlockSize);
-        toSkip -= skipped;
-        const auto taken = std::min (maximumBlockSize - skipped, numSamples - written);
+        const auto taken = std::min (renderFilled - renderTaken, numSamples - written);
 
         for (int channel = 0; channel < 2; ++channel)
-            audio.copyFrom (channel, written, block, channel, skipped, taken);
+            juce::FloatVectorOperations::copy (channels[channel] + written, renderBlock.getReadPointer (channel, renderTaken), taken);
 
+        renderTaken += taken;
         written += taken;
     }
+}
 
+void Engine::endRender()
+{
     rendering = false;
-    return audio;
 }
 } // namespace phazite::engine

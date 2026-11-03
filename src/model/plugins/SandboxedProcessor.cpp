@@ -151,8 +151,12 @@ void SandboxedProcessor::collect (const devices::ProcessContext& context, std::i
 
 bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexcept
 {
-    // The channel, unless a render has it: never waited for here.
-    if (! instance.tryHold())
+    // The channel: a render waits for it, the audio thread never does (it skips the block while a render has it).
+    if (context.isRendering)
+    {
+        instance.hold();
+    }
+    else if (! instance.tryHold())
     {
         silence (context);
         return false;

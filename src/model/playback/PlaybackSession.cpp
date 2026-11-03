@@ -8,6 +8,7 @@
 #include "model/transport/internal/Take.h"
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -220,7 +221,7 @@ void PlaybackSession::update()
     cancelPendingUpdate();
     auto& engine = host.getEngine();
 
-    if (isPlayingProject())
+    if (isPlayingProject() && ! lentToRender)
     {
         auto plan = player.compile (engine.getSampleRate(), engine.getMaximumBlockSize(), false);
 
@@ -236,6 +237,23 @@ void PlaybackSession::update()
     }
 
     followLiveMidi();
+}
+
+void PlaybackSession::lendToRender (bool lent)
+{
+    if (std::exchange (lentToRender, lent) == lent || exists.get() == nullptr)
+        return;
+
+    if (lent)
+    {
+        if (isPlayingProject())
+            host.dropPlan();
+
+        return;
+    }
+
+    player.makePluginsAnew();
+    update();
 }
 
 void PlaybackSession::holdTracktion (bool hold)
@@ -318,12 +336,27 @@ std::optional<float> getPlayedValue (const te::AutomatableParameter& parameter, 
 
 juce::AudioBuffer<float> renderWithOwnEngine (te::Edit& edit, int numSamples, double sampleRate, int blockSize, int numThreads)
 {
-    engine::Engine engine;
-    engine.setNumThreads (numThreads);
-    engine.prepare (sampleRate, blockSize);
-    SongPlayer player (edit);
-    engine.setPlan (player.compile (sampleRate, blockSize, true));
-    engine.locate (0.0);
-    return engine.render (numSamples);
+    // With the project's plug-ins, which its engine plays none of meanwhile.
+    auto* session = findSession (edit);
+
+    if (session != nullptr)
+        session->lendToRender (true);
+
+    juce::AudioBuffer<float> audio;
+
+    {
+        engine::Engine engine;
+        engine.setNumThreads (numThreads);
+        engine.prepare (sampleRate, blockSize);
+        SongPlayer player (edit);
+        engine.setPlan (player.compile (sampleRate, blockSize, true));
+        engine.locate (0.0);
+        audio = engine.render (numSamples);
+    }
+
+    if (session != nullptr)
+        session->lendToRender (false);
+
+    return audio;
 }
 } // namespace phazite

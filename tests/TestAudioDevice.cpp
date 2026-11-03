@@ -105,7 +105,7 @@ juce::AudioIODevice* TestAudioDeviceType::createDevice (const juce::String&, con
 }
 
 TestAudioDevice* TestAudioDeviceType::open (juce::AudioDeviceManager& devices, double sampleRate, int blockSize, int numInputs,
-                                            int inputLatency)
+                                            int inputDelay)
 {
     // The type once for each device manager, added before JUCE makes its own (which would look for the computer's devices).
     static std::set<const juce::AudioDeviceManager*> withType;
@@ -119,7 +119,7 @@ TestAudioDevice* TestAudioDeviceType::open (juce::AudioDeviceManager& devices, d
 
     for (auto* type : devices.getAvailableDeviceTypes())
         if (auto* ours = dynamic_cast<TestAudioDeviceType*> (type))
-            ours->inputLatency = inputLatency;
+            ours->inputLatency = inputDelay;
 
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     setup.outputDeviceName = "Test";

@@ -125,6 +125,13 @@ public:
     // into a stereo buffer that it makes, in blocks of the prepared size. The plan must have been given.
     juce::AudioBuffer<float> render (int numSamples);
 
+    // A render in parts, as long as it takes (an export's, with its tails): begun from where the playhead is, playing,
+    // ahead by as much as its sound comes out late; then so many samples at a time into two channels, each part going on
+    // where the one before ended, in blocks of the prepared size; and ended. render() is one part.
+    void beginRender();
+    void renderPart (float* const* channels, int numSamples);
+    void endRender();
+
     // How late the master's sound comes out, in samples, for a plan: its devices' and its tracks' latency (delay
     // compensation), which a render plays ahead of so that its sound starts on time.
     static int getOutputLatency (const Plan&) noexcept;
@@ -185,6 +192,8 @@ private:
     } transport;
 
     bool rendering = false;
+    juce::AudioBuffer<float> renderBlock; // the render's last block, of which the next part takes what is left
+    int renderSkip = 0, renderTaken = 0, renderFilled = 0;
 
     // What comes into the audio device's inputs for the part of the block played, by their channels.
     std::array<const float*, maximumInputs> partInputs {};

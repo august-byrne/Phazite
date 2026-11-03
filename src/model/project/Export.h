@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Export (docs/design.md, section 18; roadmap step 1.8): the song rendered to a WAV or FLAC file, through the master's
 // devices, from its start to its end (getSongEnd()) with the tails of notes and effects after it, and normalized to an
-// integrated loudness (EBU R128, ITU-R BS.1770) if asked, never pushing its true peak over a ceiling. Tracktion's
-// renderer does the work, into a temporary file next to the chosen one, which replaces it only when it is complete; the
-// file is then measured again, for the report.
+// integrated loudness (EBU R128, ITU-R BS.1770) if asked, never pushing its true peak over a ceiling. Phazite's engine
+// plays it offline (docs/tracktion-migration.md, T5), into a temporary file next to the chosen one, which replaces it only
+// when it is complete; the file is then measured again, for the report.
 //
 // Or its stems (roadmap step 2.11): a file for each channel that reaches the master (internal/Export.h: getStemTracks()),
 // so that together they add up to the mix without the master's devices, all from the song's start so that they line up,
@@ -63,17 +63,17 @@ struct ExportReport
     juce::Array<juce::File> stems {};
 };
 
-// How many LU the file is under the loudness target because the true-peak ceiling held its gain back (as Tracktion's
-// normalizing does: it never limits), or 0 when it met the target, within half an LU, or had none.
+// How many LU the file is under the loudness target because the true-peak ceiling held its gain back (normalizing is one
+// gain: it never limits), or 0 when it met the target, within half an LU, or had none.
 double getLoudnessShortfall (const ExportSettings&, const ExportReport&);
 
 // The song's time that an export covers is from its start to its end; the tails after it last until they fall silent
 // (under -70 dB for a block of 512 samples), up to tailSeconds (internal/Export.h: getExportRange()).
 inline constexpr double tailSeconds = 10.0;
 
-// An export in progress, the song's or its stems', rendering on a thread of its own while this lives (Tracktion's
-// EditRenderer, or its RenderQueue for stems, one after another; internal/Export.h starts one). It stops playback first,
-// and lets the project play again when it is done. The report comes on the message thread, once, after the render
+// An export in progress, the song's or its stems', rendering on a thread of its own while this lives (stems one after
+// another; internal/Export.h starts one). It stops playback first, has the project's plug-ins while it renders, and lets
+// the project play again when it is done. The report comes on the message thread, once, after the render
 // thread has finished; deleting this first cancels the export, without a report, and leaves any file or folder that was
 // there. Delete it on the message thread; the project must outlive it.
 class SongExport

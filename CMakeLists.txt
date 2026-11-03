@@ -347,10 +347,12 @@ target_sources(phazite_core PRIVATE
     src/model/notes/NotesModel.h
     src/model/notes/internal/Notes.h
     src/model/playback/AutomationWriter.cpp
+    src/model/playback/OfflineRender.cpp
     src/model/playback/PlaybackHost.cpp
     src/model/playback/PlaybackSession.cpp
     src/model/playback/SongPlayer.cpp
     src/model/playback/internal/AutomationWriter.h
+    src/model/playback/internal/OfflineRender.h
     src/model/playback/internal/PlaybackHost.h
     src/model/playback/internal/PlaybackSession.h
     src/model/playback/internal/SongPlayer.h

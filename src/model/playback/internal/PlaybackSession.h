@@ -87,14 +87,21 @@ public:
     void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity);
     void stopGuideNotes (std::int64_t track);
 
-    // Gives the engine the song as it is now, if this is the project it plays.
+    // Gives the engine the song as it is now, if this is the project it plays (and none while a render has its plug-ins).
     void update();
+
+    // While a render plays the project's plug-ins (an export, model/project/Export.h), the engine plays nothing of the
+    // project, so that the render has them alone; once it is done, what plays them is made anew, prepared again for the
+    // device, and the engine plays the project again. Message thread.
+    void lendToRender (bool);
+    bool isLentToRender() const noexcept { return lentToRender; }
 
 private:
     te::Edit& edit;
     te::SafeSelectable<te::Edit> exists; // until the Edit goes, which can be before this does
     PlaybackHost& host;
     std::shared_ptr<AudioIO> audio; // where live MIDI comes from
+    bool lentToRender = false;
     SongPlayer player;
     AutomationWriter writer;
     juce::ValueTree editState; // the song is its PHAZITE element, which a bare Edit gets when something is first written
@@ -131,7 +138,8 @@ PlaybackSession* findPlayingSession (const te::Edit&);
 std::optional<float> getPlayedValue (const te::AutomatableParameter&, bool withModulation);
 
 // The song rendered by Phazite's own engine, offline, from its start: so many samples at a rate, in blocks of a size, in
-// stereo, through the master's devices, as an export renders it (T5) and the golden renders' harness compares it; on so
-// many threads, the same to the last bit however many.
+// stereo, through the master's devices and its plug-ins, which the project's session lends it (lendToRender()), as an export
+// renders it (OfflineRender.h) and the golden renders' harness compares it; on so many threads, the same to the last bit
+// however many. Message thread.
 juce::AudioBuffer<float> renderWithOwnEngine (te::Edit&, int numSamples, double sampleRate, int blockSize, int numThreads = 1);
 } // namespace phazite

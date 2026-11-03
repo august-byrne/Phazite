@@ -7,9 +7,12 @@
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/project/Export.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Export.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "services/Settings.h"
 #include "ui/shell/ExportPanel.h"
 
@@ -245,28 +248,29 @@ TEST_CASE ("An export replaces a file only once it is complete")
     CHECK (getFileNames (song.renders) == juce::StringArray { "Song.wav" });
 }
 
-TEST_CASE ("The song plays again after an export")
+TEST_CASE ("The project's engine plays nothing of it while an export has its plug-ins, and plays it again after")
 {
     SineSong song;
-    auto& transport = song.edit->getTransport();
-    transport.ensureContextAllocated();
-    REQUIRE (transport.isPlayContextActive());
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setEdit (context, song.edit.get());
+    const auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    REQUIRE (engine.getPlan() != nullptr);
 
     std::optional<ExportReport> report;
     auto running = phazite::startExport (*song.edit, song.renders.getChildFile ("Song.wav"), ExportSettings {},
                                          [&report] (const ExportReport& r) { report = r; });
-    CHECK_FALSE (transport.isPlayContextActive()); // the render has it
+    CHECK (engine.getPlan() == nullptr); // the render has it
     REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
     CHECK (report->result.wasOk());
-    CHECK (transport.isPlayContextActive());
+    CHECK (engine.getPlan() != nullptr);
 
     // And after one that is cancelled.
     running = phazite::startExport (*song.edit, song.renders.getChildFile ("Again.wav"), ExportSettings {}, [] (const ExportReport&) {});
-    CHECK_FALSE (transport.isPlayContextActive());
+    CHECK (engine.getPlan() == nullptr);
     running = nullptr;
-    CHECK (transport.isPlayContextActive());
+    CHECK (engine.getPlan() != nullptr);
+    setEdit (context, nullptr);
 }
-
 //==============================================================================
 namespace
 {

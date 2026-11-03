@@ -14,6 +14,7 @@
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -352,30 +353,8 @@ TEST_CASE ("Low latency leaves what renders play as the song has it")
     phazite::insertMasterDevice (*edit, limiter);
     phazite::setDeviceValue (*limiter->getAutomatableParameterByID ("gain"), 12.0f);
 
-    const auto render = [&edit]
-    {
-        juce::TemporaryFile wav (".wav");
-        te::Renderer::Parameters params (*edit);
-        params.destFile = wav.getFile();
-        params.audioFormat = edit->engine.getAudioFileFormatManager().getWavFormat();
-        params.bitDepth = 32;
-        params.sampleRateForAudio = 48000.0;
-        params.blockSizeForAudio = 512;
-        params.time = te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (1.0));
-        params.tracksToDo = te::toBitSet (te::getAllTracks (*edit));
-        params.useMasterPlugins = true;
-        params.canRenderInMono = false;
-        params.ditheringEnabled = false;
-        REQUIRE (te::Renderer::renderToFile ("Low latency test", params) == params.destFile);
-
-        const std::unique_ptr<juce::AudioFormatReader> reader (
-            edit->engine.getAudioFileFormatManager().readFormatManager.createReaderFor (wav.getFile()));
-        REQUIRE (reader != nullptr);
-        juce::AudioBuffer<float> audio ((int) reader->numChannels, (int) reader->lengthInSamples);
-        REQUIRE (reader->read (&audio, 0, audio.getNumSamples(), 0, true, true));
-        return audio;
-    };
-
+    // A second of it, as an export renders it (Phazite's engine, offline).
+    const auto render = [&edit] { return phazite::renderWithOwnEngine (*edit, 48000, 48000.0, 512); };
     const auto asItIs = render();
     phazite::setLowLatency (engine, true);
     const auto whileLow = render();

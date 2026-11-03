@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Export.h"
+#include "engine/nodes/LoudnessMeter.h"
 #include "internal/Export.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/OfflineRender.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <utility>
 
 namespace phazite
@@ -17,69 +22,41 @@ namespace
     constexpr int flacQuality = 5;            // JUCE's "5 (Default)", the FLAC tools' own default
     constexpr double loudnessTolerance = 0.5; // LU: what still counts as meeting a loudness target
     constexpr int renderBlockSize = 512;      // samples; the tails end after one this long falls silent
+    constexpr int renderPart = 8192;          // samples written at a time
+    constexpr double renderedShare = 0.9;     // of an export's progress: playing it, before its file is written
 
-    te::Renderer::Parameters makeParameters (te::Edit& edit, const juce::File& destination, const ExportSettings& settings)
+    // A writer of stereo audio into a file, in an export's format, or of 32-bit floats into a WAV file; or nothing if the
+    // file can't be written.
+    std::unique_ptr<juce::AudioFormatWriter> makeWriter (const juce::File& file, double sampleRate, const ExportSettings* settings)
     {
-        auto& formats = edit.engine.getAudioFileFormatManager();
-        const bool flac = settings.format == ExportSettings::Format::flac;
+        file.deleteFile();
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
 
-        te::Renderer::Parameters params (edit);
-        params.destFile = destination;
-        params.audioFormat = flac ? formats.getFlacFormat() : formats.getWavFormat();
-        params.quality = flac ? flacQuality : 0;
-        params.bitDepth = settings.bitDepth;
-        params.sampleRateForAudio = settings.sampleRate;
-        params.blockSizeForAudio = renderBlockSize;
-        params.time = getExportRange (edit);
-        params.endAllowance = te::TimeDuration::fromSeconds (tailSeconds);
-        params.tracksToDo = te::toBitSet (te::getAllTracks (edit)); // muted ones stay silent, as when playing
-        params.useMasterPlugins = true;
-        params.canRenderInMono = false;
-        params.ditheringEnabled = settings.bitDepth == 16;
+        if (! static_cast<juce::FileOutputStream&> (*stream).openedOk())
+            return nullptr;
 
-        if (settings.loudnessTarget.has_value())
-        {
-            params.shouldNormaliseByLUFS = true;
-            params.normaliseToLevelDb = (float) *settings.loudnessTarget;
-            params.limitTruePeak = true;
-            params.truePeakCeilingDb = (float) settings.truePeakCeiling;
-        }
+        auto options = juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels (2);
 
-        return params;
+        if (settings == nullptr || settings->bitDepth == 32)
+            options = options.withBitsPerSample (32).withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint);
+        else
+            options = options.withBitsPerSample (settings->bitDepth);
+
+        if (settings != nullptr && settings->format == ExportSettings::Format::flac)
+            return juce::FlacAudioFormat().createWriterFor (stream, options.withQualityOptionIndex (flacQuality));
+
+        return juce::WavAudioFormat().createWriterFor (stream, options);
     }
 
-    // A stem: its channel alone, through its devices, fader and pan, with the tracks that feed it through a sidechain or
-    // a send playing silently, so that it sounds as it does in the mix; from the song's start, so that the stems line up,
-    // with its tail; without the master's devices, and never normalized.
-    te::RenderSpecification makeStemSpecification (te::Track& track, const juce::File& destination, const ExportSettings& settings)
-    {
-        const bool flac = settings.format == ExportSettings::Format::flac;
-
-        te::RenderSpecification spec;
-        spec.tracks = { track.itemID };
-        spec.includeSourceTracks = true;
-        spec.time = getExportRange (track.edit);
-        spec.includeTails = true;
-        spec.destination = destination;
-        spec.format = flac ? te::RenderFormat::flac : te::RenderFormat::wav;
-        spec.sampleRate = settings.sampleRate;
-        spec.bitDepth = settings.bitDepth;
-        spec.quality = flac ? flacQuality : 0;
-        spec.channelLayout = "stereo";
-        spec.dither = settings.bitDepth == 16;
-        spec.useMasterPlugins = false;
-        return spec;
-    }
-
-    // Measures a written file: how long it is, its integrated loudness and its true peak, as Tracktion measures it to
-    // normalize. The report names the file it will be.
-    ExportReport measure (te::Engine& engine, const juce::File& written, const juce::File& file)
+    // A file's integrated loudness and true peak, as Phazite's engine measures them (EBU R128), and its length.
+    ExportReport measure (const juce::File& written, const juce::File& file)
     {
         ExportReport report;
         report.file = file;
 
-        const std::unique_ptr<juce::AudioFormatReader> reader (
-            engine.getAudioFileFormatManager().readFormatManager.createReaderFor (written));
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (written));
 
         if (reader == nullptr || reader->sampleRate <= 0.0)
         {
@@ -88,9 +65,9 @@ namespace
         }
 
         constexpr int blockSize = 16384;
-        const auto channels = (int) reader->numChannels;
-        te::LoudnessMeter meter;
-        meter.prepare (reader->sampleRate, channels, blockSize);
+        const auto channels = std::min (2, (int) reader->numChannels);
+        engine::LoudnessMeter meter;
+        meter.prepare (reader->sampleRate, blockSize);
         juce::AudioBuffer<float> buffer (channels, blockSize);
 
         for (juce::int64 position = 0; position < reader->lengthInSamples; position += blockSize)
@@ -100,11 +77,10 @@ namespace
             meter.process (buffer.getArrayOfReadPointers(), channels, samples);
         }
 
-        meter.flush();
         const auto readings = meter.getReadings();
         report.seconds = (double) reader->lengthInSamples / reader->sampleRate;
-        report.integratedLufs = readings.integratedValid ? readings.integratedLufs : -100.0;
-        report.truePeakDb = readings.truePeakDb;
+        report.integratedLufs = readings.integrated.value_or (-100.0f);
+        report.truePeakDb = readings.truePeak.value_or (-100.0f);
         return report;
     }
 
@@ -163,6 +139,76 @@ namespace
                 if (const auto locked = owner.lock())
                     (*locked)->finish (report);
             });
+    }
+
+    // How an export renders: on Phazite's engine, on the app's threads, with the project's plug-ins, which it lends.
+    OfflineRender::Setup getRenderSetup (te::Edit& edit, double sampleRate)
+    {
+        return { findSession (edit),
+                 [&edit] { return std::make_unique<SongPlayer> (edit); },
+                 edit.engine.getEngineBehaviour().getNumberOfCPUsToUseForAudio(),
+                 sampleRate,
+                 renderBlockSize,
+                 renderedShare };
+    }
+
+    //==============================================================================
+    // What an export writes of a render (model/playback/internal/OfflineRender.h), on its thread: the floats played into
+    // its file's format, at one gain, the loudness target's (as Tracktion normalized: unless that would push the true peak
+    // over the ceiling, which never limits; none for silence, which nothing passes the gates of), dithered when 16 bits
+    // (triangular, the same every time). The floats go once written.
+    juce::Result writeExport (OfflineRender& render, int job, const juce::File& floats, const juce::File& file,
+                              const ExportSettings& settings, const engine::LoudnessMeter::Readings& readings)
+    {
+        auto gain = 1.0f;
+
+        if (settings.loudnessTarget.has_value() && readings.integrated.has_value())
+        {
+            auto gainDb = *settings.loudnessTarget - (double) *readings.integrated;
+
+            if (readings.truePeak.has_value())
+                gainDb = std::min (gainDb, settings.truePeakCeiling - (double) *readings.truePeak);
+
+            gain = juce::jlimit (0.0f, 100.0f, juce::Decibels::decibelsToGain ((float) gainDb));
+        }
+
+        const auto failed = juce::Result::fail ("Phazite couldn't write " + file.getFileName() + ".");
+        juce::WavAudioFormat wav;
+        const std::unique_ptr<juce::AudioFormatReader> reader (wav.createReaderFor (new juce::FileInputStream (floats), true));
+        auto writer = makeWriter (file, settings.sampleRate, &settings);
+
+        if (reader == nullptr || writer == nullptr)
+            return failed;
+
+        const auto dither = settings.bitDepth == 16;
+        const auto lsb = 1.0f / 32768.0f;
+        juce::Random random (0x5048415a); // "PHAZ"
+        juce::AudioBuffer<float> part (2, renderPart);
+
+        for (juce::int64 position = 0; position < reader->lengthInSamples; position += renderPart)
+        {
+            if (render.isCancelled())
+                return juce::Result::fail ("Cancelled.");
+
+            const auto length = (int) std::min<juce::int64> (renderPart, reader->lengthInSamples - position);
+            reader->read (&part, 0, length, position, true, true);
+            part.applyGain (0, length, gain);
+
+            if (dither)
+                for (int channel = 0; channel < 2; ++channel)
+                    for (auto *sample = part.getWritePointer (channel), *end = sample + length; sample != end; ++sample)
+                        *sample += (random.nextFloat() - random.nextFloat()) * lsb;
+
+            if (! writer->writeFromAudioSampleBuffer (part, 0, length))
+                return failed;
+
+            render.setProgress (job,
+                                renderedShare + (1.0 - renderedShare) * (double) (position + length) / (double) reader->lengthInSamples);
+        }
+
+        writer = nullptr;
+        floats.deleteFile();
+        return juce::Result::ok();
     }
 } // namespace
 
@@ -240,240 +286,180 @@ struct SongExport::Impl
 
 namespace
 {
-    // The song, through the master's devices, into one file (Tracktion's EditRenderer).
+    // The song, through the master's devices, into one file, written next to it and taking its place once complete; then
+    // measured again.
     struct SongRender final : SongExport::Impl
     {
-        SongRender (te::Edit&, const juce::File&, const ExportSettings&, std::function<void (const ExportReport&)> onFinished);
-        ~SongRender() override;
+        SongRender (te::Edit& edit, const juce::File& file, const ExportSettings& settings,
+                    std::function<void (const ExportReport&)> callback)
+            : temporary (file),
+              onFinished (std::move (callback)),
+              alive (std::make_shared<SongRender*> (this))
+        {
+            JUCE_ASSERT_MESSAGE_THREAD
 
-        float getProgress() const override { return handle != nullptr ? handle->getProgress() : 0.0f; }
+            if (const auto check = checkExport (edit, settings); check.failed())
+            {
+                deliverTo (std::weak_ptr<SongRender*> (alive), { check, file });
+                return;
+            }
 
-        te::Edit& edit;
-        te::Engine& engine;
+            if (isSongPlaying (edit))
+                stopAndReturn (edit);
+
+            file.getParentDirectory().createDirectory();
+            renderMissingClipAudio (edit); // the engine plays a clip whose render isn't there silent
+
+            // Played into floats, written into the file, and measured on the render thread before the message thread hears.
+            const OfflineRender::Job job { floats.getFile(), getExportRange (edit).getEnd().inSeconds(), tailSeconds, std::nullopt };
+            renderer = std::make_unique<OfflineRender> (
+                getRenderSetup (edit, settings.sampleRate), std::vector { job },
+                [settings, floatsFile = floats.getFile(), file = temporary.getFile()] (OfflineRender& render, int index,
+                                                                                       const auto& readings)
+                { return writeExport (render, index, floatsFile, file, settings, readings); },
+                [weakAlive = std::weak_ptr<SongRender*> (alive), rendered = temporary.getFile(),
+                 target = temporary.getTargetFile()] (const juce::Result& result)
+                { deliverTo (weakAlive, result.wasOk() ? measure (rendered, target) : ExportReport { result, target }); });
+        }
+
+        ~SongRender() override
+        {
+            alive = nullptr;    // no report from here on
+            renderer = nullptr; // cancels the render, if it is still going
+        }
+
+        float getProgress() const override { return renderer != nullptr ? renderer->getProgress() : 0.0f; }
+
+        void finish (const ExportReport& rendered)
+        {
+            renderer = nullptr; // the project plays its plug-ins again
+            auto report = rendered;
+
+            if (report.result.wasOk() && ! temporary.overwriteTargetFileWithTemporary())
+                report.result =
+                    juce::Result::fail ("Phazite couldn't replace " + report.file.getFileName() + ". Is it open in another app?");
+
+            if (const auto callback = onFinished; callback != nullptr)
+                callback (report); // last: it may delete this
+        }
+
         juce::TemporaryFile temporary; // the render, until it replaces the chosen file; deleted if it never does
+        juce::TemporaryFile floats { temporary.getFile().withFileExtension ("wav") }; // what is played, before it is written
         const std::function<void (const ExportReport&)> onFinished;
         std::shared_ptr<SongRender*> alive; // what the render thread's report holds on to
-        std::shared_ptr<te::EditRenderer::Handle> handle;
-        bool restorePlayback = false;
-
-        void finish (const ExportReport&);
-        void endRender();
+        std::unique_ptr<OfflineRender> renderer;
 
         JUCE_DECLARE_NON_COPYABLE (SongRender)
     };
 
-    SongRender::SongRender (te::Edit& e, const juce::File& file, const ExportSettings& settings,
-                            std::function<void (const ExportReport&)> callback)
-        : edit (e),
-          engine (e.engine),
-          temporary (file),
-          onFinished (std::move (callback)),
-          alive (std::make_shared<SongRender*> (this))
-    {
-        JUCE_ASSERT_MESSAGE_THREAD
-
-        if (const auto check = checkExport (edit, settings); check.failed())
-        {
-            deliverTo (std::weak_ptr<SongRender*> (alive), { check, file });
-            return;
-        }
-
-        if (edit.getTransport().isPlaying())
-            stopAndReturn (edit);
-
-        restorePlayback = edit.getTransport().isPlayContextActive(); // the render frees it
-        file.getParentDirectory().createDirectory();
-        renderMissingClipAudio (edit); // Tracktion would render a clip whose render isn't ready silent
-
-        // The renderer calls back on its own thread, which measures the file before the message thread hears of it.
-        handle = te::EditRenderer::render (makeParameters (edit, temporary.getFile(), settings),
-                                           [weakAlive = std::weak_ptr<SongRender*> (alive), &eng = engine,
-                                            target = temporary.getTargetFile()] (tl::expected<juce::File, std::string> rendered)
-                                           {
-                                               if (rendered.has_value())
-                                                   deliverTo (weakAlive, measure (eng, *rendered, target));
-                                               else
-                                                   deliverTo (weakAlive, { juce::Result::fail (juce::String (rendered.error())), target });
-                                           });
-    }
-
-    SongRender::~SongRender()
-    {
-        alive = nullptr; // no report from here on
-        endRender();     // cancels the render, if it is still going
-    }
-
-    void SongRender::endRender()
-    {
-        handle.reset(); // waits for the render thread
-
-        if (std::exchange (restorePlayback, false))
-            edit.getTransport().ensureContextAllocated(); // live MIDI and the meters play again
-    }
-
-    void SongRender::finish (const ExportReport& rendered)
-    {
-        endRender();
-        auto report = rendered;
-
-        if (report.result.wasOk() && ! temporary.overwriteTargetFileWithTemporary())
-            report.result = juce::Result::fail ("Phazite couldn't replace " + report.file.getFileName() + ". Is it open in another app?");
-
-        if (const auto callback = onFinished; callback != nullptr)
-            callback (report); // last: it may delete this
-    }
-
     //==============================================================================
-    // The stems, each into a file of its own in a folder, one after another (Tracktion's RenderQueue, which mutes the
-    // tracks that feed a stem silently while it renders, and puts their mute switches back). The folder is written next to
-    // the chosen one and takes its place only when every stem is complete.
+    // The stems, each into a file of its own in a folder, one after another: each its channel alone as it reaches the
+    // master, what feeds it playing only through it (SongPlayer::compile()). The folder is written next to the chosen one
+    // and takes its place only when every stem is complete.
     struct StemsRender final : SongExport::Impl
     {
-        StemsRender (te::Edit&, const juce::File& folder, const ExportSettings&, std::function<void (const ExportReport&)> onFinished);
-        ~StemsRender() override;
-
-        float getProgress() const override { return queue != nullptr ? queue->getTotalProgress() : 0.0f; }
-
-        te::Edit& edit;
-        const juce::File folder;
-        juce::File temporaryFolder; // the stems, until it takes the chosen folder's place; deleted if it never does
-        const std::function<void (const ExportReport&)> onFinished;
-        std::shared_ptr<StemsRender*> alive; // what a report on its way holds on to
-        std::unique_ptr<te::RenderQueue> queue;
-        juce::Array<juce::File> stems;
-        bool rendering = false, restorePlayback = false, wasChanged = false;
-
-        void finish (const ExportReport&);
-        void finishRendering(); // the queue's callback, once every stem has finished
-        void endRender();
-
-        JUCE_DECLARE_NON_COPYABLE (StemsRender)
-    };
-
-    StemsRender::StemsRender (te::Edit& e, const juce::File& f, const ExportSettings& settings,
-                              std::function<void (const ExportReport&)> callback)
-        : edit (e),
-          folder (f),
-          onFinished (std::move (callback)),
-          alive (std::make_shared<StemsRender*> (this))
-    {
-        JUCE_ASSERT_MESSAGE_THREAD
-
-        if (const auto check = checkExport (edit, settings); check.failed())
+        StemsRender (te::Edit& edit, const juce::File& f, const ExportSettings& settings,
+                     std::function<void (const ExportReport&)> callback)
+            : folder (f),
+              seconds (getExportRange (edit).getLength().inSeconds()),
+              onFinished (std::move (callback)),
+              alive (std::make_shared<StemsRender*> (this))
         {
-            deliverTo (std::weak_ptr<StemsRender*> (alive), { check, folder });
-            return;
-        }
+            JUCE_ASSERT_MESSAGE_THREAD
 
-        if (edit.getTransport().isPlaying())
-            stopAndReturn (edit);
-
-        rendering = true;
-        restorePlayback = edit.getTransport().isPlayContextActive(); // the renders free it
-        wasChanged = edit.hasChangedSinceSaved();                    // the mute switches the queue sets aren't changes
-        temporaryFolder = folder.getSiblingFile (folder.getFileName() + " (exporting)").getNonexistentSibling (false);
-
-        if (! temporaryFolder.createDirectory())
-        {
-            deliverTo (std::weak_ptr<StemsRender*> (alive),
-                       { juce::Result::fail ("Phazite couldn't make a folder in " + folder.getParentDirectory().getFullPathName() + "."),
-                         folder });
-            return;
-        }
-
-        renderMissingClipAudio (edit); // Tracktion would render a clip whose render isn't ready silent
-        queue = std::make_unique<te::RenderQueue>();
-        const auto tracks = getStemTracks (edit);
-
-        for (int i = 0; i < tracks.size(); ++i)
-        {
-            const auto fileName = getStemFileName (i, *tracks[i], getFileSuffix (settings.format));
-            const auto spec = makeStemSpecification (*tracks[i], temporaryFolder.getChildFile (fileName), settings);
-            auto job = te::validateRenderSpecification (edit, spec).wasOk() ? te::createRenderJob (edit, spec) : std::nullopt;
-
-            if (! job.has_value())
+            if (const auto check = checkExport (edit, settings); check.failed())
             {
-                queue = nullptr;
-                deliverTo (std::weak_ptr<StemsRender*> (alive),
-                           { juce::Result::fail ("Phazite couldn't render " + getTrackName (*tracks[i]) + "."), folder });
+                deliverTo (std::weak_ptr<StemsRender*> (alive), { check, folder });
                 return;
             }
 
-            job->name = getTrackName (*tracks[i]);
-            queue->addJob (std::move (*job));
-            stems.add (folder.getChildFile (fileName));
-        }
+            if (isSongPlaying (edit))
+                stopAndReturn (edit);
 
-        queue->onFinished = [this] { finishRendering(); };
-        queue->start();
-    }
+            temporaryFolder = folder.getSiblingFile (folder.getFileName() + " (exporting)").getNonexistentSibling (false);
 
-    StemsRender::~StemsRender()
-    {
-        alive = nullptr; // no report from here on
-        endRender();     // cancels the stems still to render
-
-        if (temporaryFolder.isDirectory())
-            temporaryFolder.deleteRecursively();
-    }
-
-    void StemsRender::endRender()
-    {
-        queue = nullptr; // cancels what is left, waiting for the render thread
-
-        if (! std::exchange (rendering, false))
-            return;
-
-        if (restorePlayback)
-            edit.getTransport().ensureContextAllocated(); // live MIDI and the meters play again
-
-        if (! wasChanged)
-            edit.resetChangedStatus();
-    }
-
-    void StemsRender::finishRendering()
-    {
-        ExportReport report;
-        report.file = folder;
-        report.seconds = getExportRange (edit).getLength().inSeconds();
-
-        for (const auto& job : queue->getJobs())
-        {
-            if (job->getState() != te::RenderQueue::Job::State::completed)
+            if (! temporaryFolder.createDirectory())
             {
-                report.result =
-                    juce::Result::fail (job->getError().isNotEmpty() ? job->getError() : "Phazite couldn't render " + job->getName() + ".");
-                break;
+                deliverTo (
+                    std::weak_ptr<StemsRender*> (alive),
+                    { juce::Result::fail ("Phazite couldn't make a folder in " + folder.getParentDirectory().getFullPathName() + "."),
+                      folder });
+                return;
             }
+
+            renderMissingClipAudio (edit); // the engine plays a clip whose render isn't there silent
+            const auto tracks = getStemTracks (edit);
+            const auto end = getExportRange (edit).getEnd().inSeconds();
+            std::vector<OfflineRender::Job> jobs;
+            std::vector<juce::File> files;
+
+            for (int i = 0; i < tracks.size(); ++i)
+            {
+                const auto fileName = getStemFileName (i, *tracks[i], getFileSuffix (settings.format));
+                const auto channel = (std::int64_t) getTrackID (findTrackState (*tracks[i])).getRaw();
+                jobs.push_back (
+                    { temporaryFolder.getChildFile (fileName + ".floats.wav"), end, tailSeconds, SongPlayer::RenderOf { channel } });
+                files.push_back (temporaryFolder.getChildFile (fileName));
+                stems.add (folder.getChildFile (fileName));
+            }
+
+            renderer = std::make_unique<OfflineRender> (
+                getRenderSetup (edit, settings.sampleRate), jobs,
+                [settings, jobs, files] (OfflineRender& render, int index, const auto& readings)
+                { return writeExport (render, index, jobs[(size_t) index].file, files[(size_t) index], settings, readings); },
+                [weakAlive = std::weak_ptr<StemsRender*> (alive),
+                 report = ExportReport { juce::Result::ok(), folder, seconds }] (const juce::Result& result) mutable
+                {
+                    report.result = result;
+                    deliverTo (weakAlive, report);
+                });
         }
 
-        // Not from inside the queue's own callback, which deleting the queue would cut short.
-        deliverTo (std::weak_ptr<StemsRender*> (alive), report);
-    }
-
-    void StemsRender::finish (const ExportReport& rendered)
-    {
-        endRender();
-        auto report = rendered;
-
-        if (report.result.wasOk())
+        ~StemsRender() override
         {
-            // The folder replaced goes to the recycle bin, or, on a system without one, away.
-            if (folder.exists() && ! folder.moveToTrash() && ! folder.deleteRecursively())
-                report.result = juce::Result::fail ("Phazite couldn't move the old " + folder.getFileName()
-                                                    + " to the recycle bin. Is a file in it open in another app?");
-            else if (! temporaryFolder.moveFileTo (folder))
-                report.result = juce::Result::fail ("Phazite couldn't name the stems' folder " + folder.getFileName() + ".");
-            else
-                report.stems = stems;
+            alive = nullptr;    // no report from here on
+            renderer = nullptr; // cancels the stems still to render
+
+            if (temporaryFolder.isDirectory())
+                temporaryFolder.deleteRecursively();
         }
 
-        if (temporaryFolder.isDirectory())
-            temporaryFolder.deleteRecursively(); // only if something failed
+        float getProgress() const override { return renderer != nullptr ? renderer->getProgress() : 0.0f; }
 
-        if (const auto callback = onFinished; callback != nullptr)
-            callback (report); // last: it may delete this
-    }
+        void finish (const ExportReport& rendered)
+        {
+            renderer = nullptr; // the project plays its plug-ins again
+            auto report = rendered;
+
+            if (report.result.wasOk())
+            {
+                // The folder replaced goes to the recycle bin, or, on a system without one, away.
+                if (folder.exists() && ! folder.moveToTrash() && ! folder.deleteRecursively())
+                    report.result = juce::Result::fail ("Phazite couldn't move the old " + folder.getFileName()
+                                                        + " to the recycle bin. Is a file in it open in another app?");
+                else if (! temporaryFolder.moveFileTo (folder))
+                    report.result = juce::Result::fail ("Phazite couldn't name the stems' folder " + folder.getFileName() + ".");
+                else
+                    report.stems = stems;
+            }
+
+            if (temporaryFolder.isDirectory())
+                temporaryFolder.deleteRecursively(); // only if something failed
+
+            if (const auto callback = onFinished; callback != nullptr)
+                callback (report); // last: it may delete this
+        }
+
+        const juce::File folder;
+        const double seconds;
+        juce::File temporaryFolder; // the stems, until it takes the chosen folder's place; deleted if it never does
+        const std::function<void (const ExportReport&)> onFinished;
+        std::shared_ptr<StemsRender*> alive; // what a report on its way holds on to
+        juce::Array<juce::File> stems;
+        std::unique_ptr<OfflineRender> renderer;
+
+        JUCE_DECLARE_NON_COPYABLE (StemsRender)
+    };
 } // namespace
 
 std::unique_ptr<SongExport> startExport (te::Edit& edit, const juce::File& file, const ExportSettings& settings,

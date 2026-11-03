@@ -168,7 +168,14 @@ void SongPlayer::letGoOfPlugins()
             processor->getInstance().setMovedByEngine (std::span<const int>());
 }
 
-std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximumBlockSize, bool isRender)
+void SongPlayer::makePluginsAnew()
+{
+    std::erase_if (devices, [] (const auto& device)
+                   { return dynamic_cast<SandboxedProcessor*> (&device.second->getRunner().getProcessor()) != nullptr; });
+}
+
+std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximumBlockSize, bool isRender,
+                                                   const std::optional<RenderOf>& of)
 {
     // Another rate or block size: everything that plays is made anew for it.
     if (! juce::exactlyEqual (sampleRate, preparedRate) || maximumBlockSize != preparedBlockSize)
@@ -205,7 +212,6 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     // Each track that holds clips, through its devices.
     lowLatency = ! isRender && isLowLatency (edit.engine);
-    compilingRender = isRender;
     used.clear();
     usedFiles.clear();
     usedRegions.clear();
@@ -263,7 +269,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
             }
         }
 
-        const auto deviceIDs = addDevices (*plan, places, channel, strip, channel.state, frozen);
+        const auto* only = of.has_value() && channel.id == of->channel && of->devices.has_value() ? &*of->devices : nullptr;
+        const auto deviceIDs = addDevices (*plan, places, channel, strip, channel.state, frozen, only);
 
         if (! isRender && ! strip.hasInstrument && ! isFolderState (channel.state) && ! isReturnState (channel.state))
             strip.inputChannels = getHeardInput (channel.state);
@@ -278,22 +285,36 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     updateAudibility();
 
-    // The master adds up what goes to it: the tracks and buses in no bus, and the returns.
+    // The master adds up what goes to it: the tracks and buses in no bus, and the returns; or what a render plays of the
+    // song alone, as it is.
     engine::Plan::Strip master;
     master.state = getStrip (0);
     std::vector<engine::Plan::Input> inputs;
 
-    for (const auto& channel : channels)
-        if (channel.output == 0 && places.contains (channel.id))
-            inputs.push_back ({ places[channel.id], nullptr });
+    if (! of.has_value())
+    {
+        for (const auto& channel : channels)
+            if (channel.output == 0 && places.contains (channel.id))
+                inputs.push_back ({ places[channel.id], nullptr });
+    }
+    else if (places.contains (of->channel))
+    {
+        inputs.push_back ({ places[of->channel], nullptr, of->beforeFader });
+        plan->strips[(size_t) places[of->channel]].feedsBeforeFader |= of->beforeFader;
+    }
 
     addInputs (*plan, master, std::move (inputs));
-    const auto masterState = findPhaziteState (edit).getChildWithName (schema::MASTER);
-    const auto masterDeviceIDs = addDevices (*plan, places, {}, master, masterState);
-    addFaderAutomation (master, masterState, true);
-    addModulation (master, masterState, masterDeviceIDs);
-    tellWhatMoves (master);
-    setChannel (masterState, true);
+
+    if (! of.has_value())
+    {
+        const auto masterState = findPhaziteState (edit).getChildWithName (schema::MASTER);
+        const auto masterDeviceIDs = addDevices (*plan, places, {}, master, masterState);
+        addFaderAutomation (master, masterState, true);
+        addModulation (master, masterState, masterDeviceIDs);
+        tellWhatMoves (master);
+        setChannel (masterState, true);
+    }
+
     plan->strips.push_back (std::move (master));
 
     // What the song doesn't hold any more goes with the last plan that plays it (a plug-in told that nothing of it moves
@@ -334,9 +355,10 @@ std::shared_ptr<engine::StripState> SongPlayer::getStrip (std::int64_t id)
 
 std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree& deviceState)
 {
-    // A plug-in, live: the instance Tracktion loaded (a render plays plug-ins from T5, which renders on Phazite's engine).
+    // A plug-in: the instance Tracktion loaded, which a render holds while it plays a block, the engine skipping it then
+    // (SandboxedProcessor.h).
     if (deviceState[schema::deviceType].toString() == schema::deviceIsPlugin)
-        return compilingRender ? nullptr : getPluginDevice (deviceState);
+        return getPluginDevice (deviceState);
 
     // Phazite's own devices.
     const auto* info = findOwnDevice (deviceState[schema::deviceType].toString().toStdString());
@@ -405,7 +427,8 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::Val
 }
 
 std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std::map<std::int64_t, int>& places, const ChannelInfo& channel,
-                                                  engine::Plan::Strip& strip, const juce::ValueTree& channelState, bool skipFrozen)
+                                                  engine::Plan::Strip& strip, const juce::ValueTree& channelState, bool skipFrozen,
+                                                  const std::set<std::int64_t>* only)
 {
     std::vector<std::int64_t> ids;
 
@@ -467,6 +490,10 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
 
     for (const auto& deviceState : channelState)
     {
+        // A render of some of them (a freeze's): the others left out.
+        if (only != nullptr && ! only->contains ((std::int64_t) getID (deviceState, schema::deviceID)))
+            continue;
+
         if (deviceState.hasType (schema::DEVICE))
         {
             add (deviceState);

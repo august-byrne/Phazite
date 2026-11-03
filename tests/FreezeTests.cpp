@@ -337,8 +337,8 @@ TEST_CASE ("A freeze cancelled leaves the track as it was")
     phazite::setTrackMuted (*song.bass, true);
     phazite::toggleFreeze (song.context, song.host);
     REQUIRE (song.host.render != nullptr);
-    CHECK_FALSE (song.bass->isMuted (false)); // rendering
-    CHECK_FALSE (song.bass->getVolumePlugin()->isEnabled());
+    CHECK (song.bass->isMuted (false)); // nothing of the song changes while Phazite's engine renders it
+    CHECK (song.bass->getVolumePlugin()->isEnabled());
 
     song.host.render = nullptr;
     phazite::test::dispatchPendingMessages();

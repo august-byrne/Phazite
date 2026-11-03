@@ -29,11 +29,23 @@ class SongPlayer
 public:
     explicit SongPlayer (te::Edit&);
 
+    // What a render plays of the song, when not all of it through the master: one channel alone, by its ID, as it reaches
+    // the master (an export's stem, model/project/Export.h); or before its fader, heard whatever its mute switch or a solo
+    // says, through some of its devices and containers, by their IDs, or all of them (a freeze, a bounce:
+    // model/mixer/FreezeModel.h). What feeds it plays only through it, and the master adds it up without its own devices
+    // or fader.
+    struct RenderOf
+    {
+        std::int64_t channel = 0;
+        bool beforeFader = false;
+        std::optional<std::set<std::int64_t>> devices;
+    };
+
     // What the engine plays of the song now, at a rate and in blocks of up to so many samples: the tempo map; the loop and
-    // the metronome, live (a render plays the song once, from its start, without the metronome); and its tracks of Phazite's
-    // devices, with their automation and the faders' (plug-ins, containers, folders as buses, returns and sends come with
-    // T2's later steps), into the master.
-    std::unique_ptr<engine::Plan> compile (double sampleRate, int maximumBlockSize, bool isRender);
+    // the metronome, live (a render plays the song once, from its start, without the metronome); and its channels, with
+    // their devices, plug-ins among them, their automation and the faders', into the master; or in a render, a part of it.
+    std::unique_ptr<engine::Plan> compile (double sampleRate, int maximumBlockSize, bool isRender,
+                                           const std::optional<RenderOf>& of = std::nullopt);
 
     // Live, the audio files it plays are read ahead of the audio thread by a reading thread, and what the engine played long
     // ago is let go of after the engine's blocks pass (engine/audio/AudioFile.h); without, as in a render, each is read as it
@@ -75,6 +87,10 @@ public:
     // The plug-ins it plays told that nothing of them moves now, before it goes while their Edit stays.
     void letGoOfPlugins();
 
+    // What plays its plug-ins made anew by the next plan, prepared again (a render prepared them for itself), while no plan
+    // plays them.
+    void makePluginsAnew();
+
 private:
     te::Edit& edit;
     double preparedRate = 0.0;
@@ -95,7 +111,6 @@ private:
     std::set<std::int64_t> usedSends, usedContainers;
     std::set<std::int64_t> used; // the devices the plan being compiled plays
     bool lowLatency = false;     // as the plan being compiled sees it
-    bool compilingRender = false;
 
     // The audio files the plans play, by their paths, and each audio clip's place in its file, by its ID.
     std::map<juce::String, std::shared_ptr<engine::AudioFile>> files;
@@ -148,7 +163,8 @@ private:
     std::shared_ptr<engine::Delay> getDelay (std::pair<std::int64_t, std::int64_t> key, int length); // none for none
     std::shared_ptr<engine::SendLevel> getSendLevel (const juce::ValueTree& sendState);
     std::vector<std::int64_t> addDevices (engine::Plan&, const std::map<std::int64_t, int>& places, const ChannelInfo&,
-                                          engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false); // their IDs
+                                          engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false,
+                                          const std::set<std::int64_t>* only = nullptr); // their IDs
     std::shared_ptr<engine::ModulatorNode> getModulator (const juce::ValueTree& modulatorState);
     void setModulatorValues (engine::ModulatorNode&, const juce::ValueTree& modulatorState);
     void addModulation (engine::Plan::Strip&, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs);

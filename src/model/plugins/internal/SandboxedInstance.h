@@ -2,10 +2,10 @@
 // A plug-in hosted in a helper process, as JUCE's plug-in instance that Tracktion's te::ExternalPlugin wraps in place of
 // one loaded into Phazite's process (docs/tracktion-migration.md, T3): what Tracktion and the model ask of a plug-in
 // (its description, buses, parameters by their own IDs, state, latency, a block) goes to the helper's instance of it
-// (sandbox/client/RemoteInstance.h). Phazite's engine plays the instance's channel itself (SandboxedProcessor.h); a block
-// through processBlock() is one of Tracktion's renders (exports, stems, freezing, bouncing until T5), which waits for
-// the plug-in for as long as it takes. One block at a time goes through the channel: the engine never waits for a render
-// to be done with it, and skips the block instead. What the plug-in changes itself (its parameters, with the gestures
+// (sandbox/client/RemoteInstance.h). Phazite's engine plays the instance's channel itself (SandboxedProcessor.h), live and in
+// its renders (exports, stems, freezing, bouncing since T5), which wait for the plug-in for as long as it takes; a block
+// through processBlock() is Tracktion's, which waits too. One block at a time goes through the channel: the engine never
+// waits for a render to be done with it, and skips the block instead. What the plug-in changes itself (its parameters, with the gestures
 // around them, its latency, its state) comes in on the message thread, as a plug-in in Phazite's process would tell it.
 // Its editor is a window of the helper's, which a window of the app's shows (app/SandboxedEditor.h), made by the maker the
 // plug-in host was given. If its helper goes (a crash, or ended for a hang), it is crashed: it plays nothing, shows no

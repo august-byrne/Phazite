@@ -50,6 +50,10 @@ public:
     void remove (PlaybackSession&);
     PlaybackSession* getPlayingSession() const noexcept;
 
+    // Gives the engine no plan, and lets go of what it played once the audio thread can't be playing it (a render that
+    // plays the project's plug-ins has them alone then: PlaybackSession::lendToRender()).
+    void dropPlan() { letGoOfPlans(); }
+
     // Prepares the engine as a device would (the tests' devices, which aren't JUCE's, with so many inputs, whose sound comes in
     // so late), and gives it the playing session's song for that rate.
     void prepare (double sampleRate, int maximumBlockSize, int deviceInputs = 0, int deviceInputLatency = 0);

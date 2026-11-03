@@ -11,6 +11,8 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/playback/internal/OfflineRender.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -406,63 +408,10 @@ struct TrackRender::Impl
 
 namespace
 {
-    // What a render changes in the Edit while it renders a track, and puts back after: the devices from the end of what it
-    // renders on are off, the track isn't muted and nothing is soloed, as Tracktion's own freeze has it; and the tracks
-    // that feed the track's sidechains and sends play muted. None of it is an undo step or a change.
-    class RenderSetup
-    {
-    public:
-        RenderSetup (te::AudioTrack& t, int firstDeviceLeftOut, const juce::Array<te::EditItemID>& tracksToMute)
-            : track (t),
-              wasChanged (t.edit.hasChangedSinceSaved()),
-              wasMuted (t.isMuted (false)),
-              unsoloer (std::make_unique<te::FreezePointPlugin::ScopedTrackUnsoloer> (t.edit))
-        {
-            auto& list = track.pluginList;
-
-            for (int i = firstDeviceLeftOut; i < list.size(); ++i)
-            {
-                if (list[i]->isEnabled())
-                {
-                    leftOut.add (list[i]);
-                    list[i]->state.setProperty (te::IDs::enabled, false, nullptr);
-                }
-            }
-
-            if (wasMuted)
-                track.setMute (false);
-
-            if (! tracksToMute.isEmpty())
-                muter = std::make_unique<te::ScopedTrackMuter> (track.edit, tracksToMute);
-        }
-
-        ~RenderSetup()
-        {
-            muter = nullptr;
-            unsoloer = nullptr;
-
-            if (wasMuted)
-                track.setMute (true);
-
-            for (auto& plugin : leftOut)
-                plugin->state.setProperty (te::IDs::enabled, true, nullptr);
-
-            if (! wasChanged)
-                track.edit.resetChangedStatus();
-        }
-
-    private:
-        te::AudioTrack& track;
-        const bool wasChanged, wasMuted;
-        juce::ReferenceCountedArray<te::Plugin> leftOut;
-        std::unique_ptr<te::FreezePointPlugin::ScopedTrackUnsoloer> unsoloer;
-        std::unique_ptr<te::ScopedTrackMuter> muter;
-
-        JUCE_DECLARE_NON_COPYABLE (RenderSetup)
-    };
-
-    // A track rendered to a temporary file in the background (Tracktion's EditRenderer), then made something of on the
-    // message thread: frozen, or bounced.
+    // A track rendered by Phazite's engine in the background (model/playback/internal/OfflineRender.h), before its fader,
+    // through its devices or some of them, what feeds it playing only through it, from the song's start to the end of its
+    // last clip and on as long as its tails sound; then made something of on the message thread: frozen, or bounced.
+    // Nothing of the song changes meanwhile.
     class RenderOfTrack : public TrackRender::Impl
     {
     public:
@@ -479,73 +428,69 @@ namespace
         ~RenderOfTrack() override
         {
             alive = nullptr; // no callback from here on
-            endRender();
+            render = nullptr;
 
-            if (temporary.existsAsFile())
-                temporary.deleteFile();
+            for (const auto& file : { floats, temporary })
+                if (file.existsAsFile())
+                    file.deleteFile();
         }
 
-        float getProgress() const override { return handle != nullptr ? handle->getProgress() : 0.0f; }
+        float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
         juce::String getTitle() const override { return renderTitle; }
-        bool hasStarted() const noexcept { return handle != nullptr; }
+        bool hasStarted() const noexcept { return render != nullptr; }
 
     protected:
         ProjectContext& context;
         te::Edit& edit;
         const te::EditItemID trackID;
-        juce::File temporary; // what the render writes, until it is used
+        juce::File floats;    // what the engine plays into
+        juce::File temporary; // what is used, once rendered: the floats, or what was written of them
 
-        // Starts the render, with the setup held while it runs.
-        void start (te::Renderer::Parameters params, std::unique_ptr<RenderSetup> heldWhileRendering)
+        // Starts the render: of the track, with so much of its devices, into floats at the audio device's rate; written into
+        // the temporary file by what is given, on the render thread, or used as they are.
+        void start (te::AudioTrack& track, std::optional<std::set<std::int64_t>> devices, OfflineRender::Rendered written = {})
         {
-            if (edit.getTransport().isPlaying())
+            if (isSongPlaying (edit))
                 stopAndReturn (edit);
 
-            restorePlayback = edit.getTransport().isPlayContextActive(); // the render frees it
-            setup = std::move (heldWhileRendering);
-            temporary = params.destFile;
-            temporary.getParentDirectory().createDirectory();
-            renderMissingClipAudio (edit); // Tracktion would render a clip whose render isn't ready silent
+            floats.getParentDirectory().createDirectory();
+            renderMissingClipAudio (edit); // the engine plays a clip whose render isn't there silent
 
-            handle = te::EditRenderer::render (
-                std::move (params),
-                [weakAlive = std::weak_ptr<RenderOfTrack*> (alive)] (tl::expected<juce::File, std::string> rendered)
-                {
-                    const auto result = rendered.has_value() ? juce::Result::ok() : juce::Result::fail (juce::String (rendered.error()));
-                    juce::MessageManager::callAsync (
-                        [weakAlive, result]
-                        {
-                            if (const auto locked = weakAlive.lock())
-                                (*locked)->finish (result);
-                        });
-                });
+            const auto format = getRenderFormat (edit);
+            const OfflineRender::Job job { floats, track.getLengthIncludingInputTracks().inSeconds(), tailSeconds,
+                                           SongPlayer::RenderOf { (std::int64_t) getTrackID (track).getRaw(), true, std::move (devices) } };
+            const OfflineRender::Setup setup { findSession (edit), [&song = edit] { return std::make_unique<SongPlayer> (song); },
+                                               edit.engine.getEngineBehaviour().getNumberOfCPUsToUseForAudio(), format.sampleRate,
+                                               format.blockSize };
+            render = std::make_unique<OfflineRender> (setup, std::vector { job }, std::move (written),
+                                                      [weakAlive = std::weak_ptr<RenderOfTrack*> (alive)] (const juce::Result& result)
+                                                      {
+                                                          juce::MessageManager::callAsync (
+                                                              [weakAlive, result]
+                                                              {
+                                                                  if (const auto locked = weakAlive.lock())
+                                                                      (*locked)->finish (result);
+                                                              });
+                                                      });
         }
 
         te::AudioTrack* findTrack() const { return dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, trackID)); }
 
-        // What a rendered file becomes, on the message thread once the render has finished and the Edit is as it was.
+        // What a rendered file becomes, on the message thread once the render has finished.
         virtual juce::Result use (te::AudioTrack&, const juce::File& rendered) = 0;
 
     private:
+        // How long a track's tails may sound after its last clip, at most.
+        static constexpr double tailSeconds = 10.0;
+
         const juce::String renderTitle;
         const std::function<void (const juce::Result&)> onFinished;
         std::shared_ptr<RenderOfTrack*> alive; // what a callback on its way holds on to
-        std::shared_ptr<te::EditRenderer::Handle> handle;
-        std::unique_ptr<RenderSetup> setup;
-        bool restorePlayback = false;
-
-        void endRender()
-        {
-            handle.reset(); // waits for the render thread
-            setup = nullptr;
-
-            if (std::exchange (restorePlayback, false))
-                edit.getTransport().ensureContextAllocated(); // live MIDI and the meters play again
-        }
+        std::unique_ptr<OfflineRender> render;
 
         void finish (juce::Result result)
         {
-            endRender();
+            render = nullptr; // the project plays its plug-ins again
 
             if (result.wasOk())
             {
@@ -555,8 +500,9 @@ namespace
                     result = juce::Result::fail ("The track is gone, or Phazite couldn't render it.");
             }
 
-            if (temporary.existsAsFile())
-                temporary.deleteFile();
+            for (const auto& file : { floats, temporary })
+                if (file.existsAsFile())
+                    file.deleteFile();
 
             if (const auto callback = onFinished; callback != nullptr)
                 callback (result); // last: it may delete this
@@ -566,41 +512,49 @@ namespace
     };
 
     //==============================================================================
-    // Freezing: the track up to its freeze point, as Tracktion's own freeze renders it (tracktion_AudioTrack.cpp:
-    // freezeTrack()), at the audio device's rate, in Tracktion's frozen-file format.
+    // Freezing: the track up to its freeze point (the devices before it, as getFreezePointIndex() says), at the audio
+    // device's rate, into Tracktion's frozen-file format, which its frozen file is kept in.
     class FreezeRender final : public RenderOfTrack
     {
     public:
         FreezeRender (ProjectContext& c, te::AudioTrack& track, std::function<void (const juce::Result&)> callback)
             : RenderOfTrack (c, track, "Freezing " + getTrackName (track), std::move (callback))
         {
-            const auto format = getRenderFormat (edit);
-            juce::BigInteger trackBit;
-            trackBit.setBit (track.getIndexInEditTrackList());
-            juce::Array<te::EditItemID> trackIDs { track.itemID };
+            const auto frozenFile = te::TemporaryFileManager::getFreezeFileForTrack (track);
+            temporary = frozenFile.getSiblingFile ("rendering.freeze").getNonexistentSibling (false);
+            floats = temporary.withFileExtension ("wav");
 
-            for (auto* input : track.getInputTracks())
-                trackIDs.addIfNotAlreadyThere (input->itemID);
+            std::set<std::int64_t> frozen;
+            const auto point = getFreezePointIndex (track);
 
-            te::Renderer::Parameters params (edit);
-            params.tracksToDo = trackBit;
-            params.destFile =
-                te::TemporaryFileManager::getFreezeFileForTrack (track).getSiblingFile ("rendering.freeze").getNonexistentSibling (false);
-            params.audioFormat = edit.engine.getAudioFileFormatManager().getFrozenFileFormat();
-            params.bitDepth = 32;
-            params.blockSizeForAudio = format.blockSize;
-            params.sampleRateForAudio = format.sampleRate;
-            params.time = { te::TimePosition(), track.getLengthIncludingInputTracks() };
-            params.endAllowance = te::RenderOptions::findEndAllowance (edit, &trackIDs, nullptr);
-            params.canRenderInMono = true;
-            params.mustRenderInMono = false;
-            params.usePlugins = true;
-            params.useMasterPlugins = false;
+            for (int i = 0; i < point; ++i)
+                frozen.insert ((std::int64_t) getDeviceID (*track.pluginList[i]).getRaw());
 
-            start (std::move (params), std::make_unique<RenderSetup> (track, getFreezePointIndex (track), juce::Array<te::EditItemID>()));
+            start (track, std::move (frozen), [this, &tracktion = edit.engine] (OfflineRender& offline, int, const auto&)
+                   { return writeFrozen (offline, tracktion); });
         }
 
     private:
+        // The floats in the frozen-file format.
+        juce::Result writeFrozen (OfflineRender& offline, te::Engine& tracktion)
+        {
+            const auto failed = juce::Result::fail ("Phazite couldn't write the frozen file.");
+            juce::WavAudioFormat wav;
+            const std::unique_ptr<juce::AudioFormatReader> reader (wav.createReaderFor (new juce::FileInputStream (floats), true));
+            std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (temporary);
+
+            if (reader == nullptr || ! static_cast<juce::FileOutputStream&> (*stream).openedOk())
+                return failed;
+
+            auto writer = tracktion.getAudioFileFormatManager().getFrozenFileFormat()->createWriterFor (
+                stream, juce::AudioFormatWriterOptions {}.withSampleRate (reader->sampleRate).withNumChannels (2).withBitsPerSample (32));
+
+            if (writer == nullptr || ! writer->writeFromAudioReader (*reader, 0, reader->lengthInSamples) || offline.isCancelled())
+                return failed;
+
+            return juce::Result::ok();
+        }
+
         juce::Result use (te::AudioTrack& track, const juce::File& rendered) override
         {
             freezeFromFile (track, rendered);
@@ -610,8 +564,8 @@ namespace
     };
 
     //==============================================================================
-    // Bouncing: the track before its fader, with the tracks that feed its sidechains playing muted, from the song's start to
-    // the end of its last clip and its tail, into a WAV file of floating-point samples in the project's Audio folder.
+    // Bouncing: the track before its fader, through all its devices, into a WAV file of floating-point samples in the
+    // project's Audio folder.
     class BounceRender final : public RenderOfTrack
     {
     public:
@@ -621,34 +575,14 @@ namespace
         {
             const auto folder = edit.engine.getEngineBehaviour().getDefaultFolderForAudioRecordings (edit);
             target = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav", false);
-
-            te::RenderSpecification spec;
-            spec.tracks = { track.itemID };
-            spec.includeSourceTracks = true;
-            spec.time = te::TimeRange (te::TimePosition(), track.getLengthIncludingInputTracks());
-            spec.includeTails = true;
-            spec.destination =
+            floats = temporary =
                 target.getSiblingFile (target.getFileNameWithoutExtension() + " (rendering).wav").getNonexistentSibling (false);
-            spec.format = te::RenderFormat::wav;
-            spec.sampleRate = getRenderFormat (edit).sampleRate;
-            spec.bitDepth = 32;
-            spec.channelLayout = "stereo";
-            spec.useMasterPlugins = false;
-
-            auto job = te::createRenderJob (edit, spec);
-
-            if (! job.has_value())
-                return;
-
-            const auto fader = track.pluginList.indexOf (track.getVolumePlugin());
-            start (std::move (job->params),
-                   std::make_unique<RenderSetup> (track, fader >= 0 ? fader : track.pluginList.size(), job->tracksToMute));
+            start (track, std::nullopt);
         }
 
     private:
         const juce::String name;
         juce::File target;
-
         juce::Result use (te::AudioTrack& track, const juce::File& rendered) override
         {
             if (! rendered.moveFileTo (target))

@@ -75,7 +75,7 @@ public:
     // Adds the type to a device manager (once) and opens a device of it anew with the setup, reporting so late an input as
     // its driver would (a loopback's block); what goes out of every callback then comes from process(). Returns the device,
     // or nullptr if it didn't open. close() opens no device in its place.
-    static TestAudioDevice* open (juce::AudioDeviceManager&, double sampleRate, int blockSize, int numInputs = 0, int inputLatency = 0);
+    static TestAudioDevice* open (juce::AudioDeviceManager&, double sampleRate, int blockSize, int numInputs = 0, int inputDelay = 0);
     static void close (juce::AudioDeviceManager&);
 
     void scanForDevices() override {}

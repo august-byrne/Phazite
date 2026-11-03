@@ -350,14 +350,14 @@ TEST_SUITE ("golden")
             "frozen", "two chords on Phazite's synth through its reverb, frozen: the track plays the file of its sound.",
             [] (const Fingerprint& before, const Fingerprint& after)
             {
-                // Tracktion renders the frozen file until T5 (docs/tracktion-migration.md), its reverb warmed by a pre-roll and
-                // its tail cut below -70 dB: as loud, a tenth of a second at a time, to within 3 dB, where it is above -60 dB.
+                // Phazite's engine renders the frozen file as it plays the track (since T5: docs/tracktion-migration.md), its
+                // tail cut below -70 dB: as loud, a tenth of a second at a time, to within 0.5 dB, where it is above -60 dB.
                 auto same = before.size() == after.size();
 
                 for (size_t i = 0; i < std::min (before.size(), after.size()); ++i)
                     for (size_t channel = 0; channel < 2; ++channel)
                         if (before[i].rms[channel] > -60.0f)
-                            same = same && std::abs (before[i].rms[channel] - after[i].rms[channel]) <= 3.0f;
+                            same = same && std::abs (before[i].rms[channel] - after[i].rms[channel]) <= 0.5f;
 
                 CHECK_MESSAGE (same, "the frozen track should sound as it did live");
                 return isBetween (after, 5, -40.0f, 6.0f, "the frozen track plays") && same;
@@ -372,7 +372,7 @@ TEST_SUITE ("golden")
         song.addReturn (synth, phazite::devices::Reverb::typeID, -6.0f);
         phazite::test::settle();
 
-        // The song exported, and then its stems (both Tracktion's renders until T5: docs/tracktion-migration.md).
+        // The song exported, and then its stems (both Phazite's engine's renders since T5: docs/tracktion-migration.md).
         const auto exportSong = [&song] (bool stems, const char* name)
         {
             phazite::ExportSettings settings;
