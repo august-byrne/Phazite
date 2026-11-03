@@ -21,7 +21,7 @@ class StretchedLoop : private juce::Thread
 public:
     // Renders the file so many times as long, for playing at the sample rate. Opens it on the calling thread: isValid()
     // says whether it could.
-    StretchedLoop (te::Engine&, const juce::File&, double timeRatio, double sampleRate);
+    StretchedLoop (const juce::File&, double timeRatio, double sampleRate);
     ~StretchedLoop() override; // stops the render, if it is still going
 
     bool isValid() const noexcept { return length > 0; }

@@ -232,7 +232,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
         if (inTime)
         {
             lengthBeats = loopBeats;
-            auto stretched = std::make_shared<StretchedLoop> (impl->tracktion, newFile, lengthBeats * 60.0 / bpm / fileSeconds, rate);
+            auto stretched = std::make_shared<StretchedLoop> (newFile, lengthBeats * 60.0 / bpm / fileSeconds, rate);
 
             if (! stretched->isValid())
                 return false;

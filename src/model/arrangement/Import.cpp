@@ -23,14 +23,14 @@ namespace
     }
 } // namespace
 
-FileKind getFileKind (te::Engine& engine, const juce::File& file)
+FileKind getFileKind (const juce::File& file)
 {
     const auto extension = file.getFileExtension().toLowerCase();
 
     if (extension == ".mid" || extension == ".midi")
         return FileKind::midi;
 
-    if (extension.isNotEmpty() && engine.getAudioFileFormatManager().readFormatManager.findFormatForFileExtension (extension) != nullptr)
+    if (extension.isNotEmpty() && getAudioFormats().findFormatForFileExtension (extension) != nullptr)
         return FileKind::audio;
 
     return FileKind::other;
@@ -92,7 +92,7 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
 {
     auto& edit = track.edit;
 
-    switch (getFileKind (edit.engine, file))
+    switch (getFileKind (file))
     {
         case FileKind::audio:
         {
@@ -151,7 +151,7 @@ juce::Array<te::Clip*> importFiles (te::Edit& edit, const juce::StringArray& pat
     for (const auto& path : paths)
     {
         const juce::File file (path);
-        const auto kind = getFileKind (edit.engine, file);
+        const auto kind = getFileKind (file);
 
         if (kind == FileKind::other)
             continue;

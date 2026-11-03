@@ -65,10 +65,9 @@ std::unique_ptr<phazite::Project> createProject (const juce::File& folder)
 
 TEST_CASE ("Files are imported by kind: audio, MIDI, or nothing")
 {
-    auto& engine = phazite::test::getEngine();
-    CHECK (phazite::getFileKind (engine, juce::File::getCurrentWorkingDirectory().getChildFile ("Kick.wav")) == phazite::FileKind::audio);
-    CHECK (phazite::getFileKind (engine, juce::File::getCurrentWorkingDirectory().getChildFile ("Song.mid")) == phazite::FileKind::midi);
-    CHECK (phazite::getFileKind (engine, juce::File::getCurrentWorkingDirectory().getChildFile ("Notes.txt")) == phazite::FileKind::other);
+    CHECK (phazite::getFileKind (juce::File::getCurrentWorkingDirectory().getChildFile ("Kick.wav")) == phazite::FileKind::audio);
+    CHECK (phazite::getFileKind (juce::File::getCurrentWorkingDirectory().getChildFile ("Song.mid")) == phazite::FileKind::midi);
+    CHECK (phazite::getFileKind (juce::File::getCurrentWorkingDirectory().getChildFile ("Notes.txt")) == phazite::FileKind::other);
 }
 
 TEST_CASE ("Imported audio is copied into the project once, and keeps working after reopening")

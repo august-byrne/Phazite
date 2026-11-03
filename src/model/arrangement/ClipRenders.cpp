@@ -2,6 +2,7 @@
 #include "internal/ClipRenders.h"
 #include "internal/AudioClips.h"
 #include "model/base/internal/Schema.h"
+#include "model/engine/AudioFiles.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
@@ -37,13 +38,13 @@ namespace
     }
 } // namespace
 
-bool renderClipAudio (te::Engine& engine, const juce::File& source, const stretch::Settings& settings, const juce::File& render,
+bool renderClipAudio (const juce::File& source, const stretch::Settings& settings, const juce::File& render,
                       const std::function<bool()>& shouldStop, std::atomic<juce::int64>* framesWritten)
 {
     if (render.existsAsFile())
         return true;
 
-    std::unique_ptr<juce::AudioFormatReader> reader (engine.getAudioFileFormatManager().readFormatManager.createReaderFor (source));
+    std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (source));
 
     if (reader == nullptr || reader->numChannels == 0 || reader->lengthInSamples <= 0)
         return false;
@@ -99,7 +100,7 @@ bool renderMissingClipAudio (te::Edit& edit, const std::function<bool()>& should
         if (shouldStop != nullptr && shouldStop())
             return false;
 
-        if (renderClipAudio (edit.engine, recipe.source, recipe.settings, render, shouldStop))
+        if (renderClipAudio (recipe.source, recipe.settings, render, shouldStop))
         {
             announce (edit.engine, render);
             anyNew = true;
@@ -152,8 +153,7 @@ public:
 
     JobStatus runJob() override
     {
-        renderClipAudio (
-            engine, recipe.source, recipe.settings, render, [this] { return shouldExit() || made->stopped.load(); }, &made->written);
+        renderClipAudio (recipe.source, recipe.settings, render, [this] { return shouldExit() || made->stopped.load(); }, &made->written);
         owner.jobFinished (render);
         return jobHasFinished;
     }
@@ -245,8 +245,8 @@ void ClipRenders::update()
             continue;
 
         auto made = std::make_shared<Render>();
-        made->length = std::max<juce::int64> (
-            1, stretch::getStretchedLength (te::AudioFile (edit.engine, recipe.source).getLengthInSamples(), recipe.settings));
+        made->length =
+            std::max<juce::int64> (1, stretch::getStretchedLength (getAudioFileInfo (recipe.source).lengthInSamples, recipe.settings));
         framesAll += made->length;
         running[render] = made;
         pool.addJob (new Job (*this, edit.engine, recipe, render, std::move (made)), true);

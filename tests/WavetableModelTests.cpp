@@ -214,18 +214,17 @@ TEST_CASE ("A WAV file's 'clm ' chunk, as Serum writes it, says how long its fra
             samples.push_back (0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * (frame + 1) * n / 512));
 
     const auto file = writeSerumWavetable (temp.folder.getChildFile ("Serum.wav"), samples, 512);
-    const auto table = phazite::readWavetable (phazite::test::getEngine(), file);
+    const auto table = phazite::readWavetable (file);
     REQUIRE (table != nullptr);
     CHECK (table->getNumFrames() == 8);
     CHECK (table->getName() == juce::String ("Serum"));
 
     // Without the chunk's help, a sound becomes whole frames of 2048.
-    const auto plain =
-        phazite::readWavetable (phazite::test::getEngine(), phazite::test::writeSound (temp.folder.getChildFile ("Plain.wav"), 0.1));
+    const auto plain = phazite::readWavetable (phazite::test::writeSound (temp.folder.getChildFile ("Plain.wav"), 0.1));
     REQUIRE (plain != nullptr);
     CHECK (plain->getNumFrames() == 2);
 
-    CHECK (phazite::readWavetable (phazite::test::getEngine(), temp.folder.getChildFile ("Nothing.wav")) == nullptr);
+    CHECK (phazite::readWavetable (temp.folder.getChildFile ("Nothing.wav")) == nullptr);
 }
 
 TEST_CASE ("A preset of the wavetable synth brings its sound file into the project that loads it")

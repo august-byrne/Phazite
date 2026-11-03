@@ -2,6 +2,7 @@
 #include "ClipWaveforms.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/base/internal/Tracktion.h"
+#include "model/engine/AudioFiles.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -140,8 +141,7 @@ namespace
 
             if (thumbnail == nullptr)
             {
-                thumbnail = std::make_unique<juce::AudioThumbnail> (
-                    samplesPerLevel, audio.edit.engine.getAudioFileFormatManager().readFormatManager, levels->cache);
+                thumbnail = std::make_unique<juce::AudioThumbnail> (samplesPerLevel, getAudioFormats(), levels->cache);
                 thumbnail->addChangeListener (this); // repaints as it loads
             }
 

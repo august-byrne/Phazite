@@ -3,6 +3,7 @@
 #include "devices/drums/FactoryDrums.h"
 #include "internal/DeviceFiles.h"
 #include "model/base/internal/Schema.h"
+#include "model/engine/AudioFiles.h"
 
 namespace phazite
 {
@@ -13,9 +14,9 @@ namespace
     constexpr double longestSound = 30.0; // seconds of a file a pad plays at most
 
     // A sound file's first seconds, in mono or stereo, or nullptr if it can't be read.
-    std::unique_ptr<DrumSampler::Sound> readSound (te::Engine& engine, const juce::File& file)
+    std::unique_ptr<DrumSampler::Sound> readSound (const juce::File& file)
     {
-        const std::unique_ptr<juce::AudioFormatReader> reader (engine.getAudioFileFormatManager().readFormatManager.createReaderFor (file));
+        const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
 
         if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
             return {};
@@ -75,7 +76,7 @@ void loadPadSound (devices::DrumSampler& sampler, const te::Edit& edit, const ju
     // A file that is gone or can't be read leaves the pad with its factory sound.
     if (const auto file = findProjectFile (edit, state[schema::getPadSoundFile (pad)].toString()); file.existsAsFile())
     {
-        if (auto sound = readSound (edit.engine, file))
+        if (auto sound = readSound (file))
         {
             sampler.setSound (pad, std::move (sound));
             return;

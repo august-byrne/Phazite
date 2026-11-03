@@ -35,7 +35,7 @@ private:
 
 // A sound file as a wavetable (devices/wavetable/Wavetable.h: fromSound()), its channels mixed, with the length of its frames
 // from Serum's 'clm ' chunk if it has one; or nullptr if it can't be read.
-std::shared_ptr<const devices::Wavetable> readWavetable (te::Engine&, const juce::File&);
+std::shared_ptr<const devices::Wavetable> readWavetable (const juce::File&);
 
 // Loads what an oscillator plays into a wavetable synth, from a state that names it as the plug-in's does (its own, or the
 // song's SOUNDS of its device, which Phazite's engine plays: Schema.h): its file, if it can be read, or else the factory

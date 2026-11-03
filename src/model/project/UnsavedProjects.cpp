@@ -153,7 +153,7 @@ int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
 
     // In the order they were made, as they were recorded.
     auto unused = edit.editFileRetriever().getSiblingFile ("Audio").findChildFiles (juce::File::findFiles, true);
-    unused.removeIf ([&] (const juce::File& file) { return played.contains (file) || getFileKind (edit.engine, file) != FileKind::audio; });
+    unused.removeIf ([&] (const juce::File& file) { return played.contains (file) || getFileKind (file) != FileKind::audio; });
     std::sort (unused.begin(), unused.end(),
                [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() < b.getLastModificationTime(); });
 

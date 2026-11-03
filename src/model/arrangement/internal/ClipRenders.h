@@ -19,7 +19,7 @@ namespace phazite
 // render once it is whole. Returns false if the source can't be read or the render written, or shouldStop stopped it;
 // true if the render is there, even if someone else made it meanwhile. framesWritten, if given, counts the frames written
 // so far, for another thread to show how far it has come.
-bool renderClipAudio (te::Engine&, const juce::File& source, const stretch::Settings&, const juce::File& render,
+bool renderClipAudio (const juce::File& source, const stretch::Settings&, const juce::File& render,
                       const std::function<bool()>& shouldStop = {}, std::atomic<juce::int64>* framesWritten = nullptr);
 
 // Renders, on the calling thread, every clip's render that isn't there yet, and tells Tracktion about each new one. What

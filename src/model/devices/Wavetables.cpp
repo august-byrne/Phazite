@@ -66,7 +66,7 @@ void setFactoryWavetable (te::Plugin& plugin, int osc, int index)
 
 bool setWavetableFile (te::Plugin& plugin, int osc, const juce::File& file)
 {
-    if (asWavetableSynth (plugin, osc) == nullptr || ! file.existsAsFile() || getFileKind (plugin.edit.engine, file) != FileKind::audio)
+    if (asWavetableSynth (plugin, osc) == nullptr || ! file.existsAsFile() || getFileKind (file) != FileKind::audio)
         return false;
 
     auto& edit = plugin.edit;

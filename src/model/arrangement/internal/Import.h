@@ -18,7 +18,7 @@ enum class FileKind
 };
 
 // What a file is, by its extension: audio that Tracktion can read, a MIDI file, or neither.
-FileKind getFileKind (te::Engine&, const juce::File&);
+FileKind getFileKind (const juce::File&);
 
 // The project's copy of an audio file, in its Audio folder. The file is copied there unless it is in the
 // project already or the folder has an identical copy; a different file of the same name gets a new

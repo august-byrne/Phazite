@@ -628,7 +628,7 @@ void setCrossfade (ProjectContext& context, const CrossfadeSpot& spot, BeatPosit
 bool canImport (const ProjectContext& context, const juce::File& file)
 {
     auto* edit = getEdit (context);
-    return edit != nullptr && getFileKind (edit->engine, file) != FileKind::other;
+    return edit != nullptr && getFileKind (file) != FileKind::other;
 }
 
 std::vector<ClipID> importFiles (ProjectContext& context, const juce::StringArray& paths, TrackID target, BeatPosition start)

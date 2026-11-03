@@ -4,6 +4,7 @@
 #include "internal/AudioIO.h"
 #include "internal/EngineContext.h"
 #include "internal/EngineSetup.h"
+#include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/plugins/internal/PluginHost.h"
@@ -136,7 +137,7 @@ void EngineContext::setMidiInputOn (const juce::String& id, bool on)
 juce::StringArray EngineContext::getAudioFileExtensions() const
 {
     juce::StringArray extensions;
-    auto& formats = impl->engine.getAudioFileFormatManager().readFormatManager;
+    auto& formats = getAudioFormats();
 
     for (int i = 0; i < formats.getNumKnownFormats(); ++i)
         for (const auto& extension : formats.getKnownFormat (i)->getFileExtensions())

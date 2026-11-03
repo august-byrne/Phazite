@@ -105,12 +105,15 @@ AudioFileInfo readAudioFileInfo (const juce::AudioFormatReader& reader, const ju
 
 juce::AudioFormatManager& getAudioFormats()
 {
-    static juce::AudioFormatManager formats;
+    // Registered once, on whichever thread asks first (renders read files on threads of their own).
+    struct Formats
+    {
+        Formats() { manager.registerBasicFormats(); }
+        juce::AudioFormatManager manager;
+    };
 
-    if (formats.getNumKnownFormats() == 0)
-        formats.registerBasicFormats();
-
-    return formats;
+    static Formats formats;
+    return formats.manager;
 }
 
 AudioFileInfo getAudioFileInfo (const juce::File& file)

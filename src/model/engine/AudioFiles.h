@@ -33,6 +33,7 @@ AudioFileInfo readAudioFileInfo (const juce::AudioFormatReader&, const juce::Str
 // A tempo in a name ("Break 120 BPM", "loop_128bpm"): a number from 50 to 250 just before or after "bpm".
 std::optional<double> getTempoFromName (const juce::String&);
 
-// The formats Phazite reads audio files in: JUCE's (WAV, AIFF, FLAC, Ogg Vorbis, MP3 and what the system adds).
+// The formats Phazite reads audio files in: JUCE's (WAV, AIFF, FLAC, Ogg Vorbis, MP3 and what the system adds), from any
+// thread.
 juce::AudioFormatManager& getAudioFormats();
 } // namespace phazite

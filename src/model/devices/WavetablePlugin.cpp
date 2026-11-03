@@ -3,6 +3,7 @@
 #include "devices/wavetable/FactoryWavetables.h"
 #include "internal/DeviceFiles.h"
 #include "model/base/internal/Schema.h"
+#include "model/engine/AudioFiles.h"
 
 namespace phazite
 {
@@ -53,9 +54,9 @@ namespace
     }
 } // namespace
 
-std::shared_ptr<const devices::Wavetable> readWavetable (te::Engine& engine, const juce::File& file)
+std::shared_ptr<const devices::Wavetable> readWavetable (const juce::File& file)
 {
-    const std::unique_ptr<juce::AudioFormatReader> reader (engine.getAudioFileFormatManager().readFormatManager.createReaderFor (file));
+    const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
 
     if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0)
         return {};
@@ -114,7 +115,7 @@ void loadOscillatorTable (devices::WavetableSynth& synth, const te::Edit& edit, 
     // A file that is gone or can't be read leaves the oscillator on its factory table.
     if (const auto file = findProjectFile (edit, state[schema::getOscillatorWavetableFile (osc)].toString()); file.existsAsFile())
     {
-        if (auto table = readWavetable (edit.engine, file))
+        if (auto table = readWavetable (file))
         {
             synth.setTable (osc, std::move (table));
             return;

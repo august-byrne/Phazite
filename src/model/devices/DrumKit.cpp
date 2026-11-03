@@ -38,7 +38,7 @@ bool setPadSound (te::Plugin& plugin, int pad, const juce::File& file)
 {
     auto* drums = asDrumSampler (plugin, pad);
 
-    if (drums == nullptr || ! file.existsAsFile() || getFileKind (plugin.edit.engine, file) != FileKind::audio)
+    if (drums == nullptr || ! file.existsAsFile() || getFileKind (file) != FileKind::audio)
         return false;
 
     auto& edit = plugin.edit;

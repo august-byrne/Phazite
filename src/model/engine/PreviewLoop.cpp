@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PreviewLoop.h"
+#include "model/engine/AudioFiles.h"
 
 #include <algorithm>
 
@@ -41,9 +42,9 @@ namespace
     };
 } // namespace
 
-StretchedLoop::StretchedLoop (te::Engine& engine, const juce::File& file, double timeRatio, double rate)
+StretchedLoop::StretchedLoop (const juce::File& file, double timeRatio, double rate)
     : juce::Thread ("Phazite preview stretch"),
-      reader (engine.getAudioFileFormatManager().readFormatManager.createReaderFor (file)),
+      reader (getAudioFormats().createReaderFor (file)),
       sampleRate (rate)
 {
     if (reader == nullptr || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0 || reader->numChannels == 0 || rate <= 0.0

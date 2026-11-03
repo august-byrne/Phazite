@@ -580,7 +580,7 @@ TEST_CASE ("Benchmark: a loop previewed in time, until it can start" * doctest::
     for (int run = 0; run < 3; ++run)
     {
         const auto started = juce::Time::getMillisecondCounterHiRes();
-        phazite::StretchedLoop loop (phazite::test::getEngine(), file, 1.2, 48000.0);
+        phazite::StretchedLoop loop (file, 1.2, 48000.0);
         REQUIRE (loop.isValid());
 
         while (! loop.isReadyToPlay())
