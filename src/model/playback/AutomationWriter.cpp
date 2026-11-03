@@ -205,7 +205,7 @@ void AutomationWriter::write (const Pass& pass, std::vector<AutomationPoint> poi
         if (const auto laneValue = lane->getValueAt (end.inBeats()); ! juce::exactlyEqual (laneValue, points.back().value))
             points.push_back ({ end, laneValue, 0.0f });
 
-    replacePoints (*parameter, BeatRange (start, end), points);
+    replacePoints (getSong (parameter->getEdit()), getParameterRef (*parameter), BeatRange (start, end), points);
 }
 
 void AutomationWriter::pluginGestureChanged (const ParameterRef& ref, bool starting)

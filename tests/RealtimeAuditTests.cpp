@@ -702,10 +702,12 @@ TEST_SUITE ("realtime-audit")
         const auto song = phazite::BeatRange (phazite::BeatPosition(), phazite::BeatPosition::fromBeats (32.0));
         const auto gain = device->findParameter ("band1Gain");
         REQUIRE (gain != nullptr);
+        auto& songState = phazite::getSong (*edit);
         phazite::replacePoints (
-            *gain, song,
+            songState, phazite::getParameterRef (*gain), song,
             phazite::makeAutomationShape (phazite::AutomationShape::sine, song, phazite::BeatDuration::fromBeats (1.0), -12.0f, 12.0f));
-        phazite::replacePoints (*track.getVolumePlugin()->volParam, song, { { song.getStart(), 0.8f }, { song.getEnd(), 0.4f } });
+        phazite::replacePoints (songState, phazite::getParameterRef (*track.getVolumePlugin()->volParam), song,
+                                { { song.getStart(), 0.8f }, { song.getEnd(), 0.4f } });
 
         const auto m = playAndMeasure (*edit);
         report ("Lanes sweeping Phazite's EQ, a cycle a beat, and fading a track's volume", m);

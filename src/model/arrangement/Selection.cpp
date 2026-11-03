@@ -114,7 +114,7 @@ void deleteSelection (Selection& selection, const RangeSelection& range, bool cl
 
     if (const auto points = getSelectedPoints (selection))
     {
-        deletePoints (*points->parameter, points->indices);
+        deletePoints (*song, points->parameter, points->indices);
         selection.deselectAll(); // their indices name other points now
         return;
     }
@@ -159,8 +159,8 @@ void duplicateSelection (Selection& selection, RangeSelection& range, bool asAli
     // Automation points: the copies go right after them (a beat after one point alone), and are selected instead.
     if (const auto points = getSelectedPoints (selection); points.has_value() && ! asAliases)
     {
-        const auto copies = duplicatePoints (*points->parameter, points->indices, BeatDuration::fromBeats (1.0));
-        selectPoints (selection, *points->parameter, copies);
+        const auto copies = duplicatePoints (*song, points->parameter, points->indices, BeatDuration::fromBeats (1.0));
+        selectPoints (selection, points->parameter, copies);
         return;
     }
 

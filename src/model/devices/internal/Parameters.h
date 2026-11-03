@@ -15,7 +15,7 @@
 
 namespace phazite
 {
-enum class ParameterKind
+enum class ParameterSource
 {
     device,    // one of Phazite's own devices' (DeviceInfo.h)
     plugin,    // a plug-in's, which its instance holds
@@ -26,11 +26,11 @@ enum class ParameterKind
     macro      // a track's or a container's macro's value, from 0 to 1
 };
 
-// What a parameter is: its kind, its name, its range (with its skew and steps) and its default; and for one of Phazite's
+// What a parameter is: what it is of, its name, its range (with its skew and steps) and its default; and for one of Phazite's
 // own devices' parameters, its description, so that controls show it as its unit says.
 struct ParameterDescription
 {
-    ParameterKind kind = ParameterKind::device;
+    ParameterSource source = ParameterSource::device;
     juce::String name;
     juce::NormalisableRange<float> range;
     std::optional<float> defaultValue; // none for a plug-in's that has none
@@ -54,14 +54,14 @@ void setValueSetByHand (Song&, const ParameterRef&, float value);
 float getCurrentValue (const Song&, const ParameterRef&, bool withModulation);
 
 //==============================================================================
-// A parameter found in the song, for what reads one often (a control, at each of the display ticker's ticks): what it is,
+// A parameter found in the song, for what reads one often (a control, at each of the display ticker's ticks): what it is of,
 // the element that holds its value set by hand, and for one of Phazite's own devices' parameters, its description. The
 // functions above, given one, take it as found, which holds while its element is the song's and still names it
 // (isStillThere()).
 struct FoundParameter
 {
     ParameterRef ref;
-    ParameterKind kind = ParameterKind::device;
+    ParameterSource source = ParameterSource::device;
     juce::ValueTree state;
     const devices::ParameterInfo* info = nullptr;
 };

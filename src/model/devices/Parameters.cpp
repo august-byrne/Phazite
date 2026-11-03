@@ -38,7 +38,7 @@ namespace
         return readID (channel, schema::channelVCA) == fader.getRaw();
     }
 
-    std::optional<FoundParameter> found (const ParameterRef& ref, ParameterKind kind, const juce::ValueTree& state,
+    std::optional<FoundParameter> found (const ParameterRef& ref, ParameterSource kind, const juce::ValueTree& state,
                                          const devices::ParameterInfo* info = nullptr)
     {
         return FoundParameter { ref, kind, state, info };
@@ -66,13 +66,13 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
         const auto isMaster = channel.hasType (schema::MASTER);
 
         if (isVCA (channel, ref.device))
-            return ref.parameter == schema::vcaVolume ? found (ref, ParameterKind::volume, channel) : std::nullopt;
+            return ref.parameter == schema::vcaVolume ? found (ref, ParameterSource::volume, channel) : std::nullopt;
 
         if (ref.parameter == (isMaster ? schema::masterVolume : schema::faderVolume))
-            return found (ref, ParameterKind::volume, channel);
+            return found (ref, ParameterSource::volume, channel);
 
         if (ref.parameter == (isMaster ? schema::masterPan : schema::faderPan))
-            return found (ref, ParameterKind::pan, channel);
+            return found (ref, ParameterSource::pan, channel);
 
         return {};
     }
@@ -80,7 +80,7 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
     if (const auto device = findDeviceState (song, ref.device); device.isValid())
     {
         if (isPluginState (device))
-            return findTracktionParameter (song, ref) != nullptr ? found (ref, ParameterKind::plugin, device) : std::nullopt;
+            return findTracktionParameter (song, ref) != nullptr ? found (ref, ParameterSource::plugin, device) : std::nullopt;
 
         // One of Phazite's own; or a device of a type only tests make (Schema.h: deviceType), as Tracktion's plug-in for it
         // describes it while Tracktion's Edit mirrors the song (T6 step 9 makes the tests' types Phazite's own).
@@ -92,21 +92,21 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
 
         if (info != nullptr)
             if (const auto index = devices::findParameter (*info, ref.parameter.toStdString()); index >= 0)
-                return found (ref, ParameterKind::device, device, &info->parameters[(size_t) index]);
+                return found (ref, ParameterSource::device, device, &info->parameters[(size_t) index]);
 
         return {};
     }
 
     if (const auto send = findSendState (song, ref.device); send.isValid())
-        return ref.parameter == schema::sendLevelParameter ? found (ref, ParameterKind::send, send) : std::nullopt;
+        return ref.parameter == schema::sendLevelParameter ? found (ref, ParameterSource::send, send) : std::nullopt;
 
     if (const auto modulator = findModulatorState (song, ModulatorID::fromRaw (ref.device.getRaw())); modulator.isValid())
     {
         // A macro's one parameter has the macro's ID.
         if (modulator.hasType (schema::MACRO))
-            return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterKind::macro, modulator) : std::nullopt;
+            return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterSource::macro, modulator) : std::nullopt;
 
-        return findTracktionParameter (song, ref) != nullptr ? found (ref, ParameterKind::modulator, modulator) : std::nullopt;
+        return findTracktionParameter (song, ref) != nullptr ? found (ref, ParameterSource::modulator, modulator) : std::nullopt;
     }
 
     return {};
@@ -120,18 +120,18 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
     // Its element still names it: a folder's fader of the other kind, for one, has another ID.
     const auto id = parameter.ref.device.getRaw();
 
-    switch (parameter.kind)
+    switch (parameter.source)
     {
-        case ParameterKind::device:
-        case ParameterKind::plugin:
+        case ParameterSource::device:
+        case ParameterSource::plugin:
             return readID (parameter.state, schema::deviceID) == id;
-        case ParameterKind::volume:
-        case ParameterKind::pan:
+        case ParameterSource::volume:
+        case ParameterSource::pan:
             return readID (parameter.state, schema::channelFader) == id || readID (parameter.state, schema::channelVCA) == id;
-        case ParameterKind::send:
+        case ParameterSource::send:
             return readID (parameter.state, schema::sendID) == id;
-        case ParameterKind::modulator:
-        case ParameterKind::macro:
+        case ParameterSource::modulator:
+        case ParameterSource::macro:
             return readID (parameter.state, schema::modulatorID) == id;
     }
 
@@ -144,62 +144,62 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
     const auto& state = parameter.state;
     const auto atZeroDecibels = engine::decibelsToFaderPosition (0.0f);
 
-    switch (parameter.kind)
+    switch (parameter.source)
     {
-        case ParameterKind::device:
+        case ParameterSource::device:
         {
             const auto& info = *parameter.info;
-            return { parameter.kind, toString (info.name), devices::getRange (info), info.defaultValue, info };
+            return { parameter.source, toString (info.name), devices::getRange (info), info.defaultValue, info };
         }
 
-        case ParameterKind::volume:
+        case ParameterSource::volume:
         {
             const auto* name = state.hasType (schema::MASTER) ? "Master volume" : isVCA (state, parameter.ref.device) ? "VCA" : "Volume";
-            return { parameter.kind, name, { 0.0f, 1.0f }, atZeroDecibels, {} };
+            return { parameter.source, name, { 0.0f, 1.0f }, atZeroDecibels, {} };
         }
 
-        case ParameterKind::pan:
-            return { parameter.kind, state.hasType (schema::MASTER) ? "Master pan" : "Pan", { -1.0f, 1.0f }, 0.0f, {} };
+        case ParameterSource::pan:
+            return { parameter.source, state.hasType (schema::MASTER) ? "Master pan" : "Pan", { -1.0f, 1.0f }, 0.0f, {} };
 
-        case ParameterKind::send:
-            return { parameter.kind, "Send level", { 0.0f, 1.0f }, atZeroDecibels, {} };
+        case ParameterSource::send:
+            return { parameter.source, "Send level", { 0.0f, 1.0f }, atZeroDecibels, {} };
 
-        case ParameterKind::macro:
-            return { parameter.kind, state[schema::macroName].toString(), { 0.0f, 1.0f }, 0.0f, {} };
+        case ParameterSource::macro:
+            return { parameter.source, state[schema::macroName].toString(), { 0.0f, 1.0f }, 0.0f, {} };
 
-        case ParameterKind::modulator:
-        case ParameterKind::plugin:
+        case ParameterSource::modulator:
+        case ParameterSource::plugin:
             if (const auto tracktions = findTracktionParameter (song, parameter.ref))
-                return { parameter.kind, tracktions->getParameterName(), tracktions->valueRange, tracktions->getDefaultValue(), {} };
+                return { parameter.source, tracktions->getParameterName(), tracktions->valueRange, tracktions->getDefaultValue(), {} };
 
             break;
     }
 
-    return { parameter.kind, {}, {}, {}, {} };
+    return { parameter.source, {}, {}, {}, {} };
 }
 
 juce::String getParameterText (const Song& song, const FoundParameter& parameter, float value)
 {
-    switch (parameter.kind)
+    switch (parameter.source)
     {
-        case ParameterKind::volume:
+        case ParameterSource::volume:
             return juce::Decibels::toString (engine::faderPositionToDecibels (value) + 0.001f);
 
-        case ParameterKind::send:
+        case ParameterSource::send:
             return juce::Decibels::toString (engine::faderPositionToDecibels (value));
 
-        case ParameterKind::pan:
+        case ParameterSource::pan:
             if (std::abs (value) < 0.001f)
                 return "Centre";
 
             return value < 0.0f ? juce::String (value, 3) + " Left" : "+" + juce::String (value, 3) + " Right";
 
-        case ParameterKind::device:
-        case ParameterKind::macro:
+        case ParameterSource::device:
+        case ParameterSource::macro:
             return juce::String (value, 3);
 
-        case ParameterKind::modulator:
-        case ParameterKind::plugin:
+        case ParameterSource::modulator:
+        case ParameterSource::plugin:
             if (const auto tracktions = findTracktionParameter (song, parameter.ref))
                 return tracktions->valueToString (value);
 
@@ -213,27 +213,27 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
 {
     const auto& state = parameter.state;
 
-    switch (parameter.kind)
+    switch (parameter.source)
     {
-        case ParameterKind::device:
+        case ParameterSource::device:
             return (float) state.getChildWithName (schema::VALUES)
                 .getProperty (juce::Identifier (parameter.ref.parameter), parameter.info->defaultValue);
 
-        case ParameterKind::volume:
+        case ParameterSource::volume:
             return engine::decibelsToFaderPosition (
                 (float) state.getProperty (schema::channelVolume, state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f));
 
-        case ParameterKind::pan:
+        case ParameterSource::pan:
             return (float) state.getProperty (schema::channelPan, 0.0f);
 
-        case ParameterKind::send:
+        case ParameterSource::send:
             return engine::decibelsToFaderPosition ((float) state.getProperty (schema::sendLevel, 0.0f));
 
-        case ParameterKind::macro:
+        case ParameterSource::macro:
             return (float) state.getProperty (schema::macroValue, 0.0f);
 
-        case ParameterKind::modulator:
-        case ParameterKind::plugin:
+        case ParameterSource::modulator:
+        case ParameterSource::plugin:
             if (const auto tracktions = findTracktionParameter (song, parameter.ref))
                 return tracktions->getCurrentExplicitValue();
 
@@ -249,9 +249,9 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
     auto* undo = &song.getUndoManager();
     auto state = parameter.state;
 
-    switch (parameter.kind)
+    switch (parameter.source)
     {
-        case ParameterKind::device:
+        case ParameterSource::device:
         {
             const auto stored = juce::jlimit (parameter.info->minimum, parameter.info->maximum, value);
             moveOnePoint (song, ref, stored);
@@ -260,7 +260,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             return;
         }
 
-        case ParameterKind::volume:
+        case ParameterSource::volume:
         {
             const auto position = juce::jlimit (0.0f, 1.0f, value);
             moveOnePoint (song, ref, position);
@@ -268,7 +268,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             return;
         }
 
-        case ParameterKind::pan:
+        case ParameterSource::pan:
         {
             const auto pan = juce::jlimit (-1.0f, 1.0f, value);
             moveOnePoint (song, ref, pan);
@@ -276,7 +276,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             return;
         }
 
-        case ParameterKind::send:
+        case ParameterSource::send:
         {
             const auto position = juce::jlimit (0.0f, 1.0f, value);
             moveOnePoint (song, ref, position);
@@ -284,7 +284,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             return;
         }
 
-        case ParameterKind::macro:
+        case ParameterSource::macro:
         {
             if (const auto stored = juce::jlimit (0.0f, 1.0f, value); juce::exactlyEqual (stored, 0.0f))
                 state.removeProperty (schema::macroValue, undo);
@@ -295,8 +295,8 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             return;
         }
 
-        case ParameterKind::modulator:
-        case ParameterKind::plugin:
+        case ParameterSource::modulator:
+        case ParameterSource::plugin:
             if (const auto tracktions = findTracktionParameter (song, ref))
                 setDeviceValue (*tracktions, value);
 
@@ -309,7 +309,7 @@ float getCurrentValue (const Song& song, const FoundParameter& parameter, bool w
     // While Phazite's engine plays the song: what it played, or the value set by hand for one that nothing moves (but a
     // modulator's or a macro's, which it doesn't play as parameters).
     if (const auto* session = findPlayingSession (song);
-        session != nullptr && parameter.kind != ParameterKind::modulator && parameter.kind != ParameterKind::macro)
+        session != nullptr && parameter.source != ParameterSource::modulator && parameter.source != ParameterSource::macro)
     {
         if (! session->getPlayer().isMoved (parameter.ref))
             return getValueSetByHand (song, parameter);

@@ -4,11 +4,13 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 #include <limits>
@@ -28,9 +30,11 @@ namespace
         return curve.edit.tempoSequence.toTime (position);
     }
 
-    float limitValue (const te::AutomatableParameter& parameter, float value)
+    // A value within its parameter's range (model/devices/internal/Parameters.h).
+    float limitValue (const Song& song, const ParameterRef& ref, float value)
     {
-        return juce::jlimit (parameter.valueRange.start, parameter.valueRange.end, value);
+        const auto description = describeParameter (song, ref);
+        return description.has_value() ? description->range.getRange().clipValue (value) : value;
     }
 
     float limitCurve (float curve)
@@ -50,14 +54,31 @@ namespace
         return engine::Curve (std::move (points));
     }
 
-    // While the song plays, the engine follows the curve; while it doesn't, the value at the playhead is set here, so
-    // that controls show it.
+    // While the song plays, the engine follows the curve; while it doesn't, Tracktion's parameter's value at the playhead is
+    // set here, so that controls show it while no session plays the song (model/devices/internal/Parameters.h:
+    // getCurrentValue()).
     void followCurve (te::AutomatableParameter& parameter)
     {
         auto& edit = parameter.getEdit();
 
         if (! isSongPlaying (edit))
             parameter.updateToFollowCurve (getPlayheadTime (edit));
+    }
+
+    void followCurve (const Song& song, const ParameterRef& ref)
+    {
+        if (auto* edit = findEdit (song))
+            if (const auto parameter = findParameter (*edit, ref))
+                followCurve (*parameter);
+    }
+
+    // A parameter's value at a beat as its curve has it, as Phazite's engine plays it; without points, its value set by hand.
+    float getCurveValueAt (const Song& song, const ParameterRef& ref, const juce::ValueTree& curveState, BeatPosition beat)
+    {
+        if (curveState.getNumChildren() == 0)
+            return getValueSetByHand (song, ref);
+
+        return makeEngineCurve (curveState).getValueAt (std::max (0.0, beat.inBeats()));
     }
 
     //==========================================================================
@@ -74,19 +95,17 @@ namespace
         return {};
     }
 
-    // A parameter's curve in the song, edited point by point as Tracktion's AutomationCurve is, in beats, each change with
-    // the Edit's undo manager. Points keep time order, one added at a beat that has points going after them, as Tracktion
-    // adds them. Tracktion's curve follows (mirror::reconcileCurve()) before the curve's values are asked for, which
-    // Tracktion reckons until Phazite plays the song itself (T2), and as the edit ends, so that what plays is always the
-    // song's. One at a time for a parameter: each holds the curve's state as it found it.
+    // A parameter's curve in the song, edited point by point, in beats, each change with the song's undo manager. Points
+    // keep time order, one added at a beat that has points going after them. Tracktion's curve follows
+    // (mirror::reconcileCurve()) as the edit ends, so that what Tracktion's parameter shows is always the song's. One at a
+    // time for a parameter: each holds the curve's state as it found it.
     class SongCurve
     {
     public:
-        explicit SongCurve (te::AutomatableParameter& p)
-            : parameter (p),
-              edit (p.getEdit()),
-              ref (getParameterRef (p)),
-              state (findCurveState (edit, ref))
+        SongCurve (Song& s, const ParameterRef& r)
+            : song (s),
+              ref (r),
+              state (findCurveState (song, ref))
         {
         }
 
@@ -97,20 +116,14 @@ namespace
         float getPointValue (int index) const { return state.getChild (index)[schema::pointValue]; }
         float getPointCurve (int index) const { return state.getChild (index).getProperty (schema::pointCurve, 0.0f); }
 
-        // As Phazite's engine plays it; without points, the parameter's own value.
-        float getValueAt (BeatPosition beat) const
-        {
-            if (getNumPoints() == 0)
-                return parameter.getCurrentBaseValue();
-
-            return makeEngineCurve (state).getValueAt (std::max (0.0, beat.inBeats()));
-        }
+        // As Phazite's engine plays it; without points, the parameter's value set by hand.
+        float getValueAt (BeatPosition beat) const { return getCurveValueAt (song, ref, state, beat); }
 
         // The parameter's value at the playhead in step with the curve (followCurve()).
         void follow() const
         {
             reconcile();
-            followCurve (parameter);
+            followCurve (song, ref);
         }
 
         int addPoint (BeatPosition beat, float value, float curve)
@@ -120,9 +133,9 @@ namespace
 
             if (! state.isValid())
             {
-                auto automation = getSong (edit).getState().getOrCreateChildWithName (schema::AUTOMATION, getUndo());
+                auto automation = song.getState().getOrCreateChildWithName (schema::AUTOMATION, getUndo());
                 state = juce::ValueTree (schema::CURVE);
-                state.setProperty (schema::curveDevice, toTracktion (ref.device).toString(), nullptr);
+                state.setProperty (schema::curveDevice, juce::String (ref.device.getRaw()), nullptr);
                 state.setProperty (schema::curveParameter, ref.parameter, nullptr);
                 automation.appendChild (state, getUndo());
             }
@@ -182,10 +195,7 @@ namespace
         {
             constexpr auto threshold = 0.0001;
             const auto secondsBetween = [this] (int a, int b)
-            {
-                const auto& tempo = edit.tempoSequence;
-                return (tempo.toTime (toTracktion (getPointBeat (a))) - tempo.toTime (toTracktion (getPointBeat (b)))).inSeconds();
-            };
+            { return toSeconds (song, getPointBeat (a)) - toSeconds (song, getPointBeat (b)); };
 
             for (int i = getNumPoints(); --i >= 0;)
             {
@@ -212,37 +222,32 @@ namespace
         }
 
     private:
-        te::AutomatableParameter& parameter;
-        te::Edit& edit;
+        Song& song;
         const ParameterRef ref;
         juce::ValueTree state;
         mutable bool changed = false;
 
-        juce::UndoManager* getUndo() const { return &getSong (edit).getUndoManager(); }
+        juce::UndoManager* getUndo() const { return &song.getUndoManager(); }
 
         void reconcile() const
         {
             if (std::exchange (changed, false))
-                mirror::reconcileCurve (edit, ref);
+                if (auto* edit = findEdit (song))
+                    mirror::reconcileCurve (*edit, ref);
         }
 
         JUCE_DECLARE_NON_COPYABLE (SongCurve)
     };
 
-    int countPoints (const te::AutomatableParameter& parameter)
-    {
-        return findCurveState (parameter.getEdit(), getParameterRef (parameter)).getNumChildren();
-    }
-
     // The parameters the song has curves for that are there, not those of devices gone (whose curves the song keeps for
     // undo).
-    std::vector<te::AutomatableParameter::Ptr> getParametersWithCurves (const te::Edit& edit)
+    std::vector<ParameterRef> getParametersWithCurves (const Song& song)
     {
-        std::vector<te::AutomatableParameter::Ptr> parameters;
+        std::vector<ParameterRef> parameters;
 
-        for (const auto& curve : getCurveStates (edit))
-            if (auto parameter = findParameter (edit, getCurveParameter (curve)))
-                parameters.push_back (parameter);
+        for (const auto& curve : getCurveStates (song))
+            if (const auto ref = getCurveParameter (curve); locateParameter (song, ref).has_value())
+                parameters.push_back (ref);
 
         return parameters;
     }
@@ -252,16 +257,15 @@ namespace
     const auto justBefore = BeatDuration::fromBeats (1.0e-4); // where an edge's point on the side before it goes
 
     // Each track's stretches in time order, those that overlap or touch as one.
-    std::vector<std::pair<te::Track*, std::vector<BeatRange>>> byTrack (const Song& song, const std::vector<AutomationStretch>& stretches)
+    std::vector<std::pair<TrackID, std::vector<BeatRange>>> byTrack (const Song& song, const std::vector<AutomationStretch>& stretches)
     {
-        std::vector<std::pair<te::Track*, std::vector<BeatRange>>> tracks;
-        auto* edit = findEdit (song);
+        std::vector<std::pair<TrackID, std::vector<BeatRange>>> tracks;
 
         for (const auto& stretch : stretches)
         {
-            auto* track = edit != nullptr ? mirror::findTrack (*edit, stretch.track) : nullptr;
+            const auto track = stretch.track;
 
-            if (track == nullptr || stretch.range.isEmpty())
+            if (! findTrackState (song, track).isValid() || stretch.range.isEmpty())
                 continue;
 
             auto found = std::find_if (tracks.begin(), tracks.end(), [track] (const auto& each) { return each.first == track; });
@@ -311,12 +315,12 @@ namespace
             curve.removeRedundantPoints ({ beat - justBefore * 2.0, beat + justBefore });
     }
 
-    std::vector<te::AutomatableParameter*> getAutomatedParameters (te::Track& track)
+    std::vector<ParameterRef> getAutomatedParameters (const Song& song, TrackID track)
     {
-        std::vector<te::AutomatableParameter*> automated;
+        std::vector<ParameterRef> automated;
 
-        for (auto* parameter : getAutomatableParameters (track))
-            if (hasPoints (*parameter))
+        for (const auto& parameter : getAutomatableParameters (song, track))
+            if (hasPoints (song, parameter))
                 automated.push_back (parameter);
 
         return automated;
@@ -528,132 +532,156 @@ ParameterRef getParameterRef (const te::AutomatableParameter& parameter)
     return {};
 }
 
-te::Track* getTrackOfParameter (const te::AutomatableParameter& parameter)
+TrackID getParameterTrack (const Song& song, const ParameterRef& parameter)
 {
-    auto* device = parameter.getPlugin();
+    const auto found = locateParameter (song, parameter);
 
-    if (device == nullptr)
-        return nullptr;
+    if (! found.has_value())
+        return {};
 
-    if (auto* track = device->getOwnerTrack())
-        return track;
+    switch (found->source)
+    {
+        case ParameterSource::device:
+        case ParameterSource::plugin:
+            return getDeviceChannel (song, parameter.device); // a container's devices are on its channel
+        case ParameterSource::volume:
+        case ParameterSource::pan:
+            return getTrackID (found->state);
+        case ParameterSource::send:
+            return getTrackID (found->state.getParent());
+        case ParameterSource::modulator:
+        case ParameterSource::macro:
+            break;
+    }
 
-    if (device->isInRack())
-        return getTrackOfContainerDevice (*device);
-
-    // The master's volume is a device of the Edit's own.
-    auto& edit = device->edit;
-
-    if (device == edit.getMasterVolumePlugin().get() || edit.getMasterPluginList().contains (device))
-        return edit.getMasterTrack();
-
-    return nullptr;
+    return {};
 }
 
-juce::ReferenceCountedArray<te::AutomatableParameter> getAutomatableParameters (te::Track& track)
+std::vector<ParameterRef> getAutomatableParameters (const Song& song, TrackID track)
 {
-    juce::ReferenceCountedArray<te::AutomatableParameter> parameters;
-    juce::Array<te::Plugin*> devices;
+    std::vector<ParameterRef> parameters;
 
-    if (track.isMasterTrack())
+    // The channel's fader's (or a plain folder's VCA's), the master's for the master; then a track's sends.
+    const auto chain = findChainState (song, track);
+    const auto fader = getFader (song, track);
+
+    if (! chain.isValid() || ! fader.isValid())
+        return parameters;
+
+    parameters.push_back ({ fader, getVolumeParameterID (song, track) });
+
+    if (const auto pan = getPanParameterID (song, track); pan.isNotEmpty())
+        parameters.push_back ({ fader, pan });
+
+    for (const auto send : getSends (song, track))
+        parameters.push_back ({ send, schema::sendLevelParameter });
+
+    // Each device's (those in its containers after each container). A device's mix (Mixer.h: getMix()) is its own knob, not
+    // one of these; a container's own levels Phazite doesn't show.
+    auto* edit = findEdit (song);
+
+    const auto addParametersOf = [&] (DeviceID device)
     {
-        if (const auto volume = track.edit.getMasterVolumePlugin())
+        const auto state = findDeviceState (song, device);
+
+        if (isContainerState (state))
+            return;
+
+        // One of Phazite's own devices', in its description's order.
+        if (const auto* own = findOwnDevice (state[schema::deviceType].toString().toStdString()))
         {
-            parameters.add (volume->volParam);
-            parameters.add (volume->panParam);
+            for (const auto& info : own->parameters)
+                if (own->kind == devices::DeviceKind::instrument || info.id != devices::mixParameterID)
+                    parameters.push_back ({ device, juce::String (info.id.data(), info.id.size()) });
+
+            return;
         }
 
-        devices = getMasterDevices (track.edit);
-    }
-    else
-    {
-        if (auto* volume = dynamic_cast<te::VolumeAndPanPlugin*> (getVolumeDevice (track)))
-        {
-            parameters.add (volume->volParam);
-            parameters.add (volume->panParam);
-        }
-        else if (auto* vca = dynamic_cast<te::VCAPlugin*> (getVolumeDevice (track)))
-        {
-            parameters.add (vca->volParam);
-        }
+        // A plug-in's, as its instance has them; or a device's of a type only tests make, as Tracktion's plug-in for it has
+        // them (docs/tracktion-migration.md, T6 steps 5 and 9).
+        auto* plugin = edit != nullptr ? mirror::findDevice (*edit, device) : nullptr;
 
-        for (auto* send : getSends (track))
-            parameters.add (send->gain);
+        if (plugin == nullptr)
+            return;
 
-        devices = getDevices (track);
-    }
+        const auto mix = getMixParameters (*plugin);
 
-    // A device's mix (Mixer.h: getMix()) is its dry and wet levels together, which its knob sets: not two parameters. A
-    // container's own parameters are Tracktion's levels in and out, which Phazite doesn't show: its devices' follow it.
-    const auto addParametersOf = [&parameters] (te::Plugin& device)
-    {
-        const auto mix = getMixParameters (device);
-
-        for (auto* parameter : device.getAutomatableParameters())
+        for (auto* parameter : plugin->getAutomatableParameters())
             if (! mix.contains (parameter))
-                parameters.add (parameter);
+                parameters.push_back ({ device, parameter->paramID });
     };
 
-    for (auto* device : devices)
+    for (const auto device : getDevices (song, track))
     {
-        if (! isContainer (*device))
-            addParametersOf (*device);
+        addParametersOf (device);
 
-        for (auto* inside : getContainerDevices (*device))
-            addParametersOf (*inside);
+        for (const auto inside : getContainerDevices (song, device))
+            addParametersOf (inside);
     }
 
-    parameters.removeObject (nullptr);
     return parameters;
 }
 
-bool isMixerControl (const te::Plugin* device)
+bool isMixerControl (const Song& song, const ParameterRef& parameter)
 {
-    return dynamic_cast<const te::VolumeAndPanPlugin*> (device) != nullptr || dynamic_cast<const te::VCAPlugin*> (device) != nullptr
-           || dynamic_cast<const te::AuxSendPlugin*> (device) != nullptr;
+    const auto found = locateParameter (song, parameter);
+    return found.has_value()
+           && (found->source == ParameterSource::volume || found->source == ParameterSource::pan || found->source == ParameterSource::send);
 }
 
-juce::String getParameterName (const te::AutomatableParameter& parameter)
+juce::String getParameterName (const Song& song, const ParameterRef& parameter)
 {
-    auto* device = parameter.getPlugin();
+    const auto found = locateParameter (song, parameter);
 
-    if (auto* send = dynamic_cast<te::AuxSendPlugin*> (device))
+    if (! found.has_value())
+        return {};
+
+    switch (found->source)
     {
-        const auto* returnTrack = findReturnTrack (send->edit, send->getBusNumber());
-        return "Send to " + (returnTrack != nullptr ? getTrackName (*returnTrack) : juce::String ("Return"));
+        case ParameterSource::send:
+        {
+            const auto target = getSendTarget (song, parameter.device);
+            return "Send to " + (findTrackState (song, target).isValid() ? getTrackName (song, target) : juce::String ("Return"));
+        }
+
+        case ParameterSource::volume:
+            return "Volume"; // a folder's too, which is a VCA
+
+        case ParameterSource::pan:
+            return "Pan";
+
+        case ParameterSource::device:
+        case ParameterSource::plugin:
+        case ParameterSource::modulator:
+        case ParameterSource::macro:
+            break;
     }
 
-    if (auto* volume = dynamic_cast<te::VolumeAndPanPlugin*> (device))
-        return &parameter == volume->panParam.get() ? "Pan" : "Volume";
-
-    if (isMixerControl (device))
-        return "Volume"; // a folder's, which is a VCA
-
-    return parameter.getParameterName();
+    return describeParameter (song, *found).name;
 }
 
 //==============================================================================
-std::vector<AutomationPoint> getPoints (const te::AutomatableParameter& parameter)
+std::vector<AutomationPoint> getPoints (const Song& song, const ParameterRef& parameter)
 {
     std::vector<AutomationPoint> points;
 
-    for (const auto& point : findCurveState (parameter.getEdit(), getParameterRef (parameter)))
+    for (const auto& point : findCurveState (song, parameter))
         points.push_back ({ BeatPosition::fromBeats (point[schema::pointBeat]), point[schema::pointValue],
                             point.getProperty (schema::pointCurve, 0.0f) });
 
     return points;
 }
 
-bool hasPoints (const te::AutomatableParameter& parameter)
+bool hasPoints (const Song& song, const ParameterRef& parameter)
 {
-    return countPoints (parameter) > 0;
+    return findCurveState (song, parameter).getNumChildren() > 0;
 }
 
-std::vector<float> getValues (const te::AutomatableParameter& parameter, BeatRange range, int numValues)
+std::vector<float> getValues (const Song& song, const ParameterRef& parameter, BeatRange range, int numValues)
 {
     // As Phazite's engine plays the song's points.
     std::vector<float> values;
-    const auto state = findCurveState (parameter.getEdit(), getParameterRef (parameter));
+    const auto state = findCurveState (song, parameter);
 
     if (! state.isValid() || state.getNumChildren() == 0 || numValues <= 0)
         return values;
@@ -668,23 +696,26 @@ std::vector<float> getValues (const te::AutomatableParameter& parameter, BeatRan
     return values;
 }
 
-int addPoint (te::AutomatableParameter& parameter, AutomationPoint point)
+int addPoint (Song& song, const ParameterRef& parameter, AutomationPoint point)
 {
-    SongCurve curve (parameter);
-    const auto index = curve.addPoint (point.beat, limitValue (parameter, point.value), limitCurve (point.curve));
+    SongCurve curve (song, parameter);
+    const auto index = curve.addPoint (point.beat, limitValue (song, parameter, point.value), limitCurve (point.curve));
     curve.follow();
     return index;
 }
 
-BeatDuration movePoints (te::AutomatableParameter& parameter, const std::vector<int>& requested, BeatDuration distance, float valueChange)
+BeatDuration movePoints (Song& song, const ParameterRef& parameter, const std::vector<int>& requested, BeatDuration distance,
+                         float valueChange)
 {
-    SongCurve curve (parameter);
+    SongCurve curve (song, parameter);
     const auto indices = getValidIndices (curve.getNumPoints(), requested);
+    const auto description = describeParameter (song, parameter);
 
-    if (indices.empty())
+    if (indices.empty() || ! description.has_value())
         return {};
 
-    const auto points = getPoints (parameter);
+    const auto points = getPoints (song, parameter);
+    const auto& range = description->range;
     std::vector<bool> moving (points.size(), false);
 
     for (const auto index : indices)
@@ -720,8 +751,8 @@ BeatDuration movePoints (te::AutomatableParameter& parameter, const std::vector<
             }
         }
 
-        lowest = std::max (lowest, parameter.valueRange.start - point.value);
-        highest = std::min (highest, parameter.valueRange.end - point.value);
+        lowest = std::max (lowest, range.start - point.value);
+        highest = std::min (highest, range.end - point.value);
     }
 
     const auto beats = juce::jlimit (std::min (earliest, 0.0), std::max (latest, 0.0), distance.inBeats());
@@ -731,7 +762,7 @@ BeatDuration movePoints (te::AutomatableParameter& parameter, const std::vector<
     const auto move = [&] (int index)
     {
         const auto& point = points[(size_t) index];
-        curve.setPoint (index, point.beat + BeatDuration::fromBeats (beats), limitValue (parameter, point.value + change));
+        curve.setPoint (index, point.beat + BeatDuration::fromBeats (beats), limitValue (song, parameter, point.value + change));
     };
 
     if (beats > 0.0)
@@ -743,18 +774,18 @@ BeatDuration movePoints (te::AutomatableParameter& parameter, const std::vector<
     return BeatDuration::fromBeats (beats);
 }
 
-void setCurve (te::AutomatableParameter& parameter, int index, float curveValue)
+void setCurve (Song& song, const ParameterRef& parameter, int index, float curveValue)
 {
-    if (SongCurve curve (parameter); juce::isPositiveAndBelow (index, curve.getNumPoints()))
+    if (SongCurve curve (song, parameter); juce::isPositiveAndBelow (index, curve.getNumPoints()))
     {
         curve.setCurve (index, limitCurve (curveValue));
         curve.follow();
     }
 }
 
-void deletePoints (te::AutomatableParameter& parameter, const std::vector<int>& requested)
+void deletePoints (Song& song, const ParameterRef& parameter, const std::vector<int>& requested)
 {
-    SongCurve curve (parameter);
+    SongCurve curve (song, parameter);
     const auto indices = getValidIndices (curve.getNumPoints(), requested);
 
     for (auto i = indices.rbegin(); i != indices.rend(); ++i)
@@ -763,9 +794,9 @@ void deletePoints (te::AutomatableParameter& parameter, const std::vector<int>& 
     curve.follow();
 }
 
-void replacePoints (te::AutomatableParameter& parameter, BeatRange range, const std::vector<AutomationPoint>& points)
+void replacePoints (Song& song, const ParameterRef& parameter, BeatRange range, const std::vector<AutomationPoint>& points)
 {
-    SongCurve curve (parameter);
+    SongCurve curve (song, parameter);
 
     for (auto i = curve.getNumPoints(); --i >= 0;)
         if (const auto beat = curve.getPointBeat (i); beat >= range.getStart() && beat <= range.getEnd())
@@ -773,20 +804,20 @@ void replacePoints (te::AutomatableParameter& parameter, BeatRange range, const 
 
     // Each after any at its beat already, so that two at one beat stay in the order given: a jump.
     for (const auto& point : points)
-        curve.addPoint (point.beat, limitValue (parameter, point.value), limitCurve (point.curve));
+        curve.addPoint (point.beat, limitValue (song, parameter, point.value), limitCurve (point.curve));
 
     curve.follow();
 }
 
-std::vector<int> duplicatePoints (te::AutomatableParameter& parameter, const std::vector<int>& requested, BeatDuration minimumSpan)
+std::vector<int> duplicatePoints (Song& song, const ParameterRef& parameter, const std::vector<int>& requested, BeatDuration minimumSpan)
 {
-    SongCurve curve (parameter);
+    SongCurve curve (song, parameter);
     const auto indices = getValidIndices (curve.getNumPoints(), requested);
 
     if (indices.empty())
         return {};
 
-    const auto points = getPoints (parameter);
+    const auto points = getPoints (song, parameter);
     const auto first = points[(size_t) indices.front()].beat, last = points[(size_t) indices.back()].beat;
     const auto span = std::max (last - first, minimumSpan);
 
@@ -809,6 +840,35 @@ std::vector<int> duplicatePoints (te::AutomatableParameter& parameter, const std
 }
 
 //==============================================================================
+te::Track* getTrackOfParameter (const te::AutomatableParameter& parameter)
+{
+    auto& edit = parameter.getEdit();
+    return mirror::findTrack (edit, getParameterTrack (getSong (edit), getParameterRef (parameter)));
+}
+
+juce::String getParameterName (const te::AutomatableParameter& parameter)
+{
+    // A modulator's or a macro's has no reference, and Tracktion's name.
+    const auto ref = getParameterRef (parameter);
+    return ref.isValid() ? getParameterName (getSong (parameter.getEdit()), ref) : parameter.getParameterName();
+}
+
+std::vector<AutomationPoint> getPoints (const te::AutomatableParameter& parameter)
+{
+    return getPoints (getSong (parameter.getEdit()), getParameterRef (parameter));
+}
+
+bool hasPoints (const te::AutomatableParameter& parameter)
+{
+    return hasPoints (getSong (parameter.getEdit()), getParameterRef (parameter));
+}
+
+int addPoint (te::AutomatableParameter& parameter, AutomationPoint point)
+{
+    return addPoint (getSong (parameter.getEdit()), getParameterRef (parameter), point);
+}
+
+//==============================================================================
 void moveAutomation (Song& song, const std::vector<AutomationStretch>& stretches, BeatDuration distance, bool copy)
 {
     if (juce::exactlyEqual (distance.inBeats(), 0.0))
@@ -816,9 +876,9 @@ void moveAutomation (Song& song, const std::vector<AutomationStretch>& stretches
 
     for (const auto& [track, ranges] : byTrack (song, stretches))
     {
-        for (auto* parameter : getAutomatedParameters (*track))
+        for (const auto& parameter : getAutomatedParameters (song, track))
         {
-            SongCurve curve (*parameter);
+            SongCurve curve (song, parameter);
             std::vector<BeatPosition> edges;
 
             // Edges where each stretch is and where it lands, so that each part keeps its shape.
@@ -860,9 +920,9 @@ void deleteAutomation (Song& song, const std::vector<AutomationStretch>& stretch
 {
     for (const auto& [track, ranges] : byTrack (song, stretches))
     {
-        for (auto* parameter : getAutomatedParameters (*track))
+        for (const auto& parameter : getAutomatedParameters (song, track))
         {
-            SongCurve curve (*parameter);
+            SongCurve curve (song, parameter);
             std::vector<BeatPosition> edges;
 
             // The latest stretch first, so that closing its gap doesn't move one still to go.
@@ -899,30 +959,23 @@ std::vector<AutomationCopy> copyAutomation (const Song& song, const std::vector<
 
     for (const auto& [track, ranges] : byTrack (song, stretches))
     {
-        for (auto* parameter : getAutomatedParameters (*track))
+        for (const auto& ref : getAutomatedParameters (song, track))
         {
-            const auto ref = getParameterRef (*parameter);
-
-            if (! ref.isValid())
-                continue;
-
-            const SongCurve curve (*parameter);
+            const auto curveState = findCurveState (song, ref);
+            const auto valueAt = [&] (BeatPosition beat) { return getCurveValueAt (song, ref, curveState, beat); };
 
             // As moveAutomation() takes a stretch: its edges' values, and the points between them, from its start.
             for (const auto& range : ranges)
             {
-                AutomationCopy copy { ref,
-                                      range.getLength(),
-                                      { { BeatPosition(), curve.getValueAt (range.getStart()), 0.0f } },
-                                      range.getStart() };
+                AutomationCopy copy { ref, range.getLength(), { { BeatPosition(), valueAt (range.getStart()), 0.0f } }, range.getStart() };
 
-                for (int i = 0; i < curve.getNumPoints(); ++i)
-                    if (const auto beat = curve.getPointBeat (i); beat >= range.getStart() && beat < range.getEnd() - justBefore)
-                        copy.points.push_back (
-                            { BeatPosition() + (beat - range.getStart()), curve.getPointValue (i), curve.getPointCurve (i) });
+                for (const auto& point : curveState)
+                    if (const auto beat = BeatPosition::fromBeats (point[schema::pointBeat]);
+                        beat >= range.getStart() && beat < range.getEnd() - justBefore)
+                        copy.points.push_back ({ BeatPosition() + (beat - range.getStart()), point[schema::pointValue],
+                                                 point.getProperty (schema::pointCurve, 0.0f) });
 
-                copy.points.push_back (
-                    { BeatPosition() + (range.getLength() - justBefore), curve.getValueAt (range.getEnd() - justBefore), 0.0f });
+                copy.points.push_back ({ BeatPosition() + (range.getLength() - justBefore), valueAt (range.getEnd() - justBefore), 0.0f });
                 copies.push_back (std::move (copy));
             }
         }
@@ -933,20 +986,13 @@ std::vector<AutomationCopy> copyAutomation (const Song& song, const std::vector<
 
 void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, BeatDuration distance)
 {
-    auto* edit = findEdit (song);
-
-    if (edit == nullptr)
-        return;
-
     for (const auto& copy : copies)
     {
-        const auto parameter = findParameter (*edit, copy.parameter);
-
-        if (parameter == nullptr)
+        if (! locateParameter (song, copy.parameter).has_value())
             continue;
 
         // Where it lands, in place of what is there, what lies around it keeping its shape, as moveAutomation() copies.
-        SongCurve curve (*parameter);
+        SongCurve curve (song, copy.parameter);
         const BeatRange landing (copy.start + distance, copy.start + distance + copy.length);
         addEdge (curve, landing.getStart());
         addEdge (curve, landing.getEnd());
@@ -956,7 +1002,7 @@ void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, Bea
                 curve.removePoint (i);
 
         for (const auto& point : copy.points)
-            curve.addPoint (landing.getStart() + (point.beat - BeatPosition()), limitValue (*parameter, point.value),
+            curve.addPoint (landing.getStart() + (point.beat - BeatPosition()), limitValue (song, copy.parameter, point.value),
                             limitCurve (point.curve));
 
         tidyEdges (curve, { landing.getStart(), landing.getEnd() });
@@ -978,14 +1024,19 @@ juce::ValueTree findCurveState (const te::Edit& edit, const ParameterRef& parame
     return findCurveState (getSong (edit), parameter);
 }
 
-std::vector<juce::ValueTree> getCurveStates (const te::Edit& edit)
+std::vector<juce::ValueTree> getCurveStates (const Song& song)
 {
     std::vector<juce::ValueTree> curves;
 
-    for (const auto& curve : findPhaziteState (edit).getChildWithName (schema::AUTOMATION))
+    for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
         curves.push_back (curve);
 
     return curves;
+}
+
+std::vector<juce::ValueTree> getCurveStates (const te::Edit& edit)
+{
+    return getCurveStates (getSong (edit));
 }
 
 ParameterRef getCurveParameter (const juce::ValueTree& curve)
@@ -995,16 +1046,9 @@ ParameterRef getCurveParameter (const juce::ValueTree& curve)
 
 void insertAutomationTime (Song& song, BeatPosition at, BeatDuration length)
 {
-    auto* found = findEdit (song);
-
-    if (found == nullptr)
-        return;
-
-    auto& edit = *found;
-
-    for (const auto& parameter : getParametersWithCurves (edit))
+    for (const auto& parameter : getParametersWithCurves (song))
     {
-        SongCurve curve (*parameter);
+        SongCurve curve (song, parameter);
         const auto valueThere = curve.getValueAt (at);
 
         for (auto i = curve.getNumPoints(); --i >= 0;)
@@ -1021,16 +1065,9 @@ void insertAutomationTime (Song& song, BeatPosition at, BeatDuration length)
 
 void removeAutomationTime (Song& song, BeatRange range)
 {
-    auto* found = findEdit (song);
-
-    if (found == nullptr)
-        return;
-
-    auto& edit = *found;
-
-    for (const auto& parameter : getParametersWithCurves (edit))
+    for (const auto& parameter : getParametersWithCurves (song))
     {
-        SongCurve curve (*parameter);
+        SongCurve curve (song, parameter);
         const auto valueAtStart = curve.getValueAt (range.getStart()), valueAtEnd = curve.getValueAt (range.getEnd());
 
         for (auto i = curve.getNumPoints(); --i >= 0;)
@@ -1051,16 +1088,9 @@ void removeAutomationTime (Song& song, BeatRange range)
 
 void addAutomationEdges (Song& song, const std::vector<BeatPosition>& beats)
 {
-    auto* found = findEdit (song);
-
-    if (found == nullptr)
-        return;
-
-    auto& edit = *found;
-
-    for (const auto& parameter : getParametersWithCurves (edit))
+    for (const auto& parameter : getParametersWithCurves (song))
     {
-        SongCurve curve (*parameter);
+        SongCurve curve (song, parameter);
 
         for (const auto beat : beats)
         {
@@ -1076,35 +1106,21 @@ void addAutomationEdges (Song& song, const std::vector<BeatPosition>& beats)
 
 std::vector<ParameterPoint> getAutomationPointsIn (Song& song, BeatRange range)
 {
-    auto* found = findEdit (song);
-
-    if (found == nullptr)
-        return {};
-
-    auto& edit = *found;
-
     std::vector<ParameterPoint> points;
 
-    for (const auto& parameter : getParametersWithCurves (edit))
-        for (const auto& point : getPoints (*parameter))
+    for (const auto& parameter : getParametersWithCurves (song))
+        for (const auto& point : getPoints (song, parameter))
             if (range.contains (point.beat))
-                points.push_back ({ getParameterRef (*parameter), point });
+                points.push_back ({ parameter, point });
 
     return points;
 }
 
 void removeAutomationPointsIn (Song& song, BeatRange range)
 {
-    auto* found = findEdit (song);
-
-    if (found == nullptr)
-        return;
-
-    auto& edit = *found;
-
-    for (const auto& parameter : getParametersWithCurves (edit))
+    for (const auto& parameter : getParametersWithCurves (song))
     {
-        SongCurve curve (*parameter);
+        SongCurve curve (song, parameter);
 
         for (auto i = curve.getNumPoints(); --i >= 0;)
             if (range.contains (curve.getPointBeat (i)))
@@ -1114,13 +1130,6 @@ void removeAutomationPointsIn (Song& song, BeatRange range)
 
 void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
 {
-    auto* found = findEdit (song);
-
-    if (found == nullptr)
-        return;
-
-    auto& edit = *found;
-
     // Each parameter's through one curve, in the order given: a parameter's curve may have gone with its last point.
     std::vector<ParameterRef> parameters;
 
@@ -1130,9 +1139,9 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
 
     for (const auto& ref : parameters)
     {
-        if (const auto parameter = findParameter (edit, ref))
+        if (locateParameter (song, ref).has_value())
         {
-            SongCurve curve (*parameter);
+            SongCurve curve (song, ref);
 
             for (const auto& [pointParameter, point] : points)
                 if (pointParameter == ref)
@@ -1143,26 +1152,30 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
 
 void adoptMovedPoint (te::AutomatableParameter& parameter)
 {
-    // Tracktion moves a curve's one point to its parameter's value as the value changes, in the step of the change
-    // (AutomatableParameter::setParameterValue()); but not as the mirror sets a value from the song
-    // (mirror::setValueSetByHand(), after an undo or a redo), which plays the song's curve again.
+    // Tracktion moves a curve's one point to its parameter's value as the value changes through Tracktion's parameter (a
+    // plug-in's own window), in the step of the change (AutomatableParameter::setParameterValue()); but not as the mirror
+    // sets a value from the song (mirror::setValueSetByHand(): a value set by hand on the song moves the song's point itself,
+    // model/devices/internal/Parameters.h), which plays the song's curve again.
     const auto& moved = parameter.getCurve();
 
     if (moved.getNumPoints() != 1 || mirror::isSettingValues())
         return;
 
-    if (SongCurve curve (parameter); curve.getNumPoints() == 1 && ! juce::exactlyEqual (curve.getPointValue (0), moved.getPointValue (0)))
+    if (SongCurve curve (getSong (parameter.getEdit()), getParameterRef (parameter));
+        curve.getNumPoints() == 1 && ! juce::exactlyEqual (curve.getPointValue (0), moved.getPointValue (0)))
         curve.setPoint (0, curve.getPointBeat (0), moved.getPointValue (0));
 }
 
-void forgetCurvesOfGoneDevices (te::Edit& edit)
+void forgetCurvesOfGoneDevices (Song& song)
 {
     // A device that is there keeps its curves, those of parameters it has now and others (a plug-in that isn't installed
-    // has none until it is).
-    auto automation = findPhaziteState (edit).getChildWithName (schema::AUTOMATION);
+    // has none until it is): a device's, a fader's or a send's.
+    auto automation = song.getState().getChildWithName (schema::AUTOMATION);
 
     for (auto i = automation.getNumChildren(); --i >= 0;)
-        if (te::findPluginForID (edit, toTracktion (getCurveParameter (automation.getChild (i)).device)) == nullptr)
+        if (const auto device = getCurveParameter (automation.getChild (i)).device; ! findDeviceState (song, device).isValid()
+                                                                                    && ! findSendState (song, device).isValid()
+                                                                                    && ! findChannelOfFader (song, device).isValid())
             automation.removeChild (i, nullptr);
 }
 
@@ -1294,26 +1307,43 @@ void copyCurves (Song& song, const CopiedIDs& copied)
     }
 }
 
+AutomationMode getAutomationMode (const Song& song, TrackID track)
+{
+    return readAutomationMode (findTrackState (song, track));
+}
+
+void setAutomationMode (Song& song, TrackID track, AutomationMode mode)
+{
+    if (auto state = findTrackState (song, track); state.isValid())
+    {
+        writeAutomationMode (state, mode);
+
+        if (auto* edit = findEdit (song))
+            mirror::reconcileTrackSwitches (*edit);
+    }
+}
+
 AutomationMode getAutomationMode (const te::Track& track)
 {
-    return readAutomationMode (findTrackState (track));
+    return getAutomationMode (getSong (track.edit), getTrackID (track));
 }
 
 void setAutomationMode (te::Track& track, AutomationMode mode)
 {
-    if (auto state = findTrackState (track); state.isValid())
-    {
-        writeAutomationMode (state, mode);
-        mirror::reconcileTrackSwitches (track.edit);
-    }
+    setAutomationMode (getSong (track.edit), getTrackID (track), mode);
+}
+
+bool isWritingAutomation (const Song& song)
+{
+    auto states = getTrackStates (song);
+    states.push_back (song.getState().getChildWithName (schema::MASTER));
+    return std::any_of (states.begin(), states.end(),
+                        [] (const juce::ValueTree& state) { return readAutomationMode (state) != AutomationMode::read; });
 }
 
 bool isWritingAutomation (const te::Edit& edit)
 {
-    auto states = getTrackStates (edit);
-    states.push_back (findPhaziteState (edit).getChildWithName (schema::MASTER));
-    return std::any_of (states.begin(), states.end(),
-                        [] (const juce::ValueTree& state) { return readAutomationMode (state) != AutomationMode::read; });
+    return isWritingAutomation (getSong (edit));
 }
 
 bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)
@@ -1365,17 +1395,13 @@ void restoreValuesSetByHand (juce::ValueTree& state)
 //==============================================================================
 std::optional<PointSelection> getSelectedPoints (const Selection& selection)
 {
-    auto* edit = selection.getEdit();
+    auto* song = selection.getSong();
+    const auto& parameter = selection.getPointsParameter();
 
-    if (edit == nullptr || ! selection.getPointsParameter().isValid())
+    if (song == nullptr || ! locateParameter (*song, parameter).has_value())
         return {};
 
-    const auto parameter = findParameter (*edit, selection.getPointsParameter());
-
-    if (parameter == nullptr)
-        return {};
-
-    auto indices = getValidIndices (countPoints (*parameter), selection.getPoints());
+    auto indices = getValidIndices (findCurveState (*song, parameter).getNumChildren(), selection.getPoints());
 
     if (indices.empty())
         return {};
@@ -1383,9 +1409,10 @@ std::optional<PointSelection> getSelectedPoints (const Selection& selection)
     return PointSelection { parameter, std::move (indices) };
 }
 
-void selectPoints (Selection& selection, const te::AutomatableParameter& parameter, const std::vector<int>& indices)
+void selectPoints (Selection& selection, const ParameterRef& parameter, const std::vector<int>& indices)
 {
-    selection.selectPoints (getParameterRef (parameter), getValidIndices (countPoints (parameter), indices));
+    if (auto* song = selection.getSong())
+        selection.selectPoints (parameter, getValidIndices (findCurveState (*song, parameter).getNumChildren(), indices));
 }
 
 //==============================================================================

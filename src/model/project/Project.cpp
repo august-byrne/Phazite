@@ -65,7 +65,7 @@ namespace
         mirror::reconcileClips (edit);
         forgetMissingFrozenFiles (edit);
         mirror::reconcileDevices (edit);
-        forgetCurvesOfGoneDevices (edit);
+        forgetCurvesOfGoneDevices (getSong (edit));
         mirror::reconcileAutomation (edit);
         mirror::reconcileTransport (edit);
         ensureLoudnessMeter (edit);

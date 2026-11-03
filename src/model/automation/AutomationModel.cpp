@@ -5,7 +5,8 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
-#include "model/mirror/internal/Bridge.h"
+#include "model/devices/internal/Parameters.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -16,98 +17,93 @@ namespace phazite
 {
 namespace
 {
-    te::Track* findTrack (const ProjectContext& context, TrackID id)
+    // How a lane shows a parameter's values: a pan as a pan; a fader's volume, a folder's VCA and a send's level as
+    // decibels from a fader's positions.
+    ParameterKind getKind (const Song& song, const ParameterRef& parameter)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
-    }
+        if (const auto found = locateParameter (song, parameter))
+        {
+            if (found->source == ParameterSource::pan)
+                return ParameterKind::pan;
 
-    te::AutomatableParameter::Ptr find (const ProjectContext& context, const ParameterRef& parameter)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr ? findParameter (*edit, parameter) : nullptr;
-    }
-
-    te::Track* findTrackOf (const ProjectContext& context, const ParameterRef& parameter)
-    {
-        const auto found = find (context, parameter);
-        return found != nullptr ? getTrackOfParameter (*found) : nullptr;
-    }
-
-    ParameterKind getKind (const te::AutomatableParameter& parameter)
-    {
-        auto* device = parameter.getPlugin();
-
-        if (auto* volume = dynamic_cast<te::VolumeAndPanPlugin*> (device))
-            return &parameter == volume->panParam.get() ? ParameterKind::pan : ParameterKind::volume;
-
-        if (isMixerControl (device))
-            return ParameterKind::volume; // a folder's volume, a send's level: fader positions too
+            if (found->source == ParameterSource::volume || found->source == ParameterSource::send)
+                return ParameterKind::volume;
+        }
 
         return ParameterKind::other;
     }
 
-    juce::String getName (const te::AutomatableParameter& parameter)
+    AutomationTarget makeTarget (const Song& song, const ParameterRef& parameter, TrackID track)
     {
-        return getParameterName (parameter);
-    }
-
-    AutomationTarget makeTarget (const te::AutomatableParameter& parameter, const te::Track& track)
-    {
-        auto* device = parameter.getPlugin();
-
         AutomationTarget target;
-        target.parameter = getParameterRef (parameter);
-        target.track = getTrackID (track);
-        target.deviceName = isMixerControl (device) ? juce::String ("Mixer") : device->getName();
-        target.name = getName (parameter);
-        target.kind = getKind (parameter);
-        target.automated = hasPoints (parameter);
+        target.parameter = parameter;
+        target.track = track;
+        target.deviceName = isMixerControl (song, parameter) ? juce::String ("Mixer") : getDeviceName (song, parameter.device);
+        target.name = getParameterName (song, parameter);
+        target.kind = getKind (song, parameter);
+        target.automated = hasPoints (song, parameter);
         return target;
     }
 
     // A lane that shows needs its track, and the folders it is in, open (view state, without undo steps).
-    void openToShow (te::Track& track)
+    void openToShow (Song& song, TrackID track)
     {
-        for (auto* t = &track; t != nullptr; t = getParentFolder (*t))
-            if (isCollapsed (*t))
-                setCollapsed (*t, false);
+        for (auto t = track; t.isValid(); t = getParentFolder (song, t))
+            if (isCollapsed (song, t))
+                setCollapsed (song, t, false);
     }
 
-    void showLaneOf (te::AutomatableParameter& parameter)
+    void showLaneOf (Song& song, const ParameterRef& parameter)
     {
-        if (auto* track = getTrackOfParameter (parameter))
+        if (const auto track = getParameterTrack (song, parameter); track.isValid())
         {
-            showLane (*track, getParameterRef (parameter));
-            openToShow (*track);
+            showLane (song, track, parameter);
+            openToShow (song, track);
         }
     }
 
     // A parameter's automation, all its points as one step, and its lane, which is view state: an undo brings back the
     // automation, and the lane with it.
-    void deleteAutomationOf (te::AutomatableParameter& parameter)
+    void deleteAutomationOf (Song& song, const ParameterRef& parameter)
     {
-        if (const auto points = getPoints (parameter); ! points.empty())
+        if (const auto points = getPoints (song, parameter); ! points.empty())
         {
             std::vector<int> indices (points.size());
             std::iota (indices.begin(), indices.end(), 0);
-            const UndoStep step (parameter.getEdit(), "Delete Automation");
-            deletePoints (parameter, indices);
+            const UndoStep step (song, "Delete Automation");
+            deletePoints (song, parameter, indices);
         }
 
-        if (auto* track = getTrackOfParameter (parameter))
-            removeLane (*track, getParameterRef (parameter));
+        if (const auto track = getParameterTrack (song, parameter); track.isValid())
+            removeLane (song, track, parameter);
     }
 
-    std::vector<te::Track*> getSelectedTracksOf (const ProjectContext& context)
+    std::vector<TrackID> getSelectedTracksOf (const ProjectContext& context)
     {
-        std::vector<te::Track*> tracks;
+        std::vector<TrackID> tracks;
+        auto* song = findSong (context);
 
-        for (const auto id : context.getSongSelection().getTracks())
-            if (auto* track = findTrack (context, id))
-                tracks.push_back (track);
+        if (song != nullptr)
+            for (const auto id : context.getSongSelection().getTracks())
+                if (findTrackState (*song, id).isValid())
+                    tracks.push_back (id);
 
         return tracks;
+    }
+
+    // The track whose channel a device, a fader or a send is on (a container's devices' too).
+    TrackID findChannel (const Song& song, DeviceID device)
+    {
+        if (findDeviceState (song, device).isValid())
+            return getDeviceChannel (song, device);
+
+        if (const auto channel = findChannelOfFader (song, device); channel.isValid())
+            return getTrackID (channel);
+
+        if (const auto send = findSendState (song, device); send.isValid())
+            return getTrackID (send.getParent());
+
+        return {};
     }
 } // namespace
 
@@ -116,9 +112,9 @@ std::vector<AutomationTarget> getAutomationTargets (const ProjectContext& contex
 {
     std::vector<AutomationTarget> targets;
 
-    if (auto* track = findTrack (context, id))
-        for (auto* parameter : getAutomatableParameters (*track))
-            targets.push_back (makeTarget (*parameter, *track));
+    if (auto* song = findSong (context))
+        for (const auto& parameter : getAutomatableParameters (*song, id))
+            targets.push_back (makeTarget (*song, parameter, id));
 
     return targets;
 }
@@ -126,223 +122,228 @@ std::vector<AutomationTarget> getAutomationTargets (const ProjectContext& contex
 std::vector<AutomationTarget> getAutomationTargets (const ProjectContext& context, DeviceID device)
 {
     std::vector<AutomationTarget> targets;
-    auto* edit = getEdit (context);
-    const auto found = edit != nullptr && device.isValid() ? te::findPluginForID (*edit, toTracktion (device)) : nullptr;
-    auto* track = found != nullptr && ! found->getAutomatableParameters().isEmpty()
-                      ? getTrackOfParameter (*found->getAutomatableParameters().getFirst())
-                      : nullptr;
+    auto* song = findSong (context);
+    const auto track = song != nullptr ? findChannel (*song, device) : TrackID();
 
-    if (track != nullptr)
-        for (auto* parameter : getAutomatableParameters (*track))
-            if (parameter->getPlugin() == found.get())
-                targets.push_back (makeTarget (*parameter, *track));
+    if (track.isValid())
+        for (const auto& parameter : getAutomatableParameters (*song, track))
+            if (parameter.device == device)
+                targets.push_back (makeTarget (*song, parameter, track));
 
     return targets;
 }
 
 std::optional<AutomationTarget> getAutomationTarget (const ProjectContext& context, const ParameterRef& parameter)
 {
-    const auto found = find (context, parameter);
-    auto* track = found != nullptr ? getTrackOfParameter (*found) : nullptr;
+    auto* song = findSong (context);
+    const auto track = song != nullptr ? getParameterTrack (*song, parameter) : TrackID();
 
-    if (track == nullptr)
+    if (! track.isValid())
         return {};
 
-    return makeTarget (*found, *track);
+    return makeTarget (*song, parameter, track);
 }
 
 ParameterHandle getParameter (ProjectContext& context, const ParameterRef& parameter)
 {
-    const auto found = find (context, parameter);
-    return found != nullptr ? makeParameterHandle (found->getPlugin(), found->paramID, "Change " + getName (*found)) : ParameterHandle();
+    auto* song = findSong (context);
+
+    if (song == nullptr || ! locateParameter (*song, parameter).has_value())
+        return {};
+
+    return makeParameterHandle (*song, parameter, "Change " + getParameterName (*song, parameter));
 }
 
 TrackID getMasterTrack (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    auto* master = edit != nullptr ? edit->getMasterTrack() : nullptr;
-    return master != nullptr ? getTrackID (*master) : TrackID();
+    auto* song = findSong (context);
+    return song != nullptr ? getMasterID (*song) : TrackID();
 }
 
 //==============================================================================
 std::vector<AutomationLane> getAutomationLanes (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    return track != nullptr ? getLanes (*track) : std::vector<AutomationLane>();
+    auto* song = findSong (context);
+    return song != nullptr && findTrackState (*song, id).isValid() ? getLanes (*song, id) : std::vector<AutomationLane>();
 }
 
 TrackID showAutomationLane (ProjectContext& context, const ParameterRef& parameter)
 {
-    auto* track = findTrackOf (context, parameter);
+    auto* song = findSong (context);
+    const auto track = song != nullptr ? getParameterTrack (*song, parameter) : TrackID();
 
-    if (track == nullptr)
+    if (! track.isValid())
         return {};
 
-    showLane (*track, parameter);
-    openToShow (*track);
-    return getTrackID (*track);
+    showLane (*song, track, parameter);
+    openToShow (*song, track);
+    return track;
 }
 
 void removeAutomationLane (ProjectContext& context, const ParameterRef& parameter)
 {
-    if (const auto found = find (context, parameter))
-        deleteAutomationOf (*found);
+    if (auto* song = findSong (context); song != nullptr && locateParameter (*song, parameter).has_value())
+        deleteAutomationOf (*song, parameter);
 }
 
 void setAutomationLaneParameter (ProjectContext& context, const ParameterRef& lane, const ParameterRef& replacement)
 {
-    if (auto* track = findTrackOf (context, lane))
-        replaceLane (*track, lane, replacement);
+    if (auto* song = findSong (context))
+        if (const auto track = getParameterTrack (*song, lane); track.isValid())
+            replaceLane (*song, track, lane, replacement);
 }
 
 void setAutomationLaneHeight (ProjectContext& context, const ParameterRef& parameter, int height)
 {
-    if (auto* track = findTrackOf (context, parameter))
-        setLaneHeight (*track, parameter, height);
+    if (auto* song = findSong (context))
+        if (const auto track = getParameterTrack (*song, parameter); track.isValid())
+            setLaneHeight (*song, track, parameter, height);
 }
 
 void setAutomationLaneCollapsed (ProjectContext& context, const ParameterRef& parameter, bool collapsed)
 {
-    if (auto* track = findTrackOf (context, parameter))
-        setLaneCollapsed (*track, parameter, collapsed);
+    if (auto* song = findSong (context))
+        if (const auto track = getParameterTrack (*song, parameter); track.isValid())
+            setLaneCollapsed (*song, track, parameter, collapsed);
 }
 
 void setAutomationLanesCollapsed (ProjectContext& context, TrackID id, bool collapsed)
 {
-    if (auto* track = findTrack (context, id))
-        for (const auto& lane : getLanes (*track))
-            setLaneCollapsed (*track, lane.parameter, collapsed);
+    if (auto* song = findSong (context); song != nullptr && findTrackState (*song, id).isValid())
+        for (const auto& lane : getLanes (*song, id))
+            setLaneCollapsed (*song, id, lane.parameter, collapsed);
 }
 
 //==============================================================================
 std::vector<AutomationPoint> getAutomationPoints (const ProjectContext& context, const ParameterRef& parameter)
 {
-    const auto found = find (context, parameter);
-    return found != nullptr ? getPoints (*found) : std::vector<AutomationPoint>();
+    auto* song = findSong (context);
+    return song != nullptr ? getPoints (*song, parameter) : std::vector<AutomationPoint>();
 }
 
 std::vector<float> getAutomationValues (const ProjectContext& context, const ParameterRef& parameter, BeatRange range, int numValues)
 {
-    const auto found = find (context, parameter);
-    return found != nullptr ? getValues (*found, range, numValues) : std::vector<float>();
+    auto* song = findSong (context);
+    return song != nullptr ? getValues (*song, parameter, range, numValues) : std::vector<float>();
 }
 
 int addAutomationPoint (ProjectContext& context, const ParameterRef& parameter, AutomationPoint point)
 {
-    const auto found = find (context, parameter);
+    auto* song = findSong (context);
 
-    if (found == nullptr)
+    if (song == nullptr || ! locateParameter (*song, parameter).has_value())
         return -1;
 
-    const UndoStep step (found->getEdit(), "Add Automation Point");
-    return addPoint (*found, point);
+    const UndoStep step (*song, "Add Automation Point");
+    return addPoint (*song, parameter, point);
 }
 
 BeatDuration moveAutomationPoints (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices,
                                    BeatDuration distance, float valueChange)
 {
-    const auto found = find (context, parameter);
+    auto* song = findSong (context);
 
-    if (found == nullptr)
+    if (song == nullptr || ! locateParameter (*song, parameter).has_value())
         return {};
 
-    const UndoStep step (found->getEdit(), "Move Automation Points");
-    return movePoints (*found, indices, distance, valueChange);
+    const UndoStep step (*song, "Move Automation Points");
+    return movePoints (*song, parameter, indices, distance, valueChange);
 }
 
 void setAutomationCurve (ProjectContext& context, const ParameterRef& parameter, int index, float bend)
 {
-    if (const auto found = find (context, parameter))
+    if (auto* song = findSong (context); song != nullptr && locateParameter (*song, parameter).has_value())
     {
-        const UndoStep step (found->getEdit(), "Bend Automation");
-        setCurve (*found, index, bend);
+        const UndoStep step (*song, "Bend Automation");
+        setCurve (*song, parameter, index, bend);
     }
 }
 
 void setAutomationPointValues (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float value)
 {
-    const auto found = find (context, parameter);
+    auto* song = findSong (context);
 
-    if (found == nullptr)
+    if (song == nullptr || ! locateParameter (*song, parameter).has_value())
         return;
 
-    const UndoStep step (found->getEdit(), "Set Automation Value");
-    const auto points = getAutomationPoints (context, parameter);
+    const UndoStep step (*song, "Set Automation Value");
+    const auto points = getPoints (*song, parameter);
 
     for (const auto index : indices)
         if (juce::isPositiveAndBelow (index, (int) points.size()))
-            movePoints (*found, { index }, {}, value - points[(size_t) index].value);
+            movePoints (*song, parameter, { index }, {}, value - points[(size_t) index].value);
 }
 
 void setAutomationCurves (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices, float bend)
 {
-    if (const auto found = find (context, parameter))
+    if (auto* song = findSong (context); song != nullptr && locateParameter (*song, parameter).has_value())
     {
-        const UndoStep step (found->getEdit(), "Bend Automation");
+        const UndoStep step (*song, "Bend Automation");
 
         for (const auto index : indices)
-            setCurve (*found, index, bend);
+            setCurve (*song, parameter, index, bend);
     }
 }
 
 void deleteAutomationPoints (ProjectContext& context, const ParameterRef& parameter, const std::vector<int>& indices)
 {
-    if (const auto found = find (context, parameter))
+    if (auto* song = findSong (context); song != nullptr && locateParameter (*song, parameter).has_value())
     {
-        const UndoStep step (found->getEdit(), "Delete Automation Points");
-        deletePoints (*found, indices);
+        const UndoStep step (*song, "Delete Automation Points");
+        deletePoints (*song, parameter, indices);
     }
 }
 
 void replaceAutomationPoints (ProjectContext& context, const ParameterRef& parameter, BeatRange range,
                               const std::vector<AutomationPoint>& points)
 {
-    if (const auto found = find (context, parameter))
+    if (auto* song = findSong (context); song != nullptr && locateParameter (*song, parameter).has_value())
     {
-        const UndoStep step (found->getEdit(), "Draw Automation");
-        replacePoints (*found, range, points);
+        const UndoStep step (*song, "Draw Automation");
+        replacePoints (*song, parameter, range, points);
     }
 }
 
 bool isAutomated (const ParameterHandle& handle)
 {
-    const auto found = findParameter (handle);
-    return found != nullptr && hasPoints (*found);
+    auto* song = findSong (handle);
+    return song != nullptr && hasPoints (*song, handle.getRef());
 }
 
 void showAutomationLane (const ParameterHandle& handle)
 {
-    if (const auto found = findParameter (handle))
-        showLaneOf (*found);
+    if (auto* song = findSong (handle); song != nullptr && handle.getRef().isValid())
+        showLaneOf (*song, handle.getRef());
 }
 
 void deleteAutomation (const ParameterHandle& handle)
 {
-    if (const auto found = findParameter (handle))
-        deleteAutomationOf (*found);
+    if (auto* song = findSong (handle); song != nullptr && handle.getRef().isValid())
+        deleteAutomationOf (*song, handle.getRef());
 }
 
 //==============================================================================
 AutomationMode getAutomationMode (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    return track != nullptr ? getAutomationMode (*track) : AutomationMode::read;
+    auto* song = findSong (context);
+    return song != nullptr ? getAutomationMode (*song, id) : AutomationMode::read;
 }
 
 void setAutomationMode (ProjectContext& context, TrackID id, AutomationMode mode)
 {
-    if (auto* track = findTrack (context, id))
-        setAutomationMode (*track, mode);
+    if (auto* song = findSong (context))
+        setAutomationMode (*song, id, mode);
 }
 
 std::optional<ParameterRef> getLastTouchedParameter (const ProjectContext& context)
 {
     auto* watcher = getAutomationWatcher (context);
+    auto* song = findSong (context);
 
-    if (watcher == nullptr)
+    if (watcher == nullptr || song == nullptr)
         return {};
 
-    if (const auto parameter = watcher->getLastTouched(); findTrackOf (context, parameter) != nullptr)
+    if (const auto parameter = watcher->getLastTouched(); getParameterTrack (*song, parameter).isValid())
         return parameter;
 
     return {};
@@ -377,31 +378,37 @@ bool areTracksSelected (const ProjectContext& context)
 bool areAutomationLanesExpanded (const ProjectContext& context)
 {
     const auto tracks = getSelectedTracksOf (context);
+    const auto* song = findSong (context);
 
     return std::any_of (tracks.begin(), tracks.end(),
-                        [] (te::Track* track)
+                        [song] (TrackID track)
                         {
-                            const auto lanes = getLanes (*track);
+                            const auto lanes = getLanes (*song, track);
                             return std::any_of (lanes.begin(), lanes.end(), [] (const AutomationLane& lane) { return ! lane.collapsed; });
                         });
 }
 
 void toggleAutomationLanes (ProjectContext& context)
 {
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return;
+
     const auto collapse = areAutomationLanesExpanded (context);
 
-    for (auto* track : getSelectedTracksOf (context))
+    for (const auto track : getSelectedTracksOf (context))
     {
         // A track without lanes gets its volume's, as Ableton Live shows a new lane; expanded lanes need their track open.
         if (! collapse)
         {
-            if (const auto parameters = getAutomatableParameters (*track); getLanes (*track).empty() && ! parameters.isEmpty())
-                showLane (*track, getParameterRef (*parameters.getFirst()));
+            if (const auto parameters = getAutomatableParameters (*song, track); getLanes (*song, track).empty() && ! parameters.empty())
+                showLane (*song, track, parameters.front());
 
-            openToShow (*track);
+            openToShow (*song, track);
         }
 
-        setAutomationLanesCollapsed (context, getTrackID (*track), collapse);
+        setAutomationLanesCollapsed (context, track, collapse);
     }
 }
 
@@ -412,25 +419,30 @@ bool hasSelectedAutomationPoints (const ProjectContext& context)
 
 void moveSelectedAutomationPoints (ProjectContext& context, BeatDuration distance, float partOfRange)
 {
-    if (const auto selected = getSelectedPoints (getSelection (context)))
+    auto* song = findSong (context);
+    const auto selected = getSelectedPoints (getSelection (context));
+    const auto description = song != nullptr && selected.has_value() ? describeParameter (*song, selected->parameter) : std::nullopt;
+
+    if (description.has_value())
     {
-        auto& parameter = *selected->parameter;
-        const UndoStep step (parameter.getEdit(), "Move Automation Points");
-        movePoints (parameter, selected->indices, distance, partOfRange * (parameter.valueRange.end - parameter.valueRange.start));
+        const UndoStep step (*song, "Move Automation Points");
+        movePoints (*song, selected->parameter, selected->indices, distance,
+                    partOfRange * (description->range.end - description->range.start));
     }
 }
 
 bool isAutomationModeOfSelection (const ProjectContext& context, AutomationMode mode)
 {
     const auto tracks = getSelectedTracksOf (context);
+    const auto* song = findSong (context);
     return ! tracks.empty()
-           && std::all_of (tracks.begin(), tracks.end(), [mode] (const te::Track* track) { return getAutomationMode (*track) == mode; });
+           && std::all_of (tracks.begin(), tracks.end(), [song, mode] (TrackID track) { return getAutomationMode (*song, track) == mode; });
 }
 
 void setAutomationModeOfSelection (ProjectContext& context, AutomationMode mode)
 {
-    for (auto* track : getSelectedTracksOf (context))
-        setAutomationMode (context, getTrackID (*track), mode);
+    for (const auto track : getSelectedTracksOf (context))
+        setAutomationMode (context, track, mode);
 }
 
 //==============================================================================

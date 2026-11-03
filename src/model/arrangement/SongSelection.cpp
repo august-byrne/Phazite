@@ -6,6 +6,7 @@
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/notes/internal/Notes.h"
 
 #include <unordered_map>
@@ -183,7 +184,7 @@ void SongSelection::selectNotes (const std::vector<NoteRef>& refs, bool addToSel
 SongSelection::AutomationPoints SongSelection::getSelectedAutomationPoints() const
 {
     if (const auto selected = getSelectedPoints (impl->manager))
-        return { getParameterRef (*selected->parameter), selected->indices };
+        return { selected->parameter, selected->indices };
 
     return {};
 }
@@ -197,10 +198,8 @@ bool SongSelection::isSelected (const ParameterRef& parameter, int index) const
 void SongSelection::selectAutomationPoints (const ParameterRef& parameter, const std::vector<int>& indices, bool addToSelection)
 {
     auto* song = impl->manager.getSong();
-    auto* edit = song != nullptr ? findEdit (*song) : nullptr;
-    const auto found = edit != nullptr ? findParameter (*edit, parameter) : nullptr;
 
-    if (found == nullptr)
+    if (song == nullptr || ! locateParameter (*song, parameter).has_value())
         return;
 
     // Adding to points of the same parameter keeps them; otherwise these are all that is selected.
@@ -209,7 +208,7 @@ void SongSelection::selectAutomationPoints (const ParameterRef& parameter, const
     if (const auto before = getSelectedAutomationPoints(); addToSelection && before.parameter == parameter)
         all.insert (all.end(), before.indices.begin(), before.indices.end());
 
-    selectPoints (impl->manager, *found, all);
+    selectPoints (impl->manager, parameter, all);
 }
 
 void SongSelection::addChangeListener (juce::ChangeListener* listener)
