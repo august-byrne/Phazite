@@ -88,7 +88,7 @@ namespace
         if (edit == nullptr)
             return nullptr;
 
-        for (auto* track : getSelectedTracks (selection))
+        for (auto* track : findTracks (*edit, getSelectedTracks (selection)))
             if (auto* audio = dynamic_cast<te::AudioTrack*> (track))
                 return audio;
 

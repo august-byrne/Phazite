@@ -29,7 +29,7 @@ cmake-sources                  0
 # Tracktion's names (te:: and tracktion::) in each area of the model, in src/services, src/app and tests/: the migration
 # off Tracktion (docs/tracktion-migration.md) lowers them, area by area, and new code adds none. A phase that moves code to
 # Tracktion's side on purpose (T1's mirror) raises one, saying why.
-tracktion-arrangement        769
+tracktion-arrangement        737
 tracktion-automation         165
 tracktion-base                49
 tracktion-chords              32
@@ -48,4 +48,4 @@ tracktion-transport          222
 tracktion-other                0
 tracktion-services             0
 tracktion-app                 45
-tracktion-tests              913
+tracktion-tests              909

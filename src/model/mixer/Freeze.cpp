@@ -625,14 +625,15 @@ namespace
 
     te::AudioTrack* getSelectedAudioTrack (const ProjectContext& context)
     {
+        auto* edit = getEdit (context);
         const auto selected = getSelectedTracks (getSelection (context));
-        return selected.isEmpty() ? nullptr : dynamic_cast<te::AudioTrack*> (selected.getFirst());
+        return edit == nullptr || selected.empty() ? nullptr : dynamic_cast<te::AudioTrack*> (findTracks (*edit, selected).getFirst());
     }
 
     TrackID getSelectedTrackID (const ProjectContext& context)
     {
         const auto selected = getSelectedTracks (getSelection (context));
-        return selected.isEmpty() ? TrackID() : getTrackID (*selected.getFirst());
+        return selected.empty() ? TrackID() : selected.front();
     }
 
     // Starts a render in the host, or tells the host why it can't.

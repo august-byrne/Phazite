@@ -56,12 +56,7 @@ SongSelection::~SongSelection() = default;
 
 std::vector<TrackID> SongSelection::getTracks() const
 {
-    std::vector<TrackID> ids;
-
-    for (auto* track : getSelectedTracks (impl->manager))
-        ids.push_back (getTrackID (*track));
-
-    return ids;
+    return phazite::getSelectedTracks (impl->manager);
 }
 
 std::vector<ClipID> SongSelection::getClips() const

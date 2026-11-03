@@ -158,7 +158,7 @@ void deleteSelection (Selection& selection, const RangeSelection& range, bool cl
     }
 
     if (! closeGap)
-        deleteTracks (getSelectedOutermostTracks (selection), &selection);
+        deleteTracks (findTracks (*edit, getSelectedOutermostTracks (selection)), &selection);
 }
 
 void duplicateSelection (Selection& selection, RangeSelection& range, bool asAliases)
@@ -208,7 +208,7 @@ void duplicateSelection (Selection& selection, RangeSelection& range, bool asAli
     }
 
     if (! asAliases)
-        duplicateTracks (getSelectedOutermostTracks (selection), &selection);
+        duplicateTracks (findTracks (*edit, getSelectedOutermostTracks (selection)), &selection);
 }
 
 void splitSelection (const Selection& selection, const RangeSelection& range)
@@ -319,7 +319,7 @@ juce::String describeSelection (const Selection& selection, const RangeSelection
     if (const auto clips = getSelectedClips (selection).size(); clips > 0)
         return describe (clips, "Clip");
 
-    if (const auto tracks = getSelectedTracks (selection).size(); tracks > 0)
+    if (const auto tracks = (int) getSelectedTracks (selection).size(); tracks > 0)
         return describe (tracks, "Track");
 
     return verb;

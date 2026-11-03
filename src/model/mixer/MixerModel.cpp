@@ -163,7 +163,7 @@ TrackID getInspectedChannel (const ProjectContext& context)
     if (edit == nullptr)
         return {};
 
-    te::Track* track = getSelectedTracks (getSelection (context)).getFirst();
+    te::Track* track = findTracks (*edit, getSelectedTracks (getSelection (context))).getFirst();
 
     if (track == nullptr)
         track = getSelectedAudioTrack (getSelection (context));
@@ -270,14 +270,14 @@ std::optional<MuteSolo> getMuteSolo (const ProjectContext& context, TrackID id)
 
 void toggleMute (ProjectContext& context, TrackID id)
 {
-    if (auto* track = findTrack (context, id))
-        toggleTracksMuted ({ track });
+    if (auto* song = findSong (context))
+        toggleTracksMuted (*song, { id });
 }
 
 void toggleSolo (ProjectContext& context, TrackID id)
 {
-    if (auto* track = findTrack (context, id))
-        toggleTracksSoloed ({ track });
+    if (auto* song = findSong (context))
+        toggleTracksSoloed (*song, { id });
 }
 
 void toggleSoloAlone (ProjectContext& context, TrackID id)

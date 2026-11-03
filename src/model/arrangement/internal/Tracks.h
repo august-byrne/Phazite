@@ -130,11 +130,11 @@ te::AudioTrack* insertPlainTrack (te::Edit&, te::Track* after);
 // Tracktion's global tracks (tempo, markers, chords, arranger) and the master aren't shown.
 juce::Array<te::Track*> getPlaylistTracks (const te::Edit&);
 
-// The selected tracks, top to bottom.
-juce::Array<te::Track*> getSelectedTracks (const Selection&);
-
-// The same, without the tracks in a selected folder: those go wherever their folder goes.
-juce::Array<te::Track*> getSelectedOutermostTracks (const Selection&);
+// The selected tracks, top to bottom; the same without the tracks in a selected folder (those go wherever their folder
+// goes); and Tracktion's tracks for IDs, those still there, while the model's callers hold Tracktion's.
+std::vector<TrackID> getSelectedTracks (const Selection&);
+std::vector<TrackID> getSelectedOutermostTracks (const Selection&);
+juce::Array<te::Track*> findTracks (const te::Edit&, const std::vector<TrackID>&);
 
 // The place right after a track, in the same folder. (Tracktion's TrackInsertPoint (track, false)
 // means the start of the list for the first top-level track.)
@@ -177,11 +177,11 @@ void ungroupFolder (te::FolderTrack&);
 // What the track commands do. These don't start an undo step: the command does (Command::undoTarget).
 
 bool hasSelectedTracks (const Selection&);
-juce::Array<te::FolderTrack*> getSelectedFolders (const Selection&); // top to bottom
+std::vector<TrackID> getSelectedFolders (const Selection&); // top to bottom
 bool hasSelectedFolders (const Selection&);
 
 // The selected tracks, or all of the playlist's if none is selected; none without an Edit.
-juce::Array<te::Track*> getSelectedTracksOrAll (const Selection&);
+std::vector<TrackID> getSelectedTracksOrAll (const Selection&);
 
 // Inserts an empty track or folder after the last selected track, or at the end, and selects it alone. nullptr
 // without an Edit.
@@ -189,7 +189,7 @@ te::AudioTrack* insertTrackAfterSelection (Selection&);
 te::FolderTrack* insertFolderAfterSelection (Selection&);
 
 // Takes the tracks out of each folder, and deletes the folders.
-void ungroupFolders (const juce::Array<te::FolderTrack*>&);
+void ungroupFolders (te::Edit&, const std::vector<TrackID>& folders);
 
 // Selects the track above (direction -1) or below (1) the selection; with nothing selected, the last or the first track.
 // It stops at the first and the last track.
@@ -201,14 +201,14 @@ void moveSelectedTracks (Selection&, int direction);
 
 // Switches for lists of tracks (base/Toggles.h): on for all of them, or off if all are on. Mute and solo are each
 // track's own switch, not a folder's that it is in. Collapsing and pinning change the view: they aren't undo steps.
-bool areAllTracksMuted (const juce::Array<te::Track*>&);
-void toggleTracksMuted (const juce::Array<te::Track*>&);
-bool areAllTracksSoloed (const juce::Array<te::Track*>&);
-void toggleTracksSoloed (const juce::Array<te::Track*>&);
-bool areAllTracksCollapsed (const juce::Array<te::Track*>&);
-void toggleTracksCollapsed (const juce::Array<te::Track*>&);
-bool areAllTracksPinned (const juce::Array<te::Track*>&);
-void toggleTracksPinned (const juce::Array<te::Track*>&);
+bool areAllTracksMuted (const Song&, const std::vector<TrackID>&);
+void toggleTracksMuted (Song&, const std::vector<TrackID>&);
+bool areAllTracksSoloed (const Song&, const std::vector<TrackID>&);
+void toggleTracksSoloed (Song&, const std::vector<TrackID>&);
+bool areAllTracksCollapsed (const Song&, const std::vector<TrackID>&);
+void toggleTracksCollapsed (Song&, const std::vector<TrackID>&);
+bool areAllTracksPinned (const Song&, const std::vector<TrackID>&);
+void toggleTracksPinned (Song&, const std::vector<TrackID>&);
 
 // Every row of the playlist collapsed, or every one expanded, as Collapse All does (view state, no undo step): the tracks
 // and folders (a collapsed folder hides its tracks), the master's and the returns' rows, and every automation lane; and

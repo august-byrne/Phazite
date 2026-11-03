@@ -274,7 +274,7 @@ struct Script
     {
         const auto tracks = phazite::getSelectedTracks (selection);
         REQUIRE (tracks.size() == 1);
-        auto* track = dynamic_cast<TrackType*> (tracks.getFirst());
+        auto* track = dynamic_cast<TrackType*> (phazite::findTracks (*selection.getEdit(), tracks).getFirst());
         REQUIRE (track != nullptr);
         return *track;
     }
