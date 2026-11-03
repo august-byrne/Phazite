@@ -468,10 +468,18 @@ TEST_CASE ("Scales are saved by name")
 
     CHECK (phazite::getSavedScaleName (phazite::Scale::harmonicMinor) == juce::String ("harmonicMinor"));
 
-    // Tracktion's ionian and aeolian, which Phazite doesn't offer, as the scales with their notes.
-    CHECK (phazite::toScale (te::Scale::ionian) == phazite::Scale::major);
-    CHECK (phazite::toScale (te::Scale::aeolian) == phazite::Scale::minor);
-    CHECK (phazite::toScale (phazite::toTracktion (phazite::Scale::dorian)) == phazite::Scale::dorian);
+    // Each with its name as menus show it and its notes, a whole or a half step apart.
+    CHECK (phazite::getScaleName (phazite::Scale::harmonicMinor) == juce::String ("Harmonic Minor"));
+    CHECK (phazite::getScaleSteps (phazite::Scale::lydian) == std::vector { 0, 2, 4, 6, 7, 9, 11 });
+
+    for (const auto type : phazite::getKeyScales())
+    {
+        const auto steps = phazite::getScaleSteps (type);
+        REQUIRE (steps.size() == 7);
+
+        for (size_t i = 1; i < steps.size(); ++i)
+            CHECK ((steps[i] - steps[i - 1] == 1 || steps[i] - steps[i - 1] == 2 || steps[i] - steps[i - 1] == 3));
+    }
 
     // Names are exact: no numbers, no other spelling.
     CHECK_FALSE (phazite::findScale ("3").has_value());

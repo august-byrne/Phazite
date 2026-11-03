@@ -2,23 +2,56 @@
 #include "internal/Grid.h"
 #include "model/base/internal/Schema.h"
 
+#include <algorithm>
+#include <cmath>
 #include <iterator>
 
 namespace phazite
 {
 namespace
 {
-    constexpr int beatLevel = 9, barLevel = 10; // see te::TimecodeSnapType
-
-    te::TimecodeSnapType barsBeats (int level)
-    {
-        return { te::TimecodeType::barsBeats, juce::jlimit (GridSettings::minLevel, GridSettings::maxLevel, level) };
-    }
+    constexpr auto beatLevel = GridSettings::beatLevel, barLevel = GridSettings::barLevel;
+    constexpr double tiny = 1.0e-6; // in beats, for rounding errors
 
     // The fixed grid sizes by name, from level 5 (GridSettings::minFixedLevel) to 13.
     constexpr const char* fixedGridSteps[] = { "1/16 beat", "1/8 beat", "1/4 beat", "1/2 beat", "1 beat",
                                                "1 bar",     "2 bars",   "4 bars",   "8 bars" };
     static_assert (std::size (fixedGridSteps) == (size_t) (GridSettings::maxFixedLevel - GridSettings::minFixedLevel + 1));
+
+    int clampLevel (int level)
+    {
+        return std::clamp (level, GridSettings::minLevel, GridSettings::maxLevel);
+    }
+
+    // A level finer than a beat, as a part of one: halved at each level down, and in triplets two thirds of that.
+    double getPartOfBeat (int level, bool triplets)
+    {
+        const auto straight = std::ldexp (1.0, level - beatLevel);
+        return triplets ? straight * 2.0 / 3.0 : straight;
+    }
+
+    // A level of a bar or coarser, as a number of bars: doubled at each level up.
+    int getBarsPerStep (int level)
+    {
+        return 1 << std::max (0, level - barLevel);
+    }
+
+    // A position moved onto the grid by a rounding of how many steps it is from where they count.
+    template <typename Rounding>
+    BeatPosition moveOntoGrid (BeatPosition beat, GridStep step, const Bars& bars, Rounding rounding)
+    {
+        const auto level = clampLevel (step.level);
+
+        if (level >= barLevel)
+        {
+            const auto barsPerStep = getBarsPerStep (level);
+            return bars.getBarStart (barsPerStep * (int) rounding (bars.getBarsAt (beat) / barsPerStep));
+        }
+
+        const auto size = level < beatLevel ? getPartOfBeat (level, step.triplets) : 1.0;
+        const auto barStart = bars.getBarStart (bars.getBarAt (beat));
+        return barStart + BeatDuration::fromBeats (size * rounding ((beat - barStart).inBeats() / size));
+    }
 } // namespace
 
 //==============================================================================
@@ -91,65 +124,84 @@ void saveGridSettings (te::Edit& edit, GridOwner owner, const GridSettings& grid
 }
 
 //==============================================================================
-double getGridStepInBeats (te::TimecodeSnapType type, const te::TempoSequence& tempo, te::BeatPosition where, bool triplets)
+double getStepInBeats (GridStep step, const Bars& bars, BeatPosition where)
 {
-    const auto& setting = tempo.getTempoAt (where);
-    return type.getApproxIntervalTime (setting, triplets) / setting.getApproxBeatLength();
+    const auto level = clampLevel (step.level);
+
+    if (level < beatLevel)
+        return getPartOfBeat (level, step.triplets);
+
+    if (level == beatLevel)
+        return 1.0;
+
+    return getBarsPerStep (level) * bars.getBeatsPerBar (where);
 }
 
-te::TimecodeSnapType getAdaptiveSnapType (const te::TempoSequence& tempo, te::BeatPosition where, double widthPerBeat, bool triplets,
-                                          double minLineSpacing)
+GridStep getAdaptiveGridStep (const Bars& bars, BeatPosition where, double widthPerBeat, bool triplets, double minLineSpacing)
 {
-    auto level = GridSettings::minLevel;
+    GridStep step { GridSettings::minLevel, triplets };
 
-    while (level < GridSettings::maxLevel && getGridStepInBeats (barsBeats (level), tempo, where, triplets) * widthPerBeat < minLineSpacing)
-        ++level;
+    while (step.level < GridSettings::maxLevel && getStepInBeats (step, bars, where) * widthPerBeat < minLineSpacing)
+        ++step.level;
 
-    return barsBeats (level);
+    return step;
 }
 
-te::TimecodeSnapType getGridSnapType (const GridSettings& grid, const te::TempoSequence& tempo, te::BeatPosition where, double widthPerBeat,
-                                      double minLineSpacing)
+GridStep getGridStep (const GridSettings& grid, const Bars& bars, BeatPosition where, double widthPerBeat, double minLineSpacing)
 {
     if (! grid.adaptive)
-        return barsBeats (grid.fixedLevel);
+        return { clampLevel (grid.fixedLevel), grid.triplets };
 
-    return barsBeats (getAdaptiveSnapType (tempo, where, widthPerBeat, grid.triplets, minLineSpacing).getLevel() + grid.adaptiveOffset);
+    const auto adaptive = getAdaptiveGridStep (bars, where, widthPerBeat, grid.triplets, minLineSpacing);
+    return { clampLevel (adaptive.level + grid.adaptiveOffset), grid.triplets };
 }
 
-te::BeatPosition snapToGrid (te::BeatPosition beat, te::TimecodeSnapType type, const te::TempoSequence& tempo, bool triplets)
+BeatPosition snapToGrid (BeatPosition beat, GridStep step, const Bars& bars)
 {
-    return tempo.toBeats (type.roundTimeNearest (tempo.toTime (beat), tempo, triplets));
+    return moveOntoGrid (beat, step, bars, [] (double steps) { return std::round (steps); });
 }
 
-juce::String getGridDescription (te::TimecodeSnapType type, const te::TempoSequence& tempo, bool triplets)
+BeatPosition snapDownToGrid (BeatPosition beat, GridStep step, const Bars& bars)
 {
-    return type.getDescription (tempo.getTempoAt (te::BeatPosition()), triplets);
+    return moveOntoGrid (beat, step, bars, [] (double steps) { return std::floor (steps + tiny); });
 }
 
-void forEachGridLine (const te::TempoSequence& tempo, te::TimecodeSnapType type, bool triplets, te::BeatRange range,
-                      const std::function<void (te::BeatPosition, GridLineType)>& callback)
+juce::String describeGridStep (GridStep step)
 {
-    const auto level = type.getLevel();
+    const auto level = clampLevel (step.level);
+
+    if (level < beatLevel)
+    {
+        const auto parts = (1 << (beatLevel - level)) * (step.triplets ? 3 : 2) / 2;
+        return "1/" + juce::String (parts) + " beat";
+    }
+
+    if (level == beatLevel)
+        return "Beat";
+
+    if (level == barLevel)
+        return "Bar";
+
+    return juce::String (getBarsPerStep (level)) + " bars";
+}
+
+void forEachGridLine (const Bars& bars, GridStep step, BeatRange range, const std::function<void (BeatPosition, GridLineType)>& callback)
+{
+    const auto level = clampLevel (step.level);
     const auto start = range.getStart(), end = range.getEnd();
-    const auto oneBeat = te::BeatDuration::fromBeats (1.0);
-    const auto tiny = te::BeatDuration::fromBeats (1.0e-6); // for rounding errors
 
-    // The lines between beats, if the grid is finer than a beat, and how many bars apart the bar lines
-    // are, if it is coarser than a bar.
-    const auto subdivision = level < beatLevel ? getGridStepInBeats (type, tempo, start, triplets) : 0.0;
-    auto barsPerLine = 1;
+    // Bar lines so many bars apart (one, at a bar or finer), from the song's start; and the lines inside each beat, so
+    // far apart as a part of it (none at a beat or coarser).
+    const auto barsPerLine = getBarsPerStep (level);
+    const auto part = level < beatLevel ? getPartOfBeat (level, step.triplets) : 0.0;
+    const auto partsPerBeat = part > 0.0 ? (int) std::round (1.0 / part) : 1;
 
-    if (level > barLevel)
-        barsPerLine =
-            std::max (1, juce::roundToInt (getGridStepInBeats (type, tempo, start, triplets) / tempo.getTimeSigAt (start).numerator.get()));
-
-    auto bar = std::max (0, tempo.toBarsAndBeats (tempo.toTime (start)).bars);
+    auto bar = std::max (0, bars.getBarAt (start));
     bar -= bar % barsPerLine;
 
     for (;; bar += barsPerLine)
     {
-        const auto barStart = tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 });
+        const auto barStart = bars.getBarStart (bar);
 
         if (barStart > end)
             return;
@@ -160,9 +212,9 @@ void forEachGridLine (const te::TempoSequence& tempo, te::TimecodeSnapType type,
         if (level > beatLevel)
             continue;
 
-        const auto barEnd = tempo.toBeats (te::tempo::BarsAndBeats { bar + 1, {}, 0 }) - tiny;
+        const auto barEnd = bars.getBarStart (bar + 1) - BeatDuration::fromBeats (tiny);
 
-        for (auto beat = barStart; beat < barEnd; beat = beat + oneBeat)
+        for (auto beat = barStart; beat < barEnd; beat += BeatDuration::fromBeats (1.0))
         {
             if (beat > end)
                 return;
@@ -170,9 +222,9 @@ void forEachGridLine (const te::TempoSequence& tempo, te::TimecodeSnapType type,
             if (beat > barStart && beat >= start)
                 callback (beat, GridLineType::beat);
 
-            for (auto offset = subdivision; subdivision > 0.0 && offset < 1.0 - 1.0e-6; offset += subdivision)
+            for (int i = 1; i < partsPerBeat; ++i)
             {
-                const auto line = beat + te::BeatDuration::fromBeats (offset);
+                const auto line = beat + BeatDuration::fromBeats (part * i);
 
                 if (line > end || line >= barEnd)
                     break;

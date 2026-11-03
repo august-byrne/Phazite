@@ -391,6 +391,7 @@ target_sources(phazite_core PRIVATE
     src/model/transport/RecordingModel.h
     src/model/transport/Take.cpp
     src/model/transport/Tempo.cpp
+    src/model/transport/TempoValues.cpp
     src/model/transport/TempoValues.h
     src/model/transport/TransportModel.cpp
     src/model/transport/TransportModel.h

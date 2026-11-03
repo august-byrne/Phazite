@@ -12,96 +12,68 @@ namespace phazite
 {
 namespace
 {
-    constexpr int beatLevel = 9; // a grid step of one beat (GridSettings.h)
-
-    te::TimecodeSnapType toSnapType (GridStep step)
+    // The open song's bars; while none is open, a new song's, in 4/4.
+    Bars getBars (const ProjectContext& context)
     {
-        return { te::TimecodeType::barsBeats, step.level };
+        auto* edit = getEdit (context);
+        return edit != nullptr ? phazite::getBars (*edit) : Bars();
     }
 } // namespace
 
 //==============================================================================
 int getBeatsPerBar (const ProjectContext& context, BeatPosition where)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? getTimeSignatureAt (*edit, where).numerator : 4;
+    return getBars (context).getBeatsPerBar (where);
 }
 
 int getBarAt (const ProjectContext& context, BeatPosition where)
 {
-    auto* edit = getEdit (context);
-
-    if (edit == nullptr)
-        return (int) std::floor (where.inBeats() / 4.0);
-
-    const auto& tempo = edit->tempoSequence;
-    return tempo.toBarsAndBeats (tempo.toTime (toTracktion (where))).bars;
+    return getBars (context).getBarAt (where);
 }
 
 BeatPosition getBarStart (const ProjectContext& context, int bar)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 }))
-                           : BeatPosition::fromBeats (bar * 4.0);
+    return getBars (context).getBarStart (bar);
 }
 
 //==============================================================================
 GridStep getAdaptiveGridStep (const ProjectContext& context, BeatPosition where, double widthPerBeat, bool triplets, double minLineSpacing)
 {
-    auto* edit = getEdit (context);
+    if (! context.hasProject())
+        return { GridSettings::beatLevel, triplets };
 
-    if (edit == nullptr)
-        return { beatLevel, triplets };
-
-    return { getAdaptiveSnapType (edit->tempoSequence, toTracktion (where), widthPerBeat, triplets, minLineSpacing).getLevel(), triplets };
+    return getAdaptiveGridStep (getBars (context), where, widthPerBeat, triplets, minLineSpacing);
 }
 
 GridStep getGridStep (const ProjectContext& context, const GridSettings& grid, BeatPosition where, double widthPerBeat,
                       double minLineSpacing)
 {
-    auto* edit = getEdit (context);
+    if (! context.hasProject())
+        return { GridSettings::beatLevel, grid.triplets };
 
-    if (edit == nullptr)
-        return { beatLevel, grid.triplets };
-
-    return { getGridSnapType (grid, edit->tempoSequence, toTracktion (where), widthPerBeat, minLineSpacing).getLevel(), grid.triplets };
+    return getGridStep (grid, getBars (context), where, widthPerBeat, minLineSpacing);
 }
 
 double getStepInBeats (const ProjectContext& context, GridStep step, BeatPosition where)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? getGridStepInBeats (toSnapType (step), edit->tempoSequence, toTracktion (where), step.triplets) : 1.0;
+    return context.hasProject() ? getStepInBeats (step, getBars (context), where) : 1.0;
 }
 
 BeatPosition snapToGrid (const ProjectContext& context, BeatPosition beat, GridStep step)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? fromTracktion (snapToGrid (toTracktion (beat), toSnapType (step), edit->tempoSequence, step.triplets)) : beat;
+    return context.hasProject() ? snapToGrid (beat, step, getBars (context)) : beat;
 }
 
 BeatPosition snapDownToGrid (const ProjectContext& context, BeatPosition beat, GridStep step)
 {
-    auto* edit = getEdit (context);
-
-    if (edit == nullptr)
-        return beat;
-
-    const auto& tempo = edit->tempoSequence;
-    return fromTracktion (tempo.toBeats (toSnapType (step).roundTimeDown (tempo.toTime (toTracktion (beat)), tempo, step.triplets)));
-}
-
-juce::String describeGridStep (const ProjectContext& context, GridStep step)
-{
-    auto* edit = getEdit (context);
-    return edit != nullptr ? getGridDescription (toSnapType (step), edit->tempoSequence, step.triplets) : juce::String();
+    return context.hasProject() ? snapDownToGrid (beat, step, getBars (context)) : beat;
 }
 
 void forEachGridLine (const ProjectContext& context, GridStep step, BeatRange range,
                       const std::function<void (BeatPosition, GridLineType)>& callback)
 {
-    if (auto* edit = getEdit (context))
-        forEachGridLine (edit->tempoSequence, toSnapType (step), step.triplets, toTracktion (range),
-                         [&callback] (te::BeatPosition beat, GridLineType type) { callback (fromTracktion (beat), type); });
+    if (context.hasProject())
+        forEachGridLine (getBars (context), step, range, callback);
 }
 
 GridSettings loadGridSettings (const ProjectContext& context, GridOwner owner)

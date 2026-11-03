@@ -27,11 +27,6 @@ te::BeatPosition getNoteStart (const te::MidiClip&, const te::MidiNote&); // in 
 NoteData getNoteData (const te::MidiClip&, const te::MidiNote&);
 std::vector<NoteData> getNoteData (const std::vector<ClipNote>&);
 
-// A scale as Tracktion has it, and back (Tracktion's ionian and aeolian are major and minor, which
-// have the same notes).
-te::Scale::ScaleType toTracktion (Scale);
-Scale toScale (te::Scale::ScaleType);
-
 //==============================================================================
 // Notes' IDs (schema::noteID): each note's, which no other note of its clip has, and the same in its clip's aliases. A copy
 // of a clip keeps them. Tracktion's notes carry the ID of the song's note each plays (schema::phaziteNoteID).

@@ -125,16 +125,9 @@ std::vector<TimeSignatureChange> getTimeSignatureChanges (const te::Edit& edit)
     return changes;
 }
 
-TimeSignature getTimeSignatureAt (const te::Edit& edit, BeatPosition beat)
+Bars getBars (const te::Edit& edit)
 {
-    const auto changes = getTimeSignatureChanges (edit);
-    auto signature = changes.front().signature;
-
-    for (const auto& change : changes)
-        if (change.beat <= beat)
-            signature = change.signature;
-
-    return signature;
+    return Bars (getTimeSignatureChanges (edit));
 }
 
 void ensureTempoMap (te::Edit& edit)
@@ -266,13 +259,6 @@ void togglePatternsFollowTempo (te::Edit& edit)
 TimeSignature getTimeSignature (const te::Edit& edit)
 {
     return getTimeSignatureChanges (edit).front().signature;
-}
-
-bool isValid (TimeSignature timeSignature)
-{
-    const auto denominator = timeSignature.denominator;
-    return timeSignature.numerator >= 1 && timeSignature.numerator <= 32
-           && (denominator == 2 || denominator == 4 || denominator == 8 || denominator == 16);
 }
 
 void setTimeSignature (te::Edit& edit, TimeSignature timeSignature)

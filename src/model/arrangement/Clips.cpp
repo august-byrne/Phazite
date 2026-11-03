@@ -809,7 +809,7 @@ te::MidiClip* insertMidiClip (te::ClipTrack& track, te::BeatRange range, Selecti
 
 te::MidiClip* insertBarLongMidiClip (te::ClipTrack& track, te::BeatPosition start, Selection* selection)
 {
-    const auto bar = te::BeatDuration::fromBeats (getTimeSignatureAt (track.edit, fromTracktion (start)).numerator);
+    const auto bar = te::BeatDuration::fromBeats (getBars (track.edit).getBeatsPerBar (fromTracktion (start)));
     return insertMidiClip (track, { start, start + bar }, selection);
 }
 

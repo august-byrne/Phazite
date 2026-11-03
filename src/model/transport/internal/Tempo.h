@@ -17,25 +17,10 @@ namespace phazite
 class CommandRegistry;
 
 //==============================================================================
-// The tempo map: each tempo and time signature from a beat on, in the song's order, the first at its start. A song
-// without one is at 120 BPM in 4/4.
-struct TempoChange
-{
-    BeatPosition beat {};
-    double bpm = 120.0;
-};
-
-struct TimeSignatureChange
-{
-    BeatPosition beat {};
-    TimeSignature signature {};
-};
-
+// The song's tempo map (TempoValues.h), and its bars.
 std::vector<TempoChange> getTempoChanges (const te::Edit&);
 std::vector<TimeSignatureChange> getTimeSignatureChanges (const te::Edit&);
-
-// The time signature of the bar that is at a beat.
-TimeSignature getTimeSignatureAt (const te::Edit&, BeatPosition);
+Bars getBars (const te::Edit&);
 
 // What every project's tempo map holds when it has none yet: a tempo of 120 BPM and 4/4 from the song's start, as a new
 // song is. Not an undo step: Project adds it as a project opens.

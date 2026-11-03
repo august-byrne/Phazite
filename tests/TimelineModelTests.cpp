@@ -46,7 +46,7 @@ TEST_CASE ("The time line's bars follow the time signature, and the grid snaps i
     CHECK (phazite::snapToGrid (context, beat (2.7), beatStep).inBeats() == doctest::Approx (3.0));
     CHECK (phazite::snapDownToGrid (context, beat (2.7), beatStep).inBeats() == doctest::Approx (2.0));
     CHECK (phazite::snapToGrid (context, beat (4.0), barStep).inBeats() == doctest::Approx (3.0));
-    CHECK (phazite::describeGridStep (context, beatStep).isNotEmpty());
+    CHECK (phazite::describeGridStep (beatStep) == juce::String ("Beat"));
 
     // The lines in a range, in order: bars, beats and what is between them.
     std::vector<std::pair<double, phazite::GridLineType>> lines;

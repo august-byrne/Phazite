@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <PhaziteData.h>
 
@@ -106,13 +107,13 @@ void applyOutline (te::Edit& edit, const Outline& outline)
 {
     removeSections (edit);
 
-    const auto& tempo = edit.tempoSequence;
+    const auto bars = getBars (edit);
     auto bar = 0;
 
     for (const auto& section : outline.sections)
     {
-        const auto start = fromTracktion (tempo.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 }));
-        const auto end = fromTracktion (tempo.toBeats (te::tempo::BarsAndBeats { bar + section.bars, {}, 0 }));
+        const auto start = bars.getBarStart (bar);
+        const auto end = bars.getBarStart (bar + section.bars);
         insertSection (edit, start, { section.name, end - start, section.role, section.tip, section.energy, section.colour });
         bar += section.bars;
     }

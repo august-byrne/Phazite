@@ -321,7 +321,7 @@ PianoRoll::TransformBar::TransformBar (PianoRoll& r)
 
 void PianoRoll::TransformBar::show (const Transform& shown)
 {
-    const auto gridName = roll.hasProject() ? describeGridStep (roll.context, roll.getGridStep()) : juce::String();
+    const auto gridName = roll.hasProject() ? describeGridStep (roll.getGridStep()) : juce::String();
 
     // Each kind uses the controls it needs; the values come from the settings used last.
     const auto setUp = [] (ValueSlider& slider, const juce::String& name, double min, double max, double step, double value,

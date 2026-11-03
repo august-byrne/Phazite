@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tempo's limits and the time signature, as plain values (Tempo.h changes them; TransportModel.h shows them).
+// The tempo's limits, the time signature and the song's bars, as plain values (Tempo.h changes them; TransportModel.h
+// shows them).
 #pragma once
 
+#include "model/base/Beats.h"
+
 #include <array>
+#include <vector>
 
 namespace phazite
 {
-// Tracktion's limits, in beats per minute.
+// The tempo's limits, in beats per minute.
 inline constexpr double minTempo = 20.0, maxTempo = 300.0;
 
 struct TimeSignature
@@ -23,6 +27,49 @@ bool isValid (TimeSignature);
 // The time signatures that menus offer, as most DAWs do.
 inline constexpr std::array<TimeSignature, 8> commonTimeSignatures {
     { { 2, 4 }, { 3, 4 }, { 4, 4 }, { 5, 4 }, { 6, 8 }, { 7, 8 }, { 9, 8 }, { 12, 8 } }
+};
+
+// The tempo map: each tempo and time signature from a beat on, in the song's order, the first at its start. A song
+// without one is at 120 BPM in 4/4.
+struct TempoChange
+{
+    BeatPosition beat {};
+    double bpm = 120.0;
+};
+
+struct TimeSignatureChange
+{
+    BeatPosition beat {};
+    TimeSignature signature {};
+};
+
+// The song's bars, numbered from 0 at its start, as its time signatures lay them out: each change of the time signature
+// starts a bar, and the bars before the song's start (below 0) go back in its first.
+class Bars
+{
+public:
+    Bars(); // 4/4 throughout
+    explicit Bars (const std::vector<TimeSignatureChange>&);
+
+    int getBarAt (BeatPosition) const;
+    BeatPosition getBarStart (int bar) const;
+    int getBeatsPerBar (BeatPosition) const; // in the bar that is there
+
+    // How far into the song a beat is in bars, with the part of its bar it is through: 2.5 half way through bar 2.
+    double getBarsAt (BeatPosition) const;
+
+private:
+    // From each time signature's start, bars of its length.
+    struct Run
+    {
+        double startBeat = 0.0;
+        int firstBar = 0;
+        int beatsPerBar = 4;
+    };
+
+    std::vector<Run> runs;
+    const Run& findRunAtBeat (double) const;
+    const Run& findRunOfBar (int) const;
 };
 
 // What a change of the song's tempo stretches (docs/design.md, section 4): each sample (audio clip) that follows the

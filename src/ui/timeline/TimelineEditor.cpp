@@ -766,7 +766,7 @@ void TimelineEditor::updateGridControls()
     juce::String text ("Grid: ");
 
     if (timelineContext.hasProject())
-        text << describeGridStep (timelineContext, getGridStep());
+        text << describeGridStep (getGridStep());
 
     gridButton.setButtonText (grid.adaptive ? text + " (auto)" : text);
 }
@@ -784,8 +784,7 @@ void TimelineEditor::showGridMenu()
 
     // Item IDs are the levels plus one, as an ID can't be 0; command items have much larger IDs.
     for (auto level = GridSettings::minFixedLevel; level <= GridSettings::maxFixedLevel; ++level)
-        menu.addItem (level + 1, describeGridStep (timelineContext, { level, grid.triplets }), true,
-                      ! grid.adaptive && grid.fixedLevel == level);
+        menu.addItem (level + 1, describeGridStep ({ level, grid.triplets }), true, ! grid.adaptive && grid.fixedLevel == level);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridButton),
                         [safeThis = juce::Component::SafePointer<TimelineEditor> (this)] (int result)

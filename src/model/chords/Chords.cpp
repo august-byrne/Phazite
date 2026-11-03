@@ -131,7 +131,7 @@ namespace
 
     int getBeatsPerBar (const te::Edit& edit, BeatPosition where)
     {
-        return std::max (1, getTimeSignatureAt (edit, where).numerator);
+        return getBars (edit).getBeatsPerBar (where);
     }
 
     //==============================================================================

@@ -5,6 +5,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 #include <cmath>
@@ -118,16 +119,15 @@ namespace
         return std::find (ids.begin(), ids.end(), id) != ids.end();
     }
 
-    // Where a bar starts, in beats.
+    // Where a bar starts, in beats, and the bar a beat is in (Tempo.h).
     BeatPosition getBarStart (const te::Edit& edit, int bar)
     {
-        return fromTracktion (edit.tempoSequence.toBeats (te::tempo::BarsAndBeats { bar, {}, 0 }));
+        return getBars (edit).getBarStart (bar);
     }
 
     int getBar (const te::Edit& edit, BeatPosition beat)
     {
-        const auto& tempo = edit.tempoSequence;
-        return tempo.toBarsAndBeats (tempo.toTime (toTracktion (beat))).bars;
+        return getBars (edit).getBarAt (beat);
     }
 } // namespace
 

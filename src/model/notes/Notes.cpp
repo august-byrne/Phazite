@@ -9,8 +9,10 @@
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/mirror/internal/Mirror.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <map>
@@ -21,23 +23,29 @@ namespace phazite
 {
 namespace
 {
-    // The scales Phazite offers, in the order its menus show them, with Tracktion's and the names projects save them by.
+    // The scales Phazite offers, in the order its menus show them: the names projects save them by and menus show, and the
+    // semitones of their notes above the root.
     struct SavedScale
     {
         Scale scale;
-        te::Scale::ScaleType type;
         const char* name;
+        const char* shownName;
+        std::array<int, 7> steps;
     };
 
-    constexpr SavedScale savedScales[] = { { Scale::major, te::Scale::major, "major" },
-                                           { Scale::minor, te::Scale::minor, "minor" },
-                                           { Scale::dorian, te::Scale::dorian, "dorian" },
-                                           { Scale::phrygian, te::Scale::phrygian, "phrygian" },
-                                           { Scale::lydian, te::Scale::lydian, "lydian" },
-                                           { Scale::mixolydian, te::Scale::mixolydian, "mixolydian" },
-                                           { Scale::locrian, te::Scale::locrian, "locrian" },
-                                           { Scale::harmonicMinor, te::Scale::harmonicMinor, "harmonicMinor" },
-                                           { Scale::melodicMinor, te::Scale::melodicMinor, "melodicMinor" } };
+    // clang-format off
+    constexpr SavedScale savedScales[] = {
+        { Scale::major,         "major",         "Major",          { 0, 2, 4, 5, 7, 9, 11 } },
+        { Scale::minor,         "minor",         "Minor",          { 0, 2, 3, 5, 7, 8, 10 } },
+        { Scale::dorian,        "dorian",        "Dorian",         { 0, 2, 3, 5, 7, 9, 10 } },
+        { Scale::phrygian,      "phrygian",      "Phrygian",       { 0, 1, 3, 5, 7, 8, 10 } },
+        { Scale::lydian,        "lydian",        "Lydian",         { 0, 2, 4, 6, 7, 9, 11 } },
+        { Scale::mixolydian,    "mixolydian",    "Mixolydian",     { 0, 2, 4, 5, 7, 9, 10 } },
+        { Scale::locrian,       "locrian",       "Locrian",        { 0, 1, 3, 5, 6, 8, 10 } },
+        { Scale::harmonicMinor, "harmonicMinor", "Harmonic Minor", { 0, 2, 3, 5, 7, 8, 11 } },
+        { Scale::melodicMinor,  "melodicMinor",  "Melodic Minor",  { 0, 2, 3, 5, 7, 9, 11 } }
+    };
+    // clang-format on
 
     const SavedScale& findSavedScale (Scale scale)
     {
@@ -303,8 +311,8 @@ namespace
             return;
 
         const auto& tempo = clip.edit.tempoSequence;
-        const auto bar = tempo.toBarsAndBeats (tempo.toTime (end - tinyBeats)).bars;
-        auto newEnd = tempo.toTime (tempo.toBeats (te::tempo::BarsAndBeats { bar + 1, {}, 0 }));
+        const auto bars = getBars (clip.edit);
+        auto newEnd = tempo.toTime (toTracktion (bars.getBarStart (bars.getBarAt (fromTracktion (end - tinyBeats)) + 1)));
 
         if (const auto roomEnd = findRoomEnd (clip))
             newEnd = std::min (newEnd, *roomEnd);
@@ -370,25 +378,6 @@ NoteData getNoteData (const te::MidiClip& clip, const te::MidiNote& note)
              note.isMute(),
              (bool) note.state[schema::noteSlide],
              (bool) note.state[schema::notePortamento] };
-}
-
-te::Scale::ScaleType toTracktion (Scale scale)
-{
-    return findSavedScale (scale).type;
-}
-
-Scale toScale (te::Scale::ScaleType type)
-{
-    if (type == te::Scale::ionian)
-        return Scale::major; // the same notes
-    if (type == te::Scale::aeolian)
-        return Scale::minor;
-
-    for (const auto& saved : savedScales)
-        if (saved.type == type)
-            return saved.scale;
-
-    return Scale::major;
 }
 
 std::vector<NoteData> getNoteData (const std::vector<ClipNote>& notes)
@@ -850,7 +839,7 @@ std::vector<NoteData> chop (std::vector<NoteData> notes, double pieceBeats)
 //==============================================================================
 juce::String getScaleName (Scale scale)
 {
-    return te::Scale::getNameForType (toTracktion (scale));
+    return findSavedScale (scale).shownName;
 }
 
 juce::String describeKey (const Key& key)
@@ -860,12 +849,8 @@ juce::String describeKey (const Key& key)
 
 std::vector<int> getScaleSteps (Scale scale)
 {
-    std::vector<int> steps;
-
-    for (const auto step : te::Scale (toTracktion (scale)).getSteps())
-        steps.push_back (step);
-
-    return steps;
+    const auto& steps = findSavedScale (scale).steps;
+    return { steps.begin(), steps.end() };
 }
 
 bool isInKey (int pitch, const Key& key)
