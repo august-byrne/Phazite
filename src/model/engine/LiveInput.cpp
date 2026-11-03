@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/LiveInput.h"
 #include "internal/AudioIO.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mirror/internal/Bridge.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Containers.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackSession.h"
 
@@ -21,22 +24,29 @@ bool hasInstrument (const te::AudioTrack& track)
 
 te::AudioTrack* getSelectedAudioTrack (const Selection& selection)
 {
-    if (auto* track = selection.getFirstItemOfType<te::AudioTrack>())
-        return track;
+    auto* song = selection.getSong();
+    auto* edit = selection.getEdit();
 
-    if (auto* clip = selection.getFirstItemOfType<te::Clip>())
-        return dynamic_cast<te::AudioTrack*> (clip->getTrack());
+    if (song == nullptr || edit == nullptr)
+        return nullptr;
+
+    const auto findAudioTrack = [edit] (TrackID id) { return dynamic_cast<te::AudioTrack*> (mirror::findTrack (*edit, id)); };
+
+    for (const auto track : selection.getTracks())
+        if (auto* found = findAudioTrack (track))
+            return found;
+
+    for (const auto clip : selection.getClips())
+        if (auto* found = findAudioTrack (getClipTrack (*song, clip)))
+            return found;
 
     // Notes selected in the piano roll: their clip's track.
     if (const auto notes = getSelectedNotes (selection); ! notes.empty())
-        return dynamic_cast<te::AudioTrack*> (notes.front().clip->getTrack());
+        return findAudioTrack (getClipTrack (*song, notes.front().clip));
 
     // Devices selected in the mixer: their channel's track (a container's devices: their container's).
-    if (auto* device = selection.getFirstItemOfType<te::Plugin>())
-    {
-        auto* container = findContainerOf (*device);
-        return dynamic_cast<te::AudioTrack*> (container != nullptr ? container->getOwnerTrack() : device->getOwnerTrack());
-    }
+    if (const auto devices = selection.getDevices(); ! devices.empty())
+        return findAudioTrack (getDeviceChannel (*song, devices.front()));
 
     return nullptr;
 }

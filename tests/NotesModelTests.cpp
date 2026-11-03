@@ -45,12 +45,10 @@ struct Song
         phazite::setTrackName (*b, "B");
         setEdit (context, edit.get());
 
-        auto* first = phazite::insertMidiClip (*a, { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
-        auto* other = phazite::insertMidiClip (*b, { te::BeatPosition(), te::BeatPosition::fromBeats (8.0) }, nullptr);
-        REQUIRE (first != nullptr);
-        REQUIRE (other != nullptr);
-        clip = phazite::getClipID (*first);
-        otherClip = phazite::getClipID (*other);
+        clip = phazite::insertMidiClip (phazite::getSong (*edit), idOf (*a), { beat (4.0), beat (8.0) }, nullptr);
+        otherClip = phazite::insertMidiClip (phazite::getSong (*edit), idOf (*b), { beat (0.0), beat (8.0) }, nullptr);
+        REQUIRE (clip.isValid());
+        REQUIRE (otherClip.isValid());
         c = phazite::addNote (context, clip, 60, beat (4.0), beats (1.0), 100);
         e = phazite::addNote (context, clip, 64, beat (6.0), beats (1.0), 90);
         g = phazite::addNote (context, otherClip, 67, beat (1.0), beats (0.5), 80);
@@ -246,6 +244,6 @@ TEST_CASE ("Notes are selected by ID, of the clips an editor shows, and nothing 
     CHECK (selection.getNotes() == std::vector { song.g });
 
     // A shown clip deleted takes its notes out of the selection.
-    phazite::deleteClips ({ te::findClipForID (*song.edit, phazite::toTracktion (song.otherClip)) }, false);
+    phazite::deleteClips (phazite::getSong (*song.edit), { song.otherClip }, false);
     CHECK (selection.getNotes().empty());
 }

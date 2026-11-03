@@ -250,16 +250,16 @@ void Take::finish()
             place.firstLoopStart = place.loop->getStart();
         }
 
-        placeTake (session.getEdit(), take->track, take->file, place);
+        placeTake (getSong (session.getEdit()), take->track, take->file, place);
     }
 }
 
 void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::int64_t length)
 {
     auto& edit = session.getEdit();
-    auto* track = midiTrack.isValid() ? dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (midiTrack))) : nullptr;
+    auto& song = getSong (edit);
 
-    if (track == nullptr)
+    if (const auto state = findTrackState (song, midiTrack); ! state.hasType (schema::TRACK) || isFolderState (state))
         return;
 
     const auto end = startSample + length - midiShift; // what was heard last, as if nothing looped
@@ -362,26 +362,26 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
     // The clip they go in: with Overdub, the MIDI clip the first starts in; otherwise a new one over what was recorded, in
     // place of what was there.
     std::sort (notes.begin(), notes.end(), [] (const Played& a, const Played& b) { return a.start < b.start; });
-    const auto range = toTracktion (BeatRange (toBeat (from), toBeat (to)));
-    const auto firstStart = toTracktion (toBeat (notes.front().start));
-    te::MidiClip* clip = nullptr;
+    const auto range = BeatRange (toBeat (from), toBeat (to));
+    const auto firstStart = toBeat (notes.front().start);
+    ClipID clip;
 
     if (isOverdubOn (edit.engine))
     {
-        for (auto* existing : track->getClips())
-            if (auto* midi = dynamic_cast<te::MidiClip*> (existing);
-                clip == nullptr && midi != nullptr && midi->getStartBeat() <= firstStart && midi->getEndBeat() > firstStart)
-                clip = midi;
+        for (const auto& clipState : getClipStates (findTrackState (song, midiTrack)))
+            if (! clip.isValid() && isMidiState (clipState) && getClipRange (clipState).getStart() <= firstStart
+                && getClipRange (clipState).getEnd() > firstStart)
+                clip = getClipID (clipState);
     }
     else
     {
-        clearClipsIn (*track, range);
+        clearClipsIn (song, midiTrack, range);
     }
 
-    if (clip == nullptr)
-        clip = insertMidiClip (*track, range, nullptr);
+    if (! clip.isValid())
+        clip = insertMidiClip (song, midiTrack, range, nullptr);
 
-    if (clip == nullptr)
+    if (! clip.isValid())
         return;
 
     const auto quantize = isRecordQuantizeOn (edit.engine);
@@ -394,8 +394,8 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
         if (quantize)
             start = std::round (start / sixteenthInBeats) * sixteenthInBeats;
 
-        addNote (*clip, note.pitch, toTracktion (BeatPosition::fromBeats (start)),
-                 toTracktion (BeatDuration::fromBeats (std::max (noteLength, getMinimumNoteLength().inBeats()))), note.velocity);
+        addNote (song, clip, note.pitch, BeatPosition::fromBeats (start),
+                 BeatDuration::fromBeats (std::max (noteLength, getMinimumNoteLength().inBeats())), note.velocity);
     }
 }
 } // namespace phazite

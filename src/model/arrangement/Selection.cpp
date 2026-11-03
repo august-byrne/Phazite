@@ -9,7 +9,6 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Playback.h"
 
@@ -19,14 +18,15 @@
 namespace phazite
 {
 //==============================================================================
-void RangeSelection::set (te::BeatRange newRange, const juce::Array<te::Track*>& newTracks)
+RangeSelection::RangeSelection (const Selection& s)
+    : selection (s)
+{
+}
+
+void RangeSelection::set (BeatRange newRange, const std::vector<TrackID>& newTracks)
 {
     range = newRange;
-    tracks.clear();
-
-    for (auto* track : newTracks)
-        tracks.emplace_back (track);
-
+    tracks = newTracks;
     sendChangeMessage();
 }
 
@@ -42,36 +42,35 @@ void RangeSelection::clear()
 
 bool RangeSelection::isEmpty() const
 {
-    return range.getLength() <= te::BeatDuration() || getTracks().isEmpty();
+    return range.getLength() <= BeatDuration() || getTracks().empty();
 }
 
-juce::Array<te::Track*> RangeSelection::getTracks() const
+std::vector<TrackID> RangeSelection::getTracks() const
 {
-    juce::Array<te::Track*> result;
+    std::vector<TrackID> there;
 
-    for (const auto& track : tracks)
-        if (auto* t = track.get())
-            result.add (t);
+    if (auto* song = selection.getSong())
+        for (const auto track : tracks)
+            if (findTrackState (*song, track).isValid())
+                there.push_back (track);
 
-    return result;
+    return there;
 }
 
 namespace
 {
     // RangeSelection::setInUndoStep()'s part of an undo step: performed or redone, it sets the range; undone, it puts
-    // back the range there was. It holds the range weakly, since a range can go before its Edit's undo history does
-    // (tests declare the range after the Edit), and the tracks by ID, since Undo gives a deleted track back as a new
-    // object.
+    // back the range there was. It holds the range weakly, since a range can go before its song's undo history does
+    // (tests declare the range after the song).
     class SetRange : public juce::UndoableAction
     {
     public:
-        SetRange (RangeSelection& selection, te::Edit& e, te::BeatRange newRange, const juce::Array<te::Track*>& newTracks)
+        SetRange (RangeSelection& selection, BeatRange newRange, const std::vector<TrackID>& newTracks)
             : target (&selection),
-              edit (e),
               before (selection.getRange()),
               after (newRange),
-              tracksBefore (getIDs (selection.getTracks())),
-              tracksAfter (getIDs (newTracks))
+              tracksBefore (selection.getTracks()),
+              tracksAfter (newTracks)
         {
         }
 
@@ -80,55 +79,36 @@ namespace
 
     private:
         juce::WeakReference<RangeSelection> target;
-        te::Edit& edit;
-        te::BeatRange before, after;
-        std::vector<te::EditItemID> tracksBefore, tracksAfter;
-
-        static std::vector<te::EditItemID> getIDs (const juce::Array<te::Track*>& tracks)
-        {
-            std::vector<te::EditItemID> ids;
-
-            for (auto* track : tracks)
-                ids.push_back (track->itemID);
-
-            return ids;
-        }
+        BeatRange before, after;
+        std::vector<TrackID> tracksBefore, tracksAfter;
 
         // Always true: JUCE stops undoing a step at an action that fails, and clears the undo history.
-        bool apply (te::BeatRange newRange, const std::vector<te::EditItemID>& ids)
+        bool apply (BeatRange newRange, const std::vector<TrackID>& ids)
         {
             if (auto* selection = target.get())
-            {
-                juce::Array<te::Track*> tracks;
-
-                for (auto id : ids)
-                    if (auto* track = te::findTrackForID (edit, id))
-                        tracks.add (track);
-
-                selection->set (newRange, tracks);
-            }
+                selection->set (newRange, ids);
 
             return true;
         }
     };
 } // namespace
 
-void RangeSelection::setInUndoStep (te::Edit& edit, te::BeatRange newRange, const juce::Array<te::Track*>& newTracks)
+void RangeSelection::setInUndoStep (Song& song, BeatRange newRange, const std::vector<TrackID>& newTracks)
 {
-    getSong (edit).getUndoManager().perform (new SetRange (*this, edit, newRange, newTracks)); // the undo manager owns it
+    song.getUndoManager().perform (new SetRange (*this, newRange, newTracks)); // the undo manager owns it
 }
 
 //==============================================================================
 void deleteSelection (Selection& selection, const RangeSelection& range, bool closeGap)
 {
-    auto* edit = selection.getEdit();
+    auto* song = selection.getSong();
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return;
 
     if (const auto notes = getSelectedNotes (selection); ! notes.empty())
     {
-        deleteNotes (notes);
+        deleteNotes (*song, notes);
         return;
     }
 
@@ -141,38 +121,38 @@ void deleteSelection (Selection& selection, const RangeSelection& range, bool cl
 
     if (! range.isEmpty())
     {
-        deleteTimeRange (*edit, range.getRange(), range.getTracks(), closeGap);
+        deleteTimeRange (*song, range.getRange(), range.getTracks(), closeGap);
         return;
     }
 
     // Sections go with what is in them, and the rest of the song closes up.
     if (const auto sections = getSelectedSections (selection); ! sections.empty())
     {
-        deleteSections (*edit, getIDs (sections));
+        deleteSections (*song, getIDs (sections));
         return;
     }
 
-    if (const auto clips = findSelectedClips (selection); ! clips.isEmpty())
+    if (const auto clips = getSelectedClips (selection); ! clips.empty())
     {
-        deleteClips (clips, closeGap);
+        deleteClips (*song, clips, closeGap);
         return;
     }
 
     if (! closeGap)
-        deleteTracks (findTracks (*edit, getSelectedOutermostTracks (selection)), &selection);
+        deleteTracks (*song, getSelectedOutermostTracks (selection), &selection);
 }
 
 void duplicateSelection (Selection& selection, RangeSelection& range, bool asAliases)
 {
-    auto* edit = selection.getEdit();
+    auto* song = selection.getSong();
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return;
 
     // Notes: the copies go right after them, and are selected instead.
     if (const auto notes = getSelectedNotes (selection); ! notes.empty() && ! asAliases)
     {
-        selectNotes (selection, duplicateNotes (notes));
+        selectNotes (selection, duplicateNotes (*song, notes));
         return;
     }
 
@@ -190,66 +170,72 @@ void duplicateSelection (Selection& selection, RangeSelection& range, bool asAli
     if (! range.isEmpty() && ! asAliases)
     {
         const auto tracks = range.getTracks();
-        const auto copied = duplicateTimeRange (*edit, range.getRange(), tracks);
-        range.setInUndoStep (*edit, copied, tracks);
+        const auto copied = duplicateTimeRange (*song, range.getRange(), tracks);
+        range.setInUndoStep (*song, copied, tracks);
         return;
     }
 
     // Sections, with what is in them, and clips go right after themselves.
     if (const auto sections = getSelectedSections (selection); ! sections.empty())
     {
-        duplicateSections (*edit, getIDs (sections), asAliases, &selection);
+        duplicateSections (*song, getIDs (sections), asAliases, &selection);
         return;
     }
 
-    if (const auto clips = findSelectedClips (selection); ! clips.isEmpty())
+    if (const auto clips = getSelectedClips (selection); ! clips.empty())
     {
-        duplicateClips (clips, asAliases, &selection);
+        duplicateClips (*song, clips, asAliases, &selection);
         return;
     }
 
     if (! asAliases)
-        duplicateTracks (findTracks (*edit, getSelectedOutermostTracks (selection)), &selection);
+        duplicateTracks (*song, getSelectedOutermostTracks (selection), &selection);
 }
 
 void splitSelection (const Selection& selection, const RangeSelection& range)
 {
-    auto* edit = selection.getEdit();
+    auto* song = selection.getSong();
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return;
 
     if (! range.isEmpty())
-        splitClipsAtEdges (range.getTracks(), range.getRange());
+        splitClipsAtEdges (*song, range.getTracks(), range.getRange());
     else
-        splitClips (findSelectedClips (selection), edit->tempoSequence.toBeats (getPlayheadTime (*edit)));
+        splitClips (*song, getSelectedClips (selection), getPlayheadBeat (*song));
 }
 
 void selectAllClipsOrTracks (Selection& selection, RangeSelection& range)
 {
-    auto* edit = selection.getEdit();
+    auto* song = selection.getSong();
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return;
 
-    // Every track while tracks are selected; otherwise every clip, or every track if there are none.
-    const auto tracksSelected = hasSelectedTracks (selection);
-    juce::Array<te::Selectable*> items;
+    // Every track while tracks are selected; otherwise every clip, track by track, each track's in time order as the playlist
+    // shows them, or every track if there are none.
+    std::vector<ClipID> clips;
 
-    for (auto* track : getPlaylistTracks (*edit))
-        if (auto* clipTrack = dynamic_cast<te::ClipTrack*> (track); clipTrack != nullptr && ! tracksSelected)
-            for (auto* clip : clipTrack->getClips())
-                items.add (clip);
-
-    if (items.isEmpty())
-        for (auto* track : getPlaylistTracks (*edit))
-            items.add (track);
+    if (! hasSelectedTracks (selection))
+    {
+        for (const auto track : getTrackIDs (*song))
+        {
+            auto onTrack = getClips (*song, track);
+            std::stable_sort (onTrack.begin(), onTrack.end(), [song] (ClipID a, ClipID b)
+                              { return getClipRange (*song, a).getStart() < getClipRange (*song, b).getStart(); });
+            clips.insert (clips.end(), onTrack.begin(), onTrack.end());
+        }
+    }
 
     range.clear();
     selection.deselectAll();
 
-    for (auto* item : items)
-        selection.addToSelection (item);
+    if (clips.empty())
+        for (const auto track : getTrackIDs (*song))
+            selection.addToSelection (track);
+
+    for (const auto clip : clips)
+        selection.addToSelection (clip);
 }
 
 void clearSelection (Selection& selection, RangeSelection& range)
@@ -260,19 +246,28 @@ void clearSelection (Selection& selection, RangeSelection& range)
 
 void toggleSelectionMuted (const Selection& selection)
 {
+    auto* song = selection.getSong();
+
+    if (song == nullptr)
+        return;
+
     if (const auto notes = getSelectedNotes (selection); ! notes.empty())
-        toggleNotesMuted (notes);
-    else if (auto* song = selection.getSong())
+        toggleNotesMuted (*song, notes);
+    else
         toggleClipsMuted (*song, getSelectedClips (selection));
 }
 
 bool isSelectionMuted (const Selection& selection)
 {
-    if (const auto notes = getSelectedNotes (selection); ! notes.empty())
-        return areAllNotesMuted (notes);
-
     auto* song = selection.getSong();
-    return song != nullptr && areAllClipsMuted (*song, getSelectedClips (selection));
+
+    if (song == nullptr)
+        return false;
+
+    if (const auto notes = getSelectedNotes (selection); ! notes.empty())
+        return areAllNotesMuted (*song, notes);
+
+    return areAllClipsMuted (*song, getSelectedClips (selection));
 }
 
 bool canDeleteSelection (const Selection& selection, const RangeSelection& range)
@@ -330,7 +325,7 @@ juce::String describeSelection (const Selection& selection, const RangeSelection
 void addSelectionCommands (CommandRegistry& registry, Selection& selection, RangeSelection& range)
 {
     const auto undoTarget = undoTargetOf (selection);
-    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+    const auto hasSong = [&selection] { return selection.getSong() != nullptr; };
 
     registry.add ({ .id = "edit.delete",
                     .name = "Delete",
@@ -414,17 +409,18 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
            NamedFade { sCurveFade, "clip.fadeSCurve", "S-Curve Fades", "Fades that start and end gently, like an S." } })
     {
         const auto type = shape.curve;
-        registry.add ({ .id = shape.id,
-                        .name = shape.name,
-                        .category = "Clip",
-                        .description = juce::String (shape.description) + " For the selected audio clips.",
-                        .synonyms = { "fade shape", "fade curve", "crossfade" },
-                        .perform = [&selection, type] { setFadeShape (findSelectedClips (selection), type); },
-                        .isEnabled = ifSong (selection, [&selection] (const Song& song)
-                                             { return hasAudioClips (song, getSelectedClips (selection)); }),
-                        .undoTarget = undoTarget,
-                        .isTicked = ifSong (selection, [&selection, type] (const Song& song)
-                                            { return hasFadeShape (song, getSelectedClips (selection), type); }) });
+        registry.add (
+            { .id = shape.id,
+              .name = shape.name,
+              .category = "Clip",
+              .description = juce::String (shape.description) + " For the selected audio clips.",
+              .synonyms = { "fade shape", "fade curve", "crossfade" },
+              .perform = withSong (selection, [&selection, type] (Song& song) { setFadeShape (song, getSelectedClips (selection), type); }),
+              .isEnabled =
+                  ifSong (selection, [&selection] (const Song& song) { return hasAudioClips (song, getSelectedClips (selection)); }),
+              .undoTarget = undoTarget,
+              .isTicked = ifSong (selection, [&selection, type] (const Song& song)
+                                  { return hasFadeShape (song, getSelectedClips (selection), type); }) });
     }
 
     // What the selected audio clips play: backwards, and stretched to the song's tempo (as the audio clip editor sets them).
@@ -434,10 +430,11 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
           .category = "Clip",
           .description = "Plays the selected audio clips backwards, or forwards again.",
           .synonyms = { "backwards", "reverse audio", "play backwards" },
-          .perform = [&selection] { toggleClipsReversed (findSelectedClips (selection)); },
+          .perform = withSong (selection, [&selection] (Song& song) { toggleClipsReversed (song, getSelectedClips (selection)); }),
           .isEnabled = ifSong (selection, [&selection] (const Song& song) { return hasAudioClips (song, getSelectedClips (selection)); }),
           .undoTarget = undoTarget,
-          .isTicked = [&selection] { return areAllClipsReversed (findSelectedClips (selection)); } });
+          .isTicked =
+              ifSong (selection, [&selection] (const Song& song) { return areAllClipsReversed (song, getSelectedClips (selection)); }) });
 
     registry.add (
         { .id = "clip.followTempo",
@@ -446,10 +443,11 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
           .description = "Stretches the selected audio clips to follow the song's tempo, keeping their pitch, or plays them at "
                          "their own speed again.",
           .synonyms = { "warp", "stretch", "time stretch", "sync to tempo", "tempo" },
-          .perform = [&selection] { toggleClipsFollowTempo (findSelectedClips (selection)); },
+          .perform = withSong (selection, [&selection] (Song& song) { toggleClipsFollowTempo (song, getSelectedClips (selection)); }),
           .isEnabled = ifSong (selection, [&selection] (const Song& song) { return hasAudioClips (song, getSelectedClips (selection)); }),
           .undoTarget = undoTarget,
-          .isTicked = [&selection] { return doAllClipsFollowTempo (findSelectedClips (selection)); } });
+          .isTicked =
+              ifSong (selection, [&selection] (const Song& song) { return doAllClipsFollowTempo (song, getSelectedClips (selection)); }) });
 
     registry.add ({ .id = "edit.split",
                     .name = "Split",
@@ -467,8 +465,8 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
           .description =
               "Inserts empty time, as long as the selected time range, at its start, on every track. A section it falls inside gets longer.",
           .synonyms = { "insert silence", "add bars", "make room" },
-          .perform = withEdit (selection,
-                               [&range] (te::Edit& edit) { insertTime (edit, range.getRange().getStart(), range.getRange().getLength()); }),
+          .perform =
+              withSong (selection, [&range] (Song& song) { insertTime (song, range.getRange().getStart(), range.getRange().getLength()); }),
           .isEnabled = [&range] { return ! range.isEmpty(); },
           .undoTarget = undoTarget });
 
@@ -479,7 +477,7 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
           .description =
               "Removes the selected time range from every track, and moves what comes after it back. Sections that reach into it get shorter.",
           .synonyms = { "delete time", "remove bars", "cut time" },
-          .perform = withEdit (selection, [&range] (te::Edit& edit) { removeTime (edit, range.getRange()); }),
+          .perform = withSong (selection, [&range] (Song& song) { removeTime (song, range.getRange()); }),
           .isEnabled = [&range] { return ! range.isEmpty(); },
           .undoTarget = undoTarget });
 
@@ -489,7 +487,7 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
                     .description = "Selects every clip, or every track while tracks are selected.",
                     .synonyms = { "everything" },
                     .perform = [&selection, &range] { selectAllClipsOrTracks (selection, range); },
-                    .isEnabled = hasEdit });
+                    .isEnabled = hasSong });
 
     registry.add ({ .id = "edit.deselectAll",
                     .name = "Deselect All",

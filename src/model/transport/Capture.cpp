@@ -4,6 +4,7 @@
 #include "internal/Recording.h"
 #include "internal/Tempo.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -143,17 +144,18 @@ namespace
     }
 
     // The first bar line from one, in beats, after which a clip of some beats would overlap none of the track's clips.
-    double findRoom (te::ClipTrack& track, double bar, double length, double beatsPerBar)
+    double findRoom (const Song& song, TrackID track, double bar, double length, double beatsPerBar)
     {
         for (bool moved = true; moved;)
         {
             moved = false;
 
-            for (auto* clip : track.getClips())
+            for (const auto& clipState : getClipStates (findTrackState (song, track)))
             {
-                const auto end = clip->getEndBeat().inBeats();
+                const auto range = getClipRange (song, clipState);
+                const auto end = range.getEnd().inBeats();
 
-                if (clip->getStartBeat().inBeats() < bar + length && end > bar)
+                if (range.getStart().inBeats() < bar + length && end > bar)
                 {
                     bar = std::ceil (end / beatsPerBar - 1.0e-9) * beatsPerBar;
                     moved = true;
@@ -170,12 +172,15 @@ bool canCapture (te::Edit& edit)
     return getLiveMidiTrack (edit) != nullptr && findPlayingSession (edit) != nullptr;
 }
 
-te::MidiClip* capture (te::Edit& edit, Selection* selection)
+ClipID capture (te::Edit& edit, Selection* selection)
 {
-    auto* track = getLiveMidiTrack (edit);
+    auto* liveTrack = getLiveMidiTrack (edit);
 
-    if (track == nullptr || ! canCapture (edit))
-        return nullptr;
+    if (liveTrack == nullptr || ! canCapture (edit))
+        return {};
+
+    auto& song = getSong (edit);
+    const auto track = getTrackID (*liveTrack);
 
     const UndoStep step (edit, "Capture");
     const bool playing = isSongPlaying (edit);
@@ -183,18 +188,16 @@ te::MidiClip* capture (te::Edit& edit, Selection* selection)
     const auto notes = takePlayedNotes (*findPlayingSession (edit), playing);
 
     if (notes.empty())
-        return nullptr;
+        return {};
 
     // In beats: where they were played in the song, or from the first note, at the song's tempo (set from the notes
     // in a song without clips).
-    auto& tempo = edit.tempoSequence;
     std::vector<std::pair<double, double>> beats; // start and end
 
     if (playing)
     {
         for (const auto& n : notes)
-            beats.emplace_back (tempo.toBeats (te::TimePosition::fromSeconds (n.start)).inBeats(),
-                                tempo.toBeats (te::TimePosition::fromSeconds (n.end)).inBeats());
+            beats.emplace_back (toBeats (song, n.start).inBeats(), toBeats (song, n.end).inBeats());
     }
     else
     {
@@ -206,17 +209,17 @@ te::MidiClip* capture (te::Edit& edit, Selection* selection)
                 starts.push_back (n.start);
 
             if (const auto detected = detectTempo (starts))
-                setTempo (edit, *detected); // part of this step
+                setTempo (song, *detected); // part of this step
         }
 
-        const auto beatsPerSecond = getTempo (getSong (edit)) / 60.0;
+        const auto beatsPerSecond = getTempo (song) / 60.0;
 
         for (const auto& n : notes)
             beats.emplace_back ((n.start - notes.front().start) * beatsPerSecond, (n.end - notes.front().start) * beatsPerSecond);
     }
 
     // Whole bars, from the bar the first note is in to the bar the last one ends in.
-    const auto beatsPerBar = (double) getTimeSignature (getSong (edit)).numerator;
+    const auto beatsPerBar = (double) getTimeSignature (song).numerator;
     auto clipStart = std::floor (beats.front().first / beatsPerBar) * beatsPerBar;
     auto lastEnd = clipStart;
 
@@ -228,8 +231,8 @@ te::MidiClip* capture (te::Edit& edit, Selection* selection)
     // While stopped: at the bar the play start is in, or the first after the track's clips with room for it.
     if (! playing)
     {
-        const auto playStartBar = std::floor (tempo.toBeats (getPlayStart (edit)).inBeats() / beatsPerBar) * beatsPerBar;
-        const auto bar = findRoom (*track, playStartBar, length, beatsPerBar);
+        const auto playStartBar = std::floor (getPlayStartBeat (song).inBeats() / beatsPerBar) * beatsPerBar;
+        const auto bar = findRoom (song, track, playStartBar, length, beatsPerBar);
 
         for (auto& [start, end] : beats)
         {
@@ -240,11 +243,11 @@ te::MidiClip* capture (te::Edit& edit, Selection* selection)
         clipStart = bar;
     }
 
-    auto* clip =
-        insertMidiClip (*track, { te::BeatPosition::fromBeats (clipStart), te::BeatPosition::fromBeats (clipStart + length) }, selection);
+    const auto clip =
+        insertMidiClip (song, track, { BeatPosition::fromBeats (clipStart), BeatPosition::fromBeats (clipStart + length) }, selection);
 
-    if (clip == nullptr)
-        return nullptr;
+    if (! clip.isValid())
+        return {};
 
     const bool quantize = isRecordQuantizeOn (edit.engine);
 
@@ -259,8 +262,8 @@ te::MidiClip* capture (te::Edit& edit, Selection* selection)
             end = start + noteLength;
         }
 
-        addNote (*clip, notes[i].pitch, te::BeatPosition::fromBeats (start),
-                 te::BeatDuration::fromBeats (std::max (end - start, getMinimumNoteLength().inBeats())), notes[i].velocity);
+        addNote (song, clip, notes[i].pitch, BeatPosition::fromBeats (start),
+                 BeatDuration::fromBeats (std::max (end - start, getMinimumNoteLength().inBeats())), notes[i].velocity);
     }
 
     return clip;

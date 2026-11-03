@@ -32,9 +32,9 @@ using namespace tracktion::literals;
 
 namespace
 {
-te::BeatPosition beats (double b)
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
 std::unique_ptr<phazite::Project> createProject (const juce::File& parentFolder, const juce::String& name)
@@ -83,7 +83,8 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     using phazite::test::createBuiltInDevice;
 
     auto& edit = project.getEdit();
-    phazite::setTempo (edit, 120.0);
+    auto& song = phazite::getSong (edit);
+    phazite::setTempo (song, 120.0);
     phazite::setTimeSignature (phazite::getSong (edit), { 4, 4 });
 
     auto* drums = te::getAudioTracks (edit)[0];
@@ -95,7 +96,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
         { "name": "Intro", "role": "intro", "bars": 2, "energy": 0.25, "tip": "Set the mood." },
         { "name": "Drop", "role": "drop", "bars": 4, "energy": 0.9, "colour": "Yellow", "tip": "Everything at once." } ] })");
     REQUIRE (outline.has_value());
-    phazite::applyOutline (edit, *outline);
+    phazite::applyOutline (phazite::getSong (edit), *outline);
     const phazite::SectionInfo outro { .name = "Outro",
                                        .length = phazite::BeatDuration::fromBeats (8.0),
                                        .role = "outro",
@@ -104,20 +105,22 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     REQUIRE (phazite::insertSection (phazite::getSong (edit), phazite::BeatPosition::fromBeats (24.0), outro).isValid());
 
     // Drums: a beat, shown in drum mode with the snare's row first and a row hidden; the track pinned and muted.
-    auto* beat = phazite::insertMidiClip (*drums, { beats (0.0), beats (4.0) }, nullptr);
-    REQUIRE (beat != nullptr);
+    const auto drumsID = phazite::getTrackID (*drums);
+    const auto beat = phazite::insertMidiClip (song, drumsID, { beats (0.0), beats (4.0) }, nullptr);
+    REQUIRE (beat.isValid());
 
     for (const auto start : { 0.0, 2.0 })
-        phazite::addNote (*beat, 36, beats (start), te::BeatDuration::fromBeats (0.25), 110);
+        phazite::addNote (song, beat, 36, beats (start), phazite::BeatDuration::fromBeats (0.25), 110);
 
     for (const auto start : { 1.0, 3.0 })
-        phazite::addNote (*beat, 38, beats (start), te::BeatDuration::fromBeats (0.25), 110);
+        phazite::addNote (song, beat, 38, beats (start), phazite::BeatDuration::fromBeats (0.25), 110);
 
-    phazite::setDrumTrack (*drums, true);
-    const auto drumRows = phazite::ui::getDrumRows (phazite::getSamplerSounds (*drums), phazite::getNoteNumbersPlayed ({ beat }),
-                                                    phazite::getDrumRowOrder (*drums), phazite::getHiddenDrumRows (*drums));
-    phazite::setDrumRowOrder (*drums, phazite::ui::getDrumOrderAfterMove (drumRows, 38, 0)); // the snare's row dragged to the top
-    phazite::hideDrumRow (*drums, 49);
+    phazite::setDrumTrack (song, drumsID, true);
+    const auto drumRows =
+        phazite::ui::getDrumRows (phazite::getSamplerSounds (song, drumsID), phazite::getNoteNumbersPlayed (song, { beat }),
+                                  phazite::getDrumRowOrder (song, drumsID), phazite::getHiddenDrumRows (song, drumsID));
+    phazite::setDrumRowOrder (song, drumsID, phazite::ui::getDrumOrderAfterMove (drumRows, 38, 0)); // the snare's row dragged to the top
+    phazite::hideDrumRow (song, drumsID, 49);
     phazite::setPinned (*drums, true);
     phazite::setTrackMuted (*drums, true);
 
@@ -132,16 +135,17 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     phazite::setMix (*reverb, 0.25f);
     phazite::setTrackKey (*keys, phazite::Key { 2, phazite::Scale::minor });
 
-    auto* chords = phazite::insertMidiClip (*keys, { beats (0.0), beats (8.0) }, nullptr);
-    REQUIRE (chords != nullptr);
-    phazite::addNote (*chords, 62, beats (0.0), te::BeatDuration::fromBeats (2.0), 90);
-    auto* quiet = phazite::addNote (*chords, 65, beats (2.0), te::BeatDuration::fromBeats (1.5), 70);
-    REQUIRE (quiet != nullptr);
-    phazite::toggleNotesMuted ({ { chords, quiet } });
+    const auto keysID = phazite::getTrackID (*keys);
+    const auto chords = phazite::insertMidiClip (song, keysID, { beats (0.0), beats (8.0) }, nullptr);
+    REQUIRE (chords.isValid());
+    phazite::addNote (song, chords, 62, beats (0.0), phazite::BeatDuration::fromBeats (2.0), 90);
+    const auto quiet = phazite::addNote (song, chords, 65, beats (2.0), phazite::BeatDuration::fromBeats (1.5), 70);
+    REQUIRE (quiet.isValid());
+    phazite::toggleNotesMuted (song, { quiet });
 
-    const auto alias = phazite::copyClips ({ chords }, true);
+    const auto alias = phazite::copyClips (song, { chords }, true);
     REQUIRE (alias.size() == 1);
-    phazite::moveClip (*alias[0], beats (8.0), *keys);
+    phazite::moveClip (song, alias[0], beats (8.0), keysID);
     phazite::setSavedTrackHeight (*keys, 96);
 
     auto* keysVolume = keys->getVolumePlugin();
@@ -159,12 +163,12 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     auto* tone = phazite::insertTrack (edit, pad, nullptr);
     REQUIRE (tone != nullptr);
     phazite::setTrackName (*tone, "Tone");
-    auto* audio = dynamic_cast<te::WaveAudioClip*> (
-        phazite::importFile (*tone, phazite::test::writeSound (scratch.getChildFile ("Tone.wav"), 2.0), beats (4.0)));
-    REQUIRE (audio != nullptr);
-    phazite::setClipFade (*audio, true, te::TimeDuration::fromSeconds (0.25));
-    phazite::setClipFade (*audio, false, te::TimeDuration::fromSeconds (0.5));
-    phazite::setFadeShape ({ audio }, phazite::convexFade);
+    const auto audio = phazite::importFile (song, phazite::getTrackID (*tone),
+                                            phazite::test::writeSound (scratch.getChildFile ("Tone.wav"), 2.0), beats (4.0));
+    REQUIRE (phazite::hasAudioClips (song, { audio }));
+    phazite::setClipFade (song, audio, true, 0.25);
+    phazite::setClipFade (song, audio, false, 0.5);
+    phazite::setFadeShape (song, { audio }, phazite::convexFade);
     phazite::setChannelPan (*tone, -0.5f);
 
     // Folders: Keys and Pad in a collapsed folder, and Tone in a bus at -3 dB.
@@ -186,8 +190,9 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     REQUIRE (phazite::insertMasterDevice (edit, createBuiltInDevice (edit, phazite::devices::Reverb::typeID)) != nullptr);
 
     // View settings: the playlist's grid and the piano roll's, and a range looped on purpose.
-    phazite::saveGridSettings (edit, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 1 });
-    phazite::saveGridSettings (edit, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 8, .triplets = true });
+    phazite::saveGridSettings (phazite::getSong (edit), phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 1 });
+    phazite::saveGridSettings (phazite::getSong (edit), phazite::GridOwner::pianoRoll,
+                               { .adaptive = false, .fixedLevel = 8, .triplets = true });
 
     phazite::loopRange (edit, { te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (6.0) });
 
@@ -202,7 +207,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     phazite::putLaneChord (phazite::getSong (edit), { at (20.0), at (24.0) }, { 2, -1, phazite::ChordType::majorSeventh, 2 });
     phazite::setLaneKey (phazite::getSong (edit), at (24.0), { 5, phazite::Scale::major });
     phazite::putLaneChord (phazite::getSong (edit), { at (24.0), at (32.0) }, { 1, 0, phazite::ChordType::suspendedFourth, 0 });
-    REQUIRE (phazite::addChordPart (edit, phazite::PartStyle::bassRootFifth, { at (0.0), at (32.0) }, nullptr) != nullptr);
+    REQUIRE (phazite::addChordPart (song, phazite::PartStyle::bassRootFifth, { at (0.0), at (32.0) }, nullptr).isValid());
 }
 
 //==============================================================================

@@ -375,7 +375,7 @@ TEST_CASE ("Automation keeps its beats when the tempo or the time signature chan
     REQUIRE (parameter != nullptr);
     CHECK (parameter->getCurve().getPointTime (0).inSeconds() == doctest::Approx (2.0)); // at 120 BPM
 
-    phazite::setTempo (*song.edit, 60.0);
+    phazite::setTempo (phazite::getSong (*song.edit), 60.0);
     CHECK (phazite::getAutomationPoints (context, makeup)[0].beat.inBeats() == doctest::Approx (4.0));
     CHECK (parameter->getCurve().getPointTime (0).inSeconds() == doctest::Approx (4.0));
 

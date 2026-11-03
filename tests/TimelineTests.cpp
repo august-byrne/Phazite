@@ -206,22 +206,22 @@ TEST_CASE ("Each editor keeps its own grid in the project")
     phazite::getSong (*edit).getUndoManager().clearUndoHistory();
 
     // A project that has none reads the defaults, and reading adds nothing to it.
-    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == phazite::GridSettings());
-    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::playlist) == phazite::GridSettings());
+    CHECK (phazite::loadGridSettings (phazite::getSong (*edit), phazite::GridOwner::pianoRoll) == phazite::GridSettings());
+    CHECK (phazite::loadGridSettings (phazite::getSong (*edit), phazite::GridOwner::playlist) == phazite::GridSettings());
     CHECK_FALSE (phazite::findPhaziteState (*edit).getChildWithName (phazite::schema::PIANOROLL).isValid());
     CHECK_FALSE (phazite::findPhaziteState (*edit).hasProperty (phazite::schema::gridSnap));
 
     // The piano roll's grid goes on its own child of the Phazite state, and the playlist's stays as it was.
     const phazite::GridSettings pianoRollGrid { .adaptive = false, .fixedLevel = 8, .triplets = true };
-    phazite::saveGridSettings (*edit, phazite::GridOwner::pianoRoll, pianoRollGrid);
-    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == pianoRollGrid);
-    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::playlist) == phazite::GridSettings());
+    phazite::saveGridSettings (phazite::getSong (*edit), phazite::GridOwner::pianoRoll, pianoRollGrid);
+    CHECK (phazite::loadGridSettings (phazite::getSong (*edit), phazite::GridOwner::pianoRoll) == pianoRollGrid);
+    CHECK (phazite::loadGridSettings (phazite::getSong (*edit), phazite::GridOwner::playlist) == phazite::GridSettings());
     CHECK (phazite::GridSettings::load (phazite::findPhaziteState (*edit).getChildWithName (phazite::schema::PIANOROLL)) == pianoRollGrid);
 
     const phazite::GridSettings playlistGrid { .snap = false, .adaptiveOffset = 1 };
-    phazite::saveGridSettings (*edit, phazite::GridOwner::playlist, playlistGrid);
-    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::playlist) == playlistGrid);
-    CHECK (phazite::loadGridSettings (*edit, phazite::GridOwner::pianoRoll) == pianoRollGrid);
+    phazite::saveGridSettings (phazite::getSong (*edit), phazite::GridOwner::playlist, playlistGrid);
+    CHECK (phazite::loadGridSettings (phazite::getSong (*edit), phazite::GridOwner::playlist) == playlistGrid);
+    CHECK (phazite::loadGridSettings (phazite::getSong (*edit), phazite::GridOwner::pianoRoll) == pianoRollGrid);
 
     // View settings: no undo steps.
     CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());

@@ -79,7 +79,8 @@ TEST_CASE ("A track's instrument plays its notes, and its effects come after it"
     CHECK_FALSE (phazite::needsInstrument (*mix.a)); // no notes yet
 
     // Notes without an instrument make no sound.
-    phazite::test::addMidiClip (*mix.a, { 0_bp, 4_bp });
+    phazite::test::addMidiClip (phazite::getSong (*mix.edit), phazite::getTrackID (*mix.a),
+                                { phazite::test::at (0.0), phazite::test::at (4.0) });
     CHECK (phazite::needsInstrument (*mix.a));
 
     // An effect doesn't play notes.
@@ -443,13 +444,13 @@ TEST_CASE ("New return tracks are numbered in turn")
     auto* first = phazite::addNewReturnTrack (*edit, &selection);
     REQUIRE (first != nullptr);
     CHECK (first->getName() == juce::String ("Return 1"));
-    CHECK (selection.isSelected (first));
+    CHECK (selection.isSelected (phazite::getTrackID (*first)));
 
     // Without a selection manager, the selection stays as it was.
     auto* second = phazite::addNewReturnTrack (*edit, nullptr);
     REQUIRE (second != nullptr);
     CHECK (second->getName() == juce::String ("Return 2"));
-    CHECK (selection.isSelected (first));
+    CHECK (selection.isSelected (phazite::getTrackID (*first)));
     CHECK (phazite::getReturnBus (*second) != phazite::getReturnBus (*first));
     selection.deselectAll();
 }

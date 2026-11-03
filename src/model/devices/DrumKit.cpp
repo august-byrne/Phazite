@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DrumKit.h"
+#include "devices/drums/FactoryDrums.h"
 #include "internal/DeviceFiles.h"
 #include "internal/DrumSamplerPlugin.h"
 #include "model/arrangement/internal/Import.h"
@@ -22,6 +23,24 @@ bool isDrumSampler (const te::Plugin& plugin)
     return dynamic_cast<const DrumSamplerPlugin*> (&plugin) != nullptr;
 }
 
+bool isDrumSampler (const juce::ValueTree& deviceState)
+{
+    return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == devices::DrumSampler::typeID;
+}
+
+juce::String getPadName (const Song& song, const juce::ValueTree& deviceState, int pad)
+{
+    const auto sounds = deviceState.getChildWithName (schema::SOUNDS);
+
+    if (const auto file = findProjectFile (song, sounds[schema::getPadSoundFile (pad)].toString()); file != juce::File())
+        return file.getFileNameWithoutExtension();
+
+    // Its factory sound, or else the default kit's for the pad.
+    const auto index = devices::findFactoryDrum (sounds[schema::getPadSound (pad)].toString().toStdString());
+    const auto name = devices::getFactoryDrumNames()[(size_t) (index >= 0 ? index : pad)];
+    return juce::String (name.data(), name.size());
+}
+
 juce::String getPadName (te::Plugin& plugin, int pad)
 {
     auto* drums = asDrumSampler (plugin, pad);
@@ -42,9 +61,9 @@ bool setPadSound (te::Plugin& plugin, int pad, const juce::File& file)
         return false;
 
     auto& edit = plugin.edit;
-    const auto copy = copyIntoProject (edit, file);
+    const auto copy = copyIntoProject (getSong (edit), file);
     const UndoStep step (edit, "Put " + copy.getFileNameWithoutExtension() + " on Pad " + juce::String (pad + 1));
-    setDeviceSound (plugin, schema::getPadSoundFile (pad), getProjectPath (edit, copy));
+    setDeviceSound (plugin, schema::getPadSoundFile (pad), getProjectPath (getSong (edit), copy));
     return true;
 }
 

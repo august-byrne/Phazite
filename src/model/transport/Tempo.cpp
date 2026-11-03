@@ -5,7 +5,6 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Mirror.h"
 
 #include <algorithm>
 #include <cmath>
@@ -47,31 +46,31 @@ namespace
     class PatternsKeepTheirSpeed
     {
     public:
-        explicit PatternsKeepTheirSpeed (te::Edit& e)
-            : edit (e),
-              tempoBefore (getTempo (getSong (e)))
+        explicit PatternsKeepTheirSpeed (Song& s)
+            : song (s),
+              tempoBefore (getTempo (s))
         {
         }
 
         ~PatternsKeepTheirSpeed()
         {
-            const auto scale = getTempo (getSong (edit)) / tempoBefore;
+            const auto scale = getTempo (song) / tempoBefore;
 
-            if (doPatternsFollowTempo (getSong (edit)) || juce::approximatelyEqual (scale, 1.0))
+            if (doPatternsFollowTempo (song) || juce::approximatelyEqual (scale, 1.0))
                 return;
 
-            for (const auto& clipState : getClipStates (edit))
+            for (const auto& clipState : getClipStates (song))
                 if (! isAudioState (clipState))
                     keepSpeed (clipState, scale);
         }
 
     private:
-        te::Edit& edit;
+        Song& song;
         const double tempoBefore;
 
         void keepSpeed (juce::ValueTree clipState, double scale)
         {
-            auto* um = &getSong (edit).getUndoManager();
+            auto* um = &song.getUndoManager();
 
             for (auto child : clipState)
             {
@@ -86,13 +85,8 @@ namespace
                 }
             }
 
-            // The sysex events Tracktion records with the notes, which only its clip holds.
-            if (auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (edit, toTracktion (getClipID (clipState)))))
-                for (auto* event : clip->getSequence().getSysexEvents())
-                    event->setBeatPosition (te::BeatPosition::fromBeats (event->getBeatPosition().inBeats() * scale), um);
-
             const auto range = getClipRange (clipState);
-            setClipPlace (edit, clipState, range.getStart(), range.getLength() * scale, getClipOffset (clipState) * scale);
+            setClipPlace (song, clipState, range.getStart(), range.getLength() * scale, getClipOffset (clipState) * scale);
         }
     };
 } // namespace
@@ -128,6 +122,35 @@ std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song& song)
 Bars getBars (const Song& song)
 {
     return Bars (getTimeSignatureChanges (song));
+}
+
+engine::TempoMap getTempoMap (const Song& song, double sampleRate)
+{
+    std::vector<engine::TempoMap::Tempo> tempos;
+    std::vector<engine::TempoMap::TimeSignature> signatures;
+
+    for (const auto& change : getTempoChanges (song))
+        tempos.push_back ({ change.beat.inBeats(), change.bpm });
+
+    for (const auto& change : getTimeSignatureChanges (song))
+        signatures.push_back ({ change.beat.inBeats(), change.signature.numerator, change.signature.denominator });
+
+    return engine::TempoMap (std::move (tempos), std::move (signatures), sampleRate);
+}
+
+double toSeconds (const Song& song, BeatPosition beat)
+{
+    return getTempoMap (song).toSamples (beat.inBeats());
+}
+
+BeatPosition toBeats (const Song& song, double seconds)
+{
+    return BeatPosition::fromBeats (getTempoMap (song).toBeats (seconds));
+}
+
+double getTempoAt (const Song& song, BeatPosition beat)
+{
+    return getTempoMap (song).getTempoAt (beat.inBeats());
 }
 
 void ensureTempoMap (Song& song)
@@ -186,59 +209,51 @@ double getTempo (const Song& song)
     return getTempoChanges (song).front().bpm;
 }
 
-void setTempo (te::Edit& edit, double bpm)
+void setTempo (Song& song, double bpm)
 {
     const auto rounded = std::round (juce::jlimit (minTempo, maxTempo, bpm) * 100.0) / 100.0;
 
-    if (juce::approximatelyEqual (getTempo (getSong (edit)), rounded))
+    if (juce::approximatelyEqual (getTempo (song), rounded))
         return;
 
-    const UndoStep step (edit, "Change Tempo");
-    const PatternsKeepTheirSpeed keepPatterns (edit); // unless they follow it
-    getFirstOfMap (getSong (edit), schema::TEMPO).setProperty (schema::bpm, rounded, &getSong (edit).getUndoManager());
-    mirror::reconcileTempoMap (edit); // which places the clips and the automation again, a clip that follows it stretched again
+    const UndoStep step (song, "Change Tempo");
+    const PatternsKeepTheirSpeed keepPatterns (song); // unless they follow it
+    getFirstOfMap (song, schema::TEMPO).setProperty (schema::bpm, rounded, &song.getUndoManager());
+    song.reconcile (Song::Part::tempoMap); // which places the clips and the automation again, a clip that follows it stretched again
 }
 
-TempoStretch getTempoStretch (te::Edit& edit)
+TempoStretch getTempoStretch (const Song& song)
 {
     TempoStretch stretch;
-    stretch.patternsFollow = doPatternsFollowTempo (getSong (edit));
+    stretch.patternsFollow = doPatternsFollowTempo (song);
 
-    for (auto* track : te::getAudioTracks (edit))
+    for (const auto& clipState : getClipStates (song))
     {
-        for (auto* clip : track->getClips())
+        if (isAudioState (clipState))
         {
-            if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
-            {
-                ++stretch.samples;
+            ++stretch.samples;
 
-                if (getClipTempo (*audio) > 0.0)
-                    ++stretch.samplesFollowing;
-            }
-            else if (dynamic_cast<te::MidiClip*> (clip) != nullptr)
-            {
-                ++stretch.patterns;
-            }
+            if ((double) clipState.getProperty (schema::clipTempo, 0.0) > 0.0)
+                ++stretch.samplesFollowing;
+        }
+        else
+        {
+            ++stretch.patterns;
         }
     }
 
     return stretch;
 }
 
-bool doAllSamplesFollowTempo (te::Edit& edit)
+bool doAllSamplesFollowTempo (const Song& song)
 {
-    const auto stretch = getTempoStretch (edit);
+    const auto stretch = getTempoStretch (song);
     return stretch.samples > 0 && stretch.samplesFollowing == stretch.samples;
 }
 
-void toggleSamplesFollowTempo (te::Edit& edit)
+void toggleSamplesFollowTempo (Song& song)
 {
-    juce::Array<te::Clip*> clips;
-
-    for (auto* clip : getAudioClips (edit))
-        clips.add (clip);
-
-    toggleClipsFollowTempo (clips);
+    toggleClipsFollowTempo (song, getAudioClips (song));
 }
 
 bool doPatternsFollowTempo (const Song& song)
@@ -275,7 +290,7 @@ void setTimeSignature (Song& song, TimeSignature timeSignature)
 
 void addTempoCommands (CommandRegistry& registry, Selection& selection)
 {
-    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+    const auto hasSong = [&selection] { return selection.getSong() != nullptr; };
     const auto undoTarget = undoTargetOf (selection);
 
     registry.add ({ .id = "transport.samplesFollowTempo",
@@ -284,10 +299,10 @@ void addTempoCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Every sample in the song follows its tempo, stretched to stay in time when it changes, or keeps its "
                                    "own speed again if all of them did.",
                     .synonyms = { "stretch samples", "warp", "time stretch", "audio follows tempo", "sync to tempo" },
-                    .perform = withEdit (selection, toggleSamplesFollowTempo),
-                    .isEnabled = hasEdit,
+                    .perform = withSong (selection, toggleSamplesFollowTempo),
+                    .isEnabled = hasSong,
                     .undoTarget = undoTarget,
-                    .isTicked = ifEdit (selection, doAllSamplesFollowTempo) });
+                    .isTicked = ifSong (selection, doAllSamplesFollowTempo) });
 
     registry.add ({ .id = "transport.patternsFollowTempo",
                     .name = "Patterns Follow Tempo",
@@ -296,7 +311,7 @@ void addTempoCommands (CommandRegistry& registry, Selection& selection)
                                    "they keep their speed.",
                     .synonyms = { "stretch patterns", "midi follows tempo", "notes follow tempo", "timebase" },
                     .perform = withSong (selection, togglePatternsFollowTempo),
-                    .isEnabled = hasEdit,
+                    .isEnabled = hasSong,
                     .undoTarget = undoTarget,
                     .isTicked = ifSong (selection, doPatternsFollowTempo) });
 }

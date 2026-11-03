@@ -102,6 +102,10 @@ public:
     constexpr BeatRange withStart (BeatPosition s) const noexcept { return { s, end }; }
     constexpr BeatRange withEnd (BeatPosition e) const noexcept { return { start, e }; }
     constexpr BeatRange movedBy (BeatDuration d) const noexcept { return { start + d, end + d }; }
+    constexpr BeatRange getUnionWith (BeatRange other) const noexcept
+    {
+        return { std::min (start, other.start), std::max (end, other.end) };
+    }
     constexpr BeatRange getIntersectionWith (BeatRange other) const noexcept
     {
         return { std::max (start, other.start), std::max (std::max (start, other.start), std::min (end, other.end)) };

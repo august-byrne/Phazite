@@ -1,56 +1,46 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// MIDI clips and notes made through the model, for tests that build a song without TestSong.h: the song holds its MIDI
-// clips itself, which Tracktion's mirror (docs/tracktion-migration.md, T1 step 3), so that a clip made on Tracktion's side
-// alone would be removed as the song's are placed again.
+// MIDI clips, audio clips and notes made through the model, by the song and IDs, for tests that build a song without
+// TestSong.h (docs/tracktion-migration.md, T6 step 3): the song holds its clips and notes itself.
 #pragma once
 
 #include "TestHelpers.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/notes/internal/Notes.h"
+#include "model/transport/internal/Tempo.h"
 
 namespace phazite::test
 {
-// A MIDI clip on a track from a beat to another, with a name.
-inline te::MidiClip* addMidiClip (te::ClipTrack& track, te::BeatRange beats, const juce::String& name = "Notes")
+// A MIDI clip on a track from a beat to another, with a name. Returns its ID, or none for a track that can't hold it.
+inline ClipID addMidiClip (Song& song, TrackID track, BeatRange beats, const juce::String& name = "Notes")
 {
-    auto& edit = track.edit;
-    return dynamic_cast<te::MidiClip*> (placeClipState (edit, makeMidiClipState (getSong (edit), name, fromTracktion (beats)), track));
+    return placeClipState (song, makeMidiClipState (song, name, beats), track);
 }
 
-// An audio clip on a track playing a file from its start (or from an offset into it), from one time in the song to another,
-// as Tracktion's insertWaveClip() places one.
-inline te::WaveAudioClip* addAudioClip (te::ClipTrack& track, const juce::String& name, const juce::File& file, te::TimeRange time,
-                                        te::TimeDuration offset = {})
+// An audio clip on a track playing a file from its start (or from an offset into it), from a time in the song, in its
+// seconds, for as long as given.
+inline ClipID addAudioClip (Song& song, TrackID track, const juce::String& name, const juce::File& file, double startSeconds,
+                            double lengthSeconds, double offsetSeconds = 0.0)
 {
-    auto& edit = track.edit;
-    const auto start = fromTracktion (edit.tempoSequence.toBeats (time.getStart()));
-    const auto from = offset.inSeconds();
-    const auto clipState = makeAudioClipState (edit, name, file, start, { from, from + time.getLength().inSeconds() });
-    return dynamic_cast<te::WaveAudioClip*> (placeClipState (edit, clipState, track));
+    const auto clipState =
+        makeAudioClipState (song, name, file, toBeats (song, startSeconds), { offsetSeconds, offsetSeconds + lengthSeconds });
+    return placeClipState (song, clipState, track);
 }
 
-// A note at a beat counted from the clip's content start, as Tracktion's MidiList::addNote() takes one.
-inline te::MidiNote* addMidiNote (te::MidiClip& clip, int pitch, te::BeatPosition beat, te::BeatDuration length, int velocity = 100)
+// A note at a beat counted from the clip's content start (where a clip's notes count from, Clips.h: getContentStart()).
+inline NoteRef addMidiNote (Song& song, ClipID clip, int pitch, BeatPosition beat, BeatDuration length, int velocity = 100)
 {
-    return addNote (clip, pitch, clip.getContentStartBeat() + te::toDuration (beat), length, velocity);
+    return addNote (song, clip, pitch, getContentStart (findClipState (song, clip)) + (beat - BeatPosition()), length, velocity);
 }
 
-// The IDs of Tracktion's clips, and the song of their Edit, for the model's functions that take clips by ID.
-inline std::vector<ClipID> idsOf (const juce::Array<te::Clip*>& clips)
+// The beats as Phazite's positions and lengths, for brevity.
+inline BeatPosition at (double beats)
 {
-    std::vector<ClipID> ids;
-
-    for (auto* clip : clips)
-        if (clip != nullptr)
-            ids.push_back (getClipID (*clip));
-
-    return ids;
+    return BeatPosition::fromBeats (beats);
 }
 
-inline Song& songOf (const juce::Array<te::Clip*>& clips)
+inline BeatDuration lasting (double beats)
 {
-    REQUIRE_FALSE (clips.isEmpty());
-    return getSong (clips.getFirst()->edit);
+    return BeatDuration::fromBeats (beats);
 }
 } // namespace phazite::test

@@ -9,7 +9,31 @@ Song::Song (juce::ValueTree s)
     undoManager.setMaxNumberOfStoredUnits (30000, 30);
 }
 
-Song::~Song() = default;
+Song::~Song()
+{
+    if (ownCacheFolder != juce::File())
+        ownCacheFolder.deleteRecursively();
+}
+
+void Song::setCacheFolder (const juce::File& folder)
+{
+    cacheFolder = folder;
+}
+
+juce::File Song::getCacheFolder() const
+{
+    if (cacheFolder != juce::File())
+        return cacheFolder;
+
+    if (ownCacheFolder == juce::File())
+    {
+        ownCacheFolder =
+            juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Phazite").getNonexistentChildFile ("Song", {}, false);
+        ownCacheFolder.createDirectory();
+    }
+
+    return ownCacheFolder;
+}
 
 void Song::setTracktionIDs (std::function<std::uint64_t()> takeNext)
 {

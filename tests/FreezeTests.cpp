@@ -43,8 +43,8 @@ struct Song
         phazite::setTrackName (*bass, "Bass");
 
         const auto sound = phazite::test::writeSound (temp.folder.getChildFile ("Sine.wav"), 2.0);
-        clip = phazite::test::addAudioClip (*bass, "Sine", sound, { te::TimePosition(), te::TimePosition::fromSeconds (1.5) });
-        REQUIRE (clip != nullptr);
+        clip = phazite::test::addAudioClip (phazite::getSong (edit), phazite::getTrackID (*bass), "Sine", sound, 0.0, 1.5);
+        REQUIRE (clip.isValid());
 
         expander = phazite::insertDevice (*bass, edit.getPluginCache().createNewPlugin (phazite::devices::StereoExpander::typeID, {}));
         REQUIRE (expander != nullptr);
@@ -67,13 +67,13 @@ struct Song
     void open()
     {
         setEdit (context, &project->getEdit());
-        getSelection (context).selectOnly (bass);
+        getSelection (context).selectOnly (phazite::getTrackID (*bass));
     }
 
     void close()
     {
         host.render = nullptr;
-        clip = nullptr; // the clip goes with its Edit
+        clip = {}; // the clip goes with its Edit
         setEdit (context, nullptr);
     }
 
@@ -88,7 +88,7 @@ struct Song
         REQUIRE (project != nullptr);
         bass = te::getAudioTracks (project->getEdit())[0];
         expander = phazite::getDevices (*bass)[0];
-        clip = nullptr;
+        clip = {};
         open();
     }
 
@@ -124,7 +124,7 @@ struct Song
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::test::RenderHost host;
     te::AudioTrack *bass = nullptr, *reverb = nullptr;
-    te::WaveAudioClip::Ptr clip;
+    phazite::ClipID clip;
     te::Plugin* expander = nullptr;
 };
 
@@ -206,7 +206,8 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     // Its clip: unfrozen, in the clip's own undo step.
     {
         const phazite::UndoStep step (song.edit(), "Move Clip");
-        phazite::trimClipStart (*song.clip, te::BeatPosition::fromBeats (1.0)); // half a second at 120 BPM
+        const auto halfASecond = phazite::BeatPosition::fromBeats (1.0); // at 120 BPM
+        phazite::trimClipStart (phazite::getSong (song.edit()), song.clip, halfASecond);
     }
 
     CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
@@ -228,7 +229,7 @@ TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfree
     // Undo of a change made before the freeze: unfrozen.
     {
         const phazite::UndoStep step (song.edit(), "Clip Gain");
-        phazite::setClipGain (*song.clip, -3.0f);
+        phazite::setClipGain (phazite::getSong (song.edit()), song.clip, -3.0f);
     }
 
     song.freeze();
@@ -324,7 +325,7 @@ TEST_CASE ("Returns, buses and empty tracks aren't frozen or bounced, and say wh
     CHECK (phazite::getWhyNotBounce (song.context, phazite::getTrackID (*empty)) == "Empty has nothing to bounce: it has no clips.");
 
     // The command tells the host why.
-    getSelection (song.context).selectOnly (empty);
+    getSelection (song.context).selectOnly (phazite::getTrackID (*empty));
     CHECK_FALSE (phazite::canToggleFreeze (song.context));
     phazite::toggleFreeze (song.context, song.host);
     CHECK (song.host.finished == juce::StringArray { "Freezing Empty: Empty has nothing to freeze: it has no clips." });
@@ -368,7 +369,7 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     REQUIRE (tracks.size() == 3);
     auto* bounced = tracks[1];
     CHECK (bounced->getName() == "Bass (Bounce)");
-    CHECK (getSelection (song.context).isSelected (bounced));
+    CHECK (getSelection (song.context).isSelected (phazite::getTrackID (*bounced)));
     REQUIRE (bounced->getClips().size() == 1);
     auto* wave = dynamic_cast<te::WaveAudioClip*> (bounced->getClips()[0]);
     REQUIRE (wave != nullptr);

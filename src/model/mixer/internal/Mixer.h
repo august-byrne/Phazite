@@ -12,6 +12,8 @@
 
 #include <memory>
 #include <optional>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -81,6 +83,22 @@ inline juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
 }
 DeviceID getDeviceID (const juce::ValueTree& deviceState);
 bool isPluginState (const juce::ValueTree& deviceState);
+
+// Whether a device's element is an instrument's, which turns notes into sound: one of Phazite's own instruments, or a plug-in
+// that is one (Schema.h: pluginInstrument); and whether a track has one.
+bool isInstrumentState (const juce::ValueTree& deviceState);
+bool hasInstrument (const Song&, TrackID);
+
+// The channel a device is on, the devices in its containers included: a track's ID or the master's; none for a device the
+// song hasn't.
+TrackID getDeviceChannel (const Song&, DeviceID);
+
+// A new device's element: one of Phazite's own (by its type ID), with an ID of the song's and values set by hand, by its
+// parameters' IDs (Schema.h: VALUES). And putting a device's element on a channel (a track's, or the master's for none), at a
+// place among its devices (-1: after them), an instrument first; what plays it is made from it. Joins the caller's step.
+// Returns its ID, or none for a channel that isn't there.
+juce::ValueTree makeOwnDeviceState (Song&, std::string_view typeID, const std::vector<std::pair<juce::String, float>>& values = {});
+DeviceID insertDeviceState (Song&, TrackID channel, juce::ValueTree device, int index = -1);
 juce::ValueTree makeDeviceState (te::Plugin&);
 
 // Which plug-in a device is, on its element in the song (Schema.h: pluginFormat to pluginUid), as its description says,

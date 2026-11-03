@@ -4,6 +4,7 @@
 #include "SoundPackTestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
 #include "model/mixer/internal/Mixer.h"
@@ -358,7 +359,8 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
 
     // A loop that knows its tempo follows the song's, as it played in the preview: two bars at 120 BPM span two bars
     // at 100.
-    phazite::setTempo (*edit, 100.0);
+    auto& song = phazite::getSong (*edit);
+    phazite::setTempo (song, 100.0);
     phazite::LibraryItem breakLoop;
     breakLoop.name = "Break 120 BPM";
     breakLoop.file = phazite::test::writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
@@ -368,14 +370,15 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
     REQUIRE (track->getClips().size() == 2);
     auto* loopClip = dynamic_cast<te::WaveAudioClip*> (track->getClips().getLast());
     REQUIRE (loopClip != nullptr);
-    CHECK (phazite::getClipTempo (*loopClip) == doctest::Approx (120.0)); // it follows the song's tempo, from its own
-    CHECK_FALSE (loopClip->getAutoTempo());                               // as Phazite stretches it, not Tracktion
-    CHECK (loopClip->getStartBeat().inBeats() == doctest::Approx (16.0));
-    CHECK (loopClip->getLengthInBeats().inBeats() == doctest::Approx (8.0));
+    const auto loopID = phazite::getClipID (*loopClip);
+    CHECK (phazite::getClipTempo (song, loopID) == doctest::Approx (120.0)); // it follows the song's tempo, from its own
+    CHECK_FALSE (loopClip->getAutoTempo());                                  // as Phazite stretches it, not Tracktion
+    CHECK (phazite::getClipRange (song, loopID).getStart().inBeats() == doctest::Approx (16.0));
+    CHECK (phazite::getClipRange (song, loopID).getLength().inBeats() == doctest::Approx (8.0));
 
     // Enter in the browser puts a sound on the selected track, where Space plays from.
     phazite::movePlayhead (*edit, edit->tempoSequence.toTime (te::BeatPosition::fromBeats (8.0)));
-    selection.selectOnly (track);
+    selection.selectOnly (phazite::getTrackID (*track));
     REQUIRE (playlist.placeFile (kick.file));
     REQUIRE (track->getClips().size() == 3);
     CHECK (std::any_of (track->getClips().begin(), track->getClips().end(),

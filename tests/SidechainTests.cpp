@@ -183,9 +183,11 @@ TEST_CASE ("A sidechain's source reaches the device as the song plays, muted or 
     te::Plugin::Ptr tone;
     phazite::test::createTestDevice (*song.edit, TestTone::typeID, tone);
     REQUIRE (phazite::setInstrument (*song.kick, tone) != nullptr);
-    auto* clip = phazite::test::addMidiClip (*song.kick, { 0_bp, 4_bp }, "Notes");
-    REQUIRE (clip != nullptr);
-    phazite::test::addMidiNote (*clip, 60, 0_bp, 4_bd, 64);
+    using phazite::test::at, phazite::test::lasting;
+    auto& phaziteSong = phazite::getSong (*song.edit);
+    const auto clip = phazite::test::addMidiClip (phaziteSong, phazite::getTrackID (*song.kick), { at (0.0), at (4.0) }, "Notes");
+    REQUIRE (clip.isValid());
+    phazite::test::addMidiNote (phaziteSong, clip, 60, at (0.0), lasting (4.0), 64);
     auto& ducker = song.add (*song.bass, TestSidechain::typeID);
 
     const auto kickAlone = renderPeak (*song.edit); // the bass's sidechain hears nothing yet

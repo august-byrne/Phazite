@@ -9,23 +9,24 @@
 // when a range is moved or copied.
 #pragma once
 
-#include "model/base/internal/Tracktion.h"
+#include "model/base/Beats.h"
+#include "model/base/Song.h"
 
 namespace phazite
 {
 // Inserts empty time: everything at or after a beat moves later. A section the beat falls inside gets longer.
-void insertTime (te::Edit&, te::BeatPosition at, te::BeatDuration);
+void insertTime (Song&, BeatPosition at, BeatDuration);
 
 // Removes a range from the song: what lies inside is deleted, what comes after moves back, and sections
 // that reach into it get shorter.
-void removeTime (te::Edit&, te::BeatRange);
+void removeTime (Song&, BeatRange);
 
 // Moves what lies in a range so that it starts at the destination, and what lies between them the other
 // way to make room. The destination is a beat outside the range, in the song as it is before the move: a
 // range moved later goes just before what was at the destination.
-void moveTime (te::Edit&, te::BeatRange, te::BeatPosition destination);
+void moveTime (Song&, BeatRange, BeatPosition destination);
 
 // Copies what lies in a range to the destination (a beat outside the range), after inserting room for it
 // there. With asAliases, the copied clips are aliases of the originals: editing one edits them all.
-void copyTime (te::Edit&, te::BeatRange, te::BeatPosition destination, bool asAliases);
+void copyTime (Song&, BeatRange, BeatPosition destination, bool asAliases);
 } // namespace phazite

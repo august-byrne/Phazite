@@ -259,6 +259,8 @@ inline const juce::Identifier pluginName { "name" };
 inline const juce::Identifier pluginMaker { "manufacturer" };
 inline const juce::Identifier pluginIdentifier { "identifier" };
 inline const juce::Identifier pluginUid { "uid" };
+// On a plug-in's DEVICE: true for an instrument, which turns notes into sound, as its description says; none for an effect.
+inline const juce::Identifier pluginInstrument { "instrument" };
 
 // On a plug-in's DEVICE and on a CONTAINER: its mix, 0 to 1, as setMix() sets it; none for 1.
 inline const juce::Identifier deviceMix { "mix" };
@@ -722,6 +724,10 @@ namespace phazite
 // would outlive the Edit (CI's leak check found it in tests that did, 2026-11-01). The song's changes are to its own
 // element and below.
 Song& getSong (const te::Edit&);
+
+// The Edit that mirrors a song, or nullptr for a song no Edit holds: for the model's functions that take the song and still
+// reach Tracktion's objects inside, while T6 lasts (docs/tracktion-migration.md). Goes with the mirror.
+te::Edit* findEdit (const Song&);
 
 // The song's state, but without adding it if the Edit has none yet (adding it would count as an unsaved change): then the
 // result is invalid, and reading a property from it gives the default.

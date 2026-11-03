@@ -1106,29 +1106,22 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
         if (! isAudioState (clip) || (bool) clip[schema::clipMute])
             continue;
 
-        // What Tracktion plays for it: its file, or Phazite's render of it, where it plays in seconds.
-        auto file = getAudioFile (getPlayedFile (edit, clip));
+        // What plays for it: its file, or Phazite's render of it, where it plays in seconds.
+        const auto& song = getSong (edit);
+        auto file = getAudioFile (getPlayedFile (song, clip));
 
         if (file == nullptr)
             continue;
 
-        const auto position = getPlayedPosition (edit, clip);
+        const auto position = getPlayedPosition (song, clip);
         auto region = makeRegion (getID (clip, schema::clipID), file);
-        region.start = std::llround (position.getStart().inSeconds() * preparedRate);
-        region.length = std::llround (position.getEnd().inSeconds() * preparedRate) - region.start;
-        region.fileStart = position.offset.inSeconds() * file->getSampleRate();
+        region.start = std::llround (position.start * preparedRate);
+        region.length = std::llround (position.end * preparedRate) - region.start;
+        region.fileStart = position.offset * file->getSampleRate();
         region.gain = juce::Decibels::decibelsToGain ((float) clip.getProperty (schema::clipGain, 0.0f));
 
-        // Its fades, scaled down together where they would overlap, as Tracktion fits them.
-        const auto seconds = position.getLength().inSeconds();
-        auto fadeIn = getClipFade (clip, true), fadeOut = getClipFade (clip, false);
-
-        if (fadeIn + fadeOut > seconds && fadeIn + fadeOut > 0.0)
-        {
-            const auto scale = seconds / (fadeIn + fadeOut);
-            fadeIn *= scale;
-            fadeOut *= scale;
-        }
+        // Its fades, scaled down together where they would overlap.
+        const auto [fadeIn, fadeOut] = getFittedFades (song, clip);
 
         region.fadeIn = (int) std::llround (fadeIn * preparedRate);
         region.fadeOut = (int) std::llround (fadeOut * preparedRate);

@@ -24,11 +24,6 @@ namespace
 using phazite::BeatDuration;
 using phazite::BeatPosition;
 
-te::BeatPosition teBeats (double beat)
-{
-    return te::BeatPosition::fromBeats (beat);
-}
-
 BeatPosition beats (double beat)
 {
     return BeatPosition::fromBeats (beat);
@@ -43,7 +38,7 @@ struct Song
         phazite::ensureTracks (*edit, 2);
         tracks = te::getAudioTracks (*edit);
         setEdit (context, edit.get());
-        clip = phazite::insertMidiClip (*tracks[0], { teBeats (4.0), teBeats (8.0) }, nullptr);
+        clip = phazite::insertMidiClip (getSong(), phazite::getTrackID (*tracks[0]), { beats (4.0), beats (8.0) }, nullptr);
         volume = phazite::getVolume (context, phazite::getTrackID (*tracks[0])).getRef();
         other = phazite::getVolume (context, phazite::getTrackID (*tracks[1])).getRef();
 
@@ -58,6 +53,10 @@ struct Song
 
     ~Song() { setEdit (context, nullptr); }
 
+    // The song, and where a clip starts in it, in beats.
+    phazite::Song& getSong() const { return phazite::getSong (*edit); }
+    double getStart (phazite::ClipID c) const { return phazite::getClipRange (getSong(), c).getStart().inBeats(); }
+
     float valueAt (const phazite::ParameterRef& parameter, double beat) const
     {
         return phazite::getAutomationValues (context, parameter, { beats (beat), beats (beat) }, 1).front();
@@ -70,7 +69,7 @@ struct Song
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
     juce::Array<te::AudioTrack*> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::MidiClip* clip = nullptr;
+    phazite::ClipID clip;
     phazite::ParameterRef volume, other;
 };
 } // namespace
@@ -78,15 +77,15 @@ struct Song
 TEST_CASE ("Nudged clips take the automation under them, in the same undo step")
 {
     Song song;
-    REQUIRE (song.clip != nullptr);
+    REQUIRE (song.clip.isValid());
     REQUIRE (song.valueAt (6.0) == doctest::Approx (0.9f));
 
     {
         const phazite::UndoStep step (*song.edit, "Nudge");
-        phazite::nudgeClips (song.context, { phazite::getClipID (*song.clip) }, BeatDuration::fromBeats (4.0));
+        phazite::nudgeClips (song.context, { song.clip }, BeatDuration::fromBeats (4.0));
     }
 
-    CHECK (song.clip->getStartBeat().inBeats() == doctest::Approx (8.0));
+    CHECK (song.getStart (song.clip) == doctest::Approx (8.0));
     CHECK (song.valueAt (10.0) == doctest::Approx (0.9f));
     CHECK (song.valueAt (6.0) == doctest::Approx (0.5f)); // where it was, the line runs straight across
     CHECK (song.valueAt (2.0) == doctest::Approx (0.5f));
@@ -95,7 +94,7 @@ TEST_CASE ("Nudged clips take the automation under them, in the same undo step")
 
     // One step takes the clip and its automation back.
     phazite::undo (*song.edit);
-    CHECK (song.clip->getStartBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (song.getStart (song.clip) == doctest::Approx (4.0));
     CHECK (song.valueAt (6.0) == doctest::Approx (0.9f));
     CHECK (song.valueAt (10.0) == doctest::Approx (0.5f));
 }
@@ -103,9 +102,9 @@ TEST_CASE ("Nudged clips take the automation under them, in the same undo step")
 TEST_CASE ("Duplicated clips copy the automation under them, and the originals keep theirs")
 {
     Song song;
-    const auto copies = phazite::duplicateClips ({ song.clip }, false, nullptr);
+    const auto copies = phazite::duplicateClips (song.getSong(), { song.clip }, false, nullptr);
     REQUIRE (copies.size() == 1);
-    CHECK (copies.getFirst()->getStartBeat().inBeats() == doctest::Approx (8.0));
+    CHECK (song.getStart (copies.front()) == doctest::Approx (8.0));
     CHECK (song.valueAt (6.0) == doctest::Approx (0.9f));
     CHECK (song.valueAt (10.0) == doctest::Approx (0.9f));
     CHECK (song.valueAt (14.0) == doctest::Approx (0.5f));
@@ -116,7 +115,7 @@ TEST_CASE ("A clip deleted without closing its gap leaves its automation; closin
     SUBCASE ("leaving the gap")
     {
         Song song;
-        phazite::deleteClips ({ song.clip }, false);
+        phazite::deleteClips (song.getSong(), { song.clip }, false);
         CHECK (song.valueAt (6.0) == doctest::Approx (0.9f));
     }
 
@@ -124,7 +123,7 @@ TEST_CASE ("A clip deleted without closing its gap leaves its automation; closin
     {
         Song song;
         phazite::addAutomationPoint (song.context, song.volume, { beats (10.0), 0.1f });
-        phazite::deleteClips ({ song.clip }, true);
+        phazite::deleteClips (song.getSong(), { song.clip }, true);
         CHECK (song.valueAt (6.0) == doctest::Approx (0.1f)); // the dip at beat 10 came back four beats
         CHECK (song.valueAt (song.other, 6.0) == doctest::Approx (0.3f));
     }
@@ -132,12 +131,12 @@ TEST_CASE ("A clip deleted without closing its gap leaves its automation; closin
 
 TEST_CASE ("Deleting a time range on tracks deletes their automation there; closing the gap brings what follows back")
 {
-    const te::BeatRange range { teBeats (4.0), teBeats (8.0) };
+    const phazite::BeatRange range { beats (4.0), beats (8.0) };
 
     SUBCASE ("leaving the gap")
     {
         Song song;
-        phazite::deleteTimeRange (*song.edit, range, { song.tracks[0] }, false);
+        phazite::deleteTimeRange (song.getSong(), range, { phazite::getTrackID (*song.tracks[0]) }, false);
         CHECK (song.valueAt (6.0) == doctest::Approx (0.5f));
         CHECK (song.valueAt (2.0) == doctest::Approx (0.5f));
         CHECK (song.valueAt (12.0) == doctest::Approx (0.5f));
@@ -147,7 +146,7 @@ TEST_CASE ("Deleting a time range on tracks deletes their automation there; clos
     {
         Song song;
         phazite::addAutomationPoint (song.context, song.volume, { beats (10.0), 0.1f });
-        phazite::deleteTimeRange (*song.edit, range, { song.tracks[0] }, true);
+        phazite::deleteTimeRange (song.getSong(), range, { phazite::getTrackID (*song.tracks[0]) }, true);
         CHECK (song.valueAt (6.0) == doctest::Approx (0.1f));
         CHECK (song.valueAt (song.other, 6.0) == doctest::Approx (0.3f)); // a track outside the range keeps its own
     }
@@ -157,7 +156,8 @@ TEST_CASE ("Duplicating a time range on tracks copies their automation right aft
 {
     Song song;
     phazite::addAutomationPoint (song.context, song.volume, { beats (10.0), 0.1f }); // replaced by the copy
-    const auto copied = phazite::duplicateTimeRange (*song.edit, { teBeats (4.0), teBeats (8.0) }, { song.tracks[0] });
+    const auto copied =
+        phazite::duplicateTimeRange (song.getSong(), { beats (4.0), beats (8.0) }, { phazite::getTrackID (*song.tracks[0]) });
     CHECK (copied.getStart().inBeats() == doctest::Approx (8.0));
     CHECK (song.valueAt (6.0) == doctest::Approx (0.9f));
     CHECK (song.valueAt (10.0) == doctest::Approx (0.9f));
@@ -183,7 +183,7 @@ TEST_CASE ("Time inserted, taken out, moved and copied across the song takes eve
     // back.
     {
         const phazite::UndoStep step (edit, "Insert Time");
-        phazite::insertTime (edit, teBeats (4.0), te::BeatDuration::fromBeats (4.0));
+        phazite::insertTime (phazite::getSong (edit), beats (4.0), BeatDuration::fromBeats (4.0));
     }
 
     CHECK (beatsOf (song.volume) == std::vector { 0.0, 9.0, 10.0, 11.0, 20.0 });
@@ -201,7 +201,7 @@ TEST_CASE ("Time inserted, taken out, moved and copied across the song takes eve
     // Beats 4 to 8 taken out: the peak goes with them, and what follows comes back four beats.
     {
         const phazite::UndoStep step (edit, "Remove Time");
-        phazite::removeTime (edit, { teBeats (4.0), teBeats (8.0) });
+        phazite::removeTime (phazite::getSong (edit), { beats (4.0), beats (8.0) });
     }
 
     CHECK (beatsOf (song.volume) == std::vector { 0.0, 12.0 });
@@ -211,7 +211,7 @@ TEST_CASE ("Time inserted, taken out, moved and copied across the song takes eve
     // Beats 4 to 8 moved to beat 12: the peak plays at beat 10, and what was between comes back to where they were.
     {
         const phazite::UndoStep step (edit, "Move Time");
-        phazite::moveTime (edit, { teBeats (4.0), teBeats (8.0) }, teBeats (12.0));
+        phazite::moveTime (phazite::getSong (edit), { beats (4.0), beats (8.0) }, beats (12.0));
     }
 
     CHECK (song.valueAt (10.0) == doctest::Approx (0.9f));
@@ -222,7 +222,7 @@ TEST_CASE ("Time inserted, taken out, moved and copied across the song takes eve
     // Copied to beat 12: the peak plays at beat 6 and at beat 14, and what was from beat 12 on goes four beats later.
     {
         const phazite::UndoStep step (edit, "Copy Time");
-        phazite::copyTime (edit, { teBeats (4.0), teBeats (8.0) }, teBeats (12.0), false);
+        phazite::copyTime (phazite::getSong (edit), { beats (4.0), beats (8.0) }, beats (12.0), false);
     }
 
     CHECK (song.valueAt (6.0) == doctest::Approx (0.9f));

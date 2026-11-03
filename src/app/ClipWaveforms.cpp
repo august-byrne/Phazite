@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ClipWaveforms.h"
 #include "model/arrangement/internal/AudioClips.h"
-#include "model/base/internal/Tracktion.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/base/internal/Schema.h"
 #include "model/engine/AudioFiles.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -43,22 +44,22 @@ namespace
         void paint (juce::Graphics& g, juce::Rectangle<int> area, int width) override
         {
             // The clip's width spans its beats.
-            if (auto* audio = dynamic_cast<te::AudioClipBase*> (findClip()))
+            if (const auto clipState = findClip(); clipState.isValid())
             {
-                const auto beats = audio->getEditBeatRange();
-                draw (*audio, g, area, [&beats, width] (int x)
-                      { return beats.getStart() + te::BeatDuration::fromBeats (beats.getLength().inBeats() * x / std::max (1, width)); });
+                const auto beats = getClipRange (*findSong (context), clipState);
+                draw (clipState, g, area, [&beats, width] (int x)
+                      { return beats.getStart() + BeatDuration::fromBeats (beats.getLength().inBeats() * x / std::max (1, width)); });
             }
         }
 
         void paintSpan (juce::Graphics& g, juce::Rectangle<int> area, BeatRange span) override
         {
-            if (auto* audio = dynamic_cast<te::AudioClipBase*> (findClip()))
+            if (const auto clipState = findClip(); clipState.isValid())
             {
-                const auto start = toTracktion (span.getStart());
+                const auto start = span.getStart();
                 const auto length = span.getLength().inBeats();
-                draw (*audio, g, area, [start, length, &area] (int x)
-                      { return start + te::BeatDuration::fromBeats (length * (x - area.getX()) / std::max (1, area.getWidth())); });
+                draw (clipState, g, area, [start, length, &area] (int x)
+                      { return start + BeatDuration::fromBeats (length * (x - area.getX()) / std::max (1, area.getWidth())); });
             }
         }
 
@@ -73,28 +74,31 @@ namespace
         // More of the file has been read: what shows it shows it.
         void changeListenerCallback (juce::ChangeBroadcaster*) override { toRepaint.repaint(); }
 
-        te::Clip* findClip() const
+        // The clip's element, if it is an audio clip of the open project's song.
+        juce::ValueTree findClip() const
         {
-            auto* edit = getEdit (context);
-            return edit != nullptr ? te::findClipForID (*edit, toTracktion (clipID)) : nullptr;
+            auto* song = findSong (context);
+            const auto clipState = song != nullptr ? findClipState (*song, clipID) : juce::ValueTree();
+            return isAudioState (clipState) ? clipState : juce::ValueTree();
         }
 
         // Draws the file over the part of an area that it has audio for, given the song beat at each x: over all of the area,
         // not only the part being painted. The thumbnail keeps the levels it drew last, for one width and time range, and
         // draws only what is being painted of them, so a strip that repaints under the playhead reads nothing again, while
         // an area as wide as the part being painted would read them all at each paint (docs/performance-audit.md, section 8).
-        void draw (te::AudioClipBase& audio, juce::Graphics& g, juce::Rectangle<int> area,
-                   const std::function<te::BeatPosition (int)>& beatAt)
+        void draw (const juce::ValueTree& clipState, juce::Graphics& g, juce::Rectangle<int> area,
+                   const std::function<BeatPosition (int)>& beatAt)
         {
             if (! area.intersects (g.getClipBounds()))
                 return;
 
-            showFileOf (audio);
+            const auto& song = *findSong (context);
+            showFileOf (song, clipState);
 
             // The time in the file at an x, as the clip plays it: stretched to the song's tempo, say, or going back from
             // its end while the clip plays backwards.
-            const auto fileTime = [&] (int x) { return getFileTimeAt (audio, beatAt (x)); };
-            const auto backwards = isClipReversed (audio);
+            const auto fileTime = [&] (int x) { return getFileTimeAt (song, clipID, beatAt (x)); };
+            const auto backwards = isClipReversed (song, clipID);
             auto drawn = area;
 
             // Only where the file has audio, once the thumbnail knows how long it is.
@@ -125,14 +129,14 @@ namespace
             if (backwards)
                 g.addTransform (juce::AffineTransform::scale (-1.0f, 1.0f, drawn.toFloat().getCentreX(), 0.0f));
 
-            thumbnail->drawChannels (g, drawn, from, to, audio.getGain());
+            thumbnail->drawChannels (g, drawn, from, to, juce::Decibels::decibelsToGain (getClipGain (song, clipID)));
         }
 
         // The file the clip's audio comes from. Not the render it plays while stretched, pitched or reversed, which may not
         // be ready yet: the waveform shows the file unstretched, as Ableton Live shows a sample, and all of it.
-        void showFileOf (te::AudioClipBase& audio)
+        void showFileOf (const Song& song, const juce::ValueTree& clipState)
         {
-            const auto file = getClipFile (audio);
+            const auto file = getClipFile (song, clipState);
 
             if (thumbnail != nullptr && file == shownFile)
                 return;

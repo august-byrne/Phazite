@@ -56,11 +56,11 @@ struct Song
         phazite::setTrackName (*a, "A");
         phazite::setTrackName (*b, "B");
 
-        auto* midi = phazite::insertMidiClip (*a, { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
-        REQUIRE (midi != nullptr);
-        phazite::test::addMidiNote (*midi, 60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100);
-        phazite::test::addMidiNote (*midi, 64, te::BeatPosition::fromBeats (2.0), te::BeatDuration::fromBeats (1.0), 100);
-        clip = phazite::getClipID (*midi);
+        auto& song = phazite::getSong (*edit);
+        clip = phazite::insertMidiClip (song, idOf (*a), { beat (4.0), beat (8.0) }, nullptr);
+        REQUIRE (clip.isValid());
+        phazite::test::addMidiNote (song, clip, 60, beat (0.0), beats (1.0), 100);
+        phazite::test::addMidiNote (song, clip, 64, beat (2.0), beats (1.0), 100);
         setEdit (context, edit.get());
     }
 

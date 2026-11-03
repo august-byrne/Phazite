@@ -44,6 +44,7 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/devices/internal/Wavetables.h"
+#include "model/engine/AudioFiles.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/LiveInput.h"
@@ -151,14 +152,14 @@ te::Plugin& addPlugin (te::Track& track, const juce::String& type)
 
 void addSineClip (te::AudioTrack& track, const SineFile& sine)
 {
-    phazite::test::addAudioClip (track, "Sine", sine.getFile(), { 0_tp, 2_tp });
+    phazite::test::addAudioClip (phazite::getSong (track.edit), phazite::getTrackID (track), "Sine", sine.getFile(), 0.0, 2.0);
 }
 
 // A tone on a track for longer than a scenario plays: an audio clip of a sine wave, from the song's start.
 void addTone (te::AudioTrack& track)
 {
     static const SineFile sine (8.0);
-    phazite::test::addAudioClip (track, "Tone", sine.getFile(), { 0_tp, 8_tp });
+    phazite::test::addAudioClip (phazite::getSong (track.edit), phazite::getTrackID (track), "Tone", sine.getFile(), 0.0, 8.0);
 }
 
 // A device as Phazite's engine plays it, while it plays the device's project: what its editor's displays read and its
@@ -350,13 +351,14 @@ void setDeviceValue (const te::Plugin::Ptr& plugin, const char* id, float value)
 // One track of them at most: with more, the arrays the graph pools for them can carry MIDI for the first time later on.
 void addChords (te::AudioTrack& track)
 {
-    auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Chords");
-    REQUIRE (clip != nullptr);
+    using phazite::test::at, phazite::test::lasting;
+    auto& song = phazite::getSong (track.edit);
+    const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track), { at (0.0), at (8.0) }, "Chords");
+    REQUIRE (clip.isValid());
 
     for (int i = 0; i < 32; ++i)
         for (const auto note : { 48, 52, 55, 59 })
-            phazite::test::addMidiNote (*clip, note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25),
-                                        te::BeatDuration::fromBeats (0.25), 100);
+            phazite::test::addMidiNote (song, clip, note + (i % 2) * 5, at (i * 0.25), lasting (0.25), 100);
 }
 } // namespace
 
@@ -832,11 +834,13 @@ TEST_SUITE ("realtime-audit")
         phazite::setDeviceValue (*device->findParameter ("release"), 400.0f);
 
         // More notes than voices, so some are stolen.
-        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Notes");
-        REQUIRE (clip != nullptr);
+        using phazite::test::at, phazite::test::lasting;
+        auto& song = phazite::getSong (*edit);
+        const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track), { at (0.0), at (8.0) }, "Notes");
+        REQUIRE (clip.isValid());
 
         for (int i = 0; i < 32; ++i)
-            phazite::test::addMidiNote (*clip, 36 + i, te::BeatPosition::fromBeats (i * 0.125), te::BeatDuration::fromBeats (1.0), 100);
+            phazite::test::addMidiNote (song, clip, 36 + i, at (i * 0.125), lasting (1.0), 100);
 
         const auto m = playAndMeasure (*edit);
         report ("MIDI into Phazite's synth, notes overlapping, with noise and its LFO", m);
@@ -858,13 +862,14 @@ TEST_SUITE ("realtime-audit")
 
         // Chords a sixteenth long, one after another, so that the busiest blocks (one chord's ends with the next's starts)
         // come from the first beat, within the warm-up: Tracktion's MIDI arrays grow on the busiest block (finding 4).
-        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Chords");
-        REQUIRE (clip != nullptr);
+        using phazite::test::at, phazite::test::lasting;
+        auto& song = phazite::getSong (*edit);
+        const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track), { at (0.0), at (8.0) }, "Chords");
+        REQUIRE (clip.isValid());
 
         for (int i = 0; i < 32; ++i)
             for (const auto note : { 48, 52, 55, 59 })
-                phazite::test::addMidiNote (*clip, note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25),
-                                            te::BeatDuration::fromBeats (0.25), 100);
+                phazite::test::addMidiNote (song, clip, note + (i % 2) * 5, at (i * 0.25), lasting (0.25), 100);
 
         const auto m = playAndMeasure (*edit);
         report ("Phazite's synth with seven unison voices, spread wide", m);
@@ -902,13 +907,14 @@ TEST_SUITE ("realtime-audit")
         set ("mod3Amount", 0.5f);
 
         // Chords a sixteenth long, as for the synth's unison.
-        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Chords");
-        REQUIRE (clip != nullptr);
+        using phazite::test::at, phazite::test::lasting;
+        auto& song = phazite::getSong (*edit);
+        const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track), { at (0.0), at (8.0) }, "Chords");
+        REQUIRE (clip.isValid());
 
         for (int i = 0; i < 32; ++i)
             for (const auto note : { 48, 52, 55, 59 })
-                phazite::test::addMidiNote (*clip, note + (i % 2) * 5, te::BeatPosition::fromBeats (i * 0.25),
-                                            te::BeatDuration::fromBeats (0.25), 100);
+                phazite::test::addMidiNote (song, clip, note + (i % 2) * 5, at (i * 0.25), lasting (0.25), 100);
 
         const auto m = playAndMeasure (*edit);
         report ("Phazite's wavetable synth, eight unison voices and warps, an envelope sweeping each note's table", m);
@@ -1107,17 +1113,19 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (phazite::setInstrument (track, plugin) != nullptr);
 
         // Kick and snare, closed hats on the eighths and an open hat the next one chokes.
-        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Beat");
-        REQUIRE (clip != nullptr);
+        auto& song = phazite::getSong (*edit);
+        const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track),
+                                                      { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (8.0) }, "Beat");
+        REQUIRE (clip.isValid());
 
         for (int eighth = 0; eighth < 16; ++eighth)
         {
-            const auto at = te::BeatPosition::fromBeats (eighth * 0.5);
+            const auto at = phazite::BeatPosition::fromBeats (eighth * 0.5);
             const auto note = eighth % 4 == 3 ? 46 : 42;
-            phazite::test::addMidiNote (*clip, note, at, te::BeatDuration::fromBeats (0.25), 90);
+            phazite::test::addMidiNote (song, clip, note, at, phazite::BeatDuration::fromBeats (0.25), 90);
 
             if (eighth % 4 == 0)
-                phazite::test::addMidiNote (*clip, eighth % 8 == 0 ? 36 : 38, at, te::BeatDuration::fromBeats (0.25), 110);
+                phazite::test::addMidiNote (song, clip, eighth % 8 == 0 ? 36 : 38, at, phazite::BeatDuration::fromBeats (0.25), 110);
         }
 
         const auto m = playAndMeasure (*edit, [&plugin] { // the clap, as a click on its pad plays it
@@ -1157,11 +1165,13 @@ TEST_SUITE ("realtime-audit")
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
         auto& track = getTrack (*edit, 0);
         REQUIRE (phazite::setInstrument (track, edit->getPluginCache().createNewPlugin (Synth::typeID, {})) != nullptr);
-        auto* clip = phazite::test::addMidiClip (track, { 0_bp, 8_bp }, "Notes");
-        REQUIRE (clip != nullptr);
+        using phazite::test::at, phazite::test::lasting;
+        auto& song = phazite::getSong (*edit);
+        const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track), { at (0.0), at (8.0) }, "Notes");
+        REQUIRE (clip.isValid());
 
         for (int i = 0; i < 16; ++i)
-            phazite::test::addMidiNote (*clip, 60 + (i % 5), te::BeatPosition::fromBeats (i * 0.5), te::BeatDuration::fromBeats (0.4), 100);
+            phazite::test::addMidiNote (song, clip, 60 + (i % 5), at (i * 0.5), lasting (0.4), 100);
 
         REQUIRE (track.setFrozen (true, te::Track::individualFreeze).wasOk());
         REQUIRE (track.isFrozen (te::Track::individualFreeze));
@@ -1192,15 +1202,17 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (sine.getFile().copyFileTo (loop));
 
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        phazite::setTempo (*edit, 100.0);
-        auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (getTrack (*edit, 0), loop, te::BeatPosition()));
-        REQUIRE (clip != nullptr);
-        REQUIRE (phazite::getClipTempo (*clip) == doctest::Approx (120.0));
+        auto& song = phazite::getSong (*edit);
+        phazite::setTempo (song, 100.0);
+        const auto clip = phazite::importFile (song, phazite::getTrackID (getTrack (*edit, 0)), loop, phazite::BeatPosition());
+        REQUIRE (phazite::isAudioState (phazite::findClipState (song, clip)));
+        REQUIRE (phazite::getClipTempo (song, clip) == doctest::Approx (120.0));
 
         // Phazite renders the stretched loop to a file (in the background, for an open project), and Tracktion plays that,
         // so the audio thread only reads a file; until it is ready, the clip is silent.
-        REQUIRE (phazite::renderMissingClipAudio (*edit));
-        REQUIRE (clip->getAudioFile().isValid());
+        REQUIRE (phazite::renderMissingClipAudio (song));
+        REQUIRE (phazite::isRendered (song, clip));
+        REQUIRE (phazite::getAudioFileInfo (phazite::getPlayedFile (song, phazite::findClipState (song, clip))).isValid());
 
         const auto m = playAndMeasure (*edit);
         report ("A loop at 120 BPM stretched to 100 BPM, from its render", m);
@@ -1213,13 +1225,15 @@ TEST_SUITE ("realtime-audit")
         // Tracktion plays the render, so the audio thread only reads a file.
         SineFile sine;
         auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        auto* clip = phazite::test::addAudioClip (getTrack (*edit, 0), "Sine", sine.getFile(), { 0_tp, 2_tp });
-        REQUIRE (clip != nullptr);
-        phazite::setClipGain (*clip, 6.0f);
-        phazite::setClipPitch (*clip, 3.0f);
-        phazite::setClipReversed (*clip, true);
-        REQUIRE (phazite::renderMissingClipAudio (*edit));
-        REQUIRE (clip->getAudioFile().isValid());
+        auto& song = phazite::getSong (*edit);
+        const auto clip = phazite::test::addAudioClip (song, phazite::getTrackID (getTrack (*edit, 0)), "Sine", sine.getFile(), 0.0, 2.0);
+        REQUIRE (clip.isValid());
+        phazite::setClipGain (song, clip, 6.0f);
+        phazite::setClipPitch (song, clip, 3.0f);
+        phazite::setClipReversed (song, clip, true);
+        REQUIRE (phazite::renderMissingClipAudio (song));
+        REQUIRE (phazite::isRendered (song, clip));
+        REQUIRE (phazite::getAudioFileInfo (phazite::getPlayedFile (song, phazite::findClipState (song, clip))).isValid());
 
         const auto m = playAndMeasure (*edit);
         report ("An audio clip turned up 6 dB, pitched up 3 semitones and reversed, from its render", m);
@@ -1237,7 +1251,7 @@ TEST_SUITE ("realtime-audit")
         REQUIRE (sine.getFile().copyFileTo (loop));
 
         auto project = phazite::createSongEdit (phazite::test::getEngine());
-        phazite::setTempo (*project, 100.0);
+        phazite::setTempo (phazite::getSong (*project), 100.0);
         phazite::ProjectContext context { phazite::test::getEngineContext() };
         setEdit (context, project.get());
         const auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());

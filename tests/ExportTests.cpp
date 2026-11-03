@@ -30,16 +30,16 @@ struct SineSong
 {
     SineSong()
     {
-        clip = phazite::test::addAudioClip (*te::getAudioTracks (*edit)[0], "Sine", sound,
-                                            { te::TimePosition(), te::TimePosition::fromSeconds (1.5) });
-        REQUIRE (clip != nullptr);
+        clip = phazite::test::addAudioClip (phazite::getSong (*edit), phazite::getTrackID (*te::getAudioTracks (*edit)[0]), "Sine", sound,
+                                            0.0, 1.5);
+        REQUIRE (clip.isValid());
     }
 
     phazite::test::TemporaryFolder temp;
     const juce::File sound = phazite::test::writeSound (temp.folder.getChildFile ("Sine.wav"), 2.0);
     const juce::File renders = temp.folder.getChildFile ("Renders");
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::WaveAudioClip::Ptr clip;
+    phazite::ClipID clip;
 };
 
 // Exports, and waits for the report.
@@ -133,7 +133,7 @@ TEST_CASE ("An export covers the song to its end, and needs a song")
     CHECK (phazite::getExportRange (*song.edit) == te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (2.0)));
     CHECK (phazite::canExport (*song.edit));
 
-    phazite::deleteClips ({ song.clip.get() }, false);
+    phazite::deleteClips (phazite::getSong (*song.edit), { song.clip }, false);
     CHECK_FALSE (phazite::canExport (*song.edit));
 
     const auto file = song.renders.getChildFile ("Song.wav");
@@ -315,7 +315,7 @@ struct Band
     {
         phazite::setTrackName (track, name);
         const auto sound = phazite::test::writeSound (temp.folder.getChildFile (name + ".wav"), 2.0, frequency);
-        REQUIRE (phazite::test::addAudioClip (track, name, sound, { te::TimePosition(), te::TimePosition::fromSeconds (1.5) }) != nullptr);
+        REQUIRE (phazite::test::addAudioClip (phazite::getSong (track.edit), phazite::getTrackID (track), name, sound, 0.0, 1.5).isValid());
     }
 
     phazite::test::TemporaryFolder temp;
@@ -596,7 +596,7 @@ TEST_CASE ("The export window exports stems into a folder next to the song's fil
 TEST_CASE ("The export window says why an export failed")
 {
     ExportWindow w;
-    phazite::deleteClips ({ w.song.clip.get() }, false); // nothing to export
+    phazite::deleteClips (phazite::getSong (*w.song.edit), { w.song.clip }, false); // nothing to export
 
     w.click (w.panel.getExportButton());
     REQUIRE (w.waitUntilDone());

@@ -18,7 +18,7 @@ namespace
     // Where playback starts, in the song's beats.
     BeatPosition getPlayStartBeat (const te::Edit& edit)
     {
-        return BeatPosition::fromBeats ((double) findPhaziteState (edit).getProperty (schema::playStart, 0.0));
+        return phazite::getPlayStartBeat (getSong (edit));
     }
 
     // Written only when it changes, so a project that never looped anything else has nothing new to save.
@@ -168,13 +168,18 @@ void loopSelection (te::Edit& edit, const RangeSelection& range)
     if (range.isEmpty())
         loopSong (edit);
     else
-        loopBeats (edit, fromTracktion (range.getRange()));
+        loopBeats (edit, range.getRange());
 }
 
 void loopSections (te::Edit& edit, const std::vector<Section>& sections)
 {
     if (! sections.empty())
         loopBeats (edit, getSectionsRange (sections));
+}
+
+BeatPosition getPlayStartBeat (const Song& song)
+{
+    return BeatPosition::fromBeats ((double) song.getState().getProperty (schema::playStart, 0.0));
 }
 
 te::TimePosition getPlayStart (const te::Edit& edit)
@@ -262,6 +267,12 @@ bool isSongPlaying (const te::Edit& edit)
         return session->isPlaying();
 
     return edit.getTransport().isPlaying();
+}
+
+BeatPosition getPlayheadBeat (const Song& song)
+{
+    auto* edit = findEdit (song);
+    return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (getPlayheadTime (*edit))) : BeatPosition();
 }
 
 te::TimePosition getPlayheadTime (const te::Edit& edit)

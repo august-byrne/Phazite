@@ -115,7 +115,7 @@ namespace
         {
             auto state = device.state.createCopy();
             restoreValuesSetByHand (state);
-            writeDeviceFilePaths (device.edit, state);
+            writeDeviceFilePaths (getSong (device.edit), state);
             const auto& info = own->getDeviceInfo();
             set (preset, keys::type, toString (info.typeID));
 
@@ -252,7 +252,7 @@ namespace
                 if (const auto sound = preset[keys::sounds][property].toString(); sound.isNotEmpty())
                     state.setProperty (property, sound, nullptr);
 
-            copyDeviceFilesInto (edit, state);
+            copyDeviceFilesInto (getSong (edit), state);
             return edit.getPluginCache().createNewPlugin (state);
         }
 
@@ -839,7 +839,7 @@ namespace
             if (const auto sound = saved[keys::sounds][property].toString(); sound.isNotEmpty())
                 sounds.setProperty (property, sound, nullptr);
 
-        copyDeviceFilesInto (device.edit, sounds);
+        copyDeviceFilesInto (getSong (device.edit), sounds);
 
         for (const auto& property : getSoundProperties (info))
             if (sounds.hasProperty (property))

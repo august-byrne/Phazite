@@ -5,9 +5,10 @@
 // it (Arrangement.h): move, copy, delete and resize. Sections never overlap.
 #pragma once
 
+#include "model/base/Beats.h"
+#include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <optional>
 #include <vector>
@@ -89,30 +90,30 @@ BeatRange getSectionsRange (const std::vector<Section>&);
 // (getSectionBoundaries()): positions in the song as it is before the edit.
 
 // Moves the section there, as one undo step; the sections between make room.
-void moveSection (te::Edit&, SectionID, BeatPosition destination);
+void moveSection (Song&, SectionID, BeatPosition destination);
 
 // Copies the section there, after making room, as one undo step; with asAliases, its clips are copied as aliases.
 // Returns the copy's ID.
-SectionID copySection (te::Edit&, SectionID, BeatPosition destination, bool asAliases);
+SectionID copySection (Song&, SectionID, BeatPosition destination, bool asAliases);
 
 // Copies the section right after itself.
-SectionID duplicateSection (te::Edit&, SectionID, bool asAliases);
+SectionID duplicateSection (Song&, SectionID, bool asAliases);
 
 // Deletes the section and what is in it; what comes after moves back.
-void deleteSection (te::Edit&, SectionID);
+void deleteSection (Song&, SectionID);
 
 // The same for several sections, the last first, so that deleting one doesn't move another still to be deleted.
 // Deleting one can delete another inside it.
-void deleteSections (te::Edit&, const std::vector<SectionID>&);
+void deleteSections (Song&, const std::vector<SectionID>&);
 
 // Copies each section right after itself, the last first, and returns the copies. With a selection, the copies are
 // selected instead of what was.
-std::vector<SectionID> duplicateSections (te::Edit&, const std::vector<SectionID>&, bool asAliases, Selection*);
+std::vector<SectionID> duplicateSections (Song&, const std::vector<SectionID>&, bool asAliases, Selection*);
 
 // Makes the section longer or shorter at its end, at least a beat long, as one undo step. With moveRest, what comes after
 // it moves along: time is inserted at its end, or removed from it with what lies there. Otherwise only the
 // section changes, and it doesn't grow into the next one.
-void resizeSection (te::Edit&, SectionID, BeatDuration newLength, bool moveRest);
+void resizeSection (Song&, SectionID, BeatDuration newLength, bool moveRest);
 
 // Where a section can be moved or copied to: the start of each section and the end of the last.
 std::vector<BeatPosition> getSectionBoundaries (const Song&);

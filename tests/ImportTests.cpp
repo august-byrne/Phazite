@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestHelpers.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
+
+#include <algorithm>
 
 namespace
 {
-te::BeatPosition beats (double b)
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
 // A folder in the temp directory that is deleted again at the end of the test.
@@ -80,28 +84,32 @@ TEST_CASE ("Imported audio is copied into the project once, and keeps working af
     writeWav (kick, 22050); // half a second
 
     auto project = createProject (temp.folder);
-    auto* track = te::getAudioTracks (project->getEdit())[0];
+    auto& song = phazite::getSong (project->getEdit());
+    const auto track = phazite::getTrackID (*te::getAudioTracks (project->getEdit())[0]);
 
-    auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (*track, kick, beats (4.0)));
-    REQUIRE (clip != nullptr);
-    CHECK (clip->getName() == juce::String ("Kick"));
-    CHECK (clip->getStartBeat().inBeats() == doctest::Approx (4.0));
-    CHECK (clip->getPosition().getLength().inSeconds() == doctest::Approx (0.5));
-    CHECK (clip->getAudioFile().getFile() == project->getAudioFolder().getChildFile ("Kick.wav"));
+    const auto clip = phazite::importFile (song, track, kick, beats (4.0));
+    REQUIRE (clip.isValid());
+    const auto clipState = phazite::findClipState (song, clip);
+    REQUIRE (phazite::isAudioState (clipState));
+    CHECK (clipState[phazite::schema::clipName].toString() == juce::String ("Kick"));
+    CHECK (phazite::getClipRange (song, clip).getStart().inBeats() == doctest::Approx (4.0));
+    const auto played = phazite::getPlayedPosition (song, clipState);
+    CHECK (played.end - played.start == doctest::Approx (0.5));
+    CHECK (phazite::getClipFile (song, clipState) == project->getAudioFolder().getChildFile ("Kick.wav"));
 
     // The project stores where the audio is relative to itself, so it can move.
-    CHECK_FALSE (juce::File::isAbsolutePath (clip->state[te::IDs::source].toString()));
+    CHECK_FALSE (juce::File::isAbsolutePath (clipState[phazite::schema::clipFile].toString()));
 
     // The same file again uses the same copy; another file of that name gets a name of its own.
-    CHECK (phazite::copyIntoProject (project->getEdit(), kick) == project->getAudioFolder().getChildFile ("Kick.wav"));
+    CHECK (phazite::copyIntoProject (song, kick) == project->getAudioFolder().getChildFile ("Kick.wav"));
     const auto otherKick = temp.folder.getChildFile ("Kick.wav");
     writeWav (otherKick, 1000);
-    const auto otherCopy = phazite::copyIntoProject (project->getEdit(), otherKick);
+    const auto otherCopy = phazite::copyIntoProject (song, otherKick);
     CHECK (otherCopy.isAChildOf (project->getAudioFolder()));
     CHECK (otherCopy.getFileName() != juce::String ("Kick.wav"));
 
     // A file in the project already isn't copied again.
-    CHECK (phazite::copyIntoProject (project->getEdit(), otherCopy) == otherCopy);
+    CHECK (phazite::copyIntoProject (song, otherCopy) == otherCopy);
 
     REQUIRE (project->save().wasOk());
     const auto file = project->getFile();
@@ -110,11 +118,12 @@ TEST_CASE ("Imported audio is copied into the project once, and keeps working af
     juce::String error;
     auto reopened = phazite::Project::open (phazite::test::getEngine(), file, false, error);
     REQUIRE (reopened != nullptr);
-    const auto clips = te::getAudioTracks (reopened->getEdit())[0]->getClips();
+    const auto& reopenedSong = phazite::getSong (reopened->getEdit());
+    const auto clips = phazite::getClips (reopenedSong, phazite::getTrackID (*te::getAudioTracks (reopened->getEdit())[0]));
     REQUIRE (clips.size() == 1);
-    auto* reopenedClip = dynamic_cast<te::WaveAudioClip*> (clips.getFirst());
-    REQUIRE (reopenedClip != nullptr);
-    CHECK (reopenedClip->getAudioFile().getFile().existsAsFile());
+    const auto reopenedClip = phazite::findClipState (reopenedSong, clips.front());
+    REQUIRE (phazite::isAudioState (reopenedClip));
+    CHECK (phazite::getClipFile (reopenedSong, reopenedClip).existsAsFile());
 }
 
 TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
@@ -124,14 +133,16 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
     writeMidi (midiFile);
 
     auto project = createProject (temp.folder.getChildFile ("Projects"));
-    auto* track = te::getAudioTracks (project->getEdit())[0];
+    auto& song = phazite::getSong (project->getEdit());
+    const auto track = phazite::getTrackID (*te::getAudioTracks (project->getEdit())[0]);
 
-    auto* clip = dynamic_cast<te::MidiClip*> (phazite::importFile (*track, midiFile, beats (8.0)));
-    REQUIRE (clip != nullptr);
-    CHECK (clip->getStartBeat().inBeats() == doctest::Approx (8.0));
-    CHECK (clip->getSequence().getNumNotes() == 1);
+    const auto clip = phazite::importFile (song, track, midiFile, beats (8.0));
+    REQUIRE (clip.isValid());
+    REQUIRE (phazite::isMidiState (phazite::findClipState (song, clip)));
+    CHECK (phazite::getClipRange (song, clip).getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (phazite::getClipNotes (song, clip).size() == 1);
 
-    CHECK (phazite::importFile (*track, temp.folder.getChildFile ("Notes.txt"), beats (0.0)) == nullptr);
+    CHECK_FALSE (phazite::importFile (song, track, temp.folder.getChildFile ("Notes.txt"), beats (0.0)).isValid());
 
     // The first track with notes, named as the file names it, with its controllers, to the end of the bar it ends in.
     {
@@ -150,9 +161,9 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
         REQUIRE (midi.writeTo (stream));
     }
 
-    auto* bass = phazite::importFile (*track, temp.folder.getChildFile ("Bass.mid"), beats (16.0));
-    REQUIRE (bass != nullptr);
-    const auto clipState = phazite::findClipState (*bass);
+    const auto bass = phazite::importFile (song, track, temp.folder.getChildFile ("Bass.mid"), beats (16.0));
+    REQUIRE (bass.isValid());
+    const auto clipState = phazite::findClipState (song, bass);
     CHECK (clipState[phazite::schema::clipName].toString() == juce::String ("Bassline"));
     CHECK ((double) clipState[phazite::schema::clipStart] == doctest::Approx (16.0));
     CHECK ((double) clipState[phazite::schema::clipLength] == doctest::Approx (8.0)); // the note ends in the second bar
@@ -196,30 +207,32 @@ TEST_CASE ("Dropped files go on the track that suits them, or on new tracks belo
 
     auto project = createProject (temp.folder.getChildFile ("Project"));
     auto& edit = project->getEdit();
-    auto* target = te::getAudioTracks (edit)[0];
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
+    auto& song = phazite::getSong (edit);
+    const auto target = phazite::getTrackID (*te::getAudioTracks (edit)[0]);
+    song.getUndoManager().clearUndoHistory();
 
     // The audio suits the empty track; the MIDI file gets a new track below it, named after the file. A file that is
     // neither is left out.
     const auto added = phazite::importFiles (
-        edit, { kick.getFullPathName(), chords.getFullPathName(), temp.folder.getChildFile ("Notes.txt").getFullPathName() }, target,
+        song, { kick.getFullPathName(), chords.getFullPathName(), temp.folder.getChildFile ("Notes.txt").getFullPathName() }, target,
         beats (4.0));
     REQUIRE (added.size() == 2);
-    CHECK (added[0]->getTrack() == target);
-    CHECK (dynamic_cast<te::MidiClip*> (added[1]) != nullptr);
-    CHECK (added[1]->getStartBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (phazite::getClipTrack (song, added[0]) == target);
+    CHECK (phazite::isMidiState (phazite::findClipState (song, added[1])));
+    CHECK (phazite::getClipRange (song, added[1]).getStart().inBeats() == doctest::Approx (4.0));
 
-    auto* midiTrack = added[1]->getTrack();
-    const auto tracks = phazite::getPlaylistTracks (edit);
-    CHECK (midiTrack->getName() == juce::String ("Chords"));
-    CHECK (tracks.indexOf (midiTrack) == tracks.indexOf (target) + 1);
-    CHECK (phazite::getSong (edit).getUndoManager().getUndoDescription() == juce::String ("Add Files"));
+    const auto midiTrack = phazite::getClipTrack (song, added[1]);
+    const auto tracks = phazite::getTrackIDs (song);
+    const auto indexOf = [&tracks] (phazite::TrackID track) { return std::find (tracks.begin(), tracks.end(), track) - tracks.begin(); };
+    CHECK (phazite::getTrackName (song, midiTrack) == juce::String ("Chords"));
+    CHECK (indexOf (midiTrack) == indexOf (target) + 1);
+    CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Add Files"));
 
     // MIDI doesn't go on a track with audio on it.
-    const auto more = phazite::importFiles (edit, { chords.getFullPathName() }, target, beats (0.0));
+    const auto more = phazite::importFiles (song, { chords.getFullPathName() }, target, beats (0.0));
     REQUIRE (more.size() == 1);
-    CHECK (more[0]->getTrack() != target);
-    CHECK (phazite::getSong (edit).getUndoManager().getUndoDescription() == juce::String ("Add File"));
+    CHECK (phazite::getClipTrack (song, more[0]) != target);
+    CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Add File"));
 
     phazite::undo (edit);
     CHECK (phazite::getPlaylistTracks (edit).size() == 2);

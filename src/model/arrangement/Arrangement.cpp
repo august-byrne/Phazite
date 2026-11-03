@@ -2,6 +2,7 @@
 #include "internal/Arrangement.h"
 #include "internal/Clips.h"
 #include "internal/Sections.h"
+#include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/chords/internal/Chords.h"
@@ -12,88 +13,80 @@ namespace phazite
 namespace
 {
     // Positions this close count as the same: rounding between beats and seconds leaves differences this small.
-    const auto tinyBeats = te::BeatDuration::fromBeats (1.0e-6);
-    const auto tinyTime = te::TimeDuration::fromSeconds (1.0e-6);
+    const auto tinyBeats = BeatDuration::fromBeats (1.0e-6);
 
-    void splitContentAt (te::Edit& edit, te::BeatPosition beat)
+    // Every clip of the song, track by track.
+    std::vector<ClipID> getAllClips (const Song& song)
     {
-        for (auto* track : te::getClipTracks (edit))
-            splitClips (juce::Array<te::Clip*> (track->getClips()), beat); // a copy: splitting adds clips to the list
+        std::vector<ClipID> clips;
+
+        for (const auto& clipState : getClipStates (song))
+            clips.push_back (getClipID (clipState));
+
+        return clips;
+    }
+
+    void splitContentAt (Song& song, BeatPosition beat)
+    {
+        splitClips (song, getAllClips (song), beat);
     }
 
     // Moves a clip of the song later on its track (earlier if negative), playing what it did.
-    void moveLater (te::Clip& clip, BeatDuration beats)
+    void moveLater (Song& song, ClipID clip, BeatDuration beats)
     {
-        if (auto clipState = findClipState (clip); clipState.isValid())
-            moveClipState (clip.edit, clipState, getClipRange (clipState).getStart() + beats);
+        if (auto clipState = findClipState (song, clip); clipState.isValid())
+            moveClipState (song, clipState, getClipRange (clipState).getStart() + beats);
     }
 } // namespace
 
 //==============================================================================
-void insertTime (te::Edit& edit, te::BeatPosition at, te::BeatDuration length)
+void insertTime (Song& song, BeatPosition at, BeatDuration length)
 {
-    if (length <= te::BeatDuration())
+    if (length <= BeatDuration())
         return;
 
-    const auto time = edit.tempoSequence.toTime (at);
+    // Split what crosses the time, then move every clip from it on: clips move before the tempo changes after them, since
+    // they follow the beat.
+    splitContentAt (song, at);
 
-    // As Tracktion's insertSpaceIntoEdit() does: in an Edit counted in bars and beats, clips move before the
-    // tempo changes after them, since they follow the beat.
-    const auto moveTempo = [&edit, at, length] { insertTempoMapTime (getSong (edit), fromTracktion (at), fromTracktion (length)); };
+    for (const auto clip : getAllClips (song))
+        if (getClipRange (findClipState (song, clip)).getStart() >= at - tinyBeats)
+            moveLater (song, clip, length);
 
-    const auto tempoFirst = ! edit.getTimecodeFormat().isBarsBeats();
-
-    if (tempoFirst)
-        moveTempo();
-
-    // Split what crosses the time, then move every clip from it on. (Tracktion's ClipTrack::insertSpace()
-    // stops at the first clip before the time, which misses clips when a split has left the list unsorted.)
-    splitContentAt (edit, at);
-
-    for (auto* track : te::getClipTracks (edit))
-        for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
-            if (clip->getPosition().getStart() >= time - tinyTime)
-                moveLater (*clip, fromTracktion (length));
-
-    insertAutomationTime (edit, fromTracktion (at), fromTracktion (length));
-    insertSectionTime (getSong (edit), fromTracktion (at), fromTracktion (length));
-    insertLaneTime (getSong (edit), fromTracktion (at), fromTracktion (length));
-
-    if (! tempoFirst)
-        moveTempo();
+    insertAutomationTime (song, at, length);
+    insertSectionTime (song, at, length);
+    insertLaneTime (song, at, length);
+    insertTempoMapTime (song, at, length);
 }
 
-void removeTime (te::Edit& edit, te::BeatRange range)
+void removeTime (Song& song, BeatRange range)
 {
-    const auto time = edit.tempoSequence.toTime (range);
-    const auto length = time.getLength();
-
-    if (length <= tinyTime)
+    if (range.getLength() <= tinyBeats)
         return;
 
-    for (auto* track : te::getClipTracks (edit))
+    for (const auto track : getTrackIDs (song))
     {
-        clearClipsIn (*track, range); // trims and splits the clips that reach into it
+        clearClipsIn (song, track, range); // trims and splits the clips that reach into it
 
         // Tiny pieces that rounding leaves behind go too, as Tracktion's deleteRegionOfTracks() does.
-        for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
-            if (clip->getPosition().getLength() < te::TimeDuration::fromSeconds (0.0001))
-                deleteClips ({ clip }, false);
+        for (const auto clip : getClips (song, track))
+            if (toSeconds (song, getClipRange (song, clip).getEnd()) - toSeconds (song, getClipRange (song, clip).getStart()) < 0.0001)
+                deleteClips (song, { clip }, false);
 
-        for (auto* clip : juce::Array<te::Clip*> (track->getClips()))
-            if (clip->getPosition().getStart() > time.getCentre())
-                moveLater (*clip, BeatDuration::fromBeats (-range.getLength().inBeats()));
+        for (const auto clip : getClips (song, track))
+            if (getClipRange (song, clip).getStart() > range.getCentre())
+                moveLater (song, clip, BeatDuration::fromBeats (-range.getLength().inBeats()));
     }
 
-    removeAutomationTime (edit, fromTracktion (range));
-    removeSectionTime (getSong (edit), fromTracktion (range));
-    removeLaneTime (getSong (edit), fromTracktion (range));
+    removeAutomationTime (song, range);
+    removeSectionTime (song, range);
+    removeLaneTime (song, range);
 
     // Tempo changes last, as Tracktion's deleteRegionOfTracks() does.
-    removeTempoMapTime (getSong (edit), fromTracktion (range));
+    removeTempoMapTime (song, range);
 }
 
-void moveTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination)
+void moveTime (Song& song, BeatRange range, BeatPosition destination)
 {
     const auto start = range.getStart(), end = range.getEnd();
     const auto length = range.getLength();
@@ -110,50 +103,49 @@ void moveTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
     const auto changedStart = later ? start : destination;
     const auto changedEnd = later ? destination : end;
     const auto rangeShift = later ? destination - end : destination - start;
-    const auto otherShift = later ? -length : length;
+    const auto otherShift = later ? BeatDuration() - length : length;
 
-    const auto isInChanged = [=] (te::BeatPosition beat) { return beat >= changedStart - tinyBeats && beat < changedEnd - tinyBeats; };
-    const auto isInRange = [=] (te::BeatPosition beat) { return beat >= start - tinyBeats && beat < end - tinyBeats; };
-    const auto newPosition = [=] (te::BeatPosition beat) { return beat + (isInRange (beat) ? rangeShift : otherShift); };
+    const auto isInChanged = [=] (BeatPosition beat) { return beat >= changedStart - tinyBeats && beat < changedEnd - tinyBeats; };
+    const auto isInRange = [=] (BeatPosition beat) { return beat >= start - tinyBeats && beat < end - tinyBeats; };
+    const auto newPosition = [=] (BeatPosition beat) { return beat + (isInRange (beat) ? rangeShift : otherShift); };
 
     // Each clip then lies wholly in the range, between it and the destination, or outside both.
     for (const auto beat : { start, end, destination })
-        splitContentAt (edit, beat);
+        splitContentAt (song, beat);
 
     // Where everything goes is worked out before anything moves, so nothing moves twice.
     struct ClipMove
     {
-        te::Clip::Ptr clip;
-        te::BeatPosition start;
+        ClipID clip;
+        TrackID track;
+        BeatPosition start;
     };
 
     std::vector<ClipMove> moves;
 
-    for (auto* track : te::getClipTracks (edit))
-        for (auto* clip : track->getClips())
-            if (const auto beat = clip->getStartBeat(); isInChanged (beat))
-                moves.push_back ({ clip, newPosition (beat) });
+    for (const auto& clipState : getClipStates (song))
+        if (const auto beat = getClipRange (clipState).getStart(); isInChanged (beat))
+            moves.push_back ({ getClipID (clipState), getTrackID (clipState.getParent()), newPosition (beat) });
 
     // Automation keeps its shape where the edges are; the points in the stretch are put back where their beats go.
-    addAutomationEdges (edit, { fromTracktion (start), fromTracktion (end), fromTracktion (destination) });
-    const BeatRange changed (fromTracktion (changedStart), fromTracktion (changedEnd));
-    auto points = getAutomationPointsIn (edit, changed);
+    addAutomationEdges (song, { start, end, destination });
+    const BeatRange changed (changedStart, changedEnd);
+    auto points = getAutomationPointsIn (song, changed);
 
-    for (auto& move : moves)
-        if (auto* track = move.clip->getClipTrack())
-            moveClip (*move.clip, move.start, *track);
+    for (const auto& move : moves)
+        moveClip (song, move.clip, move.start, move.track);
 
     for (auto& [parameter, point] : points)
-        point.beat = fromTracktion (newPosition (toTracktion (point.beat)));
+        point.beat = newPosition (point.beat);
 
-    removeAutomationPointsIn (edit, changed);
-    addAutomationPoints (edit, points);
+    removeAutomationPointsIn (song, changed);
+    addAutomationPoints (song, points);
 
-    moveSectionTime (getSong (edit), fromTracktion (range), fromTracktion (destination));
-    moveLaneTime (getSong (edit), fromTracktion (range), fromTracktion (destination));
+    moveSectionTime (song, range, destination);
+    moveLaneTime (song, range, destination);
 }
 
-void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination, bool asAliases)
+void copyTime (Song& song, BeatRange range, BeatPosition destination, bool asAliases)
 {
     const auto start = range.getStart(), end = range.getEnd();
     const auto length = range.getLength();
@@ -161,46 +153,40 @@ void copyTime (te::Edit& edit, te::BeatRange range, te::BeatPosition destination
     if (length <= tinyBeats || (destination > start + tinyBeats && destination < end - tinyBeats))
         return;
 
-    splitContentAt (edit, start);
-    splitContentAt (edit, end);
+    splitContentAt (song, start);
+    splitContentAt (song, end);
 
     // What lies in the range, by how far into it each thing starts.
     struct Source
     {
-        te::Clip::Ptr clip;
-        te::BeatDuration offset;
+        ClipID clip;
+        TrackID track;
+        BeatDuration offset;
     };
 
     std::vector<Source> sources;
 
-    for (auto* track : te::getClipTracks (edit))
-        for (auto* clip : track->getClips())
-            if (clip->getStartBeat() >= start - tinyBeats && clip->getEndBeat() <= end + tinyBeats)
-                sources.push_back ({ clip, clip->getStartBeat() - start });
+    for (const auto& clipState : getClipStates (song))
+        if (const auto clipRange = getClipRange (song, clipState);
+            clipRange.getStart() >= start - tinyBeats && clipRange.getEnd() <= end + tinyBeats)
+            sources.push_back ({ getClipID (clipState), getTrackID (clipState.getParent()), clipRange.getStart() - start });
 
-    addAutomationEdges (edit, { fromTracktion (start), fromTracktion (end), fromTracktion (destination) });
-    auto points = getAutomationPointsIn (edit, fromTracktion (range));
-    const auto sections = copySections (getSong (edit), fromTracktion (range));
-    const auto chords = copyLaneChords (getSong (edit), fromTracktion (range));
+    addAutomationEdges (song, { start, end, destination });
+    auto points = getAutomationPointsIn (song, range);
+    const auto sections = copySections (song, range);
+    const auto chords = copyLaneChords (song, range);
 
-    insertTime (edit, destination, length);
-    pasteSections (getSong (edit), sections, fromTracktion (destination));
-    pasteLaneChords (getSong (edit), chords, fromTracktion (destination));
+    insertTime (song, destination, length);
+    pasteSections (song, sections, destination);
+    pasteLaneChords (song, chords, destination);
 
     for (const auto& source : sources)
-    {
-        auto* track = source.clip->getClipTrack();
-
-        if (track == nullptr)
-            continue;
-
-        if (const auto copies = copyClips ({ source.clip.get() }, asAliases); ! copies.isEmpty())
-            moveClip (*copies.getFirst(), destination + source.offset, *track);
-    }
+        if (const auto copies = copyClips (song, { source.clip }, asAliases); ! copies.empty())
+            moveClip (song, copies.front(), destination + source.offset, source.track);
 
     for (auto& [parameter, point] : points)
-        point.beat = fromTracktion (destination) + (point.beat - fromTracktion (start));
+        point.beat = destination + (point.beat - start);
 
-    addAutomationPoints (edit, points);
+    addAutomationPoints (song, points);
 }
 } // namespace phazite

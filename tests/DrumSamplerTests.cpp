@@ -345,15 +345,17 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
 
     {
         auto edit = phazite::createSongEdit (engine, projectFile);
+        auto& song = phazite::getSong (*edit);
         auto* track = te::getAudioTracks (*edit)[0];
+        const auto trackID = phazite::getTrackID (*track);
         auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
         REQUIRE (phazite::setInstrument (*track, plugin) != nullptr);
         REQUIRE (phazite::isDrumSampler (*plugin));
         CHECK (phazite::getPadName (*plugin, 0) == juce::String ("Kick"));
 
         // The track's drum rows are the pads, named after what they play.
-        CHECK (phazite::isDrumTrack (*track));
-        auto rows = phazite::getSamplerSounds (*track);
+        CHECK (phazite::isDrumTrack (song, trackID));
+        auto rows = phazite::getSamplerSounds (song, trackID);
         REQUIRE (rows.has_value());
         REQUIRE (rows->size() == 16);
         CHECK ((*rows)[0].note == 36);
@@ -369,7 +371,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
         CHECK (plugin->state[phazite::schema::getPadSoundFile (0)].toString() == juce::String ("Audio/My Kick.wav"));
         CHECK (project.folder.getChildFile ("Audio/My Kick.wav").existsAsFile());
         CHECK (phazite::getPadName (*plugin, 0) == juce::String ("My Kick"));
-        CHECK (phazite::getSamplerSounds (*track)->front().name == juce::String ("My Kick"));
+        CHECK (phazite::getSamplerSounds (song, trackID)->front().name == juce::String ("My Kick"));
         auto& sampler = dynamic_cast<phazite::DrumSamplerPlugin&> (*plugin).getSampler();
         CHECK (sampler.hasOwnSound (0));
 
@@ -381,7 +383,7 @@ TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project
 
         // Saved as a project saves it: the song alone.
         phazite::storeDeviceStates (*edit);
-        REQUIRE (phazite::getSong (*edit).getState().createXml()->writeTo (projectFile));
+        REQUIRE (song.getState().createXml()->writeTo (projectFile));
     }
 
     // Opened again from the file, the pad plays its file.

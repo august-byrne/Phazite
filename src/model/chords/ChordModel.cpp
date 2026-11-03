@@ -2,6 +2,7 @@
 #include "ChordModel.h"
 #include "Progressions.h"
 #include "internal/Chords.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -16,10 +17,11 @@ namespace
 {
     constexpr double tiny = 1.0e-6;
 
-    te::MidiClip* findMidiClip (const ProjectContext& context, ClipID id)
+    // The song a MIDI clip is in, or nullptr.
+    Song* findSongOfMidiClip (const ProjectContext& context, ClipID id)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
+        auto* song = findSong (context);
+        return song != nullptr && isMidiState (findClipState (*song, id)) ? song : nullptr;
     }
 
     LaneChord toLaneChord (const PlacedChord& chord)
@@ -32,10 +34,10 @@ namespace
     template <typename Change>
     void editLane (ProjectContext& context, const char* stepName, Change&& change)
     {
-        if (auto* edit = getEdit (context))
+        if (auto* song = findSong (context))
         {
-            const UndoStep step (*edit, stepName);
-            changeLane (*edit, [&] { change (*edit); });
+            const UndoStep step (*song, stepName);
+            changeLane (*song, [&] { change (*song); });
         }
     }
 
@@ -62,8 +64,8 @@ std::vector<LaneChord> getLaneChords (const ProjectContext& context)
 {
     std::vector<LaneChord> chords;
 
-    if (auto* edit = getEdit (context))
-        for (const auto& chord : getLaneChords (getSong (*edit)))
+    if (auto* song = findSong (context))
+        for (const auto& chord : getLaneChords (*song))
             chords.push_back (toLaneChord (chord));
 
     return chords;
@@ -80,16 +82,16 @@ std::optional<LaneChord> getLaneChordAt (const ProjectContext& context, BeatPosi
 
 bool hasLaneChords (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr && ! getLaneChords (getSong (*edit)).empty();
+    auto* song = findSong (context);
+    return song != nullptr && ! getLaneChords (*song).empty();
 }
 
 std::vector<LaneKeyChange> getLaneKeyChanges (const ProjectContext& context)
 {
     std::vector<LaneKeyChange> changes;
 
-    if (auto* edit = getEdit (context))
-        for (const auto& key : getLaneKeys (getSong (*edit)))
+    if (auto* song = findSong (context))
+        for (const auto& key : getLaneKeys (*song))
             changes.push_back ({ key.start, key.key });
     else
         changes.push_back ({});
@@ -99,8 +101,8 @@ std::vector<LaneKeyChange> getLaneKeyChanges (const ProjectContext& context)
 
 Key getLaneKeyAt (const ProjectContext& context, BeatPosition where)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? getLaneKeyAt (getSong (*edit), where) : Key {};
+    auto* song = findSong (context);
+    return song != nullptr ? getLaneKeyAt (*song, where) : Key {};
 }
 
 //==============================================================================
@@ -109,7 +111,7 @@ void applyProgression (ProjectContext& context, const Progression& progression, 
     if (range.isEmpty())
         return;
 
-    editLane (context, "Apply Chord Progression", [&] (te::Edit& edit) { putProgression (getSong (edit), progression, range); });
+    editLane (context, "Apply Chord Progression", [&] (Song& song) { putProgression (song, progression, range); });
 }
 
 void addLaneChord (ProjectContext& context, BeatRange range, const Numeral& numeral)
@@ -117,37 +119,37 @@ void addLaneChord (ProjectContext& context, BeatRange range, const Numeral& nume
     if (range.isEmpty())
         return;
 
-    editLane (context, "Add Chord", [&] (te::Edit& edit) { putLaneChord (getSong (edit), range, numeral); });
+    editLane (context, "Add Chord", [&] (Song& song) { putLaneChord (song, range, numeral); });
 }
 
 void changeLaneChord (ProjectContext& context, BeatPosition chordStart, const Numeral& numeral)
 {
-    if (auto* edit = getEdit (context); edit != nullptr && hasLaneChordAt (getSong (*edit), chordStart))
-        editLane (context, "Change Chord", [&] (te::Edit& e) { setLaneChordNumeral (getSong (e), chordStart, numeral); });
+    if (auto* song = findSong (context); song != nullptr && hasLaneChordAt (*song, chordStart))
+        editLane (context, "Change Chord", [&] (Song& song) { setLaneChordNumeral (song, chordStart, numeral); });
 }
 
 void deleteLaneChord (ProjectContext& context, BeatPosition chordStart)
 {
-    if (auto* edit = getEdit (context); edit != nullptr && hasLaneChordAt (getSong (*edit), chordStart))
-        editLane (context, "Delete Chord", [&] (te::Edit& e) { removeLaneChord (getSong (e), chordStart); });
+    if (auto* song = findSong (context); song != nullptr && hasLaneChordAt (*song, chordStart))
+        editLane (context, "Delete Chord", [&] (Song& song) { removeLaneChord (song, chordStart); });
 }
 
 void setLaneChordEnd (ProjectContext& context, BeatPosition chordStart, BeatPosition end)
 {
-    if (auto* edit = getEdit (context);
-        edit != nullptr && hasLaneChordAt (getSong (*edit), chordStart) && end > chordStart + BeatDuration::fromBeats (tiny))
-        editLane (context, "Change Chord Length", [&] (te::Edit& e) { setLaneChordEnd (getSong (e), chordStart, end); });
+    if (auto* song = findSong (context);
+        song != nullptr && hasLaneChordAt (*song, chordStart) && end > chordStart + BeatDuration::fromBeats (tiny))
+        editLane (context, "Change Chord Length", [&] (Song& song) { setLaneChordEnd (song, chordStart, end); });
 }
 
 void setLaneKey (ProjectContext& context, BeatPosition from, const Key& key)
 {
-    editLane (context, "Change Key", [&] (te::Edit& edit) { setLaneKey (getSong (edit), from, key); });
+    editLane (context, "Change Key", [&] (Song& song) { setLaneKey (song, from, key); });
 }
 
 void removeLaneKeyChange (ProjectContext& context, BeatPosition at)
 {
     if (at > BeatPosition::fromBeats (1.0e-4))
-        editLane (context, "Remove Key Change", [&] (te::Edit& edit) { removeLaneKeyChange (getSong (edit), at); });
+        editLane (context, "Remove Key Change", [&] (Song& song) { removeLaneKeyChange (song, at); });
 }
 
 std::vector<Numeral> getChordChoices (const ProjectContext& context, BeatPosition where)
@@ -178,7 +180,7 @@ std::vector<Numeral> getChordChoices (const ProjectContext& context, BeatPositio
 //==============================================================================
 std::optional<BeatRange> getSelectedSectionsRange (const ProjectContext& context)
 {
-    if (getEdit (context) == nullptr)
+    if (findSong (context) == nullptr)
         return std::nullopt;
 
     const auto sections = getSelectedSections (getSelection (context));
@@ -193,7 +195,7 @@ std::optional<BeatRange> getSelectedTimeRange (const ProjectContext& context)
 {
     const auto& range = context.getSongRange();
 
-    if (getEdit (context) == nullptr || range.isEmpty())
+    if (findSong (context) == nullptr || range.isEmpty())
         return std::nullopt;
 
     return range.getRange();
@@ -201,13 +203,12 @@ std::optional<BeatRange> getSelectedTimeRange (const ProjectContext& context)
 
 std::optional<BeatRange> getWholeSongRange (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return std::nullopt;
 
-    const auto end =
-        std::max (fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength()))), getSectionsEnd (getSong (*edit)));
+    const auto end = std::max (getClipsEnd (*song), getSectionsEnd (*song));
 
     if (end <= BeatPosition::fromBeats (tiny))
         return std::nullopt;
@@ -233,12 +234,12 @@ std::optional<BeatRange> getChordPartRange (const ProjectContext& context)
 
 BeatDuration getProgressionLength (const ProjectContext& context, const Progression& progression, BeatPosition from)
 {
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
     auto beat = from;
 
     for (const auto& chord : progression.chords)
     {
-        const auto beatsPerBar = edit != nullptr ? getBars (getSong (*edit)).getBeatsPerBar (beat) : 4;
+        const auto beatsPerBar = song != nullptr ? getBars (*song).getBeatsPerBar (beat) : 4;
         beat += BeatDuration::fromBeats (chord.bars * std::max (1, beatsPerBar));
     }
 
@@ -248,15 +249,15 @@ BeatDuration getProgressionLength (const ProjectContext& context, const Progress
 //==============================================================================
 std::optional<ClipID> makeChordPart (ProjectContext& context, PartStyle style, BeatRange range)
 {
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (edit == nullptr || range.isEmpty())
+    if (song == nullptr || range.isEmpty())
         return std::nullopt;
 
-    const UndoStep step (*edit, getMakePartName (getPartKind (style)));
+    const UndoStep step (*song, getMakePartName (getPartKind (style)));
 
-    if (auto* clip = addChordPart (*edit, style, range, &getSelection (context)))
-        return getClipID (*clip);
+    if (const auto clip = addChordPart (*song, style, range, &getSelection (context)); clip.isValid())
+        return clip;
 
     return std::nullopt;
 }
@@ -299,25 +300,25 @@ juce::String getMakePartName (PartKind kind)
 
 std::optional<PartStyle> getChordPart (const ProjectContext& context, ClipID id)
 {
-    auto* clip = findMidiClip (context, id);
-    return clip != nullptr ? getChordPartStyle (*clip) : std::nullopt;
+    auto* song = findSongOfMidiClip (context, id);
+    return song != nullptr ? getChordPartStyle (*song, id) : std::nullopt;
 }
 
 bool followsChords (const ProjectContext& context, ClipID id)
 {
-    auto* clip = findMidiClip (context, id);
-    return clip != nullptr && followsChords (*clip);
+    auto* song = findSongOfMidiClip (context, id);
+    return song != nullptr && followsChords (*song, id);
 }
 
 void setFollowsChords (ProjectContext& context, ClipID id, bool follow)
 {
-    auto* clip = findMidiClip (context, id);
+    auto* song = findSongOfMidiClip (context, id);
 
-    if (clip == nullptr || ! getChordPartStyle (*clip).has_value() || followsChords (*clip) == follow)
+    if (song == nullptr || ! getChordPartStyle (*song, id).has_value() || followsChords (*song, id) == follow)
         return;
 
-    const UndoStep step (clip->edit, follow ? "Follow the Chords" : "Stop Following the Chords");
-    setChordPart (*clip, follow ? getChordPartStyle (*clip) : std::nullopt);
+    const UndoStep step (*song, follow ? "Follow the Chords" : "Stop Following the Chords");
+    setChordPart (*song, id, follow ? getChordPartStyle (*song, id) : std::nullopt);
 }
 
 //==============================================================================
@@ -327,12 +328,12 @@ bool writeProgressionPreview (const ProjectContext& context, const Progression& 
     std::vector<PlacedChord> chords;
     const auto key = getLaneKeyAt (context, from);
     const auto progressionKey = getKeyForProgression (key, progression.scale);
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
     auto beat = BeatPosition();
 
     for (const auto& chord : progression.chords)
     {
-        const auto beatsPerBar = edit != nullptr ? getBars (getSong (*edit)).getBeatsPerBar (from + (beat - BeatPosition())) : 4;
+        const auto beatsPerBar = song != nullptr ? getBars (*song).getBeatsPerBar (from + (beat - BeatPosition())) : 4;
         const auto length = BeatDuration::fromBeats (chord.bars * std::max (1, beatsPerBar));
         chords.push_back ({ { beat, length }, chord.numeral, progressionKey });
         beat += length;

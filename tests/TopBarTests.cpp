@@ -60,15 +60,17 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
 
     // A loop that follows the tempo, a sound that doesn't, and a pattern on a track of its own.
     phazite::test::TemporaryFolder temp;
-    auto& track = *te::getAudioTracks (*screen.edit)[0];
-    REQUIRE (phazite::importFile (track, phazite::test::writeSound (temp.folder.getChildFile ("Loop 120 BPM.wav"), 4.0), te::BeatPosition())
-             != nullptr);
-    REQUIRE (phazite::importFile (track, phazite::test::writeSound (temp.folder.getChildFile ("One-second hit.wav"), 1.0),
-                                  te::BeatPosition::fromBeats (10.0))
-             != nullptr);
-    auto* other = phazite::insertTrack (*screen.edit, &track, nullptr);
-    REQUIRE (other != nullptr);
-    REQUIRE (phazite::insertMidiClip (*other, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, nullptr) != nullptr);
+    auto& song = phazite::getSong (*screen.edit);
+    const auto track = phazite::getTrackID (*te::getAudioTracks (*screen.edit)[0]);
+    REQUIRE (phazite::importFile (song, track, phazite::test::writeSound (temp.folder.getChildFile ("Loop 120 BPM.wav"), 4.0),
+                                  phazite::BeatPosition())
+                 .isValid());
+    REQUIRE (phazite::importFile (song, track, phazite::test::writeSound (temp.folder.getChildFile ("One-second hit.wav"), 1.0),
+                                  phazite::BeatPosition::fromBeats (10.0))
+                 .isValid());
+    const auto other = phazite::insertTrack (song, track, nullptr);
+    REQUIRE (other.isValid());
+    REQUIRE (phazite::insertMidiClip (song, other, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) }, nullptr).isValid());
     phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
 
     // Nothing shows until the tempo is dragged.
@@ -134,7 +136,7 @@ TEST_CASE ("The top bar's tempo field shows the song's tempo, and a drag on it i
     CHECK_FALSE (phazite::getSong (*screen.edit).getUndoManager().canUndo());
 
     // A change made elsewhere shows there.
-    phazite::setTempo (*screen.edit, 95.5);
+    phazite::setTempo (phazite::getSong (*screen.edit), 95.5);
     CHECK (phazite::test::dispatchMessagesUntil ([&field] { return juce::approximatelyEqual (field.getValue(), 95.5); }));
 }
 

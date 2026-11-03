@@ -309,7 +309,7 @@ namespace
                 stopAndReturn (edit);
 
             file.getParentDirectory().createDirectory();
-            renderMissingClipAudio (edit); // the engine plays a clip whose render isn't there silent
+            renderMissingClipAudio (getSong (edit)); // the engine plays a clip whose render isn't there silent
 
             // Played into floats, written into the file, and measured on the render thread before the message thread hears.
             const OfflineRender::Job job { floats.getFile(), getExportRange (edit).getEnd().inSeconds(), tailSeconds, std::nullopt };
@@ -388,7 +388,7 @@ namespace
                 return;
             }
 
-            renderMissingClipAudio (edit); // the engine plays a clip whose render isn't there silent
+            renderMissingClipAudio (getSong (edit)); // the engine plays a clip whose render isn't there silent
             const auto tracks = getStemTracks (edit);
             const auto end = getExportRange (edit).getEnd().inSeconds();
             std::vector<OfflineRender::Job> jobs;

@@ -45,6 +45,9 @@ namespace
     void addPhaziteParts (te::Edit& edit)
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
+        // Where its files are, as the Edit finds them: its file, and its temporary folder (the project's Cache folder).
+        getSong (edit).setFile (edit.editFileRetriever != nullptr ? edit.editFileRetriever() : juce::File());
+        getSong (edit).setCacheFolder (edit.getTempDirectory (true));
         getSong (edit).setMirror ([&edit] (Song::Part part, std::uint64_t id) { mirror::reconcile (edit, part, id); });
         getSong (edit).setDeviceStateStore (
             [&edit] (std::uint64_t id)
@@ -502,6 +505,8 @@ void Project::setFile (const juce::File& newFile)
     edit->editFileRetriever = [newFile] { return newFile; };
     edit->setTempDirectory (getCacheFolder()); // the copy of the old one
     edit->sendSourceFileUpdate();
+    getSong (*edit).setFile (newFile);
+    getSong (*edit).setCacheFolder (getCacheFolder());
 }
 
 void Project::backUpProjectFile()

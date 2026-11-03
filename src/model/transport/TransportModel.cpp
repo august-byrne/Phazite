@@ -65,8 +65,8 @@ TempoHandle getTempoHandle (ProjectContext& context)
 
 TempoStretch getTempoStretch (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? getTempoStretch (*edit) : TempoStretch {};
+    auto* song = findSong (context);
+    return song != nullptr ? getTempoStretch (*song) : TempoStretch {};
 }
 
 TempoHandle::TempoHandle() = default;
@@ -116,7 +116,7 @@ void TempoHandle::beginGesture()
 void TempoHandle::setValue (double bpm)
 {
     if (auto* edit = impl != nullptr ? impl->edit.get() : nullptr)
-        setTempo (*edit, bpm); // joins the drag's step, if one is in progress
+        setTempo (getSong (*edit), bpm); // joins the drag's step, if one is in progress
 }
 
 void TempoHandle::endGesture()

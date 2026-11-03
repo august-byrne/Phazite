@@ -106,16 +106,16 @@ std::optional<int> findFixedGridLevel (const juce::String& savedStep)
     return std::nullopt;
 }
 
-GridSettings loadGridSettings (const te::Edit& edit, GridOwner owner)
+GridSettings loadGridSettings (const Song& song, GridOwner owner)
 {
-    // Reading leaves the project as it is: a project that doesn't have the state yet reads the defaults.
-    const auto state = findPhaziteState (edit);
+    // Reading leaves the song as it is: a song that doesn't have the state yet reads the defaults.
+    const auto state = song.getState();
     return GridSettings::load (owner == GridOwner::pianoRoll ? state.getChildWithName (schema::PIANOROLL) : state);
 }
 
-void saveGridSettings (te::Edit& edit, GridOwner owner, const GridSettings& grid)
+void saveGridSettings (Song& song, GridOwner owner, const GridSettings& grid)
 {
-    auto state = getSong (edit).getState();
+    auto state = song.getState();
 
     if (owner == GridOwner::pianoRoll)
         state = state.getOrCreateChildWithName (schema::PIANOROLL, nullptr);

@@ -34,9 +34,9 @@ struct EditorScreen
         b = te::getAudioTracks (*edit)[1];
         setEdit (context, edit.get());
 
-        auto* notes = phazite::insertMidiClip (*a, { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
-        REQUIRE (notes != nullptr);
-        midi = phazite::getClipID (*notes);
+        midi = phazite::insertMidiClip (phazite::getSong (*edit), phazite::getTrackID (*a),
+                                        { BeatPosition::fromBeats (4.0), BeatPosition::fromBeats (8.0) }, nullptr);
+        REQUIRE (midi.isValid());
 
         const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Vocal.wav"), 4.0);
         const auto imported =

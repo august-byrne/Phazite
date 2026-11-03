@@ -12,6 +12,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
+#include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/input/KeyDispatcher.h"
@@ -256,11 +257,12 @@ TEST_CASE ("The inspector shows whether a part made from the chords follows them
         CHECK (toggle->getToggleState());
 
         // A note edited by hand: it stops following.
-        auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, phazite::toTracktion (*part)));
-        REQUIRE (clip != nullptr);
+        auto& song = phazite::getSong (*edit);
+        const auto notes = phazite::getClipNotes (song, *part);
+        REQUIRE_FALSE (notes.empty());
         {
-            const phazite::UndoStep step (*edit, "Change Velocity");
-            clip->getSequence().getNotes().getFirst()->setVelocity (50, &phazite::getSong (*edit).getUndoManager());
+            const phazite::UndoStep step (song, "Change Velocity");
+            phazite::setNoteVelocities (song, { notes.front().getRef() }, 50);
         }
         phazite::test::dispatchPendingMessages();
         CHECK_FALSE (toggle->getToggleState());

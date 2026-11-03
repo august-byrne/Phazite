@@ -6,6 +6,7 @@
 
 #include "model/arrangement/PlaylistValues.h"
 #include "model/arrangement/TrackColours.h"
+#include "model/base/Beats.h"
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"

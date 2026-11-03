@@ -325,7 +325,7 @@ void forgetMissingFrozenFiles (te::Edit& edit)
 void purgeCache (te::Edit& edit)
 {
     te::TemporaryFileManager::purgeOrphanFreezeAndProxyFiles (edit);
-    purgeClipRenders (edit);
+    purgeClipRenders (getSong (edit));
 
     // Tracktion leaves the frozen files of tracks that are gone.
     const auto prefix = juce::String ("trackFreeze_0_");
@@ -455,7 +455,7 @@ namespace
                 stopAndReturn (edit);
 
             floats.getParentDirectory().createDirectory();
-            renderMissingClipAudio (edit); // the engine plays a clip whose render isn't there silent
+            renderMissingClipAudio (getSong (edit)); // the engine plays a clip whose render isn't there silent
 
             const auto format = getRenderFormat (edit);
             const OfflineRender::Job job { floats, track.getLengthIncludingInputTracks().inSeconds(), tailSeconds,
@@ -613,13 +613,16 @@ namespace
                 if (auto* copy = addSend (*bounced, send->getBusNumber(), isPreFader (*send)))
                     setSendLevel (*copy, getSendLevel (*send));
 
-            if (placeClipState (edit, makeAudioClipState (edit, name, target, BeatPosition(), { 0.0, length.inSeconds() }), *bounced)
-                == nullptr)
+            auto& song = getSong (edit);
+
+            if (! placeClipState (song, makeAudioClipState (song, name, target, BeatPosition(), { 0.0, length.inSeconds() }),
+                                  getTrackID (*bounced))
+                      .isValid())
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");
 
             setTrackMuted (track, true, &getSong (edit).getUndoManager());
             setCollapsed (track, true);
-            getSelection (context).selectOnly (bounced);
+            getSelection (context).selectOnly (getTrackID (*bounced));
             return juce::Result::ok();
         }
     };

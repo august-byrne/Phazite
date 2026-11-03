@@ -18,9 +18,11 @@
 
 namespace
 {
-te::BeatPosition beats (double b)
+using phazite::test::lasting;
+
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
 // Two tracks, A and B: A holds a MIDI clip at beats 0-4 with two notes, and another clip at 8-12; B holds a clip at
@@ -29,68 +31,62 @@ struct Song
 {
     Song()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        phazite::setTrackName (*a, "A");
-        phazite::setTrackName (*b, "B");
+        const auto tracks = phazite::ensureTracks (song, 2);
+        a = tracks[0];
+        b = tracks[1];
+        phazite::setTrackName (song, a, "A");
+        phazite::setTrackName (song, b, "B");
         selection.setEdit (edit.get());
 
-        first = phazite::insertMidiClip (*a, { beats (0.0), beats (4.0) }, nullptr);
-        second = phazite::insertMidiClip (*a, { beats (8.0), beats (12.0) }, nullptr);
-        REQUIRE (first != nullptr);
-        REQUIRE (second != nullptr);
-        REQUIRE (phazite::insertMidiClip (*b, { beats (20.0), beats (24.0) }, nullptr) != nullptr);
-        REQUIRE (phazite::addNote (*first, 60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
-        REQUIRE (phazite::addNote (*first, 64, beats (1.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
-        selection.setNoteClips ({ phazite::getClipID (*first) });
+        first = phazite::insertMidiClip (song, a, { beats (0.0), beats (4.0) }, nullptr);
+        second = phazite::insertMidiClip (song, a, { beats (8.0), beats (12.0) }, nullptr);
+        REQUIRE (first.isValid());
+        REQUIRE (second.isValid());
+        REQUIRE (phazite::insertMidiClip (song, b, { beats (20.0), beats (24.0) }, nullptr).isValid());
+        REQUIRE (phazite::addNote (song, first, 60, beats (0.0), lasting (1.0), 100).isValid());
+        REQUIRE (phazite::addNote (song, first, 64, beats (1.0), lasting (1.0), 100).isValid());
+        selection.setNoteClips ({ first });
 
-        intro =
-            phazite::insertSection (phazite::getSong (*edit), {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (16.0) });
-        verse = phazite::insertSection (phazite::getSong (*edit), phazite::BeatPosition::fromBeats (16.0),
+        intro = phazite::insertSection (song, {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (16.0) });
+        verse = phazite::insertSection (song, phazite::BeatPosition::fromBeats (16.0),
                                         { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
         REQUIRE (intro.isValid());
         REQUIRE (verse.isValid());
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        song.getUndoManager().clearUndoHistory();
     }
 
     ~Song() { selection.deselectAll(); }
 
     // Selects the first clip's notes, and nothing else.
-    void selectNotes()
-    {
-        std::vector<phazite::NoteRef> refs;
+    void selectNotes() { selection.selectNotes (phazite::getRefs (phazite::getClipNotes (song, first))); }
 
-        for (auto* note : first->getSequence().getNotes())
-            refs.push_back (phazite::getNoteRef (*first, *note));
-
-        selection.selectNotes (refs);
-    }
-
-    int countNotes() const { return first->getSequence().getNumNotes(); }
+    int countNotes() const { return (int) phazite::getClipNotes (song, first).size(); }
 
     // A track's clips in song order, in whole beats: "0-4 8-12".
-    static juce::String describe (te::ClipTrack& track)
+    juce::String describe (phazite::TrackID track) const
     {
-        juce::Array<te::Clip*> clips (track.getClips());
-        std::sort (clips.begin(), clips.end(), [] (te::Clip* x, te::Clip* y) { return x->getStartBeat() < y->getStartBeat(); });
+        std::vector<phazite::BeatRange> ranges;
+
+        for (const auto clip : phazite::getClips (song, track))
+            ranges.push_back (phazite::getClipRange (song, clip));
+
+        std::sort (ranges.begin(), ranges.end(), [] (phazite::BeatRange x, phazite::BeatRange y) { return x.getStart() < y.getStart(); });
         juce::StringArray parts;
 
-        for (auto* clip : clips)
-            parts.add (juce::String (juce::roundToInt (clip->getStartBeat().inBeats())) + "-"
-                       + juce::String (juce::roundToInt (clip->getEndBeat().inBeats())));
+        for (const auto& clipRange : ranges)
+            parts.add (juce::String (juce::roundToInt (clipRange.getStart().inBeats())) + "-"
+                       + juce::String (juce::roundToInt (clipRange.getEnd().inBeats())));
 
         return parts.joinIntoString (" ");
     }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
-    te::MidiClip* first = nullptr;
-    te::MidiClip* second = nullptr;
+    phazite::Song& song = phazite::getSong (*edit);
+    phazite::TrackID a, b;
+    phazite::ClipID first, second;
     phazite::SectionID intro, verse;
     phazite::Selection selection { phazite::test::getEngine() };
-    phazite::RangeSelection range;
+    phazite::RangeSelection range { selection };
 };
 } // namespace
 
@@ -103,31 +99,31 @@ TEST_CASE ("Delete takes notes first, then the range, sections, clips and tracks
     s.range.set ({ beats (8.0), beats (12.0) }, { s.a });
     phazite::deleteSelection (s.selection, s.range, false);
     CHECK (s.countNotes() == 0);
-    CHECK (Song::describe (*s.a) == juce::String ("0-4 8-12"));
+    CHECK (s.describe (s.a) == juce::String ("0-4 8-12"));
 
     // The range, before a section: what lies in it.
     s.selection.selectOnly (s.verse);
     phazite::deleteSelection (s.selection, s.range, false);
-    CHECK (Song::describe (*s.a) == juce::String ("0-4"));
-    CHECK (phazite::getSections (phazite::getSong (*s.edit)).size() == 2);
+    CHECK (s.describe (s.a) == juce::String ("0-4"));
+    CHECK (phazite::getSections (s.song).size() == 2);
 
     // A section, with what is in it (B's clip), before a clip and a track.
     s.range.clear();
     s.selection.addToSelection (s.first);
     s.selection.addToSelection (s.b);
     phazite::deleteSelection (s.selection, s.range, false);
-    CHECK (phazite::getSections (phazite::getSong (*s.edit)).size() == 1);
-    CHECK (Song::describe (*s.b).isEmpty());
-    CHECK (Song::describe (*s.a) == juce::String ("0-4"));
+    CHECK (phazite::getSections (s.song).size() == 1);
+    CHECK (s.describe (s.b).isEmpty());
+    CHECK (s.describe (s.a) == juce::String ("0-4"));
 
     // A clip, before a track.
     phazite::deleteSelection (s.selection, s.range, false);
-    CHECK (Song::describe (*s.a).isEmpty());
-    CHECK (te::getAudioTracks (*s.edit).size() == 2);
+    CHECK (s.describe (s.a).isEmpty());
+    CHECK (phazite::getTrackIDs (s.song).size() == 2);
 
     // And then the track, and the one that takes its place is selected.
     phazite::deleteSelection (s.selection, s.range, false);
-    REQUIRE (te::getAudioTracks (*s.edit).size() == 1);
+    REQUIRE (phazite::getTrackIDs (s.song).size() == 1);
     CHECK (s.selection.isSelected (s.a));
 }
 
@@ -138,12 +134,12 @@ TEST_CASE ("Delete and Close Gap leaves tracks alone")
     // A clip goes, and what comes after it on its track moves back.
     s.selection.selectOnly (s.first);
     phazite::deleteSelection (s.selection, s.range, true);
-    CHECK (Song::describe (*s.a) == juce::String ("4-8"));
+    CHECK (s.describe (s.a) == juce::String ("4-8"));
 
     // A track stays.
     s.selection.selectOnly (s.b);
     phazite::deleteSelection (s.selection, s.range, true);
-    CHECK (te::getAudioTracks (*s.edit).size() == 2);
+    CHECK (phazite::getTrackIDs (s.song).size() == 2);
     CHECK (s.selection.isSelected (s.b));
 }
 
@@ -157,12 +153,12 @@ TEST_CASE ("Duplicate takes notes first, then the range, sections, clips and tra
     phazite::duplicateSelection (s.selection, s.range, false);
     CHECK (s.countNotes() == 4);
     CHECK (phazite::getSelectedNotes (s.selection).size() == 2);
-    CHECK (Song::describe (*s.a) == juce::String ("0-4 8-12"));
+    CHECK (s.describe (s.a) == juce::String ("0-4 8-12"));
 
     // As aliases, notes and the range are skipped: with nothing else selected, nothing is copied.
     phazite::duplicateSelection (s.selection, s.range, true);
     CHECK (s.countNotes() == 4);
-    CHECK (Song::describe (*s.a) == juce::String ("0-4 8-12"));
+    CHECK (s.describe (s.a) == juce::String ("0-4 8-12"));
 
     // The range, in an undo step: its copy goes right after it, and becomes the range. Undo puts the range back, and
     // Redo moves it to the copy again.
@@ -171,13 +167,13 @@ TEST_CASE ("Duplicate takes notes first, then the range, sections, clips and tra
         const phazite::UndoStep step (*s.edit, "Duplicate Range");
         phazite::duplicateSelection (s.selection, s.range, false);
     }
-    CHECK (Song::describe (*s.a) == juce::String ("0-4 8-12 12-16"));
+    CHECK (s.describe (s.a) == juce::String ("0-4 8-12 12-16"));
     CHECK (s.range.getRange().getStart().inBeats() == doctest::Approx (12.0));
     phazite::undo (*s.edit);
-    CHECK (Song::describe (*s.a) == juce::String ("0-4 8-12"));
+    CHECK (s.describe (s.a) == juce::String ("0-4 8-12"));
     CHECK (s.range.getRange().getStart().inBeats() == doctest::Approx (8.0));
     phazite::redo (*s.edit);
-    CHECK (Song::describe (*s.a) == juce::String ("0-4 8-12 12-16"));
+    CHECK (s.describe (s.a) == juce::String ("0-4 8-12 12-16"));
     CHECK (s.range.getRange().getStart().inBeats() == doctest::Approx (12.0));
 
     // Sections, before clips: the copy, with what is in the section, is selected instead.
@@ -185,26 +181,26 @@ TEST_CASE ("Duplicate takes notes first, then the range, sections, clips and tra
     s.selection.selectOnly (s.verse);
     s.selection.addToSelection (s.first);
     phazite::duplicateSelection (s.selection, s.range, false);
-    CHECK (phazite::getSections (phazite::getSong (*s.edit)).size() == 3);
+    CHECK (phazite::getSections (s.song).size() == 3);
     CHECK (phazite::getSelectedSections (s.selection).size() == 1);
     CHECK_FALSE (phazite::hasSelectedClips (s.selection));
-    CHECK (Song::describe (*s.b) == juce::String ("20-24 36-40"));
+    CHECK (s.describe (s.b) == juce::String ("20-24 36-40"));
 
     // Clips, before tracks, as aliases too.
     s.selection.selectOnly (s.second);
     s.selection.addToSelection (s.b);
     phazite::duplicateSelection (s.selection, s.range, true);
-    const auto copies = phazite::findSelectedClips (s.selection);
+    const auto copies = phazite::getSelectedClips (s.selection);
     REQUIRE (copies.size() == 1);
-    CHECK (phazite::hasAliases (phazite::test::songOf ({ copies.getFirst() }), phazite::test::idsOf ({ copies.getFirst() })));
+    CHECK (phazite::hasAliases (s.song, { copies.front() }));
     CHECK_FALSE (s.selection.isSelected (s.b));
 
     // Tracks last, and never as aliases.
     s.selection.selectOnly (s.b);
     phazite::duplicateSelection (s.selection, s.range, true);
-    CHECK (te::getAudioTracks (*s.edit).size() == 2);
+    CHECK (phazite::getTrackIDs (s.song).size() == 2);
     phazite::duplicateSelection (s.selection, s.range, false);
-    CHECK (te::getAudioTracks (*s.edit).size() == 3);
+    CHECK (phazite::getTrackIDs (s.song).size() == 3);
 }
 
 TEST_CASE ("Split splits a range's clips at both edges, or the selected clips at the playhead")
@@ -213,15 +209,15 @@ TEST_CASE ("Split splits a range's clips at both edges, or the selected clips at
 
     s.range.set ({ beats (1.0), beats (3.0) }, { s.a });
     phazite::splitSelection (s.selection, s.range);
-    CHECK (Song::describe (*s.a) == juce::String ("0-1 1-3 3-4 8-12"));
+    CHECK (s.describe (s.a) == juce::String ("0-1 1-3 3-4 8-12"));
 
     // Without a range: the selected clips, at the playhead (beat 10, 5 seconds in at 120 BPM).
     s.range.clear();
     s.edit->getTransport().setPosition (te::TimePosition::fromSeconds (5.0));
     s.selection.selectOnly (s.second);
     phazite::splitSelection (s.selection, s.range);
-    CHECK (Song::describe (*s.a) == juce::String ("0-1 1-3 3-4 8-10 10-12"));
-    CHECK (Song::describe (*s.b) == juce::String ("20-24"));
+    CHECK (s.describe (s.a) == juce::String ("0-1 1-3 3-4 8-10 10-12"));
+    CHECK (s.describe (s.b) == juce::String ("20-24"));
 }
 
 TEST_CASE ("Select All and Clear Selection")
@@ -257,20 +253,20 @@ TEST_CASE ("Mute acts on the selected notes, and on the selected clips while no 
     CHECK_FALSE (phazite::isSelectionMuted (s.selection));
     phazite::toggleSelectionMuted (s.selection);
     CHECK (phazite::isSelectionMuted (s.selection));
-    CHECK (std::all_of (s.first->getSequence().getNotes().begin(), s.first->getSequence().getNotes().end(),
-                        [] (te::MidiNote* note) { return note->isMute(); }));
-    CHECK_FALSE (s.first->isMuted());
+    const auto notes = phazite::getClipNotes (s.song, s.first);
+    CHECK (std::all_of (notes.begin(), notes.end(), [] (const phazite::NoteData& note) { return note.muted; }));
+    CHECK_FALSE (phazite::areAllClipsMuted (s.song, { s.first }));
 
     // With no notes selected, the clips.
     s.selection.selectOnly (s.first);
     s.selection.addToSelection (s.second);
     CHECK_FALSE (phazite::isSelectionMuted (s.selection));
     phazite::toggleSelectionMuted (s.selection);
-    CHECK (s.first->isMuted());
-    CHECK (s.second->isMuted());
+    CHECK (phazite::areAllClipsMuted (s.song, { s.first }));
+    CHECK (phazite::areAllClipsMuted (s.song, { s.second }));
     CHECK (phazite::isSelectionMuted (s.selection));
     phazite::toggleSelectionMuted (s.selection);
-    CHECK_FALSE (s.first->isMuted());
+    CHECK_FALSE (phazite::areAllClipsMuted (s.song, { s.first }));
 }
 
 TEST_CASE ("When the selection commands are enabled")
@@ -341,31 +337,37 @@ TEST_CASE ("Phazite's selection holds items by their IDs: one kind at a time, an
 
     selection.addChangeListener (&counter);
 
-    // Clips and tracks together, in the order they were selected; a device starts a selection of its own.
+    // Clips and tracks together, each kind in the order it was selected; a device starts a selection of its own.
     selection.selectOnly (s.second);
-    selection.addToSelection (s.a);
-    CHECK (selection.getItemsOfType<te::Selectable>() == juce::Array<te::Selectable*> { s.second, s.a });
-    CHECK (selection.getItemsOfType<te::Clip>() == juce::Array<te::Clip*> { s.second });
-    CHECK (selection.getFirstItemOfType<te::Track>() == s.a);
-
-    auto* device = phazite::insertDevice (*s.b, s.edit->getPluginCache().createNewPlugin ("phaziteEq", {}));
-    REQUIRE (device != nullptr);
-    selection.addToSelection (device);
-    CHECK (selection.getItemsOfType<te::Selectable>() == juce::Array<te::Selectable*> { device });
     selection.addToSelection (s.b);
-    CHECK (selection.getItemsOfType<te::Selectable>() == juce::Array<te::Selectable*> { s.b });
+    selection.addToSelection (s.first);
+    selection.addToSelection (s.a);
+    CHECK (selection.getClips() == std::vector { s.second, s.first });
+    CHECK (selection.getTracks() == std::vector { s.b, s.a });
+    CHECK (selection.getNumObjectsSelected() == 4);
+
+    const auto device = phazite::insertDeviceState (s.song, s.b, phazite::makeOwnDeviceState (s.song, "phaziteEq"));
+    REQUIRE (device.isValid());
+    selection.addToSelection (device);
+    CHECK (selection.getDevices() == std::vector { device });
+    CHECK (selection.getClips().empty());
+    CHECK (selection.getTracks().empty());
+    selection.addToSelection (s.b);
+    CHECK (selection.getTracks() == std::vector { s.b });
+    CHECK (selection.getDevices().empty());
 
     // Notes are all that is selected while they are, and only those of the clips the piano roll shows.
     s.selectNotes();
-    CHECK (selection.getItemsOfType<te::Selectable>().isEmpty());
+    CHECK (selection.getTracks().empty());
+    CHECK (selection.getNumObjectsSelected() == 2);
     CHECK (phazite::getSelectedNotes (selection).size() == 2);
-    selection.setNoteClips ({ phazite::getClipID (*s.second) });
+    selection.setNoteClips ({ s.second });
     CHECK (phazite::getSelectedNotes (selection).empty());
 
     // A clip that is deleted is selected no more, without a word from it.
     selection.selectOnly (s.second);
-    phazite::deleteClips ({ s.second }, false);
-    CHECK (selection.getItemsOfType<te::Clip>().isEmpty());
+    phazite::deleteClips (s.song, { s.second }, false);
+    CHECK (selection.getClips().empty());
     CHECK (selection.getNumObjectsSelected() == 0);
 
     // Another Edit: nothing of the last one, and a change to hear.

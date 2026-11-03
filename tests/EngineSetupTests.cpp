@@ -16,10 +16,12 @@ void addSynthAndNotes (te::Edit& edit)
 {
     auto* track = te::getAudioTracks (edit)[0];
     phazite::insertDevice (*track, edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
-    auto* clip = phazite::test::addMidiClip (*track, { 0_bp, 8_bp }, "Notes");
+    using phazite::test::at, phazite::test::lasting;
+    auto& song = phazite::getSong (edit);
+    const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track), { at (0.0), at (8.0) }, "Notes");
 
     for (int i = 0; i < 8; ++i)
-        phazite::test::addMidiNote (*clip, 60 + i, te::BeatPosition::fromBeats (i), te::BeatDuration::fromBeats (0.5), 100);
+        phazite::test::addMidiNote (song, clip, 60 + i, at (i), lasting (0.5), 100);
 }
 
 std::unique_ptr<te::Edit> createEditWithSynth (te::Engine& engine, const juce::File& file)

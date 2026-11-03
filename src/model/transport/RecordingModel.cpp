@@ -28,11 +28,6 @@ namespace
         return edit != nullptr ? AudioRecorder::findFor (*edit) : nullptr;
     }
 
-    te::AudioClipBase* findAudioClip (const ProjectContext& context, ClipID id)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::AudioClipBase*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
-    }
 } // namespace
 
 std::vector<AudioInput> getAudioInputs (const ProjectContext& context)
@@ -177,23 +172,23 @@ void setPunchOn (ProjectContext& context, bool on)
 
 ClipTakes getClipTakes (const ProjectContext& context, ClipID id)
 {
-    const auto* clip = findAudioClip (context, id);
+    auto* song = findSong (context);
 
-    if (clip == nullptr || getClipTakeCount (*clip) < 2)
+    if (song == nullptr || getClipTakeCount (*song, id) < 2)
         return {};
 
-    return { getClipTakeCount (*clip), getClipTake (*clip) };
+    return { getClipTakeCount (*song, id), getClipTake (*song, id) };
 }
 
 void setClipTake (ProjectContext& context, ClipID id, int take)
 {
-    auto* clip = findAudioClip (context, id);
+    auto* song = findSong (context);
     const auto takes = getClipTakes (context, id);
 
-    if (clip == nullptr || takes.count < 2 || take < 1 || take > takes.count || take == takes.playing)
+    if (song == nullptr || takes.count < 2 || take < 1 || take > takes.count || take == takes.playing)
         return;
 
-    const UndoStep step (clip->edit, "Choose Take");
-    playTake (*clip, take);
+    const UndoStep step (*song, "Choose Take");
+    playTake (*song, id, take);
 }
 } // namespace phazite

@@ -270,7 +270,8 @@ TEST_CASE ("A track's preset makes a new track with its devices, mix and modulat
 
         // A clip and a send, which a track preset leaves out.
         phazite::addSendToNewReturn (context, track);
-        phazite::test::addMidiClip (*bass, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) });
+        phazite::test::addMidiClip (phazite::getSong (first.edit()), phazite::getTrackID (*bass),
+                                    { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
 
         REQUIRE (phazite::saveTrackPreset (context, track, file));
     }

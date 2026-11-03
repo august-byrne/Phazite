@@ -3,10 +3,10 @@
 #include "internal/AudioClips.h"
 #include "internal/Clips.h"
 #include "internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
-#include "model/engine/internal/LiveInput.h"
-#include "model/mirror/internal/Bridge.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <optional>
@@ -18,13 +18,18 @@ namespace
 {
     // Whether a dropped file can go on a track. Audio and notes don't share a track in v1 (docs/design.md,
     // section 5): an instrument would silence the audio.
-    bool suitsTrack (te::AudioTrack& track, FileKind kind)
+    bool suitsTrack (const Song& song, TrackID track, FileKind kind)
     {
-        for (auto* clip : track.getClips())
-            if ((dynamic_cast<te::MidiClip*> (clip) != nullptr) != (kind == FileKind::midi))
+        const auto state = findTrackState (song, track);
+
+        if (! state.hasType (schema::TRACK) || isFolderState (state))
+            return false;
+
+        for (const auto& clipState : getClipStates (state))
+            if (isMidiState (clipState) != (kind == FileKind::midi))
                 return false;
 
-        return kind == FileKind::midi || ! hasInstrument (track);
+        return kind == FileKind::midi || ! hasInstrument (song, track);
     }
 
     // What a MIDI file holds for a clip: the notes and controller events of its first track with notes, as the song keeps
@@ -142,9 +147,9 @@ FileKind getFileKind (const juce::File& file)
     return FileKind::other;
 }
 
-juce::File copyIntoProject (te::Edit& edit, const juce::File& file)
+juce::File copyIntoProject (Song& song, const juce::File& file)
 {
-    const auto projectFile = edit.editFileRetriever != nullptr ? edit.editFileRetriever() : juce::File();
+    const auto& projectFile = song.getFile();
 
     if (projectFile == juce::File() || file.isAChildOf (projectFile.getParentDirectory()))
         return file;
@@ -194,36 +199,25 @@ std::optional<juce::Colour> getColourForName (const juce::String& name)
     return std::nullopt;
 }
 
-te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosition start)
+ClipID importFile (Song& song, TrackID track, const juce::File& file, BeatPosition start)
 {
-    auto& edit = track.edit;
-
     switch (getFileKind (file))
     {
         case FileKind::audio:
         {
-            const auto copy = copyIntoProject (edit, file);
-
-            // Tracktion's clips, which read the file too while they mirror the song's, keep what Tracktion read of a file by
-            // its path until it checks the file again: read again if it changed since (a file written where another was,
-            // or where none was yet when Tracktion was asked about it).
-            edit.engine.getAudioFileManager().checkFileForChanges (te::AudioFile (edit.engine, copy));
+            const auto copy = copyIntoProject (song, file);
             const auto info = getAudioFileInfo (copy);
 
             if (info.getSeconds() <= 0.0)
-                return nullptr;
+                return {};
 
-            const auto clipState =
-                makeAudioClipState (edit, file.getFileNameWithoutExtension(), copy, fromTracktion (start), { 0.0, info.getSeconds() });
-            auto* clip = dynamic_cast<te::AudioClipBase*> (placeClipState (edit, clipState, track));
-
-            if (clip == nullptr)
-                return nullptr;
+            const auto clipState = makeAudioClipState (song, file.getFileNameWithoutExtension(), copy, start, { 0.0, info.getSeconds() });
+            const auto clip = placeClipState (song, clipState, track);
 
             // A loop that knows its beats (from its loop data, or from its name when it lasts whole bars) follows the song's
             // tempo, as the browser's preview played it: stretched to its beats from where it starts.
-            if (info.loopBeats > 0.0)
-                setClipFollowsTempo (*clip, true);
+            if (clip.isValid() && info.loopBeats > 0.0)
+                setClipFollowsTempo (song, clip, true);
 
             return clip;
         }
@@ -235,9 +229,8 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
             const auto content = readMidiFile (file);
 
             if (! content.has_value())
-                return nullptr;
+                return {};
 
-            auto& song = getSong (edit);
             const auto bars = getBars (song);
             const auto end = bars.getBarStart (bars.getBarAt (BeatPosition::fromBeats (std::max (0.0, content->lastBeat - 1.0e-6))) + 1);
             auto clipState = makeMidiClipState (song, content->name, { BeatPosition(), end });
@@ -252,21 +245,26 @@ te::Clip* importFile (te::ClipTrack& track, const juce::File& file, te::BeatPosi
                 clipState.appendChild (control, nullptr);
 
             clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), nullptr);
-            return placeClipState (edit, clipState, track);
+            return placeClipState (song, clipState, track);
         }
 
         case FileKind::other:
         default:
-            return nullptr;
+            return {};
     }
 }
 
-juce::Array<te::Clip*> importFiles (te::Edit& edit, const juce::StringArray& paths, te::Track* target, te::BeatPosition start)
+std::vector<ClipID> importFiles (Song& song, const juce::StringArray& paths, TrackID target, BeatPosition start)
 {
     // The first file can go on the target track; the others get new tracks below it.
-    auto* after = target != nullptr ? target : getPlaylistTracks (edit).getLast();
-    juce::Array<te::Clip*> added;
-    const UndoStep step (edit, paths.size() > 1 ? "Add Files" : "Add File");
+    auto after = target.isValid() ? target : TrackID();
+
+    if (! after.isValid())
+        if (const auto tracks = getTrackIDs (song); ! tracks.empty())
+            after = tracks.back();
+
+    std::vector<ClipID> added;
+    const UndoStep step (song, paths.size() > 1 ? "Add Files" : "Add File");
 
     for (const auto& path : paths)
     {
@@ -277,26 +275,26 @@ juce::Array<te::Clip*> importFiles (te::Edit& edit, const juce::StringArray& pat
             continue;
 
         // A new track is named after the file, and colored by what its name says it is.
-        auto* track = dynamic_cast<te::AudioTrack*> (target);
+        auto track = target;
 
-        if (track == nullptr || ! suitsTrack (*track, kind))
+        if (! track.isValid() || ! suitsTrack (song, track, kind))
         {
-            track = insertTrack (edit, after, nullptr);
+            track = insertTrack (song, after, nullptr);
 
-            if (track == nullptr)
+            if (! track.isValid())
                 break;
 
-            setTrackName (*track, file.getFileNameWithoutExtension());
+            setTrackName (song, track, file.getFileNameWithoutExtension());
 
             if (const auto colour = getColourForName (file.getFileNameWithoutExtension()))
-                setTrackColour (*track, *colour);
+                setTrackColour (song, track, *colour);
         }
 
-        if (auto* clip = importFile (*track, file, start))
-            added.add (clip);
+        if (const auto clip = importFile (song, track, file, start); clip.isValid())
+            added.push_back (clip);
 
         after = track;
-        target = nullptr;
+        target = {};
     }
 
     return added;

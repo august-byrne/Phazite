@@ -3,6 +3,7 @@
 #include "UiTestHelpers.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Outlines.h"
@@ -28,9 +29,9 @@
 
 namespace
 {
-te::BeatPosition beats (double b)
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
 // A playlist in a window, with three tracks and the commands and keys the app gives it. The mouse uses the tools
@@ -75,32 +76,37 @@ struct PlaylistScreen
         for (int i = 0; i < track; ++i)
             y += heightOf (i);
 
-        return { juce::roundToInt (playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))), y + heightOf (track) / 2 };
+        return { juce::roundToInt (playlist.getView().beatToX (beats (beat))), y + heightOf (track) / 2 };
     }
+
+    phazite::Song& getSong() const { return phazite::getSong (*edit); }
+
+    double startOf (phazite::ClipID clip) const { return phazite::getClipRange (getSong(), clip).getStart().inBeats(); }
 
     std::vector<double> getClipStarts (int track) const
     {
         std::vector<double> starts;
 
-        for (auto* clip : tracks[track]->getClips())
-            starts.push_back (clip->getStartBeat().inBeats());
+        for (const auto clip : phazite::getClips (getSong(), phazite::getTrackID (*tracks[track])))
+            starts.push_back (startOf (clip));
 
         std::sort (starts.begin(), starts.end());
         return starts;
     }
 
-    te::MidiClip& addClip (int track, double start, double length)
+    phazite::ClipID addClip (int track, double start, double length)
     {
-        auto* clip = phazite::insertMidiClip (*tracks[track], { beats (start), beats (start + length) }, nullptr);
-        REQUIRE (clip != nullptr);
-        return *clip;
+        const auto clip =
+            phazite::insertMidiClip (getSong(), phazite::getTrackID (*tracks[track]), { beats (start), beats (start + length) }, nullptr);
+        REQUIRE (clip.isValid());
+        return clip;
     }
 
     // Where a clip shows, in the lanes; nothing while it has no component (out of view).
-    juce::Rectangle<int> boundsOf (const te::Clip& clip)
+    juce::Rectangle<int> boundsOf (phazite::ClipID clip)
     {
         for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (playlist))
-            if (component->getClip() == phazite::getClipID (clip))
+            if (component->getClip() == clip)
                 return lanes->getLocalArea (component, component->getLocalBounds());
 
         return {};
@@ -180,7 +186,7 @@ TEST_CASE ("A tool's key springs back when it was held while the mouse was used"
 TEST_CASE ("Dragging a clip past the edge of the playlist scrolls it")
 {
     PlaylistScreen screen;
-    auto& clip = screen.addClip (0, 0.0, 4.0);
+    const auto clip = screen.addClip (0, 0.0, 4.0);
     phazite::test::dispatchPendingMessages(); // the playlist shows the new clip
     phazite::test::Mouse mouse (*screen.lanes);
 
@@ -200,13 +206,13 @@ TEST_CASE ("Dragging a clip past the edge of the playlist scrolls it")
 
     // The clip went along, to beyond what showed when the drag began.
     const auto widthInBeats = screen.lanes->getWidth() / view.pixelsPerBeat;
-    CHECK (clip.getStartBeat().inBeats() > widthInBeats);
+    CHECK (screen.startOf (clip) > widthInBeats);
 }
 
 TEST_CASE ("A clip dragged along its track takes the automation under it, Ctrl copies it too, and to another track it stays")
 {
     PlaylistScreen screen;
-    auto& clip = screen.addClip (0, 4.0, 4.0);
+    const auto clip = screen.addClip (0, 4.0, 4.0);
     const auto volume = phazite::getVolume (screen.context, phazite::getTrackID (*screen.tracks[0])).getRef();
 
     // A peak at beat 6, under the clip.
@@ -236,7 +242,7 @@ TEST_CASE ("A clip dragged along its track takes the automation under it, Ctrl c
     mouse.dragTo (onFirst (9.0));
     mouse.release();
     mouse.pause();
-    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (8.0));
+    CHECK (screen.startOf (clip) == doctest::Approx (8.0));
     CHECK (valueAt (10.0) == doctest::Approx (0.9f));
     CHECK (valueAt (6.0) == doctest::Approx (0.5f));
     CHECK (phazite::describeUndo (screen.edit.get()) == juce::String ("Undo Move Clip"));
@@ -309,9 +315,9 @@ TEST_CASE ("The playlist paints, with sections, a clip and a selected track")
 {
     PlaylistScreen screen;
     REQUIRE (phazite::findOutline ("pop") != nullptr);
-    phazite::applyOutline (*screen.edit, *phazite::findOutline ("pop"));
+    phazite::applyOutline (phazite::getSong (*screen.edit), *phazite::findOutline ("pop"));
     screen.addClip (1, 4.0, 8.0);
-    screen.selection.selectOnly (screen.tracks[2]);
+    screen.selection.selectOnly (phazite::getTrackID (*screen.tracks[2]));
     phazite::test::dispatchPendingMessages();
 
     const auto image = screen.window.paintEverything();
@@ -480,7 +486,7 @@ TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip
 {
     PlaylistScreen screen;
     screen.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("FL Studio"));
-    auto& clip = screen.addClip (0, 0.0, 4.0);
+    const auto clip = screen.addClip (0, 0.0, 4.0);
     phazite::test::dispatchPendingMessages();
     screen.selection.selectOnly (clip); // the clip used last
     phazite::test::dispatchPendingMessages();
@@ -500,7 +506,7 @@ TEST_CASE ("With FL Studio's keymap, a click on empty space places the last clip
     mouse.click (screen.at (8.05, 1));
     phazite::test::dispatchPendingMessages();
     CHECK (screen.getClipStarts (1).empty());
-    CHECK (screen.selection.isSelected (screen.tracks[1]));
+    CHECK (screen.selection.isSelected (phazite::getTrackID (*screen.tracks[1])));
 }
 
 #if JUCE_WINDOWS
@@ -510,7 +516,7 @@ TEST_CASE ("With FL Studio's keymap, a click places the clip selected just befor
     // another thread's message whose wake-up wasn't posted yet, so it got none of its own, and the click came first.
     PlaylistScreen screen;
     screen.commands.setKeymap (*phazite::ui::Keymap::findBuiltIn ("FL Studio"));
-    auto& clip = screen.addClip (0, 0.0, 4.0);
+    const auto clip = screen.addClip (0, 0.0, 4.0);
     auto lateWakeUp = phazite::test::queueWithoutWakeUp (100); // delivers what is waiting first
     screen.selection.selectOnly (clip);
     phazite::test::dispatchPendingMessages();
@@ -562,7 +568,7 @@ TEST_CASE ("With FL Studio's keymap, Ctrl+B repeats a selected time range, and t
     phazite::test::dispatchPendingMessages();
 
     // Two bars on the first two tracks; in this keymap the range loops while it is selected.
-    screen.range.set ({ beats (0.0), beats (8.0) }, { screen.tracks[0], screen.tracks[1] });
+    screen.range.set ({ beats (0.0), beats (8.0) }, { phazite::getTrackID (*screen.tracks[0]), phazite::getTrackID (*screen.tracks[1]) });
     phazite::test::dispatchPendingMessages();
     auto& transport = screen.edit->getTransport();
     REQUIRE (transport.looping.get());
@@ -624,8 +630,7 @@ TEST_CASE ("The playlist's vertical scroll bar shows only while its tracks don't
 TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren't colored")
 {
     PlaylistScreen screen;
-    auto& clip = screen.addClip (0, 0.0, 4.0);
-    clip.setColour (juce::Colours::red); // a color of its own, as Tracktion gives some clips
+    REQUIRE (screen.addClip (0, 0.0, 4.0).isValid());
     phazite::test::dispatchPendingMessages();
 
     const auto clipComponents = phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist);
@@ -660,7 +665,7 @@ TEST_CASE ("A folder's row shows its tracks' clips in their colors, collapsed to
     const auto image = screen.window.paintEverything();
     const auto lanesAt = screen.lanes->getBounds().getPosition();
     const auto xOf = [&screen, lanesAt] (double beat)
-    { return lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))); };
+    { return lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
     const auto y = lanesAt.y + row.getCentreY();
     const auto trackColour = phazite::getTrackRow (screen.context, phazite::getTrackID (*screen.tracks[1]))->colour;
     const auto background = phazite::ui::getPalette (screen.playlist).background;
@@ -685,14 +690,14 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
             screen.addClip (track, c * 8.0 + 4.0, 4.0);
 
     // Two that overlap on the first track, one under the other: the second, made later, below.
-    auto& first = screen.addClip (0, 0.0, 2.0);
-    auto& second = screen.addClip (0, 1.0, 2.0);
+    const auto first = screen.addClip (0, 0.0, 2.0);
+    const auto second = screen.addClip (0, 1.0, 2.0);
     phazite::test::dispatchPendingMessages();
 
-    const auto componentOf = [&screen] (const te::Clip& clip) -> phazite::ui::ClipComponent*
+    const auto componentOf = [&screen] (phazite::ClipID clip) -> phazite::ui::ClipComponent*
     {
         for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
-            if (component->getClip() == phazite::getClipID (clip))
+            if (component->getClip() == clip)
                 return component;
 
         return nullptr;
@@ -710,8 +715,9 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
     };
 
     checkOnlyInView (100);
-    const auto& lastTrackClips = screen.tracks[39]->getClips();
-    CHECK (componentOf (*lastTrackClips.getFirst()) == nullptr);
+    const auto lastTrackClips = phazite::getClips (screen.getSong(), phazite::getTrackID (*screen.tracks[39]));
+    REQUIRE_FALSE (lastTrackClips.empty());
+    CHECK (componentOf (lastTrackClips.front()) == nullptr);
     REQUIRE (componentOf (first) != nullptr);
     REQUIRE (componentOf (second) != nullptr);
     CHECK (screen.lanes->getIndexOfChildComponent (componentOf (first)->getParentComponent()) >= 0);
@@ -725,10 +731,10 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
 
     checkOnlyInView (100);
     CHECK (componentOf (first) == nullptr);
-    auto* last = componentOf (*lastTrackClips.getFirst());
+    auto* last = componentOf (lastTrackClips.front());
     REQUIRE (last != nullptr);
     mouse.click (screen.lanes->getLocalPoint (last, last->getLocalBounds().getCentre()));
-    CHECK (screen.selection.isSelected (lastTrackClips.getFirst()));
+    CHECK (screen.selection.isSelected (lastTrackClips.front()));
 
     // Back at the top, scrolled along so that only the second of the two that overlap shows, and back: the first comes
     // into view before the second in their layer, as the playlist lists them (where clips crossfade, the later shows over
@@ -748,14 +754,14 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
     const auto* layer = firstShown->getParentComponent();
     CHECK (layer->getIndexOfChildComponent (firstShown) < layer->getIndexOfChildComponent (secondShown));
     mouse.click (screen.at (1.5, 0) + juce::Point<int> (0, phazite::ui::TrackHeight::standard / 4));
-    CHECK (screen.selection.isSelected (&second));
+    CHECK (screen.selection.isSelected (second));
 
     // Zoomed out, every clip of the tracks in view shows, the song's last ones too.
     screen.playlist.zoomToFit();
     checkOnlyInView (400);
 
-    for (auto* clip : screen.tracks[0]->getClips())
-        CHECK (componentOf (*clip) != nullptr);
+    for (const auto clip : phazite::getClips (screen.getSong(), phazite::getTrackID (*screen.tracks[0])))
+        CHECK (componentOf (clip) != nullptr);
 }
 
 TEST_CASE ("Clips that overlap on a track show one under another, and each is grabbed where it shows")
@@ -763,9 +769,9 @@ TEST_CASE ("Clips that overlap on a track show one under another, and each is gr
     // A two-bar clip and another a bar later on the first track, which play together: they used to show one over the other,
     // where only the later one could be grabbed.
     PlaylistScreen screen;
-    auto& first = screen.addClip (0, 0.0, 8.0);
-    auto& second = screen.addClip (0, 4.0, 8.0);
-    auto& alone = screen.addClip (1, 0.0, 8.0);
+    const auto first = screen.addClip (0, 0.0, 8.0);
+    const auto second = screen.addClip (0, 4.0, 8.0);
+    const auto alone = screen.addClip (1, 0.0, 8.0);
     phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
     phazite::test::dispatchPendingMessages();
 
@@ -783,12 +789,12 @@ TEST_CASE ("Clips that overlap on a track show one under another, and each is gr
     const auto x = screen.at (6.0, 0).x;
     mouse.click ({ x, top.getCentreY() });
     mouse.pause();
-    CHECK (screen.selection.isSelected (&first));
-    CHECK_FALSE (screen.selection.isSelected (&second));
+    CHECK (screen.selection.isSelected (first));
+    CHECK_FALSE (screen.selection.isSelected (second));
     mouse.click ({ x, bottom.getCentreY() });
     mouse.pause();
-    CHECK (screen.selection.isSelected (&second));
-    CHECK_FALSE (screen.selection.isSelected (&first));
+    CHECK (screen.selection.isSelected (second));
+    CHECK_FALSE (screen.selection.isSelected (first));
 
     // The first, dragged from there, goes, and the second stays; still overlapping, each keeps its place.
     mouse.press ({ x, top.getCentreY() });
@@ -797,14 +803,13 @@ TEST_CASE ("Clips that overlap on a track show one under another, and each is gr
     mouse.release();
     mouse.pause();
     phazite::test::dispatchPendingMessages();
-    CHECK (first.getStartBeat().inBeats() == doctest::Approx (4.0));
-    CHECK (second.getStartBeat().inBeats() == doctest::Approx (4.0));
+    CHECK (screen.startOf (first) == doctest::Approx (4.0));
+    CHECK (screen.startOf (second) == doctest::Approx (4.0));
     CHECK (screen.boundsOf (first).getY() == top.getY());
     CHECK (screen.boundsOf (second).getY() == bottom.getY());
 
     // Once they no longer overlap, each has the whole row again.
-    phazite::moveClip (screen.context, phazite::getClipID (second), phazite::BeatPosition::fromBeats (12.0),
-                       phazite::getTrackID (*screen.tracks[0]));
+    phazite::moveClip (screen.context, second, phazite::BeatPosition::fromBeats (12.0), phazite::getTrackID (*screen.tracks[0]));
     phazite::test::dispatchPendingMessages();
     CHECK (screen.boundsOf (first).getHeight() == whole.getHeight());
     CHECK (screen.boundsOf (second).getHeight() == whole.getHeight());
@@ -819,8 +824,7 @@ TEST_CASE ("Dragging along the top of the ruler loops part of the song, and the 
     auto* ruler = dynamic_cast<phazite::ui::TimelineRuler*> (phazite::test::findComponentWithTitle (screen.playlist, "Timeline"));
     REQUIRE (ruler != nullptr);
     const auto lane = ruler->getLoopLane().getCentreY(), lower = ruler->getHeight() - 4;
-    const auto x = [&screen] (double beat)
-    { return juce::roundToInt (screen.playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))); };
+    const auto x = [&screen] (double beat) { return juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
     const auto isLoop = [&screen] (double start, double end)
     {
         const auto loop = phazite::getLoopBeatRange (*screen.edit);
@@ -871,7 +875,8 @@ TEST_CASE ("While the song plays, the playlist turns the page at the playhead, u
     screen.addClip (0, 0.0, 256.0);
     screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (16.0) });
     const auto viewStart = [&screen] { return screen.playlist.getView().start.inBeats(); };
-    const auto playTo = [&screen] (double beat) { phazite::movePlayhead (*screen.edit, screen.edit->tempoSequence.toTime (beats (beat))); };
+    const auto playTo = [&screen] (double beat)
+    { phazite::movePlayhead (*screen.edit, screen.edit->tempoSequence.toTime (phazite::toTracktion (beats (beat)))); };
 
     screen.edit->getTransport().ensureContextAllocated();
     phazite::playOrStop (*screen.edit);
@@ -907,7 +912,8 @@ TEST_CASE ("Scrolling continuously, the playlist keeps the playhead in the middl
     screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (16.0) });
     screen.playlist.setScrollingContinuously (true);
     const auto viewStart = [&screen] { return screen.playlist.getView().start.inBeats(); };
-    const auto playTo = [&screen] (double beat) { phazite::movePlayhead (*screen.edit, screen.edit->tempoSequence.toTime (beats (beat))); };
+    const auto playTo = [&screen] (double beat)
+    { phazite::movePlayhead (*screen.edit, screen.edit->tempoSequence.toTime (phazite::toTracktion (beats (beat)))); };
 
     screen.edit->getTransport().ensureContextAllocated();
     phazite::playOrStop (*screen.edit);
@@ -942,8 +948,7 @@ TEST_CASE ("A press in the ruler moves the playhead once, and the song plays on 
     auto* ruler = dynamic_cast<phazite::ui::TimelineRuler*> (phazite::test::findComponentWithTitle (screen.playlist, "Timeline"));
     REQUIRE (ruler != nullptr);
     const auto y = ruler->getHeight() - 4;
-    const auto x = [&screen] (double beat)
-    { return juce::roundToInt (screen.playlist.getView().beatToX (phazite::fromTracktion (beats (beat)))); };
+    const auto x = [&screen] (double beat) { return juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
     const auto playhead = [&screen] { return screen.playlist.getPlayheadBeat().inBeats(); };
 
     phazite::test::Mouse mouse (*ruler);
@@ -1030,12 +1035,12 @@ TEST_CASE ("A sample that follows the song's tempo is marked in the playlist, so
 {
     PlaylistScreen screen;
     phazite::test::TemporaryFolder temp;
-    REQUIRE (
-        phazite::importFile (*screen.tracks[0], phazite::test::writeSound (temp.folder.getChildFile ("Beat 120 BPM.wav"), 2.0), beats (0.0))
-        != nullptr);
-    REQUIRE (
-        phazite::importFile (*screen.tracks[1], phazite::test::writeSound (temp.folder.getChildFile ("Hit sound.wav"), 0.5), beats (0.0))
-        != nullptr);
+    REQUIRE (phazite::importFile (screen.getSong(), phazite::getTrackID (*screen.tracks[0]),
+                                  phazite::test::writeSound (temp.folder.getChildFile ("Beat 120 BPM.wav"), 2.0), beats (0.0))
+                 .isValid());
+    REQUIRE (phazite::importFile (screen.getSong(), phazite::getTrackID (*screen.tracks[1]),
+                                  phazite::test::writeSound (temp.folder.getChildFile ("Hit sound.wav"), 0.5), beats (0.0))
+                 .isValid());
     phazite::test::dispatchPendingMessages();
 
     // The loop, which knows its tempo, follows the song's; the hit plays at its own speed.
@@ -1052,7 +1057,7 @@ TEST_CASE ("A sample that follows the song's tempo is marked in the playlist, so
     // Samples Follow Tempo: every one of them does.
     {
         const phazite::UndoStep step (*screen.edit, "Samples Follow Tempo");
-        phazite::toggleSamplesFollowTempo (*screen.edit);
+        phazite::toggleSamplesFollowTempo (screen.getSong());
     }
 
     phazite::test::dispatchPendingMessages();
@@ -1063,11 +1068,10 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
 {
     PlaylistScreen screen;
     phazite::test::TemporaryFolder temp;
-    auto* loop = dynamic_cast<te::AudioClipBase*> (phazite::importFile (
-        *screen.tracks[0], phazite::test::writeClicks (temp.folder.getChildFile ("Long loop"), 64, 120.0), beats (0.0)));
-    REQUIRE (loop != nullptr);
+    const auto id = phazite::importFile (screen.getSong(), phazite::getTrackID (*screen.tracks[0]),
+                                         phazite::test::writeClicks (temp.folder.getChildFile ("Long loop"), 64, 120.0), beats (0.0));
+    REQUIRE (phazite::isAudioState (phazite::findClipState (screen.getSong(), id)));
     phazite::test::dispatchPendingMessages();
-    const auto id = phazite::getClipID (*loop);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
 
     // What its component shows: how far its render has come, or nothing; and nothing at all without a component.
@@ -1086,7 +1090,7 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
     CHECK_FALSE (shownRendering()->has_value()); // at its own tempo it plays its file
 
     // Slower, it waits for its render, which a while later it plays.
-    phazite::setTempo (*screen.edit, 100.0);
+    phazite::setTempo (screen.getSong(), 100.0);
     REQUIRE (
         phazite::test::dispatchMessagesUntil ([&shownRendering] { return shownRendering().value_or (std::nullopt).has_value(); }, 10000));
     const auto progress = *shownRendering().value_or (std::nullopt);

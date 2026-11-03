@@ -7,6 +7,7 @@
 #pragma once
 
 #include "model/base/IDs.h"
+#include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <memory>
@@ -82,7 +83,7 @@ struct TakePlace
 // Makes the clips of a track's take, in the caller's undo step: what was played where it was played; punched in, only
 // what falls in the range, in place of what was there, cross-fading at its edges; round a looped range, a take for each
 // time round, in one clip over the range, the last whole one playing. The file goes if it keeps nothing.
-void placeTake (te::Edit&, TrackID, const juce::File&, const TakePlace&);
+void placeTake (Song&, TrackID, const juce::File&, const TakePlace&);
 
 // The channels of the audio device's inputs that a track's input names ("1" or "1+2"), from 0; none for an id that names
 // none.

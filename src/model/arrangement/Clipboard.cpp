@@ -7,7 +7,6 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -20,118 +19,117 @@ namespace phazite
 {
 namespace
 {
-    // The tracks that hold clips, in the playlist's order, by which pasted clips keep their tracks' places.
-    juce::Array<te::AudioTrack*> getTracksForClips (const te::Edit& edit)
+    // The tracks that hold clips (not folders), in the playlist's order, by which pasted clips keep their tracks' places.
+    std::vector<TrackID> getTracksForClips (const Song& song)
     {
-        juce::Array<te::AudioTrack*> tracks;
+        std::vector<TrackID> tracks;
 
-        for (auto* track : getPlaylistTracks (edit))
-            if (auto* audio = dynamic_cast<te::AudioTrack*> (track))
-                tracks.add (audio);
+        for (const auto& state : getTrackStates (song))
+            if (! isFolderState (state))
+                tracks.push_back (getTrackID (state));
 
         return tracks;
     }
 
-    te::BeatPosition getPlayhead (const te::Edit& edit)
+    int indexOf (const std::vector<TrackID>& tracks, TrackID track)
     {
-        return edit.tempoSequence.toBeats (getPlayheadTime (edit));
+        const auto found = std::find (tracks.begin(), tracks.end(), track);
+        return found != tracks.end() ? (int) (found - tracks.begin()) : -1;
     }
 
     // A clip made from what Copy kept, where it was, on a track: a copy, in no alias group, with an ID of its own.
-    te::Clip* pasteClip (te::Edit& edit, const juce::ValueTree& kept, te::ClipTrack& track)
+    ClipID pasteClip (Song& song, const juce::ValueTree& kept, TrackID track)
     {
-        auto clipState = copyClipState (getSong (edit), kept);
+        auto clipState = copyClipState (song, kept);
         clipState.removeProperty (schema::clipLink, nullptr);
-        return placeClipState (edit, clipState, track);
+        return placeClipState (song, clipState, track);
     }
 
     // Keeps the clips, each with its track's place from the first of them, and the time from the earliest start to the latest
     // end (or the range's, given one).
-    void keepClips (Clipboard& clipboard, const te::Edit& edit, const juce::Array<te::Clip*>& clips, std::optional<te::BeatRange> range)
+    void keepClips (Clipboard& clipboard, const Song& song, const std::vector<ClipID>& clips, std::optional<BeatRange> range)
     {
-        const auto tracks = getTracksForClips (edit);
-        auto first = tracks.size();
+        const auto tracks = getTracksForClips (song);
+        auto first = (int) tracks.size();
 
-        for (auto* clip : clips)
-            if (const auto index = tracks.indexOf (dynamic_cast<te::AudioTrack*> (clip->getTrack())); index >= 0)
+        for (const auto clip : clips)
+            if (const auto index = indexOf (tracks, getClipTrack (song, clip)); index >= 0)
                 first = std::min (first, index);
 
-        for (auto* clip : clips)
-            if (const auto index = tracks.indexOf (dynamic_cast<te::AudioTrack*> (clip->getTrack())); index >= 0)
-                clipboard.clips.push_back ({ findClipState (*clip).createCopy(), clip->getEditBeatRange(), index - first });
+        std::optional<BeatRange> span;
+
+        for (const auto clip : clips)
+        {
+            const auto clipState = findClipState (song, clip);
+            const auto beats = getClipRange (song, clipState);
+            span = span.has_value() ? span->getUnionWith (beats) : beats;
+
+            if (const auto index = indexOf (tracks, getTrackID (clipState.getParent())); index >= 0)
+                clipboard.clips.push_back ({ clipState.createCopy(), beats, index - first });
+        }
 
         if (range.has_value())
-        {
             clipboard.range = *range;
-        }
-        else if (! clips.isEmpty())
-        {
-            auto start = clips.getFirst()->getStartBeat(), end = clips.getFirst()->getEndBeat();
+        else if (span.has_value())
+            clipboard.range = *span;
 
-            for (auto* clip : clips)
-            {
-                start = std::min (start, clip->getStartBeat());
-                end = std::max (end, clip->getEndBeat());
-            }
-
-            clipboard.range = { start, end };
-        }
-
-        if (juce::isPositiveAndBelow (first, tracks.size()))
-            clipboard.track = tracks[first]->itemID;
+        if (juce::isPositiveAndBelow (first, (int) tracks.size()))
+            clipboard.track = tracks[(size_t) first];
     }
 
     // Where Paste puts clips: from the selected track down, else the first selected clip's, else where they came from.
-    te::AudioTrack* getPasteTrack (const Clipboard& clipboard, const Selection& selection)
+    TrackID getPasteTrack (const Clipboard& clipboard, const Selection& selection)
     {
-        auto* edit = selection.getEdit();
+        auto* song = selection.getSong();
 
-        if (edit == nullptr)
-            return nullptr;
+        if (song == nullptr)
+            return {};
 
-        for (auto* track : findTracks (*edit, getSelectedTracks (selection)))
-            if (auto* audio = dynamic_cast<te::AudioTrack*> (track))
-                return audio;
+        const auto tracks = getTracksForClips (*song);
 
-        for (auto* clip : findSelectedClips (selection))
-            if (auto* audio = dynamic_cast<te::AudioTrack*> (clip->getTrack()))
-                return audio;
+        for (const auto track : getSelectedTracks (selection))
+            if (indexOf (tracks, track) >= 0)
+                return track;
 
-        return dynamic_cast<te::AudioTrack*> (te::findTrackForID (*edit, clipboard.track));
+        for (const auto clip : getSelectedClips (selection))
+            if (const auto track = getClipTrack (*song, clip); indexOf (tracks, track) >= 0)
+                return track;
+
+        return indexOf (tracks, clipboard.track) >= 0 ? clipboard.track : TrackID();
     }
 
-    // The clips the piano roll shows, which notes are pasted into.
-    juce::Array<te::MidiClip*> getNoteClips (ProjectContext& context)
+    // The MIDI clips the piano roll shows, which notes are pasted into.
+    std::vector<ClipID> getNoteClips (ProjectContext& context)
     {
-        juce::Array<te::MidiClip*> clips;
+        std::vector<ClipID> clips;
 
-        if (auto* edit = getEdit (context))
+        if (auto* song = findSong (context))
             for (const auto id : context.getSongSelection().getNoteClips())
-                if (auto* clip = dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))))
-                    clips.add (clip);
+                if (isMidiState (findClipState (*song, id)))
+                    clips.push_back (id);
 
         return clips;
     }
 
     void pasteNotes (const Clipboard& clipboard, ProjectContext& context)
     {
-        auto* edit = getEdit (context);
+        auto* song = findSong (context);
         const auto clips = getNoteClips (context);
 
-        if (edit == nullptr || clips.isEmpty())
+        if (song == nullptr || clips.empty())
             return;
 
         // At the playhead in the clip there, or as far into the first clip as they were into theirs.
-        const auto playhead = getPlayhead (*edit);
-        auto* target = clips.getFirst();
-        auto at = fromTracktion (target->getStartBeat()) + clipboard.intoClip;
+        const auto playhead = getPlayheadBeat (*song);
+        auto target = clips.front();
+        auto at = getClipRange (*song, target).getStart() + clipboard.intoClip;
 
-        for (auto* clip : clips)
+        for (const auto clip : clips)
         {
-            if (clip->getEditBeatRange().contains (playhead))
+            if (getClipRange (*song, clip).contains (playhead))
             {
                 target = clip;
-                at = fromTracktion (playhead);
+                at = playhead;
                 break;
             }
         }
@@ -140,97 +138,92 @@ namespace
 
         for (auto& note : notes)
         {
-            note.clip = getClipID (*target);
+            note.clip = target;
             note.start = at + (note.start - BeatPosition());
         }
 
-        std::vector<NoteRef> pasted;
-
-        for (const auto& added : replaceNotes (*edit, {}, notes))
-            pasted.push_back (getNoteRef (*added.clip, *added.note));
-
-        context.getSongSelection().selectNotes (pasted);
+        context.getSongSelection().selectNotes (replaceNotes (*song, {}, notes));
     }
 
     void pasteClips (const Clipboard& clipboard, ProjectContext& context)
     {
         auto& selection = getSelection (context);
-        auto* edit = getEdit (context);
-        auto* target = getPasteTrack (clipboard, selection);
+        auto* song = findSong (context);
+        const auto target = getPasteTrack (clipboard, selection);
 
-        if (edit == nullptr || target == nullptr)
+        if (song == nullptr || ! target.isValid())
             return;
 
-        const auto tracks = getTracksForClips (*edit);
-        const auto first = tracks.indexOf (target);
-        const auto distance = getPlayhead (*edit) - clipboard.range.getStart();
+        const auto tracks = getTracksForClips (*song);
+        const auto first = indexOf (tracks, target);
+        const auto distance = getPlayheadBeat (*song) - clipboard.range.getStart();
         const auto isRange = clipboard.kind == Clipboard::Kind::range;
+
+        const auto trackAt = [&tracks] (int index)
+        { return juce::isPositiveAndBelow (index, (int) tracks.size()) ? tracks[(size_t) index] : TrackID(); };
 
         // Where each lands (a range's clips cut to it): cleared first, so that no pasted clip cuts another.
         const auto landingOf = [&clipboard, isRange, distance] (const Clipboard::CopiedClip& copied)
-        {
-            const auto beats = isRange ? copied.beats.getIntersectionWith (clipboard.range) : copied.beats;
-            return te::BeatRange (beats.getStart() + distance, beats.getEnd() + distance);
-        };
+        { return (isRange ? copied.beats.getIntersectionWith (clipboard.range) : copied.beats).movedBy (distance); };
 
         for (const auto& copied : clipboard.clips)
-            if (auto* track = tracks[first + copied.trackOffset])
-                clearClipsIn (*track, landingOf (copied));
+            if (const auto track = trackAt (first + copied.trackOffset); track.isValid())
+                clearClipsIn (*song, track, landingOf (copied));
 
         // Each a copy, not an alias, as Duplicate makes them: made where it was, cut to the range, and moved to where it lands.
-        juce::Array<te::Clip*> pasted;
+        std::vector<ClipID> pasted;
 
         for (const auto& copied : clipboard.clips)
         {
-            auto* track = tracks[first + copied.trackOffset];
+            const auto track = trackAt (first + copied.trackOffset);
 
-            if (track == nullptr)
+            if (! track.isValid())
                 continue;
 
-            auto* clip = pasteClip (*edit, copied.state, *track);
+            auto clip = pasteClip (*song, copied.state, track);
 
-            if (clip == nullptr)
+            if (! clip.isValid())
                 continue;
 
             if (isRange)
             {
-                if (const auto rest = splitClips ({ clip }, clipboard.range.getStart()); ! rest.isEmpty())
+                if (const auto rest = splitClips (*song, { clip }, clipboard.range.getStart()); ! rest.empty())
                 {
-                    deleteClips ({ clip }, false); // what lay before the range
-                    clip = rest.getFirst();
+                    deleteClips (*song, { clip }, false); // what lay before the range
+                    clip = rest.front();
                 }
 
-                deleteClips (splitClips ({ clip }, clipboard.range.getEnd()), false);
+                deleteClips (*song, splitClips (*song, { clip }, clipboard.range.getEnd()), false);
             }
 
-            moveClip (*clip, landingOf (copied).getStart(), *track);
-            pasted.add (clip);
+            moveClip (*song, clip, landingOf (copied).getStart(), track);
+            pasted.push_back (clip);
         }
 
         // The automation, back onto its own tracks.
-        if (target->itemID == clipboard.track)
-            pasteAutomation (*edit, clipboard.automation, fromTracktion (distance));
+        if (target == clipboard.track)
+            pasteAutomation (*song, clipboard.automation, distance);
 
         // What was pasted is selected: a range's becomes the range, as a duplicated range does.
         if (isRange)
         {
-            juce::Array<te::Track*> landed;
+            std::vector<TrackID> landed;
 
-            for (int i = 0; i < tracks.size(); ++i)
+            for (int i = 0; i < (int) tracks.size(); ++i)
                 if (std::any_of (clipboard.clips.begin(), clipboard.clips.end(),
                                  [i, first] (const Clipboard::CopiedClip& copied) { return copied.trackOffset == i - first; }))
-                    landed.add (tracks[i]);
+                    landed.push_back (tracks[(size_t) i]);
 
-            if (landed.isEmpty())
-                landed.add (target);
+            if (landed.empty())
+                landed.push_back (target);
 
-            getRangeSelection (context).setInUndoStep (*edit, clipboard.range + distance, landed);
+            getRangeSelection (context).setInUndoStep (*song, clipboard.range.movedBy (distance), landed);
             return;
         }
 
         selection.deselectAll();
 
-        for (auto* clip : pasted)
+        for (const auto clip : pasted)
             selection.addToSelection (clip);
     }
 } // namespace
@@ -242,35 +235,29 @@ bool canCopy (const Selection& selection, const RangeSelection& range)
 
 void copySelection (Clipboard& clipboard, const Selection& selection, const RangeSelection& range)
 {
-    auto* edit = selection.getEdit();
+    auto* song = selection.getSong();
 
-    if (edit == nullptr || ! canCopy (selection, range))
+    if (song == nullptr || ! canCopy (selection, range))
         return;
 
     Clipboard copy;
 
     // Notes, as far apart as they are, and as far into its clip as the earliest is.
-    if (const auto notes = getSelectedNotes (selection); ! notes.empty())
+    if (const auto notes = getNoteData (*song, getSelectedNotes (selection)); ! notes.empty())
     {
         copy.kind = Clipboard::Kind::notes;
-        copy.notes = getNoteData (notes);
-        auto earliest = copy.notes.front().start;
-        auto* earliestClip = notes.front().clip;
+        copy.notes = notes;
+        auto earliest = notes.front();
 
-        for (size_t i = 0; i < notes.size(); ++i)
-        {
-            if (copy.notes[i].start < earliest)
-            {
-                earliest = copy.notes[i].start;
-                earliestClip = notes[i].clip;
-            }
-        }
+        for (const auto& note : notes)
+            if (note.start < earliest.start)
+                earliest = note;
 
-        copy.intoClip = earliest - fromTracktion (earliestClip->getStartBeat());
+        copy.intoClip = earliest.start - getClipRange (*song, earliest.clip).getStart();
 
         for (auto& note : copy.notes)
         {
-            note.start = BeatPosition() + (note.start - earliest);
+            note.start = BeatPosition() + (note.start - earliest.start);
             note.clip = {};
             note.id = {};
         }
@@ -280,44 +267,43 @@ void copySelection (Clipboard& clipboard, const Selection& selection, const Rang
     {
         copy.kind = Clipboard::Kind::range;
         const auto tracks = range.getTracks();
-        juce::Array<te::Clip*> clips;
+        std::vector<ClipID> clips;
 
-        for (auto* track : tracks)
-            if (auto* clipTrack = dynamic_cast<te::AudioTrack*> (track))
-                for (auto* clip : clipTrack->getClips())
-                    if (clip->getEditBeatRange().intersects (range.getRange()))
-                        clips.add (clip);
+        for (const auto track : tracks)
+            for (const auto clip : getClips (*song, track))
+                if (getClipRange (*song, clip).overlaps (range.getRange()))
+                    clips.push_back (clip);
 
-        keepClips (copy, *edit, clips, range.getRange());
+        keepClips (copy, *song, clips, range.getRange());
 
         // A range without clips pastes from its first track that holds them.
         if (! copy.track.isValid())
-            for (auto* track : getTracksForClips (*edit))
-                if (tracks.contains (track))
+            for (const auto track : getTracksForClips (*song))
+                if (std::find (tracks.begin(), tracks.end(), track) != tracks.end())
                 {
-                    copy.track = track->itemID;
+                    copy.track = track;
                     break;
                 }
 
         std::vector<AutomationStretch> stretches;
 
-        for (auto* track : tracks)
-            stretches.push_back ({ track, fromTracktion (range.getRange()) });
+        for (const auto track : tracks)
+            stretches.push_back ({ track, range.getRange() });
 
-        copy.automation = copyAutomation (stretches);
+        copy.automation = copyAutomation (*song, stretches);
     }
     // Clips, with the automation under each.
     else
     {
         copy.kind = Clipboard::Kind::clips;
-        const auto clips = findSelectedClips (selection);
-        keepClips (copy, *edit, clips, std::nullopt);
+        const auto clips = getSelectedClips (selection);
+        keepClips (copy, *song, clips, std::nullopt);
         std::vector<AutomationStretch> stretches;
 
-        for (auto* clip : clips)
-            stretches.push_back ({ clip->getTrack(), fromTracktion (clip->getEditBeatRange()) });
+        for (const auto clip : clips)
+            stretches.push_back ({ getClipTrack (*song, clip), getClipRange (*song, clip) });
 
-        copy.automation = copyAutomation (stretches);
+        copy.automation = copyAutomation (*song, stretches);
     }
 
     clipboard = std::move (copy);
@@ -325,9 +311,9 @@ void copySelection (Clipboard& clipboard, const Selection& selection, const Rang
 
 void cutSelection (Clipboard& clipboard, Selection& selection, RangeSelection& range)
 {
-    auto* edit = selection.getEdit();
+    auto* song = selection.getSong();
 
-    if (edit == nullptr || ! canCopy (selection, range))
+    if (song == nullptr || ! canCopy (selection, range))
         return;
 
     copySelection (clipboard, selection, range);
@@ -335,15 +321,15 @@ void cutSelection (Clipboard& clipboard, Selection& selection, RangeSelection& r
     switch (clipboard.kind)
     {
         case Clipboard::Kind::notes:
-            deleteNotes (getSelectedNotes (selection));
+            deleteNotes (*song, getSelectedNotes (selection));
             break;
 
         case Clipboard::Kind::range:
-            deleteTimeRange (*edit, range.getRange(), range.getTracks(), false);
+            deleteTimeRange (*song, range.getRange(), range.getTracks(), false);
             break;
 
         case Clipboard::Kind::clips:
-            deleteClips (findSelectedClips (selection), false);
+            deleteClips (*song, getSelectedClips (selection), false);
             break;
 
         case Clipboard::Kind::nothing:
@@ -361,11 +347,11 @@ bool canPaste (const Clipboard& clipboard, ProjectContext& context)
     switch (clipboard.kind)
     {
         case Clipboard::Kind::notes:
-            return ! getNoteClips (context).isEmpty();
+            return ! getNoteClips (context).empty();
 
         case Clipboard::Kind::clips:
         case Clipboard::Kind::range:
-            return getPasteTrack (clipboard, getSelection (context)) != nullptr;
+            return getPasteTrack (clipboard, getSelection (context)).isValid();
 
         case Clipboard::Kind::nothing:
             break;

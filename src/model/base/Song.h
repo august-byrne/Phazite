@@ -26,6 +26,15 @@ public:
     // Its undo history: 30 steps at least.
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
 
+    // Where its files are: its project file, which the paths it keeps of the files it plays start from (none for a song
+    // outside a project, which keeps whole paths); and the folder of what Phazite makes for it and can make again (renders
+    // of its audio clips, its frozen tracks' files): its project's Cache folder, or one of its own in the temporary folder,
+    // made as it is first asked for and deleted with the song.
+    void setFile (const juce::File& projectFile) { file = projectFile; }
+    const juce::File& getFile() const noexcept { return file; }
+    void setCacheFolder (const juce::File&);
+    juce::File getCacheFolder() const;
+
     // A new ID for an item of the song (a track, a channel's fader or VCA, a clip, a note, an alias group, a device, a
     // container, a send, a modulator, a macro, a section): the song's next (Schema.h: nextID), never given twice, nor
     // taken back by an undo.
@@ -61,6 +70,8 @@ public:
 private:
     juce::ValueTree state;
     juce::UndoManager undoManager;
+    juce::File file, cacheFolder;
+    mutable juce::File ownCacheFolder; // in the temporary folder, while no other is given
     std::function<std::uint64_t()> takeTracktionID;
     std::function<void (Part, std::uint64_t)> mirror;
     std::function<void (std::uint64_t)> deviceStateStore;

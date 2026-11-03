@@ -15,14 +15,14 @@
 
 namespace
 {
-te::BeatPosition beats (double b)
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
-te::BeatDuration length (double b)
+phazite::BeatDuration length (double b)
 {
-    return te::BeatDuration::fromBeats (b);
+    return phazite::BeatDuration::fromBeats (b);
 }
 
 // A note's values, in no clip yet.
@@ -34,47 +34,52 @@ phazite::NoteData noteData (int pitch, double start, double noteLength, int velo
              .velocity = velocity };
 }
 
+// A note of the song's, which must be there.
+phazite::NoteData noteOf (const phazite::Song& song, const phazite::NoteRef& note)
+{
+    const auto data = phazite::getNoteData (song, note);
+    REQUIRE (data.has_value());
+    return *data;
+}
+
 // An Edit with a MIDI clip from beat 4 to 8 (one bar, 4/4), the note selection for it, and the selection
 // and note commands, with a grid of a quarter beat.
 struct Notes
 {
     Notes()
     {
-        auto* track = te::getAudioTracks (*edit)[0];
-        clip = phazite::insertMidiClip (*track, { beats (4), beats (8) }, nullptr);
-        REQUIRE (clip != nullptr);
+        track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
+        clip = phazite::insertMidiClip (song, track, { beats (4), beats (8) }, nullptr);
+        REQUIRE (clip.isValid());
         selection.setEdit (edit.get());
-        selection.setNoteClips ({ phazite::getClipID (*clip) });
+        selection.setNoteClips ({ clip });
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addNoteCommands (registry, selection, [] { return 0.25; });
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        song.getUndoManager().clearUndoHistory();
     }
 
     ~Notes() { selection.deselectAll(); }
 
-    te::MidiNote& add (int pitch, double start, double noteLength, int velocity = 100)
+    phazite::NoteRef add (int pitch, double start, double noteLength, int velocity = 100)
     {
-        auto* note = phazite::addNote (*clip, pitch, beats (start), length (noteLength), velocity);
-        REQUIRE (note != nullptr);
-        return *note;
+        const auto note = phazite::addNote (song, clip, pitch, beats (start), length (noteLength), velocity);
+        REQUIRE (note.isValid());
+        return note;
     }
 
-    void select (std::initializer_list<te::MidiNote*> notes)
-    {
-        std::vector<phazite::NoteRef> refs;
+    void select (const std::vector<phazite::NoteRef>& notes) { selection.selectNotes (notes); }
 
-        for (auto* note : notes)
-            refs.push_back (phazite::getNoteRef (*clip, *note));
-
-        selection.selectNotes (refs);
-    }
-
-    double startOf (const te::MidiNote& note) const { return phazite::getNoteStart (*clip, note).inBeats(); }
+    phazite::NoteData get (const phazite::NoteRef& note) const { return noteOf (song, note); }
+    double startOf (const phazite::NoteRef& note) const { return get (note).start.inBeats(); }
+    phazite::BeatRange rangeOf (phazite::ClipID id) const { return phazite::getClipRange (song, id); }
+    size_t numNotesIn (phazite::ClipID id) const { return phazite::getClipNotes (song, id).size(); }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::MidiClip* clip = nullptr;
+    phazite::Song& song = phazite::getSong (*edit);
+    phazite::TrackID track;
+    phazite::ClipID clip;
     phazite::Selection selection { phazite::test::getEngine() };
-    phazite::RangeSelection range;
+    phazite::RangeSelection range { selection };
     phazite::CommandRegistry registry;
 };
 } // namespace
@@ -82,146 +87,147 @@ struct Notes
 TEST_CASE ("Notes are placed in song beats, and their clip grows to hold them")
 {
     Notes n;
-    auto& note = n.add (60, 5.0, 1.0);
+    const auto note = n.add (60, 5.0, 1.0);
     CHECK (n.startOf (note) == doctest::Approx (5.0));
-    CHECK (note.getStartBeat().inBeats() == doctest::Approx (1.0)); // in the clip, from its content's start
+    const auto inClip = (double) phazite::findNoteState (n.song, note)[phazite::schema::noteStart];
+    CHECK (inClip == doctest::Approx (1.0)); // in the clip, from its content's start
 
     // A note can't start before its clip, and one past its end makes it grow to the end of that bar.
-    auto& early = n.add (62, 2.0, 1.0);
+    const auto early = n.add (62, 2.0, 1.0);
     CHECK (n.startOf (early) == doctest::Approx (4.0));
 
     n.add (64, 9.0, 0.5);
-    CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (12.0));
+    CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (12.0));
 
-    phazite::moveNote (*n.clip, note, beats (13.5), 72);
+    phazite::moveNote (n.song, note, beats (13.5), 72);
     CHECK (n.startOf (note) == doctest::Approx (13.5));
-    CHECK (note.getNoteNumber() == 72);
-    CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (16.0));
+    CHECK (n.get (note).pitch == 72);
+    CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (16.0));
 
-    phazite::setNoteLength (*n.clip, note, length (0.0));
-    CHECK (note.getLengthBeats().inBeats() == doctest::Approx (phazite::getMinimumNoteLength().inBeats()));
+    phazite::setNoteLength (n.song, note, length (0.0));
+    CHECK (n.get (note).length.inBeats() == doctest::Approx (phazite::getMinimumNoteLength().inBeats()));
 }
 
 TEST_CASE ("Transposing and nudging keep the notes together, within their limits")
 {
     Notes n;
-    auto& low = n.add (2, 4.5, 1.0);
-    auto& high = n.add (60, 5.0, 1.0);
-    const std::vector<phazite::ClipNote> both { { n.clip, &low }, { n.clip, &high } };
+    const auto low = n.add (2, 4.5, 1.0);
+    const auto high = n.add (60, 5.0, 1.0);
+    const std::vector<phazite::NoteRef> both { low, high };
 
     // The lowest note can only go down 2, so the chord goes down 2.
-    phazite::transposeNotes (both, -12);
-    CHECK (low.getNoteNumber() == 0);
-    CHECK (high.getNoteNumber() == 58);
+    phazite::transposeNotes (n.song, both, -12);
+    CHECK (n.get (low).pitch == 0);
+    CHECK (n.get (high).pitch == 58);
 
     // The earliest can only go back half a beat, to the clip's start.
-    phazite::nudgeNotes (both, length (-2.0));
+    phazite::nudgeNotes (n.song, both, length (-2.0));
     CHECK (n.startOf (low) == doctest::Approx (4.0));
     CHECK (n.startOf (high) == doctest::Approx (4.5));
 
-    phazite::changeNoteLengths (both, length (0.5));
-    CHECK (high.getLengthBeats().inBeats() == doctest::Approx (1.5));
+    phazite::changeNoteLengths (n.song, both, length (0.5));
+    CHECK (n.get (high).length.inBeats() == doctest::Approx (1.5));
 
-    phazite::toggleNotesMuted (both);
-    CHECK (phazite::areAllNotesMuted (both));
-    phazite::toggleNotesMuted (both);
-    CHECK_FALSE (low.isMute());
+    phazite::toggleNotesMuted (n.song, both);
+    CHECK (phazite::areAllNotesMuted (n.song, both));
+    phazite::toggleNotesMuted (n.song, both);
+    CHECK_FALSE (n.get (low).muted);
 
-    phazite::setNoteVelocities (both, 200);
-    CHECK (high.getVelocity() == 127);
+    phazite::setNoteVelocities (n.song, both, 200);
+    CHECK (n.get (high).velocity == 127);
 }
 
 TEST_CASE ("Duplicated notes go right after the selection")
 {
     Notes n;
-    auto& a = n.add (60, 4.0, 1.0);
-    auto& b = n.add (64, 5.0, 0.5);
-    const auto copies = phazite::duplicateNotes ({ { n.clip, &a }, { n.clip, &b } });
+    const auto a = n.add (60, 4.0, 1.0);
+    const auto b = n.add (64, 5.0, 0.5);
+    const auto copies = phazite::duplicateNotes (n.song, { a, b });
 
     REQUIRE (copies.size() == 2);
-    CHECK (n.startOf (*copies[0].note) == doctest::Approx (5.5));
-    CHECK (n.startOf (*copies[1].note) == doctest::Approx (6.5));
-    CHECK (copies[1].note->getNoteNumber() == 64);
-    CHECK (n.clip->getSequence().getNumNotes() == 4);
+    CHECK (n.startOf (copies[0]) == doctest::Approx (5.5));
+    CHECK (n.startOf (copies[1]) == doctest::Approx (6.5));
+    CHECK (n.get (copies[1]).pitch == 64);
+    CHECK (n.numNotesIn (n.clip) == 4);
 }
 
 TEST_CASE ("A clip grows into the empty space after it only: never over the next clip on its track")
 {
     Notes n; // its clip is beats 4 to 8, on the Edit's only track
-    auto& track = *n.clip->getClipTrack();
-    const auto addClip = [&track] (double start, double end) -> te::MidiClip&
+    const auto track = phazite::getClipTrack (n.song, n.clip);
+    const auto addClip = [&n, track] (double start, double end)
     {
-        auto* added = phazite::insertMidiClip (track, { beats (start), beats (end) }, nullptr);
-        REQUIRE (added != nullptr);
-        return *added;
+        const auto added = phazite::insertMidiClip (n.song, track, { beats (start), beats (end) }, nullptr);
+        REQUIRE (added.isValid());
+        return added;
     };
 
     SUBCASE ("A clip right after it: it doesn't grow, and the note stays in it without playing")
     {
-        auto& next = addClip (8.0, 12.0);
-        auto& note = n.add (60, 8.5, 1.0);
+        const auto next = addClip (8.0, 12.0);
+        const auto note = n.add (60, 8.5, 1.0);
         CHECK (n.startOf (note) == doctest::Approx (8.5));
-        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (8.0));
-        CHECK (next.getStartBeat().inBeats() == doctest::Approx (8.0));
-        CHECK (next.getSequence().getNumNotes() == 0);
+        CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (8.0));
+        CHECK (n.rangeOf (next).getStart().inBeats() == doctest::Approx (8.0));
+        CHECK (n.numNotesIn (next) == 0);
     }
 
     SUBCASE ("A clip before the bar's end: it grows to meet it, not past it")
     {
-        auto& next = addClip (10.0, 14.0);
-        auto& note = n.add (60, 9.0, 0.5);
-        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (10.0)); // not 12, where the bar ends
-        phazite::moveNote (*n.clip, note, beats (13.0), 60);
-        phazite::setNoteLength (*n.clip, note, length (4.0));
-        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (10.0));
-        CHECK (next.getStartBeat().inBeats() == doctest::Approx (10.0));
-        CHECK (next.getEndBeat().inBeats() == doctest::Approx (14.0));
+        const auto next = addClip (10.0, 14.0);
+        const auto note = n.add (60, 9.0, 0.5);
+        CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (10.0)); // not 12, where the bar ends
+        phazite::moveNote (n.song, note, beats (13.0), 60);
+        phazite::setNoteLength (n.song, note, length (4.0));
+        CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (10.0));
+        CHECK (n.rangeOf (next).getStart().inBeats() == doctest::Approx (10.0));
+        CHECK (n.rangeOf (next).getEnd().inBeats() == doctest::Approx (14.0));
     }
 
     SUBCASE ("A clip that already reaches past its end: it doesn't grow")
     {
         addClip (6.0, 10.0);
         n.add (60, 8.5, 0.5);
-        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (8.0));
+        CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (8.0));
     }
 
     SUBCASE ("Clips on other tracks and sections don't count")
     {
-        auto* other = phazite::insertTrack (*n.edit, te::getAudioTracks (*n.edit)[0], nullptr);
-        REQUIRE (other != nullptr);
-        REQUIRE (phazite::insertMidiClip (*other, { beats (8.0), beats (12.0) }, nullptr) != nullptr);
+        const auto other = phazite::insertTrack (n.song, n.track, nullptr);
+        REQUIRE (other.isValid());
+        REQUIRE (phazite::insertMidiClip (n.song, other, { beats (8.0), beats (12.0) }, nullptr).isValid());
         phazite::SectionInfo drop;
         drop.name = "Drop";
-        REQUIRE (phazite::insertSection (phazite::getSong (*n.edit), phazite::BeatPosition::fromBeats (8.0), drop).isValid());
+        REQUIRE (phazite::insertSection (n.song, phazite::BeatPosition::fromBeats (8.0), drop).isValid());
         n.add (60, 9.0, 0.5);
-        CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (12.0));
+        CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (12.0));
     }
 }
 
 TEST_CASE ("Duplicating notes past their clip grows it only up to the next clip, in one undo step")
 {
     Notes n;
-    auto* next = phazite::insertMidiClip (*n.clip->getClipTrack(), { beats (10.0), beats (14.0) }, nullptr);
-    REQUIRE (next != nullptr);
-    auto& a = n.add (60, 6.0, 1.0);
-    auto& b = n.add (64, 7.0, 0.5);
-    phazite::getSong (*n.edit).getUndoManager().clearUndoHistory();
-    n.select ({ &a, &b });
+    const auto next = phazite::insertMidiClip (n.song, phazite::getClipTrack (n.song, n.clip), { beats (10.0), beats (14.0) }, nullptr);
+    REQUIRE (next.isValid());
+    const auto a = n.add (60, 6.0, 1.0);
+    const auto b = n.add (64, 7.0, 0.5);
+    n.song.getUndoManager().clearUndoHistory();
+    n.select ({ a, b });
 
     REQUIRE (n.registry.invoke ("edit.duplicate"));
-    CHECK (phazite::getSong (*n.edit).getUndoManager().getUndoDescription() == juce::String ("Duplicate 2 Notes"));
+    CHECK (n.song.getUndoManager().getUndoDescription() == juce::String ("Duplicate 2 Notes"));
 
     const auto copies = phazite::getSelectedNotes (n.selection);
     REQUIRE (copies.size() == 2);
-    CHECK (n.startOf (*copies[0].note) == doctest::Approx (7.5));
-    CHECK (n.startOf (*copies[1].note) == doctest::Approx (8.5));
-    CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (10.0)); // up to the next clip, not to beat 12
-    CHECK (next->getStartBeat().inBeats() == doctest::Approx (10.0));
+    CHECK (n.startOf (copies[0]) == doctest::Approx (7.5));
+    CHECK (n.startOf (copies[1]) == doctest::Approx (8.5));
+    CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (10.0)); // up to the next clip, not to beat 12
+    CHECK (n.rangeOf (next).getStart().inBeats() == doctest::Approx (10.0));
 
     n.selection.deselectAll(); // the copies go with the undo
     phazite::undo (*n.edit);
-    CHECK (n.clip->getSequence().getNumNotes() == 2);
-    CHECK (n.clip->getEndBeat().inBeats() == doctest::Approx (8.0));
+    CHECK (n.numNotesIn (n.clip) == 2);
+    CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (8.0));
 }
 
 TEST_CASE ("Quantize moves notes toward the grid, with strength and swing")
@@ -339,56 +345,56 @@ TEST_CASE ("Chord stamps and drum rows")
     CHECK (phazite::getDrumName (56) == juce::String ("Cowbell"));
 
     Notes n;
-    auto& track = *te::getAudioTracks (*n.edit)[0];
-    CHECK_FALSE (phazite::isDrumTrack (track)); // no sampler
-    phazite::setDrumTrack (track, true);
-    CHECK (phazite::isDrumTrack (track));
+    const auto track = n.track;
+    CHECK_FALSE (phazite::isDrumTrack (n.song, track)); // no sampler
+    phazite::setDrumTrack (n.song, track, true);
+    CHECK (phazite::isDrumTrack (n.song, track));
 
     // What the piano roll's rows come from (DrumRowTests): no sampler, so no sounds of its own, and the notes the clip
     // plays.
     n.add (70, 4.0, 0.25);
-    CHECK_FALSE (phazite::getSamplerSounds (track).has_value());
-    CHECK (phazite::getNoteNumbersPlayed ({ n.clip }) == std::vector<int> { 70 });
+    CHECK_FALSE (phazite::getSamplerSounds (n.song, track).has_value());
+    CHECK (phazite::getNoteNumbersPlayed (n.song, { n.clip }) == std::vector<int> { 70 });
 
     // The track keeps the rows' order and the hidden rows, as view settings.
-    phazite::getSong (*n.edit).getUndoManager().clearUndoHistory();
-    phazite::setDrumRowOrder (track, { 70, 36 });
-    CHECK (phazite::getDrumRowOrder (track) == std::vector<int> { 70, 36 });
-    phazite::hideDrumRow (track, 37);
-    phazite::hideDrumRow (track, 37);
-    CHECK (phazite::getHiddenDrumRows (track) == std::vector<int> { 37 }); // once
-    CHECK_FALSE (phazite::getSong (*n.edit).getUndoManager().canUndo());
+    n.song.getUndoManager().clearUndoHistory();
+    phazite::setDrumRowOrder (n.song, track, { 70, 36 });
+    CHECK (phazite::getDrumRowOrder (n.song, track) == std::vector<int> { 70, 36 });
+    phazite::hideDrumRow (n.song, track, 37);
+    phazite::hideDrumRow (n.song, track, 37);
+    CHECK (phazite::getHiddenDrumRows (n.song, track) == std::vector<int> { 37 }); // once
+    CHECK_FALSE (n.song.getUndoManager().canUndo());
 
-    phazite::showAllDrumRows (track);
-    CHECK (phazite::getHiddenDrumRows (track).empty());
+    phazite::showAllDrumRows (n.song, track);
+    CHECK (phazite::getHiddenDrumRows (n.song, track).empty());
 }
 
 TEST_CASE ("The note commands act on the selected notes, and take the arrow keys while notes are selected")
 {
     Notes n;
-    auto& a = n.add (60, 4.0, 1.0);
-    auto& b = n.add (64, 5.0, 1.0);
-    auto& undoManager = phazite::getSong (*n.edit).getUndoManager();
+    const auto a = n.add (60, 4.0, 1.0);
+    const auto b = n.add (64, 5.0, 1.0);
+    auto& undoManager = n.song.getUndoManager();
 
     CHECK_FALSE (n.registry.find ("note.transposeUp")->isEnabled());
-    n.select ({ &a, &b });
+    n.select ({ a, b });
     CHECK (phazite::getSelectedNotes (n.selection).size() == 2);
 
     REQUIRE (n.registry.invoke ("note.octaveUp"));
-    CHECK (a.getNoteNumber() == 72);
+    CHECK (n.get (a).pitch == 72);
     CHECK (undoManager.getUndoDescription() == juce::String ("Octave Up"));
 
     REQUIRE (n.registry.invoke ("note.lengthen"));
-    CHECK (b.getLengthBeats().inBeats() == doctest::Approx (1.25)); // a step of the grid
+    CHECK (n.get (b).length.inBeats() == doctest::Approx (1.25)); // a step of the grid
 
     // Legato replaces the notes and selects the new ones.
     REQUIRE (n.registry.invoke ("note.legato"));
     auto selected = phazite::getSelectedNotes (n.selection);
     REQUIRE (selected.size() == 2);
-    CHECK (selected[0].note->getLengthBeats().inBeats() == doctest::Approx (1.0));
+    CHECK (n.get (selected[0]).length.inBeats() == doctest::Approx (1.0));
 
     REQUIRE (n.registry.invoke ("note.chop"));
-    CHECK (n.clip->getSequence().getNumNotes() == 4 + 5); // 1 beat in 4 pieces, 1.25 beats in 5
+    CHECK (n.numNotesIn (n.clip) == 4 + 5); // 1 beat in 4 pieces, 1.25 beats in 5
     CHECK (phazite::getSelectedNotes (n.selection).size() == 9);
 
     // The up arrow runs the note command while notes are selected, and nothing once none are. (ShortcutTests checks
@@ -408,8 +414,8 @@ TEST_CASE ("The note commands act on the selected notes, and take the arrow keys
 TEST_CASE ("Replacing the selected notes selects the new ones")
 {
     Notes n;
-    auto& a = n.add (60, 4.0, 1.0);
-    auto& b = n.add (64, 5.0, 1.0);
+    const auto a = n.add (60, 4.0, 1.0);
+    const auto b = n.add (64, 5.0, 1.0);
     const auto octaveUp = [] (std::vector<phazite::NoteData> notes)
     {
         for (auto& data : notes)
@@ -421,18 +427,18 @@ TEST_CASE ("Replacing the selected notes selects the new ones")
     // With no notes selected, nothing changes.
     CHECK_FALSE (phazite::hasSelectedNotes (n.selection));
     CHECK (phazite::replaceSelectedNotes (n.selection, octaveUp).empty());
-    CHECK (n.clip->getSequence().getNumNotes() == 2);
+    CHECK (n.numNotesIn (n.clip) == 2);
 
-    n.select ({ &a, &b });
+    n.select ({ a, b });
     CHECK (phazite::hasSelectedNotes (n.selection));
     const auto added = phazite::replaceSelectedNotes (n.selection, octaveUp);
     REQUIRE (added.size() == 2);
-    CHECK (n.clip->getSequence().getNumNotes() == 2); // replaced, not added to
+    CHECK (n.numNotesIn (n.clip) == 2); // replaced, not added to
 
     std::vector<int> pitches;
 
     for (const auto& selected : phazite::getSelectedNotes (n.selection))
-        pitches.push_back (selected.note->getNoteNumber());
+        pitches.push_back (n.get (selected).pitch);
 
     std::sort (pitches.begin(), pitches.end());
     CHECK (pitches == std::vector<int> { 72, 76 });
@@ -490,61 +496,62 @@ TEST_CASE ("Scales are saved by name")
 TEST_CASE ("The piano roll's key menu, Alt and the wheel, and an applied transform are undo steps of their own")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto* track = te::getAudioTracks (*edit)[0];
-    auto* clip = phazite::insertMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, nullptr);
-    REQUIRE (clip != nullptr);
-    auto* note = phazite::addNote (*clip, 60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100);
-    REQUIRE (note != nullptr);
-    auto& undo = phazite::getSong (*edit).getUndoManager();
+    auto& song = phazite::getSong (*edit);
+    const auto track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
+    const auto clip = phazite::insertMidiClip (song, track, { phazite::BeatPosition(), beats (4.0) }, nullptr);
+    REQUIRE (clip.isValid());
+    const auto note = phazite::addNote (song, clip, 60, phazite::BeatPosition(), length (1.0), 100);
+    REQUIRE (note.isValid());
+    auto& undo = song.getUndoManager();
     undo.clearUndoHistory();
 
-    phazite::chooseTrackKey (*track, phazite::Key { 9, phazite::Scale::minor });
+    phazite::chooseTrackKey (song, track, phazite::Key { 9, phazite::Scale::minor });
     CHECK (undo.getUndoDescription() == juce::String ("Set Key"));
-    phazite::chooseTrackKey (*track, std::nullopt);
+    phazite::chooseTrackKey (song, track, std::nullopt);
     CHECK (undo.getUndoDescription() == juce::String ("Turn Key Off"));
 
-    phazite::changeNoteVelocities ({ { clip, note } }, -10);
-    CHECK (note->getVelocity() == 90);
+    phazite::changeNoteVelocities (song, { note }, -10);
+    CHECK (noteOf (song, note).velocity == 90);
     CHECK (undo.getUndoDescription() == juce::String ("Change Velocity"));
 
-    auto data = phazite::getNoteData ({ { clip, note } });
+    auto data = phazite::getNoteData (song, std::vector { note });
     data.front().pitch = 67;
-    const auto replaced = phazite::replaceNotes (*edit, { { clip, note } }, data, "Transpose Notes");
+    const auto replaced = phazite::replaceNotes (song, { note }, data, "Transpose Notes");
     REQUIRE (replaced.size() == 1);
-    CHECK (replaced.front().note->getNoteNumber() == 67);
+    CHECK (noteOf (song, replaced.front()).pitch == 67);
     CHECK (undo.getUndoDescription() == juce::String ("Transpose Notes"));
 }
 
 TEST_CASE ("Slide and portamento notes are switched by their commands, each one undo step, and their copies keep them")
 {
     Notes n;
-    auto& c = n.add (60, 4.0, 2.0);
-    auto& e = n.add (64, 5.0, 1.0);
-    n.select ({ &e });
+    const auto c = n.add (60, 4.0, 2.0);
+    const auto e = n.add (64, 5.0, 1.0);
+    n.select ({ e });
     CHECK_FALSE (n.registry.find ("note.slide")->isTicked());
 
     // A slide note, saved on the song's note as well as shown.
     REQUIRE (n.registry.invoke ("note.slide"));
     CHECK (n.registry.find ("note.slide")->isTicked());
-    CHECK (phazite::getNoteData (*n.clip, e).slide);
-    CHECK_FALSE (phazite::getNoteData (*n.clip, e).portamento);
-    CHECK_FALSE (phazite::getNoteData (*n.clip, c).slide);
+    CHECK (n.get (e).slide);
+    CHECK_FALSE (n.get (e).portamento);
+    CHECK_FALSE (n.get (c).slide);
     CHECK (phazite::describeUndo (n.edit.get()) == juce::String ("Undo Slide Note"));
 
     // Portamento on both; with one of them already, it goes on for the other.
-    n.select ({ &c, &e });
+    n.select ({ c, e });
     REQUIRE (n.registry.invoke ("note.portamento"));
     CHECK (n.registry.find ("note.portamento")->isTicked());
-    CHECK (phazite::getNoteData (*n.clip, c).portamento);
+    CHECK (n.get (c).portamento);
     CHECK_FALSE (n.registry.find ("note.slide")->isTicked()); // not every selected note is a slide note
 
     // Copies keep them.
-    n.select ({ &e });
+    n.select ({ e });
     REQUIRE (n.registry.invoke ("edit.duplicate"));
     auto copies = 0;
 
-    for (auto* note : n.clip->getSequence().getNotes())
-        if (const auto data = phazite::getNoteData (*n.clip, *note); data.pitch == 64 && data.slide && data.portamento)
+    for (const auto& data : phazite::getClipNotes (n.song, n.clip))
+        if (data.pitch == 64 && data.slide && data.portamento)
             ++copies;
 
     CHECK (copies == 2);
@@ -552,7 +559,7 @@ TEST_CASE ("Slide and portamento notes are switched by their commands, each one 
     // Undone, step by step.
     phazite::undo (*n.edit);
     phazite::undo (*n.edit);
-    CHECK_FALSE (phazite::getNoteData (*n.clip, c).portamento);
+    CHECK_FALSE (n.get (c).portamento);
     phazite::undo (*n.edit);
-    CHECK_FALSE (phazite::getNoteData (*n.clip, e).slide);
+    CHECK_FALSE (n.get (e).slide);
 }

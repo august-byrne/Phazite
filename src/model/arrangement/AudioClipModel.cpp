@@ -2,10 +2,14 @@
 #include "AudioClipModel.h"
 #include "internal/AudioClips.h"
 #include "internal/ClipRenders.h"
+#include "internal/Clips.h"
+#include "internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <cmath>
 #include <functional>
@@ -16,72 +20,74 @@ namespace phazite
 {
 namespace
 {
-    te::AudioClipBase* findAudioClip (const ProjectContext& context, ClipID id)
+    // An audio clip's element in the open project's song, or invalid.
+    juce::ValueTree findAudioClip (const ProjectContext& context, ClipID id)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::AudioClipBase*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
+        auto* song = findSong (context);
+        const auto clipState = song != nullptr ? findClipState (*song, id) : juce::ValueTree();
+        return isAudioState (clipState) ? clipState : juce::ValueTree();
     }
 
-    // A track that can hold clips of either kind (not a folder).
-    te::AudioTrack* findTrack (const ProjectContext& context, TrackID id)
+    // A track that can hold clips of either kind (not a folder or the master), or invalid.
+    juce::ValueTree findTrack (const ProjectContext& context, TrackID id)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::AudioTrack*> (te::findTrackForID (*edit, toTracktion (id))) : nullptr;
+        auto* song = findSong (context);
+        const auto state = song != nullptr ? findTrackState (*song, id) : juce::ValueTree();
+        return state.hasType (schema::TRACK) && ! isFolderState (state) ? state : juce::ValueTree();
     }
 
-    bool holdsAudio (const te::AudioTrack& track)
+    bool holdsAudio (const juce::ValueTree& trackState)
     {
-        for (auto* clip : track.getClips())
-            if (dynamic_cast<te::AudioClipBase*> (clip) != nullptr)
-                return true;
-
-        return false;
+        const auto clips = getClipStates (trackState);
+        return std::any_of (clips.begin(), clips.end(), isAudioState);
     }
 
     // A change to an audio clip, as an undo step of its own with that name.
     template <typename Change>
     void changeClip (ProjectContext& context, ClipID id, const juce::String& name, Change&& change)
     {
-        if (auto* clip = findAudioClip (context, id))
+        if (findAudioClip (context, id).isValid())
         {
-            const UndoStep step (clip->edit, name);
-            change (*clip);
+            auto& song = *findSong (context);
+            const UndoStep step (song, name);
+            change (song);
         }
     }
 } // namespace
 
 std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID id)
 {
-    auto* clip = findAudioClip (context, id);
+    const auto clipState = findAudioClip (context, id);
     const auto shown = getClip (context, id);
 
-    if (clip == nullptr || ! shown.has_value())
+    if (! clipState.isValid() || ! shown.has_value())
         return {};
 
+    const auto& song = *findSong (context);
     AudioClipInfo info;
     info.clip = *shown;
 
     // The file as it was recorded, not the render that plays it stretched, pitched or reversed.
-    const auto original = getClipFile (*clip);
+    const auto original = getClipFile (song, clipState);
     const auto file = getAudioFileInfo (original);
     info.fileName = original.getFileName();
     info.sampleRate = file.sampleRate;
     info.channels = file.numChannels;
     info.seconds = file.getSeconds();
 
-    const auto& tempo = clip->edit.tempoSequence;
-    const auto audio = getAudioTimeRange (*clip);
-    info.content = { fromTracktion (tempo.toBeats (audio.getStart())), fromTracktion (tempo.toBeats (audio.getEnd())) };
+    const auto audio = getAudioFileRange (song, clipState);
+    info.content = { toBeats (song, audio.start), toBeats (song, audio.end) };
 
-    info.gain = getClipGain (*clip);
-    info.pitch = getClipPitch (*clip);
-    info.reversed = isClipReversed (*clip);
-    info.tempo = getClipTempo (*clip);
+    info.gain = getClipGain (song, id);
+    info.pitch = getClipPitch (song, id);
+    info.reversed = isClipReversed (song, id);
+    info.tempo = getClipTempo (song, id);
     info.followsTempo = info.tempo > 0.0;
 
+    // A render not made yet is being prepared (ClipRenders.h).
     if (file.sampleRate <= 0.0)
         info.state = AudioState::missing;
-    else if (isRendered (*clip) && ! clip->getAudioFile().isValid())
+    else if (isRendered (song, id) && ! getAudioFileInfo (getPlayedFile (song, clipState)).isValid())
         info.state = AudioState::preparing;
 
     return info;
@@ -89,27 +95,28 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
 
 std::optional<ClipID> getAudioClipNearest (const ProjectContext& context, TrackID id, BeatPosition beat)
 {
-    auto* track = findTrack (context, id);
+    const auto track = findTrack (context, id);
 
-    if (track == nullptr)
+    if (! track.isValid())
         return {};
 
+    const auto& song = *findSong (context);
     std::optional<ClipID> nearest;
     auto nearestDistance = std::numeric_limits<double>::max();
-    const auto at = toTracktion (beat);
 
-    for (auto* clip : track->getClips())
+    for (const auto& clipState : getClipStates (track))
     {
-        if (dynamic_cast<te::AudioClipBase*> (clip) == nullptr)
+        if (! isAudioState (clipState))
             continue;
 
-        const auto range = clip->getEditBeatRange();
-        const auto distance =
-            range.contains (at) ? 0.0 : std::min (std::abs ((range.getStart() - at).inBeats()), std::abs ((range.getEnd() - at).inBeats()));
+        const auto range = getClipRange (song, clipState);
+        const auto distance = range.contains (beat)
+                                  ? 0.0
+                                  : std::min (std::abs ((range.getStart() - beat).inBeats()), std::abs ((range.getEnd() - beat).inBeats()));
 
         if (distance < nearestDistance)
         {
-            nearest = getClipID (*clip);
+            nearest = getClipID (clipState);
             nearestDistance = distance;
         }
     }
@@ -137,8 +144,8 @@ std::optional<ClipType> getClipTypeToEdit (const ProjectContext& context)
         return type;
 
     if (const auto tracks = selection.getTracks(); ! tracks.empty())
-        if (auto* track = findTrack (context, tracks.front()))
-            return holdsAudio (*track) ? ClipType::audio : ClipType::midi;
+        if (const auto track = findTrack (context, tracks.front()); track.isValid())
+            return holdsAudio (track) ? ClipType::audio : ClipType::midi;
 
     return {};
 }
@@ -172,29 +179,29 @@ std::optional<ClipID> getAudioClipToEdit (const ProjectContext& context, BeatPos
 //==============================================================================
 void setClipGain (ProjectContext& context, ClipID id, float decibels)
 {
-    changeClip (context, id, "Change Clip Gain", [decibels] (te::AudioClipBase& clip) { setClipGain (clip, decibels); });
+    changeClip (context, id, "Change Clip Gain", [id, decibels] (Song& song) { setClipGain (song, id, decibels); });
 }
 
 void setClipPitch (ProjectContext& context, ClipID id, float semitones)
 {
-    changeClip (context, id, "Change Clip Pitch", [semitones] (te::AudioClipBase& clip) { setClipPitch (clip, semitones); });
+    changeClip (context, id, "Change Clip Pitch", [id, semitones] (Song& song) { setClipPitch (song, id, semitones); });
 }
 
 void setClipReversed (ProjectContext& context, ClipID id, bool reversed)
 {
     changeClip (context, id, reversed ? "Reverse Clip" : "Play Clip Forwards",
-                [reversed] (te::AudioClipBase& clip) { setClipReversed (clip, reversed); });
+                [id, reversed] (Song& song) { setClipReversed (song, id, reversed); });
 }
 
 void setClipFollowsTempo (ProjectContext& context, ClipID id, bool follows)
 {
     changeClip (context, id, follows ? "Follow Tempo" : "Stop Following Tempo",
-                [follows] (te::AudioClipBase& clip) { setClipFollowsTempo (clip, follows); });
+                [id, follows] (Song& song) { setClipFollowsTempo (song, id, follows); });
 }
 
 void setClipTempo (ProjectContext& context, ClipID id, double bpm)
 {
-    changeClip (context, id, "Change Clip Tempo", [bpm] (te::AudioClipBase& clip) { setClipTempo (clip, bpm); });
+    changeClip (context, id, "Change Clip Tempo", [id, bpm] (Song& song) { setClipTempo (song, id, bpm); });
 }
 
 ClipRenderProgress getClipRenderProgress (const ProjectContext& context)
@@ -212,15 +219,15 @@ std::map<ClipID, double> getClipsBeingRendered (const ProjectContext& context)
 {
     std::map<ClipID, double> clips;
     const auto* renders = getClipRenders (context);
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (renders == nullptr || edit == nullptr || renders->getProgress().renders == 0)
+    if (renders == nullptr || song == nullptr || renders->getProgress().renders == 0)
         return clips;
 
-    for (auto* clip : getAudioClips (*edit))
-        if (isRendered (*clip))
-            if (const auto progress = renders->getProgressOf (clip->getSourceFileReference().getFile()))
-                clips[getClipID (*clip)] = *progress;
+    for (const auto clip : getAudioClips (*song))
+        if (isRendered (*song, clip))
+            if (const auto progress = renders->getProgressOf (getPlayedFile (*song, findClipState (*song, clip))))
+                clips[clip] = *progress;
 
     return clips;
 }
@@ -264,7 +271,7 @@ namespace
     void setEachClip (ProjectContext& context, const std::vector<ClipID>& ids, ClipProperty property,
                       const std::function<double (double earliest, double own)>& valueOf)
     {
-        auto* edit = getEdit (context);
+        auto* song = findSong (context);
         std::vector<std::pair<ClipInfo, double>> clips;
         auto earliest = std::numeric_limits<double>::max();
 
@@ -280,10 +287,10 @@ namespace
             }
         }
 
-        if (edit == nullptr || clips.empty())
+        if (song == nullptr || clips.empty())
             return;
 
-        const UndoStep step (*edit, getUndoName (property));
+        const UndoStep step (*song, getUndoName (property));
 
         for (const auto& [clip, own] : clips)
         {

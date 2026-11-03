@@ -24,6 +24,11 @@ te::Track* findTrack (const te::Edit&, TrackID);
 te::Track* findTrack (const te::Edit&, const juce::ValueTree& trackState);
 juce::Array<te::Track*> findTracks (const te::Edit&, const std::vector<TrackID>&); // those there, in their order
 
+// A file Tracktion's clips may play, which Tracktion may have read before: read again (a render made since it last looked),
+// or let go of before it is deleted.
+void reconcileFile (te::Edit&, const juce::File&);
+void releaseFile (te::Edit&, const juce::File&);
+
 // The tempo map (model/transport/internal/Tempo.h): Tracktion's tempo sequence gets the document's tempos and time
 // signatures, each at its beat; and the clips and the automation are placed again for them (reconcileClips(),
 // reconcileAutomation()).

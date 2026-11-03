@@ -105,7 +105,7 @@ namespace
     }
 
     // Puts a device's element among a chain's, before the one at a place, or after the last.
-    void addDeviceState (te::Edit& edit, juce::ValueTree chain, const juce::ValueTree& device, int deviceIndex)
+    void addDeviceState (Song& song, juce::ValueTree chain, const juce::ValueTree& device, int deviceIndex)
     {
         const auto devices = getDeviceStates (chain);
         auto index = chain.getNumChildren();
@@ -115,7 +115,7 @@ namespace
         else if (! devices.empty())
             index = chain.indexOf (devices.back()) + 1;
 
-        chain.addChild (device, index, &getSong (edit).getUndoManager());
+        chain.addChild (device, index, &song.getUndoManager());
     }
 
     // Takes a device out of the song, and Tracktion's with it (in the caller's undo step), with what it holds of its state
@@ -204,7 +204,7 @@ namespace
             return nullptr;
 
         if (auto chain = findChainState (plugin->edit, list.getOwnerTrack()); chain.isValid())
-            addDeviceState (plugin->edit, chain, makeDeviceState (*plugin), index);
+            addDeviceState (getSong (plugin->edit), chain, makeDeviceState (*plugin), index);
 
         return plugin.get();
     }
@@ -785,6 +785,63 @@ bool isPluginState (const juce::ValueTree& deviceState)
     return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == schema::deviceIsPlugin;
 }
 
+bool isInstrumentState (const juce::ValueTree& deviceState)
+{
+    if (isPluginState (deviceState))
+        return deviceState[schema::pluginInstrument];
+
+    const auto* own =
+        deviceState.hasType (schema::DEVICE) ? findOwnDevice (deviceState[schema::deviceType].toString().toStdString()) : nullptr;
+    return own != nullptr && own->kind == devices::DeviceKind::instrument;
+}
+
+TrackID getDeviceChannel (const Song& song, DeviceID device)
+{
+    auto parent = findDeviceState (song, device).getParent();
+
+    if (parent.hasType (schema::CONTAINER))
+        parent = parent.getParent();
+
+    return getTrackID (parent);
+}
+
+juce::ValueTree makeOwnDeviceState (Song& song, std::string_view typeID, const std::vector<std::pair<juce::String, float>>& values)
+{
+    juce::ValueTree state (schema::DEVICE);
+    state.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
+    state.setProperty (schema::deviceType, juce::String (typeID.data(), typeID.size()), nullptr);
+
+    if (! values.empty())
+    {
+        juce::ValueTree set (schema::VALUES);
+
+        for (const auto& [parameter, value] : values)
+            set.setProperty (juce::Identifier (parameter), value, nullptr);
+
+        state.appendChild (set, nullptr);
+    }
+
+    return state;
+}
+
+DeviceID insertDeviceState (Song& song, TrackID channel, juce::ValueTree device, int index)
+{
+    auto chain = channel.isValid() ? findTrackState (song, channel) : song.getState().getChildWithName (schema::MASTER);
+
+    if (! chain.isValid() || ! device.isValid())
+        return {};
+
+    addDeviceState (song, chain, device, isInstrumentState (device) ? 0 : index); // instruments come first
+    song.reconcile (Song::Part::devices);
+    return getDeviceID (device);
+}
+
+bool hasInstrument (const Song& song, TrackID track)
+{
+    const auto devices = getDeviceStates (findTrackState (song, track));
+    return std::any_of (devices.begin(), devices.end(), isInstrumentState);
+}
+
 juce::ValueTree makeDeviceState (te::Plugin& device)
 {
     juce::ValueTree state (isContainer (device) ? schema::CONTAINER : schema::DEVICE);
@@ -868,6 +925,11 @@ void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription& 
     store (device, schema::pluginMaker, description.manufacturerName);
     store (device, schema::pluginIdentifier, description.fileOrIdentifier);
     store (device, schema::pluginUid, description.uniqueId);
+
+    if (description.isInstrument)
+        store (device, schema::pluginInstrument, true);
+    else if (device.hasProperty (schema::pluginInstrument))
+        device.removeProperty (schema::pluginInstrument, nullptr);
 }
 
 std::optional<juce::PluginDescription> findKnownPlugin (te::Engine& engine, const juce::PluginDescription& wanted)

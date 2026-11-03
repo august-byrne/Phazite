@@ -69,7 +69,7 @@ struct Tracks
         selection.deselectAll();
 
         for (const auto* name : names)
-            selection.addToSelection ((*this)[name]);
+            selection.addToSelection (phazite::getTrackID (*(*this)[name]));
     }
 
     juce::String getUndoName() const { return phazite::getSong (*edit).getUndoManager().getUndoDescription(); }
@@ -580,7 +580,7 @@ TEST_CASE ("Deleting and duplicating tracks directly")
     REQUIRE (copies.size() == 2);
     CHECK (tracks.getOrder() == juce::String ("A A B C C"));
     CHECK (tracks.getSelectedNames() == juce::String ("B"));
-    CHECK_FALSE (tracks.selection.isSelected (copies.getFirst()));
+    CHECK_FALSE (tracks.selection.isSelected (phazite::getTrackID (*copies.getFirst())));
 
     // With one, the copies are selected instead.
     copies = phazite::duplicateTracks ({ tracks["B"] }, &tracks.selection);
@@ -710,7 +710,7 @@ TEST_CASE ("Adding a track at the end, coloring tracks and moving them are undo 
     auto* added = phazite::addTrackAtEnd (*t.edit, false, &t.selection);
     REQUIRE (added != nullptr);
     CHECK (phazite::getPlaylistTracks (*t.edit).getLast() == added);
-    CHECK (t.selection.isSelected (added));
+    CHECK (t.selection.isSelected (phazite::getTrackID (*added)));
     CHECK (t.getUndoName() == juce::String ("Add Track"));
     phazite::setTrackName (*added, "D");
 

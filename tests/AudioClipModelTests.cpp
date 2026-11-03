@@ -34,9 +34,8 @@ struct Song
         b = te::getAudioTracks (*edit)[1];
         setEdit (context, edit.get());
 
-        auto* notes = phazite::insertMidiClip (*a, { te::BeatPosition::fromBeats (4.0), te::BeatPosition::fromBeats (8.0) }, nullptr);
-        REQUIRE (notes != nullptr);
-        midi = phazite::getClipID (*notes);
+        midi = phazite::insertMidiClip (phazite::getSong (*edit), phazite::getTrackID (*a), { beat (4.0), beat (8.0) }, nullptr);
+        REQUIRE (midi.isValid());
 
         const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Tone.wav"), 4.0);
         const auto imported = phazite::importFiles (context, { file.getFullPathName() }, phazite::getTrackID (*b), beat (0.0));
@@ -223,10 +222,10 @@ TEST_CASE ("A clip that follows the tempo keeps its start and its audio, and its
     CHECK (song.get().content.getEnd().inBeats() == doctest::Approx (8.0));
 
     // The time in the file that plays at a beat, which the waveforms draw: a second in where the clip starts.
-    auto* clip = dynamic_cast<te::AudioClipBase*> (te::findClipForID (*song.edit, phazite::toTracktion (song.audio)));
-    REQUIRE (clip != nullptr);
-    CHECK (phazite::getFileTimeAt (*clip, te::BeatPosition::fromBeats (2.0)) == doctest::Approx (1.0));
-    CHECK (phazite::getFileTimeAt (*clip, te::BeatPosition::fromBeats (0.0)) == doctest::Approx (0.0)); // trimmed off
+    const auto& model = phazite::getSong (*song.edit);
+    REQUIRE (phazite::isAudioState (phazite::findClipState (model, song.audio)));
+    CHECK (phazite::getFileTimeAt (model, song.audio, beat (2.0)) == doctest::Approx (1.0));
+    CHECK (phazite::getFileTimeAt (model, song.audio, beat (0.0)) == doctest::Approx (0.0)); // trimmed off
 
     // Played at 60 BPM, the audio plays twice as fast in the song, and the clip ends sooner.
     phazite::setClipTempo (context, song.audio, 60.0);
@@ -236,8 +235,8 @@ TEST_CASE ("A clip that follows the tempo keeps its start and its audio, and its
     CHECK (song.get().clip.range.getEnd().inBeats() == doctest::Approx (5.0));
     CHECK (song.get().content.getStart().inBeats() == doctest::Approx (1.0));
     CHECK (song.get().content.getEnd().inBeats() == doctest::Approx (5.0));
-    CHECK (phazite::getFileTimeAt (*clip, te::BeatPosition::fromBeats (2.0)) == doctest::Approx (1.0)); // the same audio
-    CHECK (phazite::getFileTimeAt (*clip, te::BeatPosition::fromBeats (3.0)) == doctest::Approx (2.0)); // a beat a second
+    CHECK (phazite::getFileTimeAt (model, song.audio, beat (2.0)) == doctest::Approx (1.0)); // the same audio
+    CHECK (phazite::getFileTimeAt (model, song.audio, beat (3.0)) == doctest::Approx (2.0)); // a beat a second
     phazite::setClipTempo (context, song.audio, 1000.0);
     CHECK (song.get().tempo == doctest::Approx (phazite::maxClipTempo));
     phazite::undo (*song.edit);

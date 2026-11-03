@@ -361,11 +361,14 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
             phazite::insertDevice (*track, cache.createNewPlugin (dev::Reverb::typeID, {}));
 
             // A chord on every beat for 32 beats.
-            auto* clip = phazite::test::addMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (32.0) }, "Chords");
+            auto& song = phazite::getSong (*edit);
+            const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track),
+                                                          { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (32.0) }, "Chords");
 
             for (int beat = 0; beat < 32; ++beat)
                 for (int note : { 48, 52, 55, 59 })
-                    phazite::test::addMidiNote (*clip, note, te::BeatPosition::fromBeats (beat), te::BeatDuration::fromBeats (0.9), 100);
+                    phazite::test::addMidiNote (song, clip, note, phazite::BeatPosition::fromBeats (beat),
+                                                phazite::BeatDuration::fromBeats (0.9), 100);
         }
 
         phazite::routeLiveMidiInput (*edit);
@@ -483,11 +486,13 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
         phazite::insertDevice (*track, cache.createNewPlugin (dev::Synth::typeID, {}));
         phazite::insertDevice (*track, cache.createNewPlugin (dev::Equalizer::typeID, {}));
         phazite::insertDevice (*track, cache.createNewPlugin (dev::Compressor::typeID, {}));
-        auto* clip = phazite::test::addMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (64.0) }, "Notes");
+        auto& song = phazite::getSong (edit);
+        const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track),
+                                                      { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (64.0) }, "Notes");
 
         for (int step = 0; step < 256; ++step)
-            phazite::test::addMidiNote (*clip, 48 + step % 24, te::BeatPosition::fromBeats (step * 0.25), te::BeatDuration::fromBeats (0.2),
-                                        100);
+            phazite::test::addMidiNote (song, clip, 48 + step % 24, phazite::BeatPosition::fromBeats (step * 0.25),
+                                        phazite::BeatDuration::fromBeats (0.2), 100);
     }
 
     phazite::test::settle (500);
@@ -608,7 +613,8 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
 
     // 16 tracks with a synth, each 16 clips of 4 bars with 64 notes: 256 clips and 16,384 notes.
     phazite::ensureTracks (*edit, 16);
-    te::MidiClip* firstClip = nullptr;
+    auto& song = phazite::getSong (*edit);
+    phazite::ClipID firstClip;
 
     for (auto* track : te::getAudioTracks (*edit))
     {
@@ -617,20 +623,21 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
 
         for (int c = 0; c < 16; ++c)
         {
-            const auto start = te::BeatPosition::fromBeats (c * 16.0);
-            auto clip = phazite::test::addMidiClip (*track, { start, start + te::BeatDuration::fromBeats (16.0) }, "Part");
+            const auto start = phazite::BeatPosition::fromBeats (c * 16.0);
+            const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track),
+                                                          { start, start + phazite::BeatDuration::fromBeats (16.0) }, "Part");
 
             for (int n = 0; n < 64; ++n)
-                phazite::test::addMidiNote (*clip, 48 + (n * 7) % 24, te::BeatPosition::fromBeats (n * 0.25),
-                                            te::BeatDuration::fromBeats (0.2), 100);
+                phazite::test::addMidiNote (song, clip, 48 + (n * 7) % 24, phazite::BeatPosition::fromBeats (n * 0.25),
+                                            phazite::BeatDuration::fromBeats (0.2), 100);
 
-            if (firstClip == nullptr)
+            if (! firstClip.isValid())
                 firstClip = clip;
         }
     }
 
     // The first clip selected, so that the piano roll shows it, with the other tracks' notes as ghosts.
-    REQUIRE (firstClip != nullptr);
+    REQUIRE (firstClip.isValid());
     getSelection (screen.session.getContext()).selectOnly (firstClip);
     phazite::test::dispatchMessagesUntil ([] { return false; }, 1500);
     juce::String report ("\n| The UI's work, 16 tracks, 256 clips, 16,384 notes | Time |\n|---|---|\n");
@@ -711,16 +718,17 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     // A note moved, as a drag moves it a grid step at a time: the views and Tracktion's rebuild of the playback graph.
     edit->getTransport().ensureContextAllocated();
     phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
-    auto* note = firstClip->getSequence().getNote (0);
-    REQUIRE (note != nullptr);
+    const auto notes = phazite::getClipNotes (song, firstClip);
+    REQUIRE_FALSE (notes.empty());
+    const auto note = notes.front();
+    const auto contentStart = phazite::getContentStart (phazite::findClipState (song, firstClip));
     double moving = 0.0;
 
     for (int step = 1; step <= 10; ++step)
         moving += millisecondsOf (
             [&]
             {
-                phazite::moveNote (*firstClip, *note, firstClip->getContentStartBeat() + te::BeatDuration::fromBeats (0.25 * step),
-                                   note->getNoteNumber());
+                phazite::moveNote (song, note.getRef(), contentStart + phazite::BeatDuration::fromBeats (0.25 * step), note.pitch);
                 phazite::test::dispatchMessagesUntil ([] { return false; }, 30); // Tracktion rebuilds on a timer
             });
 
@@ -741,26 +749,28 @@ TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite (
 
     // 100 tracks, each with 24 clips of 4 bars and 16 notes: 2,400 clips and 38,400 notes.
     phazite::ensureTracks (*edit, 100);
-    te::MidiClip* lastClip = nullptr;
+    auto& song = phazite::getSong (*edit);
+    phazite::ClipID lastClip;
     int numClips = 0;
 
     for (auto* track : te::getAudioTracks (*edit))
     {
         for (int c = 0; c < 24; ++c)
         {
-            const auto start = te::BeatPosition::fromBeats (c * 16.0);
-            auto clip = phazite::test::addMidiClip (*track, { start, start + te::BeatDuration::fromBeats (16.0) }, "Part");
+            const auto start = phazite::BeatPosition::fromBeats (c * 16.0);
+            const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track),
+                                                          { start, start + phazite::BeatDuration::fromBeats (16.0) }, "Part");
 
             for (int n = 0; n < 16; ++n)
-                phazite::test::addMidiNote (*clip, 48 + (n * 5) % 24, te::BeatPosition::fromBeats (n), te::BeatDuration::fromBeats (0.5),
-                                            100);
+                phazite::test::addMidiNote (song, clip, 48 + (n * 5) % 24, phazite::BeatPosition::fromBeats (n),
+                                            phazite::BeatDuration::fromBeats (0.5), 100);
 
             lastClip = clip;
             ++numClips;
         }
     }
 
-    REQUIRE (lastClip != nullptr);
+    REQUIRE (lastClip.isValid());
     phazite::test::dispatchMessagesUntil ([] { return false; }, 1500);
     auto* playlist = phazite::test::findAll<phazite::ui::Playlist> (screen.shell).getFirst();
     REQUIRE (playlist != nullptr);
@@ -807,12 +817,12 @@ TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite (
     measure ("Ctrl and a wheel notch, zooming out", 10, [&] { mouse.wheel (centre, -notch, ctrl); });
 
     // A clip moved a beat at a time, as a drag moves it: what the views do with each change.
-    auto beat = lastClip->getStartBeat();
+    auto beat = phazite::getClipRange (song, lastClip).getStart();
     measure ("A clip moved a beat", 20,
              [&]
              {
-                 beat = beat + te::BeatDuration::fromBeats (1.0);
-                 phazite::moveClip (*lastClip, beat, *lastClip->getClipTrack());
+                 beat = beat + phazite::BeatDuration::fromBeats (1.0);
+                 phazite::moveClip (song, lastClip, beat, phazite::getClipTrack (song, lastClip));
              });
 
     report << "\nClip components in the playlist: " << phazite::test::findAll<phazite::ui::ClipComponent> (*playlist).size() << "\n";

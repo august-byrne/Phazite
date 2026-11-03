@@ -70,9 +70,9 @@ bool setWavetableFile (te::Plugin& plugin, int osc, const juce::File& file)
         return false;
 
     auto& edit = plugin.edit;
-    const auto copy = copyIntoProject (edit, file);
+    const auto copy = copyIntoProject (getSong (edit), file);
     const UndoStep step (edit, getStepName (copy.getFileNameWithoutExtension(), osc));
-    setDeviceSound (plugin, schema::getOscillatorWavetableFile (osc), getProjectPath (edit, copy));
+    setDeviceSound (plugin, schema::getOscillatorWavetableFile (osc), getProjectPath (getSong (edit), copy));
     return true;
 }
 } // namespace phazite

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
 
 namespace phazite
 {
@@ -30,6 +31,13 @@ namespace
 
     // Where the Edit's state holds its song, on its root, which is never saved (a project file is the song alone).
     const juce::Identifier songHolder { "phaziteSong" };
+
+    // Each Edit that holds a song, by its song (findEdit()), while it lives.
+    std::map<const Song*, te::SafeSelectable<te::Edit>>& getEdits()
+    {
+        static std::map<const Song*, te::SafeSelectable<te::Edit>> edits;
+        return edits;
+    }
 } // namespace
 
 Song& getSong (const te::Edit& edit)
@@ -44,7 +52,15 @@ Song& getSong (const te::Edit& edit)
     // Tracktion's items take their IDs from the same numbers while it mirrors the song (Song::makeID()).
     made->setTracktionIDs ([&mutableEdit = const_cast<te::Edit&> (edit)] { return mutableEdit.createNewItemID().getRawID(); });
     root.setProperty (songHolder, juce::var (made), nullptr);
+    std::erase_if (getEdits(), [] (const auto& held) { return held.second.get() == nullptr; }); // those gone
+    getEdits()[made] = &const_cast<te::Edit&> (edit);
     return *made;
+}
+
+te::Edit* findEdit (const Song& song)
+{
+    const auto found = getEdits().find (&song);
+    return found != getEdits().end() ? found->second.get() : nullptr;
 }
 
 juce::ValueTree findPhaziteState (const te::Edit& edit)

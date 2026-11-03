@@ -174,8 +174,8 @@ std::vector<Section> getSelectedSections (const Selection& selection)
 {
     std::vector<Section> selected;
 
-    if (auto* edit = selection.getEdit())
-        for (const auto& section : getSections (getSong (*edit)))
+    if (auto* song = selection.getSong())
+        for (const auto& section : getSections (*song))
             if (selection.isSelected (section.id))
                 selected.push_back (section);
 
@@ -337,49 +337,49 @@ BeatRange getSectionsRange (const std::vector<Section>& sections)
 }
 
 //==============================================================================
-void moveSection (te::Edit& edit, SectionID id, BeatPosition destination)
+void moveSection (Song& song, SectionID id, BeatPosition destination)
 {
-    if (const auto section = getSection (getSong (edit), id))
+    if (const auto section = getSection (song, id))
     {
-        const UndoStep step (edit, "Move Section");
-        moveTime (edit, toTracktion (section->range), toTracktion (destination));
+        const UndoStep step (song, "Move Section");
+        moveTime (song, section->range, destination);
     }
 }
 
-SectionID copySection (te::Edit& edit, SectionID id, BeatPosition destination, bool asAliases)
+SectionID copySection (Song& song, SectionID id, BeatPosition destination, bool asAliases)
 {
-    const auto section = getSection (getSong (edit), id);
+    const auto section = getSection (song, id);
 
     if (! section.has_value())
         return {};
 
-    const UndoStep step (edit, asAliases ? "Copy Section as Aliases" : "Copy Section");
-    copyTime (edit, toTracktion (section->range), toTracktion (destination), asAliases);
-    return findSectionStartingAt (getSong (edit), destination, id);
+    const UndoStep step (song, asAliases ? "Copy Section as Aliases" : "Copy Section");
+    copyTime (song, section->range, destination, asAliases);
+    return findSectionStartingAt (song, destination, id);
 }
 
-SectionID duplicateSection (te::Edit& edit, SectionID id, bool asAliases)
+SectionID duplicateSection (Song& song, SectionID id, bool asAliases)
 {
-    const auto section = getSection (getSong (edit), id);
-    return section.has_value() ? copySection (edit, id, section->range.getEnd(), asAliases) : SectionID();
+    const auto section = getSection (song, id);
+    return section.has_value() ? copySection (song, id, section->range.getEnd(), asAliases) : SectionID();
 }
 
-void deleteSection (te::Edit& edit, SectionID id)
+void deleteSection (Song& song, SectionID id)
 {
-    if (const auto section = getSection (getSong (edit), id))
-        removeTime (edit, toTracktion (section->range));
+    if (const auto section = getSection (song, id))
+        removeTime (song, section->range);
 }
 
-void deleteSections (te::Edit& edit, const std::vector<SectionID>& ids)
+void deleteSections (Song& song, const std::vector<SectionID>& ids)
 {
-    const auto sections = getSections (getSong (edit));
+    const auto sections = getSections (song);
 
     for (auto section = sections.rbegin(); section != sections.rend(); ++section)
         if (contains (ids, section->id))
-            deleteSection (edit, section->id); // found again: one deleted with another is gone
+            deleteSection (song, section->id); // found again: one deleted with another is gone
 }
 
-std::vector<SectionID> duplicateSections (te::Edit& edit, const std::vector<SectionID>& ids, bool asAliases, Selection* selection)
+std::vector<SectionID> duplicateSections (Song& song, const std::vector<SectionID>& ids, bool asAliases, Selection* selection)
 {
     std::vector<SectionID> copies;
 
@@ -389,14 +389,14 @@ std::vector<SectionID> duplicateSections (te::Edit& edit, const std::vector<Sect
     if (selection != nullptr)
         selection->deselectAll();
 
-    const auto sections = getSections (getSong (edit));
+    const auto sections = getSections (song);
 
     for (auto section = sections.rbegin(); section != sections.rend(); ++section)
     {
         if (! contains (ids, section->id))
             continue;
 
-        if (const auto copy = duplicateSection (edit, section->id, asAliases); copy.isValid())
+        if (const auto copy = duplicateSection (song, section->id, asAliases); copy.isValid())
         {
             copies.push_back (copy);
 
@@ -408,14 +408,14 @@ std::vector<SectionID> duplicateSections (te::Edit& edit, const std::vector<Sect
     return copies;
 }
 
-void resizeSection (te::Edit& edit, SectionID id, BeatDuration newLength, bool moveRest)
+void resizeSection (Song& song, SectionID id, BeatDuration newLength, bool moveRest)
 {
-    auto state = findSectionState (getSong (edit), id);
+    auto state = findSectionState (song, id);
 
     if (! state.isValid())
         return;
 
-    const UndoStep step (edit, "Resize Section");
+    const UndoStep step (song, "Resize Section");
     const auto range = getRange (state);
     newLength = std::max (newLength, BeatDuration::fromBeats (1.0));
 
@@ -426,13 +426,12 @@ void resizeSection (te::Edit& edit, SectionID id, BeatDuration newLength, bool m
     {
         if (newLength > range.getLength())
         {
-            insertTime (edit, toTracktion (range.getEnd()),
-                        toTracktion (newLength - range.getLength())); // moves the sections after it, not it
-            setRange (state, range.withEnd (range.getStart() + newLength), getUndo (getSong (edit)));
+            insertTime (song, range.getEnd(), newLength - range.getLength()); // moves the sections after it, not it
+            setRange (state, range.withEnd (range.getStart() + newLength), getUndo (song));
         }
         else
         {
-            removeTime (edit, toTracktion (BeatRange (range.getStart() + newLength, range.getEnd()))); // shortens it
+            removeTime (song, BeatRange (range.getStart() + newLength, range.getEnd())); // shortens it
         }
 
         return;
@@ -441,12 +440,12 @@ void resizeSection (te::Edit& edit, SectionID id, BeatDuration newLength, bool m
     // The section alone, up to the next one at most.
     auto end = range.getStart() + newLength;
 
-    for (const auto& other : getSections (getSong (edit)))
+    for (const auto& other : getSections (song))
         if (other.id != id && other.range.getStart() >= range.getEnd() - tiny)
             end = std::min (end, other.range.getStart());
 
     if (end > range.getStart() + tiny)
-        setRange (state, range.withEnd (end), getUndo (getSong (edit)));
+        setRange (state, range.withEnd (end), getUndo (song));
 }
 
 std::vector<BeatPosition> getSectionBoundaries (const Song& song)

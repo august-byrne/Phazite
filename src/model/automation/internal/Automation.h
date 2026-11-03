@@ -63,16 +63,16 @@ std::vector<int> duplicatePoints (te::AutomatableParameter&, const std::vector<i
 // overlap or touch go as one. They join the caller's undo step.
 struct AutomationStretch
 {
-    te::Track* track = nullptr;
+    TrackID track {};
     BeatRange range {};
 };
 
-void moveAutomation (const std::vector<AutomationStretch>&, BeatDuration distance, bool copy);
+void moveAutomation (Song&, const std::vector<AutomationStretch>&, BeatDuration distance, bool copy);
 
 // Deletes the automation in stretches, as deleting time does, the parts on either side keeping their shape; with closeGap,
 // what comes after a stretch moves back by its length, as the track's clips do (arrangement/internal/Clips.h:
 // deleteTimeRange()).
-void deleteAutomation (const std::vector<AutomationStretch>&, bool closeGap);
+void deleteAutomation (Song&, const std::vector<AutomationStretch>&, bool closeGap);
 
 // The automation in stretches as it is now, for Paste to put back later (arrangement/internal/Clipboard.h): for each
 // automated parameter of a stretch's track, a stretch's points as moveAutomation() takes them, with its values at its
@@ -86,8 +86,8 @@ struct AutomationCopy
     BeatPosition start {};                  // where the stretch was
 };
 
-std::vector<AutomationCopy> copyAutomation (const std::vector<AutomationStretch>&);
-void pasteAutomation (const te::Edit&, const std::vector<AutomationCopy>&, BeatDuration distance);
+std::vector<AutomationCopy> copyAutomation (const Song&, const std::vector<AutomationStretch>&);
+void pasteAutomation (Song&, const std::vector<AutomationCopy>&, BeatDuration distance);
 
 //==============================================================================
 // The lanes a track shows (getAutomationLanes()), the master's too: those it keeps (Schema.h: LANE), of devices on it,
@@ -142,12 +142,12 @@ struct ParameterPoint
     AutomationPoint point;
 };
 
-void insertAutomationTime (te::Edit&, BeatPosition, BeatDuration);
-void removeAutomationTime (te::Edit&, BeatRange);
-void addAutomationEdges (te::Edit&, const std::vector<BeatPosition>&);
-std::vector<ParameterPoint> getAutomationPointsIn (te::Edit&, BeatRange);
-void removeAutomationPointsIn (te::Edit&, BeatRange);
-void addAutomationPoints (te::Edit&, const std::vector<ParameterPoint>&);
+void insertAutomationTime (Song&, BeatPosition, BeatDuration);
+void removeAutomationTime (Song&, BeatRange);
+void addAutomationEdges (Song&, const std::vector<BeatPosition>&);
+std::vector<ParameterPoint> getAutomationPointsIn (Song&, BeatRange);
+void removeAutomationPointsIn (Song&, BeatRange);
+void addAutomationPoints (Song&, const std::vector<ParameterPoint>&);
 
 // Takes what Tracktion writes into its curves itself into the song: the one point of a curve, which it moves to its
 // parameter's value as the value changes (in the change's step).

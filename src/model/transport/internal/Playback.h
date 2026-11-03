@@ -64,6 +64,8 @@ void loopSections (te::Edit&, const std::vector<Section>&);
 // again while it is tweaked; pausing leaves the playhead where it is. The song keeps it in beats.
 te::TimePosition getPlayStart (const te::Edit&);
 
+BeatPosition getPlayStartBeat (const Song&); // the same, in the song's beats
+
 // Puts the playhead somewhere, as a click in a ruler does: playback starts there from now on (and goes on from there,
 // if it is playing).
 void movePlayhead (te::Edit&, te::TimePosition);
@@ -88,6 +90,9 @@ void stopAndReturn (te::Edit&);
 // (model/playback/internal/PlaybackSession.h; docs/tracktion-migration.md, T2), which every function here uses.
 bool isSongPlaying (const te::Edit&);
 te::TimePosition getPlayheadTime (const te::Edit&);
+
+// The same in the song's beats, for the song's functions (the Edit that mirrors it while T6 lasts: findEdit()).
+BeatPosition getPlayheadBeat (const Song&);
 
 // The Low Latency switch, for the session (model/engine/internal/EngineSetup.h: setLowLatency()).
 bool isLowLatencyOn (const te::Edit&);

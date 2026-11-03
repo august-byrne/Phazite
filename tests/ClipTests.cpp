@@ -2,6 +2,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -16,9 +17,11 @@
 
 namespace
 {
-te::BeatPosition beats (double b)
+using phazite::test::lasting;
+
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
 // An Edit with two tracks, a selection and the selection commands.
@@ -26,26 +29,41 @@ struct ClipEdit
 {
     ClipEdit()
     {
-        phazite::ensureTracks (*edit, 2);
-        tracks = te::getAudioTracks (*edit);
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        tracks = phazite::ensureTracks (song, 2);
+        song.getUndoManager().clearUndoHistory();
         selection.setEdit (edit.get());
         phazite::addSelectionCommands (registry, selection, range);
     }
 
     ~ClipEdit() { selection.deselectAll(); }
 
-    te::MidiClip& addClip (int track, double start, double length)
+    phazite::ClipID addClip (int track, double start, double length)
     {
-        auto* clip = phazite::insertMidiClip (*tracks[track], { beats (start), beats (start + length) }, nullptr);
-        REQUIRE (clip != nullptr);
-        return *clip;
+        const auto clip = phazite::insertMidiClip (song, tracks[(size_t) track], { beats (start), beats (start + length) }, nullptr);
+        REQUIRE (clip.isValid());
+        return clip;
+    }
+
+    // Where a clip is in beats; and an audio clip's place in the song's seconds, its fades and their shapes.
+    phazite::BeatRange rangeOf (phazite::ClipID clip) const { return phazite::getClipRange (song, clip); }
+
+    phazite::PlayedPosition playedOf (phazite::ClipID clip) const
+    {
+        return phazite::getPlayedPosition (song, phazite::findClipState (song, clip));
+    }
+
+    double fadeOf (phazite::ClipID clip, bool fadeIn) const { return phazite::getClipFade (phazite::findClipState (song, clip), fadeIn); }
+
+    phazite::FadeCurve fadeCurveOf (phazite::ClipID clip, bool fadeIn) const
+    {
+        return phazite::getClipFadeCurve (phazite::findClipState (song, clip), fadeIn);
     }
 
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM: a beat is 0.5 s
-    juce::Array<te::AudioTrack*> tracks;
+    phazite::Song& song = phazite::getSong (*edit);
+    std::vector<phazite::TrackID> tracks;
     phazite::Selection selection { phazite::test::getEngine() };
-    phazite::RangeSelection range;
+    phazite::RangeSelection range { selection };
     phazite::CommandRegistry registry;
 };
 
@@ -95,120 +113,121 @@ TEST_CASE ("The Smart Tool picks what a drag does from where it starts on a clip
 TEST_CASE ("A new MIDI clip is named after its track, and selected")
 {
     ClipEdit e;
-    phazite::setTrackName (*e.tracks[0], "Bass");
+    phazite::setTrackName (e.song, e.tracks[0], "Bass");
 
-    auto* clip = phazite::insertMidiClip (*e.tracks[0], { beats (4.0), beats (8.0) }, &e.selection);
-    REQUIRE (clip != nullptr);
-    CHECK (clip->getName() == juce::String ("Bass"));
-    CHECK (clip->getStartBeat().inBeats() == doctest::Approx (4.0));
-    CHECK (clip->getEndBeat().inBeats() == doctest::Approx (8.0));
-    CHECK (phazite::getSelectedClips (e.selection) == std::vector { phazite::getClipID (*clip) });
+    const auto clip = phazite::insertMidiClip (e.song, e.tracks[0], { beats (4.0), beats (8.0) }, &e.selection);
+    REQUIRE (clip.isValid());
+    CHECK (phazite::findClipState (e.song, clip)[phazite::schema::clipName].toString() == juce::String ("Bass"));
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (e.rangeOf (clip).getEnd().inBeats() == doctest::Approx (8.0));
+    CHECK (phazite::getSelectedClips (e.selection) == std::vector { clip });
 }
 
 TEST_CASE ("Moving a clip keeps its length, and can take it to another track")
 {
     ClipEdit e;
-    auto& clip = e.addClip (0, 0.0, 4.0);
+    const auto clip = e.addClip (0, 0.0, 4.0);
 
-    phazite::moveClip (clip, beats (8.0), *e.tracks[1]);
-    CHECK (clip.getTrack() == e.tracks[1]);
-    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (8.0));
-    CHECK (clip.getLengthInBeats().inBeats() == doctest::Approx (4.0));
+    phazite::moveClip (e.song, clip, beats (8.0), e.tracks[1]);
+    CHECK (phazite::getClipTrack (e.song, clip) == e.tracks[1]);
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (e.rangeOf (clip).getLength().inBeats() == doctest::Approx (4.0));
 
-    phazite::moveClip (clip, beats (-3.0), *e.tracks[1]); // not before the song's start
-    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (0.0));
+    phazite::moveClip (e.song, clip, beats (-3.0), e.tracks[1]); // not before the song's start
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (0.0));
 }
 
 TEST_CASE ("Trimming a clip leaves its content in place")
 {
     ClipEdit e;
-    auto& clip = e.addClip (0, 4.0, 4.0);
-    phazite::test::addMidiNote (clip, 60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100);
+    const auto clip = e.addClip (0, 4.0, 4.0);
+    phazite::test::addMidiNote (e.song, clip, 60, beats (0.0), lasting (1.0), 100);
+    const auto contentStart = [&e, clip] { return phazite::getContentStart (phazite::findClipState (e.song, clip)).inBeats(); };
 
-    phazite::trimClipStart (clip, beats (5.0));
-    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (5.0));
-    CHECK (clip.getEndBeat().inBeats() == doctest::Approx (8.0));
-    CHECK (clip.getContentStartBeat().inBeats() == doctest::Approx (4.0)); // so the note is where it was
+    phazite::trimClipStart (e.song, clip, beats (5.0));
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (5.0));
+    CHECK (e.rangeOf (clip).getEnd().inBeats() == doctest::Approx (8.0));
+    CHECK (contentStart() == doctest::Approx (4.0)); // so the note is where it was
 
-    phazite::trimClipStart (clip, beats (2.0)); // not before the content starts
-    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (4.0));
+    phazite::trimClipStart (e.song, clip, beats (2.0)); // not before the content starts
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (4.0));
 
-    phazite::trimClipEnd (clip, beats (6.0));
-    CHECK (clip.getEndBeat().inBeats() == doctest::Approx (6.0));
-    CHECK (clip.getContentStartBeat().inBeats() == doctest::Approx (4.0));
+    phazite::trimClipEnd (e.song, clip, beats (6.0));
+    CHECK (e.rangeOf (clip).getEnd().inBeats() == doctest::Approx (6.0));
+    CHECK (contentStart() == doctest::Approx (4.0));
 
-    phazite::trimClipEnd (clip, beats (0.0)); // a clip keeps some length
-    CHECK (clip.getLengthInBeats().inBeats() == doctest::Approx (1.0 / 64.0));
+    phazite::trimClipEnd (e.song, clip, beats (0.0)); // a clip keeps some length
+    CHECK (e.rangeOf (clip).getLength().inBeats() == doctest::Approx (1.0 / 64.0));
 }
 
 TEST_CASE ("Copies of a clip are separate, and aliases stay linked")
 {
     ClipEdit e;
-    auto& original = e.addClip (0, 0.0, 4.0);
+    const auto original = e.addClip (0, 0.0, 4.0);
 
-    const auto copies = phazite::copyClips ({ &original }, false);
+    const auto copies = phazite::copyClips (e.song, { original }, false);
     REQUIRE (copies.size() == 1);
-    CHECK (copies[0] != &original);
-    CHECK (copies[0]->getStartBeat().inBeats() == doctest::Approx (0.0)); // in the same place, to be moved
-    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ copies[0] }), phazite::test::idsOf ({ copies[0] })));
-    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ &original }), phazite::test::idsOf ({ &original })));
+    CHECK (copies[0] != original);
+    CHECK (e.rangeOf (copies[0]).getStart().inBeats() == doctest::Approx (0.0)); // in the same place, to be moved
+    CHECK_FALSE (phazite::hasAliases (e.song, { copies[0] }));
+    CHECK_FALSE (phazite::hasAliases (e.song, { original }));
 
-    const auto aliases = phazite::copyClips ({ &original }, true);
+    const auto aliases = phazite::copyClips (e.song, { original }, true);
     REQUIRE (aliases.size() == 1);
-    CHECK (phazite::hasAliases (phazite::test::songOf ({ &original }), phazite::test::idsOf ({ &original })));
-    CHECK (aliases[0]->getLinkGroupID() == original.getLinkGroupID());
+    CHECK (phazite::hasAliases (e.song, { original }));
+    CHECK ((juce::int64) phazite::findClipState (e.song, aliases[0])[phazite::schema::clipLink]
+           == (juce::int64) phazite::findClipState (e.song, original)[phazite::schema::clipLink]);
 
     // A copy of an alias is a separate clip again.
-    const auto copyOfAlias = phazite::copyClips ({ aliases[0] }, false);
+    const auto copyOfAlias = phazite::copyClips (e.song, { aliases[0] }, false);
     REQUIRE (copyOfAlias.size() == 1);
-    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ copyOfAlias[0] }), phazite::test::idsOf ({ copyOfAlias[0] })));
-    CHECK (phazite::hasAliases (phazite::test::songOf ({ aliases[0] }), phazite::test::idsOf ({ aliases[0] })));
+    CHECK_FALSE (phazite::hasAliases (e.song, { copyOfAlias[0] }));
+    CHECK (phazite::hasAliases (e.song, { aliases[0] }));
 }
 
 TEST_CASE ("Fades stay within an audio clip")
 {
     ClipEdit e;
     SilentFile file;
-    auto* clip = phazite::test::addAudioClip (*e.tracks[0], "Silence", file.temp.getFile(),
-                                              { te::TimePosition(), te::TimePosition::fromSeconds (1.0) });
-    REQUIRE (clip != nullptr);
+    const auto clip = phazite::test::addAudioClip (e.song, e.tracks[0], "Silence", file.temp.getFile(), 0.0, 1.0);
+    REQUIRE (clip.isValid());
 
-    phazite::setClipFade (*clip, true, te::TimeDuration::fromSeconds (0.25));
-    CHECK (clip->getFadeIn().inSeconds() == doctest::Approx (0.25));
+    phazite::setClipFade (e.song, clip, true, 0.25);
+    CHECK (e.fadeOf (clip, true) == doctest::Approx (0.25));
 
-    phazite::setClipFade (*clip, false, te::TimeDuration::fromSeconds (-1.0));
-    CHECK (clip->getFadeOut().inSeconds() == doctest::Approx (0.0));
+    phazite::setClipFade (e.song, clip, false, -1.0);
+    CHECK (e.fadeOf (clip, false) == doctest::Approx (0.0));
 
-    phazite::setClipFade (*clip, true, te::TimeDuration::fromSeconds (5.0));
-    CHECK (clip->getFadeIn().inSeconds() <= 1.0);
+    phazite::setClipFade (e.song, clip, true, 5.0);
+    CHECK (e.fadeOf (clip, true) <= 1.0);
 }
 
 TEST_CASE ("Delete and duplicate act on the selected clips")
 {
     ClipEdit e;
-    auto& a = e.addClip (0, 0.0, 4.0);
-    auto& b = e.addClip (1, 4.0, 4.0);
+    const auto a = e.addClip (0, 0.0, 4.0);
+    const auto b = e.addClip (1, 4.0, 4.0);
     e.selection.selectOnly (a);
     e.selection.addToSelection (b);
 
     // Duplicates go right after the selection: here, 8 beats later.
     CHECK (phazite::getCurrentName (*e.registry.find ("edit.duplicate")) == juce::String ("Duplicate 2 Clips"));
     REQUIRE (e.registry.invoke ("edit.duplicate"));
-    CHECK (phazite::getSong (*e.edit).getUndoManager().getUndoDescription() == juce::String ("Duplicate 2 Clips"));
+    CHECK (e.song.getUndoManager().getUndoDescription() == juce::String ("Duplicate 2 Clips"));
 
-    const auto copies = phazite::findSelectedClips (e.selection);
+    const auto copies = phazite::getSelectedClips (e.selection);
     REQUIRE (copies.size() == 2);
-    CHECK (copies[0]->getTrack() == e.tracks[0]);
-    CHECK (copies[0]->getStartBeat().inBeats() == doctest::Approx (8.0));
-    CHECK (copies[1]->getTrack() == e.tracks[1]);
-    CHECK (copies[1]->getStartBeat().inBeats() == doctest::Approx (12.0));
+    CHECK (phazite::getClipTrack (e.song, copies[0]) == e.tracks[0]);
+    CHECK (e.rangeOf (copies[0]).getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (phazite::getClipTrack (e.song, copies[1]) == e.tracks[1]);
+    CHECK (e.rangeOf (copies[1]).getStart().inBeats() == doctest::Approx (12.0));
 
     REQUIRE (e.registry.invoke ("edit.delete"));
-    CHECK (e.tracks[0]->getClips().size() == 1);
-    CHECK (e.tracks[1]->getClips().size() == 1);
+    CHECK (phazite::getClips (e.song, e.tracks[0]).size() == 1);
+    CHECK (phazite::getClips (e.song, e.tracks[1]).size() == 1);
 
     phazite::undo (*e.edit);
-    CHECK (e.tracks[0]->getClips().size() == 2);
+    CHECK (phazite::getClips (e.song, e.tracks[0]).size() == 2);
 }
 
 TEST_CASE ("Select All selects every clip, or every track while tracks are selected")
@@ -229,14 +248,18 @@ TEST_CASE ("Select All selects every clip, or every track while tracks are selec
 namespace
 {
 // A track's clips as "start-end" in beats, in order, such as "0-2 4-8".
-juce::String describeClips (te::ClipTrack& track)
+juce::String describeClips (const phazite::Song& song, phazite::TrackID track)
 {
-    juce::Array<te::Clip*> clips (track.getClips());
-    std::sort (clips.begin(), clips.end(), [] (te::Clip* a, te::Clip* b) { return a->getStartBeat() < b->getStartBeat(); });
+    std::vector<phazite::BeatRange> ranges;
+
+    for (const auto clip : phazite::getClips (song, track))
+        ranges.push_back (phazite::getClipRange (song, clip));
+
+    std::sort (ranges.begin(), ranges.end(), [] (phazite::BeatRange a, phazite::BeatRange b) { return a.getStart() < b.getStart(); });
     juce::StringArray parts;
 
-    for (auto* clip : clips)
-        parts.add (juce::String (clip->getStartBeat().inBeats(), 2) + "-" + juce::String (clip->getEndBeat().inBeats(), 2));
+    for (const auto& clipRange : ranges)
+        parts.add (juce::String (clipRange.getStart().inBeats(), 2) + "-" + juce::String (clipRange.getEnd().inBeats(), 2));
 
     return parts.joinIntoString (" ");
 }
@@ -245,38 +268,37 @@ juce::String describeClips (te::ClipTrack& track)
 TEST_CASE ("Split, mute and nudge act on the selected clips")
 {
     ClipEdit e;
-    auto& clip = e.addClip (0, 0.0, 8.0);
+    const auto clip = e.addClip (0, 0.0, 8.0);
     e.selection.selectOnly (clip);
-    e.edit->getTransport().setPosition (e.edit->tempoSequence.toTime (beats (2.0)));
+    e.edit->getTransport().setPosition (te::TimePosition::fromSeconds (phazite::toSeconds (e.song, beats (2.0))));
 
     REQUIRE (e.registry.invoke ("edit.split")); // at the playhead
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-2.00 2.00-8.00"));
 
     e.selection.selectOnly (clip);
     REQUIRE (e.registry.invoke ("edit.mute"));
-    CHECK (clip.isMuted());
+    CHECK (phazite::areAllClipsMuted (e.song, { clip }));
     CHECK (e.registry.find ("edit.mute")->isTicked());
     REQUIRE (e.registry.invoke ("edit.mute"));
-    CHECK_FALSE (clip.isMuted());
+    CHECK_FALSE (phazite::areAllClipsMuted (e.song, { clip }));
 
-    phazite::nudgeClips ({ &clip }, te::BeatDuration::fromBeats (-1.0)); // not before the start of the song
-    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (0.0));
-    phazite::nudgeClips ({ &clip }, te::BeatDuration::fromBeats (8.0));
-    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (8.0));
+    phazite::nudgeClips (e.song, { clip }, lasting (-1.0)); // not before the start of the song
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (0.0));
+    phazite::nudgeClips (e.song, { clip }, lasting (8.0));
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (8.0));
 }
 
 TEST_CASE ("Make Unique turns aliases back into separate clips")
 {
     ClipEdit e;
-    auto& original = e.addClip (0, 0.0, 4.0);
-    const auto aliases = phazite::copyClips ({ &original }, true);
+    const auto original = e.addClip (0, 0.0, 4.0);
+    const auto aliases = phazite::copyClips (e.song, { original }, true);
     REQUIRE (aliases.size() == 1);
 
     e.selection.selectOnly (aliases[0]);
     REQUIRE (e.registry.invoke ("clip.makeUnique"));
-    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ aliases[0] }), phazite::test::idsOf ({ aliases[0] })));
-    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ &original }),
-                                      phazite::test::idsOf ({ &original }))); // left alone in its group, it is no one's alias either
+    CHECK_FALSE (phazite::hasAliases (e.song, { aliases[0] }));
+    CHECK_FALSE (phazite::hasAliases (e.song, { original })); // left alone in its group, it is no one's alias either
     CHECK_FALSE (e.registry.find ("clip.makeUnique")->isEnabled());
 }
 
@@ -284,12 +306,12 @@ TEST_CASE ("Delete and Close Gap moves what comes after back")
 {
     ClipEdit e;
     e.addClip (0, 0.0, 4.0);
-    auto& middle = e.addClip (0, 4.0, 4.0);
+    const auto middle = e.addClip (0, 4.0, 4.0);
     e.addClip (0, 8.0, 4.0);
 
     e.selection.selectOnly (middle);
     REQUIRE (e.registry.invoke ("edit.deleteAndCloseGap"));
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-4.00 4.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-4.00 4.00-8.00"));
 }
 
 TEST_CASE ("A time range is deleted, split, inserted and removed")
@@ -302,39 +324,39 @@ TEST_CASE ("A time range is deleted, split, inserted and removed")
 
     // Delete: on the range's track only, where the clip is split around the hole.
     REQUIRE (e.registry.invoke ("edit.delete"));
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 4.00-8.00"));
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-2.00 4.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("0.00-8.00"));
     phazite::undo (*e.edit);
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-8.00"));
 
     // Split: at both edges.
     REQUIRE (e.registry.invoke ("edit.split"));
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-4.00 4.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-2.00 2.00-4.00 4.00-8.00"));
     phazite::undo (*e.edit);
 
     // Insert Time: on every track, as long as the range.
     REQUIRE (e.registry.invoke ("edit.insertTime"));
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-2.00 4.00-10.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("0.00-2.00 4.00-10.00"));
     phazite::undo (*e.edit);
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("0.00-8.00"));
 
     // Remove Time: from every track, closing the gap.
     REQUIRE (e.registry.invoke ("edit.removeTime"));
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-6.00"));
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("0.00-2.00 2.00-6.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-2.00 2.00-6.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("0.00-2.00 2.00-6.00"));
 
     // A range whose tracks are all gone is empty.
-    phazite::deleteTracks ({ e.tracks[0] }, nullptr);
+    phazite::deleteTracks (e.song, { e.tracks[0] }, nullptr);
     CHECK (e.range.isEmpty());
 }
 
 TEST_CASE ("Duplicate copies a time range right after it, and the range moves to the copy")
 {
     ClipEdit e;
-    auto& crossing = e.addClip (0, 1.0, 2.0); // reaches into the range from before it
-    REQUIRE (phazite::addNote (crossing, 60, beats (2.5), te::BeatDuration::fromBeats (0.5), 100) != nullptr);
-    auto& after = e.addClip (0, 4.5, 3.5); // where the copy lands
-    e.addClip (1, 4.0, 2.0);               // after the range, on a track with nothing in it
+    const auto crossing = e.addClip (0, 1.0, 2.0); // reaches into the range from before it
+    REQUIRE (phazite::addNote (e.song, crossing, 60, beats (2.5), lasting (0.5), 100).isValid());
+    const auto after = e.addClip (0, 4.5, 3.5); // where the copy lands
+    e.addClip (1, 4.0, 2.0);                    // after the range, on a track with nothing in it
     e.range.set ({ beats (2.0), beats (4.0) }, { e.tracks[0], e.tracks[1] });
 
     const auto* duplicate = e.registry.find ("edit.duplicate");
@@ -342,23 +364,27 @@ TEST_CASE ("Duplicate copies a time range right after it, and the range moves to
     CHECK (duplicate->isEnabled());
     CHECK (phazite::getCurrentName (*duplicate) == juce::String ("Duplicate Range"));
     REQUIRE (e.registry.invoke ("edit.duplicate"));
-    CHECK (phazite::getSong (*e.edit).getUndoManager().getUndoDescription() == juce::String ("Duplicate Range"));
+    CHECK (e.song.getUndoManager().getUndoDescription() == juce::String ("Duplicate Range"));
 
     // The part inside the range goes right after it, in place of what was there; the clip it came from stays whole.
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("4.00-6.00")); // nothing of the range landed there
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("4.00-6.00")); // nothing of the range landed there
 
-    te::MidiClip* copy = nullptr;
+    phazite::ClipID copy;
 
-    for (auto* clip : e.tracks[0]->getClips())
-        if (clip != &crossing && clip != &after)
-            copy = dynamic_cast<te::MidiClip*> (clip);
+    for (const auto clip : phazite::getClips (e.song, e.tracks[0]))
+        if (clip != crossing && clip != after)
+            copy = clip;
 
-    REQUIRE (copy != nullptr);
-    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ copy }), phazite::test::idsOf ({ copy })));
-    REQUIRE (copy->getSequence().getNotes().size() == 1);
-    CHECK (phazite::getNoteStart (*copy, *copy->getSequence().getNotes().getFirst()).inBeats() == doctest::Approx (4.5));
-    CHECK (phazite::getNoteStart (crossing, *crossing.getSequence().getNotes().getFirst()).inBeats() == doctest::Approx (2.5));
+    REQUIRE (copy.isValid());
+    REQUIRE (phazite::isMidiState (phazite::findClipState (e.song, copy)));
+    CHECK_FALSE (phazite::hasAliases (e.song, { copy }));
+    const auto copiedNotes = phazite::getClipNotes (e.song, copy);
+    REQUIRE (copiedNotes.size() == 1);
+    CHECK (copiedNotes.front().start.inBeats() == doctest::Approx (4.5));
+    const auto crossingNotes = phazite::getClipNotes (e.song, crossing);
+    REQUIRE (crossingNotes.size() == 1);
+    CHECK (crossingNotes.front().start.inBeats() == doctest::Approx (2.5));
 
     // The copy is the range now, on both tracks, and nothing else got selected: Duplicate again repeats it.
     CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (4.0));
@@ -367,25 +393,25 @@ TEST_CASE ("Duplicate copies a time range right after it, and the range moves to
     CHECK (e.selection.getNumObjectsSelected() == 0);
 
     REQUIRE (e.registry.invoke ("edit.duplicate"));
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-6.00 6.00-7.00 7.00-8.00"));
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("4.00-6.00 6.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-6.00 6.00-7.00 7.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("4.00-6.00 6.00-8.00"));
     CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (6.0));
 
     // Each was one undo step, and Undo puts the range back where that step found it, so Duplicate after Undo repeats
     // the same part again.
     phazite::undo (*e.edit);
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
     CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (4.0));
     phazite::undo (*e.edit);
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.50-8.00"));
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("4.00-6.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("1.00-3.00 4.50-8.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("4.00-6.00"));
     CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (2.0));
     CHECK (e.range.getRange().getEnd().inBeats() == doctest::Approx (4.0));
     CHECK (e.range.getTracks().size() == 2);
 
     // Redo makes the copy again, and the range goes back to it.
     phazite::redo (*e.edit);
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("1.00-3.00 4.00-5.00 5.00-8.00"));
     CHECK (e.range.getRange().getStart().inBeats() == doctest::Approx (4.0));
     CHECK (e.range.getRange().getEnd().inBeats() == doctest::Approx (6.0));
 }
@@ -401,7 +427,7 @@ TEST_CASE ("With a time range and a track selected, Duplicate acts on the range,
     CHECK (phazite::getCurrentName (*e.registry.find ("edit.delete")) == juce::String ("Delete Range"));
     REQUIRE (e.registry.invoke ("edit.duplicate"));
     CHECK (te::getAudioTracks (*e.edit).size() == 2); // no track was copied
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-4.00 4.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-4.00 4.00-8.00"));
     CHECK (e.selection.isSelected (e.tracks[1]));
     CHECK_FALSE (e.registry.find ("edit.duplicateAsAlias")->isEnabled()); // still clips and sections only
 }
@@ -423,61 +449,59 @@ TEST_CASE ("A crossfade overlaps two touching audio clips, as far as their audio
 {
     ClipEdit e;
     SilentFile file; // a second long
-    const auto seconds = [] (double s) { return te::TimePosition::fromSeconds (s); };
-    auto* first = phazite::test::addAudioClip (*e.tracks[0], "A", file.temp.getFile(), { seconds (0.0), seconds (0.5) });
-    auto* second = phazite::test::addAudioClip (*e.tracks[0], "B", file.temp.getFile(), { seconds (0.5), seconds (1.0) },
-                                                te::TimeDuration::fromSeconds (0.25));
-    REQUIRE (first != nullptr);
-    REQUIRE (second != nullptr);
+    const auto first = phazite::test::addAudioClip (e.song, e.tracks[0], "A", file.temp.getFile(), 0.0, 0.5);
+    const auto second = phazite::test::addAudioClip (e.song, e.tracks[0], "B", file.temp.getFile(), 0.5, 0.5, 0.25);
+    REQUIRE (first.isValid());
+    REQUIRE (second.isValid());
 
-    phazite::setCrossfade (*first, *second, seconds (0.5), te::TimeDuration::fromSeconds (0.2));
-    CHECK (first->getPosition().getEnd().inSeconds() == doctest::Approx (0.6));
-    CHECK (second->getPosition().getStart().inSeconds() == doctest::Approx (0.4));
-    CHECK (first->getFadeOut().inSeconds() == doctest::Approx (0.2));
-    CHECK (second->getFadeIn().inSeconds() == doctest::Approx (0.2));
+    phazite::setCrossfade (e.song, first, second, 0.5, 0.2);
+    CHECK (e.playedOf (first).end == doctest::Approx (0.6));
+    CHECK (e.playedOf (second).start == doctest::Approx (0.4));
+    CHECK (e.fadeOf (first, false) == doctest::Approx (0.2));
+    CHECK (e.fadeOf (second, true) == doctest::Approx (0.2));
 
     // The second clip's audio starts a quarter of a second before it does, so no further.
-    phazite::setCrossfade (*first, *second, seconds (0.5), te::TimeDuration::fromSeconds (2.0));
-    CHECK (second->getPosition().getStart().inSeconds() == doctest::Approx (0.25));
-    CHECK (first->getPosition().getEnd().inSeconds() == doctest::Approx (0.75));
+    phazite::setCrossfade (e.song, first, second, 0.5, 2.0);
+    CHECK (e.playedOf (second).start == doctest::Approx (0.25));
+    CHECK (e.playedOf (first).end == doctest::Approx (0.75));
 
     // A crossfade of nothing puts them back.
-    phazite::setCrossfade (*first, *second, seconds (0.5), te::TimeDuration());
-    CHECK (first->getPosition().getEnd().inSeconds() == doctest::Approx (0.5));
-    CHECK (second->getPosition().getStart().inSeconds() == doctest::Approx (0.5));
-    CHECK (second->getFadeIn().inSeconds() == doctest::Approx (0.0));
+    phazite::setCrossfade (e.song, first, second, 0.5, 0.0);
+    CHECK (e.playedOf (first).end == doctest::Approx (0.5));
+    CHECK (e.playedOf (second).start == doctest::Approx (0.5));
+    CHECK (e.fadeOf (second, true) == doctest::Approx (0.0));
 
-    phazite::setFadeShape ({ first, second }, phazite::sCurveFade);
-    CHECK (first->getFadeOutType() == te::AudioFadeCurve::sCurve);
-    CHECK (second->getFadeInType() == te::AudioFadeCurve::sCurve);
+    phazite::setFadeShape (e.song, { first, second }, phazite::sCurveFade);
+    CHECK (e.fadeCurveOf (first, false) == phazite::sCurveFade);
+    CHECK (e.fadeCurveOf (second, true) == phazite::sCurveFade);
 }
 
 TEST_CASE ("Duplicated clips go right after them all")
 {
     ClipEdit e;
-    auto& a = e.addClip (0, 0.0, 4.0);
-    auto& b = e.addClip (1, 2.0, 4.0); // together they span beats 0-6
+    const auto a = e.addClip (0, 0.0, 4.0);
+    const auto b = e.addClip (1, 2.0, 4.0); // together they span beats 0-6
 
     // Each copy starts 6 beats after its original, on its track; without a selection manager, nothing gets selected.
-    auto copies = phazite::duplicateClips ({ &a, &b }, false, nullptr);
+    auto copies = phazite::duplicateClips (e.song, { a, b }, false, nullptr);
     REQUIRE (copies.size() == 2);
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-4.00 6.00-10.00"));
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("2.00-6.00 8.00-12.00"));
-    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ copies.getFirst() }), phazite::test::idsOf ({ copies.getFirst() })));
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-4.00 6.00-10.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("2.00-6.00 8.00-12.00"));
+    CHECK_FALSE (phazite::hasAliases (e.song, { copies.front() }));
     CHECK (e.selection.getNumObjectsSelected() == 0);
 
     // As aliases, with a selection manager: the copy is selected instead of what was.
     e.selection.selectOnly (e.tracks[1]);
-    copies = phazite::duplicateClips ({ &a }, true, &e.selection);
+    copies = phazite::duplicateClips (e.song, { a }, true, &e.selection);
     REQUIRE (copies.size() == 1);
-    CHECK (phazite::hasAliases (phazite::test::songOf ({ copies.getFirst() }), phazite::test::idsOf ({ copies.getFirst() })));
-    CHECK (copies.getFirst()->getStartBeat().inBeats() == doctest::Approx (4.0));
-    CHECK (e.selection.isSelected (copies.getFirst()));
+    CHECK (phazite::hasAliases (e.song, { copies.front() }));
+    CHECK (e.rangeOf (copies.front()).getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (e.selection.isSelected (copies.front()));
     CHECK_FALSE (e.selection.isSelected (e.tracks[1]));
 
     // No clips: nothing is copied, and the selection stays.
-    CHECK (phazite::duplicateClips ({}, false, &e.selection).isEmpty());
-    CHECK (e.selection.isSelected (copies.getFirst()));
+    CHECK (phazite::duplicateClips (e.song, {}, false, &e.selection).empty());
+    CHECK (e.selection.isSelected (copies.front()));
 }
 
 TEST_CASE ("Splitting at a range's edges")
@@ -486,129 +510,125 @@ TEST_CASE ("Splitting at a range's edges")
     e.addClip (0, 0.0, 8.0);
     e.addClip (1, 1.0, 6.0); // across the range's edges too, but on a track the range doesn't cover
 
-    phazite::splitClipsAtEdges ({ e.tracks[0] }, { beats (2.0), beats (6.0) });
-    CHECK (describeClips (*e.tracks[0]) == juce::String ("0.00-2.00 2.00-6.00 6.00-8.00"));
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("1.00-7.00"));
+    phazite::splitClipsAtEdges (e.song, { e.tracks[0] }, { beats (2.0), beats (6.0) });
+    CHECK (describeClips (e.song, e.tracks[0]) == juce::String ("0.00-2.00 2.00-6.00 6.00-8.00"));
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("1.00-7.00"));
 
     // A clip that ends inside the range is cut once.
-    phazite::splitClipsAtEdges ({ e.tracks[1] }, { beats (5.0), beats (9.0) });
-    CHECK (describeClips (*e.tracks[1]) == juce::String ("1.00-5.00 5.00-7.00"));
+    phazite::splitClipsAtEdges (e.song, { e.tracks[1] }, { beats (5.0), beats (9.0) });
+    CHECK (describeClips (e.song, e.tracks[1]) == juce::String ("1.00-5.00 5.00-7.00"));
 }
 
 TEST_CASE ("Aliases, audio clips and fade shapes")
 {
     ClipEdit e;
-    auto& midi = e.addClip (0, 0.0, 4.0);
-    CHECK_FALSE (phazite::hasAliases (phazite::test::songOf ({ &midi }), phazite::test::idsOf ({ &midi })));
-    CHECK_FALSE (phazite::hasAliases (phazite::getSong (midi.edit), {}));
-    CHECK_FALSE (phazite::hasAudioClips (phazite::test::songOf ({ &midi }), phazite::test::idsOf ({ &midi })));
-    CHECK_FALSE (phazite::hasFadeShape (phazite::test::songOf ({ &midi }), phazite::test::idsOf ({ &midi }),
-                                        phazite::linearFade)); // there is no audio clip
+    const auto midi = e.addClip (0, 0.0, 4.0);
+    CHECK_FALSE (phazite::hasAliases (e.song, { midi }));
+    CHECK_FALSE (phazite::hasAliases (e.song, {}));
+    CHECK_FALSE (phazite::hasAudioClips (e.song, { midi }));
+    CHECK_FALSE (phazite::hasFadeShape (e.song, { midi }, phazite::linearFade)); // there is no audio clip
 
-    const auto aliases = phazite::copyClips ({ &midi }, true);
+    const auto aliases = phazite::copyClips (e.song, { midi }, true);
     REQUIRE (aliases.size() == 1);
-    CHECK (phazite::hasAliases (phazite::test::songOf ({ &midi }), phazite::test::idsOf ({ &midi })));
-    CHECK (phazite::hasAliases (phazite::test::songOf (aliases), phazite::test::idsOf (aliases)));
+    CHECK (phazite::hasAliases (e.song, { midi }));
+    CHECK (phazite::hasAliases (e.song, aliases));
 
     // The shape is on when every audio clip fades in and out with it; MIDI clips don't count.
     SilentFile file;
-    auto* audio = phazite::test::addAudioClip (*e.tracks[1], "Silence", file.temp.getFile(),
-                                               { te::TimePosition(), te::TimePosition::fromSeconds (1.0) });
-    REQUIRE (audio != nullptr);
-    const juce::Array<te::Clip*> both { &midi, audio };
-    CHECK (phazite::hasAudioClips (phazite::test::songOf (both), phazite::test::idsOf (both)));
+    const auto audio = phazite::test::addAudioClip (e.song, e.tracks[1], "Silence", file.temp.getFile(), 0.0, 1.0);
+    REQUIRE (audio.isValid());
+    const std::vector both { midi, audio };
+    CHECK (phazite::hasAudioClips (e.song, both));
 
-    phazite::setFadeShape (both, phazite::convexFade);
-    CHECK (phazite::hasFadeShape (phazite::test::songOf (both), phazite::test::idsOf (both), phazite::convexFade));
-    CHECK_FALSE (phazite::hasFadeShape (phazite::test::songOf (both), phazite::test::idsOf (both), phazite::linearFade));
+    phazite::setFadeShape (e.song, both, phazite::convexFade);
+    CHECK (phazite::hasFadeShape (e.song, both, phazite::convexFade));
+    CHECK_FALSE (phazite::hasFadeShape (e.song, both, phazite::linearFade));
 
-    phazite::findClipState (*audio).removeProperty (phazite::schema::clipFadeOutBend, nullptr); // in and out differ: out is straight
-    CHECK_FALSE (phazite::hasFadeShape (phazite::test::songOf (both), phazite::test::idsOf (both), phazite::convexFade));
+    phazite::findClipState (e.song, audio).removeProperty (phazite::schema::clipFadeOutBend, nullptr); // in and out differ: out is straight
+    CHECK_FALSE (phazite::hasFadeShape (e.song, both, phazite::convexFade));
 }
 
 TEST_CASE ("A double-click's MIDI clip lasts a bar of the time signature there, as one undo step")
 {
     ClipEdit e;
-    phazite::setTimeSignature (phazite::getSong (*e.edit), { 3, 4 });
-    phazite::getSong (*e.edit).getUndoManager().clearUndoHistory();
+    phazite::setTimeSignature (e.song, { 3, 4 });
+    e.song.getUndoManager().clearUndoHistory();
 
-    auto* clip = phazite::addMidiClipAt (*e.tracks[0], beats (6.0), &e.selection);
-    REQUIRE (clip != nullptr);
-    CHECK (clip->getStartBeat().inBeats() == doctest::Approx (6.0));
-    CHECK (clip->getEndBeat().inBeats() == doctest::Approx (9.0));
-    CHECK (phazite::getSelectedClips (e.selection) == std::vector { phazite::getClipID (*clip) });
-    CHECK (phazite::getSong (*e.edit).getUndoManager().getUndoDescription() == juce::String ("Add MIDI Clip"));
+    const auto clip = phazite::addMidiClipAt (e.song, e.tracks[0], beats (6.0), &e.selection);
+    REQUIRE (clip.isValid());
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (6.0));
+    CHECK (e.rangeOf (clip).getEnd().inBeats() == doctest::Approx (9.0));
+    CHECK (phazite::getSelectedClips (e.selection) == std::vector { clip });
+    CHECK (e.song.getUndoManager().getUndoDescription() == juce::String ("Add MIDI Clip"));
 
     phazite::undo (*e.edit);
-    CHECK (e.tracks[0]->getClips().isEmpty());
+    CHECK (phazite::getClips (e.song, e.tracks[0]).empty());
 }
 
 TEST_CASE ("Draw places a copy of the clip used last, or a bar-long MIDI clip on a track with an instrument")
 {
     ClipEdit e;
-    CHECK (phazite::placeClip (*e.tracks[0], beats (0.0), nullptr) == nullptr); // nothing used yet, and no instrument
+    CHECK_FALSE (phazite::placeClip (e.song, e.tracks[0], beats (0.0), {}).isValid()); // nothing used yet, and no instrument
 
     // A MIDI clip's copy is an alias, which stays linked to it.
-    auto& source = e.addClip (0, 0.0, 2.0);
-    auto* placed = phazite::placeClip (*e.tracks[1], beats (8.0), &source);
-    REQUIRE (placed != nullptr);
-    CHECK (placed->getTrack() == e.tracks[1]);
-    CHECK (placed->getStartBeat().inBeats() == doctest::Approx (8.0));
-    CHECK (placed->getLengthInBeats().inBeats() == doctest::Approx (2.0));
-    CHECK (phazite::hasAliases (phazite::test::songOf ({ placed }), phazite::test::idsOf ({ placed })));
+    const auto source = e.addClip (0, 0.0, 2.0);
+    const auto placed = phazite::placeClip (e.song, e.tracks[1], beats (8.0), source);
+    REQUIRE (placed.isValid());
+    CHECK (phazite::getClipTrack (e.song, placed) == e.tracks[1]);
+    CHECK (e.rangeOf (placed).getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (e.rangeOf (placed).getLength().inBeats() == doctest::Approx (2.0));
+    CHECK (phazite::hasAliases (e.song, { placed }));
 
     // Once the clip used last is gone: an empty MIDI clip a bar long, on a track with an instrument only.
-    const te::SafeSelectable<te::Clip> used (&source);
-    phazite::deleteClips ({ &source }, false);
-    CHECK (phazite::placeClip (*e.tracks[0], beats (4.0), used.get()) == nullptr);
+    phazite::deleteClips (e.song, { source }, false);
+    CHECK_FALSE (phazite::placeClip (e.song, e.tracks[0], beats (4.0), source).isValid());
 
-    phazite::insertDevice (*e.tracks[0], e.edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
-    auto* empty = dynamic_cast<te::MidiClip*> (phazite::placeClip (*e.tracks[0], beats (4.0), used.get()));
-    REQUIRE (empty != nullptr);
-    CHECK (empty->getSequence().getNumNotes() == 0);
-    CHECK (empty->getStartBeat().inBeats() == doctest::Approx (4.0));
-    CHECK (empty->getLengthInBeats().inBeats() == doctest::Approx (4.0)); // a bar of 4/4
+    phazite::insertDevice (*te::getAudioTracks (*e.edit)[0],
+                           e.edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
+    const auto empty = phazite::placeClip (e.song, e.tracks[0], beats (4.0), source);
+    REQUIRE (empty.isValid());
+    REQUIRE (phazite::isMidiState (phazite::findClipState (e.song, empty)));
+    CHECK (phazite::getClipNotes (e.song, empty).empty());
+    CHECK (e.rangeOf (empty).getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (e.rangeOf (empty).getLength().inBeats() == doctest::Approx (4.0)); // a bar of 4/4
 }
 
 TEST_CASE ("Slip moves what a clip plays, not the clip, and its content can't start after the clip")
 {
     ClipEdit e;
-    auto& clip = e.addClip (0, 4.0, 4.0);
+    const auto clip = e.addClip (0, 4.0, 4.0);
 
-    phazite::slipClip (clip, te::TimeDuration::fromSeconds (1.0), te::TimeDuration::fromSeconds (0.25));
-    CHECK (clip.getPosition().getOffset().inSeconds() == doctest::Approx (0.75));
-    CHECK (clip.getStartBeat().inBeats() == doctest::Approx (4.0));
+    phazite::slipClip (e.song, clip, 1.0, 0.25);
+    CHECK (phazite::getClipStartOffset (e.song, clip) == doctest::Approx (0.75));
+    CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (4.0));
 
-    phazite::slipClip (clip, te::TimeDuration::fromSeconds (1.0), te::TimeDuration::fromSeconds (3.0));
-    CHECK (clip.getPosition().getOffset().inSeconds() == doctest::Approx (0.0));
+    phazite::slipClip (e.song, clip, 1.0, 3.0);
+    CHECK (phazite::getClipStartOffset (e.song, clip) == doctest::Approx (0.0));
 }
 
 TEST_CASE ("Where linked clips play, an editor showing one of them sees its notes playing")
 {
     ClipEdit e;
-    auto& original = e.addClip (0, 0.0, 4.0);
-    const auto aliases = phazite::copyClips ({ &original, &original }, true);
+    const auto original = e.addClip (0, 0.0, 4.0);
+    const auto aliases = phazite::copyClips (e.song, { original, original }, true);
     REQUIRE (aliases.size() == 2);
     // One alias later in the song, whole; one that plays only beats 2 to 4 of the notes (a snippet), from beat 16.
-    const auto place = [&original] (te::Clip* clip, double start, double length, double offset)
-    {
-        phazite::setClipPlace (original.edit, phazite::findClipState (*clip), phazite::BeatPosition::fromBeats (start),
-                               phazite::BeatDuration::fromBeats (length), phazite::BeatDuration::fromBeats (offset));
-    };
+    const auto place = [&e] (phazite::ClipID clip, double start, double length, double offset)
+    { phazite::setClipPlace (e.song, phazite::findClipState (e.song, clip), beats (start), lasting (length), lasting (offset)); };
 
     place (aliases[0], 8.0, 4.0, 0.0);
     place (aliases[1], 16.0, 2.0, 2.0);
-    const juce::Array<te::MidiClip*> shown { &original };
+    const std::vector shown { original };
 
-    CHECK (phazite::getLinkedPlayBeat (shown, 9.5) == std::optional<double> (1.5));
-    CHECK (phazite::getLinkedPlayBeat (shown, 16.5) == std::optional<double> (2.5));
+    CHECK (phazite::getLinkedPlayBeat (e.song, shown, 9.5) == std::optional<double> (1.5));
+    CHECK (phazite::getLinkedPlayBeat (e.song, shown, 16.5) == std::optional<double> (2.5));
 
     // The clip shown plays there itself, or nothing does: nothing to show in it.
-    CHECK_FALSE (phazite::getLinkedPlayBeat (shown, 2.0).has_value());
-    CHECK_FALSE (phazite::getLinkedPlayBeat (shown, 6.0).has_value());
-    CHECK_FALSE (phazite::getLinkedPlayBeat ({ &original, dynamic_cast<te::MidiClip*> (aliases[0]) }, 9.5).has_value());
+    CHECK_FALSE (phazite::getLinkedPlayBeat (e.song, shown, 2.0).has_value());
+    CHECK_FALSE (phazite::getLinkedPlayBeat (e.song, shown, 6.0).has_value());
+    CHECK_FALSE (phazite::getLinkedPlayBeat (e.song, { original, aliases[0] }, 9.5).has_value());
 
     // A clip made unique has no linked clips.
-    phazite::makeClipsUnique (phazite::test::songOf ({ &original }), phazite::test::idsOf ({ &original }));
-    CHECK_FALSE (phazite::getLinkedPlayBeat (shown, 9.5).has_value());
+    phazite::makeClipsUnique (e.song, { original });
+    CHECK_FALSE (phazite::getLinkedPlayBeat (e.song, shown, 9.5).has_value());
 }

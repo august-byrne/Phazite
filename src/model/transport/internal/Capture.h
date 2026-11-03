@@ -24,7 +24,7 @@ class CommandRegistry;
 bool canCapture (te::Edit&);
 
 // Makes the clip; nullptr if nothing was played. With a selection manager, the clip is selected.
-te::MidiClip* capture (te::Edit&, Selection*);
+ClipID capture (te::Edit&, Selection*);
 
 // The tempo notes were played at, from when they began (in seconds, in order), to a whole beat per minute: the one
 // between 80 and 160 at which they fall best on a grid of sixteenths, with more of them on beats, from the first note.

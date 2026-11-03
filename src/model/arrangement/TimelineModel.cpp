@@ -80,13 +80,13 @@ void forEachGridLine (const ProjectContext& context, GridStep step, BeatRange ra
 GridSettings loadGridSettings (const ProjectContext& context, GridOwner owner)
 {
     auto* edit = getEdit (context);
-    return edit != nullptr ? loadGridSettings (*edit, owner) : GridSettings();
+    return edit != nullptr ? loadGridSettings (getSong (*edit), owner) : GridSettings();
 }
 
 void saveGridSettings (ProjectContext& context, GridOwner owner, const GridSettings& grid)
 {
     if (auto* edit = getEdit (context))
-        saveGridSettings (*edit, owner, grid);
+        saveGridSettings (getSong (*edit), owner, grid);
 }
 
 //==============================================================================

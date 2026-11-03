@@ -8,13 +8,11 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/chords/internal/Chords.h"
-#include "model/engine/internal/LiveInput.h"
-#include "model/mirror/internal/Bridge.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 #include <numeric>
@@ -23,61 +21,22 @@ namespace phazite
 {
 namespace
 {
-    te::Track* findTrack (const ProjectContext& context, TrackID id)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
-    }
-
-    te::Clip* findClip (const ProjectContext& context, ClipID id)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? te::findClipForID (*edit, toTracktion (id)) : nullptr;
-    }
-
-    juce::Array<te::Track*> findTracks (const ProjectContext& context, const std::vector<TrackID>& ids)
-    {
-        juce::Array<te::Track*> tracks;
-
-        for (const auto id : ids)
-            if (auto* track = findTrack (context, id))
-                tracks.add (track);
-
-        return tracks;
-    }
-
-    juce::Array<te::Clip*> findClips (const ProjectContext& context, const std::vector<ClipID>& ids)
-    {
-        juce::Array<te::Clip*> clips;
-
-        for (const auto id : ids)
-            if (auto* clip = findClip (context, id))
-                clips.add (clip);
-
-        return clips;
-    }
-
     SongSection makeSongSection (const Section& section)
     {
         return { section.id, section.name, section.range, section.colour, section.tip, section.energy };
     }
 
-    std::vector<ClipID> idsOf (const juce::Array<te::Clip*>& clips)
+    // A track of the song's that holds clips: a track or a return, not a folder or the master.
+    bool holdsClips (const Song& song, TrackID id)
     {
-        std::vector<ClipID> ids;
-
-        for (auto* clip : clips)
-            if (clip != nullptr)
-                ids.push_back (getClipID (*clip));
-
-        return ids;
+        const auto state = findTrackState (song, id);
+        return state.hasType (schema::TRACK) && ! isFolderState (state);
     }
 
     // A track's row; its color is its row's in the palette unless it has its own. The master's is gray. Without the colors
     // of the folders it is in, which getPlaylistRows() knows from the folders before it.
-    TrackRow makeRow (const te::Edit& edit, TrackID id, int index)
+    TrackRow makeRow (const Song& song, TrackID id, int index)
     {
-        const auto& song = getSong (edit);
         const auto state = findTrackState (song, id);
         TrackRow row;
         row.id = id;
@@ -100,51 +59,42 @@ namespace
 
         row.pinned = isPinned (song, id);
         row.savedHeight = getSavedTrackHeight (song, id);
-
-        if (auto* audio = dynamic_cast<te::AudioTrack*> (mirror::findTrack (edit, state)))
-            row.hasInstrument = hasInstrument (*audio);
-
+        row.hasInstrument = ! isFolderState (state) && hasInstrument (song, id);
         row.frozen = state[schema::trackFrozen];
-
         return row;
     }
 
-    ClipInfo makeInfo (te::Clip& clip)
+    ClipInfo makeInfo (const Song& song, const juce::ValueTree& clipState)
     {
         ClipInfo info;
-        info.id = getClipID (clip);
-        info.track = clip.getTrack() != nullptr ? getTrackID (*clip.getTrack()) : TrackID();
-        info.kind = dynamic_cast<te::AudioClipBase*> (&clip) != nullptr ? ClipType::audio : ClipType::midi;
-        info.name = clip.getName();
-        info.range = { fromTracktion (clip.getStartBeat()), fromTracktion (clip.getEndBeat()) };
-        info.muted = clip.isMuted();
-        info.linked = hasAliases (getSong (clip.edit), { getClipID (clip) });
+        info.id = getClipID (clipState);
+        info.track = getTrackID (clipState.getParent());
+        info.kind = isAudioState (clipState) ? ClipType::audio : ClipType::midi;
+        info.name = clipState[schema::clipName].toString();
+        info.range = getClipRange (song, clipState);
+        info.muted = clipState[schema::clipMute];
+        info.linked = clipState.hasProperty (schema::clipLink);
 
-        // The song's own place for one of its clips, without rounding through seconds, and its fades' shapes.
-        const auto clipState = findClipState (clip);
-
-        if (clipState.isValid())
-            info.range = getClipRange (clip.edit, clipState);
-
-        if (auto* audio = dynamic_cast<te::AudioClipBase*> (&clip))
+        if (isAudioState (clipState))
         {
-            if (const auto length = audio->getPosition().getLength().inSeconds(); length > 0.0)
+            // Its fades as they play, as parts of its length.
+            const auto position = getPlayedPosition (song, clipState);
+
+            if (const auto length = position.end - position.start; length > 0.0)
             {
-                info.fadeIn = audio->getFadeIn().inSeconds() / length;
-                info.fadeOut = audio->getFadeOut().inSeconds() / length;
+                const auto [fadeIn, fadeOut] = getFittedFades (song, clipState);
+                info.fadeIn = fadeIn / length;
+                info.fadeOut = fadeOut / length;
             }
 
-            if (clipState.isValid())
-            {
-                info.fadeInCurve = getClipFadeCurve (clipState, true);
-                info.fadeOutCurve = getClipFadeCurve (clipState, false);
-            }
-            info.followsTempo = getClipTempo (*audio) > 0.0;
+            info.fadeInCurve = getClipFadeCurve (clipState, true);
+            info.fadeOutCurve = getClipFadeCurve (clipState, false);
+            info.followsTempo = getClipTempo (song, info.id) > 0.0;
 
-            if (const auto takes = getClipTakeCount (*audio); takes > 1)
+            if (const auto takes = getClipTakeCount (song, info.id); takes > 1)
             {
                 info.takes = takes;
-                info.take = getClipTake (*audio);
+                info.take = getClipTake (song, info.id);
             }
         }
 
@@ -170,22 +120,21 @@ namespace
 std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
 {
     std::vector<TrackRow> rows;
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return rows;
 
-    const auto& song = getSong (*edit);
-    const auto ids = getTrackIDs (song);
+    const auto ids = getTrackIDs (*song);
     std::vector<TrackRow> returns;
     std::vector<juce::Colour> folders; // the colors of the folders the row goes in, by depth: each folder comes before its tracks
 
     for (size_t i = 0; i < ids.size(); ++i)
     {
-        if (isHiddenInCollapsedFolder (song, ids[i]))
+        if (isHiddenInCollapsedFolder (*song, ids[i]))
             continue;
 
-        auto row = makeRow (*edit, ids[i], (int) i);
+        auto row = makeRow (*song, ids[i], (int) i);
         folders.resize ((size_t) row.depth);
         row.folderColours = folders;
 
@@ -196,7 +145,7 @@ std::vector<TrackRow> getPlaylistRows (const ProjectContext& context)
         // too (docs/design.md, section 6).
         if (row.kind != TrackType::returnTrack)
             rows.push_back (std::move (row));
-        else if (auto* track = findTrack (context, ids[i]); track != nullptr && ! getLanes (*track).empty())
+        else if (! getLanes (*song, ids[i]).empty())
             returns.push_back (std::move (row));
     }
 
@@ -213,7 +162,7 @@ std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
 
     const auto ids = getTrackIDs (*song);
     const auto indexOf = [&ids] (TrackID track) { return (int) (std::find (ids.begin(), ids.end(), track) - ids.begin()); };
-    auto row = makeRow (*getEdit (context), id, indexOf (id));
+    auto row = makeRow (*song, id, indexOf (id));
 
     for (auto folder = findTrackState (*song, id).getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
         row.folderColours.insert (row.folderColours.begin(), getTrackColour (*song, getTrackID (folder), indexOf (getTrackID (folder))));
@@ -223,13 +172,13 @@ std::optional<TrackRow> getTrackRow (const ProjectContext& context, TrackID id)
 
 std::optional<TrackRow> getMasterRow (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    auto* master = edit != nullptr ? edit->getMasterTrack() : nullptr;
+    auto* song = findSong (context);
+    const auto master = song != nullptr ? getMasterID (*song) : TrackID();
 
-    if (master == nullptr || getLanes (*master).empty())
+    if (! master.isValid() || getLanes (*song, master).empty())
         return {};
 
-    return makeRow (*edit, getTrackID (*master), -1);
+    return makeRow (*song, master, -1);
 }
 
 std::vector<TrackID> getAllPlaylistTracks (const ProjectContext& context)
@@ -290,53 +239,51 @@ void setSavedTrackHeight (ProjectContext& context, TrackID id, int height)
 
 bool isAnyRowExpanded (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr && isAnyRowExpanded (*edit);
+    auto* song = findSong (context);
+    return song != nullptr && isAnyRowExpanded (*song);
 }
 
 void renameTrack (ProjectContext& context, TrackID id, const juce::String& name)
 {
-    if (auto* track = findTrack (context, id))
-        renameTrack (*track, name);
+    if (auto* song = findSong (context))
+        renameTrack (*song, id, name);
 }
 
 void setTrackColours (ProjectContext& context, const std::vector<TrackID>& ids, juce::Colour colour)
 {
-    if (const auto tracks = findTracks (context, ids); ! tracks.isEmpty())
-        setTrackColours (tracks, colour);
+    if (auto* song = findSong (context))
+        setTrackColours (*song, ids, colour);
 }
 
 bool canMoveTracksTo (const ProjectContext& context, const std::vector<TrackID>& moving, TrackID target, TrackDrop drop)
 {
-    const auto tracks = findTracks (context, moving);
-    auto* to = findTrack (context, target);
-    return ! tracks.isEmpty() && to != nullptr && canMoveTracksTo (tracks, *to, drop);
+    auto* song = findSong (context);
+    return song != nullptr && canMoveTracksTo (*song, moving, target, drop);
 }
 
 void moveTracksTo (ProjectContext& context, const std::vector<TrackID>& moving, TrackID target, TrackDrop drop)
 {
-    if (const auto tracks = findTracks (context, moving); ! tracks.isEmpty())
-        if (auto* to = findTrack (context, target))
-            moveTracksTo (tracks, *to, drop);
+    if (auto* song = findSong (context))
+        moveTracksTo (*song, moving, target, drop);
 }
 
 TrackID addTrackAtEnd (ProjectContext& context, bool folder)
 {
-    auto* edit = getEdit (context);
-    auto* added = edit != nullptr ? addTrackAtEnd (*edit, folder, &getSelection (context)) : nullptr;
-    return added != nullptr ? getTrackID (*added) : TrackID();
+    auto* song = findSong (context);
+    return song != nullptr ? addTrackAtEnd (*song, folder, &getSelection (context)) : TrackID();
 }
 
 //==============================================================================
 std::vector<ClipInfo> getClips (const ProjectContext& context, TrackID id)
 {
     std::vector<ClipInfo> clips;
+    auto* song = findSong (context);
 
-    if (auto* track = dynamic_cast<te::ClipTrack*> (findTrack (context, id)))
-        for (auto* clip : track->getClips())
-            clips.push_back (makeInfo (*clip));
+    if (song != nullptr && holdsClips (*song, id))
+        for (const auto& clipState : getClipStates (findTrackState (*song, id)))
+            clips.push_back (makeInfo (*song, clipState));
 
-    // Tracktion keeps a track's clips in the order of the project's data, which moving a clip doesn't sort.
+    // From the earliest, whatever order the track's element holds them in.
     std::stable_sort (clips.begin(), clips.end(),
                       [] (const ClipInfo& a, const ClipInfo& b) { return a.range.getStart() < b.range.getStart(); });
     return clips;
@@ -344,15 +291,17 @@ std::vector<ClipInfo> getClips (const ProjectContext& context, TrackID id)
 
 std::optional<ClipInfo> getClip (const ProjectContext& context, ClipID id)
 {
-    if (auto* clip = findClip (context, id))
-        return makeInfo (*clip);
+    if (auto* song = findSong (context))
+        if (const auto clipState = findClipState (*song, id); clipState.isValid())
+            return makeInfo (*song, clipState);
 
     return {};
 }
 
 bool canHoldClips (const ProjectContext& context, TrackID id)
 {
-    return dynamic_cast<te::ClipTrack*> (findTrack (context, id)) != nullptr;
+    auto* song = findSong (context);
+    return song != nullptr && holdsClips (*song, id);
 }
 
 std::vector<ClipSubRow> getClipSubRows (const std::vector<ClipInfo>& clips)
@@ -448,18 +397,22 @@ float getFadeGain (FadeCurve curve, float alpha)
 std::vector<NoteShape> getNoteShapes (const ProjectContext& context, ClipID id)
 {
     std::vector<NoteShape> shapes;
-    auto* midi = dynamic_cast<te::MidiClip*> (findClip (context, id));
+    auto* song = findSong (context);
+    const auto clipState = song != nullptr ? findClipState (*song, id) : juce::ValueTree();
 
-    if (midi == nullptr)
+    if (! isMidiState (clipState))
         return shapes;
 
     // The notes are in the clip's content, which can start before the clip does.
-    const auto contentOffset = (midi->getContentStartBeat() - midi->getStartBeat()).inBeats();
+    const auto contentOffset = -getClipOffset (clipState).inBeats();
 
-    for (auto* note : midi->getSequence().getNotes())
+    for (const auto& note : clipState)
     {
-        const auto start = contentOffset + note->getStartBeat().inBeats();
-        shapes.push_back ({ note->getNoteNumber(), start, start + note->getLengthBeats().inBeats() });
+        if (! note.hasType (schema::NOTE))
+            continue;
+
+        const auto start = contentOffset + (double) note[schema::noteStart];
+        shapes.push_back ({ (int) note[schema::notePitch], start, start + (double) note[schema::noteLength] });
     }
 
     return shapes;
@@ -468,81 +421,75 @@ std::vector<NoteShape> getNoteShapes (const ProjectContext& context, ClipID id)
 //==============================================================================
 ClipID placeClip (ProjectContext& context, TrackID trackID, BeatPosition start, ClipID lastUsed)
 {
-    auto* track = dynamic_cast<te::ClipTrack*> (findTrack (context, trackID));
-    auto* placed = track != nullptr ? placeClip (*track, toTracktion (start), findClip (context, lastUsed)) : nullptr;
-    return placed != nullptr ? getClipID (*placed) : ClipID();
+    auto* song = findSong (context);
+    return song != nullptr && holdsClips (*song, trackID) ? placeClip (*song, trackID, start, lastUsed) : ClipID();
 }
 
 void moveClip (ProjectContext& context, ClipID id, BeatPosition start, TrackID trackID)
 {
-    auto* clip = findClip (context, id);
-    auto* track = dynamic_cast<te::ClipTrack*> (findTrack (context, trackID));
-
-    if (clip != nullptr && track != nullptr)
-        moveClip (*clip, toTracktion (start), *track);
+    if (auto* song = findSong (context); song != nullptr && holdsClips (*song, trackID))
+        moveClip (*song, id, start, trackID);
 }
 
 void trimClipStart (ProjectContext& context, ClipID id, BeatPosition start)
 {
-    if (auto* clip = findClip (context, id))
-        trimClipStart (*clip, toTracktion (start));
+    if (auto* song = findSong (context))
+        trimClipStart (*song, id, start);
 }
 
 void trimClipEnd (ProjectContext& context, ClipID id, BeatPosition end)
 {
-    if (auto* clip = findClip (context, id))
-        trimClipEnd (*clip, toTracktion (end));
+    if (auto* song = findSong (context))
+        trimClipEnd (*song, id, end);
 }
 
 void fadeClipTo (ProjectContext& context, ClipID id, bool fadeIn, BeatPosition at)
 {
-    auto* audio = dynamic_cast<te::AudioClipBase*> (findClip (context, id));
+    auto* song = findSong (context);
+    const auto clipState = song != nullptr ? findClipState (*song, id) : juce::ValueTree();
 
-    if (audio == nullptr)
+    if (! isAudioState (clipState))
         return;
 
-    const auto time = audio->edit.tempoSequence.toTime (toTracktion (at));
-    const auto position = audio->getPosition();
-    setClipFade (*audio, fadeIn, fadeIn ? time - position.getStart() : position.getEnd() - time);
+    const auto time = toSeconds (*song, at);
+    const auto position = getPlayedPosition (*song, clipState);
+    setClipFade (*song, id, fadeIn, fadeIn ? time - position.start : position.end - time);
 }
 
 void setFadeCurve (ProjectContext& context, ClipID id, bool fadeIn, FadeCurve curve)
 {
-    if (auto* clip = findClip (context, id))
-        setFadeCurve (*clip, fadeIn, curve);
+    if (auto* song = findSong (context))
+        setFadeCurve (*song, id, fadeIn, curve);
 }
 
 double getSlipOffset (const ProjectContext& context, ClipID id)
 {
-    auto* clip = findClip (context, id);
-    return clip != nullptr ? clip->getPosition().getOffset().inSeconds() : 0.0;
+    auto* song = findSong (context);
+    return song != nullptr && findClipState (*song, id).isValid() ? getClipStartOffset (*song, id) : 0.0;
 }
 
 void slipClip (ProjectContext& context, ClipID id, double startOffset, BeatPosition from, BeatPosition to)
 {
-    if (auto* clip = findClip (context, id))
-    {
-        const auto& tempo = clip->edit.tempoSequence;
-        slipClip (*clip, te::TimeDuration::fromSeconds (startOffset), tempo.toTime (toTracktion (to)) - tempo.toTime (toTracktion (from)));
-    }
+    if (auto* song = findSong (context))
+        slipClip (*song, id, startOffset, toSeconds (*song, to) - toSeconds (*song, from));
 }
 
 std::vector<ClipID> splitClips (ProjectContext& context, const std::vector<ClipID>& ids, BeatPosition at)
 {
-    const auto clips = findClips (context, ids);
-    return clips.isEmpty() ? std::vector<ClipID>() : idsOf (splitClips (clips, toTracktion (at)));
+    auto* song = findSong (context);
+    return song != nullptr ? splitClips (*song, ids, at) : std::vector<ClipID>();
 }
 
 std::vector<ClipID> copyClips (ProjectContext& context, const std::vector<ClipID>& ids, bool asAliases)
 {
-    const auto clips = findClips (context, ids);
-    return clips.isEmpty() ? std::vector<ClipID>() : idsOf (copyClips (clips, asAliases));
+    auto* song = findSong (context);
+    return song != nullptr ? copyClips (*song, ids, asAliases) : std::vector<ClipID>();
 }
 
 void deleteClips (ProjectContext& context, const std::vector<ClipID>& ids, bool closeGap)
 {
-    if (const auto clips = findClips (context, ids); ! clips.isEmpty())
-        deleteClips (clips, closeGap);
+    if (auto* song = findSong (context))
+        deleteClips (*song, ids, closeGap);
 }
 
 void toggleClipsMuted (ProjectContext& context, const std::vector<ClipID>& ids)
@@ -553,57 +500,60 @@ void toggleClipsMuted (ProjectContext& context, const std::vector<ClipID>& ids)
 
 void nudgeClips (ProjectContext& context, const std::vector<ClipID>& ids, BeatDuration step)
 {
-    if (const auto clips = findClips (context, ids); ! clips.isEmpty())
-        nudgeClips (clips, toTracktion (step));
+    if (auto* song = findSong (context))
+        nudgeClips (*song, ids, step);
 }
 
 void moveAutomationWithClips (ProjectContext& context, const std::vector<ClipPlace>& places, BeatDuration distance, bool copied)
 {
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return;
+
     std::vector<AutomationStretch> stretches;
 
     for (const auto& place : places)
-        if (auto* track = findTrack (context, place.track))
-            stretches.push_back ({ track, place.range });
+        if (findTrackState (*song, place.track).isValid())
+            stretches.push_back ({ place.track, place.range });
 
-    moveAutomation (stretches, distance, copied);
+    moveAutomation (*song, stretches, distance, copied);
 }
 
 ClipID addMidiClipAt (ProjectContext& context, TrackID trackID, BeatPosition start)
 {
-    auto* track = dynamic_cast<te::ClipTrack*> (findTrack (context, trackID));
-    auto* added = track != nullptr ? addMidiClipAt (*track, toTracktion (start), &getSelection (context)) : nullptr;
-    return added != nullptr ? getClipID (*added) : ClipID();
+    auto* song = findSong (context);
+    return song != nullptr && holdsClips (*song, trackID) ? addMidiClipAt (*song, trackID, start, &getSelection (context)) : ClipID();
 }
 
 std::vector<CrossfadeSpot> getCrossfadeSpots (const ProjectContext& context, TrackID trackID, BeatDuration gap)
 {
     std::vector<CrossfadeSpot> spots;
-    auto* track = dynamic_cast<te::ClipTrack*> (findTrack (context, trackID));
+    auto* song = findSong (context);
 
-    if (track == nullptr)
+    if (song == nullptr || ! holdsClips (*song, trackID))
         return spots;
 
-    const auto& tempo = track->edit.tempoSequence;
+    std::vector<juce::ValueTree> audio;
 
-    for (auto* a : track->getClips())
+    for (const auto& clipState : getClipStates (findTrackState (*song, trackID)))
+        if (isAudioState (clipState))
+            audio.push_back (clipState);
+
+    for (const auto& first : audio)
     {
-        for (auto* b : track->getClips())
+        for (const auto& second : audio)
         {
-            auto* first = dynamic_cast<te::AudioClipBase*> (a);
-            auto* second = dynamic_cast<te::AudioClipBase*> (b);
-
-            if (first == nullptr || second == nullptr || first == second)
+            if (first == second)
                 continue;
 
             // The second starts after the first, where it ends or inside it (a crossfade already), and ends later.
-            const auto one = first->getEditTimeRange(), two = second->getEditTimeRange();
+            const auto one = getPlayedPosition (*song, first), two = getPlayedPosition (*song, second);
 
-            if (two.getStart() <= one.getStart() || two.getEnd() <= one.getEnd()
-                || tempo.toBeats (two.getStart()) > tempo.toBeats (one.getEnd()) + toTracktion (gap))
+            if (two.start <= one.start || two.end <= one.end || toBeats (*song, two.start) > toBeats (*song, one.end) + gap)
                 continue;
 
-            const auto boundary = te::TimePosition::fromSeconds ((one.getEnd().inSeconds() + two.getStart().inSeconds()) / 2.0);
-            spots.push_back ({ getClipID (*first), getClipID (*second), fromTracktion (tempo.toBeats (boundary)) });
+            spots.push_back ({ getClipID (first), getClipID (second), toBeats (*song, (one.end + two.start) / 2.0) });
         }
     }
 
@@ -612,38 +562,35 @@ std::vector<CrossfadeSpot> getCrossfadeSpots (const ProjectContext& context, Tra
 
 void setCrossfade (ProjectContext& context, const CrossfadeSpot& spot, BeatPosition pointer)
 {
-    auto* first = dynamic_cast<te::AudioClipBase*> (findClip (context, spot.first));
-    auto* second = dynamic_cast<te::AudioClipBase*> (findClip (context, spot.second));
+    auto* song = findSong (context);
 
-    if (first == nullptr || second == nullptr)
+    if (song == nullptr || ! isAudioState (findClipState (*song, spot.first)) || ! isAudioState (findClipState (*song, spot.second)))
         return;
 
     // As long as twice the distance from the boundary to the pointer: the boundary stays in the middle.
-    const auto& tempo = first->edit.tempoSequence;
-    const auto boundary = tempo.toTime (toTracktion (spot.boundary));
-    const auto distance = tempo.toTime (toTracktion (pointer)) - boundary;
-    setCrossfade (*first, *second, boundary, te::TimeDuration::fromSeconds (2.0 * std::abs (distance.inSeconds())));
+    const auto boundary = toSeconds (*song, spot.boundary);
+    const auto distance = toSeconds (*song, pointer) - boundary;
+    setCrossfade (*song, spot.first, spot.second, boundary, 2.0 * std::abs (distance));
 }
 
 //==============================================================================
 bool canImport (const ProjectContext& context, const juce::File& file)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr && getFileKind (file) != FileKind::other;
+    return findSong (context) != nullptr && getFileKind (file) != FileKind::other;
 }
 
 std::vector<ClipID> importFiles (ProjectContext& context, const juce::StringArray& paths, TrackID target, BeatPosition start)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? idsOf (importFiles (*edit, paths, findTrack (context, target), toTracktion (start))) : std::vector<ClipID>();
+    auto* song = findSong (context);
+    return song != nullptr ? importFiles (*song, paths, target, start) : std::vector<ClipID>();
 }
 
 std::vector<SongSection> getSongSections (const ProjectContext& context)
 {
     std::vector<SongSection> sections;
 
-    if (auto* edit = getEdit (context))
-        for (const auto& section : getSections (getSong (*edit)))
+    if (auto* song = findSong (context))
+        for (const auto& section : getSections (*song))
             sections.push_back (makeSongSection (section));
 
     return sections;
@@ -651,8 +598,8 @@ std::vector<SongSection> getSongSections (const ProjectContext& context)
 
 std::optional<SongSection> getSongSection (const ProjectContext& context, SectionID id)
 {
-    if (auto* edit = getEdit (context))
-        if (const auto section = getSection (getSong (*edit), id))
+    if (auto* song = findSong (context))
+        if (const auto section = getSection (*song, id))
             return makeSongSection (*section);
 
     return {};
@@ -660,63 +607,63 @@ std::optional<SongSection> getSongSection (const ProjectContext& context, Sectio
 
 SectionID addSectionAt (ProjectContext& context, BeatPosition beat)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? addSectionAt (getSong (*edit), beat, &getSelection (context)) : SectionID();
+    auto* song = findSong (context);
+    return song != nullptr ? addSectionAt (*song, beat, &getSelection (context)) : SectionID();
 }
 
 void renameSection (ProjectContext& context, SectionID id, const juce::String& name)
 {
-    if (auto* edit = getEdit (context))
-        renameSection (getSong (*edit), id, name);
+    if (auto* song = findSong (context))
+        renameSection (*song, id, name);
 }
 
 void setSectionColour (ProjectContext& context, SectionID id, juce::Colour colour)
 {
-    if (auto* edit = getEdit (context))
-        setSectionColour (getSong (*edit), id, colour);
+    if (auto* song = findSong (context))
+        setSectionColour (*song, id, colour);
 }
 
 std::vector<BeatPosition> getSectionBoundaries (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? getSectionBoundaries (getSong (*edit)) : std::vector<BeatPosition>();
+    auto* song = findSong (context);
+    return song != nullptr ? getSectionBoundaries (*song) : std::vector<BeatPosition>();
 }
 
 void moveSection (ProjectContext& context, SectionID id, BeatPosition destination)
 {
-    if (auto* edit = getEdit (context))
-        moveSection (*edit, id, destination);
+    if (auto* song = findSong (context))
+        moveSection (*song, id, destination);
 }
 
 SectionID copySection (ProjectContext& context, SectionID id, BeatPosition destination, bool asAliases)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? copySection (*edit, id, destination, asAliases) : SectionID();
+    auto* song = findSong (context);
+    return song != nullptr ? copySection (*song, id, destination, asAliases) : SectionID();
 }
 
 void resizeSection (ProjectContext& context, SectionID id, BeatDuration newLength, bool moveRest)
 {
-    if (auto* edit = getEdit (context))
-        resizeSection (*edit, id, newLength, moveRest);
+    if (auto* song = findSong (context))
+        resizeSection (*song, id, newLength, moveRest);
 }
 
 BeatPosition getPlayStartBeat (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (getPlayStart (*edit))) : BeatPosition();
+    auto* song = findSong (context);
+    return song != nullptr ? getPlayStartBeat (*song) : BeatPosition();
 }
 
 BeatPosition getTimelineEnd (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return {};
 
-    auto end =
-        std::max (fromTracktion (edit->tempoSequence.toBeats (te::toPosition (edit->getLength()))), getSectionsEnd (getSong (*edit)));
+    // The latest clip's end, a section's or a chord's.
+    auto end = std::max (getClipsEnd (*song), getSectionsEnd (*song));
 
-    for (const auto& chord : getLaneChords (getSong (*edit)))
+    for (const auto& chord : getLaneChords (*song))
         end = std::max (end, chord.range.getEnd());
 
     return end;

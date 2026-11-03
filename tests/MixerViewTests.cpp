@@ -83,7 +83,8 @@ TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks 
     CHECK (buttonsIn ("Effects") == juce::StringArray { "+ Effect" });
 
     // Notes, and nothing to play them: the strip asks for an instrument.
-    phazite::test::addMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) });
+    phazite::test::addMidiClip (phazite::getSong (*edit), phazite::getTrackID (*track),
+                                { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return buttonsIn ("Instrument") == juce::StringArray { "Choose instrument" }; }));
 
     // The instrument has its own slot, and effects go in theirs.
@@ -174,12 +175,12 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
 
     // Selecting a track that sends to the return outlines the return's strip, and the other way round.
     phazite::addSend (*tracks[0], phazite::getReturnBus (*reverbReturn), false);
-    selection.selectOnly (tracks[0]);
+    selection.selectOnly (phazite::getTrackID (*tracks[0]));
     phazite::test::dispatchPendingMessages();
     CHECK (strips[2]->isRelated());
     CHECK_FALSE (strips[1]->isRelated());
 
-    selection.selectOnly (reverbReturn);
+    selection.selectOnly (phazite::getTrackID (*reverbReturn));
     phazite::test::dispatchPendingMessages();
     CHECK (strips[0]->isRelated());
     CHECK_FALSE (strips[1]->isRelated());

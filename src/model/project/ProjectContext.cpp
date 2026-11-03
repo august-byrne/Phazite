@@ -242,7 +242,7 @@ struct ProjectContext::Impl
     UIBehaviour* const focus;
     Selection selection;                          // what is selected, by IDs
     std::unique_ptr<SongSelection> songSelection; // the UI's view of selection
-    RangeSelection rangeSelection;
+    RangeSelection rangeSelection { selection };
     std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
     juce::ListenerList<Listener> listeners;
     std::unique_ptr<FreezeKeeper> freezes;                    // unfreezes a frozen track whose clips or frozen devices change
@@ -393,7 +393,7 @@ void setEdit (ProjectContext& context, te::Edit* edit)
     impl.clipRenders = nullptr;      // likewise, its renders stopped
     impl.freezes = edit != nullptr ? std::make_unique<FreezeKeeper> (*edit) : nullptr;
     impl.deviceModulation = edit != nullptr ? std::make_unique<DeviceModulationKeeper> (*edit) : nullptr;
-    impl.clipRenders = edit != nullptr ? std::make_unique<ClipRenders> (*edit) : nullptr;
+    impl.clipRenders = edit != nullptr ? std::make_unique<ClipRenders> (getSong (*edit)) : nullptr;
     impl.recorder = edit != nullptr ? std::make_unique<AudioRecorder> (*edit) : nullptr;
     impl.automation = edit != nullptr ? std::make_unique<AutomationWatcher> (*edit) : nullptr;
     impl.playback = edit != nullptr ? std::make_unique<PlaybackSession> (*edit, impl.playbackHost) : nullptr;

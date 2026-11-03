@@ -34,20 +34,21 @@ TEST_CASE ("The open project's Edit, selection and Tracktion's focus move togeth
         CHECK (focus.getLastFocusedEdit() == edit.get());
 
         // Closing the project leaves nothing of it selected, and Tracktion's focus with it.
-        getSelection (context).selectOnly (track);
-        getRangeSelection (context).set ({ te::BeatPosition::fromBeats (0.0), te::BeatPosition::fromBeats (4.0) }, { track });
-        REQUIRE (getSelection (context).isSelected (track));
+        getSelection (context).selectOnly (phazite::getTrackID (*track));
+        getRangeSelection (context).set ({ phazite::BeatPosition::fromBeats (0.0), phazite::BeatPosition::fromBeats (4.0) },
+                                         { phazite::getTrackID (*track) });
+        REQUIRE (getSelection (context).isSelected (phazite::getTrackID (*track)));
         REQUIRE_FALSE (getRangeSelection (context).isEmpty());
 
         setEdit (context, nullptr);
         CHECK (getEdit (context) == nullptr);
-        CHECK_FALSE (getSelection (context).isSelected (track));
+        CHECK_FALSE (getSelection (context).isSelected (phazite::getTrackID (*track)));
         CHECK (getRangeSelection (context).isEmpty());
         CHECK (focus.getLastFocusedEdit() == nullptr);
 
         // Opening it again selects nothing; an Edit that is deleted is gone from the context too.
         setEdit (context, edit.get());
-        CHECK_FALSE (getSelection (context).isSelected (track));
+        CHECK_FALSE (getSelection (context).isSelected (phazite::getTrackID (*track)));
         edit = nullptr;
         CHECK (getEdit (context) == nullptr);
     }
@@ -101,22 +102,24 @@ TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
     selection.selectOnly (second);
     selection.add (first);
     CHECK (selection.getTracks() == std::vector<phazite::TrackID> { first, second }); // in the playlist's order
-    CHECK (getSelection (context).isSelected (tracks[0]));                            // what the commands act on
+    CHECK (getSelection (context).isSelected (phazite::getTrackID (*tracks[0])));     // what the commands act on
     selection.remove (first);
     CHECK (selection.getTracks() == std::vector<phazite::TrackID> { second });
 
     // Clips by theirs, left to right; a section is no clip.
-    auto* later = phazite::insertMidiClip (*tracks[0], { te::BeatPosition::fromBeats (8.0), te::BeatPosition::fromBeats (12.0) }, nullptr);
-    auto* earlier = phazite::insertMidiClip (*tracks[0], { te::BeatPosition::fromBeats (0.0), te::BeatPosition::fromBeats (4.0) }, nullptr);
+    const auto later = phazite::insertMidiClip (
+        phazite::getSong (*edit), first, { phazite::BeatPosition::fromBeats (8.0), phazite::BeatPosition::fromBeats (12.0) }, nullptr);
+    const auto earlier = phazite::insertMidiClip (
+        phazite::getSong (*edit), first, { phazite::BeatPosition::fromBeats (0.0), phazite::BeatPosition::fromBeats (4.0) }, nullptr);
     const auto section =
         phazite::insertSection (phazite::getSong (*edit), {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
-    REQUIRE (later != nullptr);
-    REQUIRE (earlier != nullptr);
+    REQUIRE (later.isValid());
+    REQUIRE (earlier.isValid());
     REQUIRE (section.isValid());
-    selection.selectOnly (phazite::getClipID (*later));
-    selection.add (phazite::getClipID (*earlier));
-    CHECK (selection.getClips() == std::vector<phazite::ClipID> { phazite::getClipID (*earlier), phazite::getClipID (*later) });
-    CHECK (selection.isSelected (phazite::getClipID (*later)));
+    selection.selectOnly (later);
+    selection.add (earlier);
+    CHECK (selection.getClips() == std::vector<phazite::ClipID> { earlier, later });
+    CHECK (selection.isSelected (later));
     CHECK_FALSE (selection.isSelected (second));
     CHECK_FALSE (selection.isSelected (phazite::ClipID::fromRaw (section.getRaw())));
 
@@ -197,17 +200,18 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     CHECK (hear() == "tracks");
 
     // A clip, and its notes: no change to the track (Tracktion sorts the track's clips and parts after a clip is added).
-    auto* clip = phazite::test::addMidiClip (*track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) });
-    REQUIRE (clip != nullptr);
+    const auto clip = phazite::test::addMidiClip (phazite::getSong (*edit), phazite::getTrackID (*track),
+                                                  { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
+    REQUIRE (clip.isValid());
     CHECK (hear() == "clips");
-    phazite::test::addMidiNote (*clip, 60, te::BeatPosition(), te::BeatDuration::fromBeats (1.0), 100);
+    phazite::test::addMidiNote (phazite::getSong (*edit), clip, 60, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (1.0), 100);
     CHECK (hear() == "clips");
 
     // A section; and the tempo, which moves the clips in time (Tracktion keeps them in seconds; sections are in beats).
     REQUIRE (phazite::insertSection (phazite::getSong (*edit), {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) })
                  .isValid());
     CHECK (juce::String (hear()).contains ("sections"));
-    phazite::setTempo (*edit, 100.0);
+    phazite::setTempo (phazite::getSong (*edit), 100.0);
     CHECK (hear() == "clips tempo");
 
     // What Tracktion writes as it plays is no change to the song; view state, such as how tall a track shows, is a group of

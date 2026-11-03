@@ -3,8 +3,11 @@
 // and the commands that act on whatever is selected: delete, duplicate, select all and deselect all.
 #pragma once
 
+#include "model/base/Beats.h"
+#include "model/base/IDs.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
+
+#include <vector>
 
 namespace phazite
 {
@@ -17,23 +20,26 @@ class CommandRegistry;
 class RangeSelection : public juce::ChangeBroadcaster
 {
 public:
-    void set (te::BeatRange, const juce::Array<te::Track*>&);
+    explicit RangeSelection (const Selection&); // in whose song its tracks are
 
-    // The same, as part of the undo step being made in the Edit, for a command that moves the range to what it made
+    void set (BeatRange, const std::vector<TrackID>&);
+
+    // The same, as part of the undo step being made in the song, for a command that moves the range to what it made
     // (Duplicate): Undo puts back the range there was, and Redo sets this one again, as REAPER's undo puts razor edit
     // areas back. A range selected by hand isn't an undo step: that is set().
-    void setInUndoStep (te::Edit&, te::BeatRange, const juce::Array<te::Track*>&);
+    void setInUndoStep (Song&, BeatRange, const std::vector<TrackID>&);
 
     void clear();
 
     // Empty if nothing is selected, or if the tracks it was on have all been deleted.
     bool isEmpty() const;
-    te::BeatRange getRange() const noexcept { return range; }
-    juce::Array<te::Track*> getTracks() const; // those still there
+    BeatRange getRange() const noexcept { return range; }
+    std::vector<TrackID> getTracks() const; // those still there
 
 private:
-    te::BeatRange range;
-    std::vector<te::SafeSelectable<te::Track>> tracks;
+    const Selection& selection;
+    BeatRange range;
+    std::vector<TrackID> tracks;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (RangeSelection) // SetRange holds it weakly: an undo history can outlive it
 };

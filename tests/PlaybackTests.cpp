@@ -26,9 +26,9 @@
 
 namespace
 {
-te::BeatPosition beats (double b)
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
 te::TimePosition seconds (double s)
@@ -58,11 +58,14 @@ struct Song
 
     ~Song() { selection.deselectAll(); }
 
-    te::MidiClip& addClip (int track, double start, double end)
+    phazite::Song& getSong() const { return phazite::getSong (*edit); }
+
+    phazite::ClipID addClip (int track, double start, double end)
     {
-        auto* clip = phazite::insertMidiClip (*tracks[track], { beats (start), beats (end) }, nullptr);
-        REQUIRE (clip != nullptr);
-        return *clip;
+        const auto clip =
+            phazite::insertMidiClip (getSong(), phazite::getTrackID (*tracks[track]), { beats (start), beats (end) }, nullptr);
+        REQUIRE (clip.isValid());
+        return clip;
     }
 
     juce::String getLoop() const { return describe (edit->getTransport().getLoopRange()); }
@@ -73,7 +76,7 @@ struct Song
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     juce::Array<te::AudioTrack*> tracks;
     phazite::Selection selection { phazite::test::getEngine() };
-    phazite::RangeSelection range;
+    phazite::RangeSelection range { selection };
     phazite::CommandRegistry registry;
 };
 } // namespace
@@ -94,7 +97,7 @@ TEST_CASE ("The song's loop runs to the end of the bar its last clip ends in")
 
     // Bars last longer at a slower tempo: 4 seconds at 60 BPM.
     Song slow;
-    phazite::setTempo (*slow.edit, 60.0);
+    phazite::setTempo (slow.getSong(), 60.0);
     slow.addClip (0, 0.0, 6.0);
     CHECK (slow.getSongLoop() == "0.000-8.000");
 }
@@ -108,20 +111,21 @@ TEST_CASE ("The loop follows the song as clips are added, moved, trimmed and del
     CHECK (phazite::doesLoopFollowSong (*song.edit));
     CHECK (song.getLoop() == "0.000-2.000");
 
-    auto& clip = song.addClip (0, 0.0, 8.0);
+    const auto clip = song.addClip (0, 0.0, 8.0);
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-4.000");
 
     // Placed past the end, as the owner did: the loop grows.
-    phazite::moveClip (clip, beats (12.0), *clip.getClipTrack());
+    phazite::moveClip (song.getSong(), clip, beats (12.0), phazite::getClipTrack (song.getSong(), clip));
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-10.000");
 
-    phazite::trimClipEnd (clip, clip.getStartBeat() + te::BeatDuration::fromBeats (2.0));
+    phazite::trimClipEnd (song.getSong(), clip,
+                          phazite::getClipRange (song.getSong(), clip).getStart() + phazite::BeatDuration::fromBeats (2.0));
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-8.000");
 
-    phazite::deleteClips ({ &clip }, false);
+    phazite::deleteClips (song.getSong(), { clip }, false);
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-2.000");
 
@@ -129,7 +133,7 @@ TEST_CASE ("The loop follows the song as clips are added, moved, trimmed and del
     song.addClip (1, 0.0, 6.0);
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == "0.000-4.000");
-    phazite::setTempo (*song.edit, 240.0);
+    phazite::setTempo (song.getSong(), 240.0);
     phazite::test::dispatchPendingMessages();
     CHECK (song.getLoop() == song.getSongLoop());
     CHECK (song.getLoop() != "0.000-4.000");
@@ -224,7 +228,7 @@ TEST_CASE ("The loop, where playback starts and the metronome are the song's, wh
 
     // They keep their beats when the tempo changes, when the change is undone, and when the time signature changes (a beat
     // is an eighth note in 6/8: a quarter of a second at 120 BPM).
-    phazite::setTempo (edit, 60.0);
+    phazite::setTempo (phazite::getSong (edit), 60.0);
     CHECK (song.getLoop() == "4.000-12.000");
     CHECK (transport.startPosition.get().inSeconds() == doctest::Approx (6.0));
     phazite::undo (edit);
@@ -269,7 +273,7 @@ TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, s
     REQUIRE (song.registry.invoke ("transport.loopSelection"));
     CHECK (song.isLooping());
     CHECK (song.isTicked ("transport.loopSong"));
-    song.range.set ({ beats (2.0), beats (6.0) }, { song.tracks[0] });
+    song.range.set ({ beats (2.0), beats (6.0) }, { phazite::getTrackID (*song.tracks[0]) });
     REQUIRE (song.registry.invoke ("transport.loopSelection"));
     CHECK (song.isLooping());
     CHECK (song.getLoop() == "1.000-3.000");
@@ -364,16 +368,16 @@ TEST_CASE ("The song ends with the bar its last clip ends in, and its sections d
     CHECK (song.getSongLoop() == "0.000-2.000"); // though it loops its first bar
 
     // An outline runs on past what is in it so far: its sections end with its last bar; the song's end doesn't.
-    REQUIRE (phazite::applyOutline (*song.edit, "rock")); // 96 bars
+    REQUIRE (phazite::applyOutline (phazite::getSong (*song.edit), "rock")); // 96 bars
     CHECK (phazite::getSectionsEnd (phazite::getSong (*song.edit)).inBeats() == doctest::Approx (384.0));
     CHECK (songEnd() == "0.000");
     CHECK (song.getSongLoop() == "0.000-2.000");
 
-    auto& clip = song.addClip (1, 2.0, 4.5); // half a beat into the second bar
+    const auto clip = song.addClip (1, 2.0, 4.5); // half a beat into the second bar
     CHECK (songEnd() == "4.000");
     CHECK (song.getSongLoop() == "0.000-4.000");
 
-    phazite::toggleClipsMuted (phazite::test::songOf ({ &clip }), phazite::test::idsOf ({ &clip })); // a muted clip counts
+    phazite::toggleClipsMuted (song.getSong(), { clip }); // a muted clip counts
     CHECK (songEnd() == "4.000");
 
     phazite::setTimeSignature (phazite::getSong (*song.edit), { 3, 4 }); // beat 4.5 is in the second bar of three beats
@@ -384,7 +388,7 @@ TEST_CASE ("Go to End goes to the song's end, not to the end of its sections")
 {
     Song song;
     phazite::addTransportCommands (song.registry, song.selection);
-    REQUIRE (phazite::applyOutline (*song.edit, "rock"));
+    REQUIRE (phazite::applyOutline (phazite::getSong (*song.edit), "rock"));
     const auto playhead = [&song] { return song.edit->getTransport().getPosition().inSeconds(); };
 
     phazite::movePlayhead (*song.edit, seconds (10.0));
@@ -415,7 +419,7 @@ TEST_CASE ("The loop's functions")
     CHECK_FALSE (phazite::isLoopingSong (*song.edit));
 
     // The selected range, or the song while none is selected.
-    song.range.set ({ beats (2.0), beats (4.0) }, { song.tracks[0] });
+    song.range.set ({ beats (2.0), beats (4.0) }, { phazite::getTrackID (*song.tracks[0]) });
     phazite::loopSelection (*song.edit, song.range);
     CHECK (song.getLoop() == "1.000-2.000");
     CHECK (phazite::isLoopOn (*song.edit));
@@ -459,8 +463,9 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
         if (release > 0.0f)
             phazite::setDeviceValue (*instrument->getAutomatableParameterByID ("release"), release);
 
-        auto* clip = phazite::test::addMidiClip (track, { beats (0.0), beats (8.0) }, "Note");
-        phazite::test::addMidiNote (*clip, note, beats (0.0), te::BeatDuration::fromBeats (length), 110);
+        auto& song = phazite::getSong (*edit);
+        const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track), { beats (0.0), beats (8.0) }, "Note");
+        phazite::test::addMidiNote (song, clip, note, beats (0.0), phazite::BeatDuration::fromBeats (length), 110);
         phazite::ProjectContext context { phazite::test::getEngineContext() }; // which plays it through Phazite's engine
         setEdit (context, edit.get());
         phazite::test::settle (300);

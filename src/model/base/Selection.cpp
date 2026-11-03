@@ -70,20 +70,6 @@ namespace
     }
 } // namespace
 
-std::optional<Selection::Item> Selection::toItem (const te::Selectable* item)
-{
-    if (const auto* track = dynamic_cast<const te::Track*> (item))
-        return Item { Kind::track, track->itemID.getRawID() };
-
-    if (const auto* clip = dynamic_cast<const te::Clip*> (item))
-        return Item { Kind::clip, clip->itemID.getRawID() };
-
-    if (const auto* device = dynamic_cast<const te::Plugin*> (item))
-        return Item { Kind::device, device->itemID.getRawID() };
-
-    return std::nullopt;
-}
-
 void Selection::setEdit (te::Edit* newEdit)
 {
     if (newEdit == edit.get())
@@ -100,28 +86,6 @@ Song* Selection::getSong() const
 {
     auto* in = edit.get();
     return in != nullptr ? &phazite::getSong (*in) : nullptr;
-}
-
-te::Selectable* Selection::find (Item item) const
-{
-    auto* in = edit.get();
-
-    if (in == nullptr || item.id == 0)
-        return nullptr;
-
-    const auto id = te::EditItemID::fromRawID (item.id);
-
-    switch (item.kind)
-    {
-        case Kind::track:
-            return te::findTrackForID (*in, id);
-        case Kind::clip:
-            return te::findClipForID (*in, id);
-        case Kind::device:
-            return te::findPluginForID (*in, id).get();
-    }
-
-    return nullptr;
 }
 
 bool Selection::isThere (Item item) const

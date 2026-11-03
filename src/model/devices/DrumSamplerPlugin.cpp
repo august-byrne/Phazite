@@ -54,7 +54,7 @@ DrumSampler& DrumSamplerPlugin::getSampler() noexcept
 
 juce::File DrumSamplerPlugin::getPadFile (int pad) const
 {
-    return findProjectFile (edit, state[schema::getPadSoundFile (pad)].toString());
+    return findProjectFile (getSong (edit), state[schema::getPadSoundFile (pad)].toString());
 }
 
 juce::String DrumSamplerPlugin::getPadName (int pad) const
@@ -74,7 +74,7 @@ void DrumSamplerPlugin::loadPad (int pad)
 void loadPadSound (devices::DrumSampler& sampler, const te::Edit& edit, const juce::ValueTree& state, int pad)
 {
     // A file that is gone or can't be read leaves the pad with its factory sound.
-    if (const auto file = findProjectFile (edit, state[schema::getPadSoundFile (pad)].toString()); file.existsAsFile())
+    if (const auto file = findProjectFile (getSong (edit), state[schema::getPadSoundFile (pad)].toString()); file.existsAsFile())
     {
         if (auto sound = readSound (file))
         {

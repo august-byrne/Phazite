@@ -19,11 +19,6 @@
 
 namespace
 {
-te::BeatPosition beats (double b)
-{
-    return te::BeatPosition::fromBeats (b);
-}
-
 phazite::BeatPosition at (double b)
 {
     return phazite::BeatPosition::fromBeats (b);
@@ -49,28 +44,41 @@ struct Song
         phazite::addOutlineCommands (registry, selection);
 
         if (const auto* outline = phazite::findOutline ("electronic"))
-            phazite::applyOutline (*edit, *outline);
+            phazite::applyOutline (phazite::getSong (*edit), *outline);
 
         phazite::getSong (*edit).getUndoManager().clearUndoHistory();
     }
 
     ~Song() { selection.deselectAll(); }
 
-    te::MidiClip& addClip (int track, double start, double end, const juce::String& name)
+    phazite::Song& getSong() const { return phazite::getSong (*edit); }
+    phazite::TrackID getTrack (int track) const { return phazite::getTrackID (*tracks[track]); }
+
+    phazite::ClipID addClip (int track, double start, double end, const juce::String& name)
     {
-        auto* clip = phazite::test::addMidiClip (*tracks[track], { beats (start), beats (end) }, name);
-        REQUIRE (clip != nullptr);
-        return *clip;
+        const auto clip = phazite::test::addMidiClip (getSong(), getTrack (track), { at (start), at (end) }, name);
+        REQUIRE (clip.isValid());
+        return clip;
     }
 
-    te::Clip* findClip (int track, double start) const
+    // The clip that starts at a beat on a track: none if no clip does.
+    phazite::ClipID findClip (int track, double start) const
     {
-        for (auto* clip : tracks[track]->getClips())
-            if (std::abs (clip->getStartBeat().inBeats() - start) < 1.0e-6)
+        for (const auto clip : phazite::getClips (getSong(), getTrack (track)))
+            if (std::abs (phazite::getClipRange (getSong(), clip).getStart().inBeats() - start) < 1.0e-6)
                 return clip;
 
-        return nullptr;
+        return {};
     }
+
+    // A clip's name, where it ends, and how many clips a track has.
+    juce::String getClipName (phazite::ClipID clip) const
+    {
+        return phazite::findClipState (getSong(), clip)[phazite::schema::clipName].toString();
+    }
+
+    double getClipEnd (phazite::ClipID clip) const { return phazite::getClipRange (getSong(), clip).getEnd().inBeats(); }
+    int getNumClips (int track) const { return (int) phazite::getClips (getSong(), getTrack (track)).size(); }
 
     phazite::Section section (int index) const
     {
@@ -94,7 +102,7 @@ struct Song
     std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
     juce::Array<te::AudioTrack*> tracks;
     phazite::Selection selection { phazite::test::getEngine() };
-    phazite::RangeSelection range;
+    phazite::RangeSelection range { selection };
     phazite::CommandRegistry registry;
 };
 } // namespace
@@ -166,12 +174,12 @@ TEST_CASE ("The built-in outlines are the design's four and four more, with thei
 TEST_CASE ("Applying the electronic outline creates its seven sections at the project tempo")
 {
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::setTempo (*edit, 128.0);
+    phazite::setTempo (phazite::getSong (*edit), 128.0);
 
     const auto* outline = phazite::findOutline ("electronic");
     REQUIRE (outline != nullptr);
     phazite::getSong (*edit).getUndoManager().beginNewTransaction ("Apply Outline");
-    phazite::applyOutline (*edit, *outline);
+    phazite::applyOutline (phazite::getSong (*edit), *outline);
 
     const auto sections = phazite::getSections (phazite::getSong (*edit));
     REQUIRE (sections.size() == 7);
@@ -189,8 +197,7 @@ TEST_CASE ("Applying the electronic outline creates its seven sections at the pr
         CHECK (section.range.getLength().inBeats() == doctest::Approx (bars[i] * 4.0));
 
         // At 128 BPM a beat lasts 60/128 seconds.
-        CHECK (edit->tempoSequence.toTime (phazite::toTracktion (section.range.getStart())).inSeconds()
-               == doctest::Approx (bar * 4.0 * 60.0 / 128.0));
+        CHECK (phazite::toSeconds (phazite::getSong (*edit), section.range.getStart()) == doctest::Approx (bar * 4.0 * 60.0 / 128.0));
         CHECK (section.tip.isNotEmpty());
         bar += bars[i];
     }
@@ -198,11 +205,11 @@ TEST_CASE ("Applying the electronic outline creates its seven sections at the pr
     CHECK (sections[2].role == juce::String ("drop"));
     CHECK (sections[2].energy == doctest::Approx (1.0));
     CHECK (sections[2].colour == phazite::getRoleColour ("drop"));
-    CHECK (phazite::getAppliedOutline (*edit) == juce::String ("electronic"));
+    CHECK (phazite::getAppliedOutline (phazite::getSong (*edit)) == juce::String ("electronic"));
 
     // Another outline replaces them, and undo brings them back.
     phazite::getSong (*edit).getUndoManager().beginNewTransaction ("Apply Outline");
-    phazite::applyOutline (*edit, *phazite::findOutline ("pop"));
+    phazite::applyOutline (phazite::getSong (*edit), *phazite::findOutline ("pop"));
     CHECK (phazite::getSections (phazite::getSong (*edit)).size() == 10);
 
     phazite::undo (*edit);
@@ -218,14 +225,14 @@ TEST_CASE ("Outlines by id")
 
     // An id no outline has changes nothing.
     const auto before = edit.state.createCopy();
-    CHECK_FALSE (phazite::applyOutline (edit, "unknown"));
+    CHECK_FALSE (phazite::applyOutline (phazite::getSong (edit), "unknown"));
     CHECK (edit.state.isEquivalentTo (before));
-    CHECK (phazite::getAppliedOutline (edit) == juce::String ("electronic"));
+    CHECK (phazite::getAppliedOutline (phazite::getSong (edit)) == juce::String ("electronic"));
 
     // Pop's id lays out pop's sections, one after the other, in bars of 4 beats.
     const auto* pop = phazite::findOutline ("pop");
     REQUIRE (pop != nullptr);
-    REQUIRE (phazite::applyOutline (edit, "pop"));
+    REQUIRE (phazite::applyOutline (phazite::getSong (edit), "pop"));
 
     const auto sections = phazite::getSections (phazite::getSong (edit));
     REQUIRE (sections.size() == pop->sections.size());
@@ -242,13 +249,13 @@ TEST_CASE ("Outlines by id")
     }
 
     // It is the outline applied while the song has sections.
-    CHECK (phazite::isOutlineApplied (edit, "pop"));
-    CHECK_FALSE (phazite::isOutlineApplied (edit, "electronic"));
+    CHECK (phazite::isOutlineApplied (phazite::getSong (edit), "pop"));
+    CHECK_FALSE (phazite::isOutlineApplied (phazite::getSong (edit), "electronic"));
 
     phazite::removeSections (phazite::getSong (edit));
 
-    CHECK (phazite::getAppliedOutline (edit) == juce::String ("pop"));
-    CHECK_FALSE (phazite::isOutlineApplied (edit, "pop"));
+    CHECK (phazite::getAppliedOutline (phazite::getSong (edit)) == juce::String ("pop"));
+    CHECK_FALSE (phazite::isOutlineApplied (phazite::getSong (edit), "pop"));
 
     // The command that applies it.
     CHECK (phazite::getOutlineCommandID ("pop") == juce::String ("section.outline.pop"));
@@ -264,7 +271,7 @@ TEST_CASE ("Moving the Drop moves everything in it")
     phazite::getSong (*song.edit).getUndoManager().beginNewTransaction ("Move Section");
 
     // Before the first Build-up.
-    phazite::moveSection (*song.edit, song.id (2), at (64));
+    phazite::moveSection (phazite::getSong (*song.edit), song.id (2), at (64));
 
     CHECK (song.getSectionNames() == juce::String ("Intro, Drop, Build-up, Breakdown, Build-up, Drop, Outro"));
     CHECK (song.section (1).range.getStart().inBeats() == doctest::Approx (64.0));
@@ -272,59 +279,60 @@ TEST_CASE ("Moving the Drop moves everything in it")
     CHECK (song.section (2).range.getStart().inBeats() == doctest::Approx (128.0));
 
     // The riff went with the Drop; the fill was split at the Drop's start, and each part went with its section.
-    auto* riff = song.findClip (0, 64);
-    REQUIRE (riff != nullptr);
-    CHECK (riff->getName() == juce::String ("Riff"));
-    CHECK (riff->getEndBeat().inBeats() == doctest::Approx (128.0));
+    const auto riff = song.findClip (0, 64);
+    REQUIRE (riff.isValid());
+    CHECK (song.getClipName (riff) == juce::String ("Riff"));
+    CHECK (song.getClipEnd (riff) == doctest::Approx (128.0));
 
-    REQUIRE (song.findClip (1, 64) != nullptr); // the Fill's part in the Drop
-    CHECK (song.findClip (1, 64)->getEndBeat().inBeats() == doctest::Approx (80.0));
-    REQUIRE (song.findClip (1, 144) != nullptr); // its part in the Build-up
-    CHECK (song.findClip (1, 144)->getEndBeat().inBeats() == doctest::Approx (160.0));
+    REQUIRE (song.findClip (1, 64).isValid()); // the Fill's part in the Drop
+    CHECK (song.getClipEnd (song.findClip (1, 64)) == doctest::Approx (80.0));
+    REQUIRE (song.findClip (1, 144).isValid()); // its part in the Build-up
+    CHECK (song.getClipEnd (song.findClip (1, 144)) == doctest::Approx (160.0));
 
-    CHECK (song.findClip (0, 160) != nullptr); // the Breakdown didn't move
+    CHECK (song.findClip (0, 160).isValid()); // the Breakdown didn't move
 
     // One undo step puts it all back.
     phazite::undo (*song.edit);
     CHECK (song.getSectionNames() == juce::String ("Intro, Build-up, Drop, Breakdown, Build-up, Drop, Outro"));
-    CHECK (song.findClip (0, 96) != nullptr);
-    CHECK (song.findClip (1, 80) != nullptr);
-    CHECK (song.tracks[1]->getClips().size() == 1);
+    CHECK (song.findClip (0, 96).isValid());
+    CHECK (song.findClip (1, 80).isValid());
+    CHECK (song.getNumClips (1) == 1);
 
     SUBCASE ("and moving a section later puts it before the destination")
     {
         // The first Build-up, to the Breakdown's start: after the Drop.
-        phazite::moveSection (*song.edit, song.id (1), at (160));
+        phazite::moveSection (phazite::getSong (*song.edit), song.id (1), at (160));
         CHECK (song.getSectionNames() == juce::String ("Intro, Drop, Build-up, Breakdown, Build-up, Drop, Outro"));
-        CHECK (song.findClip (0, 64) != nullptr); // the riff, earlier by the Build-up's length
-        CHECK (song.findClip (0, 160) != nullptr);
+        CHECK (song.findClip (0, 64).isValid()); // the riff, earlier by the Build-up's length
+        CHECK (song.findClip (0, 160).isValid());
     }
 }
 
 TEST_CASE ("Duplicating a section copies what is in it, as aliases if asked")
 {
     Song song;
-    auto& riff = song.addClip (0, 96, 160, "Riff");
-    phazite::test::addMidiNote (riff, 60, beats (0), te::BeatDuration::fromBeats (1.0), 100);
+    const auto riff = song.addClip (0, 96, 160, "Riff");
+    phazite::test::addMidiNote (phazite::getSong (*song.edit), riff, 60, at (0), lasting (1.0), 100);
     song.addClip (0, 160, 176, "Pad");
 
-    const auto copy = phazite::getSection (phazite::getSong (*song.edit), phazite::duplicateSection (*song.edit, song.id (2), true));
+    const auto copy =
+        phazite::getSection (phazite::getSong (*song.edit), phazite::duplicateSection (phazite::getSong (*song.edit), song.id (2), true));
     REQUIRE (copy.has_value());
     CHECK (copy->name == juce::String ("Drop"));
     CHECK (copy->range.getStart().inBeats() == doctest::Approx (160.0));
     CHECK (song.getSectionNames() == juce::String ("Intro, Build-up, Drop, Drop, Breakdown, Build-up, Drop, Outro"));
 
     // The riff's copy is an alias of it, and what came after moved later.
-    auto* riffCopy = song.findClip (0, 160);
-    REQUIRE (riffCopy != nullptr);
-    CHECK (riffCopy->getName() == juce::String ("Riff"));
-    CHECK (phazite::hasAliases (phazite::test::songOf ({ riffCopy }), phazite::test::idsOf ({ riffCopy })));
-    CHECK (phazite::hasAliases (phazite::test::songOf ({ &riff }), phazite::test::idsOf ({ &riff })));
-    CHECK (song.findClip (0, 224) != nullptr); // the Pad
+    const auto riffCopy = song.findClip (0, 160);
+    REQUIRE (riffCopy.isValid());
+    CHECK (song.getClipName (riffCopy) == juce::String ("Riff"));
+    CHECK (phazite::hasAliases (phazite::getSong (*song.edit), { riffCopy }));
+    CHECK (phazite::hasAliases (phazite::getSong (*song.edit), { riff }));
+    CHECK (song.findClip (0, 224).isValid()); // the Pad
     CHECK (song.section (4).range.getStart().inBeats() == doctest::Approx (224.0));
 
     // A plain copy isn't linked.
-    REQUIRE (phazite::copySection (*song.edit, song.id (0), at (0), false).isValid());
+    REQUIRE (phazite::copySection (phazite::getSong (*song.edit), song.id (0), at (0), false).isValid());
     CHECK (song.getSectionNames().startsWith ("Intro, Intro, Build-up"));
 }
 
@@ -336,11 +344,11 @@ TEST_CASE ("Duplicating a section moves what comes after it, even after a clip a
     song.addClip (1, 80, 112, "Fill");  // from the Build-up into the Drop
     song.addClip (1, 176, 192, "Lead"); // in the Breakdown
 
-    REQUIRE (phazite::duplicateSection (*song.edit, song.id (2), false).isValid());
-    CHECK (song.findClip (1, 240) != nullptr); // the Lead, a Drop later
-    CHECK (song.findClip (1, 176) == nullptr);
-    CHECK (song.findClip (1, 160) != nullptr); // the Fill's part in the Drop, copied
-    CHECK (song.findClip (1, 160)->getEndBeat().inBeats() == doctest::Approx (176.0));
+    REQUIRE (phazite::duplicateSection (phazite::getSong (*song.edit), song.id (2), false).isValid());
+    CHECK (song.findClip (1, 240).isValid()); // the Lead, a Drop later
+    CHECK_FALSE (song.findClip (1, 176).isValid());
+    CHECK (song.findClip (1, 160).isValid()); // the Fill's part in the Drop, copied
+    CHECK (song.getClipEnd (song.findClip (1, 160)) == doctest::Approx (176.0));
 }
 
 TEST_CASE ("Deleting a section deletes what is in it, and the rest of the song closes up")
@@ -350,17 +358,17 @@ TEST_CASE ("Deleting a section deletes what is in it, and the rest of the song c
     song.addClip (1, 80, 112, "Fill");
     song.addClip (0, 160, 176, "Pad");
 
-    phazite::deleteSection (*song.edit, song.id (2));
+    phazite::deleteSection (phazite::getSong (*song.edit), song.id (2));
 
     CHECK (song.getSectionNames() == juce::String ("Intro, Build-up, Breakdown, Build-up, Drop, Outro"));
     CHECK (song.section (0).range.getEnd().inBeats() == doctest::Approx (64.0)); // sections before it are left alone
     CHECK (song.section (1).range.getEnd().inBeats() == doctest::Approx (96.0));
     CHECK (song.section (2).range.getStart().inBeats() == doctest::Approx (96.0));
-    CHECK (song.tracks[0]->getClips().size() == 1); // the Riff went
-    CHECK (song.findClip (0, 96) != nullptr);       // the Pad came back to the Breakdown's new start
+    CHECK (song.getNumClips (0) == 1);       // the Riff went
+    CHECK (song.findClip (0, 96).isValid()); // the Pad came back to the Breakdown's new start
 
-    REQUIRE (song.findClip (1, 80) != nullptr); // the Fill lost its part in the Drop
-    CHECK (song.findClip (1, 80)->getEndBeat().inBeats() == doctest::Approx (96.0));
+    REQUIRE (song.findClip (1, 80).isValid()); // the Fill lost its part in the Drop
+    CHECK (song.getClipEnd (song.findClip (1, 80)) == doctest::Approx (96.0));
 }
 
 TEST_CASE ("Resizing a section moves the rest of the song, unless it is resized alone")
@@ -369,23 +377,23 @@ TEST_CASE ("Resizing a section moves the rest of the song, unless it is resized 
     song.addClip (0, 96, 160, "Riff");
 
     // The first Build-up, from 8 bars to 16: everything after it moves 8 bars later.
-    phazite::resizeSection (*song.edit, song.id (1), lasting (64.0), true);
+    phazite::resizeSection (phazite::getSong (*song.edit), song.id (1), lasting (64.0), true);
     CHECK (song.section (1).range.getEnd().inBeats() == doctest::Approx (128.0));
     CHECK (song.section (2).range.getStart().inBeats() == doctest::Approx (128.0));
-    CHECK (song.findClip (0, 128) != nullptr);
+    CHECK (song.findClip (0, 128).isValid());
 
     // Back to 8 bars: the time is taken out again.
-    phazite::resizeSection (*song.edit, song.id (1), lasting (32.0), true);
+    phazite::resizeSection (phazite::getSong (*song.edit), song.id (1), lasting (32.0), true);
     CHECK (song.section (2).range.getStart().inBeats() == doctest::Approx (96.0));
-    CHECK (song.findClip (0, 96) != nullptr);
+    CHECK (song.findClip (0, 96).isValid());
 
     // Alone, it can't grow into the next section, and nothing else moves.
-    phazite::resizeSection (*song.edit, song.id (1), lasting (64.0), false);
+    phazite::resizeSection (phazite::getSong (*song.edit), song.id (1), lasting (64.0), false);
     CHECK (song.section (1).range.getEnd().inBeats() == doctest::Approx (96.0));
-    phazite::resizeSection (*song.edit, song.id (1), lasting (16.0), false);
+    phazite::resizeSection (phazite::getSong (*song.edit), song.id (1), lasting (16.0), false);
     CHECK (song.section (1).range.getEnd().inBeats() == doctest::Approx (80.0));
     CHECK (song.section (2).range.getStart().inBeats() == doctest::Approx (96.0));
-    CHECK (song.findClip (0, 96) != nullptr);
+    CHECK (song.findClip (0, 96).isValid());
 }
 
 TEST_CASE ("Inserting and removing time stretch the sections they fall inside")
@@ -394,23 +402,23 @@ TEST_CASE ("Inserting and removing time stretch the sections they fall inside")
     song.addClip (0, 96, 160, "Riff");
 
     // 8 beats inside the first Drop: it gets longer, the clip is split, and later sections move.
-    phazite::insertTime (*song.edit, beats (100), te::BeatDuration::fromBeats (8.0));
+    phazite::insertTime (phazite::getSong (*song.edit), at (100), lasting (8.0));
     CHECK (phazite::getSections (phazite::getSong (*song.edit)).size() == 7);
     CHECK (song.section (2).range.getEnd().inBeats() == doctest::Approx (168.0));
     CHECK (song.section (3).range.getStart().inBeats() == doctest::Approx (168.0));
-    CHECK (song.findClip (0, 108) != nullptr);
+    CHECK (song.findClip (0, 108).isValid());
 
-    phazite::removeTime (*song.edit, { beats (100), beats (108) });
+    phazite::removeTime (phazite::getSong (*song.edit), { at (100), at (108) });
     CHECK (song.section (2).range.getEnd().inBeats() == doctest::Approx (160.0));
     CHECK (song.section (3).range.getStart().inBeats() == doctest::Approx (160.0));
-    CHECK (song.findClip (0, 100) != nullptr);
+    CHECK (song.findClip (0, 100).isValid());
 
     // Sections before the range are left alone.
     CHECK (song.section (0).range.getEnd().inBeats() == doctest::Approx (64.0));
     CHECK (song.section (1).range.getEnd().inBeats() == doctest::Approx (96.0));
 
     // Removing a range that covers a whole section deletes it.
-    phazite::removeTime (*song.edit, { beats (64), beats (96) });
+    phazite::removeTime (phazite::getSong (*song.edit), { at (64), at (96) });
     CHECK (song.getSectionNames() == juce::String ("Intro, Drop, Breakdown, Build-up, Drop, Outro"));
 }
 
@@ -432,7 +440,7 @@ TEST_CASE ("The section commands")
 
     REQUIRE (song.registry.invoke ("edit.delete"));
     CHECK (phazite::getSections (phazite::getSong (*song.edit)).size() == 7);
-    CHECK (song.findClip (0, 96) != nullptr);
+    CHECK (song.findClip (0, 96).isValid());
 
     // Add Section goes after the last one, 8 bars long.
     REQUIRE (song.registry.invoke ("section.add"));
@@ -457,26 +465,26 @@ TEST_CASE ("Deleting and duplicating sections directly")
     // Each copy goes right after its original, the last first, so that copying one doesn't move another still to be
     // copied; with a selection, the copies are selected instead of what was. Intro 0-64 and its copy 64-128,
     // Build-up 128-160, Drop 160-224 and its copy 224-288, and the rest 64 beats later.
-    song.selection.selectOnly (song.tracks[0]);
-    const auto copies = phazite::duplicateSections (*song.edit, { song.id (0), song.id (2) }, false, &song.selection);
+    song.selection.selectOnly (phazite::getTrackID (*song.tracks[0]));
+    const auto copies = phazite::duplicateSections (phazite::getSong (*song.edit), { song.id (0), song.id (2) }, false, &song.selection);
     REQUIRE (copies.size() == 2);
     CHECK (count() == 9);
     CHECK (phazite::getSelectedSections (song.selection).size() == 2);
-    CHECK_FALSE (song.selection.isSelected (song.tracks[0]));
+    CHECK_FALSE (song.selection.isSelected (phazite::getTrackID (*song.tracks[0])));
     CHECK (song.section (1).range.getStart().inBeats() == doctest::Approx (64.0));
     CHECK (song.section (4).range.getStart().inBeats() == doctest::Approx (224.0));
 
     // Deleting them, the last first, puts the song back as it was.
-    phazite::deleteSections (*song.edit, { song.id (1), song.id (4) });
+    phazite::deleteSections (phazite::getSong (*song.edit), { song.id (1), song.id (4) });
     CHECK (count() == 7);
     CHECK (song.section (1).range.getStart().inBeats() == doctest::Approx (64.0));  // the build-up
     CHECK (song.section (3).range.getStart().inBeats() == doctest::Approx (160.0)); // the breakdown
     CHECK (song.section (6).range.getEnd().inBeats() == doctest::Approx (384.0));
 
     // No sections: nothing is copied.
-    song.selection.selectOnly (song.tracks[0]);
-    CHECK (phazite::duplicateSections (*song.edit, {}, false, &song.selection).empty());
-    CHECK (song.selection.isSelected (song.tracks[0]));
+    song.selection.selectOnly (phazite::getTrackID (*song.tracks[0]));
+    CHECK (phazite::duplicateSections (phazite::getSong (*song.edit), {}, false, &song.selection).empty());
+    CHECK (song.selection.isSelected (phazite::getTrackID (*song.tracks[0])));
 }
 
 TEST_CASE ("A new section goes after the last one, 8 bars long and named in turn")
@@ -522,7 +530,7 @@ TEST_CASE ("Sections are kept in the project itself, with IDs no track, clip or 
     CHECK ((edit.getArrangerTrack() == nullptr || edit.getArrangerTrack()->getClips().isEmpty()));
 
     // Their IDs are the Edit's: a clip made after them gets another, and so does a copy of one.
-    std::set<std::uint64_t> ids { song.addClip (0, 0, 4, "Clip").itemID.getRawID() };
+    std::set<std::uint64_t> ids { song.addClip (0, 0, 4, "Clip").getRaw() };
 
     for (auto* track : te::getAllTracks (edit))
         ids.insert (track->itemID.getRawID());
@@ -530,7 +538,7 @@ TEST_CASE ("Sections are kept in the project itself, with IDs no track, clip or 
     for (const auto& section : phazite::getSections (phazite::getSong (edit)))
         CHECK (ids.insert (section.id.getRaw()).second);
 
-    const auto copy = phazite::duplicateSection (edit, song.id (0), false);
+    const auto copy = phazite::duplicateSection (phazite::getSong (edit), song.id (0), false);
     REQUIRE (copy.isValid());
     CHECK (ids.insert (copy.getRaw()).second);
 
@@ -564,15 +572,15 @@ TEST_CASE ("Section edits made with the mouse are undo steps of their own, and n
     auto& undo = phazite::getSong (*song.edit).getUndoManager();
 
     // Moving, copying and resizing, each named for Undo.
-    phazite::moveSection (*song.edit, song.id (2), at (0.0));
+    phazite::moveSection (phazite::getSong (*song.edit), song.id (2), at (0.0));
     CHECK (undo.getUndoDescription() == juce::String ("Move Section"));
     phazite::undo (*song.edit);
 
-    phazite::copySection (*song.edit, song.id (2), at (0.0), true);
+    phazite::copySection (phazite::getSong (*song.edit), song.id (2), at (0.0), true);
     CHECK (undo.getUndoDescription() == juce::String ("Copy Section as Aliases"));
     phazite::undo (*song.edit);
 
-    phazite::resizeSection (*song.edit, song.id (0), lasting (32.0), true);
+    phazite::resizeSection (phazite::getSong (*song.edit), song.id (0), lasting (32.0), true);
     CHECK (undo.getUndoDescription() == juce::String ("Resize Section"));
     phazite::undo (*song.edit);
 

@@ -2,6 +2,7 @@
 #include "internal/UnsavedProjects.h"
 #include "internal/Project.h"
 #include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
@@ -146,13 +147,14 @@ int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
 {
     juce::Array<juce::File> played;
 
-    for (auto* track : te::getAudioTracks (edit))
-        for (auto* clip : track->getClips())
-            if (auto* audio = dynamic_cast<te::WaveAudioClip*> (clip))
-                played.add (getClipFile (*audio)); // the file, not a render of it
+    auto& song = getSong (edit);
+
+    for (const auto& clipState : getClipStates (song))
+        if (isAudioState (clipState))
+            played.add (getClipFile (song, clipState)); // the file, not a render of it
 
     // In the order they were made, as they were recorded.
-    auto unused = edit.editFileRetriever().getSiblingFile ("Audio").findChildFiles (juce::File::findFiles, true);
+    auto unused = song.getFile().getSiblingFile ("Audio").findChildFiles (juce::File::findFiles, true);
     unused.removeIf ([&] (const juce::File& file) { return played.contains (file) || getFileKind (file) != FileKind::audio; });
     std::sort (unused.begin(), unused.end(),
                [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() < b.getLastModificationTime(); });
@@ -165,8 +167,8 @@ int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
     for (const auto& file : unused)
         paths.add (file.getFullPathName());
 
-    const auto added = importFiles (edit, paths, nullptr, te::BeatPosition());
-    getSong (edit).getUndoManager().clearUndoHistory(); // the project was just opened: restoring it is no undo step
+    const auto added = importFiles (song, paths, {}, BeatPosition());
+    song.getUndoManager().clearUndoHistory(); // the project was just opened: restoring it is no undo step
     edit.getUndoManager().clearUndoHistory();
     return added.size();
 }

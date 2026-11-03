@@ -6,8 +6,6 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/devices/internal/DevicePlugin.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Tempo.h"
@@ -138,17 +136,6 @@ namespace
     //==============================================================================
     // Parts.
 
-    // A clip's notes as plain values, in song beats.
-    std::vector<NoteData> getClipNotes (const te::MidiClip& clip)
-    {
-        std::vector<NoteData> notes;
-
-        for (auto* note : clip.getSequence().getNotes())
-            notes.push_back (getNoteData (clip, *note));
-
-        return notes;
-    }
-
     // Whether two lists hold the same notes, in any order, whatever their IDs.
     bool areSameNotes (std::vector<NoteData> a, std::vector<NoteData> b)
     {
@@ -174,9 +161,9 @@ namespace
         return true;
     }
 
-    void setPartNotes (te::MidiClip& clip, const std::vector<NoteData>& notes)
+    void setPartNotes (Song& song, ClipID clip, const std::vector<NoteData>& notes)
     {
-        setClipNotes (clip, notes);
+        setClipNotes (song, clip, notes);
     }
 
     // The sound of each kind of part on Phazite's synth.
@@ -203,28 +190,25 @@ namespace
                                        { "sustain", 0.4f },       { "release", 250.0f },     { "osc2Detune", 10.0f },
                                        { "level", -12.0f } };
 
-    te::Plugin::Ptr createSynth (te::Edit& edit, PartKind kind)
+    // Phazite's synth for a kind of part, made with that sound.
+    juce::ValueTree makeSynth (Song& song, PartKind kind)
     {
-        auto synth = edit.getPluginCache().createNewPlugin (devices::Synth::typeID, {});
+        std::vector<std::pair<juce::String, float>> values;
 
-        if (auto* device = dynamic_cast<DevicePlugin*> (synth.get()))
+        const auto add = [&values] (const auto& settings)
         {
-            const auto apply = [device] (const auto& settings)
-            {
-                for (const auto& setting : settings)
-                    if (auto* parameter = device->findParameter (setting.id))
-                        parameter->setParameter (setting.value, juce::sendNotification);
-            };
+            for (const auto& setting : settings)
+                values.push_back ({ setting.id, setting.value });
+        };
 
-            if (kind == PartKind::bass)
-                apply (bassSound);
-            else if (kind == PartKind::arpeggio)
-                apply (pluckSound);
-            else
-                apply (padSound);
-        }
+        if (kind == PartKind::bass)
+            add (bassSound);
+        else if (kind == PartKind::arpeggio)
+            add (pluckSound);
+        else
+            add (padSound);
 
-        return synth;
+        return makeOwnDeviceState (song, devices::Synth::typeID, values);
     }
 
     //==============================================================================
@@ -449,26 +433,19 @@ void putProgression (Song& song, const Progression& progression, BeatRange range
     }
 }
 
-void changeLane (te::Edit& edit, const std::function<void()>& change)
+void changeLane (Song& song, const std::function<void()>& change)
 {
-    struct Part
-    {
-        juce::ReferenceCountedObjectPtr<te::MidiClip> clip;
-        PartStyle style;
-    };
+    std::vector<std::pair<ClipID, PartStyle>> following;
 
-    std::vector<Part> following;
-
-    for (auto* track : te::getAudioTracks (edit))
-        for (auto* clip : track->getClips())
-            if (auto* midi = dynamic_cast<te::MidiClip*> (clip))
-                if (const auto style = getChordPartStyle (*midi); style.has_value() && followsChords (*midi))
-                    following.push_back ({ midi, *style });
+    for (const auto& clipState : getClipStates (song))
+        if (const auto clip = getClipID (clipState); isMidiState (clipState))
+            if (const auto style = getChordPartStyle (song, clip); style.has_value() && followsChords (song, clip))
+                following.emplace_back (clip, *style);
 
     change();
 
-    for (const auto& part : following)
-        setPartNotes (*part.clip, makeChordPartNotes (*part.clip, part.style));
+    for (const auto& [clip, style] : following)
+        setPartNotes (song, clip, makeChordPartNotes (song, clip, style));
 }
 
 //==============================================================================
@@ -626,59 +603,60 @@ void pasteLaneChords (Song& song, const LaneCopy& copy, BeatPosition destination
 }
 
 //==============================================================================
-std::optional<PartStyle> getChordPartStyle (const te::Clip& clip)
+std::optional<PartStyle> getChordPartStyle (const Song& song, ClipID clip)
 {
-    return findPartStyle (findClipState (clip)[schema::chordPart].toString());
+    return findPartStyle (findClipState (song, clip)[schema::chordPart].toString());
 }
 
-std::vector<NoteData> makeChordPartNotes (const te::MidiClip& clip, PartStyle style)
+std::vector<NoteData> makeChordPartNotes (const Song& song, ClipID clip, PartStyle style)
 {
-    const auto range = BeatRange (fromTracktion (clip.getStartBeat()), fromTracktion (clip.getEndBeat()));
-    return makePartNotes (getLaneChords (getSong (clip.edit)), style, range, getClipID (clip));
+    return makePartNotes (getLaneChords (song), style, getClipRange (findClipState (song, clip)), clip);
 }
 
-bool followsChords (const te::MidiClip& clip)
+bool followsChords (const Song& song, ClipID clip)
 {
-    const auto style = getChordPartStyle (clip);
-    return style.has_value() && areSameNotes (getClipNotes (clip), makeChordPartNotes (clip, *style));
+    const auto style = getChordPartStyle (song, clip);
+    return style.has_value() && areSameNotes (getClipNotes (song, clip), makeChordPartNotes (song, clip, *style));
 }
 
-void setChordPart (te::MidiClip& clip, std::optional<PartStyle> style)
+void setChordPart (Song& song, ClipID clip, std::optional<PartStyle> style)
 {
-    auto* undo = getUndo (getSong (clip.edit));
+    auto clipState = findClipState (song, clip);
+
+    if (! isMidiState (clipState))
+        return;
 
     if (! style.has_value())
     {
-        findClipState (clip).removeProperty (schema::chordPart, undo);
+        clipState.removeProperty (schema::chordPart, getUndo (song));
         return;
     }
 
-    findClipState (clip).setProperty (schema::chordPart, getSavedPartStyleName (*style), undo);
-    setPartNotes (clip, makeChordPartNotes (clip, *style));
+    clipState.setProperty (schema::chordPart, getSavedPartStyleName (*style), getUndo (song));
+    setPartNotes (song, clip, makeChordPartNotes (song, clip, *style));
 }
 
-te::MidiClip* addChordPart (te::Edit& edit, PartStyle style, BeatRange range, Selection* selection)
+ClipID addChordPart (Song& song, PartStyle style, BeatRange range, Selection* selection)
 {
     if (range.isEmpty())
-        return nullptr;
+        return {};
 
-    auto* track = insertTrack (edit, nullptr, selection);
+    const auto track = insertTrack (song, {}, selection);
 
-    if (track == nullptr)
-        return nullptr;
+    if (! track.isValid())
+        return {};
 
     const auto kind = getPartKind (style);
-    setTrackName (*track, getPartKindName (kind));
+    setTrackName (song, track, getPartKindName (kind));
 
-    if (const auto colour = getColourForName (getTrackName (*track)))
-        setTrackColour (*track, *colour);
+    if (const auto colour = getColourForName (getTrackName (song, track)))
+        setTrackColour (song, track, *colour);
 
-    setInstrument (*track, createSynth (edit, kind));
+    insertDeviceState (song, track, makeSynth (song, kind));
+    const auto clip = insertMidiClip (song, track, range, nullptr);
 
-    auto* clip = insertMidiClip (*track, toTracktion (range), nullptr);
-
-    if (clip != nullptr)
-        setChordPart (*clip, style);
+    if (clip.isValid())
+        setChordPart (song, clip, style);
 
     return clip;
 }

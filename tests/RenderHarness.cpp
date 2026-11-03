@@ -53,7 +53,7 @@ namespace
     // Phazite's engine, playing an Edit's song.
     juce::AudioBuffer<float> renderEdit (te::Edit& edit, double seconds)
     {
-        REQUIRE (renderMissingClipAudio (edit)); // as an export does: a clip whose render isn't ready would play nothing
+        REQUIRE (renderMissingClipAudio (getSong (edit))); // as an export does: a clip whose render isn't ready would play nothing
         return renderWithOwnEngine (edit, (int) std::lround (seconds * renderSampleRate), renderSampleRate, renderBlockSize);
     }
 

@@ -11,10 +11,9 @@ namespace phazite
 {
 namespace
 {
-    juce::File getProjectFolder (const te::Edit& edit)
+    juce::File getProjectFolder (const Song& song)
     {
-        const auto projectFile = edit.editFileRetriever != nullptr ? edit.editFileRetriever() : juce::File();
-        return projectFile != juce::File() ? projectFile.getParentDirectory() : juce::File();
+        return song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File();
     }
 
     // The properties of a device's state that name files: none for most devices.
@@ -64,14 +63,14 @@ std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo& inf
     return properties;
 }
 
-juce::String getProjectPath (const te::Edit& edit, const juce::File& file)
+juce::String getProjectPath (const Song& song, const juce::File& file)
 {
-    const auto folder = getProjectFolder (edit);
+    const auto folder = getProjectFolder (song);
     return folder != juce::File() && file.isAChildOf (folder) ? file.getRelativePathFrom (folder).replaceCharacter ('\\', '/')
                                                               : file.getFullPathName();
 }
 
-juce::File findProjectFile (const te::Edit& edit, const juce::String& path)
+juce::File findProjectFile (const Song& song, const juce::String& path)
 {
     if (path.isEmpty())
         return {};
@@ -79,22 +78,22 @@ juce::File findProjectFile (const te::Edit& edit, const juce::String& path)
     if (juce::File::isAbsolutePath (path))
         return juce::File (path);
 
-    const auto folder = getProjectFolder (edit);
+    const auto folder = getProjectFolder (song);
     return folder != juce::File() ? folder.getChildFile (path) : juce::File();
 }
 
-void writeDeviceFilePaths (const te::Edit& edit, juce::ValueTree& state)
+void writeDeviceFilePaths (const Song& song, juce::ValueTree& state)
 {
     for (const auto& property : getFileProperties (state))
         if (const auto path = state[property].toString(); path.isNotEmpty() && ! juce::File::isAbsolutePath (path))
-            if (const auto file = findProjectFile (edit, path); file != juce::File())
+            if (const auto file = findProjectFile (song, path); file != juce::File())
                 state.setProperty (property, file.getFullPathName(), nullptr);
 
     for (auto child : state)
-        writeDeviceFilePaths (edit, child);
+        writeDeviceFilePaths (song, child);
 }
 
-void copyDeviceFilesInto (te::Edit& edit, juce::ValueTree& state)
+void copyDeviceFilesInto (Song& song, juce::ValueTree& state)
 {
     for (const auto& property : getFileProperties (state))
     {
@@ -105,12 +104,12 @@ void copyDeviceFilesInto (te::Edit& edit, juce::ValueTree& state)
 
         // A file that isn't there any more: the device plays its own sound.
         if (const juce::File file (juce::File::isAbsolutePath (path) ? path : juce::String()); file.existsAsFile())
-            state.setProperty (property, getProjectPath (edit, copyIntoProject (edit, file)), nullptr);
+            state.setProperty (property, getProjectPath (song, copyIntoProject (song, file)), nullptr);
         else
             state.removeProperty (property, nullptr);
     }
 
     for (auto child : state)
-        copyDeviceFilesInto (edit, child);
+        copyDeviceFilesInto (song, child);
 }
 } // namespace phazite

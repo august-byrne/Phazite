@@ -150,13 +150,13 @@ TEST_CASE ("Live MIDI follows the selected track, if it has an instrument")
     phazite::Selection selection (phazite::test::getEngine());
     selection.setEdit (edit.get());
 
-    selection.selectOnly (tracks[2]);
+    selection.selectOnly (phazite::getTrackID (*tracks[2]));
     phazite::followSelectedTrack (selection);
     CHECK (phazite::getLiveMidiTrack (*edit) == tracks[2]);
 
     // A track without an instrument can't play it, so live MIDI stays where it was.
     CHECK_FALSE (phazite::hasInstrument (*tracks[1]));
-    selection.selectOnly (tracks[1]);
+    selection.selectOnly (phazite::getTrackID (*tracks[1]));
     phazite::followSelectedTrack (selection);
     CHECK (phazite::getLiveMidiTrack (*edit) == tracks[2]);
 
@@ -344,10 +344,12 @@ TEST_CASE ("Low latency leaves what renders play as the song has it")
     auto edit = phazite::createSongEdit (engine);
     auto& track = *te::getAudioTracks (*edit)[0];
     addInstrument (track);
-    auto clip = phazite::test::addMidiClip (track, { te::BeatPosition(), te::BeatPosition::fromBeats (4.0) }, "Chord");
+    auto& song = phazite::getSong (*edit);
+    const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track),
+                                                  { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) }, "Chord");
 
     for (int note : { 48, 55, 60, 64 })
-        phazite::test::addMidiNote (*clip, note, te::BeatPosition(), te::BeatDuration::fromBeats (3.0), 120);
+        phazite::test::addMidiNote (song, clip, note, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (3.0), 120);
 
     auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
     phazite::insertMasterDevice (*edit, limiter);

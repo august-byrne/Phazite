@@ -252,19 +252,22 @@ namespace
     const auto justBefore = BeatDuration::fromBeats (1.0e-4); // where an edge's point on the side before it goes
 
     // Each track's stretches in time order, those that overlap or touch as one.
-    std::vector<std::pair<te::Track*, std::vector<BeatRange>>> byTrack (const std::vector<AutomationStretch>& stretches)
+    std::vector<std::pair<te::Track*, std::vector<BeatRange>>> byTrack (const Song& song, const std::vector<AutomationStretch>& stretches)
     {
         std::vector<std::pair<te::Track*, std::vector<BeatRange>>> tracks;
+        auto* edit = findEdit (song);
 
         for (const auto& stretch : stretches)
         {
-            if (stretch.track == nullptr || stretch.range.isEmpty())
+            auto* track = edit != nullptr ? mirror::findTrack (*edit, stretch.track) : nullptr;
+
+            if (track == nullptr || stretch.range.isEmpty())
                 continue;
 
-            auto found = std::find_if (tracks.begin(), tracks.end(), [&stretch] (const auto& each) { return each.first == stretch.track; });
+            auto found = std::find_if (tracks.begin(), tracks.end(), [track] (const auto& each) { return each.first == track; });
 
             if (found == tracks.end())
-                found = tracks.insert (tracks.end(), { stretch.track, {} });
+                found = tracks.insert (tracks.end(), { track, {} });
 
             found->second.push_back (stretch.range);
         }
@@ -799,12 +802,12 @@ std::vector<int> duplicatePoints (te::AutomatableParameter& parameter, const std
 }
 
 //==============================================================================
-void moveAutomation (const std::vector<AutomationStretch>& stretches, BeatDuration distance, bool copy)
+void moveAutomation (Song& song, const std::vector<AutomationStretch>& stretches, BeatDuration distance, bool copy)
 {
     if (juce::exactlyEqual (distance.inBeats(), 0.0))
         return;
 
-    for (const auto& [track, ranges] : byTrack (stretches))
+    for (const auto& [track, ranges] : byTrack (song, stretches))
     {
         for (auto* parameter : getAutomatedParameters (*track))
         {
@@ -846,9 +849,9 @@ void moveAutomation (const std::vector<AutomationStretch>& stretches, BeatDurati
     }
 }
 
-void deleteAutomation (const std::vector<AutomationStretch>& stretches, bool closeGap)
+void deleteAutomation (Song& song, const std::vector<AutomationStretch>& stretches, bool closeGap)
 {
-    for (const auto& [track, ranges] : byTrack (stretches))
+    for (const auto& [track, ranges] : byTrack (song, stretches))
     {
         for (auto* parameter : getAutomatedParameters (*track))
         {
@@ -883,11 +886,11 @@ void deleteAutomation (const std::vector<AutomationStretch>& stretches, bool clo
     }
 }
 
-std::vector<AutomationCopy> copyAutomation (const std::vector<AutomationStretch>& stretches)
+std::vector<AutomationCopy> copyAutomation (const Song& song, const std::vector<AutomationStretch>& stretches)
 {
     std::vector<AutomationCopy> copies;
 
-    for (const auto& [track, ranges] : byTrack (stretches))
+    for (const auto& [track, ranges] : byTrack (song, stretches))
     {
         for (auto* parameter : getAutomatedParameters (*track))
         {
@@ -921,11 +924,16 @@ std::vector<AutomationCopy> copyAutomation (const std::vector<AutomationStretch>
     return copies;
 }
 
-void pasteAutomation (const te::Edit& edit, const std::vector<AutomationCopy>& copies, BeatDuration distance)
+void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, BeatDuration distance)
 {
+    auto* edit = findEdit (song);
+
+    if (edit == nullptr)
+        return;
+
     for (const auto& copy : copies)
     {
-        const auto parameter = findParameter (edit, copy.parameter);
+        const auto parameter = findParameter (*edit, copy.parameter);
 
         if (parameter == nullptr)
             continue;
@@ -973,8 +981,15 @@ ParameterRef getCurveParameter (const juce::ValueTree& curve)
     return { readDeviceID (curve[schema::curveDevice]), curve[schema::curveParameter].toString() };
 }
 
-void insertAutomationTime (te::Edit& edit, BeatPosition at, BeatDuration length)
+void insertAutomationTime (Song& song, BeatPosition at, BeatDuration length)
 {
+    auto* found = findEdit (song);
+
+    if (found == nullptr)
+        return;
+
+    auto& edit = *found;
+
     for (const auto& parameter : getParametersWithCurves (edit))
     {
         SongCurve curve (*parameter);
@@ -992,8 +1007,15 @@ void insertAutomationTime (te::Edit& edit, BeatPosition at, BeatDuration length)
     }
 }
 
-void removeAutomationTime (te::Edit& edit, BeatRange range)
+void removeAutomationTime (Song& song, BeatRange range)
 {
+    auto* found = findEdit (song);
+
+    if (found == nullptr)
+        return;
+
+    auto& edit = *found;
+
     for (const auto& parameter : getParametersWithCurves (edit))
     {
         SongCurve curve (*parameter);
@@ -1015,8 +1037,15 @@ void removeAutomationTime (te::Edit& edit, BeatRange range)
     }
 }
 
-void addAutomationEdges (te::Edit& edit, const std::vector<BeatPosition>& beats)
+void addAutomationEdges (Song& song, const std::vector<BeatPosition>& beats)
 {
+    auto* found = findEdit (song);
+
+    if (found == nullptr)
+        return;
+
+    auto& edit = *found;
+
     for (const auto& parameter : getParametersWithCurves (edit))
     {
         SongCurve curve (*parameter);
@@ -1033,8 +1062,15 @@ void addAutomationEdges (te::Edit& edit, const std::vector<BeatPosition>& beats)
     }
 }
 
-std::vector<ParameterPoint> getAutomationPointsIn (te::Edit& edit, BeatRange range)
+std::vector<ParameterPoint> getAutomationPointsIn (Song& song, BeatRange range)
 {
+    auto* found = findEdit (song);
+
+    if (found == nullptr)
+        return {};
+
+    auto& edit = *found;
+
     std::vector<ParameterPoint> points;
 
     for (const auto& parameter : getParametersWithCurves (edit))
@@ -1045,8 +1081,15 @@ std::vector<ParameterPoint> getAutomationPointsIn (te::Edit& edit, BeatRange ran
     return points;
 }
 
-void removeAutomationPointsIn (te::Edit& edit, BeatRange range)
+void removeAutomationPointsIn (Song& song, BeatRange range)
 {
+    auto* found = findEdit (song);
+
+    if (found == nullptr)
+        return;
+
+    auto& edit = *found;
+
     for (const auto& parameter : getParametersWithCurves (edit))
     {
         SongCurve curve (*parameter);
@@ -1057,8 +1100,15 @@ void removeAutomationPointsIn (te::Edit& edit, BeatRange range)
     }
 }
 
-void addAutomationPoints (te::Edit& edit, const std::vector<ParameterPoint>& points)
+void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
 {
+    auto* found = findEdit (song);
+
+    if (found == nullptr)
+        return;
+
+    auto& edit = *found;
+
     // Each parameter's through one curve, in the order given: a parameter's curve may have gone with its last point.
     std::vector<ParameterRef> parameters;
 

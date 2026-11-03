@@ -38,8 +38,10 @@ namespace
     {
         juce::Array<te::Plugin*> devices;
 
-        for (auto* device : selection.getItemsOfType<te::Plugin>())
-            devices.add (device);
+        if (auto* edit = selection.getEdit())
+            for (const auto id : selection.getDevices())
+                if (const auto device = te::findPluginForID (*edit, toTracktion (id)))
+                    devices.add (device.get());
 
         return devices;
     }
@@ -138,7 +140,7 @@ bool canGroupSelectedDevices (const Selection& selection)
 void groupSelectedDevices (Selection& selection)
 {
     if (auto* container = groupIntoContainer (getSelectedDevices (selection)))
-        selection.selectOnly (container);
+        selection.selectOnly (getDeviceID (*container));
 }
 
 bool canUngroupSelectedContainer (const Selection& selection)
@@ -165,7 +167,7 @@ void ungroupSelectedContainer (Selection& selection)
     selection.deselectAll();
 
     for (auto* device : inside)
-        selection.addToSelection (device);
+        selection.addToSelection (getDeviceID (*device));
 }
 
 void addContainerCommands (CommandRegistry& registry, Selection& selection)

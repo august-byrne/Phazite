@@ -57,7 +57,7 @@ void putProgression (Song&, const Progression&, BeatRange);
 
 // Runs a change of the lane, then remakes the notes of the parts that followed the chords before it (their notes were the
 // ones the lane made for them), so that they follow the chords as they are after it.
-void changeLane (te::Edit&, const std::function<void()>& change);
+void changeLane (Song&, const std::function<void()>& change);
 
 // The lane's state, added if it has none yet, with a key from 0 (the one getLaneKeys() gives until then).
 juce::ValueTree getLaneState (Song&);
@@ -86,17 +86,18 @@ void pasteLaneChords (Song&, const LaneCopy&, BeatPosition destination);
 //==============================================================================
 // Parts: MIDI clips whose notes the lane made (schema::chordPart).
 
-std::optional<PartStyle> getChordPartStyle (const te::Clip&);
+std::optional<PartStyle> getChordPartStyle (const Song&, ClipID);
 
 // The notes the lane makes for a part where it is: from the clip's start to its end.
-std::vector<NoteData> makeChordPartNotes (const te::MidiClip&, PartStyle);
+std::vector<NoteData> makeChordPartNotes (const Song&, ClipID, PartStyle);
 
 // Whether a part's notes are the ones the lane makes for it, so that they change with the chords.
-bool followsChords (const te::MidiClip&);
+bool followsChords (const Song&, ClipID);
 
 // Makes a clip a part in a style, with the notes the lane makes for it; with no style, it is a clip like any other.
-void setChordPart (te::MidiClip&, std::optional<PartStyle>);
+void setChordPart (Song&, ClipID, std::optional<PartStyle>);
 
-// Adds a track at the end of the song with an instrument for the part, and the part on it over a range. Returns the clip.
-te::MidiClip* addChordPart (te::Edit&, PartStyle, BeatRange, Selection*);
+// Adds a track at the end of the song with an instrument for the part, and the part on it over a range. Returns the clip,
+// or none.
+ClipID addChordPart (Song&, PartStyle, BeatRange, Selection*);
 } // namespace phazite

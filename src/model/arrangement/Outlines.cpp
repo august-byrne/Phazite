@@ -103,43 +103,43 @@ const Outline* findOutline (const juce::String& id)
     return nullptr;
 }
 
-void applyOutline (te::Edit& edit, const Outline& outline)
+void applyOutline (Song& song, const Outline& outline)
 {
-    removeSections (getSong (edit));
+    removeSections (song);
 
-    const auto bars = getBars (getSong (edit));
+    const auto bars = getBars (song);
     auto bar = 0;
 
     for (const auto& section : outline.sections)
     {
         const auto start = bars.getBarStart (bar);
         const auto end = bars.getBarStart (bar + section.bars);
-        insertSection (getSong (edit), start, { section.name, end - start, section.role, section.tip, section.energy, section.colour });
+        insertSection (song, start, { section.name, end - start, section.role, section.tip, section.energy, section.colour });
         bar += section.bars;
     }
 
-    getSong (edit).getState().setProperty (schema::outline, outline.id, &getSong (edit).getUndoManager());
+    song.getState().setProperty (schema::outline, outline.id, &song.getUndoManager());
 }
 
-bool applyOutline (te::Edit& edit, const juce::String& outlineID)
+bool applyOutline (Song& song, const juce::String& outlineID)
 {
     const auto* outline = findOutline (outlineID);
 
     if (outline == nullptr)
         return false;
 
-    applyOutline (edit, *outline);
+    applyOutline (song, *outline);
     return true;
 }
 
-juce::String getAppliedOutline (const te::Edit& edit)
+juce::String getAppliedOutline (const Song& song)
 {
-    return findPhaziteState (edit)[schema::outline].toString();
+    return song.getState()[schema::outline].toString();
 }
 
-bool isOutlineApplied (const te::Edit& edit, const juce::String& outlineID)
+bool isOutlineApplied (const Song& song, const juce::String& outlineID)
 {
-    return getAppliedOutline (edit) == outlineID && ! getSections (getSong (edit)).empty();
+    return getAppliedOutline (song) == outlineID && ! getSections (song).empty();
 }
 
 juce::String getOutlineCommandID (const juce::String& outlineID)
@@ -160,10 +160,10 @@ void addOutlineCommands (CommandRegistry& registry, Selection& selection)
                         .description = "Lays out the song's sections. " + outline.description
                                        + " It replaces the sections there are; what is on the tracks stays where it is.",
                         .synonyms = { "song outline", "structure", "template", "arrangement", "form" },
-                        .perform = withEdit (selection, [id] (te::Edit& edit) { applyOutline (edit, id); }),
-                        .isEnabled = [&selection] { return selection.getEdit() != nullptr; },
+                        .perform = withSong (selection, [id] (Song& song) { applyOutline (song, id); }),
+                        .isEnabled = [&selection] { return selection.getSong() != nullptr; },
                         .undoTarget = undoTargetOf (selection),
-                        .isTicked = ifEdit (selection, [id] (te::Edit& edit) { return isOutlineApplied (edit, id); }) });
+                        .isTicked = ifSong (selection, [id] (const Song& song) { return isOutlineApplied (song, id); }) });
     }
 }
 } // namespace phazite

@@ -24,9 +24,9 @@ bool isValid (const NewProjectSettings& settings)
 void addNewProjectContent (te::Edit& edit, const NewProjectSettings& settings)
 {
     // Not undo steps that matter: the project opens from its first save, without them. It starts with no tracks (the owner,
-    // 2026-11-01), so the one Tracktion makes with the Edit goes.
-    deleteTracks (getPlaylistTracks (edit), nullptr);
-    setTempo (edit, settings.tempo);
+    // 2026-11-01), so the one a new song has goes.
+    deleteTracks (getSong (edit), getTrackIDs (getSong (edit)), nullptr);
+    setTempo (getSong (edit), settings.tempo);
     setTimeSignature (getSong (edit), settings.timeSignature);
 
     // The key goes on the tracks added later.
@@ -35,6 +35,6 @@ void addNewProjectContent (te::Edit& edit, const NewProjectSettings& settings)
             setLastKey (edit, { *settings.keyRoot, *scale });
 
     if (settings.outline.isNotEmpty())
-        applyOutline (edit, settings.outline);
+        applyOutline (getSong (edit), settings.outline);
 }
 } // namespace phazite

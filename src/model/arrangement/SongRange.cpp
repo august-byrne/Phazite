@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SongRange.h"
 #include "internal/SongRange.h"
+#include "internal/Tracks.h"
 
 namespace phazite
 {
@@ -29,29 +30,25 @@ bool SongRange::isEmpty() const
 
 BeatRange SongRange::getRange() const
 {
-    return fromTracktion (impl->range.getRange());
+    return impl->range.getRange();
 }
 
 std::vector<TrackID> SongRange::getTracks() const
 {
-    std::vector<TrackID> ids;
-
-    for (auto* track : impl->range.getTracks())
-        ids.push_back (getTrackID (*track));
-
-    return ids;
+    return impl->range.getTracks();
 }
 
 void SongRange::set (BeatRange newRange, const std::vector<TrackID>& ids)
 {
-    juce::Array<te::Track*> tracks;
+    // Those the song holds.
+    std::vector<TrackID> tracks;
 
-    if (auto* edit = impl->selection.getEdit())
+    if (auto* song = impl->selection.getSong())
         for (const auto id : ids)
-            if (auto* track = te::findTrackForID (*edit, toTracktion (id)))
-                tracks.add (track);
+            if (findTrackState (*song, id).isValid())
+                tracks.push_back (id);
 
-    impl->range.set (toTracktion (newRange), tracks);
+    impl->range.set (newRange, tracks);
 }
 
 void SongRange::clear()

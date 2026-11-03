@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/ClipRenders.h"
 #include "internal/AudioClips.h"
+#include "internal/Clips.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AudioFiles.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
@@ -19,22 +21,34 @@ namespace
         stretch::Settings settings;
     };
 
-    // The renders the Edit's clips play, each with what it is made from.
-    std::map<juce::File, Recipe> getNeededRenders (te::Edit& edit)
+    // The renders the song's clips play, each with what it is made from.
+    std::map<juce::File, Recipe> getNeededRenders (const Song& song)
     {
         std::map<juce::File, Recipe> needed;
 
-        for (auto* clip : getAudioClips (edit))
-            if (isRendered (*clip))
-                needed.emplace (clip->getSourceFileReference().getFile(), Recipe { getClipFile (*clip), getClipStretch (*clip) });
+        for (const auto& clipState : getClipStates (song))
+            if (isAudioState (clipState))
+                if (const auto settings = getClipStretch (song, clipState); ! stretch::isUnchanged (settings))
+                    needed.emplace (getPlayedFile (song, clipState), Recipe { getClipFile (song, clipState), settings });
 
         return needed;
     }
 
-    // Tells Tracktion that a file it may have looked for already is there now.
-    void announce (te::Engine& engine, const juce::File& file)
+    // Renders newly made play: Phazite's engine plays them from its next plan (docs/tracktion-migration.md, T2), and what
+    // Tracktion read of their files it reads again.
+    void announce (const Song& song, const juce::Array<juce::File>& renders)
     {
-        engine.getAudioFileManager().checkFileForChanges (te::AudioFile (engine, file));
+        if (renders.isEmpty() || ! juce::MessageManager::existsAndIsCurrentThread())
+            return;
+
+        if (auto* edit = findEdit (song))
+        {
+            for (const auto& render : renders)
+                mirror::reconcileFile (*edit, render);
+
+            if (auto* session = findSession (*edit))
+                session->update();
+        }
     }
 } // namespace
 
@@ -88,11 +102,12 @@ bool renderClipAudio (const juce::File& source, const stretch::Settings& setting
     return render.existsAsFile();
 }
 
-bool renderMissingClipAudio (te::Edit& edit, const std::function<bool()>& shouldStop)
+bool renderMissingClipAudio (const Song& song, const std::function<bool()>& shouldStop)
 {
-    auto allRendered = true, anyNew = false;
+    auto allRendered = true;
+    juce::Array<juce::File> made;
 
-    for (const auto& [render, recipe] : getNeededRenders (edit))
+    for (const auto& [render, recipe] : getNeededRenders (song))
     {
         if (render.existsAsFile())
             continue;
@@ -101,50 +116,42 @@ bool renderMissingClipAudio (te::Edit& edit, const std::function<bool()>& should
             return false;
 
         if (renderClipAudio (recipe.source, recipe.settings, render, shouldStop))
-        {
-            announce (edit.engine, render);
-            anyNew = true;
-        }
+            made.add (render);
         else
-        {
             allRendered = false;
-        }
     }
 
-    // Renders newly made play: Tracktion makes its playback graph again for them, and Phazite's engine plays them from its
-    // next plan (docs/tracktion-migration.md, T2).
-    if (anyNew && juce::MessageManager::existsAndIsCurrentThread())
-    {
-        edit.restartPlayback();
-
-        if (auto* session = findSession (edit))
-            session->update();
-    }
-
+    announce (song, made);
     return allRendered;
 }
 
-void purgeClipRenders (te::Edit& edit)
+void purgeClipRenders (const Song& song)
 {
     juce::Array<juce::File> played;
 
-    for (auto* clip : getAudioClips (edit))
-        if (isRendered (*clip))
-            played.addIfNotAlreadyThere (clip->getSourceFileReference().getFile());
+    for (const auto& [render, recipe] : getNeededRenders (song))
+        played.add (render);
 
-    for (const auto& entry : juce::RangedDirectoryIterator (edit.getTempDirectory (false), false, juce::String (renderFilePrefix) + "*"))
-        if (! played.contains (entry.getFile()))
-            te::AudioFile (edit.engine, entry.getFile()).deleteFile();
+    for (const auto& entry : juce::RangedDirectoryIterator (song.getCacheFolder(), false, juce::String (renderFilePrefix) + "*"))
+    {
+        if (played.contains (entry.getFile()))
+            continue;
+
+        // What Tracktion still holds open of it, let go of first.
+        if (auto* edit = findEdit (song))
+            mirror::releaseFile (*edit, entry.getFile());
+
+        entry.getFile().deleteFile();
+    }
 }
 
 //==============================================================================
 class ClipRenders::Job : public juce::ThreadPoolJob
 {
 public:
-    Job (ClipRenders& o, te::Engine& e, Recipe r, juce::File file, std::shared_ptr<Render> shared)
+    Job (ClipRenders& o, Recipe r, juce::File file, std::shared_ptr<Render> shared)
         : juce::ThreadPoolJob ("Clip render"),
           owner (o),
-          engine (e),
           recipe (std::move (r)),
           render (std::move (file)),
           made (std::move (shared))
@@ -160,15 +167,14 @@ public:
 
 private:
     ClipRenders& owner;
-    te::Engine& engine;
     const Recipe recipe;
     const juce::File render;
     const std::shared_ptr<Render> made;
 };
 
-ClipRenders::ClipRenders (te::Edit& e)
-    : edit (e),
-      state (e.state),
+ClipRenders::ClipRenders (const Song& s)
+    : song (s),
+      state (s.getState()),
       pool (juce::ThreadPoolOptions {}
                 .withThreadName ("Phazite clip renders")
                 .withNumberOfThreads (2)
@@ -188,7 +194,7 @@ ClipRenders::~ClipRenders()
 
 bool ClipRenders::isRendering() const
 {
-    for (const auto& [render, recipe] : getNeededRenders (edit))
+    for (const auto& [render, recipe] : getNeededRenders (song))
         if (! render.existsAsFile())
             return true;
 
@@ -227,7 +233,7 @@ std::optional<double> ClipRenders::getProgressOf (const juce::File& render) cons
 
 void ClipRenders::update()
 {
-    const auto needed = getNeededRenders (edit);
+    const auto needed = getNeededRenders (song);
 
     // Those no clip plays any more stop, and leave the progress.
     for (const auto& [render, made] : running)
@@ -249,7 +255,7 @@ void ClipRenders::update()
             std::max<juce::int64> (1, stretch::getStretchedLength (getAudioFileInfo (recipe.source).lengthInSamples, recipe.settings));
         framesAll += made->length;
         running[render] = made;
-        pool.addJob (new Job (*this, edit.engine, recipe, render, std::move (made)), true);
+        pool.addJob (new Job (*this, recipe, render, std::move (made)), true);
     }
 }
 
@@ -271,40 +277,28 @@ void ClipRenders::timerCallback()
 
 void ClipRenders::handleAsyncUpdate()
 {
-    juce::Array<juce::File> done;
+    juce::Array<juce::File> done, made;
 
     {
         const juce::ScopedLock sl (finishedLock);
         done.swapWith (finished);
     }
 
-    auto anyNew = false;
-
     for (const auto& render : done)
     {
-        if (const auto made = running.find (render); made != running.end())
+        if (const auto running = this->running.find (render); running != this->running.end())
         {
-            if (! made->second->stopped.load())
-                framesMade += made->second->length;
+            if (! running->second->stopped.load())
+                framesMade += running->second->length;
 
-            running.erase (made);
+            this->running.erase (running);
         }
 
         if (render.existsAsFile())
-        {
-            announce (edit.engine, render);
-            anyNew = true;
-        }
+            made.add (render);
     }
 
-    if (anyNew)
-    {
-        edit.restartPlayback();
-
-        if (auto* session = findSession (edit))
-            session->update();
-    }
-
+    announce (song, made);
     update(); // starts what waited for one that stopped
 
     // None being made: the next progress starts over.
@@ -312,9 +306,10 @@ void ClipRenders::handleAsyncUpdate()
         framesMade = framesAll = 0;
 }
 
-void ClipRenders::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
+void ClipRenders::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
 {
-    if (tree.hasType (te::IDs::AUDIOCLIP) && property == te::IDs::source)
+    // A clip's sound, or the tempo it follows.
+    if (tree.hasType (schema::CLIP) || tree.hasType (schema::TEMPO))
         startTimer (quietMilliseconds);
 }
 

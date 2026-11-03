@@ -362,7 +362,7 @@ namespace
             outline.sections = std::move (sections);
 
             if (auto* edit = getEdit (context))
-                applyOutline (*edit, outline);
+                applyOutline (getSong (*edit), outline);
         }
 
     private:
@@ -609,7 +609,7 @@ namespace
 
         // Intro 4, Loop A 8, Loop B 8, Loop A 8, Break 4, Loop B 8, Outro 8.
         if (auto* edit = getEdit (song.context))
-            applyOutline (*edit, juce::String ("lofi"));
+            applyOutline (getSong (*edit), juce::String ("lofi"));
 
         song.layChords (key, { "ii", "V", "I", "vi" }, 0, 12);
         song.layChords (key, { "IV", "iii", "vi", "V" }, 12, 20);

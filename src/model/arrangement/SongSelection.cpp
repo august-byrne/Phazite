@@ -5,6 +5,7 @@
 #include "internal/SongSelection.h"
 #include "internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/notes/internal/Notes.h"
 
 #include <unordered_map>
@@ -20,27 +21,6 @@ struct SongSelection::Impl
 
     Selection& manager;
 };
-
-namespace
-{
-    te::Track* findTrack (const Selection& manager, TrackID id)
-    {
-        auto* edit = manager.getEdit();
-        return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
-    }
-
-    te::Clip* findClip (const Selection& manager, ClipID id)
-    {
-        auto* edit = manager.getEdit();
-        return edit != nullptr && id.isValid() ? te::findClipForID (*edit, toTracktion (id)) : nullptr;
-    }
-
-    te::Plugin* findDevice (const Selection& manager, DeviceID id)
-    {
-        auto* edit = manager.getEdit();
-        return edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)).get() : nullptr;
-    }
-} // namespace
 
 std::unique_ptr<SongSelection> createSongSelection (Selection& manager)
 {
@@ -76,14 +56,12 @@ std::vector<SectionID> SongSelection::getSections() const
 
 bool SongSelection::isSelected (TrackID id) const
 {
-    auto* track = findTrack (impl->manager, id);
-    return track != nullptr && impl->manager.isSelected (track);
+    return impl->manager.isSelected (id);
 }
 
 bool SongSelection::isSelected (ClipID id) const
 {
-    auto* clip = findClip (impl->manager, id);
-    return clip != nullptr && impl->manager.isSelected (clip);
+    return impl->manager.isSelected (id);
 }
 
 bool SongSelection::isSelected (SectionID id) const
@@ -93,12 +71,12 @@ bool SongSelection::isSelected (SectionID id) const
 
 void SongSelection::selectOnly (TrackID id)
 {
-    impl->manager.selectOnly (findTrack (impl->manager, id));
+    impl->manager.selectOnly (id);
 }
 
 void SongSelection::selectOnly (ClipID id)
 {
-    impl->manager.selectOnly (findClip (impl->manager, id));
+    impl->manager.selectOnly (id);
 }
 
 void SongSelection::selectOnly (SectionID id)
@@ -108,12 +86,12 @@ void SongSelection::selectOnly (SectionID id)
 
 void SongSelection::add (TrackID id)
 {
-    impl->manager.addToSelection (findTrack (impl->manager, id));
+    impl->manager.addToSelection (id);
 }
 
 void SongSelection::add (ClipID id)
 {
-    impl->manager.addToSelection (findClip (impl->manager, id));
+    impl->manager.addToSelection (id);
 }
 
 void SongSelection::add (SectionID id)
@@ -123,12 +101,12 @@ void SongSelection::add (SectionID id)
 
 void SongSelection::remove (TrackID id)
 {
-    impl->manager.deselect (findTrack (impl->manager, id));
+    impl->manager.deselect (id);
 }
 
 void SongSelection::remove (ClipID id)
 {
-    impl->manager.deselect (findClip (impl->manager, id));
+    impl->manager.deselect (id);
 }
 
 void SongSelection::remove (SectionID id)
@@ -144,33 +122,27 @@ void SongSelection::clear()
 //==============================================================================
 std::vector<DeviceID> SongSelection::getDevices() const
 {
-    std::vector<DeviceID> ids;
-
-    for (auto* device : impl->manager.getItemsOfType<te::Plugin>())
-        ids.push_back (getDeviceID (*device));
-
-    return ids;
+    return impl->manager.getDevices();
 }
 
 bool SongSelection::isSelected (DeviceID id) const
 {
-    auto* device = findDevice (impl->manager, id);
-    return device != nullptr && impl->manager.isSelected (device);
+    return impl->manager.isSelected (id);
 }
 
 void SongSelection::selectOnly (DeviceID id)
 {
-    impl->manager.selectOnly (findDevice (impl->manager, id));
+    impl->manager.selectOnly (id);
 }
 
 void SongSelection::add (DeviceID id)
 {
-    impl->manager.addToSelection (findDevice (impl->manager, id));
+    impl->manager.addToSelection (id);
 }
 
 void SongSelection::remove (DeviceID id)
 {
-    impl->manager.deselect (findDevice (impl->manager, id));
+    impl->manager.deselect (id);
 }
 
 //==============================================================================
@@ -182,10 +154,10 @@ void SongSelection::setNoteClips (const std::vector<ClipID>& ids)
 std::vector<ClipID> SongSelection::getNoteClips() const
 {
     std::vector<ClipID> ids;
-    auto* edit = impl->manager.getEdit();
+    auto* song = impl->manager.getSong();
 
     for (const auto id : impl->manager.getNoteClips())
-        if (edit != nullptr && dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) != nullptr)
+        if (song != nullptr && isMidiState (findClipState (*song, id)))
             ids.push_back (id);
 
     return ids;
@@ -193,12 +165,7 @@ std::vector<ClipID> SongSelection::getNoteClips() const
 
 std::vector<NoteRef> SongSelection::getNotes() const
 {
-    std::vector<NoteRef> refs;
-
-    for (const auto& n : getSelectedNotes (impl->manager))
-        refs.push_back (getNoteRef (*n.clip, *n.note));
-
-    return refs;
+    return getSelectedNotes (impl->manager);
 }
 
 bool SongSelection::isSelected (NoteRef ref) const
@@ -229,7 +196,8 @@ bool SongSelection::isSelected (const ParameterRef& parameter, int index) const
 
 void SongSelection::selectAutomationPoints (const ParameterRef& parameter, const std::vector<int>& indices, bool addToSelection)
 {
-    auto* edit = impl->manager.getEdit();
+    auto* song = impl->manager.getSong();
+    auto* edit = song != nullptr ? findEdit (*song) : nullptr;
     const auto found = edit != nullptr ? findParameter (*edit, parameter) : nullptr;
 
     if (found == nullptr)

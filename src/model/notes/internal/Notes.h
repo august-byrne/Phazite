@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Notes in MIDI clips, as the piano roll edits them (docs/design.md, section 7): the Tracktion side of NoteValues.h, which
-// holds notes as plain values with the transforms, keys, chords and drums' names. Positions are song beats (the clip's
-// content start plus the note's own beat), so the notes of several clips line up.
+// Notes in MIDI clips, as the piano roll edits them (docs/design.md, section 7): the song's side of NoteValues.h, which
+// holds notes as plain values with the transforms, keys, chords and drums' names. The song holds each note in its clip's
+// element (schema::NOTE), and in each of the clip's aliases', by its ID. Positions are song beats (the clip's content start
+// plus the note's own beat), so the notes of several clips line up.
 #pragma once
 
+#include "model/base/Beats.h"
+#include "model/base/IDs.h"
+#include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/notes/NoteValues.h"
 
 #include <functional>
@@ -16,90 +19,80 @@ namespace phazite
 {
 class CommandRegistry;
 
-// A note, with the clip it is in.
-struct ClipNote
-{
-    te::MidiClip* clip = nullptr;
-    te::MidiNote* note = nullptr;
-};
-
-te::BeatPosition getNoteStart (const te::MidiClip&, const te::MidiNote&); // in the song
-NoteData getNoteData (const te::MidiClip&, const te::MidiNote&);
-std::vector<NoteData> getNoteData (const std::vector<ClipNote>&);
+// A note's element, invalid for a note that is gone; and what it is, by where it is in the song. Notes' IDs
+// (schema::noteID) are each note's, which no other note of its clip has, and the same in its clip's aliases; a copy of a
+// clip keeps them.
+juce::ValueTree findNoteState (const Song&, const NoteRef&);
+std::optional<NoteData> getNoteData (const Song&, const NoteRef&);
+std::vector<NoteData> getNoteData (const Song&, const std::vector<NoteRef>&); // those there
+std::vector<NoteData> getClipNotes (const Song&, ClipID);                     // in the order the clip holds them
 
 //==============================================================================
-// Notes' IDs (schema::noteID): each note's, which no other note of its clip has, and the same in its clip's aliases. A copy
-// of a clip keeps them. Tracktion's notes carry the ID of the song's note each plays (schema::phaziteNoteID).
-
-NoteID getNoteID (const te::MidiNote&); // none for a note of Tracktion's that plays none of the song's
-te::MidiNote* findNote (const te::MidiClip&, NoteID);
-NoteRef getNoteRef (const te::MidiClip&, const te::MidiNote&);
-
-//==============================================================================
-// The selected notes still there, of the clips the piano roll shows (Selection: getNotes()), as Tracktion's objects; and
-// selecting notes (of those clips), deselecting anything else.
-std::vector<ClipNote> getSelectedNotes (const Selection&);
+// The selected notes still there, of the clips the piano roll shows (Selection: getNotes()); and selecting notes (of those
+// clips), deselecting anything else.
+std::vector<NoteRef> getSelectedNotes (const Selection&);
 bool hasSelectedNotes (const Selection&);
-void selectNotes (Selection&, const std::vector<ClipNote>&);
+void selectNotes (Selection&, const std::vector<NoteRef>&);
 
 //==============================================================================
-// Edits, with the clip's Edit's undo manager: a command's undo step holds them.
+// Edits, with the song's undo history: a command's undo step holds them. Each is made to the note in each of its clip's
+// aliases too.
 
 // Adds a note at a song beat. If it ends after the clip, the clip grows to the end of that bar, but only into the empty
 // space after it: never past the start of the next clip on its track. A note beyond that stays in the clip without
-// playing, as outside a trimmed clip.
-te::MidiNote* addNote (te::MidiClip&, int pitch, te::BeatPosition start, te::BeatDuration, int velocity);
+// playing, as outside a trimmed clip. Returns it, or none for a clip that isn't a MIDI clip of the song's.
+NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity);
 
 // Moves a note to a song beat and a pitch. It can't start before its clip's content does; the clip grows to hold it,
 // as addNote() says.
-void moveNote (te::MidiClip&, te::MidiNote&, te::BeatPosition start, int pitch);
+void moveNote (Song&, const NoteRef&, BeatPosition start, int pitch);
 
 // Sets a note's length (at least getMinimumNoteLength()); the clip grows to hold it, as addNote() says.
-void setNoteLength (te::MidiClip&, te::MidiNote&, te::BeatDuration);
+void setNoteLength (Song&, const NoteRef&, BeatDuration);
 
-void deleteNotes (const std::vector<ClipNote>&);
+void deleteNotes (Song&, const std::vector<NoteRef>&);
 
 // Transposes the notes by semitones, all by the same amount and none beyond the MIDI range.
-void transposeNotes (const std::vector<ClipNote>&, int semitones);
+void transposeNotes (Song&, const std::vector<NoteRef>&, int semitones);
 
 // Moves the notes in time, all by the same amount and none before its clip's content.
-void nudgeNotes (const std::vector<ClipNote>&, te::BeatDuration);
+void nudgeNotes (Song&, const std::vector<NoteRef>&, BeatDuration);
 
 // Makes the notes longer or shorter by the same amount, each at least getMinimumNoteLength().
-void changeNoteLengths (const std::vector<ClipNote>&, te::BeatDuration);
+void changeNoteLengths (Song&, const std::vector<NoteRef>&, BeatDuration);
 
-bool areAllNotesMuted (const std::vector<ClipNote>&);
-void toggleNotesMuted (const std::vector<ClipNote>&); // mutes them, or unmutes them if they all are
-void setNoteVelocities (const std::vector<ClipNote>&, int velocity);
+bool areAllNotesMuted (const Song&, const std::vector<NoteRef>&);
+void toggleNotesMuted (Song&, const std::vector<NoteRef>&); // mutes them, or unmutes them if they all are
+void setNoteVelocities (Song&, const std::vector<NoteRef>&, int velocity);
 
 // Slide and portamento notes (NoteValues.h), switched on for all of them, or off if all are, in the caller's undo step.
-bool areAllNotesSlides (const std::vector<ClipNote>&);
-void toggleNotesSlide (const std::vector<ClipNote>&);
-bool areAllNotesPortamento (const std::vector<ClipNote>&);
-void toggleNotesPortamento (const std::vector<ClipNote>&);
+bool areAllNotesSlides (const Song&, const std::vector<NoteRef>&);
+void toggleNotesSlide (Song&, const std::vector<NoteRef>&);
+bool areAllNotesPortamento (const Song&, const std::vector<NoteRef>&);
+void toggleNotesPortamento (Song&, const std::vector<NoteRef>&);
 
 // Raises or lowers each note's velocity by the same amount, as one undo step, "Change Velocity" (Alt and the wheel).
-void changeNoteVelocities (const std::vector<ClipNote>&, int change);
+void changeNoteVelocities (Song&, const std::vector<NoteRef>&, int change);
 
 // Copies the notes right after them, as FL Studio's Ctrl+B does, each into its original's clip, which grows as
 // addNote() says. Returns the copies.
-std::vector<ClipNote> duplicateNotes (const std::vector<ClipNote>&);
+std::vector<NoteRef> duplicateNotes (Song&, const std::vector<NoteRef>&);
 
 // Puts these notes in a clip, and in its aliases, in place of all it holds, without growing it: the notes the chord lane
 // makes for a part. Each gets a new ID.
-void setClipNotes (te::MidiClip&, const std::vector<NoteData>&);
+void setClipNotes (Song&, ClipID, const std::vector<NoteData>&);
 
-// Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to the Edit's
-// clips they name. Returns the new notes.
-std::vector<ClipNote> replaceNotes (te::Edit&, const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements);
+// Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to the clips
+// they name. Returns the new notes.
+std::vector<NoteRef> replaceNotes (Song&, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements);
 
 // The same, as one undo step with the name given (a transform's, such as "Quantize Notes").
-std::vector<ClipNote> replaceNotes (te::Edit&, const std::vector<ClipNote>& old, const std::vector<NoteData>& replacements,
-                                    const juce::String& undoName);
+std::vector<NoteRef> replaceNotes (Song&, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements,
+                                   const juce::String& undoName);
 
 // Replaces the selected notes with what a transform makes of them (legato, chop), and selects the new notes. Returns
 // them; with no notes selected, nothing changes.
-std::vector<ClipNote> replaceSelectedNotes (Selection&, const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform);
+std::vector<NoteRef> replaceSelectedNotes (Selection&, const std::function<std::vector<NoteData> (std::vector<NoteData>)>& transform);
 
 //==============================================================================
 // Keys.
@@ -125,20 +118,20 @@ void setLastKey (Song&, const Key&);
 
 // Whether the piano roll shows the track's clips in drum mode: on for a track whose instrument is Phazite's drum sampler,
 // unless it was turned off, and for any track it was turned on for.
-bool isDrumTrack (const te::AudioTrack&);
-void setDrumTrack (te::AudioTrack&, bool);
+bool isDrumTrack (const Song&, TrackID);
+void setDrumTrack (Song&, TrackID, bool);
 
 // What a drum track's rows come from (the piano roll lays them out: ui/pianoroll/DrumRows.h): Phazite's drum sampler's
 // pads, named after what each plays, or nothing for a track without one.
-std::optional<std::vector<DrumRow>> getSamplerSounds (const te::AudioTrack&);
-std::vector<int> getNoteNumbersPlayed (const juce::Array<te::MidiClip*>&); // from low to high, each once
+std::optional<std::vector<DrumRow>> getSamplerSounds (const Song&, TrackID);
+std::vector<int> getNoteNumbersPlayed (const Song&, const std::vector<ClipID>&); // from low to high, each once
 
 // The track keeps its rows' order and the hidden rows, as view settings without undo steps.
-std::vector<int> getDrumRowOrder (const te::AudioTrack&);
-void setDrumRowOrder (te::AudioTrack&, const std::vector<int>& notes);
-std::vector<int> getHiddenDrumRows (const te::AudioTrack&);
-void hideDrumRow (te::AudioTrack&, int note);
-void showAllDrumRows (te::AudioTrack&);
+std::vector<int> getDrumRowOrder (const Song&, TrackID);
+void setDrumRowOrder (Song&, TrackID, const std::vector<int>& notes);
+std::vector<int> getHiddenDrumRows (const Song&, TrackID);
+void hideDrumRow (Song&, TrackID, int note);
+void showAllDrumRows (Song&, TrackID);
 
 //==============================================================================
 // The note commands, for the selected notes (Command::notePriority, so the arrow keys move notes while

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MixerModel.h"
+#include "engine/nodes/Channel.h"
 #include "internal/Containers.h"
 #include "internal/Freeze.h"
 #include "internal/LevelSource.h"
@@ -181,12 +182,12 @@ TrackID getInspectedChannel (const ProjectContext& context)
 //==============================================================================
 float faderPositionToDecibels (float position)
 {
-    return te::volumeFaderPositionToDB (position);
+    return engine::faderPositionToDecibels (position);
 }
 
 float decibelsToFaderPosition (float decibels)
 {
-    return te::decibelsToVolumeFaderPosition (decibels);
+    return engine::decibelsToFaderPosition (decibels);
 }
 
 ParameterHandle getVolume (ProjectContext& context, TrackID id)

@@ -27,9 +27,9 @@
 
 namespace
 {
-te::BeatPosition beats (double b)
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
 // A folder in the temp directory that is deleted again at the end of the test.
@@ -286,13 +286,14 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     auto project = createProject (temp.folder.getChildFile ("Unsaved"), "Untitled");
     const auto oldFile = project->getFile();
     auto& edit = project->getEdit();
+    auto& song = phazite::getSong (edit);
     phazite::ensureTracks (edit, 1);
 
     // Audio imported into it (the project's own copy, by its path relative to the project), unsaved and autosaved.
     const auto kick = phazite::test::writeSound (temp.folder.getChildFile ("Samples").getChildFile ("Kick.wav"), 0.5);
-    auto* clip = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (*te::getAudioTracks (edit)[0], kick, beats (0.0)));
-    REQUIRE (clip != nullptr);
-    REQUIRE (clip->getAudioFile().getFile().isAChildOf (project->getAudioFolder()));
+    const auto clip = phazite::importFile (song, phazite::getTrackID (*te::getAudioTracks (edit)[0]), kick, beats (0.0));
+    REQUIRE (phazite::isAudioState (phazite::findClipState (song, clip)));
+    REQUIRE (phazite::getClipFile (song, phazite::findClipState (song, clip)).isAChildOf (project->getAudioFolder()));
     REQUIRE (phazite::getSong (edit).getUndoManager().canUndo());
     REQUIRE (project->autosave().wasOk());
     REQUIRE (phazite::Project::getAutosaveFile (oldFile).existsAsFile());
@@ -313,8 +314,9 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
 
     // The clip plays the new folder's copy of its audio. The old folder stays, for its owner to delete once the project
     // has closed, without the autosave, whose changes are saved now.
-    CHECK (clip->getAudioFile().getFile() == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
-    CHECK (clip->getAudioFile().getFile().existsAsFile());
+    const auto clipFile = phazite::getClipFile (song, phazite::findClipState (song, clip));
+    CHECK (clipFile == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
+    CHECK (clipFile.existsAsFile());
     CHECK (oldFile.existsAsFile());
     CHECK_FALSE (phazite::Project::getAutosaveFile (oldFile).exists());
 
@@ -324,11 +326,12 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     project = nullptr;
     auto reopened = openProject (newFile);
     CHECK (reopened->getPhaziteState()[phazite::schema::outline].toString() == juce::String ("pop"));
-    const auto clips = te::getAudioTracks (reopened->getEdit())[0]->getClips();
+    const auto& reopenedSong = phazite::getSong (reopened->getEdit());
+    const auto clips = phazite::getClips (reopenedSong, phazite::getTrackID (*te::getAudioTracks (reopened->getEdit())[0]));
     REQUIRE (clips.size() == 1);
-    auto* reopenedClip = dynamic_cast<te::WaveAudioClip*> (clips.getFirst());
-    REQUIRE (reopenedClip != nullptr);
-    CHECK (reopenedClip->getAudioFile().getFile() == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
+    const auto reopenedClip = phazite::findClipState (reopenedSong, clips.front());
+    REQUIRE (phazite::isAudioState (reopenedClip));
+    CHECK (phazite::getClipFile (reopenedSong, reopenedClip) == newFile.getSiblingFile ("Audio").getChildFile ("Kick.wav"));
 }
 
 TEST_CASE ("A project opens with the playhead at the song's start, where playback starts")
@@ -374,11 +377,11 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
 
     SUBCASE ("An outline's sections, as New Project lays them out")
     {
-        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Outlined", error,
-                                            [] (te::Edit& e) { phazite::applyOutline (e, *phazite::findOutline ("pop")); });
+        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Outlined", error, [] (te::Edit& e)
+                                            { phazite::applyOutline (phazite::getSong (e), *phazite::findOutline ("pop")); });
         INFO (error.toStdString());
         REQUIRE (project != nullptr);
-        CHECK (phazite::getAppliedOutline (project->getEdit()) == juce::String ("pop"));
+        CHECK (phazite::getAppliedOutline (phazite::getSong (project->getEdit())) == juce::String ("pop"));
         CHECK_FALSE (phazite::getSections (phazite::getSong (project->getEdit())).empty());
     }
 
@@ -395,15 +398,17 @@ TEST_CASE ("A project with MIDI clips and an alias opens without unsaved changes
 {
     TemporaryFolder temp;
     auto project = createProject (temp.folder, "Notes");
+    auto& song = phazite::getSong (project->getEdit());
     auto* track = te::getAudioTracks (project->getEdit())[0];
     REQUIRE (track != nullptr);
-    auto* clip = phazite::insertMidiClip (*track, { beats (0.0), beats (4.0) }, nullptr);
-    REQUIRE (clip != nullptr);
-    REQUIRE (phazite::addNote (*clip, 60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
-    REQUIRE (phazite::addNote (*clip, 64, beats (2.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
-    const auto aliases = phazite::copyClips ({ clip }, true);
+    const auto trackID = phazite::getTrackID (*track);
+    const auto clip = phazite::insertMidiClip (song, trackID, { beats (0.0), beats (4.0) }, nullptr);
+    REQUIRE (clip.isValid());
+    REQUIRE (phazite::addNote (song, clip, 60, beats (0.0), phazite::BeatDuration::fromBeats (1.0), 100).isValid());
+    REQUIRE (phazite::addNote (song, clip, 64, beats (2.0), phazite::BeatDuration::fromBeats (1.0), 100).isValid());
+    const auto aliases = phazite::copyClips (song, { clip }, true);
     REQUIRE (aliases.size() == 1);
-    phazite::moveClip (*aliases[0], beats (4.0), *track);
+    phazite::moveClip (song, aliases[0], beats (4.0), trackID);
 
     // As the app's message loop does between edits: Tracktion sorts the track's clips, and the alias copies the notes.
     phazite::test::settle();
@@ -458,15 +463,17 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     auto project = createProject (temp.folder, "Changes");
 
     {
+        auto& song = phazite::getSong (project->getEdit());
         auto* track = te::getAudioTracks (project->getEdit())[0];
         REQUIRE (track != nullptr);
-        auto* clip = phazite::insertMidiClip (*track, { beats (0.0), beats (4.0) }, nullptr);
-        REQUIRE (clip != nullptr);
-        REQUIRE (phazite::addNote (*clip, 60, beats (0.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
-        REQUIRE (phazite::addNote (*clip, 64, beats (2.0), te::BeatDuration::fromBeats (1.0), 100) != nullptr);
-        const auto aliases = phazite::copyClips ({ clip }, true);
+        const auto trackID = phazite::getTrackID (*track);
+        const auto clip = phazite::insertMidiClip (song, trackID, { beats (0.0), beats (4.0) }, nullptr);
+        REQUIRE (clip.isValid());
+        REQUIRE (phazite::addNote (song, clip, 60, beats (0.0), phazite::BeatDuration::fromBeats (1.0), 100).isValid());
+        REQUIRE (phazite::addNote (song, clip, 64, beats (2.0), phazite::BeatDuration::fromBeats (1.0), 100).isValid());
+        const auto aliases = phazite::copyClips (song, { clip }, true);
         REQUIRE (aliases.size() == 1);
-        phazite::moveClip (*aliases[0], beats (4.0), *track);
+        phazite::moveClip (song, aliases[0], beats (4.0), trackID);
         phazite::setTrackKey (*track, phazite::Key { 2, phazite::Scale::minor });
         phazite::test::settle();
         REQUIRE (project->save().wasOk());
@@ -483,6 +490,8 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     REQUIRE (track != nullptr);
     auto* clip = dynamic_cast<te::MidiClip*> (track->getClips().getFirst()); // the original, at beat 0
     REQUIRE (clip != nullptr);
+    auto& song = phazite::getSong (edit);
+    const auto clipID = phazite::getClipID (*clip);
 
     // Notifications that change nothing.
     clip->state.sendPropertyChangeMessage (te::IDs::mute);
@@ -521,7 +530,7 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    REQUIRE (phazite::test::addMidiNote (*clip, 67, beats (3.0), te::BeatDuration::fromBeats (0.5), 100) != nullptr);
+    REQUIRE (phazite::test::addMidiNote (song, clipID, 67, beats (3.0), phazite::BeatDuration::fromBeats (0.5), 100).isValid());
     CHECK (project->hasUnsavedChanges());
     phazite::test::settle(); // the alias copies the note
     REQUIRE (project->save().wasOk());
@@ -529,7 +538,7 @@ TEST_CASE ("Only a change to what the project holds is an unsaved change, made w
 
     // With an undo step, as the editors make changes: Tracktion's listener for undo steps then marks the Edit changed
     // too, with its flag and its time stamp, lastSignificantChange.
-    REQUIRE (phazite::addNote (*clip, 69, beats (3.5), te::BeatDuration::fromBeats (0.25), 100) != nullptr);
+    REQUIRE (phazite::addNote (song, clipID, 69, beats (3.5), phazite::BeatDuration::fromBeats (0.25), 100).isValid());
     CHECK (project->hasUnsavedChanges());
     phazite::test::settle();
     CHECK (edit.hasChangedSinceSaved());
@@ -605,13 +614,14 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     phazite::setCollapsed (*other, true); // as dragging its edge well below the minimum does
     phazite::setCollapsed (*folder, true);
     phazite::setPinned (*track, true);
-    phazite::setDrumTrack (*track, true);
-    phazite::setDrumRowOrder (*track, { 38, 36 });
-    phazite::hideDrumRow (*track, 42);
-    phazite::hideDrumRow (*other, 42);
-    phazite::showAllDrumRows (*other);
-    phazite::saveGridSettings (edit, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 2 });
-    phazite::saveGridSettings (edit, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 10 });
+    auto& song = phazite::getSong (edit);
+    phazite::setDrumTrack (song, phazite::getTrackID (*track), true);
+    phazite::setDrumRowOrder (song, phazite::getTrackID (*track), { 38, 36 });
+    phazite::hideDrumRow (song, phazite::getTrackID (*track), 42);
+    phazite::hideDrumRow (song, phazite::getTrackID (*other), 42);
+    phazite::showAllDrumRows (song, phazite::getTrackID (*other));
+    phazite::saveGridSettings (phazite::getSong (edit), phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 2 });
+    phazite::saveGridSettings (phazite::getSong (edit), phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 10 });
     plugin->windowState->lastWindowBounds = juce::Rectangle<int> (140, 360, 300, 200);
     phazite::rememberWindowPosition (*plugin, { 140, 360 });
     phazite::test::settle();
@@ -647,11 +657,11 @@ TEST_CASE ("View settings are saved, but changing them isn't an unsaved change")
     CHECK (phazite::isCollapsed (*o));
     CHECK (phazite::isCollapsed (*f));
     CHECK (phazite::isPinned (*t));
-    CHECK (phazite::isDrumTrack (*t));
-    CHECK (phazite::getDrumRowOrder (*t) == std::vector<int> { 38, 36 });
-    CHECK (phazite::getHiddenDrumRows (*t) == std::vector<int> { 42 });
-    CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::playlist).adaptiveOffset == 2);
-    CHECK (phazite::loadGridSettings (reopened, phazite::GridOwner::pianoRoll).fixedLevel == 10);
+    CHECK (phazite::isDrumTrack (phazite::getSong (reopened), phazite::getTrackID (*t)));
+    CHECK (phazite::getDrumRowOrder (phazite::getSong (reopened), phazite::getTrackID (*t)) == std::vector<int> { 38, 36 });
+    CHECK (phazite::getHiddenDrumRows (phazite::getSong (reopened), phazite::getTrackID (*t)) == std::vector<int> { 42 });
+    CHECK (phazite::loadGridSettings (phazite::getSong (reopened), phazite::GridOwner::playlist).adaptiveOffset == 2);
+    CHECK (phazite::loadGridSettings (phazite::getSong (reopened), phazite::GridOwner::pianoRoll).fixedLevel == 10);
     const auto reopenedPlugin = te::findPluginForID (reopened, pluginID);
     REQUIRE (reopenedPlugin != nullptr);
     REQUIRE (reopenedPlugin->windowState->lastWindowBounds.has_value());

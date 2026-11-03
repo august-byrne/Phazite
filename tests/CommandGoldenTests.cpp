@@ -50,9 +50,9 @@ constexpr const char* aboutTheStates =
 constexpr const char* aboutTheProject = "The project the command script leaves (every model command run where it does something), "
                                         "saved: tests/CommandGoldenTests.cpp";
 
-te::BeatPosition beats (double b)
+phazite::BeatPosition beats (double b)
 {
-    return te::BeatPosition::fromBeats (b);
+    return phazite::BeatPosition::fromBeats (b);
 }
 
 // The model's commands, registered as the app registers them: addSongCommands(), which Main.cpp calls, then the note
@@ -121,42 +121,42 @@ juce::String describeNotes (const std::vector<phazite::NoteData>& notes)
     return juce::String ((int) notes.size()) + (notes.size() == 1 ? " note (" : " notes (") + described.joinIntoString (", ") + ")";
 }
 
-// What is selected: tracks and clips in the order they were selected, then sections in the song's order, then notes;
+// What is selected: clips, then tracks, each in the order they were selected, then sections in the song's order, then notes;
 // and the time range: "selected: track One, track Two", or "selected: nothing".
 juce::String describeSelected (const phazite::Selection& selection, const phazite::RangeSelection& range)
 {
     juce::StringArray items;
 
-    for (auto* selected : selection.getItemsOfType<te::Selectable>())
+    auto* song = selection.getSong();
+
+    if (song != nullptr)
     {
-        if (auto* clip = dynamic_cast<te::Clip*> (selected))
+        for (const auto clip : selection.getClips())
         {
-            auto* clipTrack = clip->getTrack();
-            items.add ("clip on " + (clipTrack != nullptr ? clipTrack->getName() : juce::String ("no track")) + " at "
-                       + juce::String (clip->getStartBeat().inBeats(), 3));
+            const auto clipTrack = phazite::getClipTrack (*song, clip);
+            items.add ("clip on " + (clipTrack.isValid() ? phazite::getTrackName (*song, clipTrack) : juce::String ("no track")) + " at "
+                       + juce::String (phazite::getClipRange (*song, clip).getStart().inBeats(), 3));
         }
-        else if (auto* track = dynamic_cast<te::Track*> (selected))
-        {
-            items.add ("track " + track->getName());
-        }
-        else if (selected != nullptr)
-        {
-            items.add ("other: " + selected->getSelectableDescription());
-        }
+
+        for (const auto track : selection.getTracks())
+            items.add ("track " + phazite::getTrackName (*song, track));
     }
 
     for (const auto& section : phazite::getSelectedSections (selection))
         items.add ("section " + section.name);
 
-    if (const auto notes = phazite::getNoteData (phazite::getSelectedNotes (selection)); ! notes.empty())
-        items.add (describeNotes (notes));
+    if (song != nullptr)
+    {
+        if (const auto notes = phazite::getNoteData (*song, phazite::getSelectedNotes (selection)); ! notes.empty())
+            items.add (describeNotes (notes));
+    }
 
-    if (! range.isEmpty())
+    if (! range.isEmpty() && song != nullptr)
     {
         juce::StringArray names;
 
-        for (auto* track : range.getTracks())
-            names.add (track->getName());
+        for (const auto track : range.getTracks())
+            names.add (phazite::getTrackName (*song, track));
 
         items.add ("range " + juce::String (range.getRange().getStart().inBeats(), 3) + "-"
                    + juce::String (range.getRange().getEnd().inBeats(), 3) + " beats on " + names.joinIntoString (" and "));
@@ -209,9 +209,10 @@ struct Script
 {
     Script()
     {
-        one = te::getAudioTracks (edit)[0];
-        REQUIRE (one != nullptr);
-        phazite::setTrackName (*one, "One");
+        auto& song = phazite::getSong (edit);
+        REQUIRE_FALSE (phazite::getTrackIDs (song).empty());
+        one = phazite::getTrackIDs (song).front();
+        phazite::setTrackName (song, one, "One");
         phazite::getSong (edit).getUndoManager().clearUndoHistory();
 
         setEdit (context, &edit);
@@ -244,21 +245,28 @@ struct Script
         snapshot (what);
     }
 
-    // Selects the items alone, in this order: the first with selectOnly(), the others added to it.
-    void select (const juce::String& names, std::initializer_list<te::Selectable*> items)
+    // Selects the tracks alone, in this order: the first with selectOnly(), the others added to it.
+    void select (const juce::String& names, std::initializer_list<phazite::TrackID> tracks)
     {
         auto isFirst = true;
 
-        for (auto* item : items)
+        for (const auto track : tracks)
         {
             if (isFirst)
-                selection.selectOnly (item);
+                selection.selectOnly (track);
             else
-                selection.addToSelection (item);
+                selection.addToSelection (track);
 
             isFirst = false;
         }
 
+        snapshot ("select " + names);
+    }
+
+    // Selects a clip alone.
+    void select (const juce::String& names, phazite::ClipID clip)
+    {
+        selection.selectOnly (clip);
         snapshot ("select " + names);
     }
 
@@ -268,15 +276,13 @@ struct Script
         snapshot ("select nothing");
     }
 
-    // The one selected track, of a type.
-    template <typename TrackType>
-    TrackType& getSelectedTrack() const
+    // The one selected track: a folder, or a track that isn't.
+    phazite::TrackID getSelectedTrack (bool folder) const
     {
         const auto tracks = phazite::getSelectedTracks (selection);
         REQUIRE (tracks.size() == 1);
-        auto* track = dynamic_cast<TrackType*> (phazite::findTracks (*selection.getEdit(), tracks).getFirst());
-        REQUIRE (track != nullptr);
-        return *track;
+        REQUIRE (phazite::isFolder (phazite::getSong (edit), tracks.front()) == folder);
+        return tracks.front();
     }
 
     // Adds 'after <what>:', the commands whose state changed since the last snapshot (all of them the first time), and
@@ -315,7 +321,7 @@ struct Script
     phazite::test::TemporaryFolder temp;
     std::unique_ptr<phazite::Project> project = createProject (temp.folder);
     te::Edit& edit = project->getEdit();
-    te::AudioTrack* one = nullptr;
+    phazite::TrackID one;
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     phazite::Selection& selection = getSelection (context);
     phazite::RangeSelection& range = getRangeSelection (context);
@@ -347,23 +353,24 @@ TEST_SUITE ("golden")
     TEST_CASE ("Golden commands: a script of every model command, with the undo step and the states each leaves")
     {
         Script s;
-        auto* one = s.one;
+        const auto one = s.one;
 
         // Tracks: add, name and group them, change their heights, pin, collapse, mute and solo them, move them and move
         // through them. One, inside a muted folder, isn't muted itself, so Mute Track isn't ticked for it.
         s.select ("One", { one });
         s.run ({ "track.add" });
 
-        te::AudioTrack* two = nullptr;
+        phazite::TrackID two;
         s.setup ("name the new track Two",
                  [&s, &two]
                  {
-                     two = &s.getSelectedTrack<te::AudioTrack>();
-                     phazite::setTrackName (*two, "Two");
+                     two = s.getSelectedTrack (false);
+                     phazite::setTrackName (phazite::getSong (s.edit), two, "Two");
                  });
 
         s.run ({ "track.addFolder" });
-        s.setup ("name the new folder Empty", [&s] { phazite::setTrackName (s.getSelectedTrack<te::FolderTrack>(), "Empty"); });
+        s.setup ("name the new folder Empty",
+                 [&s] { phazite::setTrackName (phazite::getSong (s.edit), s.getSelectedTrack (true), "Empty"); });
         s.run ({ "track.ungroup" });
 
         s.select ("One", { one });
@@ -377,12 +384,12 @@ TEST_SUITE ("golden")
         s.select ("One and Two", { one, two });
         s.run ({ "track.groupIntoFolder" });
 
-        te::FolderTrack* group = nullptr;
+        phazite::TrackID group;
         s.setup ("name the new folder Group",
                  [&s, &group]
                  {
-                     group = &s.getSelectedTrack<te::FolderTrack>();
-                     phazite::setTrackName (*group, "Group");
+                     group = s.getSelectedTrack (true);
+                     phazite::setTrackName (phazite::getSong (s.edit), group, "Group");
                  });
 
         s.run ({ "track.mute" }); // the folder
@@ -409,21 +416,22 @@ TEST_SUITE ("golden")
                  "section.outline.rock" });
 
         // A MIDI clip on One, and its notes: half a beat long, a beat apart, so that legato makes the first one longer.
-        te::MidiClip* clip = nullptr;
+        phazite::ClipID clip;
         s.setup ("add a MIDI clip on One, with two notes",
                  [&s, &clip, one]
                  {
-                     clip = phazite::insertMidiClip (*one, { beats (0.0), beats (4.0) }, &s.selection);
-                     REQUIRE (clip != nullptr);
+                     auto& song = phazite::getSong (s.edit);
+                     clip = phazite::insertMidiClip (song, one, { beats (0.0), beats (4.0) }, &s.selection);
+                     REQUIRE (clip.isValid());
                      REQUIRE (s.selection.isSelected (clip));
-                     REQUIRE (phazite::addNote (*clip, 60, beats (0.0), te::BeatDuration::fromBeats (0.5), 100) != nullptr);
-                     REQUIRE (phazite::addNote (*clip, 64, beats (1.0), te::BeatDuration::fromBeats (0.5), 100) != nullptr);
+                     REQUIRE (phazite::addNote (song, clip, 60, beats (0.0), phazite::BeatDuration::fromBeats (0.5), 100).isValid());
+                     REQUIRE (phazite::addNote (song, clip, 64, beats (1.0), phazite::BeatDuration::fromBeats (0.5), 100).isValid());
                  });
 
         s.run ({ "edit.mute", "edit.mute", "edit.duplicate", "edit.delete" });
-        s.select ("the clip", { clip });
+        s.select ("the clip", clip);
         s.run ({ "edit.duplicateAsAlias", "clip.makeUnique" });
-        s.select ("the clip", { clip });
+        s.select ("the clip", clip);
         s.run ({ "transport.goToEnd", "transport.goToStart" });
         s.setup ("put the playhead at 1 s", [&s] { phazite::movePlayhead (s.edit, te::TimePosition::fromSeconds (1.0)); });
         s.run ({ "edit.split" });
@@ -431,13 +439,10 @@ TEST_SUITE ("golden")
         s.setup ("select the clip's notes",
                  [&s, &clip]
                  {
-                     std::vector<phazite::NoteRef> notes;
-
-                     for (auto* note : clip->getSequence().getNotes())
-                         notes.push_back (phazite::getNoteRef (*clip, *note));
+                     const auto notes = phazite::getRefs (phazite::getClipNotes (phazite::getSong (s.edit), clip));
 
                      s.selection.selectOnly (clip);
-                     s.selection.setNoteClips ({ phazite::getClipID (*clip) });
+                     s.selection.setNoteClips ({ clip });
                      s.selection.selectNotes (notes);
                  });
 
@@ -456,9 +461,10 @@ TEST_SUITE ("golden")
         s.setup ("import a tone onto Two at beat 8, and select it",
                  [&s, two]
                  {
+                     auto& song = phazite::getSong (s.edit);
                      const auto tone = phazite::test::writeSound (s.temp.folder.getChildFile ("Tone.wav"), 2.0);
-                     auto* audio = dynamic_cast<te::WaveAudioClip*> (phazite::importFile (*two, tone, beats (8.0)));
-                     REQUIRE (audio != nullptr);
+                     const auto audio = phazite::importFile (song, two, tone, beats (8.0));
+                     REQUIRE (phazite::hasAudioClips (song, { audio }));
                      s.selection.selectOnly (audio);
                  });
 

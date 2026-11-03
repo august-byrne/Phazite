@@ -3,16 +3,15 @@
 // manager: tracks, clips, sections and devices, in the order they were selected; or notes of the clips an editor shows; or
 // automation points of one parameter. One kind of thing at a time, as the commands act on one: selecting devices deselects
 // anything else and the other way round, and notes and points are each all that is selected while they are. An ID of an
-// item that is gone names nothing and is left out. The model's commands reach Tracktion's objects through it, in the Edit
-// it is of (the project context's); the UI reaches it by IDs (model/arrangement/SongSelection.h). It tells its listeners
-// after each change, on the message thread. Message thread only.
+// item that is gone names nothing and is left out. The model's commands act on what it names in its song (the project
+// context's), and the UI reaches it by IDs (model/arrangement/SongSelection.h). It tells its listeners after each change, on
+// the message thread. Message thread only.
 #pragma once
 
 #include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/devices/ParameterRef.h"
 
-#include <optional>
 #include <vector>
 
 namespace phazite
@@ -63,36 +62,6 @@ public:
     void deselectAll();
     int getNumObjectsSelected() const; // of every kind still there, notes and points included
 
-    // The same for Tracktion's objects, while the model's callers hold them: anything else of Tracktion's is never selected.
-    bool isSelected (const te::Selectable* item) const
-    {
-        const auto found = toItem (item);
-        return found.has_value() && isSelected (*found);
-    }
-
-    void selectOnly (te::Selectable* item)
-    {
-        if (const auto found = toItem (item))
-            selectOnly (*found);
-    }
-
-    void addToSelection (te::Selectable* item)
-    {
-        if (const auto found = toItem (item))
-            addToSelection (*found);
-    }
-
-    void deselect (te::Selectable* item)
-    {
-        if (const auto found = toItem (item))
-            deselect (*found);
-    }
-
-    bool isSelected (const te::Selectable& item) const { return isSelected (&item); }
-    void selectOnly (te::Selectable& item) { selectOnly (&item); }
-    void addToSelection (te::Selectable& item) { addToSelection (&item); }
-    void deselect (te::Selectable& item) { deselect (&item); }
-
     //==============================================================================
     // Sections, which the project keeps itself (model/arrangement/internal/Sections.h), by their IDs: with tracks and
     // clips, and without devices, as tracks and clips are.
@@ -100,29 +69,6 @@ public:
     void selectOnly (SectionID);
     void addToSelection (SectionID);
     void deselect (SectionID);
-
-    // Those of a type still there, in the order they were selected.
-    template <typename Type>
-    juce::Array<Type*> getItemsOfType() const
-    {
-        juce::Array<Type*> found;
-
-        for (const auto& id : items)
-            if (auto* item = dynamic_cast<Type*> (find (id)))
-                found.add (item);
-
-        return found;
-    }
-
-    template <typename Type>
-    Type* getFirstItemOfType() const
-    {
-        for (const auto& id : items)
-            if (auto* item = dynamic_cast<Type*> (find (id)))
-                return item;
-
-        return nullptr;
-    }
 
     //==============================================================================
     // Notes, of the clips an editor shows (the piano roll's), by their references: other clips deselect them, and so does
@@ -156,9 +102,7 @@ private:
     ParameterRef pointsParameter;
     std::vector<int> points;
 
-    static std::optional<Item> toItem (const te::Selectable*); // nothing for anything else of Tracktion's
-    te::Selectable* find (Item) const;                         // Tracktion's object, or nullptr
-    bool isThere (Item) const;                                 // whether the song holds it
+    bool isThere (Item) const; // whether the song holds it
     bool isThere (SectionID) const;
     bool isSelected (Item) const;
     void selectOnly (Item);

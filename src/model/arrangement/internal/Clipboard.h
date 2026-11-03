@@ -13,8 +13,9 @@
 #pragma once
 
 #include "model/automation/internal/Automation.h"
+#include "model/base/Beats.h"
+#include "model/base/IDs.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/notes/NoteValues.h"
 
 #include <vector>
@@ -40,7 +41,7 @@ struct Clipboard
     struct CopiedClip
     {
         juce::ValueTree state;
-        te::BeatRange beats;
+        BeatRange beats;
         int trackOffset = 0;
     };
 
@@ -48,8 +49,8 @@ struct Clipboard
     std::vector<NoteData> notes; // with no clip or ID, each starting as far after the earliest as it did
     BeatDuration intoClip;       // how far into its clip the earliest note was
     std::vector<CopiedClip> clips;
-    te::BeatRange range;  // the time range, or the clips' from the earliest start to the latest end
-    te::EditItemID track; // the first of the clips' tracks, or of the range's
+    BeatRange range; // the time range, or the clips' from the earliest start to the latest end
+    TrackID track;   // the first of the clips' tracks, or of the range's
     std::vector<AutomationCopy> automation;
 };
 

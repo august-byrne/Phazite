@@ -8,6 +8,7 @@
 #include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <map>
 
@@ -228,18 +229,15 @@ juce::File AudioRecorder::getTakeFile (const te::AudioTrack& track) const
             return file;
 }
 
-void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const TakePlace& take)
+void placeTake (Song& song, TrackID track, const juce::File& file, const TakePlace& take)
 {
     const auto rate = take.sampleRate;
-    auto* found = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (trackID)));
 
-    if (found == nullptr)
+    if (const auto state = findTrackState (song, track); ! state.hasType (schema::TRACK) || isFolderState (state))
     {
         file.deleteFile();
         return;
     }
-
-    auto& track = *found;
 
     // Where in the song, as if nothing looped, each frame of the file was played; and the frame played at a time.
     const auto timeOf = [&] (double frame) { return take.firstFrame + frame / rate; };
@@ -254,16 +252,15 @@ void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const T
         return;
     }
 
-    const auto name = getTrackName (track);
-    const auto& tempo = edit.tempoSequence;
-    const auto toBeats = [&tempo] (double seconds) { return fromTracktion (tempo.toBeats (te::TimePosition::fromSeconds (seconds))); };
+    const auto name = getTrackName (song, track);
+    const auto beatsOf = [&song] (double seconds) { return toBeats (song, seconds); };
 
     // A clip of the song's playing the file from a time in it, as it was recorded.
-    const auto place = [&] (double clipStart, double clipEnd, double fileStart) -> te::AudioClipBase*
+    const auto place = [&] (double clipStart, double clipEnd, double fileStart)
     {
         const auto partStart = std::max (0.0, fileStart);
-        const auto clipState = makeAudioClipState (edit, name, file, toBeats (clipStart), { partStart, partStart + (clipEnd - clipStart) });
-        return dynamic_cast<te::AudioClipBase*> (placeClipState (edit, clipState, track));
+        const auto clipState = makeAudioClipState (song, name, file, beatsOf (clipStart), { partStart, partStart + (clipEnd - clipStart) });
+        return placeClipState (song, clipState, track);
     };
 
     // Punched in: only what falls in the range, in place of what was there, cross-fading at the edges: the new clip
@@ -281,25 +278,26 @@ void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const T
 
         const auto half = crossfadeSeconds / 2.0;
         const auto clipStart = std::max (from, in - half), clipEnd = std::min (to, out + half);
-        clearClipsIn (track, toTracktion (BeatRange (toBeats (clipStart + crossfadeSeconds), toBeats (clipEnd - crossfadeSeconds))));
-        const auto crossfade = te::TimeDuration::fromSeconds (crossfadeSeconds);
+        clearClipsIn (song, track, BeatRange (beatsOf (clipStart + crossfadeSeconds), beatsOf (clipEnd - crossfadeSeconds)));
 
-        for (auto* clip : track.getClips())
-            if (auto* audio = dynamic_cast<te::AudioClipBase*> (clip))
-            {
-                const auto range = audio->getPosition().time;
-
-                if (std::abs (range.getEnd().inSeconds() - (clipStart + crossfadeSeconds)) < 1.0e-6)
-                    setClipFade (*audio, false, crossfade);
-
-                if (std::abs (range.getStart().inSeconds() - (clipEnd - crossfadeSeconds)) < 1.0e-6)
-                    setClipFade (*audio, true, crossfade);
-            }
-
-        if (auto* clip = place (clipStart, clipEnd, frameOf (clipStart) / rate))
+        for (const auto& clipState : getClipStates (findTrackState (song, track)))
         {
-            setClipFade (*clip, true, crossfade);
-            setClipFade (*clip, false, crossfade);
+            if (! isAudioState (clipState))
+                continue;
+
+            const auto position = getPlayedPosition (song, clipState);
+
+            if (std::abs (position.end - (clipStart + crossfadeSeconds)) < 1.0e-6)
+                setClipFade (song, getClipID (clipState), false, crossfadeSeconds);
+
+            if (std::abs (position.start - (clipEnd - crossfadeSeconds)) < 1.0e-6)
+                setClipFade (song, getClipID (clipState), true, crossfadeSeconds);
+        }
+
+        if (const auto clip = place (clipStart, clipEnd, frameOf (clipStart) / rate); clip.isValid())
+        {
+            setClipFade (song, clip, true, crossfadeSeconds);
+            setClipFade (song, clip, false, crossfadeSeconds);
         }
 
         return;
@@ -331,13 +329,14 @@ void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const T
 
                 const auto passStart = firstLoopStart + playing * length;
 
-                if (auto* clip = place (loopStart, loopStart + length, frameOf (passStart) / rate))
+                if (const auto clip = place (loopStart, loopStart + length, frameOf (passStart) / rate); clip.isValid())
                 {
-                    auto clipState = findClipState (*clip);
-                    clipState.setProperty (schema::clipTakes, (int) takes.size(), &getSong (edit).getUndoManager());
+                    auto clipState = findClipState (song, clip);
+                    auto* undo = &song.getUndoManager();
+                    clipState.setProperty (schema::clipTakes, (int) takes.size(), undo);
                     clipState.setProperty (schema::clipTake, (int) (std::find (takes.begin(), takes.end(), playing) - takes.begin()) + 1,
-                                           &getSong (edit).getUndoManager());
-                    clipState.setProperty (schema::clipTakeLength, length, &getSong (edit).getUndoManager());
+                                           undo);
+                    clipState.setProperty (schema::clipTakeLength, length, undo);
                 }
 
                 return;

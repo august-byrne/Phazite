@@ -93,7 +93,7 @@ TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")
 {
     TemporaryFolder temp;
     auto project = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::setTempo (*project, 100.0);
+    phazite::setTempo (phazite::getSong (*project), 100.0);
     phazite::ProjectContext context (phazite::test::getEngineContext()); // with the project open
     setEdit (context, project.get());
 

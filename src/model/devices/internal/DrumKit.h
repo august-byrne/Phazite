@@ -3,12 +3,17 @@
 // sounds dropped from the browser onto them.
 #pragma once
 
+#include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 
 namespace phazite
 {
 // Whether a device is Phazite's drum sampler.
 bool isDrumSampler (const te::Plugin&);
+
+// The same for a device's element in the song; and what one of its pads plays, as its sounds there say (Schema.h: SOUNDS).
+bool isDrumSampler (const juce::ValueTree& deviceState);
+juce::String getPadName (const Song&, const juce::ValueTree& deviceState, int pad);
 
 // What a pad plays: its sound file's name, or its factory sound's ("808 Kick", or the default kit's "Kick"); and whether
 // it plays a file.

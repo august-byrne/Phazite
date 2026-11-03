@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/mirror/internal/Bridge.h"
 
+#include <cmath>
 #include <set>
 #include <unordered_map>
 
@@ -13,6 +14,70 @@ namespace phazite::mirror
 {
 namespace
 {
+    // A controller event of a MIDI clip of the song's (schema::CONTROL) as Tracktion's MidiControllerEvent has it: its type (a
+    // MIDI controller's number, or one of Tracktion's own types), its value (7 bits up, but for the pitch wheel's) and its
+    // metadata (an aftertouch's note).
+    struct TracktionControl
+    {
+        te::BeatPosition beat;
+        int type = 0, value = 0, metadata = 0;
+    };
+
+    TracktionControl toTracktionControl (const juce::ValueTree& control)
+    {
+        const auto kind = control[schema::controlKind].toString();
+        const auto value = (int) control[schema::controlValue];
+        const auto number = (int) control[schema::controlNumber];
+        TracktionControl event { te::BeatPosition::fromBeats ((double) control[schema::controlBeat]) };
+
+        if (kind == schema::controlIsPitchWheel)
+            event.type = te::MidiControllerEvent::pitchWheelType, event.value = value;
+        else if (kind == schema::controlIsChannelPressure)
+            event.type = te::MidiControllerEvent::channelPressureType, event.value = value << 7;
+        else if (kind == schema::controlIsAftertouch)
+            event.type = te::MidiControllerEvent::aftertouchType, event.value = value << 7, event.metadata = number;
+        else if (kind == schema::controlIsProgramChange)
+            event.type = te::MidiControllerEvent::programChangeType, event.value = value << 7;
+        else
+            event.type = number, event.value = value << 7;
+
+        return event;
+    }
+
+    // Whether Tracktion's clip holds the controller events of the song's element for it, in their order.
+    bool haveSameControls (const te::MidiClip& clip, const juce::ValueTree& clipState)
+    {
+        const auto& events = clip.getSequence().getControllerEvents();
+        int i = 0;
+
+        for (const auto& child : clipState)
+        {
+            if (! child.hasType (schema::CONTROL))
+                continue;
+
+            const auto control = toTracktionControl (child);
+            const auto* event = events[i++];
+
+            if (event == nullptr || event->getBeatPosition() != control.beat || event->getType() != control.type
+                || event->getControllerValue() != control.value || event->getMetadata() != control.metadata)
+                return false;
+        }
+
+        return i == events.size();
+    }
+
+    // Tracktion's fade type nearest a shape, for Tracktion's clip, which plays nothing.
+    te::AudioFadeCurve::Type getNearestFadeType (FadeCurve curve)
+    {
+        if (std::abs (curve.bend) < 0.5f)
+            return te::AudioFadeCurve::linear;
+
+        if (curve.shape == FadeShape::sCurve)
+            return curve.bend > 0.0f ? te::AudioFadeCurve::sCurve : te::AudioFadeCurve::linear;
+
+        return curve.bend > 0.0f ? te::AudioFadeCurve::convex : te::AudioFadeCurve::concave;
+    }
+
     // Where a clip of the song is in Tracktion's time: from its start to its end, with its content starting its offset
     // before it.
     te::ClipPosition getPosition (const te::Edit& edit, const juce::ValueTree& clipState)
@@ -171,32 +236,21 @@ namespace
         reconcileControls (*clip, clipState);
     }
 
-    // The song's fades of an audio clip as Tracktion plays them: scaled down together where they would overrun it, as
-    // Tracktion's own getters give them, so that Tracktion never scales its own outside the undo history.
-    std::pair<double, double> getFittedFades (const juce::ValueTree& clipState, double length)
-    {
-        auto in = juce::jlimit (0.0, length, getClipFade (clipState, true));
-        auto out = juce::jlimit (0.0, length, getClipFade (clipState, false));
-
-        if (in + out > length && in + out > 0.0)
-        {
-            const auto scale = length / (in + out);
-            in *= scale;
-            out *= scale;
-        }
-
-        return { in, out };
-    }
-
     void reconcileAudioClip (te::Edit& edit, const juce::ValueTree& clipState, te::ClipTrack& track)
     {
         const auto id = toTracktion (getClipID (clipState));
-        const auto position = getPlayedPosition (edit, clipState);
-        const auto played = getPlayedFile (edit, clipState);
+        const auto& song = getSong (edit);
+        const auto played = getPlayedFile (song, clipState);
+        const auto seconds = getPlayedPosition (song, clipState);
+        const te::ClipPosition position { { te::TimePosition::fromSeconds (seconds.start), te::TimePosition::fromSeconds (seconds.end) },
+                                          te::TimeDuration::fromSeconds (seconds.offset) };
         auto* clip = dynamic_cast<te::AudioClipBase*> (te::findClipForID (edit, id));
 
         if (clip == nullptr)
         {
+            // Tracktion keeps what it read of a file by its path until it checks the file again: read again if it changed
+            // since (a file written where another was, or where none was yet when Tracktion was asked about it).
+            edit.engine.getAudioFileManager().checkFileForChanges (te::AudioFile (edit.engine, played));
             auto created = makeTracktionClip (te::IDs::AUDIOCLIP, id, clipState[schema::clipName].toString(), position);
             created.setProperty (te::IDs::source, te::SourceFileReference::findPathFromFile (edit, played, true), nullptr);
             clip = dynamic_cast<te::AudioClipBase*> (te::insertClipWithState (track, created));
@@ -215,7 +269,7 @@ namespace
             clip->setGainDB (gain);
 
         // Written as they are: they fit, so Tracktion's setters, which fit each against the other's old length, aren't needed.
-        const auto [fadeIn, fadeOut] = getFittedFades (clipState, position.getLength().inSeconds());
+        const auto [fadeIn, fadeOut] = getFittedFades (song, clipState);
 
         if (! juce::exactlyEqual ((double) clip->state.getProperty (te::IDs::fadeIn, 0.0), fadeIn))
             clip->state.setProperty (te::IDs::fadeIn, fadeIn, undo);
@@ -288,6 +342,16 @@ namespace
     }
 } // namespace
 
+void reconcileFile (te::Edit& edit, const juce::File& file)
+{
+    edit.engine.getAudioFileManager().checkFileForChanges (te::AudioFile (edit.engine, file));
+}
+
+void releaseFile (te::Edit& edit, const juce::File& file)
+{
+    edit.engine.getAudioFileManager().releaseFile (te::AudioFile (edit.engine, file));
+}
+
 void reconcileClips (te::Edit& edit)
 {
     if (! findTrackList (edit).isValid())
@@ -295,7 +359,7 @@ void reconcileClips (te::Edit& edit)
 
     std::set<te::EditItemID> kept;
 
-    for (const auto& clipState : getClipStates (edit))
+    for (const auto& clipState : getClipStates (getSong (edit)))
     {
         kept.insert (toTracktion (getClipID (clipState)));
 
@@ -320,7 +384,7 @@ void reconcileClips (te::Edit& edit)
 
 void reconcileClip (te::Edit& edit, ClipID id)
 {
-    if (const auto clipState = findClipState (edit, id); clipState.isValid())
+    if (const auto clipState = findClipState (getSong (edit), id); clipState.isValid())
     {
         if (auto* track = findTrackOf (edit, clipState))
         {

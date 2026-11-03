@@ -4,6 +4,7 @@
 #include "internal/Metronome.h"
 #include "internal/Playback.h"
 #include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
@@ -12,6 +13,7 @@
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mirror/internal/Bridge.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
@@ -134,21 +136,23 @@ namespace
         auto* recorder = selection.getEdit() != nullptr ? AudioRecorder::findFor (*selection.getEdit()) : nullptr;
 
         if (recorder != nullptr)
-            for (auto* track : selection.getItemsOfType<te::AudioTrack>())
-                if (! getInputChannels (findTrackState (*track)[schema::trackInput].toString()).empty() && ! hasInstrument (*track))
-                    tracks.add (track);
+            for (const auto id : selection.getTracks())
+                if (auto* track = dynamic_cast<te::AudioTrack*> (mirror::findTrack (*selection.getEdit(), id)))
+                    if (! getInputChannels (findTrackState (*track)[schema::trackInput].toString()).empty() && ! hasInstrument (*track))
+                        tracks.add (track);
 
         return tracks;
     }
 
     // The selected audio clips with takes.
-    juce::Array<te::AudioClipBase*> getClipsWithTakes (const Selection& selection)
+    std::vector<ClipID> getClipsWithTakes (const Selection& selection)
     {
-        juce::Array<te::AudioClipBase*> clips;
+        std::vector<ClipID> clips;
 
-        for (auto* clip : selection.getItemsOfType<te::AudioClipBase>())
-            if (getClipTakeCount (*clip) > 1)
-                clips.add (clip);
+        if (auto* song = selection.getSong())
+            for (const auto clip : getSelectedClips (selection))
+                if (getClipTakeCount (*song, clip) > 1)
+                    clips.push_back (clip);
 
         return clips;
     }
@@ -176,16 +180,15 @@ void toggleArmSelectedTracks (const Selection& selection)
 
 bool canStepTakes (const Selection& selection)
 {
-    return ! getClipsWithTakes (selection).isEmpty();
+    return ! getClipsWithTakes (selection).empty();
 }
 
 void stepTakes (const Selection& selection, int direction)
 {
     // The takes lie one after another in the clip's file, each as long as the range they were recorded round.
-    for (auto* clip : getClipsWithTakes (selection))
-    {
-        playTake (*clip, juce::jlimit (1, getClipTakeCount (*clip), getClipTake (*clip) + direction));
-    }
+    if (auto* song = selection.getSong())
+        for (const auto clip : getClipsWithTakes (selection))
+            playTake (*song, clip, juce::jlimit (1, getClipTakeCount (*song, clip), getClipTake (*song, clip) + direction));
 }
 
 //==============================================================================

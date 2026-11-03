@@ -3,9 +3,10 @@
 #include "internal/Notes.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/engine/internal/LiveInput.h"
-#include "model/mirror/internal/Bridge.h"
+#include "model/mirror/internal/Mirror.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -14,87 +15,37 @@
 #include <cmath>
 #include <functional>
 #include <limits>
-#include <unordered_map>
 
 namespace phazite
 {
 namespace
 {
-    te::Track* findTrack (const ProjectContext& context, TrackID id)
+    // A MIDI clip's element in the open project's song, or invalid.
+    juce::ValueTree findMidiClip (const ProjectContext& context, ClipID id)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
+        auto* song = findSong (context);
+        const auto clipState = song != nullptr ? findClipState (*song, id) : juce::ValueTree();
+        return isMidiState (clipState) ? clipState : juce::ValueTree();
     }
 
-    te::AudioTrack* findAudioTrack (const ProjectContext& context, TrackID id)
+    // A track of the open project's that can hold notes: a track or a return, not a folder or the master.
+    bool canHold (const Song& song, TrackID id)
     {
-        return dynamic_cast<te::AudioTrack*> (findTrack (context, id));
+        const auto state = findTrackState (song, id);
+        return state.hasType (schema::TRACK) && ! isFolderState (state);
     }
 
-    te::MidiClip* findMidiClip (const ProjectContext& context, ClipID id)
+    NoteClip makeNoteClip (const Song& song, const juce::ValueTree& clipState)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, toTracktion (id))) : nullptr;
-    }
-
-    juce::Array<te::MidiClip*> findMidiClips (const ProjectContext& context, const std::vector<ClipID>& ids)
-    {
-        juce::Array<te::MidiClip*> clips;
-
-        for (const auto id : ids)
-            if (auto* clip = findMidiClip (context, id))
-                clips.add (clip);
-
-        return clips;
-    }
-
-    // The notes named, found once per clip: each clip's notes by ID.
-    std::vector<ClipNote> findNotes (const ProjectContext& context, const std::vector<NoteRef>& refs)
-    {
-        std::vector<ClipNote> notes;
-        std::unordered_map<ClipID, std::unordered_map<NoteID, te::MidiNote*>> byClip;
-
-        for (const auto& ref : refs)
-        {
-            auto* clip = findMidiClip (context, ref.clip);
-
-            if (clip == nullptr)
-                continue;
-
-            auto [found, isNew] = byClip.try_emplace (ref.clip);
-
-            if (isNew)
-                for (auto* note : clip->getSequence().getNotes())
-                    found->second.emplace (getNoteID (*note), note);
-
-            if (const auto note = found->second.find (ref.note); note != found->second.end())
-                notes.push_back ({ clip, note->second });
-        }
-
-        return notes;
-    }
-
-    std::vector<NoteRef> refsOf (const std::vector<ClipNote>& notes)
-    {
-        std::vector<NoteRef> refs;
-
-        for (const auto& n : notes)
-            refs.push_back (getNoteRef (*n.clip, *n.note));
-
-        return refs;
-    }
-
-    NoteClip makeNoteClip (const te::MidiClip& clip)
-    {
-        auto* track = clip.getTrack();
-        const auto row = track != nullptr ? getPlaylistTracks (clip.edit).indexOf (track) : 0;
-
-        return { getClipID (clip),
-                 track != nullptr ? getTrackID (*track) : TrackID(),
-                 clip.getName(),
-                 fromTracktion (clip.getEditBeatRange()),
-                 fromTracktion (clip.getContentStartBeat()),
-                 track != nullptr ? getTrackColour (*track, row) : juce::Colours::grey };
+        const auto track = getTrackID (clipState.getParent());
+        const auto tracks = getTrackIDs (song);
+        const auto row = (int) (std::find (tracks.begin(), tracks.end(), track) - tracks.begin());
+        return { getClipID (clipState),
+                 track,
+                 clipState[schema::clipName].toString(),
+                 getClipRange (clipState),
+                 getContentStart (clipState),
+                 getTrackColour (song, track, row) };
     }
 } // namespace
 
@@ -104,60 +55,56 @@ std::vector<NoteClip> getNoteClips (const ProjectContext& context, const std::ve
     std::vector<NoteClip> clips;
 
     for (const auto id : ids)
-        if (auto* clip = findMidiClip (context, id))
-            clips.push_back (makeNoteClip (*clip));
+        if (const auto clipState = findMidiClip (context, id); clipState.isValid())
+            clips.push_back (makeNoteClip (*findSong (context), clipState));
 
     return clips;
 }
 
 std::optional<NoteClip> getNoteClip (const ProjectContext& context, ClipID id)
 {
-    if (auto* clip = findMidiClip (context, id))
-        return makeNoteClip (*clip);
+    if (const auto clipState = findMidiClip (context, id); clipState.isValid())
+        return makeNoteClip (*findSong (context), clipState);
 
     return {};
 }
 
 bool canHoldNotes (const ProjectContext& context, TrackID id)
 {
-    return findAudioTrack (context, id) != nullptr;
+    auto* song = findSong (context);
+    return song != nullptr && canHold (*song, id);
 }
 
 bool hasAudioClips (const ProjectContext& context, TrackID id)
 {
-    if (auto* track = findAudioTrack (context, id))
-        for (auto* clip : track->getClips())
-            if (dynamic_cast<te::AudioClipBase*> (clip) != nullptr)
-                return true;
-
-    return false;
+    auto* song = findSong (context);
+    return song != nullptr && canHold (*song, id) && hasAudioClips (*song, getClips (*song, id));
 }
 
 std::optional<ClipID> getMidiClipNearest (const ProjectContext& context, TrackID id, BeatPosition beat)
 {
-    auto* track = findAudioTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr)
+    if (song == nullptr || ! canHold (*song, id))
         return {};
 
     std::optional<ClipID> nearest;
     auto nearestDistance = std::numeric_limits<double>::max();
-    const auto at = toTracktion (beat);
 
-    for (auto* clip : track->getClips())
+    for (const auto& clipState : getClipStates (findTrackState (*song, id)))
     {
-        if (auto* midi = dynamic_cast<te::MidiClip*> (clip))
-        {
-            const auto range = midi->getEditBeatRange();
-            const auto distance = range.contains (at)
-                                      ? 0.0
-                                      : std::min (std::abs ((range.getStart() - at).inBeats()), std::abs ((range.getEnd() - at).inBeats()));
+        if (! isMidiState (clipState))
+            continue;
 
-            if (distance < nearestDistance)
-            {
-                nearest = getClipID (*midi);
-                nearestDistance = distance;
-            }
+        const auto range = getClipRange (clipState);
+        const auto distance = range.contains (beat)
+                                  ? 0.0
+                                  : std::min (std::abs ((range.getStart() - beat).inBeats()), std::abs ((range.getEnd() - beat).inBeats()));
+
+        if (distance < nearestDistance)
+        {
+            nearest = getClipID (clipState);
+            nearestDistance = distance;
         }
     }
 
@@ -166,14 +113,14 @@ std::optional<ClipID> getMidiClipNearest (const ProjectContext& context, TrackID
 
 ClipID addClipForNotes (ProjectContext& context, TrackID id, BeatPosition start)
 {
-    auto* track = findAudioTrack (context, id);
-    auto* clip = track != nullptr ? insertBarLongMidiClip (*track, toTracktion (start), nullptr) : nullptr;
-    return clip != nullptr ? getClipID (*clip) : ClipID();
+    auto* song = findSong (context);
+    return song != nullptr && canHold (*song, id) ? insertBarLongMidiClip (*song, id, start, nullptr) : ClipID();
 }
 
 std::optional<double> getLinkedPlayBeat (const ProjectContext& context, const std::vector<ClipID>& ids, double songBeat)
 {
-    return getLinkedPlayBeat (findMidiClips (context, ids), songBeat);
+    auto* song = findSong (context);
+    return song != nullptr ? getLinkedPlayBeat (*song, ids, songBeat) : std::nullopt;
 }
 
 //==============================================================================
@@ -181,43 +128,37 @@ std::vector<NoteData> getNotes (const ProjectContext& context, const std::vector
 {
     std::vector<NoteData> notes;
 
-    for (auto* clip : findMidiClips (context, ids))
-        for (auto* note : clip->getSequence().getNotes())
-            notes.push_back (getNoteData (*clip, *note));
+    if (auto* song = findSong (context))
+        for (const auto id : ids)
+            for (const auto& note : getClipNotes (*song, id))
+                notes.push_back (note);
 
     return notes;
 }
 
 std::optional<NoteData> getNote (const ProjectContext& context, NoteRef ref)
 {
-    auto* clip = findMidiClip (context, ref.clip);
-    auto* note = clip != nullptr ? findNote (*clip, ref.note) : nullptr;
-
-    if (note == nullptr)
-        return {};
-
-    return getNoteData (*clip, *note);
+    auto* song = findSong (context);
+    return song != nullptr ? getNoteData (*song, ref) : std::nullopt;
 }
 
 std::vector<NoteData> getNotesOfOtherTracks (const ProjectContext& context, const std::vector<TrackID>& shown, BeatRange range)
 {
     std::vector<NoteData> notes;
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return notes;
 
-    const auto visible = toTracktion (range);
-
-    for (auto* track : te::getAudioTracks (*edit))
+    for (const auto track : getTrackIDs (*song))
     {
-        if (std::find (shown.begin(), shown.end(), getTrackID (*track)) != shown.end())
+        if (std::find (shown.begin(), shown.end(), track) != shown.end())
             continue;
 
-        for (auto* clip : track->getClips())
-            if (auto* midi = dynamic_cast<te::MidiClip*> (clip); midi != nullptr && midi->getEditBeatRange().overlaps (visible))
-                for (auto* note : midi->getSequence().getNotes())
-                    notes.push_back (getNoteData (*midi, *note));
+        for (const auto& clipState : getClipStates (findTrackState (*song, track)))
+            if (isMidiState (clipState) && getClipRange (clipState).overlaps (range))
+                for (const auto& note : getClipNotes (*song, getClipID (clipState)))
+                    notes.push_back (note);
     }
 
     return notes;
@@ -225,42 +166,44 @@ std::vector<NoteData> getNotesOfOtherTracks (const ProjectContext& context, cons
 
 NoteRef addNote (ProjectContext& context, ClipID id, int pitch, BeatPosition start, BeatDuration length, int velocity)
 {
-    auto* clip = findMidiClip (context, id);
-    auto* note = clip != nullptr ? addNote (*clip, pitch, toTracktion (start), toTracktion (length), velocity) : nullptr;
-    return note != nullptr ? getNoteRef (*clip, *note) : NoteRef();
+    auto* song = findSong (context);
+    return song != nullptr ? addNote (*song, id, pitch, start, length, velocity) : NoteRef();
 }
 
 void moveNote (ProjectContext& context, NoteRef ref, BeatPosition start, int pitch)
 {
-    for (const auto& n : findNotes (context, { ref }))
-        moveNote (*n.clip, *n.note, toTracktion (start), pitch);
+    if (auto* song = findSong (context))
+        moveNote (*song, ref, start, pitch);
 }
 
 void setNoteLength (ProjectContext& context, NoteRef ref, BeatDuration length)
 {
-    for (const auto& n : findNotes (context, { ref }))
-        setNoteLength (*n.clip, *n.note, toTracktion (length));
+    if (auto* song = findSong (context))
+        setNoteLength (*song, ref, length);
 }
 
 void deleteNotes (ProjectContext& context, const std::vector<NoteRef>& refs)
 {
-    deleteNotes (findNotes (context, refs));
+    if (auto* song = findSong (context))
+        deleteNotes (*song, refs);
 }
 
 void toggleNotesMuted (ProjectContext& context, const std::vector<NoteRef>& refs)
 {
-    toggleNotesMuted (findNotes (context, refs));
+    if (auto* song = findSong (context))
+        toggleNotesMuted (*song, refs);
 }
 
 void setNoteVelocities (ProjectContext& context, const std::vector<NoteRef>& refs, int velocity)
 {
-    setNoteVelocities (findNotes (context, refs), velocity);
+    if (auto* song = findSong (context))
+        setNoteVelocities (*song, refs, velocity);
 }
 
 void nudgeNotes (ProjectContext& context, const std::vector<NoteRef>& refs, BeatDuration amount)
 {
-    if (const auto notes = findNotes (context, refs); ! notes.empty())
-        nudgeNotes (notes, toTracktion (amount));
+    if (auto* song = findSong (context))
+        nudgeNotes (*song, refs, amount);
 }
 
 namespace
@@ -320,17 +263,17 @@ namespace
     void setEach (ProjectContext& context, const std::vector<NoteRef>& refs, NoteProperty property,
                   const std::function<double (Range, double)>& valueOf)
     {
-        auto* edit = getEdit (context);
+        auto* song = findSong (context);
         std::vector<NoteData> notes;
 
         for (const auto ref : refs)
             if (const auto note = getNote (context, ref))
                 notes.push_back (*note);
 
-        if (edit == nullptr || notes.empty())
+        if (song == nullptr || notes.empty())
             return;
 
-        const UndoStep step (*edit, getUndoName (property));
+        const UndoStep step (*song, getUndoName (property));
         const auto range = getRange (notes, property);
         auto changed = notes;
 
@@ -385,161 +328,166 @@ void setNotesTo (ProjectContext& context, const std::vector<NoteRef>& refs, Note
 
 void setNotes (ProjectContext& context, const std::vector<NoteData>& notes)
 {
-    std::vector<NoteRef> refs;
-
-    for (const auto& note : notes)
-        refs.push_back (note.getRef());
-
-    // Found once, in the order given (those that are gone left out), then each set as given.
-    auto data = notes.begin();
-
-    for (const auto& n : findNotes (context, refs))
+    // Each as given, those that are gone left out.
+    if (auto* song = findSong (context))
     {
-        const auto ref = getNoteRef (*n.clip, *n.note);
+        for (const auto& note : notes)
+        {
+            if (! findNoteState (*song, note.getRef()).isValid())
+                continue;
 
-        while (data != notes.end() && data->getRef() != ref)
-            ++data;
-
-        if (data == notes.end())
-            break;
-
-        moveNote (*n.clip, *n.note, toTracktion (data->start), data->pitch);
-        setNoteLength (*n.clip, *n.note, toTracktion (data->length));
-        ++data;
+            moveNote (*song, note.getRef(), note.start, note.pitch);
+            setNoteLength (*song, note.getRef(), note.length);
+        }
     }
 }
 
 std::vector<NoteRef> replaceNotes (ProjectContext& context, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? refsOf (replaceNotes (*edit, findNotes (context, old), replacements)) : std::vector<NoteRef>();
+    auto* song = findSong (context);
+    return song != nullptr ? replaceNotes (*song, old, replacements) : std::vector<NoteRef>();
 }
 
 std::vector<NoteRef> replaceNotes (ProjectContext& context, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements,
                                    const juce::String& undoName)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? refsOf (replaceNotes (*edit, findNotes (context, old), replacements, undoName)) : std::vector<NoteRef>();
+    auto* song = findSong (context);
+    return song != nullptr ? replaceNotes (*song, old, replacements, undoName) : std::vector<NoteRef>();
 }
 
 void changeNoteVelocities (ProjectContext& context, const std::vector<NoteRef>& refs, int change)
 {
-    changeNoteVelocities (findNotes (context, refs), change);
+    if (auto* song = findSong (context))
+        changeNoteVelocities (*song, refs, change);
 }
 
 //==============================================================================
 std::optional<Key> getTrackKey (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    return track != nullptr ? getTrackKey (*track) : std::nullopt;
+    auto* song = findSong (context);
+    return song != nullptr ? getTrackKey (*song, id) : std::nullopt;
 }
 
 void chooseTrackKey (ProjectContext& context, TrackID id, const std::optional<Key>& key)
 {
-    if (auto* track = findTrack (context, id))
-        chooseTrackKey (*track, key);
+    if (auto* song = findSong (context); song != nullptr && findTrackState (*song, id).isValid())
+        chooseTrackKey (*song, id, key);
 }
 
 void useKeyOnEveryTrack (ProjectContext& context, const std::optional<Key>& key)
 {
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return;
 
-    const UndoStep step (*edit, "Use This Key on Every Track");
-    setTrackKeys (getPlaylistTracks (*edit), key);
+    const UndoStep step (*song, "Use This Key on Every Track");
+    setTrackKeys (*song, getTrackIDs (*song), key);
 }
 
 //==============================================================================
 bool isDrumTrack (const ProjectContext& context, TrackID id)
 {
-    auto* track = findAudioTrack (context, id);
-    return track != nullptr && isDrumTrack (*track);
+    auto* song = findSong (context);
+    return song != nullptr && canHold (*song, id) && isDrumTrack (*song, id);
 }
 
 void setDrumTrack (ProjectContext& context, TrackID id, bool on)
 {
-    if (auto* track = findAudioTrack (context, id))
-        setDrumTrack (*track, on);
+    if (auto* song = findSong (context); song != nullptr && canHold (*song, id))
+        setDrumTrack (*song, id, on);
 }
 
 std::optional<std::vector<DrumRow>> getSamplerSounds (const ProjectContext& context, TrackID id)
 {
-    auto* track = findAudioTrack (context, id);
-    return track != nullptr ? getSamplerSounds (*track) : std::nullopt;
+    auto* song = findSong (context);
+    return song != nullptr && canHold (*song, id) ? getSamplerSounds (*song, id) : std::nullopt;
 }
 
 std::vector<int> getNoteNumbersPlayed (const ProjectContext& context, const std::vector<ClipID>& ids)
 {
-    return getNoteNumbersPlayed (findMidiClips (context, ids));
+    auto* song = findSong (context);
+    return song != nullptr ? getNoteNumbersPlayed (*song, ids) : std::vector<int>();
 }
 
 std::vector<int> getDrumRowOrder (const ProjectContext& context, TrackID id)
 {
-    auto* track = findAudioTrack (context, id);
-    return track != nullptr ? getDrumRowOrder (*track) : std::vector<int>();
+    auto* song = findSong (context);
+    return song != nullptr && canHold (*song, id) ? getDrumRowOrder (*song, id) : std::vector<int>();
 }
 
 void setDrumRowOrder (ProjectContext& context, TrackID id, const std::vector<int>& notes)
 {
-    if (auto* track = findAudioTrack (context, id))
-        setDrumRowOrder (*track, notes);
+    if (auto* song = findSong (context); song != nullptr && canHold (*song, id))
+        setDrumRowOrder (*song, id, notes);
 }
 
 std::vector<int> getHiddenDrumRows (const ProjectContext& context, TrackID id)
 {
-    auto* track = findAudioTrack (context, id);
-    return track != nullptr ? getHiddenDrumRows (*track) : std::vector<int>();
+    auto* song = findSong (context);
+    return song != nullptr && canHold (*song, id) ? getHiddenDrumRows (*song, id) : std::vector<int>();
 }
 
 void hideDrumRow (ProjectContext& context, TrackID id, int note)
 {
-    if (auto* track = findAudioTrack (context, id))
-        hideDrumRow (*track, note);
+    if (auto* song = findSong (context); song != nullptr && canHold (*song, id))
+        hideDrumRow (*song, id, note);
 }
 
 void showAllDrumRows (ProjectContext& context, TrackID id)
 {
-    if (auto* track = findAudioTrack (context, id))
-        showAllDrumRows (*track);
+    if (auto* song = findSong (context); song != nullptr && canHold (*song, id))
+        showAllDrumRows (*song, id);
 }
 
 //==============================================================================
 TrackID auditionNotes (ProjectContext& context, ClipID id, const std::vector<int>& pitches, int velocity)
 {
-    auto* clip = findMidiClip (context, id);
-    auto* track = clip != nullptr ? dynamic_cast<te::AudioTrack*> (clip->getTrack()) : nullptr;
+    auto* song = findSong (context);
+    const auto track = song != nullptr ? getClipTrack (*song, id) : TrackID();
 
-    if (track == nullptr || ! hasInstrument (*track))
+    if (! track.isValid() || ! findMidiClip (context, id).isValid() || ! hasInstrument (*song, track))
+        return {};
+
+    auto* edit = findEdit (*song);
+
+    if (edit == nullptr)
         return {};
 
     // Through Phazite's own engine while it plays the project (docs/tracktion-migration.md, T2).
-    if (auto* session = findPlayingSession (clip->edit))
+    if (auto* session = findPlayingSession (*edit))
     {
-        session->playGuideNotes ((juce::int64) track->itemID.getRawID(), pitches, velocity);
-        return getTrackID (*track);
+        session->playGuideNotes ((juce::int64) track.getRaw(), pitches, velocity);
+        return track;
     }
 
     // Guide notes go into the track as live MIDI does, so the playback graph has to be running.
-    clip->edit.getTransport().ensureContextAllocated();
-    const auto channel = clip->getMidiChannel().isValid() ? clip->getMidiChannel() : te::MidiChannel (1);
+    auto* audioTrack = dynamic_cast<te::AudioTrack*> (mirror::findTrack (*edit, track));
+
+    if (audioTrack == nullptr)
+        return {};
+
+    edit->getTransport().ensureContextAllocated();
 
     for (const auto pitch : pitches)
-        track->playGuideNote (pitch, channel, juce::jlimit (1, 127, velocity), false, true, false);
+        audioTrack->playGuideNote (pitch, te::MidiChannel (1), juce::jlimit (1, 127, velocity), false, true, false);
 
-    return getTrackID (*track);
+    return track;
 }
 
 void stopAuditioning (ProjectContext& context, TrackID id)
 {
-    if (auto* track = findAudioTrack (context, id))
-    {
-        if (auto* session = findSession (track->edit))
-            session->stopGuideNotes ((juce::int64) track->itemID.getRawID());
+    auto* song = findSong (context);
+    auto* edit = song != nullptr ? findEdit (*song) : nullptr;
 
+    if (edit == nullptr)
+        return;
+
+    if (auto* session = findSession (*edit))
+        session->stopGuideNotes ((juce::int64) id.getRaw());
+
+    if (auto* track = dynamic_cast<te::AudioTrack*> (mirror::findTrack (*edit, id)))
         track->turnOffGuideNotes();
-    }
 }
 
 //==============================================================================
