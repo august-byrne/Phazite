@@ -3,6 +3,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/project/ExampleSongs.h"
 #include "model/project/internal/Export.h"
 #include "ui/input/KeymapStore.h"

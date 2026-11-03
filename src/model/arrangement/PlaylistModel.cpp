@@ -9,6 +9,8 @@
 #include "model/base/internal/Schema.h"
 #include "model/chords/internal/Chords.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mirror/internal/Bridge.h"
+#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -99,11 +101,10 @@ namespace
         row.pinned = isPinned (song, id);
         row.savedHeight = getSavedTrackHeight (song, id);
 
-        if (auto* audio = dynamic_cast<te::AudioTrack*> (phazite::findTrack (edit, state)))
-        {
+        if (auto* audio = dynamic_cast<te::AudioTrack*> (mirror::findTrack (edit, state)))
             row.hasInstrument = hasInstrument (*audio);
-            row.frozen = audio->isFrozen (te::Track::individualFreeze);
-        }
+
+        row.frozen = state[schema::trackFrozen];
 
         return row;
     }

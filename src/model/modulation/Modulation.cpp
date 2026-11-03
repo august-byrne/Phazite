@@ -4,6 +4,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DevicePlugin.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -162,67 +163,6 @@ std::vector<float> getModulatorSteps (const juce::ValueTree& modulatorState)
         steps.push_back (value.getFloatValue());
 
     return steps;
-}
-
-void mapCopiedModulators (const te::Track& original, const te::Track& copy, te::EditItemID::IDMap& map)
-{
-    auto* originals = original.getModifierList();
-    auto* copies = copy.getModifierList();
-
-    if (originals != nullptr && copies != nullptr)
-    {
-        const auto from = originals->getModifiers(), to = copies->getModifiers();
-
-        for (int i = 0; i < from.size() && i < to.size(); ++i)
-            map[from[i]->itemID] = to[i]->itemID;
-    }
-
-    auto* originalTrack = dynamic_cast<const te::AudioTrack*> (&original);
-    auto* copiedTrack = dynamic_cast<const te::AudioTrack*> (&copy);
-
-    if (originalTrack != nullptr && copiedTrack != nullptr)
-    {
-        const auto from = originalTrack->getMacroParameters(), to = copiedTrack->getMacroParameters();
-
-        for (int i = 0; i < from.size() && i < to.size(); ++i)
-            map[te::EditItemID::fromID (from[i]->state)] = te::EditItemID::fromID (to[i]->state);
-    }
-
-    const auto originalTracks = original.getAllSubTracks (false), copiedTracks = copy.getAllSubTracks (false);
-
-    for (int i = 0; i < originalTracks.size() && i < copiedTracks.size(); ++i)
-        mapCopiedModulators (*originalTracks[i], *copiedTracks[i], map);
-}
-
-void giveCopiedModulatorIDs (juce::ValueTree& copiedTrack, const te::EditItemID::IDMap& copied)
-{
-    const auto giveCopiedID = [&copied] (juce::ValueTree element, const juce::Identifier& property, bool asText)
-    {
-        if (const auto found = copied.find (te::EditItemID::fromVar (element[property])); found != copied.end())
-            element.setProperty (
-                property, asText ? juce::var (found->second.toString()) : juce::var ((juce::int64) found->second.getRawID()), nullptr);
-    };
-
-    const auto giveModulatorIDs = [&giveCopiedID] (const juce::ValueTree& owner)
-    {
-        for (const auto& child : owner)
-        {
-            if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
-            {
-                giveCopiedID (child, schema::modulatorID, false);
-
-                for (const auto& modulates : child)
-                    if (modulates.hasType (schema::MODULATES))
-                        giveCopiedID (modulates, schema::modulatesDevice, true);
-            }
-        }
-    };
-
-    giveModulatorIDs (copiedTrack);
-
-    for (const auto& device : getDeviceStates (copiedTrack))
-        if (device.hasType (schema::CONTAINER))
-            giveModulatorIDs (device);
 }
 
 //==============================================================================

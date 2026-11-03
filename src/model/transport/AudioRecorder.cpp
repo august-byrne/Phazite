@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/AudioIO.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 

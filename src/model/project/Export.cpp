@@ -4,6 +4,7 @@
 #include "internal/Export.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackSession.h"

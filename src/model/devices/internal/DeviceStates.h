@@ -9,7 +9,7 @@
 // undo step that changed nothing the user did, and undoing one that stored a plug-in's channel layout for the first time
 // reset the playing plug-in. These store the same without the undo manager, and only what differs from what is there, as
 // the undo manager would: Tracktion's own, called after them, finds it all stored and records nothing.
-// Call them instead of Tracktion's, and before what of Tracktion's stores devices' states itself (Edit::copyTrack()).
+// Call them instead of Tracktion's; the song asks for them before it copies a track (Song::storeDeviceStates()).
 // A plug-in's are stored in its element in the song too (Schema.h: DEVICE; docs/tracktion-migration.md, T1 step 5c),
 // which the model also stores before it takes the plug-in away, so that an undo brings it back as it was.
 #pragma once

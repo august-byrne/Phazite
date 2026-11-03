@@ -8,6 +8,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -888,41 +889,41 @@ std::optional<Scale> findScale (const juce::String& savedName)
     return std::nullopt;
 }
 
-std::optional<Key> getTrackKey (const te::Track& track)
+std::optional<Key> getTrackKey (const Song& song, TrackID track)
 {
-    return readKey (findTrackState (track));
+    return readKey (findTrackState (song, track));
 }
 
-void setTrackKey (te::Track& track, const std::optional<Key>& key)
+void setTrackKey (Song& song, TrackID track, const std::optional<Key>& key)
 {
-    writeKey (findTrackState (track), key, &getSong (track.edit).getUndoManager());
+    writeKey (findTrackState (song, track), key, &song.getUndoManager());
 
     // What new tracks get; not an edit to undo.
     if (key.has_value())
-        writeKey (getSong (track.edit).getState().getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
+        writeKey (song.getState().getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
 }
 
-void setTrackKeys (const juce::Array<te::Track*>& tracks, const std::optional<Key>& key)
+void setTrackKeys (Song& song, const std::vector<TrackID>& tracks, const std::optional<Key>& key)
 {
-    for (auto* track : tracks)
-        setTrackKey (*track, key);
+    for (const auto track : tracks)
+        setTrackKey (song, track, key);
 }
 
-void chooseTrackKey (te::Track& track, const std::optional<Key>& key)
+void chooseTrackKey (Song& song, TrackID track, const std::optional<Key>& key)
 {
-    const UndoStep step (track.edit, key.has_value() ? "Set Key" : "Turn Key Off");
-    setTrackKey (track, key);
+    const UndoStep step (song, key.has_value() ? "Set Key" : "Turn Key Off");
+    setTrackKey (song, track, key);
 }
 
-void applyLastKey (te::Track& track)
+void applyLastKey (Song& song, TrackID track)
 {
-    if (const auto last = readKey (findPhaziteState (track.edit).getChildWithName (schema::LASTKEY)))
-        writeKey (findTrackState (track), last, nullptr);
+    if (const auto last = readKey (song.getState().getChildWithName (schema::LASTKEY)))
+        writeKey (findTrackState (song, track), last, nullptr);
 }
 
-void setLastKey (te::Edit& edit, const Key& key)
+void setLastKey (Song& song, const Key& key)
 {
-    writeKey (getSong (edit).getState().getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
+    writeKey (song.getState().getOrCreateChildWithName (schema::LASTKEY, nullptr), key, nullptr);
 }
 
 int snapToKey (int pitch, const Key& key)

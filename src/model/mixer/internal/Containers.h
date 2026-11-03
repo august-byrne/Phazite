@@ -88,11 +88,6 @@ juce::String makeContainerName (const te::Edit&);
 // this gives a preset's container, made on no channel yet, its own). Joins the caller's step.
 void addContainerMacros (te::RackType&);
 
-// After a track was copied (a folder with its tracks): the copy's containers play rack types of their own, copies of the
-// original's, whose devices the copy's modulators modulate where the original's modulated the original's. Returns what
-// each device (and macro) in the original's containers is in the copy's. Joins the caller's step.
-te::EditItemID::IDMap copyContainers (const te::Track& original, te::Track& copy);
-
 //==============================================================================
 // The commands act on the selected devices: grouping them, which selects the container ("Group into Container"), and
 // ungrouping the selected container, which selects its devices ("Ungroup Container").

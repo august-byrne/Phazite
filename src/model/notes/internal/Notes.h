@@ -106,20 +106,19 @@ std::vector<ClipNote> replaceSelectedNotes (Selection&, const std::function<std:
 
 // A track's key, which the piano roll shades its rows by and can snap notes to. A track has none until one is chosen:
 // Phazite keeps a key for each track, and the chord lane's keys along the song (model/chords/ChordModel.h).
-std::optional<Key> getTrackKey (const te::Track&);
+std::optional<Key> getTrackKey (const Song&, TrackID);
 
-// Sets a track's key (or none), with the Edit's undo manager. The song remembers it, and new tracks get it
-// (applyLastKey()).
-void setTrackKey (te::Track&, const std::optional<Key>&);
-void setTrackKeys (const juce::Array<te::Track*>&, const std::optional<Key>&); // the same key for each of them
+// Sets a track's key (or none), in the caller's undo step. The song remembers it, and new tracks get it (applyLastKey()).
+void setTrackKey (Song&, TrackID, const std::optional<Key>&);
+void setTrackKeys (Song&, const std::vector<TrackID>&, const std::optional<Key>&); // the same key for each of them
 
 // Sets a track's key as the piano roll's key menu does, as one undo step: "Set Key", or "Turn Key Off".
-void chooseTrackKey (te::Track&, const std::optional<Key>&);
-void applyLastKey (te::Track&); // the key set last on any of the song's tracks, if there is one
+void chooseTrackKey (Song&, TrackID, const std::optional<Key>&);
+void applyLastKey (Song&, TrackID); // the key set last on any of the song's tracks, if there is one
 
 // Makes a key the one new tracks get (applyLastKey()), as setting it on a track does, without an undo step: a new
 // project's key, before it has tracks.
-void setLastKey (te::Edit&, const Key&);
+void setLastKey (Song&, const Key&);
 
 //==============================================================================
 // Drum mode (docs/design.md, section 7).

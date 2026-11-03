@@ -47,12 +47,6 @@ std::vector<float> getModulatorSteps (const juce::ValueTree& modulatorState);
 std::optional<ModulatorType> findModulatorType (const juce::String& name);
 const juce::Identifier& getModifierType (ModulatorType);
 
-// After a track was copied (a folder with its tracks): what each of the original's modulators and macros is in the copy,
-// the one in the same place, added to a map; and the elements of the modulators and macros, and of what they modulate, in
-// the copy of its element given the copies' IDs, through a map that also holds its devices' (Mixer.h: mapCopiedDevices()).
-void mapCopiedModulators (const te::Track& original, const te::Track& copy, te::EditItemID::IDMap&);
-void giveCopiedModulatorIDs (juce::ValueTree& copiedTrack, const te::EditItemID::IDMap& copied);
-
 // A track's modulators, in their order, then its macros: the master's and folders' too.
 std::vector<ModulatorAccess> getModulators (te::Track&);
 

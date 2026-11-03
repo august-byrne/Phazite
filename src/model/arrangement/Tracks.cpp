@@ -5,13 +5,8 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/devices/internal/DeviceStates.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Buses.h"
-#include "model/mixer/internal/Containers.h"
-#include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
-#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 
 #include <algorithm>
@@ -20,11 +15,6 @@ namespace phazite
 {
 namespace
 {
-    juce::UndoManager* getUndo (te::Edit& edit)
-    {
-        return &getSong (edit).getUndoManager();
-    }
-
     void collectTrackStates (const juce::ValueTree& parent, std::vector<juce::ValueTree>& states)
     {
         for (const auto& child : parent)
@@ -56,35 +46,39 @@ namespace
 
     // A new track's element, of a kind, with an ID of the song's (Song::makeID()), and its fader's: a folder starts as a bus
     // (design question 11).
-    juce::ValueTree makeTrackState (te::Edit& edit, const char* kind, juce::Colour colour)
+    juce::ValueTree makeTrackState (Song& song, const char* kind, std::optional<juce::Colour> colour)
     {
         juce::ValueTree state (schema::TRACK);
-        state.setProperty (schema::trackID, (juce::int64) getSong (edit).makeID(), nullptr);
+        state.setProperty (schema::trackID, (juce::int64) song.makeID(), nullptr);
         state.setProperty (schema::trackKind, kind, nullptr);
-        state.setProperty (schema::trackColour, colour.toString(), nullptr);
-        state.setProperty (schema::channelFader, (juce::int64) getSong (edit).makeID(), nullptr);
+
+        if (colour.has_value())
+            state.setProperty (schema::trackColour, colour->toString(), nullptr);
+
+        state.setProperty (schema::channelFader, (juce::int64) song.makeID(), nullptr);
         return state;
     }
 
     // Puts a track's element right after another track's, in that one's folder, or at the end of the list.
-    void insertTrackState (te::Edit& edit, const juce::ValueTree& state, const te::Track* after)
+    void insertTrackState (Song& song, const juce::ValueTree& state, TrackID after)
     {
-        if (const auto previous = after != nullptr ? findTrackState (*after) : juce::ValueTree(); previous.isValid())
+        if (const auto previous = findTrackState (song, after); previous.isValid() && ! previous.hasType (schema::MASTER))
         {
             auto parent = previous.getParent();
-            parent.addChild (state, parent.indexOf (previous) + 1, getUndo (edit));
+            parent.addChild (state, parent.indexOf (previous) + 1, &song.getUndoManager());
         }
         else
         {
-            getTrackList (edit).appendChild (state, getUndo (edit));
+            getTrackList (song).appendChild (state, &song.getUndoManager());
         }
     }
 
     // Moves a track's element to a place among a parent's children (a folder's element, or the list): before the child
     // at that index as the children are before the move.
-    void moveTrackState (te::Edit& edit, const juce::ValueTree& state, juce::ValueTree parent, int index)
+    void moveTrackState (Song& song, const juce::ValueTree& state, juce::ValueTree parent, int index)
     {
         auto oldParent = state.getParent();
+        auto* undo = &song.getUndoManager();
 
         if (oldParent == parent)
         {
@@ -92,22 +86,22 @@ namespace
             const auto newIndex = index > oldIndex ? index - 1 : index;
 
             if (newIndex != oldIndex)
-                parent.moveChild (oldIndex, juce::jlimit (0, parent.getNumChildren() - 1, newIndex), getUndo (edit));
+                parent.moveChild (oldIndex, juce::jlimit (0, parent.getNumChildren() - 1, newIndex), undo);
 
             return;
         }
 
-        oldParent.removeChild (state, getUndo (edit));
-        parent.addChild (state, index, getUndo (edit));
+        oldParent.removeChild (state, undo);
+        parent.addChild (state, index, undo);
     }
 
     // The tracks that move, in the playlist's order: those given, but those inside a folder that moves, which go with it.
-    std::vector<juce::ValueTree> getMovingStates (const juce::Array<te::Track*>& tracks)
+    std::vector<juce::ValueTree> getMovingStates (const Song& song, const std::vector<TrackID>& tracks)
     {
         std::vector<juce::ValueTree> given, moving;
 
-        for (auto* track : tracks)
-            if (const auto state = findTrackState (*track); state.isValid())
+        for (const auto id : tracks)
+            if (const auto state = findTrackState (song, id); state.hasType (schema::TRACK))
                 given.push_back (state);
 
         const auto isGiven = [&given] (const juce::ValueTree& state)
@@ -116,7 +110,7 @@ namespace
         if (given.empty())
             return moving;
 
-        for (const auto& state : getTrackStates (tracks.getFirst()->edit))
+        for (const auto& state : getTrackStates (song))
         {
             auto inMovingFolder = false;
 
@@ -144,6 +138,9 @@ namespace
 
         DropPlace place;
 
+        if (! target.hasType (schema::TRACK))
+            return {};
+
         if (drop == TrackDrop::into)
         {
             if (! isFolderState (target))
@@ -162,7 +159,7 @@ namespace
                     place.before = child;
         }
 
-        if (! target.isValid() || ! place.parent.isValid())
+        if (! place.parent.isValid())
             return {};
 
         for (auto parent = place.parent; parent.hasType (schema::TRACK); parent = parent.getParent())
@@ -174,41 +171,42 @@ namespace
 
     // The tracks that have a row in the playlist, or can have one: its tracks and folders, and the returns and the master,
     // whose rows show while they have automation lanes.
-    juce::Array<te::Track*> getRowTracks (te::Edit& edit)
+    std::vector<TrackID> getRowTracks (const Song& song)
     {
-        auto tracks = getPlaylistTracks (edit);
+        auto tracks = getTrackIDs (song);
 
-        if (auto* master = edit.getMasterTrack())
-            tracks.add (master);
+        if (const auto master = getMasterID (song); master.isValid())
+            tracks.push_back (master);
 
         return tracks;
     }
 
     // Moves a track right after another one, in its folder, or else first in the list.
-    void moveTrackAfter (te::Track& track, const te::Track* previous)
+    void moveTrackAfter (Song& song, TrackID track, TrackID previous)
     {
-        const auto state = findTrackState (track);
+        const auto state = findTrackState (song, track);
 
-        if (! state.isValid())
+        if (! state.hasType (schema::TRACK))
             return;
 
-        if (const auto before = previous != nullptr ? findTrackState (*previous) : juce::ValueTree(); before.isValid())
-            moveTrackState (track.edit, state, before.getParent(), before.getParent().indexOf (before) + 1);
+        if (const auto before = findTrackState (song, previous); before.hasType (schema::TRACK))
+            moveTrackState (song, state, before.getParent(), before.getParent().indexOf (before) + 1);
         else
-            moveTrackState (track.edit, state, getTrackList (track.edit), 0);
+            moveTrackState (song, state, getTrackList (song), 0);
     }
 
-    // The palette's next color after the track a new one goes below (the last track if that is nullptr),
-    // so that neighbours differ.
-    juce::Colour getNextColour (te::Edit& edit, te::Track* after)
+    // The palette's next color after the track a new one goes below (the last track if that is none), so that neighbours
+    // differ.
+    juce::Colour getNextColour (const Song& song, TrackID after)
     {
-        const auto tracks = getPlaylistTracks (edit);
+        const auto tracks = getTrackIDs (song);
         const auto& colours = getTrackColours();
         size_t next = 0;
 
-        if (auto* above = after != nullptr ? after : tracks.getLast())
+        if (const auto above = after.isValid() ? after : (tracks.empty() ? TrackID() : tracks.back()); above.isValid())
         {
-            const auto aboveColour = getTrackColour (*above, tracks.indexOf (above));
+            const auto row = (int) (std::find (tracks.begin(), tracks.end(), above) - tracks.begin());
+            const auto aboveColour = getTrackColour (song, above, row);
 
             for (size_t i = 0; i < colours.size(); ++i)
                 if (colours[i].colour == aboveColour)
@@ -219,16 +217,16 @@ namespace
     }
 
     // The playlist track before (direction -1) or after (1) this one in its folder, or among the top-level tracks.
-    te::Track* getSibling (te::Track& track, int direction)
+    TrackID getSibling (const Song& song, TrackID track, int direction)
     {
-        const auto state = findTrackState (track);
+        const auto state = findTrackState (song, track);
         const auto parent = state.getParent();
 
         for (auto i = parent.indexOf (state) + direction; juce::isPositiveAndBelow (i, parent.getNumChildren()); i += direction)
             if (const auto sibling = parent.getChild (i); sibling.hasType (schema::TRACK))
-                return findTrack (track.edit, sibling);
+                return getTrackID (sibling);
 
-        return nullptr;
+        return {};
     }
 
     bool isSoloedOrInSoloedFolder (const juce::ValueTree& state)
@@ -240,37 +238,21 @@ namespace
         return false;
     }
 
-    // Each track's element in a copy of a track's, given the ID its copy in Tracktion has: the copy's tracks are in the
-    // same order as the original's, and its devices', containers', sends', modulators' and macros' elements name the copy's.
-    // Its clips get IDs of their own, as copyClipState() gives a clip's copy, with the same notes, in the same alias group.
-    void giveCopiedIDs (juce::ValueTree& copied, const te::Track& copy, const te::EditItemID::IDMap& copiedDevices)
+    // A track the song gives a key: the key set last on any of its tracks (model/notes/internal/Notes.h).
+    TrackID madeWithLastKey (Song& song, TrackID id)
     {
-        copied.setProperty (schema::trackID, (juce::int64) copy.itemID.getRawID(), nullptr);
-        giveCopiedDeviceIDs (copied, copiedDevices);
-        giveCopiedModulatorIDs (copied, copiedDevices);
+        if (id.isValid())
+            applyLastKey (song, id);
 
-        for (auto child : copied)
-            if (child.hasType (schema::CLIP))
-                child.setProperty (schema::clipID, (juce::int64) getSong (copy.edit).makeID(), nullptr);
-
-        if (auto* folder = dynamic_cast<const te::FolderTrack*> (&copy))
-        {
-            const auto subTracks = folder->getAllSubTracks (false);
-            auto index = 0;
-
-            for (auto child : copied)
-                if (child.hasType (schema::TRACK) && index < subTracks.size())
-                    giveCopiedIDs (child, *subTracks[index++], copiedDevices);
-        }
+        return id;
     }
 } // namespace
 
 //==============================================================================
-juce::ValueTree getTrackList (te::Edit& edit)
+juce::ValueTree getTrackList (Song& song)
 {
-    auto phazite = getSong (edit).getState();
-    getMasterState (edit);
-    return phazite.getOrCreateChildWithName (schema::TRACKS, nullptr);
+    getMasterState (song);
+    return song.getState().getOrCreateChildWithName (schema::TRACKS, nullptr);
 }
 
 juce::ValueTree findTrackList (const Song& song)
@@ -278,30 +260,24 @@ juce::ValueTree findTrackList (const Song& song)
     return song.getState().getChildWithName (schema::TRACKS);
 }
 
-juce::ValueTree findTrackList (const te::Edit& edit)
+juce::ValueTree getMasterState (Song& song)
 {
-    return findPhaziteState (edit).getChildWithName (schema::TRACKS);
-}
-
-juce::ValueTree getMasterState (te::Edit& edit)
-{
-    auto phazite = getSong (edit).getState();
+    auto phazite = song.getState();
 
     if (auto master = phazite.getChildWithName (schema::MASTER); master.isValid())
         return master;
 
-    // With the master's ID and its fader's, those of Tracktion's master track and fader, which it makes with the Edit (and
-    // createEditFromSong() with the song's IDs).
+    // With IDs of the song's, for the master and its fader.
     juce::ValueTree master (schema::MASTER);
-
-    if (auto* track = edit.getMasterTrack())
-        master.setProperty (schema::trackID, (juce::int64) track->itemID.getRawID(), nullptr);
-
-    if (const auto fader = edit.getMasterVolumePlugin())
-        master.setProperty (schema::channelFader, (juce::int64) fader->itemID.getRawID(), nullptr);
-
+    master.setProperty (schema::trackID, (juce::int64) song.makeID(), nullptr);
+    master.setProperty (schema::channelFader, (juce::int64) song.makeID(), nullptr);
     phazite.appendChild (master, nullptr);
     return master;
+}
+
+TrackID getMasterID (const Song& song)
+{
+    return getTrackID (song.getState().getChildWithName (schema::MASTER));
 }
 
 juce::ValueTree findTrackState (const Song& song, TrackID id)
@@ -333,11 +309,6 @@ std::vector<TrackID> getTrackIDs (const Song& song)
     return ids;
 }
 
-te::Track* findTrack (const te::Edit& edit, const juce::ValueTree& state)
-{
-    return state.isValid() ? te::findTrackForID (edit, toTracktion (getTrackID (state))) : nullptr;
-}
-
 TrackID getTrackID (const juce::ValueTree& state)
 {
     return TrackID::fromRaw ((std::uint64_t) (juce::int64) state[schema::trackID]);
@@ -353,12 +324,27 @@ bool isReturnState (const juce::ValueTree& state)
     return state[schema::trackKind].toString() == schema::trackIsReturn;
 }
 
+bool isFolder (const Song& song, TrackID id)
+{
+    return isFolderState (findTrackState (song, id));
+}
+
+bool isReturnTrack (const Song& song, TrackID id)
+{
+    return isReturnState (findTrackState (song, id));
+}
+
+bool isMaster (const Song& song, TrackID id)
+{
+    return id.isValid() && id == getMasterID (song);
+}
+
 juce::String getTrackName (const Song& song, TrackID id)
 {
     const auto state = findTrackState (song, id);
 
-    if (! state.isValid())
-        return {};
+    if (! state.hasType (schema::TRACK))
+        return state.hasType (schema::MASTER) ? juce::String ("Master") : juce::String();
 
     if (const auto name = state[schema::trackName].toString(); name.isNotEmpty() || isFolderState (state))
         return name;
@@ -377,25 +363,25 @@ juce::String getTrackName (const Song& song, TrackID id)
     return "Track " + juce::String (number);
 }
 
-juce::String getTrackName (const te::Track& track)
-{
-    const auto& song = getSong (track.edit);
-    return findTrackState (song, getTrackID (track)).isValid() ? getTrackName (song, getTrackID (track)) : track.getName();
-}
-
-bool isReturnTrack (const Song& song, TrackID id)
-{
-    return isReturnState (findTrackState (song, id));
-}
-
 TrackID getParentFolder (const Song& song, TrackID id)
 {
-    return getTrackID (findTrackState (song, id).getParent());
+    if (const auto parent = findTrackState (song, id).getParent(); parent.hasType (schema::TRACK))
+        return getTrackID (parent);
+
+    return {};
 }
 
-te::FolderTrack* getParentFolder (const te::Track& track)
+std::vector<TrackID> getTracksInFolder (const Song& song, TrackID folder)
 {
-    return dynamic_cast<te::FolderTrack*> (findTrack (track.edit, findTrackState (track).getParent()));
+    std::vector<juce::ValueTree> states;
+    collectTrackStates (findTrackState (song, folder), states);
+
+    std::vector<TrackID> ids;
+
+    for (const auto& state : states)
+        ids.push_back (getTrackID (state));
+
+    return ids;
 }
 
 bool isTrackMuted (const Song& song, TrackID id, bool orInMutedFolder)
@@ -420,7 +406,7 @@ bool areAnyTracksSoloed (const Song& song)
 
 void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
 {
-    if (auto state = findTrackState (song, id); state.isValid() && (bool) state[schema::trackMute] != muted)
+    if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && (bool) state[schema::trackMute] != muted)
     {
         state.setProperty (schema::trackMute, muted, undo);
         song.reconcile (Song::Part::tracks);
@@ -429,7 +415,7 @@ void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
 
 void setTrackSoloed (Song& song, TrackID id, bool soloed)
 {
-    if (auto state = findTrackState (song, id); state.isValid() && (bool) state[schema::trackSolo] != soloed)
+    if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && (bool) state[schema::trackSolo] != soloed)
     {
         state.setProperty (schema::trackSolo, soloed, nullptr);
         song.reconcile (Song::Part::tracks);
@@ -438,7 +424,7 @@ void setTrackSoloed (Song& song, TrackID id, bool soloed)
 
 void setTrackName (Song& song, TrackID id, const juce::String& name)
 {
-    if (auto state = findTrackState (song, id); state.isValid())
+    if (auto state = findTrackState (song, id); state.hasType (schema::TRACK))
         state.setProperty (schema::trackName, name, &song.getUndoManager());
 
     song.reconcile (Song::Part::tracks);
@@ -446,21 +432,18 @@ void setTrackName (Song& song, TrackID id, const juce::String& name)
 
 void setTrackColour (Song& song, TrackID id, juce::Colour colour)
 {
-    if (auto state = findTrackState (song, id); state.isValid())
+    if (auto state = findTrackState (song, id); state.hasType (schema::TRACK))
         state.setProperty (schema::trackColour, colour.toString(), &song.getUndoManager());
 
     song.reconcile (Song::Part::tracks);
 }
 
-te::AudioTrack* insertPlainTrack (te::Edit& edit, te::Track* after)
+TrackID insertPlainTrack (Song& song, TrackID after)
 {
-    juce::ValueTree state (schema::TRACK);
-    state.setProperty (schema::trackID, (juce::int64) getSong (edit).makeID(), nullptr);
-    state.setProperty (schema::trackKind, schema::trackIsTrack, nullptr);
-    state.setProperty (schema::channelFader, (juce::int64) getSong (edit).makeID(), nullptr);
-    insertTrackState (edit, state, after);
-    mirror::reconcileTracks (edit);
-    return dynamic_cast<te::AudioTrack*> (findTrack (edit, state));
+    const auto state = makeTrackState (song, schema::trackIsTrack, std::nullopt);
+    insertTrackState (song, state, after);
+    song.reconcile (Song::Part::tracks);
+    return getTrackID (state);
 }
 
 //==============================================================================
@@ -471,23 +454,6 @@ juce::Colour getTrackColour (const Song& song, TrackID id, int row)
 
     const auto& colours = getTrackColours();
     return colours[(size_t) (std::max (0, row) % (int) colours.size())].colour;
-}
-
-//==============================================================================
-juce::Array<te::Track*> getPlaylistTracks (const te::Edit& edit)
-{
-    juce::Array<te::Track*> tracks;
-
-    for (const auto& state : getTrackStates (getSong (edit)))
-        if (auto* track = findTrack (edit, state))
-            tracks.add (track);
-
-    return tracks;
-}
-
-te::TrackInsertPoint getInsertPointAfter (te::Track& track)
-{
-    return { track.getParentTrack(), &track };
 }
 
 //==============================================================================
@@ -540,7 +506,7 @@ void toggleSoloAlone (Song& song, TrackID id)
 {
     auto state = findTrackState (song, id);
 
-    if (! state.isValid())
+    if (! state.hasType (schema::TRACK))
         return;
 
     auto alone = isTrackSoloed (song, id);
@@ -564,94 +530,60 @@ bool isSilencedBySolo (const Song& song, TrackID id)
 }
 
 //==============================================================================
-te::AudioTrack* insertTrack (te::Edit& edit, te::Track* after, Selection* selection)
+TrackID insertTrack (Song& song, TrackID after, Selection* selection)
 {
-    const auto state = makeTrackState (edit, schema::trackIsTrack, getNextColour (edit, after));
-    insertTrackState (edit, state, after);
-    mirror::reconcileTracks (edit);
-    auto* track = dynamic_cast<te::AudioTrack*> (findTrack (edit, state));
-
-    if (track == nullptr)
-        return nullptr;
-
-    applyLastKey (*track); // the key chosen last in the song
+    const auto state = makeTrackState (song, schema::trackIsTrack, getNextColour (song, after));
+    insertTrackState (song, state, after);
+    song.reconcile (Song::Part::tracks);
+    const auto id = madeWithLastKey (song, getTrackID (state)); // the key chosen last in the song
 
     if (selection != nullptr)
-        selection->selectOnly (track);
+        selection->selectOnly (id);
 
-    return track;
+    return id;
 }
 
-te::AudioTrack* insertReturnTrack (te::Edit& edit, const juce::String& name, Selection* selection)
+TrackID insertReturnTrack (Song& song, const juce::String& name, Selection* selection)
 {
-    auto state = makeTrackState (edit, schema::trackIsReturn, getNextColour (edit, nullptr));
+    auto state = makeTrackState (song, schema::trackIsReturn, getNextColour (song, {}));
     state.setProperty (schema::trackName, name, nullptr);
-    insertTrackState (edit, state, nullptr);
-    mirror::reconcileTracks (edit);
-    auto* track = dynamic_cast<te::AudioTrack*> (findTrack (edit, state));
-
-    if (track == nullptr)
-        return nullptr;
-
-    applyLastKey (*track); // as any new track gets it
+    insertTrackState (song, state, {});
+    song.reconcile (Song::Part::tracks);
+    const auto id = madeWithLastKey (song, getTrackID (state)); // as any new track gets it
 
     if (selection != nullptr)
-        selection->selectOnly (track);
+        selection->selectOnly (id);
 
-    return track;
+    return id;
 }
 
-void recordFirstTrack (te::Edit& edit)
+std::vector<TrackID> ensureTracks (Song& song, int count)
 {
-    auto list = getTrackList (edit);
-    const auto tracks = te::getAudioTracks (edit);
-
-    if (getTrackStates (edit).empty() && ! tracks.isEmpty())
+    const auto getTracks = [&song]
     {
-        juce::ValueTree state (schema::TRACK);
-        state.setProperty (schema::trackID, (juce::int64) tracks.getFirst()->itemID.getRawID(), nullptr);
-        state.setProperty (schema::trackKind, schema::trackIsTrack, nullptr);
+        std::vector<TrackID> tracks;
 
-        if (auto* fader = getVolumeDevice (*tracks.getFirst()))
-            state.setProperty (schema::channelFader, (juce::int64) fader->itemID.getRawID(), nullptr);
-
-        list.appendChild (state, nullptr);
-    }
-}
-
-juce::Array<te::AudioTrack*> ensureTracks (te::Edit& edit, int count)
-{
-    const auto getTracks = [&edit]
-    {
-        juce::Array<te::AudioTrack*> tracks;
-
-        for (const auto& state : getTrackStates (edit))
+        for (const auto& state : getTrackStates (song))
             if (! isFolderState (state) && ! isReturnState (state))
-                if (auto* track = dynamic_cast<te::AudioTrack*> (findTrack (edit, state)))
-                    tracks.add (track);
+                tracks.push_back (getTrackID (state));
 
         return tracks;
     };
 
-    for (auto tracks = getTracks(); tracks.size() < count; tracks = getTracks())
-        if (insertPlainTrack (edit, nullptr) == nullptr)
-            break;
+    for (auto tracks = getTracks(); (int) tracks.size() < count; tracks = getTracks())
+        insertPlainTrack (song, {});
 
     return getTracks();
 }
 
-te::FolderTrack* insertFolder (te::Edit& edit, te::Track* after, Selection* selection)
+TrackID insertFolder (Song& song, TrackID after, Selection* selection)
 {
-    auto state = makeTrackState (edit, schema::trackIsFolder, getNextColour (edit, after));
+    auto state = makeTrackState (song, schema::trackIsFolder, getNextColour (song, after));
     state.setProperty (schema::trackName, "Folder", nullptr);
-    insertTrackState (edit, state, after);
-    mirror::reconcileTracks (edit);
-    auto* folder = dynamic_cast<te::FolderTrack*> (findTrack (edit, state));
-
-    if (folder == nullptr)
-        return nullptr;
-
-    mixAsBus (*folder); // a bus from the start (design question 11)
+    insertTrackState (song, state, after);
+    song.reconcile (Song::Part::tracks);
+    const auto folder = getTrackID (state);
+    mixAsBus (song, folder); // a bus from the start (design question 11)
 
     if (selection != nullptr)
         selection->selectOnly (folder);
@@ -659,29 +591,26 @@ te::FolderTrack* insertFolder (te::Edit& edit, te::Track* after, Selection* sele
     return folder;
 }
 
-te::FolderTrack* groupIntoFolder (const juce::Array<te::Track*>& tracks, Selection* selection)
+TrackID groupIntoFolder (Song& song, const std::vector<TrackID>& tracks, Selection* selection)
 {
-    if (tracks.isEmpty())
-        return nullptr;
+    const auto firstState = tracks.empty() ? juce::ValueTree() : findTrackState (song, tracks.front());
+
+    if (! firstState.hasType (schema::TRACK))
+        return {};
 
     // Where the first track is, in its own folder if it has one; in its color.
-    auto& first = *tracks.getFirst();
-    auto& edit = first.edit;
-    const auto firstState = findTrackState (first);
-    auto state = makeTrackState (edit, schema::trackIsFolder, getTrackColour (first, getPlaylistTracks (edit).indexOf (&first)));
+    const auto all = getTrackIDs (song);
+    const auto row = (int) (std::find (all.begin(), all.end(), tracks.front()) - all.begin());
+    auto state = makeTrackState (song, schema::trackIsFolder, getTrackColour (song, tracks.front(), row));
     state.setProperty (schema::trackName, "Folder", nullptr);
     auto parent = firstState.getParent();
-    parent.addChild (state, parent.indexOf (firstState), getUndo (edit));
-    mirror::reconcileTracks (edit);
-    auto* folder = dynamic_cast<te::FolderTrack*> (findTrack (edit, state));
+    parent.addChild (state, parent.indexOf (firstState), &song.getUndoManager());
+    song.reconcile (Song::Part::tracks);
+    const auto folder = getTrackID (state);
+    mixAsBus (song, folder); // a bus from the start (design question 11)
 
-    if (folder == nullptr)
-        return nullptr;
-
-    mixAsBus (*folder); // a bus from the start (design question 11)
-
-    for (auto* track : tracks)
-        moveTrackIntoFolder (*track, *folder);
+    for (const auto track : tracks)
+        moveTrackIntoFolder (song, track, folder);
 
     if (selection != nullptr)
         selection->selectOnly (folder);
@@ -689,25 +618,24 @@ te::FolderTrack* groupIntoFolder (const juce::Array<te::Track*>& tracks, Selecti
     return folder;
 }
 
-void moveTrackIntoFolder (te::Track& track, te::FolderTrack& folder)
+void moveTrackIntoFolder (Song& song, TrackID track, TrackID folder)
 {
-    const auto state = findTrackState (track);
-    auto folderState = findTrackState (folder);
+    const auto state = findTrackState (song, track);
+    auto folderState = findTrackState (song, folder);
 
     // A folder can't go into itself, or into a folder inside it.
-    if (! state.isValid() || ! folderState.isValid() || state == folderState || folderState.isAChildOf (state))
+    if (! state.hasType (schema::TRACK) || ! isFolderState (folderState) || state == folderState || folderState.isAChildOf (state))
         return;
 
-    moveTrackState (track.edit, state, folderState, folderState.getNumChildren());
-    mirror::reconcileTracks (track.edit);
+    moveTrackState (song, state, folderState, folderState.getNumChildren());
+    song.reconcile (Song::Part::tracks);
 }
 
-void ungroupFolder (te::FolderTrack& folder)
+void ungroupFolder (Song& song, TrackID folder)
 {
-    auto& edit = folder.edit;
-    const auto folderState = findTrackState (folder);
+    const auto folderState = findTrackState (song, folder);
 
-    if (! folderState.isValid())
+    if (! isFolderState (folderState))
         return;
 
     // Its tracks go where it was, in their order, and it goes.
@@ -717,27 +645,16 @@ void ungroupFolder (te::FolderTrack& folder)
     for (int i = 0; i < folderState.getNumChildren();)
     {
         if (const auto child = folderState.getChild (i); child.hasType (schema::TRACK))
-            moveTrackState (edit, child, parent, place++);
+            moveTrackState (song, child, parent, place++);
         else
             ++i;
     }
 
-    parent.removeChild (folderState, getUndo (edit));
-    mirror::reconcileTracks (edit);
+    parent.removeChild (folderState, &song.getUndoManager());
+    song.reconcile (Song::Part::tracks);
 }
 
 //==============================================================================
-juce::Array<te::Track*> findTracks (const te::Edit& edit, const std::vector<TrackID>& ids)
-{
-    juce::Array<te::Track*> tracks;
-
-    for (const auto id : ids)
-        if (auto* track = findTrack (edit, findTrackState (getSong (edit), id)))
-            tracks.add (track);
-
-    return tracks;
-}
-
 std::vector<TrackID> getSelectedTracks (const Selection& selection)
 {
     std::vector<TrackID> selected;
@@ -779,7 +696,7 @@ std::vector<TrackID> getSelectedFolders (const Selection& selection)
     std::vector<TrackID> folders;
 
     for (const auto id : getSelectedTracks (selection))
-        if (isFolderState (findTrackState (*selection.getSong(), id)))
+        if (isFolder (*selection.getSong(), id))
             folders.push_back (id);
 
     return folders;
@@ -801,23 +718,24 @@ std::vector<TrackID> getSelectedTracksOrAll (const Selection& selection)
     return tracks;
 }
 
-te::AudioTrack* insertTrackAfterSelection (Selection& selection)
+TrackID insertTrackAfterSelection (Selection& selection)
 {
-    auto* edit = selection.getEdit();
-    return edit != nullptr ? insertTrack (*edit, findTracks (*edit, getSelectedTracks (selection)).getLast(), &selection) : nullptr;
+    auto* song = selection.getSong();
+    const auto selected = getSelectedTracks (selection);
+    return song != nullptr ? insertTrack (*song, selected.empty() ? TrackID() : selected.back(), &selection) : TrackID();
 }
 
-te::FolderTrack* insertFolderAfterSelection (Selection& selection)
+TrackID insertFolderAfterSelection (Selection& selection)
 {
-    auto* edit = selection.getEdit();
-    return edit != nullptr ? insertFolder (*edit, findTracks (*edit, getSelectedTracks (selection)).getLast(), &selection) : nullptr;
+    auto* song = selection.getSong();
+    const auto selected = getSelectedTracks (selection);
+    return song != nullptr ? insertFolder (*song, selected.empty() ? TrackID() : selected.back(), &selection) : TrackID();
 }
 
-void ungroupFolders (te::Edit& edit, const std::vector<TrackID>& folders)
+void ungroupFolders (Song& song, const std::vector<TrackID>& folders)
 {
-    for (auto* track : findTracks (edit, folders))
-        if (auto* folder = dynamic_cast<te::FolderTrack*> (track))
-            ungroupFolder (*folder);
+    for (const auto folder : folders)
+        ungroupFolder (song, folder);
 }
 
 void selectNeighbourTrack (Selection& selection, int direction)
@@ -846,31 +764,31 @@ void selectNeighbourTrack (Selection& selection, int direction)
 
 void moveSelectedTracks (Selection& selection, int direction)
 {
-    auto* edit = selection.getEdit();
+    auto* song = selection.getSong();
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return;
 
-    auto tracks = findTracks (*edit, getSelectedOutermostTracks (selection));
+    auto tracks = getSelectedOutermostTracks (selection);
 
     // The track nearest to where they move goes first.
     if (direction > 0)
         std::reverse (tracks.begin(), tracks.end());
 
-    for (auto* track : tracks)
+    for (const auto track : tracks)
     {
-        auto* neighbour = getSibling (*track, direction);
+        const auto neighbour = getSibling (*song, track, direction);
 
-        if (neighbour == nullptr || selection.isSelected (neighbour))
+        if (! neighbour.isValid() || selection.isSelected (neighbour))
             continue;
 
         if (direction < 0)
-            moveTrackAfter (*neighbour, track); // the one above goes below
+            moveTrackAfter (*song, neighbour, track); // the one above goes below
         else
-            moveTrackAfter (*track, neighbour);
+            moveTrackAfter (*song, track, neighbour);
     }
 
-    mirror::reconcileTracks (*edit);
+    song->reconcile (Song::Part::tracks);
 }
 
 bool areAllTracksMuted (const Song& song, const std::vector<TrackID>& tracks)
@@ -918,15 +836,15 @@ void toggleTracksPinned (Song& song, const std::vector<TrackID>& tracks)
     toggleAll (tracks, [&song] (TrackID id) { return isPinned (song, id); }, [&song] (TrackID id, bool on) { setPinned (song, id, on); });
 }
 
-bool isAnyRowExpanded (te::Edit& edit)
+bool isAnyRowExpanded (const Song& song)
 {
-    for (auto* track : getRowTracks (edit))
+    for (const auto track : getRowTracks (song))
     {
         // A return's or the master's own row shows only with lanes.
-        const auto lanes = getLanes (*track);
-        const auto hasRow = ! track->isMasterTrack() && ! isReturnTrack (*track);
+        const auto lanes = getLanes (song, track);
+        const auto hasRow = ! isMaster (song, track) && ! isReturnTrack (song, track);
 
-        if ((hasRow || ! lanes.empty()) && ! isCollapsed (*track))
+        if ((hasRow || ! lanes.empty()) && ! isCollapsed (song, track))
             return true;
 
         if (std::any_of (lanes.begin(), lanes.end(), [] (const AutomationLane& lane) { return ! lane.collapsed; }))
@@ -936,186 +854,186 @@ bool isAnyRowExpanded (te::Edit& edit)
     return false;
 }
 
-void setAllRowsCollapsed (te::Edit& edit, bool collapsed)
+void setAllRowsCollapsed (Song& song, bool collapsed)
 {
-    for (auto* track : getRowTracks (edit))
+    for (const auto track : getRowTracks (song))
     {
-        setCollapsed (*track, collapsed);
+        setCollapsed (song, track, collapsed);
 
-        for (const auto& lane : getLanes (*track))
-            setLaneCollapsed (*track, lane.parameter, collapsed);
+        for (const auto& lane : getLanes (song, track))
+            setLaneCollapsed (song, track, lane.parameter, collapsed);
     }
 }
 
-void toggleAllRowsCollapsed (te::Edit& edit)
+void toggleAllRowsCollapsed (Song& song)
 {
-    setAllRowsCollapsed (edit, isAnyRowExpanded (edit));
+    setAllRowsCollapsed (song, isAnyRowExpanded (song));
 }
 
-juce::Array<te::Track*> duplicateTracks (const juce::Array<te::Track*>& tracks, Selection* selection)
+std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tracks, Selection* selection)
 {
-    juce::Array<te::Track*> copies;
+    std::vector<TrackID> copies;
 
-    for (auto* track : tracks)
+    for (const auto track : tracks)
     {
-        // The copy takes the devices' states as they are now (Tracktion stores those of the track's own devices as it
-        // copies, but through the undo manager: model/devices/internal/DeviceStates.h).
-        storeDeviceStates (*track);
-        const auto original = findTrackState (*track);
+        const auto original = findTrackState (song, track);
 
-        // Tracktion copies the track's devices, giving the copy, and the tracks in it, IDs of their own, and its containers
-        // hold devices of their own; the song's track list gets the same copy, with those IDs, right after it. The song's
-        // clips in the copy, with IDs of their own, replace the clips Tracktion copied as the clips are placed again.
-        if (auto copy = track->edit.copyTrack (track, getInsertPointAfter (*track)); copy != nullptr && original.isValid())
-        {
-            const auto inContainers = copyContainers (*track, *copy);
-            auto copiedDevices = inContainers;
-            mapCopiedDevices (*track, *copy, copiedDevices);
-            mapCopiedModulators (*track, *copy, copiedDevices);
-            auto copied = original.createCopy();
-            giveCopiedIDs (copied, *copy, copiedDevices);
-            auto parent = original.getParent();
-            parent.addChild (copied, parent.indexOf (original) + 1, getUndo (track->edit));
-            copyLanesAndCurves (*track, *copy, inContainers); // its lanes and automation are its own devices'
-            copies.add (copy.get());
-        }
+        if (! original.hasType (schema::TRACK))
+            continue;
+
+        // The copy holds what its devices hold now (a plug-in's own settings), every item in it the song's with an ID of its
+        // own (its tracks, devices, sends, modulators and clips, its clips' notes as they are, in their alias groups), with
+        // its own automation, right after the original. A frozen track's copy plays live: the frozen file is the original's.
+        song.storeDeviceStates (track.getRaw());
+        auto copy = original.createCopy();
+        const auto copied = giveNewIDs (song, copy);
+
+        copy.removeProperty (schema::trackFrozen, nullptr);
+        std::vector<juce::ValueTree> inside;
+        collectTrackStates (copy, inside);
+
+        for (auto state : inside)
+            state.removeProperty (schema::trackFrozen, nullptr);
+
+        auto parent = original.getParent();
+        parent.addChild (copy, parent.indexOf (original) + 1, &song.getUndoManager());
+        copyCurves (song, copied);
+        copies.push_back (getTrackID (copy));
     }
 
-    if (! tracks.isEmpty())
-    {
-        mirror::reconcileTracks (tracks.getFirst()->edit);
-        mirror::reconcileClips (tracks.getFirst()->edit);
-    }
+    if (! copies.empty())
+        song.reconcile (Song::Part::everything);
 
     if (selection != nullptr)
     {
         selection->deselectAll();
 
-        for (auto* copy : copies)
+        for (const auto copy : copies)
             selection->addToSelection (copy);
     }
 
     return copies;
 }
 
-void renameTrack (te::Track& track, const juce::String& name)
+void renameTrack (Song& song, TrackID track, const juce::String& name)
 {
     const auto trimmed = name.trim();
-    auto state = findTrackState (track);
+    auto state = findTrackState (song, track);
 
-    if (! state.isValid() || trimmed == state[schema::trackName].toString())
+    if (! state.hasType (schema::TRACK) || trimmed == state[schema::trackName].toString())
         return;
 
-    const UndoStep step (track.edit, "Rename Track");
-    state.setProperty (schema::trackName, trimmed, getUndo (track.edit));
-    mirror::reconcileTracks (track.edit);
+    const UndoStep step (song, "Rename Track");
+    state.setProperty (schema::trackName, trimmed, &song.getUndoManager());
+    song.reconcile (Song::Part::tracks);
 }
 
-te::Track* addTrackAtEnd (te::Edit& edit, bool folder, Selection* selection)
+TrackID addTrackAtEnd (Song& song, bool folder, Selection* selection)
 {
-    const UndoStep step (edit, folder ? "Add Folder" : "Add Track");
+    const UndoStep step (song, folder ? "Add Folder" : "Add Track");
 
     if (folder)
-        return insertFolder (edit, nullptr, selection);
+        return insertFolder (song, {}, selection);
 
-    return insertTrack (edit, nullptr, selection);
+    return insertTrack (song, {}, selection);
 }
 
-void setTrackColours (const juce::Array<te::Track*>& tracks, juce::Colour colour)
+void setTrackColours (Song& song, const std::vector<TrackID>& tracks, juce::Colour colour)
 {
-    if (tracks.isEmpty())
+    if (tracks.empty())
         return;
 
-    auto& edit = tracks.getFirst()->edit;
-    const UndoStep step (edit, tracks.size() > 1 ? "Change Track Colors" : "Change Track Color");
+    const UndoStep step (song, tracks.size() > 1 ? "Change Track Colors" : "Change Track Color");
 
-    for (auto* track : tracks)
-        findTrackState (*track).setProperty (schema::trackColour, colour.toString(), getUndo (edit));
+    for (const auto track : tracks)
+        if (auto state = findTrackState (song, track); state.hasType (schema::TRACK))
+            state.setProperty (schema::trackColour, colour.toString(), &song.getUndoManager());
 
-    mirror::reconcileTracks (edit);
+    song.reconcile (Song::Part::tracks);
 }
 
-void moveTracksAfter (const juce::Array<te::Track*>& moving, te::Track* previous)
+void moveTracksAfter (Song& song, const std::vector<TrackID>& moving, TrackID previous)
 {
-    if (moving.isEmpty())
+    if (moving.empty())
         return;
 
-    auto& edit = moving.getFirst()->edit;
-    const UndoStep step (edit, moving.size() > 1 ? "Move Tracks" : "Move Track");
+    const UndoStep step (song, moving.size() > 1 ? "Move Tracks" : "Move Track");
 
-    for (auto* track : moving)
+    for (const auto track : moving)
     {
-        moveTrackAfter (*track, previous);
+        moveTrackAfter (song, track, previous);
         previous = track;
     }
 
-    mirror::reconcileTracks (edit);
+    song.reconcile (Song::Part::tracks);
 }
 
-bool canMoveTracksTo (const juce::Array<te::Track*>& tracks, const te::Track& target, TrackDrop drop)
+bool canMoveTracksTo (const Song& song, const std::vector<TrackID>& tracks, TrackID target, TrackDrop drop)
 {
-    const auto moving = getMovingStates (tracks);
-    return ! moving.empty() && findDropPlace (moving, findTrackState (target), drop).has_value();
+    const auto moving = getMovingStates (song, tracks);
+    return ! moving.empty() && findDropPlace (moving, findTrackState (song, target), drop).has_value();
 }
 
-void moveTracksTo (const juce::Array<te::Track*>& tracks, const te::Track& target, TrackDrop drop)
+void moveTracksTo (Song& song, const std::vector<TrackID>& tracks, TrackID target, TrackDrop drop)
 {
-    const auto moving = getMovingStates (tracks);
-    const auto place = moving.empty() ? std::nullopt : findDropPlace (moving, findTrackState (target), drop);
+    const auto moving = getMovingStates (song, tracks);
+    const auto place = moving.empty() ? std::nullopt : findDropPlace (moving, findTrackState (song, target), drop);
 
     if (! place.has_value())
         return;
 
-    auto& edit = target.edit;
-    const UndoStep step (edit, moving.size() > 1 ? "Move Tracks" : "Move Track");
+    const UndoStep step (song, moving.size() > 1 ? "Move Tracks" : "Move Track");
 
     // Each goes before the same child, which doesn't move, so that they keep their order.
     for (const auto& state : moving)
-        moveTrackState (edit, state, place->parent,
+        moveTrackState (song, state, place->parent,
                         place->before.isValid() ? place->parent.indexOf (place->before) : place->parent.getNumChildren());
 
-    mirror::reconcileTracks (edit);
+    song.reconcile (Song::Part::tracks);
 }
 
-void deleteTracks (const juce::Array<te::Track*>& tracks, Selection* selection)
+void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* selection)
 {
     // A folder takes the tracks inside it along, so those aren't deleted on their own.
-    juce::Array<te::Track*> outermost;
+    std::vector<TrackID> outermost;
 
-    for (auto* track : tracks)
+    for (const auto track : tracks)
     {
+        if (! findTrackState (song, track).hasType (schema::TRACK))
+            continue;
+
         auto inDeletedFolder = false;
 
-        for (auto* folder = getParentFolder (*track); folder != nullptr && ! inDeletedFolder; folder = getParentFolder (*folder))
-            inDeletedFolder = tracks.contains (folder);
+        for (auto folder = getParentFolder (song, track); folder.isValid() && ! inDeletedFolder; folder = getParentFolder (song, folder))
+            inDeletedFolder = std::find (tracks.begin(), tracks.end(), folder) != tracks.end();
 
         if (! inDeletedFolder)
-            outermost.add (track);
+            outermost.push_back (track);
     }
 
-    if (outermost.isEmpty())
+    if (outermost.empty())
         return;
 
-    auto& edit = outermost.getFirst()->edit;
-    const auto row = getPlaylistTracks (edit).indexOf (outermost.getFirst());
-    forgetSidechainSources (outermost);
+    const auto all = getTrackIDs (song);
+    const auto row = (int) (std::find (all.begin(), all.end(), outermost.front()) - all.begin());
+    forgetSidechainSources (song, outermost);
 
-    for (auto* track : outermost)
-        if (const auto state = findTrackState (*track); state.isValid())
-            state.getParent().removeChild (state, getUndo (edit));
+    for (const auto track : outermost)
+        if (const auto state = findTrackState (song, track); state.isValid())
+            state.getParent().removeChild (state, &song.getUndoManager());
 
-    mirror::reconcileTracks (edit);
+    song.reconcile (Song::Part::tracks);
 
     if (selection != nullptr)
-        if (const auto remaining = getPlaylistTracks (edit); ! remaining.isEmpty())
-            selection->selectOnly (remaining[juce::jmin (row, remaining.size() - 1)]);
+        if (const auto remaining = getTrackIDs (song); ! remaining.empty())
+            selection->selectOnly (remaining[(size_t) juce::jmin (row, (int) remaining.size() - 1)]);
 }
 
 //==============================================================================
 void addTrackCommands (CommandRegistry& registry, Selection& selection)
 {
     const auto undoTarget = undoTargetOf (selection);
-    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+    const auto hasSong = [&selection] { return selection.getSong() != nullptr; };
 
     registry.add ({ .id = "track.add",
                     .name = "Add Track",
@@ -1123,7 +1041,7 @@ void addTrackCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Adds an empty track below the selected one, or at the bottom.",
                     .synonyms = { "new track", "insert track", "create" },
                     .perform = [&selection] { insertTrackAfterSelection (selection); },
-                    .isEnabled = hasEdit,
+                    .isEnabled = hasSong,
                     .undoTarget = undoTarget });
 
     // Folders.
@@ -1133,7 +1051,7 @@ void addTrackCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Adds an empty folder below the selected track, or at the bottom.",
                     .synonyms = { "new folder", "group", "bus" },
                     .perform = [&selection] { insertFolderAfterSelection (selection); },
-                    .isEnabled = hasEdit,
+                    .isEnabled = hasSong,
                     .undoTarget = undoTarget });
 
     registry.add ({ .id = "track.groupIntoFolder",
@@ -1141,20 +1059,19 @@ void addTrackCommands (CommandRegistry& registry, Selection& selection)
                     .category = "Track",
                     .description = "Puts the selected tracks into a new folder. A folder becomes a bus when it holds an effect.",
                     .synonyms = { "group", "folder", "bus", "submix" },
-                    .perform = withEdit (selection, [&selection] (te::Edit& edit)
-                                         { groupIntoFolder (findTracks (edit, getSelectedOutermostTracks (selection)), &selection); }),
+                    .perform = withSong (selection, [&selection] (Song& song)
+                                         { groupIntoFolder (song, getSelectedOutermostTracks (selection), &selection); }),
                     .isEnabled = [&selection] { return hasSelectedTracks (selection); },
                     .undoTarget = undoTarget });
 
-    registry.add (
-        { .id = "track.ungroup",
-          .name = "Ungroup Folder",
-          .category = "Track",
-          .description = "Takes the tracks out of the selected folders, and deletes the folders.",
-          .synonyms = { "remove folder", "ungroup", "unfolder" },
-          .perform = withEdit (selection, [&selection] (te::Edit& edit) { ungroupFolders (edit, getSelectedFolders (selection)); }),
-          .isEnabled = [&selection] { return hasSelectedFolders (selection); },
-          .undoTarget = undoTarget });
+    registry.add ({ .id = "track.ungroup",
+                    .name = "Ungroup Folder",
+                    .category = "Track",
+                    .description = "Takes the tracks out of the selected folders, and deletes the folders.",
+                    .synonyms = { "remove folder", "ungroup", "unfolder" },
+                    .perform = withSong (selection, [&selection] (Song& song) { ungroupFolders (song, getSelectedFolders (selection)); }),
+                    .isEnabled = [&selection] { return hasSelectedFolders (selection); },
+                    .undoTarget = undoTarget });
 
     // Collapsing and pinning change the view, so they aren't undo steps.
     registry.add (
@@ -1175,12 +1092,12 @@ void addTrackCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Makes every track, folder and automation lane a thin row, or, when they all are, shows them "
                                    "all at full height again.",
                     .synonyms = { "fold all", "unfold all", "expand all", "collapse everything", "minimize all" },
-                    .perform = withEdit (selection, [] (te::Edit& edit) { toggleAllRowsCollapsed (edit); }),
-                    .isEnabled = hasEdit,
+                    .perform = withSong (selection, [] (Song& song) { toggleAllRowsCollapsed (song); }),
+                    .isEnabled = hasSong,
                     .currentName = [&selection]
                     {
-                        auto* edit = selection.getEdit();
-                        return edit == nullptr || isAnyRowExpanded (*edit) ? juce::String ("Collapse All") : juce::String ("Expand All");
+                        auto* song = selection.getSong();
+                        return song == nullptr || isAnyRowExpanded (*song) ? juce::String ("Collapse All") : juce::String ("Expand All");
                     } });
 
     registry.add (
@@ -1200,7 +1117,7 @@ void addTrackCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Selects the track above the selected one.",
                     .synonyms = { "previous track", "up" },
                     .perform = [&selection] { selectNeighbourTrack (selection, -1); },
-                    .isEnabled = hasEdit,
+                    .isEnabled = hasSong,
                     .repeatsWhileHeld = true });
 
     registry.add ({ .id = "track.selectNext",
@@ -1209,7 +1126,7 @@ void addTrackCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Selects the track below the selected one.",
                     .synonyms = { "next track", "down" },
                     .perform = [&selection] { selectNeighbourTrack (selection, 1); },
-                    .isEnabled = hasEdit,
+                    .isEnabled = hasSong,
                     .repeatsWhileHeld = true });
 
     registry.add ({ .id = "track.moveUp",
@@ -1232,7 +1149,7 @@ void addTrackCommands (CommandRegistry& registry, Selection& selection)
                     .undoTarget = undoTarget,
                     .repeatsWhileHeld = true });
 
-    // Tracktion keeps mute and solo out of the undo history, as many DAWs do.
+    // Mute and solo are kept out of the undo history, as many DAWs do.
     registry.add ({ .id = "track.mute",
                     .name = "Mute Track",
                     .category = "Track",

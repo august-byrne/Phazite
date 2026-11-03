@@ -7,6 +7,7 @@
 #include "model/engine/AppInfo.h"
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/transport/internal/Playback.h"
@@ -45,6 +46,14 @@ namespace
     {
         const auto wasChanged = edit.hasChangedSinceSaved();
         getSong (edit).setMirror ([&edit] (Song::Part part, std::uint64_t id) { mirror::reconcile (edit, part, id); });
+        getSong (edit).setDeviceStateStore (
+            [&edit] (std::uint64_t id)
+            {
+                if (id == 0)
+                    storeDeviceStates (edit);
+                else if (auto* track = mirror::findTrack (edit, TrackID::fromRaw (id)))
+                    storeDeviceStates (*track);
+            });
         ensureTempoMap (getSong (edit));
         getTrackList (edit);
         countIDs (edit);
@@ -112,23 +121,19 @@ namespace
 } // namespace
 
 //==============================================================================
+juce::ValueTree makeNewSong()
+{
+    // A song of its own, numbering its items itself: its tempo map, its master and one empty track.
+    Song song { juce::ValueTree (schema::PHAZITE) };
+    ensureTempoMap (song);
+    getTrackList (song); // with the master's element first
+    ensureTracks (song, 1);
+    return song.getState();
+}
+
 std::unique_ptr<te::Edit> createSongEdit (te::Engine& engine, const juce::File& file)
 {
-    JUCE_ASSERT_MESSAGE_THREAD
-
-    // With the first track Tracktion makes as it makes the Edit, recorded as the song's: a track added once the Edit is
-    // made would leave Tracktion a change to mark later, as if the song had changed after it was made.
-    const auto id = te::ProjectItemID::createNewID (te::ProjectID {});
-    te::Edit::Options options { engine, te::loadEditFromFile (engine, {}, id), id };
-    options.editFileRetriever = [file] { return file; };
-    auto edit = te::Edit::createEdit (std::move (options));
-
-    if (edit == nullptr)
-        return {};
-
-    recordFirstTrack (*edit);
-    addPhaziteParts (*edit);
-    return edit;
+    return createEditFromSong (engine, makeNewSong(), file);
 }
 
 juce::File getDefaultProjectsFolder()
@@ -143,6 +148,13 @@ std::unique_ptr<te::Edit> createEditFromSong (te::Engine& engine, const juce::Va
 
     if (! song.hasType (schema::PHAZITE))
         return {};
+
+    // Its master, which Tracktion makes with the Edit by the song's IDs, numbered by the song if it has none yet.
+    if (! song.getChildWithName (schema::MASTER).isValid())
+    {
+        Song numbering (song);
+        getMasterState (numbering);
+    }
 
     auto edit = createEditFromState (engine, mirror::makeEditState (song), file, cacheFolder);
 

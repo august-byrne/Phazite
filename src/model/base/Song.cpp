@@ -26,4 +26,15 @@ void Song::reconcile (Part part, std::uint64_t id)
     if (mirror != nullptr)
         mirror (part, id);
 }
+
+void Song::setDeviceStateStore (std::function<void (std::uint64_t)> store)
+{
+    deviceStateStore = std::move (store);
+}
+
+void Song::storeDeviceStates (std::uint64_t trackID)
+{
+    if (deviceStateStore != nullptr)
+        deviceStateStore (trackID);
+}
 } // namespace phazite

@@ -452,7 +452,10 @@ TEST_CASE ("A duplicated track's containers play rack types of their own, which 
     for (const auto& modulation : phazite::getModulations (context, copiedGain))
         modulators.push_back (modulation.modulator);
 
-    CHECK (modulators == std::vector<phazite::ModulatorID> { copiedMacro, copiedLfo });
+    // In any order: what modulates a parameter adds up.
+    CHECK (modulators.size() == 2);
+    CHECK (std::find (modulators.begin(), modulators.end(), copiedMacro) != modulators.end());
+    CHECK (std::find (modulators.begin(), modulators.end(), copiedLfo) != modulators.end());
     CHECK (phazite::getModulations (context, gain).size() == 2); // the original's are as they were
 
     // Its lane shows its own device's parameter.

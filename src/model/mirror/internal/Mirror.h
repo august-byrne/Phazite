@@ -14,8 +14,16 @@
 #include "model/base/internal/Tracktion.h"
 #include "model/devices/ParameterRef.h"
 
+#include <vector>
+
 namespace phazite::mirror
 {
+// Tracktion's track for one of the song's, by its ID or its element, for the model's functions that still take Tracktion's
+// tracks while T6 lasts (docs/tracktion-migration.md): nullptr for none.
+te::Track* findTrack (const te::Edit&, TrackID);
+te::Track* findTrack (const te::Edit&, const juce::ValueTree& trackState);
+juce::Array<te::Track*> findTracks (const te::Edit&, const std::vector<TrackID>&); // those there, in their order
+
 // The tempo map (model/transport/internal/Tempo.h): Tracktion's tempo sequence gets the document's tempos and time
 // signatures, each at its beat; and the clips and the automation are placed again for them (reconcileClips(),
 // reconcileAutomation()).

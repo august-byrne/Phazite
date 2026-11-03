@@ -11,6 +11,7 @@
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/devices/internal/WavetablePlugin.h"
 #include "model/engine/internal/EngineSetup.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"

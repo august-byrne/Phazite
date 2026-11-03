@@ -310,12 +310,14 @@ target_sources(phazite_core PRIVATE
     src/model/engine/internal/Preview.h
     src/model/engine/internal/PreviewLoop.h
     src/model/mirror/AutomationMirror.cpp
+    src/model/mirror/Bridge.cpp
     src/model/mirror/ClipMirror.cpp
     src/model/mirror/DeviceMirror.cpp
     src/model/mirror/ModulationMirror.cpp
     src/model/mirror/TempoMirror.cpp
     src/model/mirror/TrackMirror.cpp
     src/model/mirror/TransportMirror.cpp
+    src/model/mirror/internal/Bridge.h
     src/model/mirror/internal/Mirror.h
     src/model/mixer/Buses.cpp
     src/model/mixer/ContainerModel.cpp

@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackSession.h"
 

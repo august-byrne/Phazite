@@ -11,6 +11,7 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"

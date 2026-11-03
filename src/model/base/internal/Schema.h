@@ -13,6 +13,8 @@
 #include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 
+#include <map>
+
 namespace phazite::schema
 {
 //==============================================================================
@@ -731,4 +733,12 @@ std::uint64_t findNextID (const juce::ValueTree& song);
 
 // Brings the song's count there (findNextID()), and Tracktion's next past that. As a project opens and saves.
 void countIDs (te::Edit&);
+
+// A copy of a part of the song (a track's element, a folder's with its tracks, a device's) made the song's own: every item
+// in it given a new ID of the song's (tracks, their faders and VCAs, clips, devices, containers, sends, modulators and
+// macros; not notes, which a clip's copy keeps, as its aliases do, nor alias groups, which the copies join), and what in it
+// names them (a lane's device, a modulation's) renamed to match. Returns each old ID with its new one, for what outside
+// the copy names them (the song's automation: model/automation/internal/Automation.h, copyCurves()).
+using CopiedIDs = std::map<std::uint64_t, std::uint64_t>;
+CopiedIDs giveNewIDs (Song&, juce::ValueTree& copy);
 } // namespace phazite

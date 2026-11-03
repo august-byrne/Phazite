@@ -21,6 +21,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/chords/ChordModel.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"

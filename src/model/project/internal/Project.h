@@ -10,6 +10,10 @@ namespace phazite
 {
 class SongFollower;
 
+// A new song, as a new project's starts: its tempo map, its master and one empty track, numbered by the song itself
+// (Schema.h).
+juce::ValueTree makeNewSong();
+
 // A new song's Edit, as a new project's starts (Project::create() makes one in a project folder): Phazite's parts (its
 // tempo map, its track list, the master's loudness meter) and one empty track, with no undo steps. Its file, if given, is
 // where its audio files' paths start from. For a song outside a project: tests' songs, and what is rendered alone.

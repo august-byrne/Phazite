@@ -14,6 +14,7 @@
 #include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"

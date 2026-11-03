@@ -3,6 +3,7 @@
 #include "internal/AudioIO.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackSession.h"

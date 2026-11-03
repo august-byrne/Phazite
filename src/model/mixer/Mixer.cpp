@@ -12,6 +12,7 @@
 #include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/modulation/internal/Modulation.h"
 
@@ -145,14 +146,14 @@ namespace
 
     juce::ValueTree findChannelState (const te::Track& track)
     {
-        return track.isMasterTrack() ? findChainState (track.edit, nullptr) : findTrackState (track);
+        return track.isMasterTrack() ? findChainState (track.edit, nullptr) : findTrackState (getSong (track.edit), getTrackID (track));
     }
 
     // A send's element in the song (Schema.h: SEND), on its track's; invalid for one the song hasn't.
     juce::ValueTree findSendState (const te::AuxSendPlugin& send)
     {
         if (auto* track = send.getOwnerTrack())
-            for (const auto& child : findTrackState (*track))
+            for (const auto& child : findTrackState (getSong (track->edit), getTrackID (*track)))
                 if (child.hasType (schema::SEND) && (juce::int64) child[schema::sendID] == (juce::int64) send.itemID.getRawID())
                     return child;
 
@@ -302,8 +303,8 @@ te::Plugin* setInstrument (te::AudioTrack& track, const te::Plugin::Ptr& plugin)
 
 te::Plugin* insertDevice (te::Track& track, const te::Plugin::Ptr& plugin, int index)
 {
-    if (auto* folder = dynamic_cast<te::FolderTrack*> (&track); folder != nullptr && ! isBus (*folder))
-        makeBus (*folder);
+    if (auto* folder = dynamic_cast<te::FolderTrack*> (&track); folder != nullptr && ! isBus (getSong (folder->edit), getTrackID (*folder)))
+        makeBus (getSong (folder->edit), getTrackID (*folder));
 
     return insertInto (track.pluginList, plugin, index);
 }
@@ -322,9 +323,9 @@ void removeDevice (te::Plugin& device)
     // container take its place.
     removeDeviceState (device);
 
-    if (folder != nullptr && isBus (*folder) && getDevices (*folder).isEmpty()
-        && ! findTrackState (*folder).getProperty (schema::folderBus, false))
-        makePlainFolder (*folder);
+    if (folder != nullptr && isBus (getSong (folder->edit), getTrackID (*folder)) && getDevices (*folder).isEmpty()
+        && ! findTrackState (getSong (folder->edit), getTrackID (*folder)).getProperty (schema::folderBus, false))
+        makePlainFolder (getSong (folder->edit), getTrackID (*folder));
 }
 
 void moveDevice (te::Plugin& device, int newIndex)
@@ -492,17 +493,18 @@ te::Plugin* placeDevice (te::Edit& edit, te::Track* track, const te::Plugin::Ptr
                             && std::any_of (audioTrack->getClips().begin(), audioTrack->getClips().end(),
                                             [] (te::Clip* clip) { return dynamic_cast<te::AudioClipBase*> (clip) != nullptr; });
 
-    if (audioTrack == nullptr || isReturnTrack (*audioTrack) || holdsAudio)
+    if (audioTrack == nullptr || isReturnTrack (getSong (edit), getTrackID (*audioTrack)) || holdsAudio)
     {
-        audioTrack = insertTrack (edit, track, selection);
+        audioTrack = dynamic_cast<te::AudioTrack*> (
+            mirror::findTrack (edit, insertTrack (getSong (edit), track != nullptr ? getTrackID (*track) : TrackID(), selection)));
 
         if (audioTrack == nullptr)
             return nullptr;
 
-        setTrackName (*audioTrack, device->getName());
+        setTrackName (getSong (edit), getTrackID (*audioTrack), device->getName());
 
         if (const auto colour = getColourForName (device->getName()))
-            setTrackColour (*audioTrack, *colour);
+            setTrackColour (getSong (edit), getTrackID (*audioTrack), *colour);
     }
 
     return setInstrument (*audioTrack, device);
@@ -515,12 +517,13 @@ void setMixedAsBus (te::FolderTrack& folder, bool bus)
 
     if (bus)
     {
-        mixAsBus (folder);
+        mixAsBus (getSong (folder.edit), getTrackID (folder));
     }
     else if (getDevices (folder).isEmpty())
     {
-        findTrackState (folder).removeProperty (schema::folderBus, &getSong (folder.edit).getUndoManager());
-        makePlainFolder (folder);
+        findTrackState (getSong (folder.edit), getTrackID (folder))
+            .removeProperty (schema::folderBus, &getSong (folder.edit).getUndoManager());
+        makePlainFolder (getSong (folder.edit), getTrackID (folder));
     }
 }
 
@@ -530,7 +533,8 @@ te::Plugin* getVolumeDevice (te::Track& track)
         return audio->getVolumePlugin();
 
     if (auto* folder = dynamic_cast<te::FolderTrack*> (&track))
-        return isBus (*folder) ? static_cast<te::Plugin*> (folder->getVolumePlugin()) : static_cast<te::Plugin*> (folder->getVCAPlugin());
+        return isBus (getSong (folder->edit), getTrackID (*folder)) ? static_cast<te::Plugin*> (folder->getVolumePlugin())
+                                                                    : static_cast<te::Plugin*> (folder->getVCAPlugin());
 
     return nullptr;
 }
@@ -552,7 +556,7 @@ te::LevelMeasurer* getLevelMeasurer (te::Track& track)
         if (auto* meter = audio->getLevelMeterPlugin())
             return &meter->measurer;
 
-    if (isBus (track))
+    if (isBus (getSong (track.edit), getTrackID (track)))
         if (auto* meter = track.pluginList.findFirstPluginOfType<te::LevelMeterPlugin>())
             return &meter->measurer;
 
@@ -561,16 +565,18 @@ te::LevelMeasurer* getLevelMeasurer (te::Track& track)
 
 te::FolderTrack* getOutputBus (const te::Track& track)
 {
-    for (auto* parent = getParentFolder (track); parent != nullptr; parent = getParentFolder (*parent))
-        if (isBus (*parent))
-            return parent;
+    const auto& song = getSong (track.edit);
+
+    for (auto parent = getParentFolder (song, getTrackID (track)); parent.isValid(); parent = getParentFolder (song, parent))
+        if (isBus (song, parent))
+            return dynamic_cast<te::FolderTrack*> (mirror::findTrack (track.edit, parent));
 
     return nullptr;
 }
 
 juce::Array<te::Track*> getChannelTracks (const te::Edit& edit)
 {
-    auto tracks = getPlaylistTracks (edit);
+    auto tracks = mirror::findTracks (edit, getTrackIDs (getSong (edit)));
 
     for (auto* returnTrack : getReturnTracks (edit))
         tracks.addIfNotAlreadyThere (returnTrack);
@@ -591,8 +597,8 @@ juce::Array<te::AudioTrack*> getReturnTracks (const te::Edit& edit)
 {
     juce::Array<te::AudioTrack*> returns;
 
-    for (auto* track : getPlaylistTracks (edit))
-        if (auto* audio = dynamic_cast<te::AudioTrack*> (track); audio != nullptr && isReturnTrack (*audio))
+    for (auto* track : mirror::findTracks (edit, getTrackIDs (getSong (edit))))
+        if (auto* audio = dynamic_cast<te::AudioTrack*> (track); audio != nullptr && isReturnTrack (getSong (edit), getTrackID (*audio)))
             returns.add (audio);
 
     return returns;
@@ -616,7 +622,7 @@ te::AudioTrack* addReturnTrack (te::Edit& edit, const juce::String& name, Select
 {
     // Solo-safe, as Studio One's effect channels are: soloing a track keeps its reverb, say, audible (a return's solo
     // isolation, which the mirror gives it); and its input on a bus of its own, which the mirror gives it too.
-    auto* track = insertReturnTrack (edit, name, selection);
+    auto* track = dynamic_cast<te::AudioTrack*> (mirror::findTrack (edit, insertReturnTrack (getSong (edit), name, selection)));
 
     if (track != nullptr)
         mirror::reconcileDevices (edit);
@@ -633,7 +639,10 @@ te::AudioTrack* addReturnWithEffect (te::Track& sender, const te::Plugin::Ptr& e
     auto& edit = sender.edit;
     const auto returns = getReturnTracks (edit);
     const auto isTaken = [&returns] (const juce::String& candidate)
-    { return std::any_of (returns.begin(), returns.end(), [&candidate] (te::AudioTrack* r) { return getTrackName (*r) == candidate; }); };
+    {
+        return std::any_of (returns.begin(), returns.end(),
+                            [&candidate] (te::AudioTrack* r) { return getTrackName (getSong (r->edit), getTrackID (*r)) == candidate; });
+    };
 
     auto name = effect->getName();
 
@@ -664,7 +673,7 @@ te::AuxSendPlugin* addSend (te::Track& track, int bus, bool preFader)
 {
     // The song's, after the track's other sends, to the return on the bus, which the mirror makes.
     auto* target = findReturnTrack (track.edit, bus);
-    auto state = findTrackState (track);
+    auto state = findTrackState (getSong (track.edit), getTrackID (track));
 
     if (target == nullptr || ! state.isValid() || getVolumeDevice (track) == nullptr)
         return nullptr;
@@ -726,7 +735,8 @@ bool isDeviceOn (const te::Plugin& device)
 
 juce::ValueTree findChainState (const te::Edit& edit, const te::Track* track)
 {
-    return track != nullptr ? findTrackState (*track) : findPhaziteState (edit).getChildWithName (schema::MASTER);
+    return track != nullptr ? findTrackState (getSong (edit), getTrackID (*track))
+                            : findPhaziteState (edit).getChildWithName (schema::MASTER);
 }
 
 std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain)
@@ -740,7 +750,7 @@ std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain)
     return devices;
 }
 
-juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
+juce::ValueTree findDeviceState (const Song& song, DeviceID id)
 {
     // In a chain, or in one of its containers.
     const auto findIn = [id] (const juce::ValueTree& chain)
@@ -758,11 +768,11 @@ juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
         return juce::ValueTree();
     };
 
-    for (const auto& track : getTrackStates (edit))
+    for (const auto& track : getTrackStates (song))
         if (const auto found = findIn (track); found.isValid())
             return found;
 
-    return findIn (findChainState (edit, nullptr));
+    return findIn (song.getState().getChildWithName (schema::MASTER));
 }
 
 DeviceID getDeviceID (const juce::ValueTree& deviceState)
@@ -1000,45 +1010,6 @@ void setDeviceSound (te::Plugin& device, const juce::Identifier& property, const
         device.state.setProperty (property, value, &device.edit.getUndoManager());
     else
         device.state.removeProperty (property, &device.edit.getUndoManager());
-}
-
-void mapCopiedDevices (const te::Track& original, const te::Track& copy, te::EditItemID::IDMap& devices)
-{
-    const auto originals = original.getAllPlugins(), copies = copy.getAllPlugins();
-
-    for (int i = 0; i < originals.size() && i < copies.size(); ++i)
-        devices[originals[i]->itemID] = copies[i]->itemID;
-
-    const auto originalTracks = original.getAllSubTracks (false), copiedTracks = copy.getAllSubTracks (false);
-
-    for (int i = 0; i < originalTracks.size() && i < copiedTracks.size(); ++i)
-        mapCopiedDevices (*originalTracks[i], *copiedTracks[i], devices);
-}
-
-void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::EditItemID::IDMap& copied)
-{
-    const auto giveCopiedID = [&copied] (juce::ValueTree element, const juce::Identifier& property)
-    {
-        if (const auto found = copied.find (te::EditItemID::fromVar (element[property])); found != copied.end())
-            element.setProperty (property, (juce::int64) found->second.getRawID(), nullptr);
-    };
-
-    giveCopiedID (copiedChain, schema::channelFader);
-    giveCopiedID (copiedChain, schema::channelVCA);
-
-    for (auto child : copiedChain)
-    {
-        if (child.hasType (schema::SEND))
-            giveCopiedID (child, schema::sendID);
-
-        if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER))
-        {
-            giveCopiedID (child, schema::deviceID);
-
-            for (const auto& inside : getDeviceStates (child))
-                giveCopiedID (inside, schema::deviceID);
-        }
-    }
 }
 
 void rememberWindowPosition (te::Plugin& device, juce::Point<int> topLeft)

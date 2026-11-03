@@ -3,6 +3,7 @@
 #pragma once
 
 #include "model/base/internal/Tracktion.h" // Tracktion as the model includes it, with one of GCC's warnings off for it
+#include "model/mirror/internal/Bridge.h"  // the forms of the song's functions that take Tracktion's objects, until the tests move off them
 #include "model/mixer/FreezeModel.h"
 
 #include <juce_events/juce_events.h>

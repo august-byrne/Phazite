@@ -11,6 +11,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite

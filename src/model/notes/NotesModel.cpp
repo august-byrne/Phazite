@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"

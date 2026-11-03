@@ -52,11 +52,18 @@ public:
     void setMirror (std::function<void (Part, std::uint64_t id)> reconcile);
     void reconcile (Part, std::uint64_t id = 0); // nothing without a mirror; the ID of the one it is of
 
+    // What the devices that play the song hold of their state outside it (a plug-in's own settings), stored into the
+    // song's elements of them, outside the undo history, before the song is copied: a track's devices (by the track's ID,
+    // its folder's tracks' too), or every device for 0. The side that holds them sets it (model/devices/internal/DeviceStates.h).
+    void setDeviceStateStore (std::function<void (std::uint64_t trackID)> store);
+    void storeDeviceStates (std::uint64_t trackID = 0); // nothing without one
+
 private:
     juce::ValueTree state;
     juce::UndoManager undoManager;
     std::function<std::uint64_t()> takeTracktionID;
     std::function<void (Part, std::uint64_t)> mirror;
+    std::function<void (std::uint64_t)> deviceStateStore;
 
     JUCE_DECLARE_NON_COPYABLE (Song)
 };

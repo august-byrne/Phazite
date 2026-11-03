@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -347,28 +348,53 @@ namespace
         lane.setProperty (schema::laneParameter, parameter.parameter, nullptr);
     }
 
-    // A copied track's lanes, and those of the tracks in a folder's copy, show the copies of the devices they showed.
-    void showCopiedDevices (te::Track& copy, const te::EditItemID::IDMap& devices)
+    // The devices whose parameters a track's lanes show, in the order the lanes of their automation come: its channel's
+    // fader (or a plain folder's VCA), its sends, then its devices, those in its containers in their place.
+    std::vector<DeviceID> getLaneDevices (const Song& song, TrackID track)
     {
-        for (auto lane : findTrackState (copy))
-        {
-            if (! schema::isTrackViewElement (lane))
-                continue;
+        std::vector<DeviceID> ids;
+        const auto state = findTrackState (song, track);
 
-            if (auto parameter = readLane (lane); devices.count (toTracktion (parameter.device)) > 0)
-            {
-                parameter.device = DeviceID::fromRaw (devices.at (toTracktion (parameter.device)).getRawID());
-                writeLane (lane, parameter);
-            }
+        for (const auto* property : { &schema::channelFader, &schema::channelVCA })
+            if (const auto* id = state.getPropertyPointer (*property))
+                ids.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) *id));
+
+        for (const auto& child : state)
+            if (child.hasType (schema::SEND))
+                ids.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) child[schema::sendID]));
+
+        for (const auto& device : getDeviceStates (state))
+        {
+            if (! device.hasType (schema::CONTAINER))
+                ids.push_back (getDeviceID (device));
+
+            for (const auto& inside : getDeviceStates (device))
+                ids.push_back (getDeviceID (inside));
         }
 
-        for (auto* inside : copy.getAllSubTracks (false))
-            showCopiedDevices (*inside, devices);
+        return ids;
     }
 
-    juce::ValueTree findLaneState (const te::Track& track, const ParameterRef& parameter)
+    // Where a parameter's lane comes among its device's: a fader's volume before its pan, and one of Phazite's own devices'
+    // parameters in their order; others after, in the order their automation was made.
+    int getLaneOrder (const Song& song, const ParameterRef& parameter)
     {
-        for (const auto& child : findTrackState (track))
+        if (parameter.parameter == "volume" || parameter.parameter == "master volume" || parameter.parameter == "vca")
+            return 0;
+
+        if (parameter.parameter == "pan" || parameter.parameter == "master pan")
+            return 1;
+
+        if (const auto* info = findOwnDevice (findDeviceState (song, parameter.device)[schema::deviceType].toString().toStdString()))
+            if (const auto index = devices::findParameter (*info, parameter.parameter.toStdString()); index >= 0)
+                return index;
+
+        return std::numeric_limits<int>::max();
+    }
+
+    juce::ValueTree findLaneState (const Song& song, TrackID track, const ParameterRef& parameter)
+    {
+        for (const auto& child : findTrackState (song, track))
             if (schema::isTrackViewElement (child) && readLane (child) == parameter)
                 return child;
 
@@ -376,24 +402,24 @@ namespace
     }
 
     // Whether a lane shows a parameter of a device on this track.
-    bool isOnTrack (const te::Track& track, const ParameterRef& parameter)
+    bool isOnTrack (const Song& song, TrackID track, const ParameterRef& parameter)
     {
-        const auto found = findParameter (track.edit, parameter);
-        return found != nullptr && getTrackOfParameter (*found) == &track;
+        const auto devices = getLaneDevices (song, track);
+        return parameter.parameter.isNotEmpty() && std::find (devices.begin(), devices.end(), parameter.device) != devices.end();
     }
 
     // Before a change to a track's lanes: it keeps one for each lane it shows without keeping one (of a parameter with
     // automation), in the order they show, so that they stay in that order.
-    void keepShownLanes (te::Track& track)
+    void keepShownLanes (Song& song, TrackID track)
     {
-        for (const auto& shown : getLanes (track))
+        for (const auto& shown : getLanes (song, track))
         {
-            if (findLaneState (track, shown.parameter).isValid())
+            if (findLaneState (song, track, shown.parameter).isValid())
                 continue;
 
             juce::ValueTree lane (schema::LANE);
             writeLane (lane, shown.parameter);
-            findTrackState (track).appendChild (lane, nullptr);
+            findTrackState (song, track).appendChild (lane, nullptr);
         }
     }
 
@@ -1079,11 +1105,11 @@ void forgetCurvesOfGoneDevices (te::Edit& edit)
 }
 
 //==============================================================================
-std::vector<AutomationLane> getLanes (te::Track& track)
+std::vector<AutomationLane> getLanes (const Song& song, TrackID track)
 {
     std::vector<AutomationLane> lanes;
 
-    for (const auto& child : findTrackState (track))
+    for (const auto& child : findTrackState (song, track))
     {
         if (! schema::isTrackViewElement (child))
             continue;
@@ -1092,31 +1118,45 @@ std::vector<AutomationLane> getLanes (te::Track& track)
         const auto height = juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight,
                                           (int) child.getProperty (schema::laneHeight, AutomationLane::defaultHeight));
 
-        if (isOnTrack (track, parameter))
+        if (isOnTrack (song, track, parameter))
             lanes.push_back ({ parameter, height, (bool) child[schema::laneCollapsed] });
     }
 
-    // Automation never hides: a parameter with automation that the track keeps no lane for shows one after the others.
-    for (auto* parameter : getAutomatableParameters (track))
-    {
-        const auto ref = getParameterRef (*parameter);
+    // Automation never hides: a parameter with automation that the track keeps no lane for shows one after the others, by
+    // its device's place and then its own. A device's mix (Mixer.h: getMix()) has no lane.
+    const auto devices = getLaneDevices (song, track);
+    std::vector<std::pair<std::pair<size_t, int>, ParameterRef>> automated;
 
-        if (hasPoints (*parameter)
-            && std::none_of (lanes.begin(), lanes.end(), [&ref] (const AutomationLane& lane) { return lane.parameter == ref; }))
-            lanes.push_back ({ ref });
+    for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+    {
+        const auto ref = getCurveParameter (curve);
+        const auto device = std::find (devices.begin(), devices.end(), ref.device);
+
+        if (device == devices.end() || curve.getNumChildren() == 0
+            || ref.parameter == juce::String (devices::mixParameterID.data(), devices::mixParameterID.size())
+            || ref.parameter == "dry level" || ref.parameter == "wet level")
+            continue;
+
+        if (std::none_of (lanes.begin(), lanes.end(), [&ref] (const AutomationLane& lane) { return lane.parameter == ref; }))
+            automated.push_back ({ { (size_t) (device - devices.begin()), getLaneOrder (song, ref) }, ref });
     }
+
+    std::stable_sort (automated.begin(), automated.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+
+    for (const auto& each : automated)
+        lanes.push_back ({ each.second });
 
     return lanes;
 }
 
-void showLane (te::Track& track, const ParameterRef& parameter)
+void showLane (Song& song, TrackID track, const ParameterRef& parameter)
 {
-    if (! isOnTrack (track, parameter))
+    if (! isOnTrack (song, track, parameter))
         return;
 
-    keepShownLanes (track);
+    keepShownLanes (song, track);
 
-    if (auto lane = findLaneState (track, parameter); lane.isValid())
+    if (auto lane = findLaneState (song, track, parameter); lane.isValid())
     {
         lane.removeProperty (schema::laneCollapsed, nullptr);
         return;
@@ -1124,40 +1164,40 @@ void showLane (te::Track& track, const ParameterRef& parameter)
 
     juce::ValueTree lane (schema::LANE);
     writeLane (lane, parameter);
-    findTrackState (track).appendChild (lane, nullptr);
+    findTrackState (song, track).appendChild (lane, nullptr);
 }
 
-void removeLane (te::Track& track, const ParameterRef& parameter)
+void removeLane (Song& song, TrackID track, const ParameterRef& parameter)
 {
-    if (auto lane = findLaneState (track, parameter); lane.isValid())
-        findTrackState (track).removeChild (lane, nullptr);
+    if (auto lane = findLaneState (song, track, parameter); lane.isValid())
+        findTrackState (song, track).removeChild (lane, nullptr);
 }
 
-void replaceLane (te::Track& track, const ParameterRef& parameter, const ParameterRef& replacement)
+void replaceLane (Song& song, TrackID track, const ParameterRef& parameter, const ParameterRef& replacement)
 {
-    keepShownLanes (track);
-    auto lane = findLaneState (track, parameter);
+    keepShownLanes (song, track);
+    auto lane = findLaneState (song, track, parameter);
 
-    if (! lane.isValid() || parameter == replacement || ! isOnTrack (track, replacement))
+    if (! lane.isValid() || parameter == replacement || ! isOnTrack (song, track, replacement))
         return;
 
-    removeLane (track, replacement); // a lane that shows it already moves here
+    removeLane (song, track, replacement); // a lane that shows it already moves here
     writeLane (lane, replacement);
 }
 
-void setLaneHeight (te::Track& track, const ParameterRef& parameter, int height)
+void setLaneHeight (Song& song, TrackID track, const ParameterRef& parameter, int height)
 {
-    keepShownLanes (track);
+    keepShownLanes (song, track);
 
-    if (auto lane = findLaneState (track, parameter); lane.isValid())
+    if (auto lane = findLaneState (song, track, parameter); lane.isValid())
         lane.setProperty (schema::laneHeight, juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight, height), nullptr);
 }
 
-void setLaneCollapsed (te::Track& track, const ParameterRef& parameter, bool collapsed)
+void setLaneCollapsed (Song& song, TrackID track, const ParameterRef& parameter, bool collapsed)
 {
-    keepShownLanes (track);
+    keepShownLanes (song, track);
 
-    if (auto lane = findLaneState (track, parameter); lane.isValid())
+    if (auto lane = findLaneState (song, track, parameter); lane.isValid())
     {
         if (collapsed)
             lane.setProperty (schema::laneCollapsed, true, nullptr);
@@ -1166,30 +1206,28 @@ void setLaneCollapsed (te::Track& track, const ParameterRef& parameter, bool col
     }
 }
 
-void copyLanesAndCurves (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers)
+void copyCurves (Song& song, const CopiedIDs& copied)
 {
-    auto devices = devicesInContainers;
-    mapCopiedDevices (original, copy, devices);
-    showCopiedDevices (copy, devices);
+    auto automation = song.getState().getChildWithName (schema::AUTOMATION);
+    std::vector<juce::ValueTree> curves;
 
-    auto& edit = copy.edit;
-    auto automation = findPhaziteState (edit).getChildWithName (schema::AUTOMATION);
+    for (const auto& curve : automation)
+        curves.push_back (curve);
 
-    for (const auto& curve : getCurveStates (edit))
+    for (const auto& curve : curves)
     {
         const auto ref = getCurveParameter (curve);
-        const auto copied = devices.find (toTracktion (ref.device));
+        const auto found = copied.find (ref.device.getRaw());
 
-        if (copied == devices.end())
+        if (found == copied.end())
             continue;
 
-        if (const ParameterRef copiedRef { DeviceID::fromRaw (copied->second.getRawID()), ref.parameter };
+        if (const ParameterRef copiedRef { DeviceID::fromRaw (found->second), ref.parameter };
             ! findCurveIn (automation, copiedRef).isValid())
         {
             auto copiedState = curve.createCopy();
-            copiedState.setProperty (schema::curveDevice, toTracktion (copiedRef.device).toString(), nullptr);
-            automation.appendChild (copiedState, &getSong (edit).getUndoManager());
-            mirror::reconcileCurve (edit, copiedRef);
+            copiedState.setProperty (schema::curveDevice, juce::String ((juce::int64) found->second), nullptr);
+            automation.appendChild (copiedState, &song.getUndoManager());
         }
     }
 }

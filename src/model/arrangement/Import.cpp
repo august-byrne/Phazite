@@ -6,6 +6,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <optional>

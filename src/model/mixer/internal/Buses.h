@@ -5,15 +5,16 @@
 // rest of the mixer (Mixer.h), so that the folders' code (arrangement/Tracks.h) can make buses.
 #pragma once
 
-#include "model/base/internal/Tracktion.h"
+#include "model/base/IDs.h"
+#include "model/base/Song.h"
 
 namespace phazite
 {
-bool isBus (const te::Track&);
-void makeBus (te::FolderTrack&);         // its fader starts where the folder's volume was
-void makePlainFolder (te::FolderTrack&); // its volume starts where the bus's fader was; takes its devices away
+bool isBus (const Song&, TrackID);
+void makeBus (Song&, TrackID folder);         // its fader starts where the folder's volume was
+void makePlainFolder (Song&, TrackID folder); // its volume starts where the bus's fader was; takes its devices away
 
 // Makes a folder a bus with its switch on, so that it stays one without effects (setMixedAsBus() in Mixer.h): what every
 // new folder is. Joins the caller's undo step.
-void mixAsBus (te::FolderTrack&);
+void mixAsBus (Song&, TrackID folder);
 } // namespace phazite

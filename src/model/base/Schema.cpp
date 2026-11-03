@@ -2,6 +2,7 @@
 #include "internal/Schema.h"
 
 #include <algorithm>
+#include <functional>
 
 namespace phazite
 {
@@ -94,5 +95,57 @@ void countIDs (te::Edit& edit)
     if (largest + 1 < next)
         for (auto id = edit.createNewItemID().getRawID(); id + 1 < next;)
             id = edit.createNewItemID().getRawID();
+}
+
+CopiedIDs giveNewIDs (Song& song, juce::ValueTree& copy)
+{
+    CopiedIDs copied;
+
+    // Each kind of item's ID is named "id" (schema::trackID, clipID, deviceID, sendID, modulatorID), as a note's is, which
+    // keeps its own; a channel's fader and VCA are named after them.
+    const std::function<void (juce::ValueTree)> renumber = [&] (juce::ValueTree tree)
+    {
+        if (tree.hasType (schema::NOTE))
+            return;
+
+        for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
+        {
+            if (const auto* old = tree.getPropertyPointer (*property))
+            {
+                const auto id = song.makeID();
+                copied[(std::uint64_t) (juce::int64) *old] = id;
+                tree.setProperty (*property, (juce::int64) id, nullptr);
+            }
+        }
+
+        for (const auto& child : tree)
+            renumber (child);
+    };
+
+    // A lane, a modulation and a sidechain name what they show, modulate or listen to: the copy's own if it holds it.
+    const std::function<void (juce::ValueTree)> rename = [&] (juce::ValueTree tree)
+    {
+        const auto renameDevice = [&] (const juce::Identifier& property)
+        {
+            if (const auto found = copied.find ((std::uint64_t) tree[property].toString().getLargeIntValue()); found != copied.end())
+                tree.setProperty (property, juce::String ((juce::int64) found->second), nullptr);
+        };
+
+        if (tree.hasType (schema::LANE))
+            renameDevice (schema::laneDevice);
+        else if (tree.hasType (schema::MODULATES))
+            renameDevice (schema::modulatesDevice);
+
+        if (const auto* source = tree.getPropertyPointer (schema::deviceSidechain))
+            if (const auto found = copied.find ((std::uint64_t) (juce::int64) *source); found != copied.end())
+                tree.setProperty (schema::deviceSidechain, (juce::int64) found->second, nullptr);
+
+        for (const auto& child : tree)
+            rename (child);
+    };
+
+    renumber (copy);
+    rename (copy);
+    return copied;
 }
 } // namespace phazite

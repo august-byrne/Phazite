@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/mirror/internal/Bridge.h"
 
 #include <set>
 #include <unordered_map>

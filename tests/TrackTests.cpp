@@ -489,23 +489,23 @@ TEST_CASE ("Tracks and folders go in after the selection")
 
     // After the last selected track, and selected alone; at the end while nothing is selected.
     tracks.select ({ "A", "B" });
-    auto* track = phazite::insertTrackAfterSelection (tracks.selection);
-    REQUIRE (track != nullptr);
-    phazite::setTrackName (*track, "New");
+    const auto track = phazite::insertTrackAfterSelection (tracks.selection);
+    REQUIRE (track.isValid());
+    phazite::setTrackName (phazite::getSong (*tracks.edit), track, "New");
     CHECK (tracks.getOrder() == juce::String ("A B New C"));
     CHECK (tracks.getSelectedNames() == juce::String ("New"));
 
     tracks.selection.deselectAll();
-    auto* folder = phazite::insertFolderAfterSelection (tracks.selection);
-    REQUIRE (folder != nullptr);
+    const auto folder = phazite::insertFolderAfterSelection (tracks.selection);
+    REQUIRE (folder.isValid());
     CHECK (tracks.getOrder() == juce::String ("A B New C Folder"));
     CHECK (tracks.getSelectedNames() == juce::String ("Folder"));
 
     // Without an Edit, nothing goes in.
     tracks.selection.deselectAll();
     tracks.selection.setEdit (nullptr);
-    CHECK (phazite::insertTrackAfterSelection (tracks.selection) == nullptr);
-    CHECK (phazite::insertFolderAfterSelection (tracks.selection) == nullptr);
+    CHECK_FALSE (phazite::insertTrackAfterSelection (tracks.selection).isValid());
+    CHECK_FALSE (phazite::insertFolderAfterSelection (tracks.selection).isValid());
     tracks.selection.setEdit (tracks.edit.get());
     CHECK (phazite::getPlaylistTracks (*tracks.edit).size() == 5);
 }

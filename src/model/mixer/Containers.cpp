@@ -5,6 +5,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/modulation/internal/Modulation.h"
 
@@ -18,64 +19,6 @@ namespace
     juce::Array<te::Plugin*> getChannelDevices (te::Edit& edit, te::Track* track)
     {
         return track != nullptr ? getDevices (*track) : getMasterDevices (edit);
-    }
-
-    // Points what a state's devices are modulated by at other modulators.
-    void remapModulationSources (juce::ValueTree state, const te::EditItemID::IDMap& modulators)
-    {
-        if (state.hasType (te::IDs::MODIFIERASSIGNMENTS))
-        {
-            for (auto assignment : state)
-                if (const auto found = modulators.find (te::EditItemID::fromProperty (assignment, te::IDs::source));
-                    found != modulators.end())
-                    found->second.setProperty (assignment, te::IDs::source, nullptr);
-
-            return;
-        }
-
-        for (auto child : state)
-            remapModulationSources (child, modulators);
-    }
-
-    // Gives a track's containers that play the same rack type as another's (a copy's) rack types of their own, and those of
-    // the tracks in it, noting what each device in them is in its copy.
-    void copyContainersOf (te::Track& track, const te::EditItemID::IDMap& modulators, te::EditItemID::IDMap& devices)
-    {
-        auto& edit = track.edit;
-
-        for (auto* plugin : track.pluginList.getPlugins())
-        {
-            auto* container = dynamic_cast<te::RackInstance*> (plugin);
-            auto* list = container != nullptr ? container->getOwnerList() : nullptr;
-
-            if (list == nullptr || container->type == nullptr || te::getRackInstancesInEditForType (*container->type).size() < 2)
-                continue;
-
-            // A copy of its rack type with new IDs, whose devices the copy's modulators modulate.
-            storeDeviceStates (*container->type);
-            auto rackState = container->type->state.createCopy();
-            te::EditItemID::IDMap ids;
-            te::EditItemID::remapIDs (rackState, nullptr, edit, &ids);
-            remapModulationSources (rackState, modulators);
-            const auto rack = addContainerRack (edit, rackState);
-
-            if (rack == nullptr)
-                continue;
-
-            for (const auto& [from, to] : ids)
-                devices[from] = to;
-
-            // The container plays it from the same place, with its ID and settings: Tracktion makes a container's rack
-            // type once, so a new container takes the old one's place.
-            auto state = container->state.createCopy();
-            rack->itemID.setProperty (state, te::IDs::rackType, nullptr);
-            const auto index = list->indexOf (container);
-            container->removeFromParent();
-            list->insertPlugin (state, index);
-        }
-
-        for (auto* inside : track.getAllSubTracks (false))
-            copyContainersOf (*inside, modulators, devices);
     }
 } // namespace
 
@@ -473,14 +416,5 @@ void addContainerMacros (te::RackType& rack)
         macro.setProperty (te::IDs::value, 0.0f, nullptr);
         macros.state.addChild (macro, -1, &edit.getUndoManager());
     }
-}
-
-//==============================================================================
-te::EditItemID::IDMap copyContainers (const te::Track& original, te::Track& copy)
-{
-    te::EditItemID::IDMap modulators, devices;
-    mapCopiedModulators (original, copy, modulators);
-    copyContainersOf (copy, modulators, devices);
-    return devices;
 }
 } // namespace phazite

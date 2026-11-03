@@ -7,7 +7,10 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DrumKit.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
+
+#include <set>
 
 namespace phazite
 {
@@ -230,31 +233,42 @@ te::Plugin* duckUnder (te::AudioTrack& ducked, te::AudioTrack& key)
     return compressor;
 }
 
-void forgetSidechainSources (const juce::Array<te::Track*>& tracks)
+void forgetSidechainSources (Song& song, const std::vector<TrackID>& tracks)
 {
-    if (tracks.isEmpty())
-        return;
+    std::set<juce::int64> going;
 
-    juce::Array<juce::int64> going;
-
-    for (auto* track : tracks)
+    for (const auto track : tracks)
     {
-        going.addIfNotAlreadyThere ((juce::int64) getTrackID (*track).getRaw());
+        going.insert ((juce::int64) track.getRaw());
 
-        for (auto* inside : track->getAllSubTracks (true))
-            going.addIfNotAlreadyThere ((juce::int64) getTrackID (*inside).getRaw());
+        for (const auto inside : getTracksInFolder (song, track))
+            going.insert ((juce::int64) inside.getRaw());
     }
 
-    // The song's devices that listen to them listen to none, which the mirror plays.
-    auto& edit = tracks.getFirst()->edit;
-    auto chains = getTrackStates (edit);
-    chains.push_back (findChainState (edit, nullptr));
+    if (going.empty())
+        return;
+
+    // The song's devices that listen to them, in containers too, listen to none.
+    auto chains = getTrackStates (song);
+    chains.push_back (song.getState().getChildWithName (schema::MASTER));
+
+    const auto forget = [&song, &going] (juce::ValueTree device)
+    {
+        if (going.contains ((juce::int64) device[schema::deviceSidechain]))
+            device.removeProperty (schema::deviceSidechain, &song.getUndoManager());
+    };
 
     for (const auto& chain : chains)
-        for (auto device : getDeviceStates (chain))
-            if (going.contains ((juce::int64) device[schema::deviceSidechain]))
-                device.removeProperty (schema::deviceSidechain, &getSong (edit).getUndoManager());
+    {
+        for (const auto& device : getDeviceStates (chain))
+        {
+            forget (device);
 
-    mirror::reconcileDevices (edit);
+            for (const auto& inside : getDeviceStates (device))
+                forget (inside);
+        }
+    }
+
+    song.reconcile (Song::Part::devices);
 }
 } // namespace phazite

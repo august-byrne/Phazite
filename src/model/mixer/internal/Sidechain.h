@@ -5,6 +5,7 @@
 // feeding the sidechain while muted, so a muted "ghost" kick can still duck the bass.
 #pragma once
 
+#include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/mixer/SidechainChoice.h"
 
@@ -48,5 +49,5 @@ te::Plugin* duckUnder (te::AudioTrack& ducked, te::AudioTrack& key);
 
 // Points the sidechains that listen to these tracks, or to tracks inside them, back at the sound passing through each
 // device: for tracks about to be deleted. Joins the caller's undo step.
-void forgetSidechainSources (const juce::Array<te::Track*>& tracks);
+void forgetSidechainSources (Song&, const std::vector<TrackID>& tracks);
 } // namespace phazite

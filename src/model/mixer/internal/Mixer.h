@@ -4,6 +4,7 @@
 // before or after its fader.
 #pragma once
 
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/mixer/DeviceType.h"
@@ -73,7 +74,11 @@ bool isDeviceOn (const te::Plugin&);
 // with what its state holds (a plug-in's settings, as a preset made it; a container's devices).
 juce::ValueTree findChainState (const te::Edit&, const te::Track*);
 std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
-juce::ValueTree findDeviceState (const te::Edit&, DeviceID);
+juce::ValueTree findDeviceState (const Song&, DeviceID);
+inline juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
+{
+    return findDeviceState (getSong (edit), id);
+}
 DeviceID getDeviceID (const juce::ValueTree& deviceState);
 bool isPluginState (const juce::ValueTree& deviceState);
 juce::ValueTree makeDeviceState (te::Plugin&);
@@ -86,13 +91,6 @@ juce::ValueTree makeDeviceState (te::Plugin&);
 void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription&);
 std::optional<juce::PluginDescription> findKnownPlugin (te::Engine&, const juce::PluginDescription&);
 juce::PluginDescription getPluginDescription (te::Engine&, const juce::ValueTree& device);
-
-// After a track was copied (a folder with its tracks): what each of the original's devices is in the copy (by their places
-// in their lists: its channel's devices, sends and the rest, and those of the tracks in it), added to a map (which
-// copyContainers() in Containers.h starts with its containers' devices); and the elements of the devices, containers,
-// their devices and sends in the copy of its element, and its fader or VCA, given the copies' IDs.
-void mapCopiedDevices (const te::Track& original, const te::Track& copy, te::EditItemID::IDMap&);
-void giveCopiedDeviceIDs (juce::ValueTree& copiedChain, const te::EditItemID::IDMap& copied);
 
 // Sets a device's parameter to a value set by hand, as it snaps to its range and steps: the song's, for one of Phazite's own
 // devices in a chain (Schema.h: VALUES), and Tracktion's parameter, which plays it. And one of a device's files or tables

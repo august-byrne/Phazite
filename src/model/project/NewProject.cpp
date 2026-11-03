@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Tempo.h"
 

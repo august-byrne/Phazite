@@ -10,6 +10,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
+#include "model/mirror/internal/Bridge.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackSession.h"

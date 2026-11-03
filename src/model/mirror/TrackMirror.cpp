@@ -2,6 +2,7 @@
 #include "internal/Mirror.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/mirror/internal/Bridge.h"
 
 #include <set>
 
@@ -206,6 +207,27 @@ namespace
         }
     }
 } // namespace
+
+te::Track* findTrack (const te::Edit& edit, TrackID id)
+{
+    return id.isValid() ? te::findTrackForID (edit, toTracktion (id)) : nullptr;
+}
+
+te::Track* findTrack (const te::Edit& edit, const juce::ValueTree& state)
+{
+    return findTrack (edit, getTrackID (state));
+}
+
+juce::Array<te::Track*> findTracks (const te::Edit& edit, const std::vector<TrackID>& ids)
+{
+    juce::Array<te::Track*> tracks;
+
+    for (const auto id : ids)
+        if (auto* track = findTrack (edit, id))
+            tracks.add (track);
+
+    return tracks;
+}
 
 void reconcileTracks (te::Edit& edit)
 {

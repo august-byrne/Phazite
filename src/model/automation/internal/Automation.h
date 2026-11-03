@@ -7,6 +7,7 @@
 #pragma once
 
 #include "model/automation/AutomationValues.h"
+#include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
 #include "model/base/internal/Tracktion.h"
 
@@ -89,20 +90,20 @@ std::vector<AutomationCopy> copyAutomation (const std::vector<AutomationStretch>
 void pasteAutomation (const te::Edit&, const std::vector<AutomationCopy>&, BeatDuration distance);
 
 //==============================================================================
-// The lanes a track shows (getAutomationLanes()): those it keeps (Schema.h: PHAZITELANE), of devices on it, then one for
-// each of its parameters with automation that it keeps none for, so that automation never hides. Changes to them are
-// written without undo steps, and keep a lane for each of those first, so that the lanes stay in the order shown.
-std::vector<AutomationLane> getLanes (te::Track&);
-void showLane (te::Track&, const ParameterRef&);   // after the others, or where it is; expanded
-void removeLane (te::Track&, const ParameterRef&); // one for a parameter with automation shows again, after the others
-void replaceLane (te::Track&, const ParameterRef& lane, const ParameterRef& replacement);
-void setLaneHeight (te::Track&, const ParameterRef&, int height);
-void setLaneCollapsed (te::Track&, const ParameterRef&, bool);
+// The lanes a track shows (getAutomationLanes()), the master's too: those it keeps (Schema.h: LANE), of devices on it,
+// then one for each of its parameters with automation in the song that it keeps none for, so that automation never
+// hides. Changes to them are written without undo steps, and keep a lane for each of those first, so that the lanes stay
+// in the order shown.
+std::vector<AutomationLane> getLanes (const Song&, TrackID);
+void showLane (Song&, TrackID, const ParameterRef&);   // after the others, or where it is; expanded
+void removeLane (Song&, TrackID, const ParameterRef&); // one for a parameter with automation shows again, after the others
+void replaceLane (Song&, TrackID, const ParameterRef& lane, const ParameterRef& replacement);
+void setLaneHeight (Song&, TrackID, const ParameterRef&, int height);
+void setLaneCollapsed (Song&, TrackID, const ParameterRef&, bool);
 
-// After a track was copied (a folder with its tracks): the copy's lanes show the copy's devices, as the original's show
-// the original's, those in its containers too (the map: from each original's ID to its copy's); and each of the copy's
-// devices gets its original's automation in the song, as Tracktion copied it, in the caller's undo step.
-void copyLanesAndCurves (const te::Track& original, te::Track& copy, const te::EditItemID::IDMap& devicesInContainers = {});
+// After a part of the song was copied with new IDs (giveNewIDs(), Schema.h): each copied device gets its original's
+// automation, in the caller's undo step.
+void copyCurves (Song&, const CopiedIDs&);
 
 // A track's write mode, the song's (Schema.h: trackAutomationMode), which Tracktion's track mirrors: set without an undo
 // step.

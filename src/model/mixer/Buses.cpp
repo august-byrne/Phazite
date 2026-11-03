@@ -3,54 +3,53 @@
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/mirror/internal/Mirror.h"
 
 namespace phazite
 {
-bool isBus (const te::Track& track)
+bool isBus (const Song& song, TrackID track)
 {
     // A folder whose volume a fader of its own sets, not a VCA (Schema.h: channelFader).
-    return track.isFolderTrack() && findTrackState (track).hasProperty (schema::channelFader);
+    const auto state = findTrackState (song, track);
+    return isFolderState (state) && state.hasProperty (schema::channelFader);
 }
 
-void makeBus (te::FolderTrack& folder)
+void makeBus (Song& song, TrackID folder)
 {
-    if (isBus (folder))
+    if (! isFolder (song, folder) || isBus (song, folder))
         return;
 
-    // A fader of its own in place of its VCA, which the mirror makes at the folder's volume (the song's: Schema.h
-    // channelVolume).
-    auto& edit = folder.edit;
-    auto* undo = &getSong (edit).getUndoManager();
-    auto state = findTrackState (folder);
+    // A fader of its own in place of its VCA, which plays at the folder's volume (the song's: Schema.h channelVolume).
+    auto* undo = &song.getUndoManager();
+    auto state = findTrackState (song, folder);
     state.removeProperty (schema::channelVCA, undo);
-    state.setProperty (schema::channelFader, (juce::int64) getSong (edit).makeID(), undo);
-    mirror::reconcileTracks (edit);
-    mirror::reconcileDevices (edit);
+    state.setProperty (schema::channelFader, (juce::int64) song.makeID(), undo);
+    song.reconcile (Song::Part::tracks);
+    song.reconcile (Song::Part::devices);
 }
 
-void makePlainFolder (te::FolderTrack& folder)
+void makePlainFolder (Song& song, TrackID folder)
 {
-    if (! isBus (folder))
+    if (! isBus (song, folder))
         return;
 
     // A VCA of its own in place of its fader, at the folder's volume; its devices go from the song too.
-    auto& edit = folder.edit;
-    auto* undo = &getSong (edit).getUndoManager();
-    auto state = findTrackState (folder);
+    auto* undo = &song.getUndoManager();
+    auto state = findTrackState (song, folder);
 
     for (const auto& device : getDeviceStates (state))
         state.removeChild (device, undo);
 
     state.removeProperty (schema::channelFader, undo);
-    state.setProperty (schema::channelVCA, (juce::int64) getSong (edit).makeID(), undo);
-    mirror::reconcileTracks (edit);
-    mirror::reconcileDevices (edit);
+    state.setProperty (schema::channelVCA, (juce::int64) song.makeID(), undo);
+    song.reconcile (Song::Part::tracks);
+    song.reconcile (Song::Part::devices);
 }
 
-void mixAsBus (te::FolderTrack& folder)
+void mixAsBus (Song& song, TrackID folder)
 {
-    makeBus (folder);
-    findTrackState (folder).setProperty (schema::folderBus, true, &getSong (folder.edit).getUndoManager());
+    makeBus (song, folder);
+
+    if (auto state = findTrackState (song, folder); isFolderState (state))
+        state.setProperty (schema::folderBus, true, &song.getUndoManager());
 }
 } // namespace phazite
