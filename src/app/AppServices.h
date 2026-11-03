@@ -41,6 +41,13 @@ struct AppServices
     // read from the settings as the services start, and kept there as they change.
     struct PluginLists;
     std::unique_ptr<PluginLists> pluginLists;
+
+    // Opens the audio device and the MIDI inputs as the settings saved them (or as a first run chooses), and keeps them
+    // there from then on as they change (model/engine/internal/AudioIO.h): the app's, as it starts. Tests open devices of
+    // their own, and their services save none.
+    void openAudioDevices();
+    struct DeviceSettings;
+    std::unique_ptr<DeviceSettings> deviceSettings;
     ~AppServices();
 
     JUCE_DECLARE_NON_COPYABLE (AppServices)

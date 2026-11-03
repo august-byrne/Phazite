@@ -140,7 +140,7 @@ int main (int argc, char** argv)
         // Audio is processed on one thread only, the one that calls the hosted device: the real-time
         // audit attributes everything that happens during processing to that thread.
         auto engine = phazite::createEngine ({ .applicationName = "PhaziteTests",
-                                               .behaviour = { .openAudioDevice = false, .numAudioThreads = 1 },
+                                               .behaviour = { .numAudioThreads = 1 },
                                                .propertyStorage = std::make_unique<TestPropertyStorage> (settingsFolder) });
         testEngine = engine.get();
         const auto engineContext = phazite::createEngineContext (*engine);

@@ -16,8 +16,10 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
@@ -458,7 +460,8 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
 
         auto* clip = phazite::test::addMidiClip (track, { beats (0.0), beats (8.0) }, "Note");
         phazite::test::addMidiNote (*clip, note, beats (0.0), te::BeatDuration::fromBeats (length), 110);
-        edit->getTransport().ensureContextAllocated();
+        phazite::ProjectContext context { phazite::test::getEngineContext() }; // which plays it through Phazite's engine
+        setEdit (context, edit.get());
         phazite::test::settle (300);
 
         phazite::playOrStop (*edit);
@@ -485,7 +488,8 @@ TEST_CASE ("Stopping just after notes begin leaves nothing of them sounding, and
 
         // Back at the play start, though playback stopped within 200 ms of starting.
         phazite::test::dispatchMessagesUntil ([] { return false; }, 400);
-        CHECK (edit->getTransport().getPosition() == te::TimePosition());
+        CHECK (phazite::getPlayheadTime (*edit) == te::TimePosition());
+        setEdit (context, nullptr);
         return left;
     };
 

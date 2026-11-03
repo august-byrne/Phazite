@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Tracktion's hosted audio device for tests and benchmarks that process audio blocks themselves, on a thread of their own
-// as the audio thread would, one call at a time: to find when a live note sounds, or to time the playback graph. (Tests
-// that need playback to run on its own in real time use RealTimePlayback.h.)
+// The tests' audio device (TestAudioDevice.h), opened on Phazite's device manager as the app opens a device, for tests and
+// benchmarks that process audio blocks themselves, on a thread of their own as the audio thread would, one call at a time:
+// to find when a live note sounds, or to time what plays. (Tests that need playback to run on its own in real time use
+// RealTimePlayback.h.)
 #pragma once
 
 #include "GoldenFiles.h"
+#include "TestAudioDevice.h"
 #include "TestHelpers.h"
+#include "UiTestHelpers.h"
+#include "model/engine/EngineContext.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -14,8 +19,8 @@
 
 namespace phazite::test
 {
-// The engine's audio comes from this device for as long as it lives; it is closed again as Tracktion's own tests close
-// it, so that later tests start without it.
+// The engine's audio comes from this device for as long as it lives; it closes again after, so that later tests start
+// without it.
 class HostedDevice
 {
 public:
@@ -23,27 +28,16 @@ public:
     static constexpr int blockSize = 480; // 10 ms, the owner's setting in October 2026
 
     HostedDevice()
-        : audioIO (engine.getDeviceManager().getHostedAudioDeviceInterface())
+        : device (TestAudioDeviceType::open (getEngineContext().getAudioDeviceManager(), sampleRate, blockSize))
     {
-        te::HostedAudioDeviceInterface::Parameters parameters;
-        parameters.sampleRate = sampleRate;
-        parameters.blockSize = blockSize;
-        audioIO.initialise (parameters);
-        audioIO.prepareToPlay (sampleRate, blockSize);
-        engine.getDeviceManager().dispatchPendingUpdates();
-
-        // Tracktion adds the device's MIDI inputs and outputs in messages of its own, to lists the audio callback reads
-        // without a lock: blocks are processed once they are there.
-        settle (500);
+        REQUIRE (device != nullptr);
+        dispatchPendingMessages(); // the song for the device's rate
     }
 
     ~HostedDevice()
     {
-        auto& deviceManager = engine.getDeviceManager();
-        deviceManager.closeDevices();
-        deviceManager.removeHostedAudioDeviceInterface();
-        deviceManager.deviceManager.closeAudioDevice();
-        settle (300);
+        TestAudioDeviceType::close (getEngineContext().getAudioDeviceManager());
+        dispatchPendingMessages();
     }
 
     // Processes some blocks on another thread, and waits for it: each one, if given, sees each block's output and can stop
@@ -54,13 +48,11 @@ public:
             [&]
             {
                 juce::AudioBuffer<float> buffer (2, blockSize);
-                juce::MidiBuffer midi;
 
                 for (int b = 0; b < count; ++b)
                 {
                     buffer.clear();
-                    midi.clear();
-                    audioIO.processBlock (buffer, midi);
+                    device->process (buffer);
 
                     if (each && each (buffer, b))
                         break;
@@ -72,7 +64,7 @@ public:
         audioThread.join();
     }
 
-    // How long processBlock() takes over some blocks processed back to back, as a percentage of their audio's length.
+    // How long a block takes to process over some blocks processed back to back, as a percentage of their audio's length.
     double percentOfRealTime (int count)
     {
         process (20, {}, 0);
@@ -102,8 +94,40 @@ public:
         return found;
     }
 
+    // Plays a note on the device's thread just after a block, as a MIDI driver's thread would, and says how many samples
+    // after it was played it sounds above -60 dBFS, or -1 if it doesn't within 40 blocks. Phazite's engine plays a live
+    // note as far into the next block as it came after the block before started (engine::Engine::playLive()), which this
+    // times as the engine does: what is left is the delay of what plays it (delay compensation, a device's look-ahead).
+    int samplesFromNoteToSound (const std::function<void()>& playNote)
+    {
+        int found = -1;
+        std::thread audioThread (
+            [&]
+            {
+                juce::AudioBuffer<float> buffer (2, blockSize);
+                buffer.clear();
+                const auto blockStarted = juce::Time::getMillisecondCounterHiRes();
+                device->process (buffer);
+                const auto before = juce::Time::getMillisecondCounterHiRes();
+                playNote();
+                const auto played = (before + juce::Time::getMillisecondCounterHiRes()) / 2.0;
+                const auto intoBlock = std::clamp (juce::roundToInt ((played - blockStarted) * sampleRate / 1000.0), 0, blockSize - 1);
+
+                for (int b = 0; b < 40 && found < 0; ++b)
+                {
+                    buffer.clear();
+                    device->process (buffer);
+
+                    for (int i = 0; i < blockSize && found < 0; ++i)
+                        if (std::abs (buffer.getSample (0, i)) > 0.001f || std::abs (buffer.getSample (1, i)) > 0.001f)
+                            found = b * blockSize + i - intoBlock;
+                }
+            });
+        audioThread.join();
+        return found;
+    }
+
 private:
-    te::Engine& engine = getEngine();
-    te::HostedAudioDeviceInterface& audioIO;
+    TestAudioDevice* device;
 };
 } // namespace phazite::test

@@ -27,29 +27,9 @@
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 
-namespace
-{
-// Tracktion's merged MIDI input, which it creates on a timer once asked to scan the MIDI devices (as LiveInputTests.cpp
-// waits for it).
-std::shared_ptr<te::MidiInputDevice> waitForAllMidiInputs()
-{
-    auto& engine = phazite::test::getEngine();
-
-    if (phazite::getAllMidiInputs (engine) == nullptr)
-    {
-        engine.getDeviceManager().rescanMidiDeviceList();
-        phazite::test::runTimersUntil ([&engine] { return phazite::getAllMidiInputs (engine) != nullptr; });
-    }
-
-    return phazite::getAllMidiInputs (engine);
-}
-
-} // namespace
-
 TEST_CASE ("Overdub and quantizing recordings are the app's settings, which their commands switch")
 {
     auto& engine = phazite::test::getEngine();
-    REQUIRE (waitForAllMidiInputs() != nullptr);
 
     auto edit = phazite::createSongEdit (engine);
     phazite::Selection selection (engine);
@@ -66,7 +46,6 @@ TEST_CASE ("Overdub and quantizing recordings are the app's settings, which thei
 
     REQUIRE (registry.invoke ("transport.overdub"));
     CHECK_FALSE (phazite::isOverdubOn (engine));
-    CHECK (phazite::getAllMidiInputs (engine)->replaceExistingClips);
 
     REQUIRE (registry.invoke ("transport.quantizeRecordings"));
     CHECK (phazite::isRecordQuantizeOn (engine));
@@ -82,7 +61,6 @@ TEST_CASE ("Overdub and quantizing recordings are the app's settings, which thei
 
 TEST_CASE ("Recording needs a track for live MIDI to play")
 {
-    REQUIRE (waitForAllMidiInputs() != nullptr);
     phazite::test::TestSong song;
     auto& edit = *phazite::getEdit (song.context);
     phazite::routeLiveMidiInput (edit);
@@ -158,7 +136,6 @@ struct EngineTake
 {
     EngineTake()
     {
-        REQUIRE (waitForAllMidiInputs() != nullptr);
         song.setTempo (120.0);
         song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
         song.setSwitch ("transport.countIn", false);
@@ -174,9 +151,9 @@ struct EngineTake
     void playNote (int pitch, double after, double seconds)
     {
         playback.play (after);
-        phazite::playIntoAllMidiInputs (phazite::test::getEngine(), juce::MidiMessage::noteOn (1, pitch, 0.8f));
+        phazite::playLiveMidi (phazite::test::getEngine(), juce::MidiMessage::noteOn (1, pitch, 0.8f));
         playback.play (seconds);
-        phazite::playIntoAllMidiInputs (phazite::test::getEngine(), juce::MidiMessage::noteOff (1, pitch));
+        phazite::playLiveMidi (phazite::test::getEngine(), juce::MidiMessage::noteOff (1, pitch));
     }
 
     // The notes of the track's clips, in time order.

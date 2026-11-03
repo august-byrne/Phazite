@@ -18,7 +18,7 @@ class EngineContext
 public:
     ~EngineContext();
 
-    // JUCE's device manager, which the audio settings show; the Engine saves what they change in its settings.
+    // JUCE's device manager, which the audio settings show; the app keeps what they change in Phazite's settings.
     juce::AudioDeviceManager& getAudioDeviceManager();
 
     // How much of the time available for each audio block the engine uses, from 0 to 1.
@@ -51,8 +51,8 @@ public:
     double getRecordingCorrection() const;
     void setRecordingCorrection (double milliseconds);
 
-    // The MIDI devices connected, each on or off. The Engine opens them (not JUCE's device manager), and what they
-    // play goes to the track live MIDI plays.
+    // The MIDI devices connected, each on or off, listed again as they are plugged in. Phazite opens those on, and what
+    // they play goes to the track live MIDI plays.
     struct MidiInput
     {
         juce::String id, name;

@@ -30,29 +30,26 @@ ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui, RecentProjects& 
       engineContext (createEngineContext (e)),
       context (*engineContext, &ui)
 {
-    engine.getDeviceManager().addChangeListener (this);
+    engineContext->addChangeListener (this);
     getSelection().addChangeListener (this);
 }
 
 ProjectSession::~ProjectSession()
 {
     getSelection().removeChangeListener (this);
-    engine.getDeviceManager().removeChangeListener (this);
+    engineContext->removeChangeListener (this);
     setProject (nullptr); // closes the project on the message thread, before the Engine goes
 }
 
 void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
-    if (source != &getSelection())
-        closeMidiOutputs (engine);
-
     if (project == nullptr)
         return;
 
     if (source == &getSelection())
         followSelectedTrack (getSelection());
     else
-        routeLiveMidiInput (project->getEdit()); // MIDI inputs show up a moment after startup, and when plugged in
+        routeLiveMidiInput (project->getEdit()); // a MIDI input plugged in, or the audio device changed
 }
 
 bool ProjectSession::isUntitled() const

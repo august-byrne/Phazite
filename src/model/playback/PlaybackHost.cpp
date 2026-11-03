@@ -6,13 +6,14 @@
 
 namespace phazite
 {
-PlaybackHost::PlaybackHost (te::Engine& e)
+PlaybackHost::PlaybackHost (te::Engine& e, juce::AudioDeviceManager& d)
     : tracktion (e),
+      devices (d),
       taking (512)
 {
     // As many threads as Tracktion's (model/engine/internal/EngineSetup.h), which plays nothing of a project.
     engine.setNumThreads (tracktion.getEngineBehaviour().getNumberOfCPUsToUseForAudio());
-    tracktion.getDeviceManager().deviceManager.addAudioCallback (this); // which prepares the engine at once, if a device is open
+    devices.addAudioCallback (this); // which prepares the engines at once, if a device is open
     startTimerHz (4);
 }
 
@@ -20,7 +21,7 @@ PlaybackHost::~PlaybackHost()
 {
     jassert (sessions.empty()); // each project's session goes before the app's engine
     stopTimer();
-    tracktion.getDeviceManager().deviceManager.removeAudioCallback (this);
+    devices.removeAudioCallback (this);
     engine.stop();
     engine.dropPlans();
     previews.stop();

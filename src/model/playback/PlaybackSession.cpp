@@ -3,6 +3,7 @@
 #include "internal/PlaybackHost.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/transport/internal/Take.h"
 
@@ -35,11 +36,11 @@ PlaybackSession::PlaybackSession (te::Edit& e, PlaybackHost& h)
     : edit (e),
       exists (&e),
       host (h),
+      audio (AudioIO::getFor (e.engine)),
       player (e),
       writer (e, *this),
       editState (e.state)
 {
-    liveMidi.playing = &host.getEngine();
     player.readLive (host.getFileReader(), host.getEngine().getBlocksPlayed());
     player.setPluginGestureListener ([this] (const ParameterRef& parameter, bool starting)
                                      { writer.pluginGestureChanged (parameter, starting); });
@@ -56,12 +57,13 @@ PlaybackSession::~PlaybackSession()
     cancelPendingUpdate();
     editState.removeListener (this);
 
-    // The Edit may have gone first (it is deleted while a context still holds it), and its inputs with it.
+    // Live MIDI goes nowhere until the session the engine plays next (if any) sends it there again (host.remove()).
+    if (host.getPlayingSession() == this)
+        audio->stopLiveMidi (host.getEngine());
+
+    // The Edit may have gone first (it is deleted while a context still holds it).
     if (exists.get() != nullptr)
     {
-        if (auto* instance = findLiveMidiInput (edit))
-            instance->removeConsumer (&liveMidi);
-
         holdTracktion (false);
         edit.getParameterChangeHandler().removeListener (*this);
         player.letGoOfPlugins();
@@ -176,11 +178,10 @@ BeatPosition PlaybackSession::getPlayhead() const
     return BeatPosition::fromBeats (host.getEngine().getPlayheadBeat());
 }
 
-void PlaybackSession::LiveMidi::handleIncomingMidiMessage (const juce::MidiMessage& message, te::MPESourceID)
+void PlaybackSession::setLiveTrack (TrackID track)
 {
-    // A MIDI input's thread, or the message thread for the computer keyboard: only what is lock-free.
-    if (const auto event = engine::toNoteEvent (message, 0); event.has_value() && playing != nullptr)
-        playing->playLive (track.load (std::memory_order_relaxed), *event);
+    liveTrack = track;
+    followLiveMidi();
 }
 
 void PlaybackSession::followLiveMidi()
@@ -188,30 +189,14 @@ void PlaybackSession::followLiveMidi()
     if (exists.get() == nullptr)
         return;
 
+    // While the engine plays this project, into its track; Tracktion's graph held silent meanwhile.
     const auto playing = isPlayingProject();
-    auto* track = getLiveMidiTrack (edit);
-    liveMidi.track.store (track != nullptr ? (juce::int64) track->itemID.getRawID() : 0, std::memory_order_relaxed);
 
-    if (auto* instance = findLiveMidiInput (edit))
-    {
-        if (playing)
-            instance->addConsumer (&liveMidi);
-        else
-            instance->removeConsumer (&liveMidi);
-    }
+    if (playing)
+        audio->setLiveMidi (&host.getEngine(), (std::int64_t) liveTrack.getRaw());
 
     holdTracktion (playing);
-
-    // Tracktion plays live MIDI only while Phazite's engine doesn't (the project it plays decides).
-    if (const auto input = getAllMidiInputs (edit.engine); input != nullptr && host.getPlayingSession() == this)
-    {
-        const auto mode = playing ? te::InputDevice::MonitorMode::off : te::InputDevice::MonitorMode::automatic;
-
-        if (input->getMonitorMode() != mode)
-            input->setMonitorMode (mode);
-    }
 }
-
 void PlaybackSession::playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity)
 {
     for (const auto pitch : pitches)

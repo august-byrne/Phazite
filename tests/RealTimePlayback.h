@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Playing in real time through Tracktion's hosted device, for the tests that need an audio device with inputs, which the
-// device's own thread plays: a track's input, and a recording's correction for the inputs' delay (AudioRecordingTests.cpp).
+// Playing in real time through the tests' audio device (TestAudioDevice.h), for the tests that need an audio device with
+// inputs, which the device's own thread plays: a track's input, and a recording's correction for the inputs' delay
+// (AudioRecordingTests.cpp).
 #pragma once
 
+#include "TestAudioDevice.h"
+#include "TestHelpers.h"
 #include "UiTestHelpers.h"
-#include "model/base/internal/Tracktion.h"
+#include "model/engine/EngineContext.h"
 
 #include <atomic>
 #include <chrono>
@@ -12,11 +15,9 @@
 
 namespace phazite::test
 {
-// Plays an Edit through Tracktion's hosted audio device for as long as it lives, on a thread that acts as the audio
-// thread and processes a block every block's length, so that what is played or moved meanwhile is recorded as the app
-// records it. Nothing may open the device again meanwhile: unlike the computer's own devices, the hosted one hands the
-// thread's blocks to the callback it was started with, which it sets and reads unsynchronised (docs/realtime-audit.md,
-// finding 24). Its inputs are all open, so arming a track to record needn't open it again.
+// Plays through the tests' audio device for as long as it lives, on a thread that acts as the audio thread and processes a
+// block every block's length, so that what is played or moved meanwhile is recorded as the app records it. Its two inputs
+// are open, so arming a track to record needn't open them again.
 class RealTimePlayback
 {
 public:
@@ -29,34 +30,18 @@ public:
     };
 
     // With captureSeconds, it can keep that much of what it plays (startCapture()).
-    explicit RealTimePlayback (te::Engine& e, Input input = Input::silence, double captureSeconds = 0.0)
-        : engine (e),
-          captured (2, (int) (captureSeconds * sampleRate))
+    explicit RealTimePlayback (Input input = Input::silence, double captureSeconds = 0.0)
+        : captured (2, (int) (captureSeconds * sampleRate)),
+          device (TestAudioDeviceType::open (getEngineContext().getAudioDeviceManager(), sampleRate, blockSize, 2,
+                                             input == Input::loopback ? blockSize : 0)) // a loopback comes back a block late
     {
-        auto& deviceManager = engine.getDeviceManager();
-        auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
-
-        // As Tracktion's own test player does (tracktion_EnginePlayer.h): after a block that took longer to process than
-        // it lasts, as blocks can in a slow build (ThreadSanitizer's), Tracktion skips the next block, as when the computer
-        // can't keep up: what comes in then is lost, and nothing plays. These tests play as if it always kept up.
-        deviceManager.setCpuLimitBeforeMuting (1000.0);
-
-        te::HostedAudioDeviceInterface::Parameters params;
-        params.sampleRate = sampleRate;
-        params.blockSize = blockSize;
-        audioIO.initialise (params);
-        audioIO.prepareToPlay (sampleRate, blockSize);
-        deviceManager.dispatchPendingUpdates();
-
-        // Tracktion adds the hosted device's MIDI inputs and outputs in messages of its own, to lists its audio callback
-        // reads without a lock: the audio thread starts once they are there.
-        wait (settleMilliseconds);
+        REQUIRE (device != nullptr);
+        wait (settleMilliseconds); // the song for the device's rate
 
         audioThread = std::thread (
-            [this, &audioIO, input]
+            [this, input]
             {
                 juce::AudioBuffer<float> buffer (2, blockSize);
-                juce::MidiBuffer midi;
                 const auto blockDuration = std::chrono::duration_cast<std::chrono::steady_clock::duration> (
                     std::chrono::duration<double> (blockSize / sampleRate));
                 auto nextBlock = std::chrono::steady_clock::now();
@@ -68,8 +53,8 @@ public:
 
                     if (input == Input::silence)
                         buffer.clear(); // otherwise what it played last comes back in
-                    midi.clear();
-                    audioIO.processBlock (buffer, midi);
+
+                    device->process (buffer);
 
                     if (capturing.load (std::memory_order_acquire))
                     {
@@ -85,23 +70,13 @@ public:
                     std::this_thread::sleep_until (nextBlock);
                 }
             });
-
-        // Tracktion hears of the device in messages of its own, after another test's playback closed its device, and
-        // rebuilds an Edit's playback then: a transport started before that stops again.
-        wait (settleMilliseconds);
     }
 
     ~RealTimePlayback()
     {
         stopping = true;
         audioThread.join();
-
-        // As Tracktion's own tests do, so later tests start without the hosted device.
-        auto& deviceManager = engine.getDeviceManager();
-        deviceManager.closeDevices();
-        deviceManager.removeHostedAudioDeviceInterface();
-        deviceManager.deviceManager.closeAudioDevice();
-        deviceManager.setCpuLimitBeforeMuting (0.98); // Tracktion's own again
+        TestAudioDeviceType::close (getEngineContext().getAudioDeviceManager()); // so later tests start without it
     }
 
     // Lets some time pass on the message thread, which delivers its messages and runs its timers meanwhile.
@@ -136,8 +111,8 @@ private:
     static constexpr int blockSize = 256;
     static constexpr int settleMilliseconds = 200;
 
-    te::Engine& engine;
     juce::AudioBuffer<float> captured; // made at once, so the audio thread never allocates
+    TestAudioDevice* device;
     std::atomic<int> capturedSamples { 0 };
     std::atomic<bool> capturing { false }, stopping { false };
     std::thread audioThread;

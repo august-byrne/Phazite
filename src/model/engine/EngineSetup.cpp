@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/EngineSetup.h"
 #include "AudioDevices.h"
+#include "internal/AudioIO.h"
 #include "internal/LoudnessMeterPlugin.h"
 #include "internal/PluginScanner.h"
 #include "model/devices/internal/Devices.h"
@@ -58,9 +59,11 @@ EngineBehaviour::EngineBehaviour (Options o)
 {
 }
 
+// Tracktion's device manager opens no device and no MIDI input: Phazite opens them (internal/AudioIO.h;
+// docs/tracktion-migration.md, T4).
 bool EngineBehaviour::autoInitialiseDeviceManager()
 {
-    return options.openAudioDevice;
+    return false;
 }
 
 // Tracktion processes audio on the audio callback's thread plus (this number - 1) worker threads, which it wakes every
@@ -88,63 +91,14 @@ namespace
         return static_cast<EngineBehaviour&> (engine.getEngineBehaviour());
     }
 
-    // Sets the output's buffer outside what is saved (JUCE saves setups chosen as such only), with each Edit's playback
-    // made again for it, as Tracktion's own low-latency monitoring does.
-    void setBufferSize (te::Engine& engine, int bufferSize)
+    // Sets the output's buffer outside what is saved (JUCE saves setups chosen as such only): Phazite's engine is prepared
+    // again for it as the device starts again.
+    void setBufferSize (juce::AudioDeviceManager& devices, int bufferSize)
     {
-        auto& devices = engine.getDeviceManager().deviceManager;
         auto setup = devices.getAudioDeviceSetup();
         setup.bufferSize = bufferSize;
-
-        juce::Array<te::Edit*> playing;
-
-        for (auto* edit : engine.getActiveEdits().getEdits())
-        {
-            if (edit->getTransport().isPlaying())
-                playing.add (edit);
-
-            edit->getTransport().freePlaybackContext();
-        }
-
         devices.setAudioDeviceSetup (setup, false);
-
-        for (auto* edit : engine.getActiveEdits().getEdits())
-            edit->getTransport().ensureContextAllocated();
-
-        for (auto* edit : playing)
-            edit->getTransport().play (true);
     }
-
-    // Brings JUCE's approximate millisecond clock up to date after every audio block. Tracktion's audio code reads that
-    // clock (Time::getApproximateMillisecondCounter()), which only a read of the exact one brings up to date: JUCE's timer
-    // thread reads it every 100 ms at most, and not at all for up to 300 ms while it waits for a busy message thread.
-    // Tracktion's live MIDI input takes a clock that moved more than two blocks and 100 ms between two blocks for a glitch,
-    // and drops the notes waiting; a note played on the computer keyboard reads the exact clock itself
-    // (juce::MidiKeyboardState::noteOn()). So the first note played after the clock fell behind was lost, about every
-    // other note in tests, whose message thread waits while blocks are processed.
-    class ClockKeeper final : public juce::AudioProcessor
-    {
-    public:
-        using juce::AudioProcessor::processBlock;
-
-        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override { juce::Time::getMillisecondCounter(); }
-
-        const juce::String getName() const override { return "Clock keeper"; }
-        void prepareToPlay (double, int) override {}
-        void releaseResources() override {}
-        double getTailLengthSeconds() const override { return 0.0; }
-        bool acceptsMidi() const override { return false; }
-        bool producesMidi() const override { return false; }
-        juce::AudioProcessorEditor* createEditor() override { return nullptr; }
-        bool hasEditor() const override { return false; }
-        int getNumPrograms() override { return 1; }
-        int getCurrentProgram() override { return 0; }
-        void setCurrentProgram (int) override {}
-        const juce::String getProgramName (int) override { return {}; }
-        void changeProgramName (int, const juce::String&) override {}
-        void getStateInformation (juce::MemoryBlock&) override {}
-        void setStateInformation (const void*, int) override {}
-    };
 } // namespace
 
 bool isLowLatency (te::Engine& engine)
@@ -167,7 +121,8 @@ void setLowLatency (te::Engine& engine, bool on)
         edit->restartPlayback();
     }
 
-    auto* device = engine.getDeviceManager().deviceManager.getCurrentAudioDevice();
+    auto* audio = AudioIO::findFor (engine);
+    auto* device = audio != nullptr ? audio->getDevices().getCurrentAudioDevice() : nullptr;
 
     if (device == nullptr)
         return;
@@ -180,14 +135,14 @@ void setLowLatency (te::Engine& engine, bool on)
         {
             behaviour.bufferBeforeLowLatency = current;
             behaviour.lowLatencyBuffer = *smaller;
-            setBufferSize (engine, *smaller);
+            setBufferSize (audio->getDevices(), *smaller);
         }
     }
     else if (behaviour.bufferBeforeLowLatency > 0)
     {
         // Back as it was, unless the settings changed it meanwhile.
         if (device->getCurrentBufferSizeSamples() == behaviour.lowLatencyBuffer)
-            setBufferSize (engine, behaviour.bufferBeforeLowLatency);
+            setBufferSize (audio->getDevices(), behaviour.bufferBeforeLowLatency);
 
         behaviour.bufferBeforeLowLatency = behaviour.lowLatencyBuffer = 0;
     }
@@ -231,12 +186,6 @@ void EngineBehaviour::newClipCreated (te::Clip& clip, bool)
 // Phazite has no clip launcher (until after v1: docs/design.md, section 26), so no track needs the nodes Tracktion adds
 // to every one for its clip slots (docs/performance-audit.md, A3).
 bool EngineBehaviour::areClipSlotsEnabled()
-{
-    return false;
-}
-
-// Don't open the microphone until the user asks for an input.
-bool EngineBehaviour::shouldOpenAudioInputByDefault()
 {
     return false;
 }
@@ -303,9 +252,6 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
 
     auto storage = o.propertyStorage != nullptr ? std::move (o.propertyStorage) : std::make_unique<PropertyStorage> (o.applicationName);
     auto ui = o.uiBehaviour != nullptr ? std::move (o.uiBehaviour) : std::make_unique<UIBehaviour>();
-    const bool openDevices = o.behaviour.openAudioDevice;
-    const bool firstRun = openDevices && storage->getXmlProperty (te::SettingID::audio_device_setup) == nullptr;
-
     auto engine = std::make_unique<te::Engine> (std::move (storage), std::move (ui), std::make_unique<EngineBehaviour> (o.behaviour));
 
     // Plug-ins scanned in Phazite's helper program, with a time limit for each.
@@ -314,21 +260,6 @@ std::unique_ptr<te::Engine> createEngine (EngineOptions o)
     // Phazite's own plug-in types, which projects can hold.
     engine->getPluginManager().createBuiltInType<LoudnessMeterPlugin>();
     registerDevices (*engine);
-
-    // So that every note played live sounds (ClockKeeper).
-    engine->getDeviceManager().setGlobalOutputAudioProcessor (std::make_unique<ClockKeeper>());
-
-    // Tracktion's DeviceManager::initialise() asks for a MIDI device scan in 5 ms, but then restarts the
-    // same timer with the 4-second hot-plug check, so MIDI inputs (and the computer keyboard, which
-    // plays into "All MIDI Ins") would only work 4 seconds after startup. Ask again, once it is done.
-    if (openDevices)
-        engine->getDeviceManager().rescanMidiDeviceList();
-
-    // With no audio setup saved yet, Tracktion opened the default output as Windows shares it; Low Latency Mode instead
-    // where it offers a small buffer (docs/design.md, section 20).
-    if (firstRun)
-        chooseLowLatencySetup (engine->getDeviceManager().deviceManager);
-
     return engine;
 }
 

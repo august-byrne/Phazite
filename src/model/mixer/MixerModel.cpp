@@ -78,11 +78,23 @@ namespace
 
 DeviceSlot makeDeviceSlot (te::Plugin& device)
 {
+    // How late its sound comes out, as Phazite's engine plays it while it plays the device's project, in seconds; or as
+    // Tracktion knows it otherwise. While Low Latency is on, one that looks ahead further than its limit is bypassed
+    // (EngineSetup.h).
+    auto latency = device.isEnabled() ? device.getLatencySeconds() : 0.0;
+
+    if (auto* session = findPlayingSession (device.edit))
+    {
+        auto* node = session->getPlayer().findDevice ((std::int64_t) device.itemID.getRawID());
+        latency = node != nullptr && node->isOn() ? node->getRunner().getLatencySamples() / session->getEngine().getSampleRate() : 0.0;
+        latency = isLowLatency (device.engine) && latency > lowLatencyLimitSeconds ? 0.0 : latency;
+    }
+
     return { .id = getDeviceID (device),
              .name = device.getName(),
              .isOn = isDeviceOn (device),
              .hasMix = hasMix (device),
-             .latencySeconds = device.getLatencySeconds(),
+             .latencySeconds = latency,
              .isContainer = isContainer (device),
              .opensWindow = opensWindow (device),
              .popsOut = popsOut (device),
@@ -827,21 +839,10 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
 
     // Each device's, as Phazite's engine plays it, while it plays the project.
     auto* session = findPlayingSession (*edit);
-    const auto latencyOf = [session] (auto& plugin)
-    {
-        if (session == nullptr)
-            return plugin.isEnabled() ? plugin.getLatencySeconds() : 0.0;
-
-        // While Low Latency is on, one that looks ahead further than its limit is bypassed (EngineSetup.h).
-        auto* node = session->getPlayer().findDevice ((std::int64_t) plugin.itemID.getRawID());
-        const auto latency =
-            node != nullptr && node->isOn() ? node->getRunner().getLatencySamples() / session->getEngine().getSampleRate() : 0.0;
-        return isLowLatency (plugin.engine) && latency > lowLatencyLimitSeconds ? 0.0 : latency;
-    };
 
     for (auto* track : te::getAllTracks (*edit))
         for (auto* plugin : track->pluginList.getPlugins())
-            if (const auto latency = latencyOf (*plugin); latency > 0.0)
+            if (const auto latency = makeDeviceSlot (*plugin).latencySeconds; latency > 0.0)
                 compensation.devices.push_back (
                     { plugin->getName() + " on " + (track->isMasterTrack() ? juce::String ("Master") : getTrackName (*track)), latency });
 

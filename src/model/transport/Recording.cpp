@@ -9,31 +9,16 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
-namespace
-{
-    // Tracktion's names for quantizing to sixteenths (a quarter of a beat in 4/4), and for not quantizing.
-    constexpr const char* sixteenths = "1/4 beat";
-    constexpr const char* notQuantized = "(none)";
-
-    // Tracktion keeps the MIDI input's settings with its own, for every project (until T6: docs/tracktion-migration.md).
-    void saveSettings (te::MidiInputDevice& device)
-    {
-        if (auto* merged = dynamic_cast<te::VirtualMidiInputDevice*> (&device))
-            merged->saveProps();
-    }
-} // namespace
-
 bool canRecord (te::Edit& edit)
 {
     const auto* recorder = AudioRecorder::findFor (edit);
-    return findPlayingSession (edit) != nullptr
-           && ((getLiveMidiTrack (edit) != nullptr && findLiveMidiInput (edit) != nullptr)
-               || (recorder != nullptr && recorder->canRecord()));
+    return findPlayingSession (edit) != nullptr && (getLiveMidiTrack (edit) != nullptr || (recorder != nullptr && recorder->canRecord()));
 }
 
 bool isRecording (const te::Edit& edit)
@@ -81,18 +66,14 @@ bool canToggleRecording (te::Edit& edit)
 //==============================================================================
 bool isOverdubOn (te::Engine& engine)
 {
-    const auto device = getAllMidiInputs (engine);
-    return device == nullptr || ! device->replaceExistingClips;
+    const auto* audio = AudioIO::findFor (engine);
+    return audio == nullptr || audio->isOverdubOn();
 }
 
 void setOverdubOn (te::Engine& engine, bool on)
 {
-    if (const auto device = getAllMidiInputs (engine))
-    {
-        device->mergeRecordings = on;
-        device->replaceExistingClips = ! on;
-        saveSettings (*device);
-    }
+    if (auto* audio = AudioIO::findFor (engine))
+        audio->setOverdubOn (on);
 }
 
 void toggleOverdub (te::Engine& engine)
@@ -102,19 +83,15 @@ void toggleOverdub (te::Engine& engine)
 
 bool isRecordQuantizeOn (te::Engine& engine)
 {
-    const auto device = getAllMidiInputs (engine);
-    return device != nullptr && device->quantisation.getType (false) == sixteenths;
+    const auto* audio = AudioIO::findFor (engine);
+    return audio != nullptr && audio->isRecordQuantizeOn();
 }
 
 void setRecordQuantizeOn (te::Engine& engine, bool on)
 {
-    if (const auto device = getAllMidiInputs (engine))
-    {
-        device->quantisation.setType (on ? sixteenths : notQuantized);
-        saveSettings (*device);
-    }
+    if (auto* audio = AudioIO::findFor (engine))
+        audio->setRecordQuantizeOn (on);
 }
-
 void toggleRecordQuantize (te::Engine& engine)
 {
     setRecordQuantizeOn (engine, ! isRecordQuantizeOn (engine));

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/LiveInput.h"
-#include "internal/EngineSetup.h"
+#include "internal/AudioIO.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/devices/internal/Devices.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/notes/internal/Notes.h"
@@ -8,20 +9,6 @@
 
 namespace phazite
 {
-namespace
-{
-    // The Edit's instance of an input device, which holds the tracks it goes to. Only exists while the
-    // Edit's playback context is allocated.
-    te::InputDeviceInstance* findInstance (te::Edit& edit, const te::InputDevice& device)
-    {
-        for (auto* instance : edit.getAllInputDevices())
-            if (&instance->getInputDevice() == &device)
-                return instance;
-
-        return nullptr;
-    }
-} // namespace
-
 bool hasInstrument (const te::AudioTrack& track)
 {
     for (auto* plugin : track.pluginList)
@@ -61,81 +48,43 @@ void followSelectedTrack (const Selection& selection)
         routeLiveMidiInput (*edit); // in case the track it played was deleted
 }
 
-std::shared_ptr<te::MidiInputDevice> getAllMidiInputs (te::Engine& engine)
+void playLiveMidi (te::Engine& engine, const juce::MidiMessage& message)
 {
-    for (auto& device : engine.getDeviceManager().getMidiInDevices())
-        if (auto* merged = dynamic_cast<te::VirtualMidiInputDevice*> (device.get()); merged != nullptr && merged->useAllInputs)
-            return device;
-
-    return nullptr;
-}
-
-void playIntoAllMidiInputs (te::Engine& engine, const juce::MidiMessage& m)
-{
-    if (const auto device = getAllMidiInputs (engine))
-    {
-        if (m.isNoteOn())
-            device->keyboardState.noteOn (m.getChannel(), m.getNoteNumber(), m.getFloatVelocity());
-        else if (m.isNoteOff())
-            device->keyboardState.noteOff (m.getChannel(), m.getNoteNumber(), m.getFloatVelocity());
-    }
-}
-
-te::InputDeviceInstance* findLiveMidiInput (te::Edit& edit)
-{
-    if (const auto device = getAllMidiInputs (edit.engine))
-        return findInstance (edit, *device);
-
-    return nullptr;
+    if (auto* audio = AudioIO::findFor (engine); audio != nullptr && (message.isNoteOn() || message.isNoteOff()))
+        audio->playLive (message);
 }
 
 te::AudioTrack* getLiveMidiTrack (te::Edit& edit)
 {
-    if (auto* instance = findLiveMidiInput (edit))
-        if (const auto tracks = te::getTargetTracks (*instance); ! tracks.isEmpty())
-            return tracks.getFirst();
+    if (const auto* session = findSession (edit); session != nullptr && session->getLiveTrack().isValid())
+        return dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (session->getLiveTrack())));
 
     return nullptr;
 }
 
 bool setLiveMidiTrack (te::AudioTrack& track)
 {
-    auto& edit = track.edit;
-    const auto device = getAllMidiInputs (edit.engine);
+    auto* session = findSession (track.edit);
 
-    if (device == nullptr)
-        return false;
-
-    edit.getTransport().ensureContextAllocated();
-    auto* instance = findInstance (edit, *device);
-
-    if (instance == nullptr)
+    if (session == nullptr)
         return false;
 
     // Without an undo step: this follows the track being played, it isn't an edit of the song.
-    if (const auto tracks = te::getTargetTracks (*instance); tracks.size() != 1 || tracks.getFirst() != &track)
-        if (const auto destination = instance->setTarget (track.itemID, true, nullptr, 0);
-            ! destination.has_value() || *destination == nullptr)
-            return false;
-
-    // Phazite's own engine plays it, while it plays the project (docs/tracktion-migration.md, T2).
-    if (auto* session = findSession (edit))
-        session->followLiveMidi();
-
+    session->setLiveTrack (getTrackID (findTrackState (track)));
     return true;
 }
 
 void routeLiveMidiInput (te::Edit& edit)
 {
-    edit.getTransport().ensureContextAllocated();
+    auto* session = findSession (edit);
 
-    if (auto* session = findSession (edit))
-        session->followLiveMidi();
+    if (session == nullptr)
+        return;
 
     // The track it plays already.
-    if (auto* track = getLiveMidiTrack (edit))
+    if (getLiveMidiTrack (edit) != nullptr)
     {
-        setLiveMidiTrack (*track);
+        session->followLiveMidi();
         return;
     }
 
@@ -147,14 +96,7 @@ void routeLiveMidiInput (te::Edit& edit)
             return;
         }
     }
-}
 
-void closeMidiOutputs (te::Engine& engine)
-{
-    auto& devices = engine.getDeviceManager();
-
-    for (int i = 0; i < devices.getNumMidiOutDevices(); ++i)
-        if (auto* output = devices.getMidiOutDevice (i); output != nullptr && output->isEnabled())
-            output->setEnabled (false);
+    session->setLiveTrack ({});
 }
 } // namespace phazite

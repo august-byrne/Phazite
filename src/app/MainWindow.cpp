@@ -55,7 +55,7 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
       session (s),
       lookAndFeel (lf),
       services (appServices),
-      computerKeyboard ([&e] (const juce::MidiMessage& m) { playIntoAllMidiInputs (e, m); }),
+      computerKeyboard ([&e] (const juce::MidiMessage& m) { playLiveMidi (e, m); }),
       shortcutKeys (bridge),
       pluginWindowServices { s.getContext(), appServices.library, appServices.settings }
 {
@@ -448,7 +448,7 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
     }
 
     auto* panel = new ui::WelcomePanel (
-        services.soundPack, engine.getDeviceManager().deviceManager, commands.getKeymap().name,
+        services.soundPack, services.engineContext->getAudioDeviceManager(), commands.getKeymap().name,
         [this] (const juce::String& name) { setKeymap (name); },
         [safeThis = juce::Component::SafePointer<MainWindow> (this)] (const juce::String& commandID)
         {

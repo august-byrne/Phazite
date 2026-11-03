@@ -14,7 +14,7 @@ Replacing a part of the engine outright is a separate decision, made one capabil
 
 ## How it is measured
 
-- **The scenarios:** [tests/RealtimeAuditTests.cpp](../tests/RealtimeAuditTests.cpp) builds small projects and plays them in real time. Playback goes through Tracktion's hosted audio device (the way the engine runs inside a plug-in), on a separate thread that acts as the audio thread.
+- **The scenarios:** [tests/RealtimeAuditTests.cpp](../tests/RealtimeAuditTests.cpp) builds small projects and plays them in real time. Playback goes through the tests' own audio device (`tests/TestAudioDevice.h`), opened on Phazite's device manager as the app opens a device, on a separate thread that acts as the audio thread (through Tracktion's hosted audio device until T4, step 1).
   - The settings are 48 kHz with 256-sample blocks.
   - The engine's worker threads are off in the tests, so all audio processing happens on that one thread.
   - Like the app, the device opens no audio inputs unless a scenario asks for them.
@@ -32,10 +32,11 @@ Replacing a part of the engine outright is a separate decision, made one capabil
 
 ## Results (Windows Debug)
 
-Since [T2 step 10](tracktion-migration.md) (2026-11-02) every scenario but the preview plays as the app plays: its song
-opened as a project, Tracktion's hosted device calling both callbacks on the one audio thread, Tracktion's (which plays
-nothing of a project) and Phazite's engine (on one thread, so that the monitor counts all it does: its workers play the
-same strips' code), with a tone coming into the device's two inputs. The first column covers the warm-up after playback
+Since [T2 step 10](tracktion-migration.md) (2026-11-02) every scenario plays as the app plays: its song opened as a
+project, and since T4 step 1 the tests' own device calling Phazite's callback on the one audio thread (before, Tracktion's
+hosted device called Tracktion's too, which played nothing of a project), Phazite's engine on one thread, so that the
+monitor counts all it does (its workers play the same strips' code), with a tone coming into the device's two inputs; the
+preview (T5 step 1) plays beside an empty song. The first column covers the warm-up after playback
 starts (about 0.5 s); the second covers the next second. Measured on 2026-11-02; the counts before, through Tracktion's
 graph, were in this table's history.
 
@@ -192,7 +193,7 @@ and frees a second at 48 kHz with two inputs, which the audit found once its sce
 **19. The hosted MIDI input** (measured by ThreadSanitizer in CI, 2026-10-16).
 - **What:** Tracktion's hosted audio device, which the tests (and plug-ins built on Tracktion) play through, passes each block's MIDI to the input instances of the Edits playing (`HostedMidiInputDevice::processBlock`) without the lock under which an Edit's playback adds and removes its instances on the message thread (`MidiInputDevice::addInstance`, `removeInstance`). A test that starts or stops playback while the hosted device processes blocks on a thread of its own shows it.
 - **Why it is harmless to Phazite:** the app plays through the computer's own audio and MIDI devices, not the hosted one; only the tests use it.
-- **Action:** `tools/tsan-suppressions.txt` suppresses it. Report upstream.
+- **Action:** `tools/tsan-suppressions.txt` suppressed it. *Gone since T4, step 1 (2026-11-02):* the tests play through a device of their own, and Tracktion opens no MIDI input; the suppression went with it.
 
 **20. The transport's position while the song is stopped** (measured by ThreadSanitizer in CI, 2026-10-17).
 - **What:** while the transport is stopped, a plug-in with automation sets its parameters from where the playhead is, in each block (`Plugin::applyToBufferWithAutomation`). It reads that position with `TransportControl::getPosition()`, a `juce::CachedValue` that the message thread writes whenever the playhead moves, without synchronisation. The touch test in `tests/AutomationModelTests.cpp` shows it, now and then: it stops the song while the volume it automated keeps playing. The app does the same when the playhead moves while the song is stopped.
@@ -207,7 +208,7 @@ and frees a second at 48 kHz with two inputs, which the audit found once its sce
 **24. The hosted audio device opened again while a thread plays through it** (measured by ThreadSanitizer in CI, 2026-10-29).
 - **What:** Tracktion's hosted audio device keeps the callback it is started with in a plain pointer, which `HostedAudioDevice::start()` sets on the message thread whenever JUCE opens the device again, and which `processBlock()` reads on the thread that plays through the device, without synchronisation. The computer's own devices stop handing blocks to the callback before they change it. The audio recording tests (step 3.4) showed it five times: arming a track opened the device again while `RealTimePlayback`'s thread played through it.
 - **Why it is harmless to Phazite:** the app plays through the computer's own devices; only the tests use the hosted one.
-- **Action:** not suppressed. A suppression would have to name the reader, `HostedAudioDeviceType::processBlock`, which is on every stack of the tests' audio thread, so it would hide every race there. Instead the tests never open the device again while a thread plays through it (`tests/RealTimePlayback.h`): the device opens both its inputs, and arming a track opens it again only when an input that the track needs is closed. `AudioRecorder::update()` had also opened it again to name inputs that were open already, which the app never needs, as it opens no input by itself. The hosted device reports every input open whatever is asked of it, so opening and closing the inputs that armed tracks need is checked by hand, with an audio interface. Report upstream.
+- **Action:** not suppressed. A suppression would have to name the reader, `HostedAudioDeviceType::processBlock`, which is on every stack of the tests' audio thread, so it would hide every race there. Instead the tests never open the device again while a thread plays through it (`tests/RealTimePlayback.h`): the device opens both its inputs, and arming a track opens it again only when an input that the track needs is closed. `AudioRecorder::update()` had also opened it again to name inputs that were open already, which the app never needs, as it opens no input by itself. The hosted device reports every input open whatever is asked of it, so opening and closing the inputs that armed tracks need is checked by hand, with an audio interface. Report upstream. *Gone since T4, step 1 (2026-11-02):* the tests' own device (`tests/TestAudioDevice.h`) starts, stops and plays blocks under one lock, as a driver does, and reports the inputs its setup opened.
 
 **25. A modulator's sample rate written while the graph plays** (measured by ThreadSanitizer in CI, 2026-10-29).
 - **What:** building a playback graph on the message thread initialises each modulator's node, which writes the modulator's sample rate, a plain `double` (`Modifier::baseClassInitialise`), while the audio thread reads it for the graph still playing, in the LFO's timer (`LFOModifier::LFOModifierTimer::updateStreamTime`, through `Modifier::getSampleRate()`), without synchronisation. It showed in one of four `linux-tsan` runs of the same code.

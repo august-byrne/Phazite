@@ -78,6 +78,14 @@ public:
     static constexpr ListSetting pluginsGettingAllKeys { "phazitePluginsGettingAllKeys", SaveTiming::now }; // plug-ins, by identity
     static constexpr ListSetting pluginsCrashedLoading { "phazitePluginsCrashedLoading", SaveTiming::now }; // kept off, by identity
     static constexpr TextSetting knownPlugins { "phaziteKnownPlugins", "", SaveTiming::soon };              // the scan's list, JUCE's XML
+    // The audio device and MIDI inputs (model/engine/internal/AudioIO.h): JUCE's device manager's state, empty until a
+    // first run chose one; the MIDI inputs switched off, by their IDs; the MIDI recordings' options; and the correction of
+    // the inputs' delay for recordings, in milliseconds.
+    static constexpr TextSetting audioSetup { "phaziteAudioSetup", "", SaveTiming::now };
+    static constexpr ListSetting midiInputsOff { "phaziteMidiInputsOff", SaveTiming::now };
+    static constexpr BoolSetting recordOverdub { "phaziteRecordOverdub", true, SaveTiming::now };
+    static constexpr BoolSetting recordQuantize { "phaziteRecordQuantize", false, SaveTiming::now };
+    static constexpr NumberSetting recordingCorrection { "phaziteRecordingCorrection", 0.0, SaveTiming::now };
     static constexpr BoolSetting guide { "phaziteGuide", true, SaveTiming::now };
     static constexpr ListSetting guideStepsDone { "phaziteGuideStepsDone", SaveTiming::now }; // the guide's steps, by name
     static constexpr ListSetting lessonsDone { "phaziteLessonsDone", SaveTiming::now };       // the lessons finished, by id

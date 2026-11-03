@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppServices.h"
 #include "SandboxedEditor.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/Preview.h"
 #include "model/plugins/internal/PluginHost.h"
@@ -46,6 +47,42 @@ struct AppServices::PluginLists final : private juce::ChangeListener
     }
 };
 
+struct AppServices::DeviceSettings final : private juce::ChangeListener
+{
+    DeviceSettings (AudioIO& a, Settings& s)
+        : audio (a),
+          settings (s)
+    {
+        AudioIO::Saved saved;
+        saved.audioSetup = juce::parseXML (settings.get (Settings::audioSetup));
+        saved.midiInputsOff = settings.get (Settings::midiInputsOff);
+        saved.overdub = settings.get (Settings::recordOverdub);
+        saved.recordQuantize = settings.get (Settings::recordQuantize);
+        saved.recordingCorrection = settings.get (Settings::recordingCorrection);
+        audio.open (saved);
+        save(); // a first run's choice
+        audio.addChangeListener (this);
+    }
+
+    ~DeviceSettings() override { audio.removeChangeListener (this); }
+
+    AudioIO& audio;
+    Settings& settings;
+
+    void save()
+    {
+        const auto saved = audio.getSaved();
+        settings.set (Settings::audioSetup, saved.audioSetup != nullptr
+                                                ? saved.audioSetup->toString (juce::XmlElement::TextFormat().singleLine())
+                                                : juce::String());
+        settings.set (Settings::midiInputsOff, saved.midiInputsOff);
+        settings.set (Settings::recordOverdub, saved.overdub);
+        settings.set (Settings::recordQuantize, saved.recordQuantize);
+        settings.set (Settings::recordingCorrection, saved.recordingCorrection);
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { save(); }
+};
 AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
     : engineContext (createEngineContext (engine)),
       settings (options.settingsInMemory ? nullptr : &engine.getPropertyStorage().getPropertiesFile()),
@@ -58,6 +95,12 @@ AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
     // list, and those that crashed as they loaded kept off.
     useSandboxedEditors (getPluginHost (*engineContext));
     pluginLists = std::make_unique<PluginLists> (engine.getPluginManager().knownPluginList, getPluginHost (*engineContext), settings);
+}
+
+void AppServices::openAudioDevices()
+{
+    if (deviceSettings == nullptr)
+        deviceSettings = std::make_unique<DeviceSettings> (getAudioIO (*engineContext), settings);
 }
 
 AppServices::~AppServices() = default;

@@ -12,6 +12,7 @@
 
 #include "AudioThreadMonitor.h"
 #include "SandboxedPlugins.h"
+#include "TestAudioDevice.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -43,6 +44,7 @@
 #include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/DrumSamplerPlugin.h"
 #include "model/devices/internal/Wavetables.h"
+#include "model/engine/EngineContext.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/LoudnessMeterPlugin.h"
@@ -181,101 +183,17 @@ struct Measurement
     float peakLevel = 0.0f;
 };
 
-// Plays an Edit that is no project's (a preview's) from the start through Tracktion's engine, in real time on a separate
-// "audio" thread, through Tracktion's hosted audio device, and measures that thread.
-Measurement playTracktionAndMeasure (te::Edit& edit)
-{
-    auto& deviceManager = edit.engine.getDeviceManager();
-    auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
-
-    te::HostedAudioDeviceInterface::Parameters params;
-    params.sampleRate = auditSampleRate;
-    params.blockSize = auditBlockSize;
-    params.inputChannels = 0;
-    audioIO.initialise (params);
-    audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
-    deviceManager.dispatchPendingUpdates();
-
-    auto& transport = edit.getTransport();
-    transport.ensureContextAllocated();
-    transport.setPosition (0_tp);
-    transport.play (false);
-
-    Measurement m;
-
-    // Allocated before the thread is marked as an audio thread, so they aren't counted.
-    juce::AudioBuffer<float> buffer (std::max (params.inputChannels, params.outputChannels), auditBlockSize);
-    juce::MidiBuffer midi;
-    midi.ensureSize (4096);
-
-    const auto blockDuration =
-        std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
-
-    AudioThreadMonitor::reset();
-
-    std::thread audioThread (
-        [&]
-        {
-            const AudioThreadMonitor::ScopedAudioThread marker;
-
-            // In real time, so that Tracktion's background threads (file reading,
-            // for example) keep up as they would with a real audio device.
-            const auto processFor = [&] (double seconds)
-            {
-                const auto numBlocks = juce::roundToInt (seconds * auditSampleRate / auditBlockSize);
-
-                for (int i = 0; i < numBlocks; ++i)
-                {
-                    const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
-                    buffer.clear();
-                    midi.clear();
-                    audioIO.processBlock (buffer, midi);
-                    m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
-                    std::this_thread::sleep_until (blockEnd);
-                }
-            };
-
-            m.warmUpTaken = warmUp (processFor);
-            m.warmUp = AudioThreadMonitor::getCounts();
-            m.firstSteadyEvent = AudioThreadMonitor::getNumEvents();
-
-            processFor (steadySeconds);
-            const auto total = AudioThreadMonitor::getCounts();
-            m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
-        });
-    audioThread.join();
-
-    transport.stop (false, false);
-    m.callSites = AudioThreadMonitor::describeCallSites();
-    m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
-
-    // Remove the hosted device again, as Tracktion's own tests do, so later tests start without one.
-    deviceManager.closeDevices();
-    deviceManager.removeHostedAudioDeviceInterface();
-    deviceManager.deviceManager.closeAudioDevice();
-
-    return m;
-}
-
 // Plays the open project from its start through Phazite's engine as the app plays it, in real time on a separate "audio"
-// thread that drives Tracktion's hosted audio device, whose callbacks are Tracktion's, which plays nothing of the project,
-// and Phazite's (model/playback/internal/PlaybackHost.h), and measures that thread; a tone comes into the device's two
-// inputs. Recording, it records a take instead, while another thread plays a note every twentieth of a second into a
+// thread that drives the tests' audio device (TestAudioDevice.h), whose callback is Phazite's
+// (model/playback/internal/PlaybackHost.h), and measures that thread; a tone comes into the device's two inputs. Recording, it records a take instead, while another thread plays a note every twentieth of a second into a
 // track live, as a MIDI driver would; stopping keeps the take.
 Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::function<void()>& before = {}, bool recording = false,
                                    phazite::TrackID liveTrack = {})
 {
     auto& edit = *phazite::getEdit (context);
-    auto& deviceManager = edit.engine.getDeviceManager();
-    auto& audioIO = deviceManager.getHostedAudioDeviceInterface();
-
-    te::HostedAudioDeviceInterface::Parameters params;
-    params.sampleRate = auditSampleRate;
-    params.blockSize = auditBlockSize;
-    params.inputChannels = 2;
-    audioIO.initialise (params);
-    audioIO.prepareToPlay (auditSampleRate, auditBlockSize);
-    deviceManager.dispatchPendingUpdates();
+    auto& devices = phazite::test::getEngineContext().getAudioDeviceManager();
+    auto* device = phazite::test::TestAudioDeviceType::open (devices, auditSampleRate, auditBlockSize, 2);
+    REQUIRE (device != nullptr);
     phazite::test::dispatchPendingMessages(); // the song for the device's rate
     phazite::movePlayhead (edit, 0_tp);
 
@@ -313,8 +231,6 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::
 
     Measurement m;
     juce::AudioBuffer<float> buffer (2, auditBlockSize); // allocated before the thread is marked as an audio thread
-    juce::MidiBuffer midi;
-    midi.ensureSize (4096);
     const auto blockDuration =
         std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
 
@@ -336,8 +252,7 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::
                     for (int channel = 0; channel < 2; ++channel)
                         buffer.copyFrom (channel, 0, tone, 0, 0, auditBlockSize);
 
-                    midi.clear();
-                    audioIO.processBlock (buffer, midi);
+                    device->process (buffer);
                     m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
                     std::this_thread::sleep_until (blockEnd);
                 }
@@ -360,10 +275,8 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::
     m.callSites = AudioThreadMonitor::describeCallSites();
     m.steadyCallSites = AudioThreadMonitor::describeCallSites (6, m.firstSteadyEvent);
 
-    // Remove the hosted device again, as Tracktion's own tests do, so later tests start without one.
-    deviceManager.closeDevices();
-    deviceManager.removeHostedAudioDeviceInterface();
-    deviceManager.deviceManager.closeAudioDevice();
+    // So that later tests start without the device.
+    phazite::test::TestAudioDeviceType::close (devices);
     return m;
 }
 
@@ -600,14 +513,6 @@ TEST_SUITE ("realtime-audit")
 
     TEST_CASE ("Real-time audit: Phazite's own engine recording a take: an armed track's input, heard, and notes played live")
     {
-        auto& engine = phazite::test::getEngine();
-
-        if (phazite::getAllMidiInputs (engine) == nullptr)
-        {
-            engine.getDeviceManager().rescanMidiDeviceList();
-            phazite::test::runTimersUntil ([&engine] { return phazite::getAllMidiInputs (engine) != nullptr; });
-        }
-
         phazite::test::TestSong song;
         song.setSwitch ("transport.countIn", false);
         song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);

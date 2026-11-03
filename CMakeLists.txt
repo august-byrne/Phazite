@@ -286,6 +286,7 @@ target_sources(phazite_core PRIVATE
     src/model/engine/AppInfo.h
     src/model/engine/AudioDevices.cpp
     src/model/engine/AudioDevices.h
+    src/model/engine/AudioIO.cpp
     src/model/engine/EngineContext.cpp
     src/model/engine/EngineContext.h
     src/model/engine/EngineSetup.cpp
@@ -295,6 +296,7 @@ target_sources(phazite_core PRIVATE
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
     src/model/engine/PreviewLoop.cpp
+    src/model/engine/internal/AudioIO.h
     src/model/engine/internal/EngineContext.h
     src/model/engine/internal/EngineSetup.h
     src/model/engine/internal/LiveInput.h
@@ -1023,6 +1025,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/StretchTests.cpp
         tests/SynthEditorTests.cpp
         tests/SynthTests.cpp
+        tests/TestAudioDevice.cpp
+        tests/TestAudioDevice.h
         tests/TestClips.h
         tests/TestDevices.h
         tests/TestPlugin.cpp

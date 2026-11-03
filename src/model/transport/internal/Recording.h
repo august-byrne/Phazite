@@ -7,7 +7,7 @@
 // played in the looped range is kept, the take not looping. Overdub, the default, adds the notes to the clips already
 // there; with it off, they take those clips' place. Recorded notes can be quantized to sixteenths as they go in. However
 // recording stops, the take is one undo step, "Record" (Playback.h's stop functions keep it too). Overdub and quantizing
-// are the app's settings, for every project, which Tracktion keeps with the MIDI input's own.
+// are the app's settings, for every project, which Phazite keeps (model/engine/internal/AudioIO.h).
 #pragma once
 
 #include "model/base/internal/Selection.h"

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's own engine on the audio device (docs/tracktion-migration.md, T2): one for the app, which its EngineContext
-// owns, a second callback on the device Tracktion opens (JUCE adds what the two play: Tracktion's plays nothing of a
-// project, PlaybackSession.h), which plays the song of the open project's PlaybackSession, with what comes into the
-// device's inputs, which the tracks that hear them play and a take records.
+// owns, a callback on the device Phazite opens (T4: model/engine/internal/AudioIO.h), which plays the song of the open
+// project's PlaybackSession, with what comes into the device's inputs, which the tracks that hear them play and a take
+// records; and the browser's previews (T5) beside it.
 #pragma once
 
 #include "engine/audio/FileReader.h"
@@ -24,7 +24,8 @@ class PlaybackHost : private juce::AudioIODeviceCallback,
                      private juce::Timer // which takes in what was played live, and logs blocks that came late
 {
 public:
-    explicit PlaybackHost (te::Engine&);
+    // On the audio device Phazite opens (model/engine/internal/AudioIO.h), for an Engine.
+    PlaybackHost (te::Engine&, juce::AudioDeviceManager&);
     ~PlaybackHost() override;
 
     engine::Engine& getEngine() noexcept { return engine; }
@@ -66,6 +67,7 @@ public:
 
 private:
     te::Engine& tracktion;
+    juce::AudioDeviceManager& devices;
     engine::Engine engine;
     engine::FileReader fileReader;
     engine::Engine previews;

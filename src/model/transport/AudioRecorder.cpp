@@ -4,7 +4,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/engine/internal/LiveInput.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 
@@ -43,7 +43,7 @@ int AudioRecorder::getNumInputs() const
     if (auto* session = findPlayingSession (edit))
         return session->getNumInputs();
 
-    auto* device = engine.getDeviceManager().deviceManager.getCurrentAudioDevice();
+    auto* device = audio->getDevices().getCurrentAudioDevice();
     return device != nullptr ? device->getInputChannelNames().size() : 0;
 }
 
@@ -68,33 +68,34 @@ std::vector<int> getInputChannels (const juce::String& inputID)
 
 double getRecordingCorrection (te::Engine& engine)
 {
-    const auto inputs = engine.getDeviceManager().getWaveInputDevices();
-    return inputs.empty() ? 0.0 : inputs.front()->getRecordAdjustmentMs();
+    const auto* io = AudioIO::findFor (engine);
+    return io != nullptr ? io->getRecordingCorrection() : 0.0;
 }
 
 void setRecordingCorrection (te::Engine& engine, double milliseconds)
 {
-    for (auto* input : engine.getDeviceManager().getWaveInputDevices())
-        input->setRecordAdjustmentMs (milliseconds);
+    if (auto* io = AudioIO::findFor (engine))
+        io->setRecordingCorrection (milliseconds);
 }
 
 //==============================================================================
 AudioRecorder::AudioRecorder (te::Edit& e)
     : edit (e),
       engine (e.engine),
+      audio (AudioIO::getFor (e.engine)),
       alive (e),
       key (&e),
       editState (e.state)
 {
     getRecorders()[key] = this;
     editState.addListener (this);
-    engine.getDeviceManager().addChangeListener (this);
+    audio->addChangeListener (this);
     update();
 }
 
 AudioRecorder::~AudioRecorder()
 {
-    engine.getDeviceManager().removeChangeListener (this);
+    audio->removeChangeListener (this);
     editState.removeListener (this);
     armed.clear();
     update(); // what was opened for its tracks closes
@@ -165,8 +166,8 @@ void AudioRecorder::update()
         return;
 
     const juce::ScopedValueSetter<bool> svs (updating, true);
-    auto& devices = engine.getDeviceManager();
-    auto* device = devices.deviceManager.getCurrentAudioDevice();
+    auto& devices = audio->getDevices();
+    auto* device = devices.getCurrentAudioDevice();
     const auto numInputs = device != nullptr ? device->getInputChannelNames().size() : 0;
     auto* liveEdit = alive.get(); // once the Edit is gone, its tracks need nothing
 
@@ -192,7 +193,7 @@ void AudioRecorder::update()
     // it opened again.
     if (device != nullptr && numInputs > 0)
     {
-        auto setup = devices.deviceManager.getAudioDeviceSetup();
+        auto setup = devices.getAudioDeviceSetup();
         auto channels = setup.inputChannels;
 
         for (int channel = 0; channel < numInputs; ++channel)
@@ -210,15 +211,9 @@ void AudioRecorder::update()
 
             setup.inputChannels = channels;
             setup.useDefaultInputChannels = false;
-            devices.deviceManager.setAudioDeviceSetup (setup, true);
+            devices.setAudioDeviceSetup (setup, true);
         }
     }
-
-    // Tracktion's own inputs stay off: Phazite's engine takes what comes in itself (model/playback/internal/PlaybackHost.h),
-    // and one of Tracktion's that is on makes a buffer on the audio thread for each block (docs/realtime-audit.md).
-    for (auto* input : devices.getWaveInputDevices())
-        if (input->isEnabled())
-            devices.setDeviceEnabled (*input, false);
 }
 
 juce::File AudioRecorder::getTakeFile (const te::AudioTrack& track) const
@@ -360,7 +355,7 @@ void placeTake (te::Edit& edit, TrackID trackID, const juce::File& file, const T
 //==============================================================================
 void AudioRecorder::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    update(); // Tracktion remade its inputs, or the audio device changed
+    update(); // the audio device changed
 }
 
 void AudioRecorder::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)

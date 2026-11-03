@@ -9,6 +9,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/mirror/internal/Mirror.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -146,11 +147,29 @@ namespace
         return true;
     }
 
-    // The rate a track renders at: the audio device's, as the file plays alongside it (44.1 kHz without a device).
-    double getRenderSampleRate (te::Edit& edit)
+    // The rate a track renders at, and its blocks: the audio device's, as its file plays alongside what it plays
+    // (model/engine/internal/AudioIO.h), or 44.1 kHz in blocks of 256 without one.
+    struct RenderFormat
     {
-        const auto rate = edit.engine.getDeviceManager().getSampleRate();
-        return rate > 7000.0 ? rate : 44100.0;
+        double sampleRate = 44100.0;
+        int blockSize = 256;
+    };
+
+    RenderFormat getRenderFormat (te::Edit& edit)
+    {
+        RenderFormat format;
+        auto* audio = AudioIO::findFor (edit.engine);
+
+        if (auto* device = audio != nullptr ? audio->getDevices().getCurrentAudioDevice() : nullptr)
+        {
+            if (device->getCurrentSampleRate() > 7000.0)
+                format.sampleRate = device->getCurrentSampleRate();
+
+            if (device->getCurrentBufferSizeSamples() > 0)
+                format.blockSize = device->getCurrentBufferSizeSamples();
+        }
+
+        return format;
     }
 
     // The track a tree is in, or an invalid tree.
@@ -555,7 +574,7 @@ namespace
         FreezeRender (ProjectContext& c, te::AudioTrack& track, std::function<void (const juce::Result&)> callback)
             : RenderOfTrack (c, track, "Freezing " + getTrackName (track), std::move (callback))
         {
-            auto& devices = edit.engine.getDeviceManager();
+            const auto format = getRenderFormat (edit);
             juce::BigInteger trackBit;
             trackBit.setBit (track.getIndexInEditTrackList());
             juce::Array<te::EditItemID> trackIDs { track.itemID };
@@ -569,8 +588,8 @@ namespace
                 te::TemporaryFileManager::getFreezeFileForTrack (track).getSiblingFile ("rendering.freeze").getNonexistentSibling (false);
             params.audioFormat = edit.engine.getAudioFileFormatManager().getFrozenFileFormat();
             params.bitDepth = 32;
-            params.blockSizeForAudio = devices.getBlockSize() > 0 ? devices.getBlockSize() : 512;
-            params.sampleRateForAudio = getRenderSampleRate (edit);
+            params.blockSizeForAudio = format.blockSize;
+            params.sampleRateForAudio = format.sampleRate;
             params.time = { te::TimePosition(), track.getLengthIncludingInputTracks() };
             params.endAllowance = te::RenderOptions::findEndAllowance (edit, &trackIDs, nullptr);
             params.canRenderInMono = true;
@@ -611,7 +630,7 @@ namespace
             spec.destination =
                 target.getSiblingFile (target.getFileNameWithoutExtension() + " (rendering).wav").getNonexistentSibling (false);
             spec.format = te::RenderFormat::wav;
-            spec.sampleRate = getRenderSampleRate (edit);
+            spec.sampleRate = getRenderFormat (edit).sampleRate;
             spec.bitDepth = 32;
             spec.channelLayout = "stereo";
             spec.useMasterPlugins = false;

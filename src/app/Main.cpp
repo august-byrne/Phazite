@@ -47,12 +47,13 @@ public:
         logger.reset (juce::FileLogger::createDefaultAppLogger ("Phazite", "Phazite.log", "Phazite " + getApplicationVersion()));
         juce::Logger::setCurrentLogger (logger.get());
 
-        // The Engine opens the default audio device, and the services load the plug-in list Phazite keeps (settings live in
-        // %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in its helper program.
+        // The services load the plug-in list Phazite keeps and open the audio device and the MIDI inputs as its settings
+        // saved them (settings live in %APPDATA%\Phazite\Settings.xml). Plug-ins are scanned in its helper program.
         engine = createEngine ({ .uiBehaviour = std::make_unique<AppUIBehaviour>() });
         runMarker = std::make_unique<RunMarker> (engine->getPropertyStorage().getAppPrefsFolder().getChildFile ("Running"));
-        logAudioOutput();
         services = std::make_unique<AppServices> (*engine);
+        services->openAudioDevices();
+        logAudioOutput();
 
         lookAndFeel = std::make_unique<ui::LookAndFeel>();
         juce::LookAndFeel::setDefaultLookAndFeel (lookAndFeel.get()); // dialogs and menus use it too
@@ -104,7 +105,7 @@ public:
     // What plays the sound, in the log.
     void logAudioOutput()
     {
-        if (auto* device = engine->getDeviceManager().deviceManager.getCurrentAudioDevice())
+        if (auto* device = services->engineContext->getAudioDeviceManager().getCurrentAudioDevice())
             juce::Logger::writeToLog ("Audio output: " + device->getTypeName() + ", " + device->getName() + ", "
                                       + juce::String (device->getCurrentSampleRate()) + " Hz, "
                                       + juce::String (device->getCurrentBufferSizeSamples()) + " samples");

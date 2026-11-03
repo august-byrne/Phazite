@@ -9,13 +9,16 @@
 #include "model/base/IDs.h"
 #include "model/base/internal/Tracktion.h"
 
+#include <memory>
 #include <optional>
 #include <set>
 #include <vector>
 
 namespace phazite
 {
-class AudioRecorder : private juce::ChangeListener,     // Tracktion's device manager, as the audio device changes
+class AudioIO;
+
+class AudioRecorder : private juce::ChangeListener,     // Phazite's devices (AudioIO.h), as the audio device changes
                       private juce::ValueTree::Listener // the tracks' inputs and monitoring
 {
 public:
@@ -49,6 +52,7 @@ public:
 private:
     te::Edit& edit;
     te::Engine& engine;
+    std::shared_ptr<AudioIO> audio;
     const te::SafeSelectable<te::Edit> alive; // gone first if the project context outlives the Edit
     const te::Edit* const key;                // where findFor() finds it
     juce::ValueTree editState;
@@ -85,8 +89,8 @@ void placeTake (te::Edit&, TrackID, const juce::File&, const TakePlace&);
 std::vector<int> getInputChannels (const juce::String& inputID);
 
 // The audio settings' correction for recordings, in milliseconds: how much earlier what the audio inputs record goes than
-// the delays their driver reports put it, for a driver that reports them wrongly; 0 at first. Tracktion keeps it for each
-// input of each device.
+// the delays their driver reports put it, for a driver that reports them wrongly; 0 at first. One for every device,
+// which the app keeps in its settings (model/engine/internal/AudioIO.h).
 double getRecordingCorrection (te::Engine&);
 void setRecordingCorrection (te::Engine&, double milliseconds);
 } // namespace phazite

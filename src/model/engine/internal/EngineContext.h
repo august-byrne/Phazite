@@ -8,8 +8,12 @@
 
 namespace phazite
 {
+class AudioIO;
 class EngineContext;
 
 std::unique_ptr<EngineContext> createEngineContext (te::Engine&);
 te::Engine& getEngine (EngineContext&); // the one it was made for
+
+// Its audio device and MIDI inputs (AudioIO.h), which the app opens as its settings saved them and keeps there.
+AudioIO& getAudioIO (EngineContext&);
 } // namespace phazite

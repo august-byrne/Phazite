@@ -82,19 +82,23 @@ TEST_CASE ("The engine as the UI reaches it: its audio devices, how busy it is, 
     auto& engine = phazite::test::getEngine();
     const auto engineContext = phazite::createEngineContext (engine);
 
-    CHECK (&engineContext->getAudioDeviceManager() == &engine.getDeviceManager().deviceManager);
+    // Phazite's own device manager, one for the Engine, which every engine context of it shares; never Tracktion's.
+    CHECK (&engineContext->getAudioDeviceManager() == &phazite::test::getEngineContext().getAudioDeviceManager());
+    CHECK (&engineContext->getAudioDeviceManager() != &engine.getDeviceManager().deviceManager);
     CHECK (engineContext->getCpuUsage() >= 0.0);
 
-    // Only the devices connected: Phazite's own inputs (the computer keyboard's, and the tests') aren't listed.
+    // The MIDI devices connected, as JUCE lists them, each by its ID.
+    const auto connected = juce::MidiInput::getAvailableDevices();
+    CHECK (engineContext->getMidiInputs().size() == (size_t) connected.size());
+
     for (const auto& input : engineContext->getMidiInputs())
     {
         CAPTURE (input.name.toStdString());
         CHECK (input.id.isNotEmpty());
-
-        for (const auto& device : engine.getDeviceManager().getMidiInDevices())
-            if (device->getDeviceID() == input.id)
-                CHECK (device->getDeviceType() == te::InputDevice::physicalMidiDevice);
+        CHECK (input.isOn); // on, unless switched off
     }
 
-    engineContext->setMidiInputOn ("no such device", true); // changes nothing
+    engineContext->setMidiInputOn ("no such device", false); // changes nothing
+    const auto after = engineContext->getMidiInputs();
+    CHECK (std::all_of (after.begin(), after.end(), [] (const auto& input) { return input.isOn; }));
 }

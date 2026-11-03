@@ -194,18 +194,6 @@ std::pair<double, double> timeToSound (const DeviceCase& c)
 }
 
 //==============================================================================
-std::shared_ptr<te::MidiInputDevice> findAllMidiInputs()
-{
-    auto& engine = phazite::test::getEngine();
-
-    if (phazite::getAllMidiInputs (engine) == nullptr)
-    {
-        engine.getDeviceManager().rescanMidiDeviceList();
-        phazite::test::runTimersUntil ([&engine] { return phazite::getAllMidiInputs (engine) != nullptr; });
-    }
-
-    return phazite::getAllMidiInputs (engine);
-}
 
 juce::String milliseconds (double ms, int decimals = 2)
 {
@@ -297,10 +285,9 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
 TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::test_suite ("benchmark") * doctest::skip())
 {
     auto& engine = phazite::test::getEngine();
-    REQUIRE (findAllMidiInputs() != nullptr);
     HostedDevice device;
 
-    // A project, as the app plays it: Tracktion's callback plays nothing of it, Phazite's engine all.
+    // A project, as the app plays it, through Phazite's engine.
     auto edit = phazite::createSongEdit (engine);
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setEdit (context, edit.get());
@@ -317,9 +304,9 @@ TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::te
     const auto playNote = [&] (const juce::String& what)
     {
         device.process (50);
-        phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
+        phazite::playLiveMidi (engine, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
         const auto samples = device.samplesToFirstSound();
-        phazite::playIntoAllMidiInputs (engine, juce::MidiMessage::noteOff (1, 60));
+        phazite::playLiveMidi (engine, juce::MidiMessage::noteOff (1, 60));
         device.process (200);
         report << what << ": heard "
                << (samples < 0 ? juce::String ("never")
@@ -355,7 +342,6 @@ TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::te
 TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_suite ("benchmark") * doctest::skip())
 {
     auto& engine = phazite::test::getEngine();
-    REQUIRE (findAllMidiInputs() != nullptr);
     HostedDevice device;
 
     const auto makeEdit = [&engine] (int numTracks, bool withDevices)

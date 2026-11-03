@@ -88,16 +88,6 @@ TEST_SUITE ("golden")
 
     TEST_CASE ("Golden render: the count-in clicks a bar before recording starts, the metronome off")
     {
-        auto& engine = phazite::test::getEngine();
-
-        if (phazite::getAllMidiInputs (engine) == nullptr)
-        {
-            engine.getDeviceManager().rescanMidiDeviceList();
-            phazite::test::runTimersUntil ([&engine] { return phazite::getAllMidiInputs (engine) != nullptr; });
-        }
-
-        REQUIRE (phazite::getAllMidiInputs (engine) != nullptr);
-
         TestSong song;
         song.setTempo (120.0);
         song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);

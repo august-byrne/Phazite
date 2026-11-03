@@ -38,15 +38,13 @@ class EngineBehaviour : public te::EngineBehaviour
 public:
     struct Options
     {
-        bool openAudioDevice = true; // false in tests, which don't need one
-        int numAudioThreads = 0;     // threads that process audio; 0 = one per physical core but one
+        int numAudioThreads = 0; // threads that process audio; 0 = one per physical core but one
     };
 
     explicit EngineBehaviour (Options);
 
     bool autoInitialiseDeviceManager() override;
     int getNumberOfCPUsToUseForAudio() override;
-    bool shouldOpenAudioInputByDefault() override;
     te::EditLimits getEditLimits() override;
     juce::File getDefaultFolderForAudioRecordings (te::Edit&) override;
     bool shouldBypassedPluginsBeRemovedFromPlaybackGraph() override;

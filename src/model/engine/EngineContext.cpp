@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EngineContext.h"
 #include "AudioDevices.h"
+#include "internal/AudioIO.h"
 #include "internal/EngineContext.h"
 #include "internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/plugins/internal/PluginHost.h"
-#include "model/transport/internal/AudioRecorder.h"
 
 namespace phazite
 {
 struct EngineContext::Impl
 {
     te::Engine& engine;
-    PlaybackHost playback { engine };                                  // Phazite's own engine (docs/tracktion-migration.md, T2)
+    std::shared_ptr<AudioIO> audio = AudioIO::getFor (engine);         // the audio device and MIDI inputs (T4): the Engine's one
+    PlaybackHost playback { engine, audio->getDevices() };             // Phazite's own engine (docs/tracktion-migration.md, T2)
     std::shared_ptr<PluginHost> plugins = PluginHost::getFor (engine); // plug-ins in helper processes (T3): the Engine's one
 
     // Whether the output last asked about is Bluetooth, which takes a look through Windows' devices to find out.
@@ -36,6 +37,11 @@ PlaybackHost& getPlaybackHost (EngineContext& context)
     return context.getImpl().playback;
 }
 
+AudioIO& getAudioIO (EngineContext& context)
+{
+    return *context.getImpl().audio;
+}
+
 PluginHost& getPluginHost (EngineContext& context)
 {
     return *context.getImpl().plugins;
@@ -50,7 +56,7 @@ EngineContext::~EngineContext() = default;
 
 juce::AudioDeviceManager& EngineContext::getAudioDeviceManager()
 {
-    return impl->engine.getDeviceManager().deviceManager;
+    return impl->audio->getDevices();
 }
 
 double EngineContext::getCpuUsage() const
@@ -60,7 +66,7 @@ double EngineContext::getCpuUsage() const
 
 EngineContext::AudioOutput EngineContext::getAudioOutput() const
 {
-    auto& devices = impl->engine.getDeviceManager().deviceManager;
+    auto& devices = impl->audio->getDevices();
     AudioOutput output;
     auto* device = devices.getCurrentAudioDevice();
 
@@ -96,17 +102,17 @@ bool EngineContext::isLowLatency() const
 
 double EngineContext::getRecordingCorrection() const
 {
-    return phazite::getRecordingCorrection (impl->engine);
+    return impl->audio->getRecordingCorrection();
 }
 
 void EngineContext::setRecordingCorrection (double milliseconds)
 {
-    phazite::setRecordingCorrection (impl->engine, milliseconds);
+    impl->audio->setRecordingCorrection (milliseconds);
 }
 
 bool EngineContext::hasAsioDrivers() const
 {
-    for (auto* type : impl->engine.getDeviceManager().deviceManager.getAvailableDeviceTypes())
+    for (auto* type : impl->audio->getDevices().getAvailableDeviceTypes())
         if (type->getTypeName() == "ASIO")
             return ! type->getDeviceNames().isEmpty();
 
@@ -117,22 +123,16 @@ std::vector<EngineContext::MidiInput> EngineContext::getMidiInputs() const
 {
     std::vector<MidiInput> inputs;
 
-    // Not Phazite's own inputs (the computer keyboard's, for one), which Tracktion lists too.
-    for (const auto& device : impl->engine.getDeviceManager().getMidiInDevices())
-        if (device->getDeviceType() == te::InputDevice::physicalMidiDevice)
-            inputs.push_back ({ device->getDeviceID(), device->getName(), device->isEnabled() });
+    for (const auto& input : impl->audio->getMidiInputs())
+        inputs.push_back ({ input.id, input.name, input.isOn });
 
     return inputs;
 }
 
 void EngineContext::setMidiInputOn (const juce::String& id, bool on)
 {
-    // Tracktion may replace its device objects when devices change: found by ID each time.
-    for (const auto& device : impl->engine.getDeviceManager().getMidiInDevices())
-        if (device->getDeviceID() == id)
-            device->setEnabled (on);
+    impl->audio->setMidiInputOn (id, on);
 }
-
 juce::StringArray EngineContext::getAudioFileExtensions() const
 {
     juce::StringArray extensions;
@@ -152,11 +152,11 @@ std::vector<DeviceType> EngineContext::getDeviceTypes() const
 
 void EngineContext::addChangeListener (juce::ChangeListener* listener)
 {
-    impl->engine.getDeviceManager().addChangeListener (listener);
+    impl->audio->addChangeListener (listener);
 }
 
 void EngineContext::removeChangeListener (juce::ChangeListener* listener)
 {
-    impl->engine.getDeviceManager().removeChangeListener (listener);
+    impl->audio->removeChangeListener (listener);
 }
 } // namespace phazite

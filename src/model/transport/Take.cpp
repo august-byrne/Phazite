@@ -112,7 +112,7 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session)
     else if (isLoopOn (edit) && ! doesLoopFollowSong (edit))
         take->loop = getLoopBeats (edit);
 
-    if (auto* track = getLiveMidiTrack (edit); track != nullptr && findLiveMidiInput (edit) != nullptr)
+    if (auto* track = getLiveMidiTrack (edit))
         take->midiTrack = getTrackID (findTrackState (*track));
 
     // Each armed track's input the audio device has, into a file of its own.

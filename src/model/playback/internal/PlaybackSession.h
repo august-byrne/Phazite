@@ -12,6 +12,7 @@
 #include "SongPlayer.h"
 #include "engine/core/Engine.h"
 #include "model/base/Beats.h"
+#include "model/base/IDs.h"
 #include "model/base/internal/Tracktion.h"
 
 #include <atomic>
@@ -24,6 +25,7 @@
 
 namespace phazite
 {
+class AudioIO;
 class PlaybackHost;
 class Take;
 
@@ -69,10 +71,11 @@ public:
     const std::deque<engine::Engine::PlayedEvent>& getPlayedEvents();
     void keepPlayedFrom (std::optional<std::int64_t> clock);
 
-    // Live MIDI (the computer keyboard and the MIDI inputs, which Tracktion's "All MIDI Ins" brings together) plays the track
-    // it goes to (model/engine/internal/LiveInput.h) through Phazite's engine while the engine plays the project, in its next
-    // block, and Tracktion doesn't play it too: after the track it goes to changes, or Tracktion's inputs are made again,
-    // this takes them in again.
+    // Live MIDI (the computer keyboard and the MIDI inputs, model/engine/internal/AudioIO.h) plays the track it goes to
+    // (model/engine/internal/LiveInput.h), none at first, through Phazite's engine while the engine plays the project, in
+    // its next block. After that track or the project the engine plays changes, followLiveMidi() sends it there again.
+    TrackID getLiveTrack() const noexcept { return liveTrack; }
+    void setLiveTrack (TrackID);
     void followLiveMidi();
 
     // While Phazite's engine plays the project, Tracktion's playback graph plays nothing: it is held, never prepared, in a
@@ -91,18 +94,12 @@ private:
     te::Edit& edit;
     te::SafeSelectable<te::Edit> exists; // until the Edit goes, which can be before this does
     PlaybackHost& host;
+    std::shared_ptr<AudioIO> audio; // where live MIDI comes from
     SongPlayer player;
     AutomationWriter writer;
     juce::ValueTree editState; // the song is its PHAZITE element, which a bare Edit gets when something is first written
 
-    // What takes live MIDI in from Tracktion's input, on its MIDI threads, for the track it goes to.
-    struct LiveMidi : te::InputDeviceInstance::Consumer
-    {
-        engine::Engine* playing = nullptr;
-        std::atomic<std::int64_t> track { 0 };
-        void handleIncomingMidiMessage (const juce::MidiMessage&, te::MPESourceID) override;
-    } liveMidi;
-
+    TrackID liveTrack;
     std::vector<std::pair<std::int64_t, int>> guideNotes; // each track's sounding
 
     te::EditPlaybackContext* heldContext = nullptr; // the context whose graph is held, or none

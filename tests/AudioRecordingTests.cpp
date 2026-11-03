@@ -59,7 +59,7 @@ TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is on
 {
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const RealTimePlayback playback (phazite::test::getEngine()); // a device with two inputs
+    const RealTimePlayback playback; // a device with two inputs
     setEdit (context, edit.get());
     const auto track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
 
@@ -296,7 +296,7 @@ TEST_CASE ("The audio settings' correction moves what an input records earlier")
     // block later, which it reports as its delay, so that the clicks would land on their beats, and the correction puts
     // them a block earlier.
     TestSong song;
-    const RealTimePlayback playback (phazite::test::getEngine(), RealTimePlayback::Input::loopback);
+    const RealTimePlayback playback (RealTimePlayback::Input::loopback);
     song.setTempo (120.0);
     song.setSwitch ("transport.metronome", true);
     song.setSwitch ("transport.countIn", false);

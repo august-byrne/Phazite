@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Live MIDI input: what is played on a MIDI keyboard or the computer keyboard goes to one track.
+// Live MIDI input: what is played on a MIDI keyboard or the computer keyboard goes to one track of the open project, which
+// Phazite's engine plays (AudioIO.h; model/playback/internal/PlaybackSession.h keeps which track, by its ID).
 #pragma once
 
 #include "model/base/internal/Selection.h"
@@ -7,35 +8,19 @@
 
 namespace phazite
 {
-// Tracktion's "All MIDI Ins" input: every enabled MIDI device merged, plus the notes the computer
-// keyboard plays into it. It is always monitored, so the track it goes to plays what comes in.
-// nullptr until Tracktion has scanned the MIDI devices, which it does just after the Engine starts.
-std::shared_ptr<te::MidiInputDevice> getAllMidiInputs (te::Engine&);
+// Plays a note-on or note-off into live MIDI as a MIDI keyboard would (the computer keyboard's notes): into the track it
+// plays, through Phazite's engine while the engine plays that track's project. Other messages do nothing.
+void playLiveMidi (te::Engine&, const juce::MidiMessage&);
 
-// Plays a note-on or note-off into "All MIDI Ins" as a MIDI keyboard would, so it reaches the track that live MIDI
-// plays (the computer keyboard's notes). Other messages, and notes before Tracktion has scanned the MIDI devices, do
-// nothing.
-void playIntoAllMidiInputs (te::Engine&, const juce::MidiMessage&);
-
-// The track that live MIDI input plays, or nullptr.
+// The track that live MIDI input plays, or nullptr: none yet, or an Edit no ProjectContext holds (which has no session).
 te::AudioTrack* getLiveMidiTrack (te::Edit&);
 
-// The Edit's instance of "All MIDI Ins", which plays live MIDI's track and records onto it (Recording.h in transport/).
-// nullptr until Tracktion has scanned the MIDI devices and the Edit's playback is allocated.
-te::InputDeviceInstance* findLiveMidiInput (te::Edit&);
-
-// Makes live MIDI input play this track, and no other. Returns false if there is no MIDI input yet.
+// Makes live MIDI input play this track, and no other. Returns false if its Edit has no session.
 bool setLiveMidiTrack (te::AudioTrack&);
 
-// If live MIDI input plays none of the Edit's tracks, sends it to the first track with an instrument.
-// Also keeps the Edit's playback graph running, so that input is heard while the transport is
-// stopped. Call it when a project opens and whenever the MIDI devices change.
+// If live MIDI input plays none of the Edit's tracks (none yet, or one that went), sends it to the first track with an
+// instrument, or nowhere. Call it when a project opens and whenever its tracks change.
 void routeLiveMidiInput (te::Edit&);
-
-// Phazite sends no MIDI out yet, so it closes the MIDI outputs Tracktion opens: the first it finds on a first run, and
-// those earlier settings left on, such as Windows' GS Wavetable Synth (docs/performance-audit.md, A3). They list again
-// as they are plugged in, so this runs whenever the devices change.
-void closeMidiOutputs (te::Engine&);
 
 // True if the track has an instrument (a synth or sampler plug-in) that live MIDI input can play.
 bool hasInstrument (const te::AudioTrack&);
