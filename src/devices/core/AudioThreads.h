@@ -17,6 +17,18 @@ void startAudioThread (juce::Thread&);
 // A moment's pause in a spin, which lets the core's other thread on.
 void pauseInSpin() noexcept;
 
+// An audio thread's wait for what another is about to finish (a task of the same block, which is real-time safe and ends
+// by the block's deadline): spun for, a pause in each turn, never giving the core away. On Windows 11, an audio thread in
+// MMCSS's Pro Audio task that yielded (std::this_thread::yield(), which is SwitchToThread() there, or Sleep (0)) while a
+// thread at the normal priority was busy on its core lost the core for up to 16 ms, several blocks, in a fifth to a
+// third of its waits; spinning, never more than microseconds.
+template <typename Done>
+void spinUntil (Done&& done) noexcept
+{
+    while (! done())
+        pauseInSpin();
+}
+
 // While it lives, the thread that made it is in MMCSS's Pro Audio task (Windows; nothing elsewhere). Made first thing in
 // the thread's run().
 class ProAudioTask

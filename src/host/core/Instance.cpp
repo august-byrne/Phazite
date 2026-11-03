@@ -291,6 +291,11 @@ void Instance::play() noexcept
     const auto* changes = channel->getChanges();
     const auto numChanges = juce::jlimit (0, limits.maxChanges, info.numChanges);
 
+    // Playback starting from a stop: what the plug-in still rings with stops before it plays (a VST3's setActive() off and
+    // on, which can take longer than a block: this block is late then, and silent, as the song starts).
+    if (info.reset != 0)
+        plugin->reset();
+
     // In pieces between the parameters' changes, each taking those at its start.
     auto start = 0, next = 0;
 

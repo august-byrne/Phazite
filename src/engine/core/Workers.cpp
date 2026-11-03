@@ -114,9 +114,8 @@ void Workers::run (int count, Task newTask, void* newContext) noexcept
 
     takeTasks();
 
-    // The tasks others took, done soon.
-    while (doneTasks.load (std::memory_order_acquire) < count)
-        std::this_thread::yield();
+    // The tasks others took, done soon: spun for, never giving the core away.
+    devices::spinUntil ([this, count] { return doneTasks.load (std::memory_order_acquire) >= count; });
 }
 
 void Workers::takeTasks() noexcept

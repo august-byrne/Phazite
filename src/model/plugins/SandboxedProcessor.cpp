@@ -233,9 +233,13 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
     block.sample = (std::int64_t) (context.beat * 60.0 / std::max (1.0, context.tempo) * rate);
     block.isPlaying = context.isPlaying ? 1 : 0;
     block.isRendering = context.isRendering ? 1 : 0;
+    block.reset = resetWanted ? 1 : 0;
 
     if (channel.handOver())
+    {
+        resetWanted = false;
         return true;
+    }
 
     instance.let();
     silence (context);

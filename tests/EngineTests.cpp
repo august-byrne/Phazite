@@ -454,6 +454,31 @@ private:
     int numDue = 0;
 };
 
+// An effect that rings at a level of 0.25 from the first sound it hears until it is reset: a tail without an end.
+class Ringer final : public dev::Processor
+{
+public:
+    static inline const dev::DeviceInfo info { .typeID = "testRinger", .name = "Ringer", .kind = dev::DeviceKind::effect };
+
+    void prepare (double, int) override {}
+    void reset() override { ringing = false; }
+    bool sleepsOnSilence() const noexcept override { return false; }
+
+    void process (const dev::ProcessContext& context) override
+    {
+        for (int i = 0; i < context.numSamples; ++i)
+        {
+            ringing = ringing || ! juce::exactlyEqual (context.channels[0][i], 0.0f);
+
+            for (int channel = 0; channel < context.numChannels; ++channel)
+                context.channels[channel][i] = ringing ? 0.25f : 0.0f;
+        }
+    }
+
+private:
+    bool ringing = false;
+};
+
 // A track of a plan: its notes, into one instrument, which is made and prepared for it.
 engine::Plan::Strip makeTrack (std::int64_t id, const dev::DeviceInfo& info, std::unique_ptr<dev::Processor> instrument,
                                std::vector<engine::NoteSequence::Note> notes, int maximumBlockSize)
@@ -511,6 +536,61 @@ TEST_CASE ("The engine plays a track's notes on their samples, and ends what sou
     CHECK (played.getSample (0, 47999) == 0.0f); // the loop's last sample: the note ends there
     CHECK (played.getSample (0, 48000) == 0.5f); // and starts again with the loop
     CHECK (played.getSample (1, 48000) == 0.5f);
+}
+
+TEST_CASE ("The engine played from where one note ends and the next starts plays the next alone, however its beat rounds")
+{
+    // At 140 BPM, beat 8 is at sample 164571.43: on sample 164571, a little before the beat.
+    auto plan = makeClickPlan ({}, 140.0);
+    plan->metronome = false;
+    REQUIRE (plan->tempo.toBeats ((double) std::llround (plan->tempo.toSamples (8.0))) < 8.0);
+
+    plan->strips.push_back (
+        makeTrack (1, Ticker::info, std::make_unique<Ticker> (0), { { 7.0, 8.0, 60, 0.8f }, { 8.0, 9.0, 62, 0.8f } }, blockSize));
+    plan->strips.push_back (makeMaster (*plan, blockSize));
+
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (std::move (plan));
+    player.locate (8.0);
+    const auto played = player.render (blockSize);
+
+    CHECK (played.getSample (0, 0) == 0.5f); // the second note alone: the first, which ends there, doesn't start again
+    CHECK (played.getMagnitude (0, 1, blockSize - 1) == 0.0f);
+}
+
+TEST_CASE ("Playback started or jumping starts from silence: a tail rings on after a stop, but not into what plays next")
+{
+    auto plan = makeClickPlan();
+    plan->metronome = false;
+    auto track = makeTrack (1, Ticker::info, std::make_unique<Ticker> (0), { { 0.0, 1.0, 60, 0.8f } }, blockSize);
+    auto ringer = std::make_shared<engine::DeviceNode> (Ringer::info, std::make_unique<Ringer>());
+    ringer->getRunner().prepare (rate, blockSize);
+    track.devices.push_back ({ std::move (ringer), {} });
+    plan->strips.push_back (std::move (track));
+    plan->strips.push_back (makeMaster (*plan, blockSize));
+
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (std::move (plan));
+
+    // The note at the song's start sets it ringing; a jump while playing cuts it off, where no note is.
+    CHECK (player.render (blockSize).getSample (0, blockSize - 1) == 0.25f);
+    player.locate (8.0);
+    CHECK (player.render (blockSize).getMagnitude (0, 0, blockSize) == 0.0f);
+
+    // Back to the note, it rings again, and on after a stop.
+    player.locate (0.0);
+    CHECK (player.render (blockSize).getSample (0, blockSize - 1) == 0.25f);
+    player.stop();
+    juce::AudioBuffer<float> stopped (2, blockSize);
+    float* channels[] = { stopped.getWritePointer (0), stopped.getWritePointer (1) };
+    player.process (channels, 2, blockSize);
+    CHECK (stopped.getSample (0, blockSize - 1) == 0.25f);
+
+    // Played again, where no note is, it is silent from the first sample.
+    player.locate (8.0);
+    CHECK (player.render (blockSize).getMagnitude (0, 0, blockSize) == 0.0f);
 }
 
 TEST_CASE ("The engine's master lines its tracks up, each delayed as much as the latest is late")

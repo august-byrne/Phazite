@@ -247,6 +247,7 @@ namespace
         }
 
         void prepareToPlay (double sampleRate, int) override { rate = sampleRate; }
+        void reset() override { stop (-1); }
 
         using StandIn::processBlock;
         void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override

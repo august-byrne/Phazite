@@ -37,7 +37,7 @@ public:
     int findParameter (const juce::String& tracktionID) const noexcept;
 
     void prepare (double sampleRate, int maximumBlockSize) override;
-    void reset() override {}
+    void reset() override { resetWanted = true; } // the helper resets the plug-in as it is handed its next block
     void process (const devices::ProcessContext&) override;
     int getLatencySamples() const override;
     double getTailSeconds() const override;
@@ -58,6 +58,7 @@ private:
     devices::DeviceInfo info;
     double rate = 44100.0;
     std::int64_t busySince = 0; // the audio thread's: when it found the channel still on a block, in high-resolution ticks
+    bool resetWanted = false;   // the audio thread's: reset() since a block was last handed over
 
     // The audio thread's: a block started early (start()), whether it was handed over, and when, in high-resolution ticks.
     bool started = false, handed = false;

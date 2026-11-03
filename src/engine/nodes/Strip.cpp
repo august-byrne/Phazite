@@ -97,6 +97,12 @@ void Delay::addDelayed (const float* const* inputs, float* const* outputs, int n
     }
 }
 
+void Delay::reset() noexcept
+{
+    line.clear();
+    position = 0;
+}
+
 //==============================================================================
 void SendLevel::setDecibels (float decibels) noexcept
 {
@@ -157,5 +163,13 @@ void ContainerState::mix (float* const* channels, int numSamples) noexcept
             channels[channel][i] = channels[channel][i] * wet + kept[i] * (1.0f - wet);
         }
     }
+}
+
+void ContainerState::reset() noexcept
+{
+    dry.clear();
+
+    if (delay != nullptr)
+        delay->reset();
 }
 } // namespace phazite::engine

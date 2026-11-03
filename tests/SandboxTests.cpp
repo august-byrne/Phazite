@@ -293,6 +293,28 @@ TEST_CASE ("An instrument in a helper plays its notes from their samples, and te
     helper.forget (*synth);
 }
 
+TEST_CASE ("A block that asks for a reset plays from silence: what the plug-in still sounded with stops before it")
+{
+    TestHelper helper;
+    auto synth = helper.open (Kind::synth);
+    const auto* played = synth->getChannel().getChannel (0);
+
+    // A note held from the first block sounds on in the next.
+    addNote (*synth, 0, 69, true);
+    REQUIRE (playBlock (*synth, 128, 0.0f) == sandbox::BlockChannel::Played::done);
+    REQUIRE (playBlock (*synth, 128, 0.0f) == sandbox::BlockChannel::Played::done);
+    CHECK (juce::FloatVectorOperations::findMaximum (played, 128) > 0.1f);
+
+    // Reset as the block starts (playback starting from a stop): silent.
+    synth->getChannel().getInfo().reset = 1;
+    REQUIRE (playBlock (*synth, 128, 0.0f) == sandbox::BlockChannel::Played::done);
+    synth->getChannel().getInfo().reset = 0;
+    CHECK (juce::FloatVectorOperations::findMaximum (played, 128) == 0.0f);
+    CHECK (juce::FloatVectorOperations::findMinimum (played, 128) == 0.0f);
+
+    helper.forget (*synth);
+}
+
 TEST_CASE ("A plug-in's latency is known as it opens and as it changes; a sidechain reaches its bus")
 {
     TestHelper helper;

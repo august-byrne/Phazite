@@ -73,6 +73,7 @@ public:
     // another over the block, and keeps what comes in now.
     void addDelayed (const float* const* inputs, float* const* outputs, int numSamples, float startGain = 1.0f,
                      float endGain = 1.0f) noexcept;
+    void reset() noexcept; // audio thread: silence in it, as when it was made
 
 private:
     int length = 0, position = 0;
@@ -107,6 +108,7 @@ public:
     // Audio thread: what comes in, before its first device; and after its last, its devices' sound mixed with it.
     void keepDry (const float* const* channels, int numSamples) noexcept;
     void mix (float* const* channels, int numSamples) noexcept;
+    void reset() noexcept; // nothing kept that came in before
 
 private:
     int latency = 0;

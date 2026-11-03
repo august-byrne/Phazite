@@ -168,6 +168,7 @@ private:
         double beat = 0.0;
         const Plan* plan = nullptr;
         bool notesOff = false, chase = true;
+        bool flush = false; // playback starts or jumps: what rings on from before stops (flushStrip())
         CountIn countIn;
     } transport;
 
@@ -196,7 +197,7 @@ private:
         double beat = 0.0, tempo = 120.0, beatsPerSample = 0.0;
         std::int64_t gridSample = 0;
         std::uint64_t pass = 0;
-        bool startsEarly = false;
+        bool startsEarly = false, flush = false;
     };
 
     Workers workers;
@@ -206,6 +207,7 @@ private:
     void playStrip (const Span&, size_t index) noexcept;
     void takeEvents (const Span&, const Plan::Strip&) noexcept; // its instrument's notes and live notes, then its modulators
     bool isSilent (const Plan::Strip&) noexcept;                // and its devices reset as it is heard again
+    static void flushStrip (const Plan::Strip&) noexcept;       // its devices reset, and the delays that line it up
     DeviceRunner::Block getDeviceBlock (const Span&, const Plan::Strip&, size_t device) noexcept;
     void addInput (const Plan::Strip&, float* const* channels, int offset, int numSamples) noexcept;
     void addNotes (const Plan::Strip&, const Plan&, int numSamples) noexcept;

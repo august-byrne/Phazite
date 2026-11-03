@@ -376,6 +376,7 @@ void SandboxedInstance::playBlock (juce::AudioBuffer<float>& buffer, const juce:
     }
 
     info.isRendering = 1;
+    info.reset = 0;
 
     // As long as the plug-in takes, but for a block kept so long that it is a hang, which its helper is ended for.
     const auto hangNanoseconds = (std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000;

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Engine.h"
+#include "devices/core/AudioThreads.h"
 #include "engine/transport/Click.h"
 
 #include <algorithm>
 #include <cmath>
-#include <thread>
 
 namespace phazite::engine
 {
@@ -171,7 +171,10 @@ void Engine::takeCommands (const Plan& plan) noexcept
                         clicking = nullptr;
                     }
 
+                    // From a stop, the song starts from silence: tails ringing on from before (a reverb's, a delay's)
+                    // stop as it starts, as Ableton Live and Bitwig reset plug-ins. Its loop's end doesn't cut them.
                     transport.chase = transport.chase || ! transport.playing;
+                    transport.flush = transport.flush || ! transport.playing;
                     transport.playing = true;
                     break;
 
@@ -184,8 +187,9 @@ void Engine::takeCommands (const Plan& plan) noexcept
                     break;
 
                 case Command::Type::locate:
-                    // A jump while playing: the notes sounding stop, and those where it lands start.
+                    // A jump while playing: the notes sounding stop, and those where it lands start, from silence.
                     transport.notesOff = transport.notesOff || transport.playing;
+                    transport.flush = transport.flush || transport.playing;
                     brokeTake = true;
                     transport.chase = true;
                     transport.beat = command.beat;
@@ -411,6 +415,7 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
 
     transport.notesOff = false;
     transport.chase = false;
+    transport.flush = false;
 
     if (plan.metronome && transport.playing)
         playClicks (plan, outputs, numOutputs, offset, numSamples);
@@ -429,6 +434,7 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
                               : 0.0;
     span.gridSample = transport.playing ? transport.sample : clock + offset;
     span.pass = ++passes;
+    span.flush = transport.flush;
     findControlPoints (plan, span.gridSample, numSamples);
 
     // Each strip a task, in the plan's order, on the audio thread and the workers; each waits for what it takes in, done
@@ -465,6 +471,10 @@ void Engine::startStrip (const Span& span, size_t index) noexcept
     // nothing in it; its own task takes what it played (playStrip()).
     const auto& strip = span.plan->strips[index];
     auto& state = *strip.state;
+
+    if (span.flush)
+        flushStrip (strip);
+
     takeEvents (span, strip);
     state.startedSilent = isSilent (strip);
 
@@ -523,6 +533,26 @@ bool Engine::isSilent (const Plan::Strip& strip) noexcept
     return false;
 }
 
+void Engine::flushStrip (const Plan::Strip& strip) noexcept
+{
+    // Nothing it heard before rings on: its devices start from silence (a plug-in as its helper is handed its next block),
+    // and so do the delays that line up what it adds and listens to, and its containers' dry sound.
+    for (const auto& device : strip.devices)
+    {
+        device.node->getRunner().reset();
+
+        if (device.sidechainDelay != nullptr)
+            device.sidechainDelay->reset();
+    }
+
+    for (const auto& input : strip.inputs)
+        if (input.delay != nullptr)
+            input.delay->reset();
+
+    for (const auto& container : strip.containers)
+        container.state->reset();
+}
+
 DeviceRunner::Block Engine::getDeviceBlock (const Span& span, const Plan::Strip& strip, size_t index) noexcept
 {
     const auto& device = strip.devices[index];
@@ -568,10 +598,7 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
     // What it takes in, done first: what it adds up, and what its devices' sidechains listen to; and its instrument's
     // block handed over early, in a task before.
     const auto waitFor = [&span] (const std::atomic<std::uint64_t>& done)
-    {
-        while (done.load (std::memory_order_acquire) != span.pass)
-            std::this_thread::yield();
-    };
+    { devices::spinUntil ([&] { return done.load (std::memory_order_acquire) == span.pass; }); };
 
     for (const auto& input : strip.inputs)
         waitFor (plan.strips[(size_t) input.strip].state->donePass);
@@ -584,6 +611,8 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
 
     if (startedEarly)
         waitFor (strip.state->startedPass);
+    else if (span.flush)
+        flushStrip (strip); // flushed as its instrument was handed its block, if it was
 
     {
         auto& state = *strip.state;
@@ -783,15 +812,18 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     const auto from = (double) transport.sample;
     const auto fromBeat = plan.tempo.toBeats (from), toBeat = plan.tempo.toBeats (from + numSamples);
 
-    // The notes sounding here: those that started before it and end after it.
-    const auto forEachSounding = [notes, fromBeat] (auto&& action)
+    // The notes sounding here: those that started before it and end after its first sample. A note that ends where the
+    // span starts ends on that sample, however its beat rounds to it, so that a song played from where one note ends
+    // and the next starts plays the next alone.
+    const auto firstSampleEnd = plan.tempo.toBeats (from + 0.5);
+    const auto forEachSounding = [notes, fromBeat, firstSampleEnd] (auto&& action)
     {
         for (const auto& note : notes->getNotes())
         {
             if (note.start >= fromBeat)
                 break;
 
-            if (note.end > fromBeat)
+            if (note.end > firstSampleEnd)
                 action (note);
         }
     };

@@ -41,6 +41,7 @@ struct BlockInfo
     std::int32_t numChanges = 0;
     std::int32_t timeSignatureNumerator = 4, timeSignatureDenominator = 4;
     std::int32_t isPlaying = 0, isRendering = 0;
+    std::int32_t reset = 0; // the plug-in reset before it plays the block: what rings on from before stops
     double tempo = 120.0;
     double beat = 0.0;       // where the song is at the block's start, in quarter notes
     std::int64_t sample = 0; // and in samples
