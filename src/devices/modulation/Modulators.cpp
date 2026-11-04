@@ -36,27 +36,85 @@ namespace
         return std::ldexp (1.0, -(noteValue + 1)) * feels[(rateType - 4) % 3];
     }
 
+    // What the parameters that pick one of several mean, each from 0 up.
+    constexpr std::string_view syncChoices[] = { "Free", "Transport", "Note" };
+    constexpr std::string_view rateTypeChoices[] = { "Hertz",  "4 Bars", "2 Bars", "1 Bar",  "1/2 T", "1/2",    "1/2 D", "1/4 T",
+                                                     "1/4",    "1/4 D",  "1/8 T",  "1/8",    "1/8 D", "1/16 T", "1/16",  "1/16 D",
+                                                     "1/32 T", "1/32",   "1/32 D", "1/64 T", "1/64",  "1/64 D" };
+    constexpr std::string_view waveChoices[] = { "Sine",         "Triangle",   "Saw Up",       "Saw Down", "Square", "4 Steps Up",
+                                                 "4 Steps Down", "8 Steps Up", "8 Steps Down", "Random",   "Noise" };
+    constexpr std::string_view polarityChoices[] = { "Unipolar", "Bipolar" };
+    constexpr std::string_view randomTypeChoices[] = { "Random", "Noise" };
+    constexpr std::string_view followsChoices[] = { "Pitch", "Velocity" };
+    constexpr std::string_view modeChoices[] = { "Absolute", "Relative" };
+
+    // What several kinds share: how a cycle is timed, and its rate, in hertz or in lengths of the bar (getBarFraction()).
+    constexpr ParameterInfo syncParameter { "syncType", "Sync", 0.0f, 2.0f, 0.0f, Unit::choice, {}, syncChoices };
+    constexpr ParameterInfo rateParameter { "rate", "Rate", 0.01f, 50.0f, 1.0f, Unit::hertz, 1.0f };
+    constexpr ParameterInfo rateTypeParameter { "rateType", "Rate Type", 0.0f, 21.0f, 3.0f, Unit::choice, {}, rateTypeChoices };
+    constexpr ParameterInfo polarityParameter { "biopolar", "Polarity", 0.0f, 1.0f, 0.0f, Unit::choice, {}, polarityChoices };
+
     // clang-format off
-    constexpr ModulatorParameterInfo lfoParameters[] = { { "wave", 0.0f }, { "syncType", 0.0f }, { "rate", 1.0f }, { "rateType", 3.0f },
-                                                         { "depth", 1.0f }, { "biopolar", 0.0f }, { "phase", 0.0f }, { "offset", 0.0f } };
-    constexpr ModulatorParameterInfo followerParameters[] = { { "gainDb", 0.0f }, { "attack", 100.0f }, { "hold", 0.0f },
-                                                              { "release", 500.0f }, { "depth", 1.0f }, { "offset", 0.0f },
-                                                              { "lowPassEnabled", 0.0f }, { "highPassEnabled", 0.0f },
-                                                              { "lowPassFrequency", 2000.0f }, { "highPassFrequency", 500.0f } };
-    constexpr ModulatorParameterInfo stepsParameters[] = { { "syncType", 0.0f }, { "numSteps", 16.0f }, { "rate", 1.0f },
-                                                           { "rateType", 3.0f }, { "depth", 1.0f } };
-    constexpr ModulatorParameterInfo randomParameters[] = { { "type", 0.0f }, { "shape", 0.0f }, { "syncType", 0.0f }, { "rate", 1.0f },
-                                                            { "rateType", 3.0f }, { "depth", 1.0f }, { "stepDepth", 1.0f },
-                                                            { "smooth", 0.0f }, { "biopolar", 0.0f } };
-    constexpr ModulatorParameterInfo breakpointParameters[] = {
-        { "numActivePoints", 4.0f }, { "syncType", 0.0f },        { "rate", 1.0f },          { "rateType", 3.0f },
-        { "depth", 1.0f },           { "biopolar", 0.0f },        { "stageZeroValue", 0.0f }, { "stageOneValue", 1.0f },
-        { "stageOneTime", 0.25f },   { "stageOneCurve", 0.0f },   { "stageTwoValue", 0.5f },  { "stageTwoTime", 0.5f },
-        { "stageTwoCurve", 0.0f },   { "stageThreeValue", 0.5f }, { "stageThreeTime", 0.75f }, { "stageThreeCurve", 0.0f },
-        { "stageFourValue", 0.0f },  { "stageFourTime", 1.0f },   { "stageFourCurve", 0.0f }
+    constexpr ParameterInfo lfoParameters[] = {
+        { "wave", "Wave", 0.0f, 10.0f, 0.0f, Unit::choice, {}, waveChoices },
+        syncParameter, rateParameter, rateTypeParameter,
+        { "depth", "Depth", 0.0f, 1.0f, 1.0f },
+        polarityParameter,
+        { "phase", "Phase", 0.0f, 1.0f, 0.0f },
+        { "offset", "Offset", 0.0f, 1.0f, 0.0f }
     };
-    constexpr ModulatorParameterInfo noteFollowerParameters[] = { { "type", 0.0f }, { "mode", 0.0f }, { "relativeRoot", 60.0f },
-                                                                  { "relativeSpread", 12.0f } };
+    constexpr ParameterInfo followerParameters[] = {
+        { "gainDb", "Gain", -20.0f, 20.0f, 0.0f, Unit::decibels, {}, {}, 0.001f },
+        { "attack", "Attack", 1.0f, 5000.0f, 100.0f, Unit::milliseconds, 50.0f },
+        { "hold", "Hold", 0.0f, 5000.0f, 0.0f, Unit::milliseconds, 50.0f },
+        { "release", "Release", 1.0f, 5000.0f, 500.0f, Unit::milliseconds, 50.0f },
+        { "depth", "Depth", -1.0f, 1.0f, 1.0f },
+        { "offset", "Offset", 0.0f, 1.0f, 0.0f },
+        { "lowPassEnabled", "Low Pass", 0.0f, 1.0f, 0.0f, Unit::toggle },
+        { "highPassEnabled", "High Pass", 0.0f, 1.0f, 0.0f, Unit::toggle },
+        { "lowPassFrequency", "Low Pass Frequency", 20.0f, 20000.0f, 2000.0f, Unit::hertz, 700.0f },
+        { "highPassFrequency", "High Pass Frequency", 20.0f, 20000.0f, 500.0f, Unit::hertz, 700.0f }
+    };
+    constexpr ParameterInfo stepsParameters[] = {
+        syncParameter,
+        { "numSteps", "Steps", 2.0f, 64.0f, 16.0f, Unit::none, 31.0f, {}, 1.0f },
+        rateParameter, rateTypeParameter,
+        { "depth", "Depth", -1.0f, 1.0f, 1.0f }
+    };
+    constexpr ParameterInfo randomParameters[] = {
+        { "type", "Type", 0.0f, 1.0f, 0.0f, Unit::choice, {}, randomTypeChoices },
+        { "shape", "Shape", 0.0f, 1.0f, 0.0f },
+        syncParameter, rateParameter, rateTypeParameter,
+        { "depth", "Depth", 0.0f, 1.0f, 1.0f },
+        { "stepDepth", "Step Depth", 0.0f, 1.0f, 1.0f },
+        { "smooth", "Smooth", 0.0f, 1.0f, 0.0f },
+        polarityParameter
+    };
+    constexpr ParameterInfo breakpointParameters[] = {
+        { "numActivePoints", "Points", 1.0f, 4.0f, 4.0f, Unit::none, {}, {}, 1.0f },
+        syncParameter, rateParameter, rateTypeParameter,
+        { "depth", "Depth", 0.0f, 1.0f, 1.0f },
+        polarityParameter,
+        { "stageZeroValue", "Start Level", 0.0f, 1.0f, 0.0f },
+        { "stageOneValue", "Point 1 Level", 0.0f, 1.0f, 1.0f },
+        { "stageOneTime", "Point 1 Time", 0.0f, 1.0f, 0.25f },
+        { "stageOneCurve", "Point 1 Curve", -0.5f, 0.5f, 0.0f },
+        { "stageTwoValue", "Point 2 Level", 0.0f, 1.0f, 0.5f },
+        { "stageTwoTime", "Point 2 Time", 0.0f, 1.0f, 0.5f },
+        { "stageTwoCurve", "Point 2 Curve", -0.5f, 0.5f, 0.0f },
+        { "stageThreeValue", "Point 3 Level", 0.0f, 1.0f, 0.5f },
+        { "stageThreeTime", "Point 3 Time", 0.0f, 1.0f, 0.75f },
+        { "stageThreeCurve", "Point 3 Curve", -0.5f, 0.5f, 0.0f },
+        { "stageFourValue", "Point 4 Level", 0.0f, 1.0f, 0.0f },
+        { "stageFourTime", "Point 4 Time", 0.0f, 1.0f, 1.0f },
+        { "stageFourCurve", "Point 4 Curve", -0.5f, 0.5f, 0.0f }
+    };
+    constexpr ParameterInfo noteFollowerParameters[] = {
+        { "type", "Follows", 0.0f, 1.0f, 0.0f, Unit::choice, {}, followsChoices },
+        { "mode", "Mode", 0.0f, 1.0f, 0.0f, Unit::choice, {}, modeChoices },
+        { "relativeRoot", "Root", 1.0f, 127.0f, 60.0f, Unit::none, 63.5f, {}, 1.0f },
+        { "relativeSpread", "Spread", 1.0f, 64.0f, 12.0f, Unit::none, 32.0f, {}, 1.0f }
+    };
     // clang-format on
 
     // Each kind's parameters by their places in the lists above.
@@ -190,7 +248,7 @@ namespace
     }
 } // namespace
 
-std::span<const ModulatorParameterInfo> getModulatorParameters (ModulatorKind kind)
+std::span<const ParameterInfo> getModulatorParameters (ModulatorKind kind)
 {
     switch (kind)
     {

@@ -34,6 +34,9 @@ bool isValid (const ParameterInfo& parameter)
     if (parameter.midpoint.has_value() && ! (*parameter.midpoint > parameter.minimum && *parameter.midpoint < parameter.maximum))
         return false;
 
+    if (parameter.step.has_value() && ! (*parameter.step > 0.0f))
+        return false;
+
     if (takesWholeNumbers (parameter.unit))
     {
         // Whole steps, which a skew would only bend.
@@ -53,7 +56,8 @@ bool isValid (const ParameterInfo& parameter)
 
 juce::NormalisableRange<float> getRange (const ParameterInfo& parameter)
 {
-    juce::NormalisableRange<float> range (parameter.minimum, parameter.maximum, takesWholeNumbers (parameter.unit) ? 1.0f : 0.0f);
+    juce::NormalisableRange<float> range (parameter.minimum, parameter.maximum,
+                                          takesWholeNumbers (parameter.unit) ? 1.0f : parameter.step.value_or (0.0f));
 
     if (parameter.midpoint.has_value())
         range.setSkewForCentre (*parameter.midpoint);
@@ -67,7 +71,15 @@ float constrain (const ParameterInfo& parameter, float value)
         return parameter.defaultValue;
 
     value = juce::jlimit (parameter.minimum, parameter.maximum, value);
-    return takesWholeNumbers (parameter.unit) ? std::round (value) : value;
+
+    if (takesWholeNumbers (parameter.unit))
+        return std::round (value);
+
+    if (parameter.step.has_value())
+        return juce::jmin (parameter.maximum,
+                           parameter.minimum + *parameter.step * std::round ((value - parameter.minimum) / *parameter.step));
+
+    return value;
 }
 
 int findParameter (const DeviceInfo& device, std::string_view id)

@@ -110,6 +110,33 @@ std::optional<ModulatorType> findModulatorType (const juce::String& name)
     return {};
 }
 
+std::optional<devices::ModulatorKind> getModulatorKind (const juce::ValueTree& state)
+{
+    const auto type = state.hasType (schema::MODULATOR) ? findModulatorType (state[schema::modulatorType].toString()) : std::nullopt;
+
+    if (! type.has_value())
+        return {};
+
+    switch (*type)
+    {
+        case ModulatorType::envelopeFollower:
+            return devices::ModulatorKind::envelopeFollower;
+        case ModulatorType::steps:
+            return devices::ModulatorKind::steps;
+        case ModulatorType::random:
+            return devices::ModulatorKind::random;
+        case ModulatorType::breakpoints:
+            return devices::ModulatorKind::breakpoints;
+        case ModulatorType::noteFollower:
+            return devices::ModulatorKind::noteFollower;
+        case ModulatorType::lfo:
+        case ModulatorType::macro:
+            break;
+    }
+
+    return devices::ModulatorKind::lfo;
+}
+
 std::vector<juce::ValueTree> getModulatorStates (const Song& song)
 {
     std::vector<juce::ValueTree> states;

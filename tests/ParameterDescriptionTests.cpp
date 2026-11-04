@@ -11,6 +11,7 @@
 #include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/project/internal/Project.h"
 
 namespace
@@ -186,4 +187,66 @@ TEST_CASE ("A value set by hand is the song's, which Tracktion's parameter plays
     curves.appendChild (curve, nullptr);
     phazite::setValueSetByHand (s.song, ref, range.convertFrom0to1 (0.5f));
     CHECK ((float) curve.getChild (0)[phazite::schema::pointValue] == doctest::Approx (range.convertFrom0to1 (0.5f)));
+}
+
+TEST_CASE ("Each modulator's parameters are described as Tracktion's modifier of its kind describes them, in their order")
+{
+    Song s;
+    auto* track = phazite::mirror::findTrack (*s.edit, s.tracks[0]);
+    REQUIRE (track != nullptr);
+
+    for (const auto type : phazite::allModulatorTypes)
+    {
+        if (type == phazite::ModulatorType::macro)
+            continue;
+
+        const auto modulator = phazite::addModulator (*track, type);
+        REQUIRE (modulator.has_value());
+        REQUIRE (modulator->modifier != nullptr);
+        INFO (phazite::getModulatorTypeName (type).toStdString());
+
+        const auto id = phazite::DeviceID::fromRaw (modulator->getID().getRaw());
+        const auto kind = phazite::getModulatorKind (phazite::findModulatorState (s.song, modulator->getID()));
+        REQUIRE (kind.has_value());
+        const auto infos = phazite::devices::getModulatorParameters (*kind);
+        size_t place = 0;
+
+        for (auto* parameter : modulator->modifier->getAutomatableParameters())
+        {
+            if (parameter->paramID == "enabled") // its switch is the song's deviceOff
+                continue;
+
+            INFO (parameter->paramID.toStdString());
+            REQUIRE (place < infos.size());
+            CHECK (juce::String (infos[place].id.data(), infos[place].id.size()) == parameter->paramID);
+            ++place;
+
+            const ParameterRef ref { id, parameter->paramID };
+            const auto description = phazite::describeParameter (s.song, ref);
+            REQUIRE (description.has_value());
+            REQUIRE (description->info.has_value());
+            CHECK (description->name == phazite::getModulatorParameterName (*parameter));
+            CHECK (description->range.start == doctest::Approx (parameter->valueRange.start));
+            CHECK (description->range.end == doctest::Approx (parameter->valueRange.end));
+            CHECK (description->range.skew == doctest::Approx (parameter->valueRange.skew));
+            REQUIRE (parameter->getDefaultValue().has_value());
+            CHECK (description->defaultValue.value_or (-1.0f) == doctest::Approx (*parameter->getDefaultValue()));
+
+            // Choices and switches move in whole numbers, which Tracktion's don't say.
+            if (const auto unit = description->info->unit; unit != phazite::devices::Unit::choice && unit != phazite::devices::Unit::toggle)
+            {
+                CHECK (description->range.interval == doctest::Approx (parameter->valueRange.interval));
+
+                for (const auto proportion : { 0.0f, 0.25f, 0.5f, 1.0f })
+                {
+                    const auto value = parameter->valueRange.convertFrom0to1 (proportion);
+                    CHECK (phazite::getParameterText (s.song, ref, value) == parameter->valueToString (value));
+                }
+            }
+
+            CHECK (phazite::getValueSetByHand (s.song, ref) == doctest::Approx (parameter->getCurrentExplicitValue()));
+        }
+
+        CHECK (place == infos.size());
+    }
 }

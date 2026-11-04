@@ -4,8 +4,10 @@
 // 32 samples from the song's start: engine/automation/Curve.h): one free-running moves on by its own time from where it
 // was, stopped too; one synced to the transport is where the song is; one synced to notes starts again at each note. Its
 // parameters are kept by their IDs ("rate") and in their units, as the song keeps them (model/base/internal/Schema.h:
-// MODULATOR), each with a default for one never set.
+// MODULATOR), each described as a device's are, with a default for one never set.
 #pragma once
+
+#include "devices/core/DeviceInfo.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -26,14 +28,9 @@ enum class ModulatorKind
     noteFollower
 };
 
-// A modulator's parameter: its ID, as the song keeps it, and its value when none is set.
-struct ModulatorParameterInfo
-{
-    std::string_view id;
-    float defaultValue = 0.0f;
-};
-
-std::span<const ModulatorParameterInfo> getModulatorParameters (ModulatorKind);
+// A modulator's parameters, in the order its values are handed to next(): each with its ID, as the song keeps it, its
+// name, its range and its value when none is set.
+std::span<const ParameterInfo> getModulatorParameters (ModulatorKind);
 int findModulatorParameter (ModulatorKind, std::string_view id); // -1 for none
 
 // Where the song is at a control point, for the modulators that follow it.

@@ -44,17 +44,22 @@ struct ParameterInfo
 
     // For Unit::choice: what each whole number from the minimum up means.
     std::span<const std::string_view> choices {};
+
+    // For a parameter that moves in steps of its own (a count, say), from its minimum: the step. Choices and toggles move
+    // in whole numbers without one.
+    std::optional<float> step {};
 };
 
 // Whether a description holds together: a range with the default in it, a midpoint strictly inside it, whole numbers
-// for choices and toggles, and as many choices as the range has whole numbers.
+// for choices and toggles, as many choices as the range has whole numbers, and a step above 0.
 bool isValid (const ParameterInfo&);
 
 // The range a knob moves through: skewed so that the midpoint is halfway along, in whole steps for choices and
-// toggles.
+// toggles, and in its steps for one that has them.
 juce::NormalisableRange<float> getRange (const ParameterInfo&);
 
-// A value as the parameter allows it: within its range, and whole for choices and toggles.
+// A value as the parameter allows it: within its range, whole for choices and toggles, and on a step for one that has
+// them.
 float constrain (const ParameterInfo&, float value);
 
 //==============================================================================

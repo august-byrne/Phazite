@@ -5,6 +5,7 @@
 // MODULATOR, MACRO, MODULATES; T1 step 6), which the model changes, and Tracktion's mirror. Not for the UI.
 #pragma once
 
+#include "devices/modulation/Modulators.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Tracktion.h"
 #include "model/devices/ParameterRef.h"
@@ -49,6 +50,10 @@ ParameterRef getModulatedParameter (const juce::ValueTree& modulates);
 std::vector<float> getModulatorSteps (const juce::ValueTree& modulatorState);
 std::optional<ModulatorType> findModulatorType (const juce::String& name);
 const juce::Identifier& getModifierType (ModulatorType);
+
+// A modulator's kind as Phazite's engine plays it (devices/modulation/Modulators.h), whose parameters it has; nothing for a
+// macro.
+std::optional<devices::ModulatorKind> getModulatorKind (const juce::ValueTree& modulatorState);
 
 // A track's modulators, in their order, then its macros: the master's and folders' too.
 std::vector<ModulatorAccess> getModulators (te::Track&);

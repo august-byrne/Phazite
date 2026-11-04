@@ -110,7 +110,11 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
         if (modulator.hasType (schema::MACRO))
             return ref.parameter == juce::String (ref.device.getRaw()) ? found (ref, ParameterSource::macro, modulator) : std::nullopt;
 
-        return findTracktionParameter (song, ref) != nullptr ? found (ref, ParameterSource::modulator, modulator) : std::nullopt;
+        if (const auto kind = getModulatorKind (modulator))
+            if (const auto index = devices::findModulatorParameter (*kind, ref.parameter.toStdString()); index >= 0)
+                return found (ref, ParameterSource::modulator, modulator, &devices::getModulatorParameters (*kind)[(size_t) index]);
+
+        return {};
     }
 
     return {};
@@ -151,6 +155,7 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
     switch (parameter.source)
     {
         case ParameterSource::device:
+        case ParameterSource::modulator:
         {
             const auto& info = *parameter.info;
             return { parameter.source, toString (info.name), devices::getRange (info), info.defaultValue, info };
@@ -171,7 +176,6 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
         case ParameterSource::macro:
             return { parameter.source, state[schema::macroName].toString(), { 0.0f, 1.0f }, 0.0f, {} };
 
-        case ParameterSource::modulator:
         case ParameterSource::plugin:
             if (const auto tracktions = findTracktionParameter (song, parameter.ref))
                 return { parameter.source, tracktions->getParameterName(), tracktions->valueRange, tracktions->getDefaultValue(), {} };
@@ -199,10 +203,16 @@ juce::String getParameterText (const Song& song, const FoundParameter& parameter
             return value < 0.0f ? juce::String (value, 3) + " Left" : "+" + juce::String (value, 3) + " Right";
 
         case ParameterSource::device:
+        case ParameterSource::modulator:
+            // A count (one that moves in whole steps) reads as a whole number.
+            if (const auto step = parameter.info->step; step.has_value() && juce::exactlyEqual (*step, std::round (*step)))
+                return juce::String (juce::roundToInt (value));
+
+            return juce::String (value, 3);
+
         case ParameterSource::macro:
             return juce::String (value, 3);
 
-        case ParameterSource::modulator:
         case ParameterSource::plugin:
             if (const auto tracktions = findTracktionParameter (song, parameter.ref))
                 return tracktions->valueToString (value);
@@ -220,6 +230,7 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
     switch (parameter.source)
     {
         case ParameterSource::device:
+        case ParameterSource::modulator:
             return (float) state.getChildWithName (schema::VALUES)
                 .getProperty (juce::Identifier (parameter.ref.parameter), parameter.info->defaultValue);
 
@@ -236,7 +247,6 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
         case ParameterSource::macro:
             return (float) state.getProperty (schema::macroValue, 0.0f);
 
-        case ParameterSource::modulator:
         case ParameterSource::plugin:
             if (const auto tracktions = findTracktionParameter (song, parameter.ref))
                 return tracktions->getCurrentExplicitValue();
@@ -261,6 +271,15 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             moveOnePoint (song, ref, stored);
             state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (ref.parameter), stored, undo);
             song.reconcile (Song::Part::device, ref.device.getRaw());
+            return;
+        }
+
+        case ParameterSource::modulator:
+        {
+            // Nothing moves a modulator's parameters: no curve of one point follows them.
+            const auto stored = devices::constrain (*parameter.info, value);
+            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (ref.parameter), stored, undo);
+            song.reconcile (Song::Part::modulator, ref.device.getRaw());
             return;
         }
 
@@ -299,7 +318,6 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             return;
         }
 
-        case ParameterSource::modulator:
         case ParameterSource::plugin:
             if (const auto tracktions = findTracktionParameter (song, ref))
                 setDeviceValue (*tracktions, value);
@@ -310,6 +328,10 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
 
 float getCurrentValue (const Song& song, const FoundParameter& parameter, bool withModulation)
 {
+    // Nothing moves a modulator's parameters or a macro's value.
+    if (parameter.source == ParameterSource::modulator || parameter.source == ParameterSource::macro)
+        return getValueSetByHand (song, parameter);
+
     // While Phazite's engine plays the song: what it played, or the value set by hand for one that nothing moves (but a
     // modulator's or a macro's, which it doesn't play as parameters).
     if (const auto* session = findPlayingSession (song);

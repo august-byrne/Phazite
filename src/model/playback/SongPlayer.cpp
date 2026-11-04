@@ -110,29 +110,6 @@ namespace
     private:
         std::unique_ptr<juce::AudioFormatReader> reader;
     };
-
-    // A modulator's kind, as the engine plays it.
-    devices::ModulatorKind toKind (ModulatorType type)
-    {
-        switch (type)
-        {
-            case ModulatorType::envelopeFollower:
-                return devices::ModulatorKind::envelopeFollower;
-            case ModulatorType::steps:
-                return devices::ModulatorKind::steps;
-            case ModulatorType::random:
-                return devices::ModulatorKind::random;
-            case ModulatorType::breakpoints:
-                return devices::ModulatorKind::breakpoints;
-            case ModulatorType::noteFollower:
-                return devices::ModulatorKind::noteFollower;
-            case ModulatorType::lfo:
-            case ModulatorType::macro:
-                break;
-        }
-
-        return devices::ModulatorKind::lfo;
-    }
 } // namespace
 
 SongPlayer::SongPlayer (te::Edit& e)
@@ -642,12 +619,10 @@ std::shared_ptr<engine::ModulatorNode> SongPlayer::getModulator (const juce::Val
 
     if (state.hasType (schema::MODULATOR))
     {
-        const auto type = findModulatorType (state[schema::modulatorType].toString());
+        kind = getModulatorKind (state);
 
-        if (! type.has_value() || *type == ModulatorType::macro)
+        if (! kind.has_value())
             return nullptr;
-
-        kind = toKind (*type);
     }
 
     const auto id = getID (state, schema::modulatorID);
