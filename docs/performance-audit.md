@@ -452,3 +452,51 @@ parameter before it asks for the modulation's range. The UI's benchmark (`tests/
 A project's CPU, stopped and playing, moved within its noise (20 tracks of Phazite's devices on one thread: 0.84 % and
 27.19 % of each block before, 0.80 % and 26.59 % after). The comparison spans every T6 change of that day, so the
 autosave's 5 ms more may come from any of them (one run each); which is left to measure.
+
+## 12. On JUCE alone (2026-11-04)
+
+T6 ends A6 ([roadmap](roadmap.md#architecture-track)): Phazite builds on JUCE alone, its song, its engine and its
+plug-in hosting its own. Measured after it with `phazite_tests.exe --test-suite=benchmark --no-skip` from the
+`windows-profile` build, against section 11's numbers (2026-11-03):
+
+| The UI's work, 16 tracks, 256 clips, 16,384 notes | 2026-11-03 | 2026-11-04 |
+|---|---|---|
+| A parameter's change, as the views handle it | 0.19 ms | 0.03 ms |
+| The whole window painted | 12.8 ms | 12.1 ms |
+| An 11-px column of the window, as a playhead repaints | 0.66 ms | 0.64 ms |
+| Save | 135.5 ms | 102.6 ms |
+| Autosave, on the UI thread | 15.8 ms | 6.6 ms |
+| A note moved a step, with what follows | 2.07 ms | 3.5 to 3.8 ms |
+
+The note's row moves by 2 ms from run to run of the same build (2.07, 2.78 and 3.74 ms on 2026-11-04 without the
+changes below): it times a 30 ms wait for the messages that follow and takes the 30 ms away, so it shows when the wait
+ends as much as the work. The work it times is less than before (one track's notes compiled again, below). A 40-track
+song of 10,240 notes saves in 66 ms, autosaves in 49 ms and opens in 28 ms (77 to 100 ms, 56 ms and 61 ms in section 3).
+A project's CPU is as it was: 20 tracks of Phazite's devices playing chords take 26.4 to 26.9 % of each block on one
+thread in four runs (26.59 % in section 11; a fifth, just after a build, 29.4 %), the strips' CPU meters, which time each
+device as it plays (`engine::DeviceNode::getLoad()`), included.
+
+**A clip moved in a big song.** The playlist's benchmark (100 tracks, 2,400 clips, 38,400 notes) timed 25.1 ms of the UI
+thread's work for a clip moved a beat, as each step of a drag moves it, where section 8 measured 1.5 ms on 2026-10-27,
+before Phazite's engine played projects (T2). Split up, 14.2 ms were the new plan the playback session compiles for the
+change and 6.4 ms the playlist's. Three causes, each fixed:
+- Every plan compiled every track's notes again (6.1 ms). The song player keeps each track's
+  (`SongPlayer::getNotes()`, `model/playback/internal/SongPlayer.h`), compiled again only once something in its clips
+  changes, which it hears from the song itself, so that every player's plans follow it.
+- Finding a track by its ID (`findTrackState()`) and listing the tracks looked through every track's children, its clips
+  among them, so that the playlist's look at its 100 tracks walked the song's 2,400 clips 200 times (6.3 ms). Only a
+  folder holds tracks, so only a folder's children are looked through now.
+- Ordering the channels and taking in their sends looked through every other channel's children, clips included, for
+  sends to each channel (4.9 and 2.5 ms): each channel's sends are now found once a plan.
+
+| The playlist: 100 tracks, 2,400 clips, 38,400 notes | Before | After |
+|---|---|---|
+| A clip moved a beat: the UI thread's work | 25.1 ms | 3.3 ms |
+| ... of which the new plan | 14.2 ms | 0.8 ms |
+| ... and the playlist | 6.4 ms | 1.5 ms |
+| A wheel notch, scrolling down | 0.70 ms | 0.27 ms |
+| Ctrl and a wheel notch, zooming in | 0.99 ms | 0.53 ms |
+| The mouse moved a pixel over the tracks | 0.53 ms | 0.13 ms |
+
+A test checks that a new plan compiles again the notes of the tracks whose clips changed only, and plays every change of
+them (`tests/EnginePlaybackTests.cpp`); with the player hearing nothing of the song's changes, it fails.

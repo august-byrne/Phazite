@@ -9,6 +9,8 @@
 #include "devices/synth/Synth.h"
 #include "engine/transport/Click.h"
 #include "model/arrangement/TimelineModel.h"
+#include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
 #include "model/commands/internal/Undo.h"
@@ -140,6 +142,77 @@ TEST_CASE ("Phazite's engine plays a track's notes through Phazite's synth, whic
     playback.play (0.05);
     const auto quiet = playback.play (0.2);
     CHECK (quiet.getMagnitude (0, 0, quiet.getNumSamples()) == 0.0f);
+}
+
+TEST_CASE ("A new plan compiles again the notes of the tracks whose clips changed only, and plays every change of them")
+{
+    TestSong song;
+    auto& state = *phazite::findSong (song.context);
+    const auto other = song.addTrack ("Other");
+    const auto clip = song.addMidiClip (song.firstTrack, 0.0, 4.0);
+    song.addNote (clip, 60, 0.0, 1.0);
+    song.addNote (song.addMidiClip (other, 0.0, 4.0), 48, 0.0, 1.0);
+
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    const auto compile = [session] { return session->getPlayer().compile (48000.0, 256, std::nullopt); };
+    const auto notesOf = [] (const phazite::engine::Plan& plan, phazite::TrackID track)
+    {
+        for (const auto& strip : plan.strips)
+            if (strip.id == (std::int64_t) track.getRaw())
+                return strip.notes;
+
+        FAIL ("no strip for the track");
+        return std::shared_ptr<const phazite::engine::NoteSequence>();
+    };
+
+    const auto pitchesOf = [&notesOf] (const phazite::engine::Plan& plan, phazite::TrackID track)
+    {
+        std::vector<int> pitches;
+
+        if (const auto notes = notesOf (plan, track))
+            for (const auto& note : notes->getNotes())
+                pitches.push_back (note.pitch);
+
+        return pitches;
+    };
+
+    const auto first = compile();
+    CHECK (pitchesOf (*first, song.firstTrack) == std::vector { 60 });
+    CHECK (pitchesOf (*first, other) == std::vector { 48 });
+
+    // Nothing changed: both tracks' notes as they were; a note added to the first track: its notes again, the other's
+    // the same.
+    const auto again = compile();
+    CHECK (notesOf (*again, song.firstTrack) == notesOf (*first, song.firstTrack));
+    song.addNote (clip, 64, 1.0, 1.0);
+    const auto added = compile();
+    CHECK (pitchesOf (*added, song.firstTrack) == std::vector { 60, 64 });
+    CHECK (notesOf (*added, other) == notesOf (*first, other));
+
+    // The clip moved onto the other track: both again; undone, back where they were.
+    {
+        const phazite::UndoStep step (state, "Move Clip");
+        phazite::moveClip (state, clip, phazite::BeatPosition::fromBeats (8.0), other);
+    }
+
+    const auto moved = compile();
+    CHECK (pitchesOf (*moved, song.firstTrack).empty());
+    CHECK (pitchesOf (*moved, other) == std::vector { 48, 60, 64 });
+    phazite::undo (state);
+    const auto undone = compile();
+    CHECK (pitchesOf (*undone, song.firstTrack) == std::vector { 60, 64 });
+    CHECK (pitchesOf (*undone, other) == std::vector { 48 });
+
+    // The first track deleted and its deletion undone: its notes again.
+    {
+        const phazite::UndoStep step (state, "Delete Track");
+        phazite::deleteTracks (state, { song.firstTrack }, nullptr);
+    }
+
+    compile();
+    phazite::undo (state);
+    CHECK (pitchesOf (*compile(), song.firstTrack) == std::vector { 60, 64 });
 }
 
 TEST_CASE ("The piano roll's guide notes play through Phazite's engine while the song is stopped")

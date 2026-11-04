@@ -28,11 +28,12 @@ namespace phazite
 {
 class PluginInstances;
 
-class SongPlayer
+class SongPlayer : private juce::ValueTree::Listener
 {
 public:
     // A song's, with its plug-ins' instances (those of its session: none play without).
     explicit SongPlayer (Song&, PluginInstances* = nullptr);
+    ~SongPlayer() override;
 
     // What a render plays of the song, when not all of it through the master: one channel alone, by its ID, as it reaches
     // the master (an export's stem, model/project/Export.h); or before its fader, heard whatever its mute switch or a solo
@@ -138,6 +139,20 @@ private:
     std::shared_ptr<const engine::Curve> findCurve (std::uint64_t device, const juce::String& parameter) const;
     void addFaderAutomation (engine::Plan::Strip&, const juce::ValueTree& channelState, bool isMaster);
 
+    // Each track's notes as the plans play them, by its ID, compiled again only once something in its clips changed
+    // (the song tells the player, which listens to it itself, so that every player's plans follow it): in a big song a
+    // change is in one track, and its notes are many.
+    std::map<std::int64_t, std::shared_ptr<const engine::NoteSequence>> notes;
+    std::set<std::int64_t> notesChanged, usedNotes;
+    juce::ValueTree songState;
+    std::shared_ptr<const engine::NoteSequence> getNotes (const juce::ValueTree& trackState);
+    void markNotes (const juce::ValueTree& changed);    // the track of the clip it is, or is in
+    void markTracksIn (const juce::ValueTree& element); // it, if a track, and the tracks it holds
+    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { markNotes (tree); }
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
+    void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override;
+
     std::shared_ptr<engine::AudioFile> getAudioFile (const juce::File&);
     engine::AudioRegion makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile>);
     void addAudio (engine::Plan::Strip&, const juce::ValueTree& trackState);
@@ -162,6 +177,7 @@ private:
     {
         juce::ValueTree state {};
         std::int64_t id = 0, output = 0;
+        std::vector<juce::ValueTree> sends {}; // its SEND children, looked for once
         std::vector<std::int64_t> needs {};
         std::set<std::int64_t> refused {};
 

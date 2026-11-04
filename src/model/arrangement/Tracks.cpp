@@ -15,6 +15,7 @@ namespace phazite
 {
 namespace
 {
+    // Only a folder holds tracks: the others' children (their clips and devices, many in a big song) aren't looked through.
     void collectTrackStates (const juce::ValueTree& parent, std::vector<juce::ValueTree>& states)
     {
         for (const auto& child : parent)
@@ -22,7 +23,9 @@ namespace
             if (child.hasType (schema::TRACK))
             {
                 states.push_back (child);
-                collectTrackStates (child, states);
+
+                if (isFolderState (child))
+                    collectTrackStates (child, states);
             }
         }
     }
@@ -37,8 +40,9 @@ namespace
             if (getTrackID (child) == id)
                 return child;
 
-            if (auto found = findIn (child, id); found.isValid())
-                return found;
+            if (isFolderState (child))
+                if (auto found = findIn (child, id); found.isValid())
+                    return found;
         }
 
         return {};

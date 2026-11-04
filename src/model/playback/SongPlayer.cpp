@@ -115,8 +115,79 @@ namespace
 
 SongPlayer::SongPlayer (Song& s, PluginInstances* p)
     : song (s),
-      plugins (p)
+      plugins (p),
+      songState (s.getState())
 {
+    songState.addListener (this);
+}
+
+SongPlayer::~SongPlayer()
+{
+    songState.removeListener (this);
+}
+
+//==============================================================================
+std::shared_ptr<const engine::NoteSequence> SongPlayer::getNotes (const juce::ValueTree& trackState)
+{
+    const auto id = getID (trackState, schema::trackID);
+    usedNotes.insert (id);
+
+    if (const auto found = notes.find (id); found != notes.end() && ! notesChanged.contains (id))
+        return found->second;
+
+    auto compiled = compileNotes (trackState);
+    notes[id] = compiled;
+    notesChanged.erase (id);
+    return compiled;
+}
+
+void SongPlayer::markNotes (const juce::ValueTree& changed)
+{
+    // A change in a clip, or to a clip: its track's notes (a tempo change moves none: they are in beats).
+    for (auto element = changed; element.isValid(); element = element.getParent())
+        if (element.hasType (schema::CLIP))
+            return (void) notesChanged.insert (getID (element.getParent(), schema::trackID));
+}
+
+void SongPlayer::markTracksIn (const juce::ValueTree& element)
+{
+    if (element.hasType (schema::TRACK))
+        notesChanged.insert (getID (element, schema::trackID));
+
+    if (element.hasType (schema::TRACK) || element.hasType (schema::TRACKS) || element.hasType (schema::PHAZITE))
+        for (const auto& child : element)
+            if (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS))
+                markTracksIn (child);
+}
+
+void SongPlayer::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
+{
+    // A clip added to a track, or something to a clip; or tracks added, which may hold notes already (an undo).
+    if (child.hasType (schema::CLIP))
+        markNotes (child);
+    else
+        markNotes (parent);
+
+    markTracksIn (child);
+}
+
+void SongPlayer::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
+{
+    // A clip taken off its track (which it has no more: its old parent's).
+    if (child.hasType (schema::CLIP) && parent.hasType (schema::TRACK))
+        notesChanged.insert (getID (parent, schema::trackID));
+    else
+        markNotes (parent);
+
+    markTracksIn (child);
+}
+
+void SongPlayer::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
+{
+    if (parent.hasType (schema::TRACK))
+        notesChanged.insert (getID (parent, schema::trackID));
+    else
+        markNotes (parent);
 }
 
 void SongPlayer::letGoOfPlugins()
@@ -171,6 +242,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     used.clear();
     usedFiles.clear();
     usedRegions.clear();
+    usedNotes.clear();
     usedModulators.clear();
     modulated.clear();
     readCurves();
@@ -189,18 +261,24 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
         // A bus adds up its tracks; a return what is sent to it.
         std::vector<engine::Plan::Input> inputs;
+        const auto isReturn = isReturnState (channel.state);
 
         for (const auto& other : channels)
         {
             if (! places.contains (other.id) || channel.refuses (other.id))
                 continue;
 
-            if (other.output == channel.id && ! isReturnState (channel.state))
-                inputs.push_back ({ places[other.id], nullptr });
-
-            for (const auto& send : other.state)
+            if (! isReturn)
             {
-                if (send.hasType (schema::SEND) && getID (send, schema::sendTo) == channel.id && isReturnState (channel.state))
+                if (other.output == channel.id)
+                    inputs.push_back ({ places[other.id], nullptr });
+
+                continue;
+            }
+
+            for (const auto& send : other.sends)
+            {
+                if (getID (send, schema::sendTo) == channel.id)
                 {
                     const auto beforeFader = (bool) send[schema::sendPreFader];
                     inputs.push_back ({ places[other.id], nullptr, beforeFader, getSendLevel (send) });
@@ -220,7 +298,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
             if (! frozen)
             {
-                strip.notes = compileNotes (channel.state);
+                strip.notes = getNotes (channel.state);
                 addAudio (strip, channel.state);
             }
         }
@@ -289,6 +367,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::erase_if (modulators, [this] (const auto& modulator) { return usedModulators.count (modulator.first) == 0; });
     std::erase_if (files, [this] (const auto& file) { return usedFiles.count (file.first) == 0; });
     std::erase_if (regions, [this] (const auto& region) { return usedRegions.count (region.first) == 0; });
+    std::erase_if (notes, [this] (const auto& track) { return usedNotes.count (track.first) == 0; });
+    notesChanged.clear(); // those of tracks it played were compiled again, and the others' notes are let go
     std::erase_if (strips, [&tracks] (const auto& strip) { return tracks.count (strip.first) == 0; });
     std::erase_if (delays, [this] (const auto& delay) { return usedDelays.count (delay.first) == 0; });
     std::erase_if (sendLevels, [this] (const auto& level) { return usedSends.count (level.first) == 0; });
@@ -481,29 +561,41 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
                 if (parent.hasProperty (schema::channelFader))
                     info.output = getID (parent, schema::trackID);
 
+        for (const auto& child : state)
+            if (child.hasType (schema::SEND))
+                info.sends.push_back (child);
+
         infos.push_back (std::move (info));
     }
 
     for (auto& info : infos)
     {
+        const auto isReturn = isReturnState (info.state);
+
         for (const auto& other : infos)
         {
-            if (other.output == info.id && ! isReturnState (info.state))
+            if (other.output == info.id && ! isReturn)
                 info.needs.push_back (other.id);
 
-            for (const auto& send : other.state)
-                if (send.hasType (schema::SEND) && getID (send, schema::sendTo) == info.id && isReturnState (info.state))
-                    info.needs.push_back (other.id);
+            if (isReturn)
+                for (const auto& send : other.sends)
+                    if (getID (send, schema::sendTo) == info.id)
+                        info.needs.push_back (other.id);
         }
 
         const auto addSidechains = [&info] (const juce::ValueTree& chain, auto& addInside) -> void
         {
             for (const auto& device : chain)
             {
-                if (const auto source = getID (device, schema::deviceSidechain); device.hasType (schema::DEVICE) && source != 0)
-                    info.needs.push_back (source);
+                if (device.hasType (schema::DEVICE))
+                {
+                    if (const auto source = getID (device, schema::deviceSidechain); source != 0)
+                        info.needs.push_back (source);
+                }
                 else if (device.hasType (schema::CONTAINER))
+                {
                     addInside (device, addInside);
+                }
             }
         };
 
