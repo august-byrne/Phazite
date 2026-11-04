@@ -24,10 +24,10 @@ class OfflineRender final : private juce::Thread
 public:
     struct Job
     {
-        juce::File file;                        // where its floats go
-        double endSeconds = 0.0;                // the song's time it plays to, before its tails
-        double tailSeconds = 0.0;               // and on, for as long as its tails sound, at most
-        std::optional<SongPlayer::RenderOf> of; // the song through the master, or a part of it
+        juce::File file {};                        // where its floats go
+        double endSeconds = 0.0;                   // the song's time it plays to, before its tails
+        double tailSeconds = 0.0;                  // and on, for as long as its tails sound, at most
+        std::optional<SongPlayer::RenderOf> of {}; // the song through the master, or a part of it
     };
 
     // On the render thread: what comes of a job's file once it is written, with what was measured of it (an export writes

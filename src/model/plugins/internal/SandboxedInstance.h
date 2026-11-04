@@ -78,7 +78,7 @@ public:
     int findParameter (const juce::String& ownID) const;
     float getParameterValue (int parameter) const;
     void setParameterValue (int parameter, float value);
-    juce::String getParameterText (int parameter, float value) const;
+    juce::String describeValue (int parameter, float value) const; // not getParameterText(), which would hide JUCE's
 
     // What the plug-in changes itself, told on the message thread: a value of its own, as its window or a program of its own
     // set it (and as it opens again after a crash), by the parameter's place; what its own window grabs and lets go of, a

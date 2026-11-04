@@ -262,7 +262,7 @@ void SandboxedInstance::setParameterValue (int parameter, float value)
         parameters[(size_t) parameter]->setValue (juce::jlimit (0.0f, 1.0f, value));
 }
 
-juce::String SandboxedInstance::getParameterText (int parameter, float value) const
+juce::String SandboxedInstance::describeValue (int parameter, float value) const
 {
     return juce::isPositiveAndBelow (parameter, (int) parameters.size()) ? parameters[(size_t) parameter]->getText (value, 1024)
                                                                          : juce::String();

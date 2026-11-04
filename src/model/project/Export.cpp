@@ -321,9 +321,9 @@ namespace
             const OfflineRender::Job job { floats.getFile(), toSeconds (song, getExportRange (song).getEnd()), tailSeconds, std::nullopt };
             renderer = std::make_unique<OfflineRender> (
                 getRenderSetup (song, settings.sampleRate), std::vector { job },
-                [settings, floatsFile = floats.getFile(), file = temporary.getFile()] (OfflineRender& render, int index,
-                                                                                       const auto& readings)
-                { return writeExport (render, index, floatsFile, file, settings, readings); },
+                [settings, floatsFile = floats.getFile(), written = temporary.getFile()] (OfflineRender& render, int index,
+                                                                                          const auto& readings)
+                { return writeExport (render, index, floatsFile, written, settings, readings); },
                 [weakAlive = std::weak_ptr<SongRender*> (alive), rendered = temporary.getFile(),
                  target = temporary.getTargetFile()] (const juce::Result& result)
                 { deliverTo (weakAlive, result.wasOk() ? measure (rendered, target) : ExportReport { result, target }); });

@@ -126,20 +126,20 @@ void addLaneChord (ProjectContext& context, BeatRange range, const Numeral& nume
 
 void changeLaneChord (ProjectContext& context, BeatPosition chordStart, const Numeral& numeral)
 {
-    if (auto* song = findSong (context); song != nullptr && hasLaneChordAt (*song, chordStart))
+    if (auto* played = findSong (context); played != nullptr && hasLaneChordAt (*played, chordStart))
         editLane (context, "Change Chord", [&] (Song& song) { setLaneChordNumeral (song, chordStart, numeral); });
 }
 
 void deleteLaneChord (ProjectContext& context, BeatPosition chordStart)
 {
-    if (auto* song = findSong (context); song != nullptr && hasLaneChordAt (*song, chordStart))
+    if (auto* played = findSong (context); played != nullptr && hasLaneChordAt (*played, chordStart))
         editLane (context, "Delete Chord", [&] (Song& song) { removeLaneChord (song, chordStart); });
 }
 
 void setLaneChordEnd (ProjectContext& context, BeatPosition chordStart, BeatPosition end)
 {
-    if (auto* song = findSong (context);
-        song != nullptr && hasLaneChordAt (*song, chordStart) && end > chordStart + BeatDuration::fromBeats (tiny))
+    if (auto* played = findSong (context);
+        played != nullptr && hasLaneChordAt (*played, chordStart) && end > chordStart + BeatDuration::fromBeats (tiny))
         editLane (context, "Change Chord Length", [&] (Song& song) { setLaneChordEnd (song, chordStart, end); });
 }
 

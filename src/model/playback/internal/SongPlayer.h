@@ -44,7 +44,7 @@ public:
     {
         std::int64_t channel = 0;
         bool beforeFader = false;
-        std::optional<std::set<std::int64_t>> devices;
+        std::optional<std::set<std::int64_t>> devices {};
     };
 
     // What plays live, as the session sees it: whether Low Latency is on (PlaybackHost.h), and the tracks armed to record,

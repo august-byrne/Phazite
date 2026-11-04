@@ -231,7 +231,7 @@ juce::String getParameterText (const Song& song, const FoundParameter& parameter
 
         case ParameterSource::plugin:
             if (const auto [instance, index] = findPluginParameter (song, parameter.ref); instance != nullptr)
-                return instance->getParameterText (index, value);
+                return instance->describeValue (index, value);
 
             return juce::String (value, 2);
     }

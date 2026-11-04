@@ -79,7 +79,6 @@ namespace
 
     void removeClipState (Song& song, juce::ValueTree clipState)
     {
-        const auto id = getClipID (clipState);
         clipState.getParent().removeChild (clipState, &song.getUndoManager());
     }
 

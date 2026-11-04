@@ -94,8 +94,8 @@ void setMixedAsBus (ProjectContext&, TrackID, bool); // a folder's bus switch
 // Devices, in slots: a track's instrument, then its effects; the master's effects (with an empty ID).
 struct DeviceSlot
 {
-    DeviceID id;
-    juce::String name;
+    DeviceID id {};
+    juce::String name {};
     bool isOn = true;
     bool hasMix = false;         // an effect's mix (getMix())
     double latencySeconds = 0.0; // how late its sound comes out
