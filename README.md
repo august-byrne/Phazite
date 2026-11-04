@@ -9,7 +9,7 @@ Phazite is a free, open-source digital audio workstation (DAW) for making beats 
 ![Phazite with the House Groove example song: the browser on the left, the playlist with its sections and chord lane in the centre, the Drum Sampler under it, and the selected track's properties on the right](docs/images/phazite.png)
 
 - **Clean and quick:** an uncluttered window, one clear way to do each thing, and the shortcuts of Phazite, FL Studio or Ableton Live.
-- **Help for newcomers:** song outlines, a chord lane with chord progressions, example songs and lessons in the app, with AI chord suggestions and drum-sound generation planned ([the design](docs/design.md)).
+- **Help for newcomers:** song outlines, a chord lane with chord progressions, example songs and lessons in the app, with chord suggestions and drum-sound generation planned after version 1 ([the design](docs/design.md)).
 - **Lean and fast:** low CPU and memory use, in the audio engine and the UI.
 - **Plug-ins:** VST®3 now; CLAP, and Audio Units on macOS, later.
 - **Open source:** [AGPL-3.0-or-later](LICENSE).
@@ -29,7 +29,7 @@ What works today, on Windows:
 
 The song plays, records, exports and freezes through Phazite's own engine, built on JUCE, and plug-ins run in Phazite's own helper processes.
 
-Next come chord suggestions, the sound generator, and passes on performance and accessibility; then an installer and version 1. The [roadmap](docs/roadmap.md) has the plan step by step.
+The passes on performance and accessibility are done. Next come an installer and version 1; chord suggestions, the sound generator and a richer browser follow after it. The [roadmap](docs/roadmap.md) has the plan step by step.
 
 | Platform | Status |
 |---|---|

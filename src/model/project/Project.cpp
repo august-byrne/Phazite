@@ -211,6 +211,8 @@ public:
 
     bool isBusy() const noexcept { return busy.load(); }
     bool takeFailure() noexcept { return failed.exchange (false); }
+    juce::int64 getWrittenAt() const noexcept { return writtenAt.load(); } // the last whole write, or 0
+    void forgetWritten() noexcept { writtenAt = 0; }
     void wait() { waitForThreadToExit (30000); }
 
     // Writes a state that nothing else changes (a copy) into a file.
@@ -228,10 +230,13 @@ private:
     juce::ValueTree state;
     juce::File file;
     std::atomic<bool> busy { false }, failed { false };
+    std::atomic<juce::int64> writtenAt { 0 }; // in milliseconds since 1970
 
     void run() override
     {
-        if (! writeProjectFile (state, file))
+        if (writeProjectFile (state, file))
+            writtenAt = juce::Time::currentTimeMillis();
+        else
             failed = true;
 
         state = {};
@@ -290,6 +295,8 @@ juce::Result Project::save()
     changesOutsideHistory = song->getChangesOutsideHistory(); // stored in the song as it saved
     rememberSavedState();                                     // what the file holds now
     getAutosaveFile (file).deleteFile();
+    autosavedAt = 0;
+    autosaveWriter->forgetWritten();
     return juce::Result::ok();
 }
 
@@ -314,6 +321,7 @@ juce::Result Project::autosave()
     }
 
     changedSinceAutosave = false;
+    autosavedAt = juce::Time::currentTimeMillis();
     return juce::Result::ok();
 }
 
@@ -347,6 +355,16 @@ void Project::autosaveInBackground()
 bool Project::isAutosaving() const
 {
     return autosaveWriter->isBusy();
+}
+
+std::optional<juce::Time> Project::getLastAutosave() const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (const auto latest = std::max (autosavedAt, autosaveWriter->getWrittenAt()); latest > 0)
+        return juce::Time (latest);
+
+    return std::nullopt;
 }
 
 bool Project::takeAutosaveFailure()

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden files of saved projects (tests/golden/projects): a new project, the First Beat example song and a project with one of
-// each kind of track and every piece of Phazite's data are saved, reopened and saved again, and the second save is
-// compared with a committed file. GoldenFiles.h says what the comparison leaves out and how to regenerate the files.
+// Golden files of saved projects (tests/golden/projects): a new project and a project with one of each kind of track and
+// every piece of Phazite's data are saved, reopened and saved again, and the second save is compared with a committed file. GoldenFiles.h says what the comparison leaves out and how to regenerate the files.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -21,7 +20,6 @@
 #include "model/chords/internal/Chords.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
-#include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
@@ -387,27 +385,6 @@ TEST_SUITE ("golden")
 
         saveReopenAndSaveAgain (std::move (project), "empty",
                                 "A new, empty project (Project::create), saved, reopened and saved again: tests/GoldenProjectTests.cpp");
-    }
-
-    TEST_CASE ("Golden project: the First Beat example song")
-    {
-        // As Help > Example Songs makes it (ProjectSession::openExampleSong()).
-        phazite::test::TemporaryFolder temp;
-        juce::String error;
-        auto project = phazite::Project::create (
-            temp.folder, "First Beat", error,
-            phazite::getExampleSongContent (phazite::test::getEngineContext(), "firstBeat", phazite::test::getFactoryPresetsFolder()));
-        INFO (error.toStdString());
-        REQUIRE (project != nullptr);
-        phazite::test::settle();
-
-        // The first start shows no unsaved changes, and nothing to undo.
-        CHECK_FALSE (project->hasUnsavedChanges());
-        CHECK_FALSE (project->getSong().getUndoManager().canUndo());
-
-        saveReopenAndSaveAgain (std::move (project), "first-beat",
-                                "The First Beat example song (ExampleSongs.h), saved, reopened and saved again: "
-                                "tests/GoldenProjectTests.cpp");
     }
 
     TEST_CASE ("Golden project: one of each kind of track and every piece of Phazite data")

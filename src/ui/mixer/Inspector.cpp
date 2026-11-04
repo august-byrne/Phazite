@@ -1374,6 +1374,7 @@ Inspector::Inspector (CommandBridge& bridge, ProjectContext& projectContext)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Inspector");
+    view.setTitle ("Properties"); // what a screen reader says as the keys go to it, to scroll it
     view.setScrollBarsShown (true, false);
     view.setScrollBarThickness (6);
     addAndMakeVisible (view);

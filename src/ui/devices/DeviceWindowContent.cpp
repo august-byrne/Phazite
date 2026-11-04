@@ -10,6 +10,7 @@ DeviceWindowContent::DeviceWindowContent (const DeviceHandle& device)
     : editor (createDeviceEditor (device))
 {
     setTitle ("Device");
+    view.setTitle ("Controls"); // what a screen reader says as the keys go to it, to scroll it
     view.setScrollBarsShown (true, false);
     view.setViewedComponent (editor.get(), false);
     addAndMakeVisible (view);

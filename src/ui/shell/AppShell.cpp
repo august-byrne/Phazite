@@ -316,6 +316,46 @@ void AppShell::showView (ViewTab tab)
     }
 
     updateLayout();
+    focusView (tab);
+}
+
+void AppShell::showPlaylist()
+{
+    revealView (ViewTab::playlist);
+    focusView (ViewTab::playlist);
+}
+
+void AppShell::focusView (ViewTab tab)
+{
+    // The keys go where the command took the eyes, and a screen reader says the view's name; Tab goes on into its controls.
+    // A time line's view is also the editor the time line's commands act on.
+    juce::Component* view = nullptr;
+    TimelineEditor* editor = nullptr;
+
+    switch (tab)
+    {
+        case ViewTab::playlist:
+            view = editor = &playlist;
+            break;
+        case ViewTab::mixer:
+            view = &mixer;
+            break;
+        case ViewTab::clipEditor:
+            view = editor = &clipEditor.getEditor();
+            break;
+        case ViewTab::instrument:
+        case ViewTab::effects:
+            view = &devices;
+            break;
+    }
+
+    if (view == nullptr || ! view->isShowing())
+        return;
+
+    view->grabKeyboardFocus();
+
+    if (editor != nullptr)
+        setActiveEditor (editor);
 }
 
 void AppShell::revealView (ViewTab tab)
@@ -604,6 +644,9 @@ void AppShell::toggleMixer()
         showView (ViewTab::mixer);
     else
         revealView (ViewTab::mixer);
+
+    if (const auto shown = area.getShownTab())
+        focusView (*shown);
 }
 
 void AppShell::setScrollingContinuously (bool on)
@@ -720,13 +763,14 @@ void AppShell::updateAudioAlert()
                                [this] { commands.invoke ("options.audioSettings"); });
 }
 
-void AppShell::showProject (const juce::String& name, bool unsavedChanges, bool neverSaved)
+void AppShell::showProject (const juce::String& name, bool unsavedChanges, bool neverSaved, std::optional<juce::Time> lastAutosave)
 {
     titleBar.setProjectName (name, unsavedChanges);
     statusBar.showSaveState (name.isEmpty()   ? StatusBar::SaveState::none
                              : neverSaved     ? StatusBar::SaveState::neverSaved
                              : unsavedChanges ? StatusBar::SaveState::unsaved
-                                              : StatusBar::SaveState::saved);
+                                              : StatusBar::SaveState::saved,
+                             lastAutosave);
 }
 
 void AppShell::setEdgeInset (int inset)
@@ -977,7 +1021,7 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .isEnabled = [this] { return ! projectContext.getSongSelection().getDevices().empty(); } });
 
     add ("view.playlist", "Playlist", "Shows the playlist, in place of the view beside it.", { "arrange", "tracks", "clips", "timeline" },
-         [this] { revealView (ViewTab::playlist); });
+         [this] { showPlaylist(); });
 
     add ("view.mixer", "Mixer", "Shows the mixer, or the playlist again if the mixer is showing in its place.", { "channels", "faders" },
          [this] { toggleMixer(); });

@@ -32,6 +32,17 @@ TEST_CASE ("The status bar says whether the project is saved, and a click on tha
     CHECK (status.getSaveText().isEmpty());
     status.showSaveState (SaveState::saved);
     CHECK (status.getSaveText() == juce::String ("Saved"));
+
+    // With how long ago its changes were autosaved, if they were, in whole minutes.
+    const auto now = juce::Time::getCurrentTime();
+    status.showSaveState (SaveState::unsaved);
+    CHECK (status.getSaveText() == juce::String ("Unsaved changes"));
+    status.showSaveState (SaveState::unsaved, now);
+    CHECK (status.getSaveText() == juce::String::fromUTF8 ("Unsaved changes \xc2\xb7 autosaved just now"));
+    status.showSaveState (SaveState::unsaved, now - juce::RelativeTime::minutes (3));
+    CHECK (status.getSaveText() == juce::String::fromUTF8 ("Unsaved changes \xc2\xb7 autosaved 3 min ago"));
+    status.showSaveState (SaveState::neverSaved, now - juce::RelativeTime::hours (2));
+    CHECK (status.getSaveText() == juce::String::fromUTF8 ("Not saved yet \xc2\xb7 autosaved over an hour ago"));
     status.showSaveState (SaveState::neverSaved);
     CHECK (status.getSaveText() == juce::String ("Not saved yet"));
     REQUIRE (screen.session.isUntitled());
@@ -79,7 +90,7 @@ TEST_CASE ("The status bar says what is selected, and where what is played on a 
 {
     Screen screen;
     screen.session.openAtStartup();
-    REQUIRE (screen.registry.invoke ("help.example.firstBeat")); // tracks with clips, as Help > Example Songs opens it
+    REQUIRE (screen.registry.invoke ("help.example.trapBeat")); // tracks with clips, as Help > Example Songs opens it
     phazite::test::dispatchPendingMessages();
     phazite::test::settle();
     auto& status = screen.shell.getStatusBar();

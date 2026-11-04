@@ -4,8 +4,10 @@
 // the plug-in picker, Detach, New, Open or Save As): Linux CI has no display.
 #include "AppScreen.h"
 #include "GoldenFiles.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/input/Keymap.h"
+#include "ui/pianoroll/PianoRoll.h"
 
 #include <algorithm>
 #include <functional>
@@ -353,6 +355,103 @@ TEST_CASE ("Every command the built-in keymaps give a key to is one the app has"
             CHECK ((screen.registry.find (entry.first) != nullptr || mainWindows.contains (entry.first)));
         }
     }
+}
+
+TEST_CASE ("A view its key shows gets the keyboard, and a screen reader its name, for working with the keyboard alone")
+{
+    Screen screen;
+    screen.session.openAtStartup();
+    REQUIRE (screen.registry.invoke ("help.example.trapBeat"));
+    phazite::test::dispatchPendingMessages();
+    phazite::test::settle();
+
+    // The view the keyboard went to: the focused component, or the view it is in, by its title.
+    const auto focusedView = []
+    {
+        for (auto* c = juce::Component::getCurrentlyFocusedComponent(); c != nullptr; c = c->getParentComponent())
+            for (const auto* title : { "Playlist", "Mixer", "Piano roll", "Devices" })
+                if (c->getTitle() == juce::String (title))
+                    return juce::String (title);
+
+        return juce::String();
+    };
+
+    REQUIRE (screen.registry.invoke ("view.mixer"));
+    phazite::test::dispatchPendingMessages();
+    CHECK (focusedView() == "Mixer");
+    REQUIRE (screen.registry.invoke ("view.playlist"));
+    phazite::test::dispatchPendingMessages();
+    CHECK (focusedView() == "Playlist");
+    REQUIRE (screen.registry.invoke ("view.effects"));
+    phazite::test::dispatchPendingMessages();
+    CHECK (focusedView() == "Devices");
+
+    // A clip selected for the piano roll: F7 gives it the keys (or, where it showed, hides it: then again shows it).
+    auto& context = screen.session.getContext();
+    context.getSongSelection().selectOnly (phazite::getClips (context, phazite::getAllPlaylistTracks (context).front()).front().id);
+    phazite::test::dispatchPendingMessages();
+    const auto findPianoRoll = [&screen]() -> juce::Component*
+    {
+        phazite::test::dispatchPendingMessages();
+        auto* found = phazite::test::findAll<phazite::ui::PianoRoll> (screen.shell).getFirst();
+        return found != nullptr && found->isShowing() ? found : nullptr;
+    };
+
+    REQUIRE (screen.registry.invoke ("view.pianoRoll"));
+
+    if (findPianoRoll() == nullptr)
+        REQUIRE (screen.registry.invoke ("view.pianoRoll"));
+
+    CHECK (findPianoRoll() != nullptr);
+    CHECK (focusedView() == "Piano roll");
+}
+
+TEST_CASE ("Every control in the window has a name and a role for screen readers, as Narrator reads them")
+{
+    Screen screen;
+    screen.session.openAtStartup();
+    REQUIRE (screen.registry.invoke ("help.example.trapBeat")); // tracks, clips and devices to show
+    phazite::test::dispatchPendingMessages();
+    phazite::test::settle();
+    juce::StringArray nameless;
+
+    // Each visible control, and each component that takes the keyboard (which Narrator moves to), by the titles of the
+    // components it is in. A control's own parts (a slider's text box, a list's scroll bar) are its.
+    std::function<void (juce::Component&, const juce::String&)> visit = [&nameless, &visit] (juce::Component& c, const juce::String& path)
+    {
+        if (! c.isVisible() || dynamic_cast<juce::ScrollBar*> (&c) != nullptr)
+            return;
+
+        const auto here = path + " > " + (c.getTitle().isNotEmpty() ? c.getTitle() : juce::String (typeid (c).name()));
+        const auto isControl = dynamic_cast<juce::Button*> (&c) != nullptr || dynamic_cast<juce::Slider*> (&c) != nullptr
+                               || dynamic_cast<juce::ComboBox*> (&c) != nullptr || dynamic_cast<juce::TextEditor*> (&c) != nullptr;
+
+        if (isControl || c.getWantsKeyboardFocus())
+        {
+            const auto handler = c.isAccessible() ? c.createAccessibilityHandler() : nullptr;
+
+            if (handler == nullptr || handler->getTitle().trim().isEmpty() || handler->getRole() == juce::AccessibilityRole::ignored)
+                nameless.addIfNotAlreadyThere (here);
+        }
+
+        if (isControl)
+            return;
+
+        for (auto* child : c.getChildren())
+            visit (*child, here);
+    };
+
+    visit (screen.shell, "Window");
+
+    for (const auto* view : { "view.mixer", "view.pianoRoll", "view.instrument", "view.effects" })
+    {
+        REQUIRE (screen.registry.invoke (view));
+        phazite::test::dispatchPendingMessages();
+        visit (screen.shell, juce::String ("Window, ") + view);
+    }
+
+    INFO (nameless.joinIntoString ("\n").toStdString());
+    CHECK (nameless.isEmpty());
 }
 
 TEST_CASE ("Every control in the window explains itself in the hint bar, with a tooltip or a description")

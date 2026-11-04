@@ -297,6 +297,7 @@ struct DevicesView::Panel : public juce::Component
             addAndMakeVisible (*windowButton);
         }
 
+        bodyView.setTitle ("Controls"); // what a screen reader says as the keys go to it, to scroll it
         bodyView.setScrollBarsShown (true, false);
         addAndMakeVisible (bodyView);
 
@@ -988,11 +989,14 @@ DevicesView::DevicesView (CommandBridge& bridge, ProjectContext& projectContext)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Devices");
+    setWantsKeyboardFocus (true); // F6 and Shift+F6 give it the keys (and a screen reader its name), and Tab its controls
     nameLabel.setFont (juce::FontOptions (TextSize::title, juce::Font::bold));
     kindLabel.setFont (juce::FontOptions (TextSize::small));
 
     // A modulator's editor opens beside the list, where there is room for it next to the knobs it is dragged onto.
     modulators.onOpenEditor = [this] (ModulatorID id) { toggleModulatorEditor (id); };
+    modulatorsView.setTitle ("Modulators and macros"); // what screen readers say as the keys go to them, to scroll them
+    rowView.setTitle ("Devices in a row");
     modulatorsView.setViewedComponent (&modulators, false);
     modulatorsView.setScrollBarsShown (true, false);
     rowView.setScrollBarsShown (false, true);

@@ -3,9 +3,11 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
+#include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Grid.h"
@@ -231,6 +233,28 @@ TEST_CASE ("An autosave survives a crash and can be restored")
     CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
 }
 
+TEST_CASE ("A change is autosaved in the background soon after it is made, and the project says when, until it is saved")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Timed");
+    const auto autosaveFile = phazite::Project::getAutosaveFile (project->getFile());
+    phazite::AutosaveTimer timer (*project, 1, 1); // as the app's, but a second after the first change and every second
+    CHECK_FALSE (project->getLastAutosave().has_value());
+
+    const auto changed = juce::Time::getCurrentTime();
+    project->getSong().getState().setProperty ("take", 1, nullptr);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return project->getLastAutosave().has_value(); }, 10000));
+    CHECK (*project->getLastAutosave() >= changed);
+    CHECK (autosaveFile.existsAsFile());
+    CHECK (phazite::Project::hasNewerAutosave (project->getFile()));
+    CHECK (project->hasUnsavedChanges()); // the project's file is as it was
+
+    // Saving deletes the autosave, and the window says nothing more of it.
+    REQUIRE (project->save().wasOk());
+    CHECK_FALSE (project->getLastAutosave().has_value());
+    CHECK_FALSE (autosaveFile.exists());
+}
+
 TEST_CASE ("Autosave writes nothing when nothing changed")
 {
     TemporaryFolder temp;
@@ -363,25 +387,28 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
     juce::String error;
     std::unique_ptr<phazite::Project> project;
 
-    SUBCASE ("The First Beat example song, as Help > Example Songs makes it")
+    SUBCASE ("The Trap Beat example song, as Help > Example Songs makes it")
     {
         project = phazite::Project::create (
-            temp.folder, "First", error,
-            phazite::getExampleSongContent (phazite::test::getEngineContext(), "firstBeat", phazite::test::getFactoryPresetsFolder()));
+            temp.folder, "Trap", error,
+            phazite::getExampleSongContent (phazite::test::getEngineContext(), "trapBeat", phazite::test::getFactoryPresetsFolder()));
         INFO (error.toStdString());
         REQUIRE (project != nullptr);
         const auto& song = project->getSong();
-        const auto tracks = phazite::getTrackIDs (song);
-        REQUIRE (tracks.size() == 2);
-        CHECK (phazite::getTrackName (song, tracks[0]) == juce::String ("Drums"));
-        CHECK (phazite::getTrackName (song, tracks[1]) == juce::String ("Synth"));
+        std::map<juce::String, phazite::TrackID> tracks;
 
-        // Each with its clip, played by one of Phazite's own instruments: the drum sampler, the synth.
-        for (const auto& [track, instrumentType] :
-             { std::pair (tracks[0], phazite::devices::DrumSampler::typeID), std::pair (tracks[1], phazite::devices::Synth::typeID) })
+        for (const auto id : phazite::getTrackIDs (song))
+            tracks[phazite::getTrackName (song, id)] = id;
+
+        // Its tracks with clips, each played by one of Phazite's own instruments: the drum sampler, the synth, the wavetable.
+        for (const auto& [name, instrumentType] :
+             { std::pair ("Drums", phazite::devices::DrumSampler::typeID), std::pair ("808", phazite::devices::Synth::typeID),
+               std::pair ("Bells", phazite::devices::WavetableSynth::typeID) })
         {
-            CHECK (phazite::getClips (song, track).size() == 1);
-            const auto instrument = phazite::findDeviceState (song, phazite::getInstrument (song, track));
+            CAPTURE (name);
+            REQUIRE (tracks.contains (name));
+            CHECK_FALSE (phazite::getClips (song, tracks[name]).empty());
+            const auto instrument = phazite::findDeviceState (song, phazite::getInstrument (song, tracks[name]));
             CHECK (instrument[phazite::schema::deviceType].toString() == juce::String (instrumentType));
         }
     }

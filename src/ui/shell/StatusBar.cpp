@@ -219,10 +219,23 @@ StatusBar::~StatusBar()
     context.removeListener (this);
 }
 
-void StatusBar::showSaveState (SaveState state)
+void StatusBar::showSaveState (SaveState state, std::optional<juce::Time> lastAutosave)
 {
     using Emphasis = Item::Emphasis;
     saveItem->setVisible (state != SaveState::none);
+
+    // How long ago the changes were autosaved, in whole minutes, which the window brings up to date once a second.
+    juce::String autosaved, autosavedTip;
+
+    if (lastAutosave.has_value())
+    {
+        const auto minutes = (int) (juce::Time::getCurrentTime() - *lastAutosave).inMinutes();
+        autosaved = juce::String::fromUTF8 (" \xc2\xb7 autosaved ")
+                    + (minutes < 1    ? juce::String ("just now")
+                       : minutes < 60 ? juce::String (minutes) + " min ago"
+                                      : juce::String ("over an hour ago"));
+        autosavedTip = ". Autosaved: if Phazite closes without saving, it offers the changes back when it starts again";
+    }
 
     switch (state)
     {
@@ -231,13 +244,14 @@ void StatusBar::showSaveState (SaveState state)
             saveItem->setTooltip ("Every change is saved");
             break;
         case SaveState::unsaved:
-            saveItem->show ("Unsaved changes", Emphasis::normal);
-            saveItem->setTooltip (withShortcut (commands, "Changes since the project was last saved: click to save them", "project.save"));
+            saveItem->show ("Unsaved changes" + autosaved, Emphasis::normal);
+            saveItem->setTooltip (
+                withShortcut (commands, "Changes since the project was last saved: click to save them" + autosavedTip, "project.save"));
             break;
         case SaveState::neverSaved:
-            saveItem->show ("Not saved yet", Emphasis::normal);
-            saveItem->setTooltip (
-                withShortcut (commands, "The project has never been saved: click to choose its name and where it goes", "project.save"));
+            saveItem->show (juce::String ("Not saved yet") + autosaved, Emphasis::normal);
+            saveItem->setTooltip (withShortcut (
+                commands, "The project has never been saved: click to choose its name and where it goes" + autosavedTip, "project.save"));
             break;
         case SaveState::none:
         default:

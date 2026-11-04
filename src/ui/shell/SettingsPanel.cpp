@@ -99,6 +99,7 @@ AudioSettings::AudioSettings (EngineContext& e, const ProjectContext& context)
       selector (e.getAudioDeviceManager(), 0, 512, 1, 512, false, false, true, false)
 {
     setTitle ("Audio");
+    viewport.setTitle ("Device settings"); // what a screen reader says as the keys go to it, to scroll it
     viewport.setViewedComponent (&selector, false);
     viewport.setScrollBarsShown (true, false);
     makeHeading (delayHeading, "Delay");

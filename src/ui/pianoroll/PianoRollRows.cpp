@@ -97,9 +97,11 @@ juce::Rectangle<float> PianoRoll::getNoteBounds (const NoteData& note) const
     if (row < 0)
         return {};
 
+    // All of its row but the line under it (NoteGrid::paintRows()), so that it sits between the lines above and below it,
+    // as the chord tones' tint does.
     const auto& timeline = getView();
-    const auto top = (float) getRowTop (row) + 1.0f;
-    const auto height = (float) getRowHeight() - 2.0f;
+    const auto top = (float) getRowTop (row);
+    const auto height = (float) getRowHeight() - 1.0f;
     const auto left = (float) timeline.beatToX (note.start);
 
     // In drum mode a note is a hit, drawn as a diamond where it starts.

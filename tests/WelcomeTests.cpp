@@ -198,7 +198,7 @@ TEST_CASE ("The welcome window's last page opens an example song or starts a les
     // Every example song and every lesson is there.
     auto& page = w.panel.getStartPage();
 
-    for (const auto* name : { "First Beat", "House Groove", "Lo-fi Beat", "Make a Beat", "Write Chords" })
+    for (const auto* name : { "Trap Beat", "Lo-fi Beat", "House Groove", "Make a Beat", "Write Chords" })
     {
         CAPTURE (name);
         CHECK (page.findChoice (name) != nullptr);

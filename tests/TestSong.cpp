@@ -30,9 +30,9 @@ TestSong::TestSong (Start start)
 {
     juce::String error;
     REQUIRE (folder.createDirectory().wasOk());
-    project = Project::create (
-        folder, "Song", error,
-        start == Start::firstBeat ? getExampleSongContent (getEngineContext(), "firstBeat", getFactoryPresetsFolder()) : nullptr);
+    project = Project::create (folder, "Song", error,
+                               start == Start::trapBeat ? getExampleSongContent (getEngineContext(), "trapBeat", getFactoryPresetsFolder())
+                                                        : nullptr);
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     setSong (context, &project->getSong());
     addSongCommands (commands, context, renders);

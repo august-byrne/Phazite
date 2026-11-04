@@ -26,6 +26,10 @@ void dispatchPendingMessages();
 // condition still doesn't hold after timeoutMilliseconds.
 bool dispatchMessagesUntil (const std::function<bool()>& condition, int timeoutMilliseconds = 5000);
 
+// Delivers what waits on the system queue now, and what that posts in turn, without waiting for more: for a loop that waits
+// as the app's does (host/ThreadCpu.h: waitForMessages()). How many it delivered.
+int dispatchWaitingMessages();
+
 #if JUCE_WINDOWS
 // Leaves JUCE's message queue as another thread leaves it halfway through posting (JUCE's timer thread, say): a message
 // queued (one that does nothing), and the window message that wakes the message thread for it (WM_USER + 123,

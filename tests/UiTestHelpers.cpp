@@ -27,6 +27,11 @@ namespace
     }
 } // namespace
 
+int dispatchWaitingMessages()
+{
+    return dispatchSystemQueue();
+}
+
 void dispatchPendingMessages()
 {
     // On Windows, JUCE wakes the message thread for its queue with one window message, which the thread that finds the

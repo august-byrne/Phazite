@@ -7,6 +7,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <functional>
+#include <optional>
 
 namespace phazite
 {
@@ -97,6 +98,10 @@ public:
     bool isAutosaving() const;
     bool takeAutosaveFailure();
 
+    // When the autosave was last written, whole, for the window to say so; none since the project opened or last saved
+    // (which deletes it). Message thread only.
+    std::optional<juce::Time> getLastAutosave() const;
+
     // Saves the project as it is now, unsaved changes included, as a new project <parentFolder>/<name>
     // with copies of its Audio, Generated and Renders folders. This project and
     // its file stay as they are. Returns the new project file, or sets error and returns an empty
@@ -121,6 +126,7 @@ private:
     class BackgroundWriter; // one file at a time; its destructor waits for the one under way
     std::unique_ptr<BackgroundWriter> autosaveWriter;
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
+    juce::int64 autosavedAt = 0; // when autosave() last wrote it, in milliseconds since 1970; 0 for none
 
     // The song as it was when the project was opened, with Phazite's parts added, or last saved. JUCE notifies a value
     // written again as another type, which changes nothing. So while the project has no unsaved changes, a notification

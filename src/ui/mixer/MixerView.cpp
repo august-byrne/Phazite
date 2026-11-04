@@ -22,10 +22,13 @@ MixerView::MixerView (CommandBridge& bridge, ProjectContext& projectContext)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Mixer");
-    setComponentID ("mixer"); // what lessons point at (Lessons::Step::target)
+    setWantsKeyboardFocus (true); // F9 gives it the keys (and a screen reader its name), and Tab goes on into its strips
+    setComponentID ("mixer");     // what lessons point at (Lessons::Step::target)
     setDescription ("A channel for every track, in the playlist's order, and the return tracks next to the master. Click a channel to "
                     "select its track: the channels it feeds, those that feed it and those its sidechains link it to get an outline.");
 
+    viewport.setTitle ("Channels"); // what screen readers say as the keys go to them, to scroll them
+    verticalView.setTitle ("Channels and master");
     viewport.setViewedComponent (&stripHolder, false);
     viewport.setScrollBarsShown (false, true);
     verticalView.setViewedComponent (&content, false);

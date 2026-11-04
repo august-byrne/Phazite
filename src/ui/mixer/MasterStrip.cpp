@@ -27,6 +27,7 @@ MasterStrip::MasterStrip (CommandBridge& bridge, ProjectContext& projectContext)
     resetButton.setTooltip ("Starts the integrated loudness and the true peak again");
     resetButton.onClick = [this] { resetLoudness (context); };
 
+    deviceView.setTitle ("Devices"); // what a screen reader says as the keys go to it, to scroll it
     deviceView.setViewedComponent (&effects, false);
     deviceView.setScrollBarsShown (true, false);
     deviceView.setScrollBarThickness (6);

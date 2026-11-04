@@ -825,3 +825,65 @@ TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite (
     report << "\nClip components in the playlist: " << phazite::test::findAll<phazite::ui::ClipComponent> (*playlist).size() << "\n";
     MESSAGE (report);
 }
+
+TEST_CASE ("Benchmark: starting up, and the window at rest" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Starting up as Main.cpp and MainWindow do, but for the process itself and the audio device, which the tests' engine
+    // context opens once: the services, the commands and the window's content; the project the first start opens, shown;
+    // and an example song opened from Help, shown.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::String report ("\n| Starting up, and at rest | |\n|---|---|\n");
+    std::unique_ptr<phazite::test::AppScreen> screen;
+    report << "| The services, the commands and the window's content | "
+           << milliseconds (millisecondsOf ([&] { screen = std::make_unique<phazite::test::AppScreen>(); }), 1) << " |\n";
+    report << "| The first start's project, open and the window painted | "
+           << milliseconds (millisecondsOf (
+                                [&]
+                                {
+                                    screen->session.openAtStartup();
+                                    phazite::test::dispatchPendingMessages();
+                                    paintTime (screen->shell, screen->shell.getLocalBounds());
+                                }),
+                            1)
+           << " |\n";
+    report << "| An example song (House Groove, 64 bars) opened from Help and the window painted | "
+           << milliseconds (millisecondsOf (
+                                [&]
+                                {
+                                    REQUIRE (screen->registry.invoke ("help.example.houseGroove"));
+                                    phazite::test::dispatchPendingMessages();
+                                    paintTime (screen->shell, screen->shell.getLocalBounds());
+                                }),
+                            1)
+           << " |\n";
+
+    // At rest with the song open and stopped: what the window asks to repaint, and the process's CPU (the tests' process,
+    // with no audio device: the message thread's timers and the threads that wait). The message thread waits as the app's
+    // message loop does, asleep until a message comes, then dispatches what there is.
+    const auto rest = [] (double milliseconds)
+    {
+        const auto until = juce::Time::getMillisecondCounterHiRes() + milliseconds;
+
+        for (auto now = juce::Time::getMillisecondCounterHiRes(); now < until; now = juce::Time::getMillisecondCounterHiRes())
+            if (phazite::test::waitForMessages ((int) (until - now) + 1))
+                phazite::test::dispatchWaitingMessages();
+    };
+
+    rest (2000.0);
+    screen->window.takeRepaintedArea();
+    const auto cpuBefore = phazite::test::getProcessCpuSeconds(), messageThreadBefore = phazite::test::getThreadCpuSeconds();
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    rest (5000.0);
+    const auto seconds = (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0;
+    const auto cpu = (phazite::test::getProcessCpuSeconds() - cpuBefore) / seconds;
+    const auto messageThread = (phazite::test::getThreadCpuSeconds() - messageThreadBefore) / seconds;
+    const auto repainted = screen->window.takeRepaintedArea().getBounds();
+    report << "| At rest for 5 s: the process's CPU | " << juce::String (cpu * 100.0, 2) << " % of a core |\n";
+    report << "| ... of which the message thread's | " << juce::String (messageThread * 100.0, 2) << " % of a core |\n";
+    report << "| At rest for 5 s: asked to repaint | "
+           << (repainted.isEmpty() ? juce::String ("nothing")
+                                   : juce::String (repainted.getWidth()) + " x " + juce::String (repainted.getHeight()) + " px")
+           << " |\n";
+    MESSAGE (report);
+    screen = nullptr;
+}

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ThreadCpu.h"
 
+#include <chrono>
 #include <cstdint>
+#include <thread>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -50,6 +52,16 @@ double getProcessCpuSeconds()
     timespec now {};
     clock_gettime (CLOCK_PROCESS_CPUTIME_ID, &now);
     return (double) now.tv_sec + (double) now.tv_nsec * 1.0e-9;
+#endif
+}
+
+bool waitForMessages (int timeoutMilliseconds)
+{
+#if defined(_WIN32)
+    return MsgWaitForMultipleObjectsEx (0, nullptr, (DWORD) timeoutMilliseconds, QS_ALLINPUT, MWMO_INPUTAVAILABLE) == WAIT_OBJECT_0;
+#else
+    std::this_thread::sleep_for (std::chrono::milliseconds (timeoutMilliseconds));
+    return true;
 #endif
 }
 } // namespace phazite::test

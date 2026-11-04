@@ -25,12 +25,12 @@ namespace phazite::test
 class TestSong
 {
 public:
-    // How the project starts: empty but for the track every new song has (firstTrack), or as the First Beat example song,
-    // a beat and an arpeggio (model/project/ExampleSongs.h), with the presets in resources/presets.
+    // How the project starts: empty but for the track every new song has (firstTrack), or as the Trap Beat example song
+    // (model/project/ExampleSongs.h), with the presets in resources/presets.
     enum class Start
     {
         empty,
-        firstBeat
+        trapBeat
     };
 
     explicit TestSong (Start = Start::empty);

@@ -134,6 +134,7 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
                               "them in a bus instead (Out)");
     addSendButton.onClick = [this] { showSendMenu(); };
 
+    slotView.setTitle ("Devices"); // what a screen reader says as the keys go to it, to scroll it
     slotView.setViewedComponent (&slotHolder, false);
     slotView.setScrollBarsShown (true, false);
     slotView.setScrollBarThickness (6);

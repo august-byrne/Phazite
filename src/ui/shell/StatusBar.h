@@ -15,6 +15,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <optional>
+
 namespace phazite::ui
 {
 class StatusBar : public juce::Component,
@@ -29,7 +31,8 @@ public:
     HintBar& getHintBar() noexcept { return hintBar; }
 
     // Whether the open project is saved (the app knows): "Saved", "Unsaved changes", or "Not saved yet" for one that never
-    // was; nothing while none is open.
+    // was, with how long ago its changes were autosaved, if they were (what Phazite offers back after a crash); nothing
+    // while none is open.
     enum class SaveState
     {
         none,
@@ -38,7 +41,7 @@ public:
         neverSaved
     };
 
-    void showSaveState (SaveState);
+    void showSaveState (SaveState, std::optional<juce::Time> lastAutosave = std::nullopt);
     void showAudioOutput (const EngineContext::AudioOutput&); // when the audio devices change
 
     // What the items show now (empty for one that doesn't show), for tests.

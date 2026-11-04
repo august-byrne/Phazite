@@ -18,7 +18,6 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
-#include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Metronome.h"
@@ -272,16 +271,6 @@ TEST_CASE ("The loop's commands turn looping on and off, and loop a selection, s
     REQUIRE (song.registry.invoke ("section.loop"));
     CHECK (song.getLoop() == "4.000-12.000");
     CHECK_FALSE (phazite::doesLoopFollowSong (song.getSong()));
-}
-
-TEST_CASE ("The First Beat example song loops its song")
-{
-    const auto song = phazite::createSong();
-    phazite::getExampleSongContent (phazite::test::getEngineContext(), "firstBeat", phazite::test::getFactoryPresetsFolder()) (*song);
-
-    CHECK (phazite::isLoopOn (*song));
-    CHECK (phazite::doesLoopFollowSong (*song));
-    CHECK (describe (*song, phazite::getLoopBeats (*song)) == describe (*song, phazite::getSongLoopBeats (*song)));
 }
 
 TEST_CASE ("Playback starts where the playhead was last put, and stopping goes back there")

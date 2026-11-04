@@ -94,6 +94,42 @@ TEST_CASE ("The piano roll keeps the notes being edited in view while the song p
     CHECK (screen.pianoRoll.isFollowingPlayback());
 }
 
+TEST_CASE ("A note fills its row from the line above it to the line below it, as tall above its middle as below")
+{
+    PianoRollScreen screen;
+    const auto clip = screen.addClip (0, 0.0, 4.0);
+    phazite::addNote (screen.song, clip, 62, beats (0.0), phazite::BeatDuration::fromBeats (1.0), 100); // D: no octave line
+    screen.select (clip);
+    const auto image = screen.notes->createComponentSnapshot (screen.notes->getLocalBounds());
+
+    // The note's column and one as far into a later beat of the clip, where no note is: the note is where they differ.
+    const auto noteX = screen.at (0.6).x, emptyX = screen.at (2.6).x;
+    std::vector<int> covered;
+
+    for (int y = 0; y < image.getHeight(); ++y)
+        if (image.getPixelAt (noteX, y) != image.getPixelAt (emptyX, y))
+            covered.push_back (y);
+
+    REQUIRE_FALSE (covered.empty());
+    const auto top = covered.front(), bottom = covered.back();
+    CHECK (bottom - top + 1 == (int) covered.size()); // one piece
+
+    // Its row in the empty column: the lines that part it from the rows above and below, the first pixels from the note's
+    // middle that are another colour than the row.
+    const auto middle = (top + bottom) / 2;
+    const auto rowColour = image.getPixelAt (emptyX, middle);
+    auto lineAbove = middle, lineBelow = middle;
+
+    while (lineAbove > 0 && image.getPixelAt (emptyX, lineAbove) == rowColour)
+        --lineAbove;
+
+    while (lineBelow < image.getHeight() - 1 && image.getPixelAt (emptyX, lineBelow) == rowColour)
+        ++lineBelow;
+
+    CHECK (top == lineAbove + 1);
+    CHECK (bottom == lineBelow - 1);
+}
+
 TEST_CASE ("The piano roll's keys are a piano's: white keys parted in the middle of the black keys between them")
 {
     PianoRollScreen screen;

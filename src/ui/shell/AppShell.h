@@ -52,8 +52,9 @@ public:
     StatusBar& getStatusBar() noexcept { return statusBar; }
     juce::Component::WindowControlKind getWindowControlAt (juce::Point<int>) const;
 
-    // The open project's name and whether it is saved, which the window knows: the title bar and the status bar show them.
-    void showProject (const juce::String& name, bool unsavedChanges, bool neverSaved);
+    // The open project's name, whether it is saved and when it was last autosaved, which the window knows: the title bar
+    // and the status bar show them.
+    void showProject (const juce::String& name, bool unsavedChanges, bool neverSaved, std::optional<juce::Time> lastAutosave = {});
 
     // How far the panels keep from the window's sides: the band there that resizes a restored window on Windows, whose
     // scroll bars it would take (app/MainWindow.h). The bars across the top and the bottom reach the sides.
@@ -159,6 +160,7 @@ private:
     void toggleMaximized (Panel);
     void maximizePanelInUse();            // or restores the panels
     void toggleMixer();                   // the mixer, or the playlist again if it shows beside it ("view.mixer")
+    void showPlaylist();                  // the playlist, in place of the view beside it ("view.playlist")
     void setScrollingContinuously (bool); // in every editor that follows playback, kept in the settings
 
     // The editor the time line's commands act on: the one used last, while it shows; or one that shows, the playlist first.
@@ -174,6 +176,7 @@ private:
     bool takesRoom (Panel) const;               // PanelLayout::takesRoom(), and for the two areas, holding a view
     void showView (ViewTab);                    // in its area; in the lower panel, or the panel hidden if it shows it, as FL Studio's F7
     void revealView (ViewTab);                  // in its area, even if it shows already
+    void focusView (ViewTab);                   // the keyboard to it, where it shows: what a command that shows a view does
     void moveView (View, ViewPlace, int index); // into that area (ViewPlaces::move()), where it shows
     void placeViewBeside (View, Panel row, bool left); // in an area of its own beside a row's (ViewPlaces::placeBeside())
     void revealMoved (View);                           // where it went

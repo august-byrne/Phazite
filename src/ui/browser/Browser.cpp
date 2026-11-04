@@ -457,6 +457,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     tree->setDefaultOpenness (false);
     tree->setMultiSelectEnabled (false);
     tree->setColour (juce::TreeView::selectedItemBackgroundColourId, juce::Colours::transparentBlack); // the rows paint it
+    tree->getViewport()->setWantsKeyboardFocus (false); // the tree takes the keys itself: one stop for Tab, not two
 
     previewButton.setClickingTogglesState (true);
     previewButton.setToggleState (isPreviewOn(), juce::dontSendNotification);

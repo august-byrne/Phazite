@@ -748,11 +748,13 @@ void MainWindow::updateTitle()
     // The taskbar's name for the window; and in the title bar and the status bar, the project's name and whether it is saved.
     juce::String title ("Phazite"), name;
     auto unsaved = false;
+    std::optional<juce::Time> lastAutosave;
 
     if (auto* project = session.getProject())
     {
         name = project->getFile().getFileNameWithoutExtension();
         unsaved = project->hasUnsavedChanges();
+        lastAutosave = project->getLastAutosave();
         title = name + (unsaved ? "*" : "") + " - Phazite";
     }
 
@@ -760,7 +762,7 @@ void MainWindow::updateTitle()
         setName (title);
 
     if (shell != nullptr)
-        shell->showProject (name, unsaved, session.getProject() != nullptr && session.isUntitled());
+        shell->showProject (name, unsaved, session.getProject() != nullptr && session.isUntitled(), lastAutosave);
 }
 
 //==============================================================================
@@ -866,28 +868,39 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
         case 3: // View
         {
-            // The panels: each shows or hides, and one fills the window until the others are restored.
+            // The panels, each shown or hidden, and the two views used most; the rest in a submenu each, every command as
+            // it was (and in the command palette, on its keys and in the right-click menus).
             add (menu, { "view.toggleBrowser", "view.toggleSong", "view.toggleEditor", "view.toggleInspector" });
 
-            juce::PopupMenu maximizeMenu;
-            add (maximizeMenu, { "view.maximizePanel" });
-            maximizeMenu.addSeparator();
-            add (maximizeMenu, { "view.maximizeBrowser", "view.maximizeSong", "view.maximizeEditor", "view.maximizeInspector" });
-            menu.addSubMenu ("Maximize", maximizeMenu);
+            // How the panels sit: one filling the window until the others are restored, one in a window of its own, or
+            // a layout of them all.
+            juce::PopupMenu panelsMenu;
+            add (panelsMenu, { "view.maximizePanel" });
+            panelsMenu.addSeparator();
+            add (panelsMenu, { "view.maximizeBrowser", "view.maximizeSong", "view.maximizeEditor", "view.maximizeInspector" });
+            panelsMenu.addSeparator();
+            add (panelsMenu, { "view.detachBrowser", "view.detachInspector", "view.detachEditor" });
+            panelsMenu.addSeparator();
+            add (panelsMenu, { "view.layoutBeat", "view.layoutMix", "view.layoutFull", "view.focusMode" });
+            menu.addSubMenu ("Panels", panelsMenu);
             add (menu, { "view.fullScreen" });
             menu.addSeparator();
             add (menu, { "view.pianoRoll", "view.mixer" });
             menu.addSeparator();
-            add (menu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.centreOnPlayhead", "view.followPlayback",
-                         "view.scrollContinuously" });
-            add (menu, { "transport.goToStart", "transport.goToEnd" });
 
-            // Where playback loops: the song, unless something else is looped on purpose.
-            juce::PopupMenu loopMenu;
-            add (loopMenu, { "transport.loop" });
-            loopMenu.addSeparator();
-            add (loopMenu, { "transport.loopSong", "transport.loopSelection", "section.loop" });
-            menu.addSubMenu ("Loop", loopMenu);
+            juce::PopupMenu zoomMenu;
+            add (zoomMenu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit" });
+            menu.addSubMenu ("Zoom", zoomMenu);
+
+            // The playhead, how the view follows it and where playback loops: the song, unless something else is looped
+            // on purpose.
+            juce::PopupMenu playbackMenu;
+            add (playbackMenu, { "transport.goToStart", "transport.goToEnd", "view.centreOnPlayhead" });
+            playbackMenu.addSeparator();
+            add (playbackMenu, { "view.followPlayback", "view.scrollContinuously" });
+            playbackMenu.addSeparator();
+            add (playbackMenu, { "transport.loop", "transport.loopSong", "transport.loopSelection", "section.loop" });
+            menu.addSubMenu ("Playback", playbackMenu);
 
             juce::PopupMenu gridMenu;
             add (gridMenu, { "grid.snap" });
@@ -895,14 +908,16 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             add (gridMenu, { "grid.adaptive", "grid.finer", "grid.coarser", "grid.triplets" });
             menu.addSubMenu ("Grid", gridMenu);
 
-            menu.addSeparator();
-            add (menu, { "view.focusMode", "track.pin", "track.collapse", "track.collapseAll", "track.taller", "track.shorter" });
-            menu.addSeparator();
-            add (menu, { "view.detachBrowser", "view.detachInspector", "view.detachEditor" });
-            menu.addSeparator();
-            add (menu, { "view.layoutBeat", "view.layoutMix", "view.layoutFull" });
-            menu.addSeparator();
-            add (menu, { "view.interfaceLarger", "view.interfaceSmaller", "view.interfaceNormal" });
+            // The selected tracks' rows in the playlist.
+            juce::PopupMenu tracksMenu;
+            add (tracksMenu, { "track.taller", "track.shorter" });
+            tracksMenu.addSeparator();
+            add (tracksMenu, { "track.collapse", "track.collapseAll", "track.pin" });
+            menu.addSubMenu ("Tracks", tracksMenu);
+
+            juce::PopupMenu sizeMenu;
+            add (sizeMenu, { "view.interfaceLarger", "view.interfaceSmaller", "view.interfaceNormal" });
+            menu.addSubMenu ("Interface Size", sizeMenu);
             break;
         }
 

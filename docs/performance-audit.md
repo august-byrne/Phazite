@@ -500,3 +500,23 @@ change and 6.4 ms the playlist's. Three causes, each fixed:
 
 A test checks that a new plan compiles again the notes of the tracks whose clips changed only, and plays every change of
 them (`tests/EnginePlaybackTests.cpp`); with the player hearing nothing of the song's changes, it fails.
+
+## 13. The performance pass (roadmap step 3.5, 2026-11-04)
+
+Each target of [design section 20](design.md#20-performance), measured with `phazite_tests.exe --test-suite=benchmark --no-skip`
+from the `windows-profile` build on the owner's PC (section 1 says which), and what is left:
+
+| Target | Measured | Met? |
+|---|---|---|
+| **Audio:** no dropouts at 128 samples with 20 to 40 tracks and a dozen third-party synths, on a mid-range laptop | 20 tracks, each a synth, an EQ, a compressor and a reverb, playing chords: 26.8 % of each 480-sample block on one thread, 7.8 % on four. Eight Surge XT in helpers, handed their blocks first and then waited for, at 128 samples: 239 microseconds a block at the median, 341 at the 99th percentile, 1.7 ms at worst, of the block's 2.67 ms | On this PC, with room to spare; not measured at 128 samples for Phazite's own devices, nor on a laptop |
+| **UI:** 60 fps scrolling and zooming with 100+ tracks | The playlist with 100 tracks, 2,400 clips and 38,400 notes: a wheel notch 0.27 ms of the UI thread's work and 1.6 ms of painting; zooming 0.53 ms and 1.6 ms; a clip moved a beat 3.3 ms (section 12) | Yes: under 4 ms of a frame's 16.7 ms |
+| **UI:** near-zero CPU at rest, only what changed repainted | An example song open and stopped, for 5 s, the message thread waiting as the app's message loop does: nothing asked to repaint; the process 1.3 to 2.2 % of one core, the message thread 0.9 to 1.3 % of it, which Task Manager shows as about 0.1 % of this 16-thread CPU | Repainting, yes; the CPU is low, not zero |
+| **Startup:** under 3 s to a playable project on an SSD, with plug-in scanning in the background | The services, the commands and the window's content: 17 to 22 ms; the first start's project open and the window painted: 26 to 29 ms; the 64-bar House Groove opened from Help and painted: 136 to 141 ms. The scan runs in helpers, a file at a time, in the background | The parts Phazite does, by far; the whole start, with the process and the audio device, not timed |
+| **Memory:** long audio streamed from disk | Audio clips, recordings and frozen tracks play from their files, read ahead of where they play by a reading thread (`engine/audio/FileReader.h`); only the browser's previews of loops are rendered into memory, and they last bars | Yes |
+
+**The gaps, and the plan for each:**
+- *Audio at 128 samples, and on a mid-range laptop.* The project benchmark plays 480-sample blocks, the owner's setting: give it a 128-sample run, whose cost per block is larger, and run the benchmarks on a laptop before v1 (a check by hand: the benchmark runs on any PC with a build). Surge XT's worst block, 1.7 ms of 2.67, is the margin to watch: on a laptop 1.5 to 2 times slower it could miss a block, so the laptop run plays a dozen synths too.
+- *CPU at rest.* About 1 % of a core goes to the views' own timers, which poll what they show whether or not anything changed: each mixer strip 8 times a second, the Devices view 15, the inspector, the hint bar, the browser and the automation lanes 10, the playback session 30. Each costs little, so no single one is worth cutting alone; the plan is to fold them into the display ticker (`ui::DisplayTicker`), which already skips what hasn't changed, and to stop the playback session's timer while nothing plays.
+- *The whole start.* Timed by hand from a double-click to a window that plays, with Task Manager or a stopwatch, on the owner's PC and on a laptop: everything Phazite does itself takes under 0.2 s, so what is left is the process, Windows and the audio device.
+
+The benchmark of starting up and of the window at rest is in `tests/Benchmarks.cpp` ("Benchmark: starting up, and the window at rest"); it waits for messages as the app's message loop does (`waitForMessages()` in `tests/host/ThreadCpu.h`), so that the tests' own loop, which wakes every 5 ms, isn't counted.

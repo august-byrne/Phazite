@@ -465,28 +465,7 @@ Done before this plan (progress since then is under [Status](#status)):
 
 ## Phase 3: v1 polish (milestone 3)
 
-**3.1 Chord suggestions (L)**
-- The theory engine, which scores candidate chords and explains its choices.
-- Next chord, fill a section, replace, and fit my melody.
-- The safe ↔ adventurous slider.
-- Local learning from accepted suggestions.
-- Optionally, pop and rock calibration from the public-domain McGill Billboard data.
-- *Done when:*
-  - suggestions respond to the project's key, melody and section;
-  - each suggestion explains itself;
-  - accepting one is a single undo step.
-
-**3.2 Sound generator (XL)** (its first part was step 2.8 until the owner moved it here, 2026-10-18)
-- **The drum synth device:** kick, 808, snare, clap, hats, tom, rim and percussion.
-- **The generator panel:**
-  - a grid of sounds, with audition in context;
-  - keep, favorite and lock;
-  - more like this, and history.
-- **Project fit and recipes:** sounds fit the project's key, tempo and loudness, and each keeps its recipe.
-- **Then:** breeding favorites, kit-aware generation (which complements the drums already used), and automatic tags.
-- *Done when:*
-  - generating, auditioning in the loop and keeping a kick tuned to the song's key works end to end, and a kept sound reopens with its recipe;
-  - breeding two favorite kicks produces new kicks with traits of both.
+On 2026-11-04 the owner moved the steps that weren't done, 3.1 (chord suggestions), 3.2 (the sound generator) and 3.8 (usability rounds), to [after v1](#after-v1), keeping their numbers out of use.
 
 **3.3 Stability (XL)**
 - A scan timeout.
@@ -505,10 +484,24 @@ Done before this plan (progress since then is under [Status](#status)):
 **3.5 Performance pass (L)**
 - Profile against the targets in [design section 20](design.md#20-performance): idle CPU, large projects, startup time.
 - *Done when:* the targets are met, or the gaps are written down with a plan.
+- *Status:* done (2026-11-04): each target measured, the gaps written down with a plan ([performance-audit.md](performance-audit.md), section 13).
+  - **UI:** met: the 100-track playlist scrolls and zooms in under 4 ms of a frame, and nothing repaints at rest.
+  - **Startup:** met for everything Phazite does: the window and a project in under 0.05 s, the 64-bar House Groove in 0.14 s.
+  - **Memory:** met: long audio plays from disk.
+  - **Audio:** met with room to spare on this PC.
+  - **The gaps:**
+    - the audio benchmark at 128 samples and on a mid-range laptop;
+    - about 1 % of a core at rest, from the views' timers, to be folded into the display ticker;
+    - the whole start, timed by hand.
+  - **The benchmark added:** "Benchmark: starting up, and the window at rest", in `tests/Benchmarks.cpp`. Before it, a clip moved in a big song took 25 ms of the UI thread, and now takes 3.3 ms (section 12).
 
 **3.6 Accessibility pass (M)**
 - Keyboard navigation everywhere, screen-reader names, contrast and scaling.
 - *Done when:* core tasks can be done with Narrator and the keyboard alone, and the themes pass WCAG 2.2 contrast.
+- *Status:* done (2026-11-04), pending the check with Narrator by hand ([design section 21](design.md#21-accessibility)).
+  - **Screen-reader names:** every control in the window, and every component that takes the keyboard, has a name and a role for screen readers. That includes the scrolling areas, each named for what it scrolls, and a test walks the whole window with each view showing. The browser's tree takes the keys itself, without a second Tab stop for its scrolling.
+  - **Keyboard:** F5, F6, Shift+F6, F7 and F9 give the view they show the keyboard focus, and Narrator its name. The mixer and the Devices view take the focus themselves, so the arrow keys still run commands until Tab reaches a control (a test in `tests/AppShellTests.cpp`).
+  - **Already there:** the three themes' contrast, tested against WCAG 2.2 (`tests/DesignTokenTests.cpp`); the interface's size, which View > Interface Size sets; and the keys, which reach every command through the menus, the command palette (Ctrl+K) and the keymaps.
 
 **3.7 Keymaps and help (M)**
 - The FL Studio keymap completed, and an Ableton Live keymap ([question 8](design.md#25-open-questions), decided 2026-10-16).
@@ -547,10 +540,6 @@ Done before this plan (progress since then is under [Status](#status)):
 - **The curve lit by the sound:** the Multiband's curve shades the area under it and lights it up to the level its compressor hears, as Maximus does, in place of a dot on the curve.
 - **The compressor draws its curve:** the Multiband's curve, the same component (`src/ui/devices/DynamicsCurve.h`, `src/devices/dynamics/DynamicsCurve.h`) with Maximus's drags and menu, replaces the threshold, ratio and knee, so that it compresses or expands either way by its shape, at first 4:1 over -18 dB; a meter beside it shows how far it turns down or up. Its characters all hear what comes in, so that each settles on the curve; FET and Tube colour the sound as far as they turn it down. Its presets and the ducking a sidechain sets up are curves (tests in `tests/CompressorTests.cpp`, `tests/CompressorEditorTests.cpp`, `tests/GraphEditingTests.cpp` and `tests/SidechainTests.cpp`).
 
-**3.8 Usability rounds (S each)**
-- Repeat the milestone test with new people and fix what they trip over.
-- *Done when:* new users finish the milestone task without help.
-
 ## Phase 4: v1 release
 
 **4.1 Installer (M)**
@@ -573,7 +562,41 @@ Done before this plan (progress since then is under [Status](#status)):
 
 ## After v1
 
-Roughly in order of value:
+The steps moved here from phase 3, in the order they would come:
+
+**Usability rounds (S each)** (step 3.8 until the owner moved it here, 2026-11-04)
+- Repeat the milestone test with new people and fix what they trip over.
+- *Done when:* new users finish the milestone task without help.
+
+**The browser, grown on its folders (M, then L)** (the owner's question of 2026-11-04, researched that day: [design section 11](design.md#11-the-browser)):
+- First, filters and swapping in place: a row of filters over what the browser shows (type, loop or one-shot, tempo and key), each offering only what is there, with counts, as chips that one Clear empties with the search words; keys read from sounds' names and loop data; Swap on a drum pad or one of Phazite's devices, so that the browser plays each sound or preset it moves to in that place, in the beat, Enter keeping it as one undo step and Esc putting the old one back; and collections, kept by file (M).
+- Then the user's own sounds known by analysis, in the background and paused at will (loop or one-shot, drum type, tempo, key, brightness), shown as guesses the user corrects, with Show Similar and a drum pad's previous and next similar sound, and loops in key (L): the same work as item 9 below.
+- *Done when:* a beat maker narrows a big folder to the kicks in a key by the filters alone, and swaps a playing pad's kick for another and back with the keys.
+
+**Chord suggestions (L)** (step 3.1 until the owner moved it here, 2026-11-04)
+- The theory engine, which scores candidate chords and explains its choices.
+- Next chord, fill a section, replace, and fit my melody.
+- The safe ↔ adventurous slider.
+- Local learning from accepted suggestions.
+- Optionally, pop and rock calibration from the public-domain McGill Billboard data.
+- *Done when:*
+  - suggestions respond to the project's key, melody and section;
+  - each suggestion explains itself;
+  - accepting one is a single undo step.
+
+**Sound generator (XL)** (step 2.8, then 3.2, until the owner moved it here, 2026-11-04)
+- **The drum synth device:** kick, 808, snare, clap, hats, tom, rim and percussion.
+- **The generator panel:**
+  - a grid of sounds, with audition in context;
+  - keep, favorite and lock;
+  - more like this, and history.
+- **Project fit and recipes:** sounds fit the project's key, tempo and loudness, and each keeps its recipe.
+- **Then:** breeding favorites, kit-aware generation (which complements the drums already used), and automatic tags.
+- *Done when:*
+  - generating, auditioning in the loop and keeping a kick tuned to the song's key works end to end, and a kept sound reopens with its recipe;
+  - breeding two favorite kicks produces new kicks with traits of both.
+
+The rest, roughly in order of value:
 
 1. CLAP hosting (L).
 2. The clip launcher, as a jam panel that records into the playlist (L).
@@ -620,7 +643,7 @@ Roughly in order of value:
 | 0. Foundations | Done, pending checks by hand (0.4: crash recovery; 0.6: Narrator and idle CPU; 0.7: MIDI and computer keyboard) and Linux CI ([real-time audit](realtime-audit.md)) |
 | 1. Make a beat | Steps done, pending checks by hand and the milestone 1 check (a usability test with a newcomer and an FL Studio user): steps 1.1 to 1.5 (the playlist, sections and song outlines, the piano roll, the mixer, the browser), with three rounds of fixes from trying them (2026-10-13); step 1.6 (all six devices, and the starter project on them), step 1.7 (metronome, tempo, recording and Capture), step 1.8 (export to WAV and FLAC, normalized to a loudness) and step 1.9 (first launch, the guide and the new-project window), 2026-10-15 |
 | 2. Finish a track | Done (2026-10-29), every step checked by hand and the new devices and stretching A/B listened to by the owner, who found them good (2026-10-29): 2.1 (automation lanes), 2.3 (modulators and macros) and 2.4 (containers and presets), 2026-10-16; 2.2 (lanes that go with the music), 2.5 (the window: the song in the centre, the Devices view, the properties inspector) and 2.6 (the audio clip editor), 2026-10-17; 2.7 (the chord lane and progressions), 2.9 (mixer depth), 2.10 (six new devices and the synth's unison), 2.11 (freeze, bounce in place and stems), 2.12 (plug-in windows and presets), 2.13 (the wavetable synth), 2.14 (comb filters) and 2.15 (more filter types), 2026-10-18; 2.16 (performance), 2026-10-21; 2.17 (devices and the window), 2026-10-29; 2.18 (Phazite's own time-stretching), 2026-10-28, with its progress shown on 2026-10-29; 2.8, the sound generator, moved to phase 3 (2026-10-18) |
-| 3. v1 polish | Under way: 3.4 (audio recording), pending a check by hand with an ASIO interface, and 3.7 (keymaps and help: Cut, Copy and Paste, the Ableton Live keymap, help text and lessons), pending a check by hand, 2026-10-29; 3.3 (stability and plug-in sandboxing), done as T3, pending a check by hand, 2026-11-02 |
+| 3. v1 polish | Done (2026-11-04), pending checks by hand: 3.3 (stability and plug-in sandboxing), done as T3, 2026-11-02, its plug-in windows and its plug-ins kept off after a crash tried by the owner on 2026-11-04; 3.4 (audio recording), 2026-10-29, pending a check with an ASIO interface; 3.5 (performance) and 3.6 (accessibility, pending a check with Narrator), 2026-11-04; 3.7 (keymaps and help: Cut, Copy and Paste, the Ableton Live keymap, help text and lessons), 2026-10-29, pending a check by hand. 3.1 (chord suggestions), 3.2 (the sound generator) and 3.8 (usability rounds) moved after v1 (the owner, 2026-11-04) |
 | 4. v1 release | Not started |
 | Architecture track | A6, Phazite's own engine, done (2026-11-04): Phazite owns its song model, its playback engine, its plug-in hosting in helper processes, its audio and MIDI devices and its renders, and builds on JUCE alone (T0 and T1, 2026-10-30; T2 and T3, 2026-11-02; T5, 2026-11-02 to 2026-11-03; T4 and T6, to 2026-11-04), pending the checks by hand of T3 and T4. A5's parts decided 2026-10-30 done: presets, the selection, waveforms and sections, and modulation of Phazite's devices (for the whole device; per note next); sandboxing done as A6's T3 (2026-11-02). A0 (2026-10-14), A1 and A2 (2026-10-15) and A3 (2026-10-16) done, A2 pending a check by hand: the UI begins no undo steps (46 when A2 began) and makes no direct edits, the playlist, piano roll and mixer strip are split into a file per part, the browser has a model, and the two editors' tools share one gesture. A3: IDs and beats, views that follow the project, the mixer by IDs, the transport and the engine for the top bar and the settings, the shared time line in Phazite's beats, the playlist by IDs, note IDs saved in the project (format version 3), the piano roll by note IDs and the browser by IDs and plain values; the UI names and includes none of the engine's types and compiles without its headers, and the model's headers that name them are in `internal/` folders. On 2026-10-18 the format versions, the migrations and the support for old projects' devices went: pre-alpha keeps no backward compatibility (design.md, section 18) |
 
