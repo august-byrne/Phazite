@@ -29,29 +29,27 @@ struct EditorScreen
 {
     EditorScreen()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        setEdit (context, edit.get());
+        const auto tracks = phazite::ensureTracks (*song, 2);
+        a = tracks[0];
+        b = tracks[1];
+        setSong (context, song.get());
 
-        midi = phazite::insertMidiClip (phazite::getSong (*edit), phazite::getTrackID (*a),
-                                        { BeatPosition::fromBeats (4.0), BeatPosition::fromBeats (8.0) }, nullptr);
+        midi = phazite::insertMidiClip (*song, a, { BeatPosition::fromBeats (4.0), BeatPosition::fromBeats (8.0) }, nullptr);
         REQUIRE (midi.isValid());
 
         const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Vocal.wav"), 4.0);
-        const auto imported =
-            phazite::importFiles (context, { file.getFullPathName() }, phazite::getTrackID (*b), BeatPosition::fromBeats (4.0));
+        const auto imported = phazite::importFiles (context, { file.getFullPathName() }, b, BeatPosition::fromBeats (4.0));
         REQUIRE (imported.size() == 1);
         vocal = imported[0];
         context.getSongSelection().clear();
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        song->getUndoManager().clearUndoHistory();
 
         phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
         phazite::ui::addTimelineCommands (registry, [this] { return &editor; });
         phazite::test::dispatchPendingMessages();
     }
 
-    ~EditorScreen() { setEdit (context, nullptr); }
+    ~EditorScreen() { setSong (context, nullptr); }
 
     phazite::AudioClipInfo get() const
     {
@@ -60,7 +58,7 @@ struct EditorScreen
         return *info;
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
     juce::Component& waveform() { return editor.getWaveformComponent(); }
 
@@ -85,9 +83,8 @@ struct EditorScreen
     }
 
     phazite::test::TemporaryFolder temp;
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
+    phazite::Song::Ptr song = phazite::createSong(); // 120 BPM, 4/4
+    phazite::TrackID a, b;
     phazite::ClipID midi, vocal;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
@@ -105,7 +102,7 @@ TEST_CASE ("The audio clip editor shows the selected audio clip, in the song's b
     CHECK_FALSE (screen.find ("Gain").isEnabled());
 
     // A track that holds audio shows its clip at the playhead, or the nearest one.
-    selection.add (phazite::getTrackID (*screen.b));
+    selection.add (screen.b);
     phazite::test::dispatchPendingMessages();
     CHECK (screen.editor.getClip() == screen.vocal);
 
@@ -162,10 +159,10 @@ TEST_CASE ("In the audio clip editor, the clip's edges trim it and its handles f
     CHECK (screen.describeUndo() == juce::String ("Undo Trim Clip End"));
 
     // Each drag was one step.
-    phazite::undo (*screen.edit);
+    phazite::undo (*screen.song);
     CHECK (screen.get().clip.range.getEnd().inBeats() == doctest::Approx (12.0));
     CHECK (screen.get().clip.range.getStart().inBeats() == doctest::Approx (5.0));
-    phazite::redo (*screen.edit);
+    phazite::redo (*screen.song);
 
     // The fade-in's handle, from the clip's top left corner to two beats in; a double-click on it takes the fade away.
     const auto fadeIn = screen.editor.getHandleBounds (Handle::fadeIn).getCentre();
@@ -252,7 +249,7 @@ TEST_CASE ("In the audio clip editor, the handle in a fade's middle bends it up 
     mouse.doubleClick (screen.editor.getHandleBounds (Handle::bendIn).getCentre());
     CHECK (screen.get().clip.fadeInCurve == phazite::linearFade);
     CHECK (screen.describeUndo() == juce::String ("Undo Change Fade Shape"));
-    phazite::undo (*screen.edit);
+    phazite::undo (*screen.song);
     CHECK (screen.get().clip.fadeInCurve == phazite::concaveFade);
 
     // An S-curve bends by the same handle, which stays half way up: dragged down, it turns quick at both ends.
@@ -297,7 +294,7 @@ TEST_CASE ("The audio clip editor shows the clip's whole audio and stays on it: 
     CHECK (fills());
 
     // Moved later in the song, it still fills the width.
-    phazite::moveClip (screen.context, screen.vocal, BeatPosition::fromBeats (40.0), phazite::getTrackID (*screen.b));
+    phazite::moveClip (screen.context, screen.vocal, BeatPosition::fromBeats (40.0), screen.b);
     phazite::test::dispatchPendingMessages();
     CHECK (screen.get().content.getStart().inBeats() == doctest::Approx (40.0));
     CHECK (fills());
@@ -323,9 +320,9 @@ TEST_CASE ("In the audio clip editor, a vocal is turned up, pitched, reversed an
     gainMouse.release();
     CHECK (screen.get().gain == doctest::Approx (3.0f));
     CHECK (screen.describeUndo() == juce::String ("Undo Change Clip Gain"));
-    phazite::undo (*screen.edit); // the whole drag
+    phazite::undo (*screen.song); // the whole drag
     CHECK (screen.get().gain == doctest::Approx (0.0f));
-    phazite::redo (*screen.edit);
+    phazite::redo (*screen.song);
 
     // Pitched: two semitones up, then 30 cents down.
     auto& pitch = screen.find ("Pitch");
@@ -380,7 +377,7 @@ TEST_CASE ("In the audio clip editor, a vocal is turned up, pitched, reversed an
     CHECK (screen.get().clip.range.getEnd().inBeats() == doctest::Approx (8.0));
     CHECK (screen.describeUndo() == juce::String ("Undo Change Clip Tempo"));
 
-    phazite::undo (*screen.edit); // the whole drag
+    phazite::undo (*screen.song); // the whole drag
     CHECK (screen.get().tempo == doctest::Approx (120.0));
     CHECK (screen.get().clip.range.getEnd().inBeats() == doctest::Approx (12.0));
 }

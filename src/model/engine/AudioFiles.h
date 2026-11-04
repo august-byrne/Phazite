@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What Phazite reads of an audio file without playing it (docs/tracktion-migration.md, T6 step 3): how long it is, at what
-// rate and in how many channels, and whether it is a loop that knows its beats; with the readers of the formats it reads.
-// Message thread only.
+// What Phazite reads of an audio file without playing it: how long it is, at what rate and in how many channels, and
+// whether it is a loop that knows its beats; with the readers of the formats it reads. Message thread only.
 #pragma once
 
 #include <juce_audio_formats/juce_audio_formats.h>

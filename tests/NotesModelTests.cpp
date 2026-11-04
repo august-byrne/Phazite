@@ -27,35 +27,32 @@ phazite::BeatDuration beats (double length)
     return phazite::BeatDuration::fromBeats (length);
 }
 
-phazite::TrackID idOf (const te::Track& track)
-{
-    return phazite::getTrackID (track);
-}
-
 // An open project at 120 BPM with tracks A and B: A with a MIDI clip from beat 4 to 8 holding notes C and E (at its
 // beats 0 and 2), B with a MIDI clip from beat 0 to 8 holding a G at beat 1.
 struct Song
 {
     Song()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        phazite::setTrackName (*a, "A");
-        phazite::setTrackName (*b, "B");
-        setEdit (context, edit.get());
+        const auto tracks = phazite::ensureTracks (getSong(), 2);
+        a = tracks[0];
+        b = tracks[1];
+        phazite::setTrackName (getSong(), a, "A");
+        phazite::setTrackName (getSong(), b, "B");
+        setSong (context, songPtr.get());
 
-        clip = phazite::insertMidiClip (phazite::getSong (*edit), idOf (*a), { beat (4.0), beat (8.0) }, nullptr);
-        otherClip = phazite::insertMidiClip (phazite::getSong (*edit), idOf (*b), { beat (0.0), beat (8.0) }, nullptr);
+        clip = phazite::insertMidiClip (getSong(), a, { beat (4.0), beat (8.0) }, nullptr);
+        otherClip = phazite::insertMidiClip (getSong(), b, { beat (0.0), beat (8.0) }, nullptr);
         REQUIRE (clip.isValid());
         REQUIRE (otherClip.isValid());
         c = phazite::addNote (context, clip, 60, beat (4.0), beats (1.0), 100);
         e = phazite::addNote (context, clip, 64, beat (6.0), beats (1.0), 90);
         g = phazite::addNote (context, otherClip, 67, beat (1.0), beats (0.5), 80);
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        getSong().getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~Song() { setSong (context, nullptr); }
+
+    phazite::Song& getSong() const { return *songPtr; }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -67,10 +64,9 @@ struct Song
         return {};
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr songPtr = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
+    phazite::TrackID a, b;
     phazite::ClipID clip, otherClip;
     phazite::NoteRef c, e, g;
 };
@@ -87,10 +83,10 @@ TEST_CASE ("The piano roll's clips and notes by ID, in song beats")
     const auto clips = phazite::getNoteClips (context, { song.clip, phazite::ClipID::fromRaw (999999), song.otherClip });
     REQUIRE (clips.size() == 2);
     CHECK (clips[0].id == song.clip);
-    CHECK (clips[0].track == idOf (*song.a));
+    CHECK (clips[0].track == song.a);
     CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
     CHECK (clips[0].contentStart.inBeats() == doctest::Approx (4.0));
-    CHECK (clips[0].colour == phazite::getTrackColour (*song.a, 0));
+    CHECK (clips[0].colour == phazite::getTrackColour (song.getSong(), song.a, 0));
     CHECK (clips[1].id == song.otherClip);
 
     const auto notes = phazite::getNotes (context, { song.clip });
@@ -103,20 +99,19 @@ TEST_CASE ("The piano roll's clips and notes by ID, in song beats")
     CHECK_FALSE (phazite::getNote (context, { song.clip, phazite::NoteID::fromRaw (999999) }).has_value());
 
     // Other tracks' notes in view are the ghosts: B's G, not A's own.
-    const auto ghosts = phazite::getNotesOfOtherTracks (context, { idOf (*song.a) }, { beat (0.0), beat (4.0) });
+    const auto ghosts = phazite::getNotesOfOtherTracks (context, { song.a }, { beat (0.0), beat (4.0) });
     REQUIRE (ghosts.size() == 1);
     CHECK (ghosts[0].getRef() == song.g);
-    CHECK (phazite::getNotesOfOtherTracks (context, { idOf (*song.a) }, { beat (10.0), beat (12.0) }).empty());
+    CHECK (phazite::getNotesOfOtherTracks (context, { song.a }, { beat (10.0), beat (12.0) }).empty());
 
     // A track's clip at the playhead or nearest it; none on a track without MIDI clips.
-    CHECK (phazite::getMidiClipNearest (context, idOf (*song.a), beat (20.0)) == song.clip);
-    CHECK (phazite::getMidiClipNearest (context, idOf (*song.b), beat (2.0)) == song.otherClip);
-    CHECK (phazite::canHoldNotes (context, idOf (*song.a)));
-    CHECK_FALSE (phazite::hasAudioClips (context, idOf (*song.a)));
+    CHECK (phazite::getMidiClipNearest (context, song.a, beat (20.0)) == song.clip);
+    CHECK (phazite::getMidiClipNearest (context, song.b, beat (2.0)) == song.otherClip);
+    CHECK (phazite::canHoldNotes (context, song.a));
+    CHECK_FALSE (phazite::hasAudioClips (context, song.a));
 
     // A track shown without clips starts one a bar long for the first note drawn there, without selecting it.
-    phazite::ensureTracks (*song.edit, 3);
-    const auto third = idOf (*te::getAudioTracks (*song.edit)[2]);
+    const auto third = phazite::ensureTracks (song.getSong(), 3)[2];
     CHECK_FALSE (phazite::getMidiClipNearest (context, third, beat (0.0)).has_value());
     const auto started = phazite::addClipForNotes (context, third, beat (8.0));
     REQUIRE (started.isValid());
@@ -128,10 +123,10 @@ TEST_CASE ("The piano roll's edits of notes by ID join the step they are in")
 {
     Song song;
     auto& context = song.context;
-    auto& undo = phazite::getSong (*song.edit).getUndoManager();
+    auto& undo = song.getSong().getUndoManager();
 
     {
-        const phazite::UndoStep step (*song.edit, "Edit Notes");
+        const phazite::UndoStep step (song.getSong(), "Edit Notes");
         phazite::moveNote (context, song.c, beat (5.0), 62);
         phazite::setNoteLength (context, song.c, beats (2.0));
         phazite::toggleNotesMuted (context, { song.e });
@@ -177,8 +172,8 @@ TEST_CASE ("A track's key and drum rows by ID")
 {
     Song song;
     auto& context = song.context;
-    auto& undo = phazite::getSong (*song.edit).getUndoManager();
-    const auto a = idOf (*song.a);
+    auto& undo = song.getSong().getUndoManager();
+    const auto a = song.a;
 
     CHECK_FALSE (phazite::getTrackKey (context, a).has_value());
     phazite::chooseTrackKey (context, a, phazite::Key { 9, phazite::Scale::minor });
@@ -186,7 +181,7 @@ TEST_CASE ("A track's key and drum rows by ID")
     CHECK (undo.getUndoDescription() == juce::String ("Set Key"));
 
     phazite::useKeyOnEveryTrack (context, phazite::Key { 2, phazite::Scale::dorian });
-    CHECK (phazite::getTrackKey (context, idOf (*song.b)) == phazite::Key { 2, phazite::Scale::dorian });
+    CHECK (phazite::getTrackKey (context, song.b) == phazite::Key { 2, phazite::Scale::dorian });
     CHECK (undo.getUndoDescription() == juce::String ("Use This Key on Every Track"));
 
     // Drum mode comes with the drum sampler; its rows' order and hidden rows are view state.
@@ -244,6 +239,6 @@ TEST_CASE ("Notes are selected by ID, of the clips an editor shows, and nothing 
     CHECK (selection.getNotes() == std::vector { song.g });
 
     // A shown clip deleted takes its notes out of the selection.
-    phazite::deleteClips (phazite::getSong (*song.edit), { song.otherClip }, false);
+    phazite::deleteClips (song.getSong(), { song.otherClip }, false);
     CHECK (selection.getNotes().empty());
 }

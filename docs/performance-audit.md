@@ -6,8 +6,8 @@ faster and more robust implementations. The owner accepted its plan, which is ro
 recommendations (section 6) the same day.*
 
 It covers the delay between playing a note and hearing it, the audio thread's work, the UI thread's work, the build,
-and robustness. Four code reviews read the code (Phazite's, and Tracktion's and JUCE's where Phazite relies on them),
-and temporary tests measured what the reviews estimated. The real-time rules and Tracktion's breaches of them are in
+and robustness. Four code reviews read the code (Phazite's, and the engine's and JUCE's where Phazite relies on them), and
+temporary tests measured what the reviews estimated. The real-time rules and what breaks them are in
 [realtime-audit.md](realtime-audit.md); this audit doesn't repeat them.
 
 **Where the numbers come from:** the owner's PC (Intel Core i9-9900K, 8 cores and 16 threads, Windows 11), the Release
@@ -24,9 +24,9 @@ Release build, so the lag isn't a Debug-build effect.
 
 | Stage | Now (Bluetooth) | Wired, same settings | How we know |
 |---|---|---|---|
-| A key or a MIDI note reaches Tracktion | about 1 ms | same | The code: the computer keyboard sends the note as JUCE delivers the key; a busy UI thread delays it (section 3) |
-| Waiting for the next audio block | 0 to 10 ms (5 on average) | same | The code: Tracktion puts live notes at the start of the next block |
-| Tracktion and Phazite's instrument | 0.04 ms | same | Measured: the synth is heard 0.04 ms into the block (-60 dB), 0.12 ms (-30 dB) |
+| A key or a MIDI note reaches the engine | about 1 ms | same | The code: the computer keyboard sends the note as JUCE delivers the key; a busy UI thread delays it (section 3) |
+| Waiting for the next audio block | 0 to 10 ms (5 on average) | same | The code: the engine puts live notes at the start of the next block |
+| The engine and Phazite's instrument | 0.04 ms | same | Measured: the synth is heard 0.04 ms into the block (-60 dB), 0.12 ms (-30 dB) |
 | Delay compensation | 0 in a new project | same | Measured: +2.06 ms for each Limiter or Maximizer anywhere in the song, plus any plug-in's own latency |
 | Windows' shared-mode output (480 samples) | about 15 to 35 ms | same | JUCE keeps one device buffer queued, plus Windows' audio engine (an estimate) |
 | The Bluetooth link | about 150 to 250 ms | none | Published measurements (RTINGS gives 173 ms for SBC, from search results: not checked on their page). Windows can't use the headphones' LDAC |
@@ -64,24 +64,24 @@ held their notes. The percentage is of one core's time (100% means it can't keep
 | Reverb | 0.66 % (0.75 % with silence in) | 4.2 % | 0 |
 | Utility | 0.04 % | 0.04 % | 0 |
 
-A whole project, through Tracktion's playback graph on one thread: 20 empty tracks take 0.5 % of a core; 20 tracks
+A whole project, through the engine's playback graph on one thread: 20 empty tracks take 0.5 % of a core; 20 tracks
 each with a synth, an EQ, a compressor and a reverb take **17 % while stopped and silent** and 29 % while playing
 chords. Notes are placed on their exact sample, every `process()` flushes denormals, and the guarded scenarios of the
 real-time audit allocate nothing.
 
 ### Findings
 
-- **A1. Devices work at full cost on silence (high).** Tracktion keeps the playback graph running while stopped, so
+- **A1. Devices work at full cost on silence (high).** The engine keeps the playback graph running while stopped, so
   that live notes play, and calls every enabled device every block; no device checks for silence. That is the 17 % of
   a stopped project above. A device could sleep once its input has been silent for longer than its latency and tail,
-  and wake at the first sound, note or change (`DevicePlugin::applyToBuffer`).
-- **A2. 15 worker threads at time-critical priority (medium).** Phazite asks for one audio thread per logical CPU
-  (`EngineBehaviour::getNumberOfCPUsToUseForAudio`): 16 here, so 15 workers that Tracktion wakes every block, even
+  and wake at the first sound, note or change.
+- **A2. 15 worker threads at time-critical priority (medium).** Phazite asks for one audio thread per logical CPU:
+  16 here, so 15 workers that the engine wakes every block, even
   while stopped, and that spin before they sleep. Physical cores minus one is the usual choice. The tests run one
   thread, so this path is unmeasured: compare idle CPU in Task Manager before and after.
 - **A3. Graphs nobody hears (low).** The browser's preview keeps its playback graph after the first preview (a synth
-  for MIDI files), processed every block for the rest of the session (`Preview.cpp`). Tracktion's clip launcher
-  (`areClipSlotsEnabled`, on by default) adds nodes to every track, though Phazite has no launcher. The Microsoft GS
+  for MIDI files), processed every block for the rest of the session (`Preview.cpp`). The engine's clip launcher
+  (on by default) adds nodes to every track, though Phazite has no launcher. The Microsoft GS
   Wavetable Synth is enabled as a MIDI output and opened, though nothing plays it.
 - **A4. Control-rate maths in the instruments (medium).** Every 16 samples each voice computes 6 to 14 `pow`, `tan`
   and `cos` calls, many with unchanged inputs: the gain of filter shapes that don't use it, constant Butterworth Qs,
@@ -96,17 +96,16 @@ real-time audit allocate nothing.
 - **A6. The wavetable's inner loop (medium; heavy at full unison).** Per sample, per unison voice and per oscillator
   it checks the warp, reads the table and checks FM and ring modulation. Working oscillator by oscillator over each
   16-sample step, with the warp chosen once, and SIMD across unison voices would cut its worst case.
-- **A7. Automation splits devices into 128-sample pieces (medium-low).** Tracktion processes any automated or
+- **A7. Automation splits devices into 128-sample pieces (medium-low).** The engine processes any automated or
   modulated plug-in in 128-sample sub-blocks, each taking a mutex and posting a UI update; Phazite's synths read their
   parameters once per piece and don't smooth them, so automated cutoffs step every 2.7 ms (zipper noise with
-  resonance). Smoothing in the devices would fix the sound, and would let Phazite's own devices skip the sub-blocks
-  (`PluginManager::canUseFineGrainAutomation`).
+  resonance). Smoothing in the devices would fix the sound, and would let Phazite's own devices skip the sub-blocks.
 - **A8. Timing bugs.**
   - *The wavetable synth's modulation runs fast* (verified). Its envelopes 2 and 3 and its LFOs step once per
     16-sample control step even when a step is cut short by a block's end or a note, so they run 1.6 % fast at
     441-sample blocks, faster with many notes, and tempo-synced LFOs drift off the beat. The synth's glide has the
     same pattern.
-  - *A switched-off look-ahead device keeps its latency* (verified). Tracktion counts a device's latency in delay
+  - *A switched-off look-ahead device keeps its latency* (verified). The engine counts a device's latency in delay
     compensation even while it is off, but passes the sound through undelayed: that track plays 2 ms early and every
     other track waits 2 ms for nothing.
   - *Voice stealing jumps* to the new note at full level, which can click; a 1 to 3 ms fade avoids it.
@@ -142,9 +141,9 @@ the window less smooth. Measured on a 16-track song with 256 clips and 16,384 no
   recording.
 - **U3. The unsaved-changes check compares the whole project (medium-low).** The title's 1 Hz timer compares the
   project with its saved copy after any change notification (12.7 ms here, growing with the song).
-- **U4. Edits rebuild the playback graph (medium, to measure).** Tracktion rebuilds the graph on the UI thread for
+- **U4. Edits rebuild the playback graph (medium, to measure).** The engine rebuilds the graph on the UI thread for
   note, clip, tempo and device edits; a note drag rebuilds at every grid step and a velocity drag at every mouse move.
-  Tracktion's `ReallocationInhibitor` can hold the rebuild until the drag ends.
+  The engine can hold the rebuild until the drag ends.
 - **U5. Painting and timers (low now, grows with songs).** The piano roll re-reads, colours and checks the selection
   of every shown note at every repaint, and its velocity lane draws every note; the playhead repaints at 60 Hz in
   editors that aren't showing; meters, mixer strips and device editors keep their timers running when hidden; the EQ
@@ -153,7 +152,7 @@ the window less smooth. Measured on a 16-track song with 256 clips and 16,384 no
 - **U6. A quick key tap can be lost (medium, correctness; verified).** The computer keyboard reads the key's state
   when the message is handled, not when the key went down (`GetAsyncKeyState`): if the UI thread was busy for longer
   than the tap, the key is already up and no note plays. Windows' `GetKeyState` gives the state as of the message.
-- **U7. Smaller.** Tracktion rescans the MIDI devices every 4 s on the UI thread (to measure); the browser searches up
+- **U7. Smaller.** The engine rescans the MIDI devices every 4 s on the UI thread (to measure); the browser searches up
   to 50,000 items on every keystroke on the UI thread; over a plug-in window, every key is first looked up through
   every command.
 
@@ -173,8 +172,8 @@ the window less smooth. Measured on a 16-track song with 256 clips and 16,384 no
 - **R6. Two Phazites can open the same project (low-medium).** Both autosave to the same file, and the first to close
   deletes it.
 - **R7. Failures leave no trace (low).** There is no log file, and a failing autosave retries silently.
-- **R8. Locks on the live MIDI path (low; Tracktion).** The audio thread and the thread delivering a live note share
-  two locks (`MidiInputDevice`, `MidiInputDeviceNode`): a candidate for realtime-audit.md, and a report upstream.
+- **R8. Locks on the live MIDI path (low; the engine's).** The audio thread and the thread delivering a live note share
+  two locks: a candidate for realtime-audit.md (finding 22).
 
 Already fine: saves are atomic (a temporary file, flushed, then swapped in), memory is bounded (30 undo steps, a
 capped library index), the background threads lock correctly, and plug-in scanning survives crashes (out of process).
@@ -220,7 +219,7 @@ searches and the MIDI rescans move off the hot path (U7).
 plug-ins off (R2); "No audio output" shows when the device fails, with a button to the audio settings (R3); the window
 paints "Opening…" before the project loads (R4); plug-in scans time out per plug-in (R5); a second Phazite brings the
 first forward instead of opening the project again (R6); a log file, and a message after repeated autosave failures
-(R7); the live-MIDI locks go into realtime-audit.md and upstream (R8).
+(R7); the live-MIDI locks go into realtime-audit.md (R8).
 - *Done when:* each has a test, or a check by hand where it needs a real device or a crashing plug-in.
 
 **Not now:** link-time optimisation and an AVX2 baseline (measure in the profile build first: done 2026-10-27, section 8,
@@ -231,8 +230,8 @@ and neither helps), `/fp:fast` (changes the golden renders and makes MSVC and GC
 1. **The first-run audio setup:** Low Latency Mode at 128 to 256 samples where the device offers it, falling back to
    today's shared mode (recommended), or keep today's shared mode with the device's own buffer.
 2. **A "Low latency" switch** in the top bar, as Cubase and Studio One have: while on, the buffer shrinks and devices
-   with look-ahead are switched off, so that playing live has no delay compensation (Tracktion's low-latency
-   monitoring). Recommended, off at first; or none.
+   with look-ahead are switched off, so that playing live has no delay compensation. Recommended, off at first;
+   or none.
 3. **Bluetooth outputs:** say what they cost in the settings and on the welcome page (recommended), or also offer to
    switch to a wired output when there is one.
 
@@ -261,7 +260,7 @@ What each part became (roadmap step 2.16 has the files):
   graph, the clip launcher and MIDI outputs (A2, A3); the instruments' unison ratios and filter coefficients, and the
   wavetable's inner loop a step at a time without FM (A4, A6); every device glides its continuous parameters over each
   block (A7). Of A5, only the compressor's maths changed: the multiband's and maximizer's need approximations of `log10`
-  and `pow` that would change their sound, for under 1 % of a core each that sleeping already saves on silence. Tracktion's
+  and `pow` that would change their sound, for under 1 % of a core each that sleeping already saves on silence. The engine's
   128-sample automation pieces stay: with Phazite's devices reading values once a block they would lag a block.
 - **E:** parameter changes (U1), autosave on a background thread that waits while the song plays (U2; an explicit Save
   still writes on the UI thread, which the user waits for anyway), the unsaved-changes check (U3), hidden editors, meters
@@ -270,8 +269,8 @@ What each part became (roadmap step 2.16 has the files):
   new editors and the piano roll's next work; the 4-second MIDI rescan and keys over plug-in windows are left as they are.
 - **F** as planned. A plug-in that crashes as it loads can't be tested without one: check by hand with a crashing VST3.
 - It found known bug 3, taken then for two Limiter-type devices silencing live notes: in fact any live note could be
-  lost after the UI thread was busy, whatever the devices (fixed 2026-10-28, [realtime-audit.md](realtime-audit.md),
-  finding 23).
+  lost after the UI thread was busy, whatever the devices (fixed 2026-10-28; since Phazite's own engine plays live notes,
+  `tests/LiveInputTests.cpp` checks that every one sounds however long the message thread was busy).
 
 ## 8. An outside review (2026-10-27)
 
@@ -339,26 +338,25 @@ the song stopped).
 
 ## 9. Phazite's own engine (2026-11-02)
 
-Phazite's own engine ([tracktion-migration.md](tracktion-migration.md), T2) plays every project since step 10. The
-benchmarks of a project and of a live note now play as the app plays: a project opened in a project context, Tracktion's
-hosted device calling both callbacks, Tracktion's playing nothing of the project and Phazite's engine all of it. Measured
-with `phazite_tests.exe --test-suite=benchmark --no-skip` from the `windows-profile` build, on the same PC, before step 10
-(Tracktion's engine playing) and after.
+Phazite's own engine ([roadmap](roadmap.md#architecture-track), A6, phase T2) plays every project since T2's step 10.
+The benchmarks of a project and of a live note now play as the app plays: a project opened in a project context, and
+Phazite's engine playing all of it. Measured with `phazite_tests.exe --test-suite=benchmark --no-skip` from the
+`windows-profile` build, on the same PC, before step 10 (the engine Phazite played on until then) and after.
 
-| What | Tracktion's engine | Phazite's engine, one thread | Phazite's engine, four threads |
+| What | The earlier engine | Phazite's engine, one thread | Phazite's engine, four threads |
 |---|---|---|---|
 | 20 empty tracks, stopped | 0.96 % of the audio thread | 0.33 % | 0.33 % |
 | 20 empty tracks, playing | 0.50 % | 0.33 % | 0.33 % |
 | 20 tracks with a synth, an EQ, a compressor and a reverb each, stopped | 2.53 % | 0.86 % | 0.50 % |
 | The same, playing chords | 29.35 % | 27.67 % | 8.18 % |
 
-A live note is heard as soon as it was with Tracktion once it is in a block, but its place in the block is new: Tracktion
-put every live note at the start of the next block (heard 2 samples in), so that a note's delay was anything from none to
+A live note is heard as soon as it was with the earlier engine once it is in a block, but its place in the block is new:
+that engine put every live note at the start of the next block (heard 2 samples in), so that a note's delay was anything from none to
 a whole block, as it came; Phazite's engine plays it as far into the next block as it came after the last one started
 (T2 step 2), so that every note waits exactly a block and keeps its timing against the others, as Ableton Live and REAPER
 time what they record. The benchmark, which plays its note about 1.5 ms after a block, hears it 71 samples into the next
 (1.48 ms at 48 kHz), and the delay compensation of a limiter on another track (+98 samples) and on the master too (+99)
-as before. With 256-sample blocks at 48 kHz a live note waits a constant 5.3 ms, where Tracktion's waited 0 to 5.3 ms.
+as before. With 256-sample blocks at 48 kHz a live note waits a constant 5.3 ms, where it waited 0 to 5.3 ms before.
 
 **The engine's workers between blocks (2026-11-02, found by T3's measurement).** Each of the engine's workers (T2 step 8)
 spun through 4000 yields for its next job before it slept, and at 128 to 480 samples the next block came before it slept:
@@ -374,7 +372,7 @@ blocks, played back to back, then sleeps until the next job; the audio thread's 
 
 ## 10. Plug-ins in helpers (2026-11-02)
 
-T3 step 0's measurement ([tracktion-migration.md](tracktion-migration.md), roadmap step 3.3): a plug-in played in a
+T3 step 0's measurement ([roadmap](roadmap.md#architecture-track), A6, and step 3.3): a plug-in played in a
 helper process, a block at a time at 128 samples (2.67 ms at 48 kHz), one each block's length as a device brings them,
 against the same plug-in in Phazite's process, from `tests/SandboxBenchmarks.cpp` (`--test-suite=benchmark --no-skip`,
 `windows-profile`, the same PC). Each block's time is from handing it over to having it back; the memory is the
@@ -434,12 +432,12 @@ tracks on four threads took 10.2 % and 6.2 % of a core with nothing changed betw
 
 ## 11. Parameters on the song (2026-11-03)
 
-T6 step 4 (docs/tracktion-migration.md) moves `ParameterHandle` off Tracktion's parameters: a handle holds the song and
+T6 step 4 ([roadmap](roadmap.md#architecture-track), A6) puts `ParameterHandle` on the song's parameters: a handle holds the song and
 the parameter's reference, and reads its description and values from the song (`model/devices/internal/Parameters.h`).
 Controls read their handles at each of the display ticker's ticks, a strip its volume, pan and sends, so a handle keeps
 the element it found and finds it again only once that element has left the song or names another; a parameter that
 nothing moves reads its value set by hand from the song, and a knob asks the song whether anything modulates its
-parameter before it asks Tracktion for the modulation's range. The UI's benchmark (`tests/Benchmarks.cpp`,
+parameter before it asks for the modulation's range. The UI's benchmark (`tests/Benchmarks.cpp`,
 `windows-profile`), before (the build of 2026-11-02, before T6's steps of 2026-11-03) and after:
 
 | The UI's work, 16 tracks, 256 clips, 16,384 notes | Before | After |

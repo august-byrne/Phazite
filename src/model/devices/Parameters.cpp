@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Parameters.h"
 #include "engine/nodes/Channel.h"
-#include "internal/DevicePlugin.h"
 #include "internal/Devices.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
 
 namespace phazite
 {
@@ -25,12 +24,19 @@ namespace
         return (std::uint64_t) (juce::int64) state.getProperty (property, (juce::int64) 0);
     }
 
-    // Tracktion's parameter for a plug-in's or a modulator's, which describes it and holds its value until the plug-ins'
-    // instances and the modulators are the song's (docs/tracktion-migration.md, T6 steps 4 and 5).
-    te::AutomatableParameter::Ptr findTracktionParameter (const Song& song, const ParameterRef& ref)
+    // A plug-in's parameter in its instance (none while no session plays the song, or the plug-in doesn't load): its
+    // instance and its place there.
+    std::pair<SandboxedInstance*, int> findPluginParameter (const Song& song, const ParameterRef& ref)
     {
-        auto* edit = findEdit (song);
-        return edit != nullptr ? findParameter (*edit, ref) : nullptr;
+        auto* instance = findPluginInstance (song, ref.device);
+        const auto index = instance != nullptr ? instance->findParameter (ref.parameter) : -1;
+        return { index >= 0 ? instance : nullptr, index };
+    }
+
+    // The VALUE of a plug-in's element that holds a parameter's value set by hand, if it has one.
+    juce::ValueTree findPluginValue (const juce::ValueTree& device, const juce::String& parameter)
+    {
+        return device.getChildWithProperty (schema::valueParameter, parameter);
     }
 
     bool isVCA (const juce::ValueTree& channel, DeviceID fader)
@@ -84,15 +90,14 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
     if (const auto device = findDeviceState (song, ref.device); device.isValid())
     {
         if (isPluginState (device))
-            return findTracktionParameter (song, ref) != nullptr ? found (ref, ParameterSource::plugin, device) : std::nullopt;
+        {
+            // One its instance has, or one the song keeps a value of (a plug-in that doesn't load keeps what refers to it).
+            const auto there = findPluginParameter (song, ref).first != nullptr || findPluginValue (device, ref.parameter).isValid();
+            return there ? found (ref, ParameterSource::plugin, device) : std::nullopt;
+        }
 
-        // One of Phazite's own; or a device of a type only tests make (Schema.h: deviceType), as Tracktion's plug-in for it
-        // describes it while Tracktion's Edit mirrors the song (T6 step 9 makes the tests' types Phazite's own).
+        // One of Phazite's own (or of a type a test registered: model/devices/internal/Devices.h).
         const auto* info = findOwnDevice (device[schema::deviceType].toString().toStdString());
-
-        if (auto* edit = info == nullptr ? findEdit (song) : nullptr)
-            if (auto* tests = dynamic_cast<DevicePlugin*> (mirror::findDevice (*edit, ref.device)))
-                info = &tests->getDeviceInfo();
 
         if (info != nullptr)
             if (const auto index = devices::findParameter (*info, ref.parameter.toStdString()); index >= 0)
@@ -177,10 +182,17 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
             return { parameter.source, state[schema::macroName].toString(), { 0.0f, 1.0f }, 0.0f, {} };
 
         case ParameterSource::plugin:
-            if (const auto tracktions = findTracktionParameter (song, parameter.ref))
-                return { parameter.source, tracktions->getParameterName(), tracktions->valueRange, tracktions->getDefaultValue(), {} };
+        {
+            // From 0 to 1, in its steps if it says it has some, as the plug-in told it as it opened.
+            if (const auto [instance, index] = findPluginParameter (song, parameter.ref); instance != nullptr)
+            {
+                const auto& info = instance->getParameterInfos()[(size_t) index];
+                const auto step = info.numSteps > 1 ? 1.0f / (float) (info.numSteps - 1) : 0.0f;
+                return { parameter.source, info.name, { 0.0f, 1.0f, step }, info.defaultValue, {} };
+            }
 
-            break;
+            return { parameter.source, parameter.ref.parameter, { 0.0f, 1.0f }, {}, {} };
+        }
     }
 
     return { parameter.source, {}, {}, {}, {} };
@@ -204,7 +216,11 @@ juce::String getParameterText (const Song& song, const FoundParameter& parameter
 
         case ParameterSource::device:
         case ParameterSource::modulator:
-            // A count (one that moves in whole steps) reads as a whole number.
+            // A choice reads as its name ("Sine"), and a count (one that moves in whole steps) as a whole number.
+            if (const auto& info = *parameter.info; info.unit == devices::Unit::choice && ! info.choices.empty())
+                return toString (
+                    info.choices[(size_t) juce::jlimit (0, (int) info.choices.size() - 1, juce::roundToInt (value - info.minimum))]);
+
             if (const auto step = parameter.info->step; step.has_value() && juce::exactlyEqual (*step, std::round (*step)))
                 return juce::String (juce::roundToInt (value));
 
@@ -214,10 +230,10 @@ juce::String getParameterText (const Song& song, const FoundParameter& parameter
             return juce::String (value, 3);
 
         case ParameterSource::plugin:
-            if (const auto tracktions = findTracktionParameter (song, parameter.ref))
-                return tracktions->valueToString (value);
+            if (const auto [instance, index] = findPluginParameter (song, parameter.ref); instance != nullptr)
+                return instance->getParameterText (index, value);
 
-            break;
+            return juce::String (value, 2);
     }
 
     return {};
@@ -248,8 +264,12 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
             return (float) state.getProperty (schema::macroValue, 0.0f);
 
         case ParameterSource::plugin:
-            if (const auto tracktions = findTracktionParameter (song, parameter.ref))
-                return tracktions->getCurrentExplicitValue();
+            // The song's, where it sets one; else its instance's.
+            if (const auto stored = findPluginValue (state, parameter.ref.parameter); stored.isValid())
+                return (float) stored[schema::valueSetByHand];
+
+            if (const auto [instance, index] = findPluginParameter (song, parameter.ref); instance != nullptr)
+                return instance->getParameterValue (index);
 
             break;
     }
@@ -262,68 +282,79 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
     const auto& ref = parameter.ref;
     auto* undo = &song.getUndoManager();
     auto state = parameter.state;
+    auto told = value;
 
     switch (parameter.source)
     {
         case ParameterSource::device:
         {
-            const auto stored = juce::jlimit (parameter.info->minimum, parameter.info->maximum, value);
-            moveOnePoint (song, ref, stored);
-            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (ref.parameter), stored, undo);
-            song.reconcile (Song::Part::device, ref.device.getRaw());
-            return;
+            told = juce::jlimit (parameter.info->minimum, parameter.info->maximum, value);
+            moveOnePoint (song, ref, told);
+            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (ref.parameter), told, undo);
+            break;
         }
 
         case ParameterSource::modulator:
         {
             // Nothing moves a modulator's parameters: no curve of one point follows them.
-            const auto stored = devices::constrain (*parameter.info, value);
-            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (ref.parameter), stored, undo);
-            song.reconcile (Song::Part::modulator, ref.device.getRaw());
-            return;
+            told = devices::constrain (*parameter.info, value);
+            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (ref.parameter), told, undo);
+            break;
+        }
+
+        case ParameterSource::plugin:
+        {
+            // A VALUE of the plug-in's element, which its instance takes (model/plugins/internal/PluginInstances.h).
+            told = juce::jlimit (0.0f, 1.0f, value);
+            moveOnePoint (song, ref, told);
+            auto stored = state.getChildWithProperty (schema::valueParameter, ref.parameter);
+
+            if (! stored.isValid())
+            {
+                stored = juce::ValueTree (schema::VALUE, { { schema::valueParameter, ref.parameter } });
+                state.appendChild (stored, undo);
+            }
+
+            stored.setProperty (schema::valueSetByHand, told, undo);
+            break;
         }
 
         case ParameterSource::volume:
         {
-            const auto position = juce::jlimit (0.0f, 1.0f, value);
-            moveOnePoint (song, ref, position);
-            setChannelVolume (song, getTrackID (state), engine::faderPositionToDecibels (position));
-            return;
+            told = juce::jlimit (0.0f, 1.0f, value);
+            moveOnePoint (song, ref, told);
+            setChannelVolume (song, getTrackID (state), engine::faderPositionToDecibels (told));
+            break;
         }
 
         case ParameterSource::pan:
         {
-            const auto pan = juce::jlimit (-1.0f, 1.0f, value);
-            moveOnePoint (song, ref, pan);
-            setChannelPan (song, getTrackID (state), pan);
-            return;
+            told = juce::jlimit (-1.0f, 1.0f, value);
+            moveOnePoint (song, ref, told);
+            setChannelPan (song, getTrackID (state), told);
+            break;
         }
 
         case ParameterSource::send:
         {
-            const auto position = juce::jlimit (0.0f, 1.0f, value);
-            moveOnePoint (song, ref, position);
-            setSendLevel (song, ref.device, engine::faderPositionToDecibels (position));
-            return;
+            told = juce::jlimit (0.0f, 1.0f, value);
+            moveOnePoint (song, ref, told);
+            setSendLevel (song, ref.device, engine::faderPositionToDecibels (told));
+            break;
         }
 
         case ParameterSource::macro:
         {
-            if (const auto stored = juce::jlimit (0.0f, 1.0f, value); juce::exactlyEqual (stored, 0.0f))
+            if (told = juce::jlimit (0.0f, 1.0f, value); juce::exactlyEqual (told, 0.0f))
                 state.removeProperty (schema::macroValue, undo);
             else
-                state.setProperty (schema::macroValue, stored, undo);
+                state.setProperty (schema::macroValue, told, undo);
 
-            song.reconcile (Song::Part::modulator, ref.device.getRaw());
-            return;
+            break;
         }
-
-        case ParameterSource::plugin:
-            if (const auto tracktions = findTracktionParameter (song, ref))
-                setDeviceValue (*tracktions, value);
-
-            return;
     }
+
+    song.tellValueSetByHand (ref, told, false);
 }
 
 float getCurrentValue (const Song& song, const FoundParameter& parameter, bool withModulation)
@@ -332,10 +363,8 @@ float getCurrentValue (const Song& song, const FoundParameter& parameter, bool w
     if (parameter.source == ParameterSource::modulator || parameter.source == ParameterSource::macro)
         return getValueSetByHand (song, parameter);
 
-    // While Phazite's engine plays the song: what it played, or the value set by hand for one that nothing moves (but a
-    // modulator's or a macro's, which it doesn't play as parameters).
-    if (const auto* session = findPlayingSession (song);
-        session != nullptr && parameter.source != ParameterSource::modulator && parameter.source != ParameterSource::macro)
+    // While Phazite's engine plays the song: what it played, or the value set by hand for one that nothing moves.
+    if (const auto* session = findPlayingSession (song))
     {
         if (! session->getPlayer().isMoved (parameter.ref))
             return getValueSetByHand (song, parameter);
@@ -343,9 +372,6 @@ float getCurrentValue (const Song& song, const FoundParameter& parameter, bool w
         if (const auto played = session->getPlayer().getPlayedValue (parameter.ref, withModulation))
             return *played;
     }
-
-    if (const auto tracktions = findTracktionParameter (song, parameter.ref))
-        return withModulation ? tracktions->getCurrentValue() : tracktions->getCurrentBaseValue();
 
     return getValueSetByHand (song, parameter);
 }

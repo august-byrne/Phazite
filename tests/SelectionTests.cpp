@@ -13,6 +13,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
+#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 
@@ -36,7 +37,7 @@ struct Song
         b = tracks[1];
         phazite::setTrackName (song, a, "A");
         phazite::setTrackName (song, b, "B");
-        selection.setEdit (edit.get());
+        selection.setSong (&song);
 
         first = phazite::insertMidiClip (song, a, { beats (0.0), beats (4.0) }, nullptr);
         second = phazite::insertMidiClip (song, a, { beats (8.0), beats (12.0) }, nullptr);
@@ -80,12 +81,12 @@ struct Song
         return parts.joinIntoString (" ");
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::Song& song = phazite::getSong (*edit);
+    phazite::Song::Ptr songPtr = phazite::createSong();
+    phazite::Song& song = *songPtr;
     phazite::TrackID a, b;
     phazite::ClipID first, second;
     phazite::SectionID intro, verse;
-    phazite::Selection selection { phazite::test::getEngine() };
+    phazite::Selection selection;
     phazite::RangeSelection range { selection };
 };
 } // namespace
@@ -164,15 +165,15 @@ TEST_CASE ("Duplicate takes notes first, then the range, sections, clips and tra
     // Redo moves it to the copy again.
     s.selection.deselectAll();
     {
-        const phazite::UndoStep step (*s.edit, "Duplicate Range");
+        const phazite::UndoStep step (s.song, "Duplicate Range");
         phazite::duplicateSelection (s.selection, s.range, false);
     }
     CHECK (s.describe (s.a) == juce::String ("0-4 8-12 12-16"));
     CHECK (s.range.getRange().getStart().inBeats() == doctest::Approx (12.0));
-    phazite::undo (*s.edit);
+    phazite::undo (s.song);
     CHECK (s.describe (s.a) == juce::String ("0-4 8-12"));
     CHECK (s.range.getRange().getStart().inBeats() == doctest::Approx (8.0));
-    phazite::redo (*s.edit);
+    phazite::redo (s.song);
     CHECK (s.describe (s.a) == juce::String ("0-4 8-12 12-16"));
     CHECK (s.range.getRange().getStart().inBeats() == doctest::Approx (12.0));
 
@@ -211,9 +212,9 @@ TEST_CASE ("Split splits a range's clips at both edges, or the selected clips at
     phazite::splitSelection (s.selection, s.range);
     CHECK (s.describe (s.a) == juce::String ("0-1 1-3 3-4 8-12"));
 
-    // Without a range: the selected clips, at the playhead (beat 10, 5 seconds in at 120 BPM).
+    // Without a range: the selected clips, at the playhead (beat 10).
     s.range.clear();
-    s.edit->getTransport().setPosition (te::TimePosition::fromSeconds (5.0));
+    phazite::movePlayhead (s.song, beats (10.0));
     s.selection.selectOnly (s.second);
     phazite::splitSelection (s.selection, s.range);
     CHECK (s.describe (s.a) == juce::String ("0-1 1-3 3-4 8-10 10-12"));
@@ -370,12 +371,12 @@ TEST_CASE ("Phazite's selection holds items by their IDs: one kind at a time, an
     CHECK (selection.getClips().empty());
     CHECK (selection.getNumObjectsSelected() == 0);
 
-    // Another Edit: nothing of the last one, and a change to hear.
+    // Another song: nothing of the last one, and a change to hear.
     phazite::test::dispatchPendingMessages();
     const auto before = changes;
     selection.selectOnly (s.a);
-    selection.setEdit (nullptr);
-    CHECK (selection.getEdit() == nullptr);
+    selection.setSong (nullptr);
+    CHECK (selection.getSong() == nullptr);
     CHECK_FALSE (selection.isSelected (s.a));
     phazite::test::dispatchPendingMessages();
     CHECK (changes > before);

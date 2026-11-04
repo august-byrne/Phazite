@@ -1,8 +1,8 @@
 # Phazite's C++ formatting: JUCE's coding standards (https://juce.com/discover/stories/coding-standards)
 # written as clang-format options. JUCE ships no .clang-format of its own. This one starts from the
-# config shared on the JUCE forum, which Tracktion Engine also uses, and follows JUCE's own source where
-# the standards don't say. Needs clang-format 22 or newer (IndentPPDirectives: Leave); Phazite is
-# formatted with clang-format 23, the version VS Code's C/C++ extension bundles.
+# config shared on the JUCE forum and follows JUCE's own source where the standards don't say.
+# Needs clang-format 22 or newer (IndentPPDirectives: Leave); Phazite is formatted with
+# clang-format 23, the version VS Code's C/C++ extension bundles.
 ---
 Language: Cpp
 BasedOnStyle: LLVM # defaults for anything not set below

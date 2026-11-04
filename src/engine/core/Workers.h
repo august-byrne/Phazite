@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The threads that help Phazite's engine play a block (docs/tracktion-migration.md, T2 step 8): the audio thread hands
-// them a job of tasks, numbered, which it and they take in their order, each the next not taken yet, until all are done.
-// A task waits for what it needs itself (its strip's inputs, done in tasks before it). The workers spin a moment for the
-// next job, then sleep until it comes; the audio thread neither waits on a lock nor allocates, and wakes them without one
-// (std::atomic's wait and notify). The workers play at the audio thread's priority, never raising the whole process's: on
-// Windows in MMCSS's Pro Audio task, as JUCE's WASAPI thread does; elsewhere as real-time threads.
+// The threads that help Phazite's engine play a block: the audio thread hands them a job of tasks, numbered, which it
+// and they take in their order, each the next not taken yet, until all are done. A task waits for what it needs itself
+// (its strip's inputs, done in tasks before it). The workers spin a moment for the next job, then sleep until it comes;
+// the audio thread neither waits on a lock nor allocates, and wakes them without one (std::atomic's wait and notify).
+// The workers play at the audio thread's priority, never raising the whole process's: on Windows in MMCSS's Pro Audio
+// task, as JUCE's WASAPI thread does; elsewhere as real-time threads.
 #pragma once
 
 #include <juce_core/juce_core.h>

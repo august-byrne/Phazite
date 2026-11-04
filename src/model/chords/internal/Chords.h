@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The chord lane's Tracktion side (ChordModel.h): its chords and keys in the song's Phazite state (Schema.h: CHORDLANE),
+// The chord lane's insides (ChordModel.h): its chords and keys in the song (Schema.h: CHORDLANE),
 // and the parts made from them, MIDI clips that follow the chords while their notes are the ones the lane makes for them
-// (docs/design.md, section 14). Edits use the Edit's undo manager and begin no step: their caller's holds them.
+// (docs/design.md, section 14). Edits use the song's undo manager and begin no step: their caller's holds them.
 #pragma once
 
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/chords/ChordValues.h"
 
 #include <functional>

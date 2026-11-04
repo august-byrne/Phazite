@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Everything Phazite writes into a project file besides Tracktion's own data: the names of its elements, properties
-// and plug-in type, each defined once, here, with where it is stored and what it holds. Code reads and writes them
-// only through these names.
+// Everything Phazite writes into a project file: the names of its elements, properties and values, each defined once,
+// here, with where it is stored and what it holds. Code reads and writes them only through these names.
 //
 // Kinds: song = part of the song, changed in undo steps; view = how the project is shown, saved but never an undo
 // step; state = remembered by the project, not an undo step.
@@ -11,20 +10,18 @@
 #pragma once
 
 #include "model/base/Song.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <map>
 
 namespace phazite::schema
 {
 //==============================================================================
-// Phazite's state: what Phazite keeps for the whole song (getSong()).
+// The song's own element, and what it keeps for the whole song (Song::getState()).
 
-// Child of EDIT. Every project has one (Project adds it as the project opens); another Edit gets one when something is
-// first written to it.
+// The song (model/base/Song.h): the element a project file holds, with everything below in it. song
 inline const juce::Identifier PHAZITE { "PHAZITE" };
 
-// On PHAZITE (T1, step 9). int64, above every ID in the song: the next ID it gives an item (Song::makeID()), each kind from the
+// On PHAZITE. int64, above every ID in the song: the next ID it gives an item (Song::makeID()), each kind from the
 // same numbers, never one twice. Written without an undo step, and no change of its own (the item it numbers is). state
 inline const juce::Identifier nextID { "nextID" };
 
@@ -32,8 +29,8 @@ inline const juce::Identifier nextID { "nextID" };
 // purpose. Written only when it changes. state
 inline const juce::Identifier loopFollowsSong { "loopFollowsSong" };
 
-// The transport's state that the song keeps (model/transport/internal/Playback.h, Metronome.h; docs/tracktion-migration.md,
-// T1 step 7), which Tracktion's transport and click track mirror. None is an undo step. On PHAZITE:
+// The transport's state that the song keeps (model/transport/internal/Playback.h, Metronome.h). None is an undo step.
+// On PHAZITE:
 // - loop: bool, default false: playback loops, around the song while the loop follows it, or else around the range
 //   looped on purpose, loopStart to loopEnd (double, in beats from the song's start; none while the loop follows the song);
 // - playStart: double, in beats, default 0: where playback starts, the song's start again as a project opens;
@@ -55,10 +52,9 @@ inline const juce::Identifier patternsKeepTheirSpeed { "patternsKeepTheirSpeed" 
 inline const juce::Identifier LASTKEY { "LASTKEY" };
 
 //==============================================================================
-// The song's tempo map (model/transport/internal/Tempo.h; docs/tracktion-migration.md, T1): its tempos and time signatures,
-// each from a beat on, which everything in the song is placed on. Tracktion's tempo sequence is a mirror of it
-// (model/mirror/internal/Mirror.h). For now a song has one tempo and one time signature, from its start; a tempo lane will
-// add changes along it. song
+// The song's tempo map (model/transport/internal/Tempo.h): its tempos and time signatures, each from a beat on, which
+// everything in the song is placed on. For now a song has one tempo and one time signature, from its start; a tempo lane
+// will add changes along it. song
 
 // Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tempos (TEMPO) and time
 // signatures (TIMESIGNATURE), in no particular order. Without one, the song is at 120 BPM in 4/4.
@@ -101,10 +97,9 @@ inline const juce::Identifier gridTriplets { "gridTriplets" };
 inline const juce::Identifier PIANOROLL { "PIANOROLL" };
 
 //==============================================================================
-// The song's tracks (model/arrangement/internal/Tracks.h; docs/tracktion-migration.md, T1): the playlist's tracks and
-// folders and the mixer's returns, top to bottom, each folder's tracks in it, with what each is, its name and color, its
-// mute and solo, its key, its audio input and how it shows. Tracktion's tracks mirror them (model/mirror/internal/Mirror.h),
-// with the same IDs while T1 lasts. song, but for what says it is view
+// The song's tracks (model/arrangement/internal/Tracks.h): the playlist's tracks and folders and the mixer's returns,
+// top to bottom, each folder's tracks in it, with what each is, its name and color, its mute and solo, its key, its
+// audio input and how it shows. song, but for what says it is view
 
 // Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tracks (TRACK), top to
 // bottom.
@@ -113,7 +108,7 @@ inline const juce::Identifier TRACKS { "TRACKS" };
 // Child of TRACKS, or of a folder's TRACK: a track.
 inline const juce::Identifier TRACK { "TRACK" };
 
-// On TRACK, and on MASTER. int64, more than 0: its ID (TrackID), which Tracktion's track (its master track) takes too.
+// On TRACK, and on MASTER. int64, more than 0: its ID (TrackID), which the song gives it (Song::makeID()).
 inline const juce::Identifier trackID { "id" };
 
 // On TRACK: what it is: trackIsTrack (a track, which holds clips), trackIsFolder (a folder, which holds tracks) or
@@ -144,17 +139,17 @@ inline constexpr const char* automationWrite = "write";
 // On a folder's TRACK. true, or none: the folder was made a bus with the bus switch, so it stays one without effects.
 inline const juce::Identifier folderBus { "bus" };
 
-// On TRACK, and on MASTER (T1, step 5e): the channel's volume, in decibels (-100 for silence), as its fader sets it (a
+// On TRACK, and on MASTER: the channel's volume, in decibels (-100 for silence), as its fader sets it (a
 // track's, a return's or a bus's; a plain folder's VCA), none for 0 dB, or for the master's -3 dB, a new song's level; and
 // its pan, from -1 (left) to 1 (right), none for the centre, which a plain folder keeps for when it is a bus again.
 inline const juce::Identifier channelVolume { "volume" };
 inline const juce::Identifier channelPan { "pan" };
 
-// On TRACK, and on MASTER (T1, step 8): the device that sets the channel's volume, by its ID (DeviceID, its Tracktion
-// plug-in's while T1 lasts), which the automation and the modulation of its volume and pan name. A track's, a return's, a
-// bus's (a folder that mixes its tracks) and the master's is a fader (channelFader: its volume and pan, with its meter after
-// it); a plain folder's is a VCA (channelVCA), which sets its tracks' volume. A folder that becomes a bus or plain again
-// gets one of the other kind, with an ID of its own.
+// On TRACK, and on MASTER: the device that sets the channel's volume, by its ID (DeviceID, of the song's), which the
+// automation and the modulation of its volume and pan name. A track's, a return's, a bus's (a folder that mixes its
+// tracks) and the master's is a fader (channelFader: its volume and pan, with its meter after it); a plain folder's is a
+// VCA (channelVCA), which sets its tracks' volume. A folder that becomes a bus or plain again gets one of the other kind,
+// with an ID of its own.
 inline const juce::Identifier channelFader { "fader" };
 inline const juce::Identifier channelVCA { "vca" };
 
@@ -169,7 +164,7 @@ inline constexpr const char* masterPan = "master pan";
 inline constexpr const char* vcaVolume = "vca";
 inline constexpr const char* sendLevelParameter = "send level";
 
-// On a track's TRACK (T1, step 8). true, or none: the track plays its frozen file (model/mixer/internal/Freeze.h), which is
+// On a track's TRACK. true, or none: the track plays its frozen file (model/mixer/internal/Freeze.h), which is
 // in the project's Cache folder, in place of its clips and the devices before its freeze point. Neither freezing nor
 // unfreezing is an undo step; a track whose file is gone as the project opens plays live.
 inline const juce::Identifier trackFrozen { "frozen" };
@@ -210,7 +205,7 @@ inline const juce::Identifier drumHidden { "drumHidden" };
 
 // Child of PHAZITE, which every project has: the master channel's own element, with its write mode
 // (trackAutomationMode), its volume and pan (channelVolume, channelPan), its devices, and its automation lanes (LANE, view),
-// with an ID of the song's (trackID) like a track's.
+// with an ID of the song's (trackID) like a track's. song, but for its lanes
 inline const juce::Identifier MASTER { "MASTER" };
 
 // Child of TRACK and of MASTER, one for each automation lane the playlist shows under the track, in their order
@@ -219,10 +214,10 @@ inline const juce::Identifier MASTER { "MASTER" };
 // one after these. view
 inline const juce::Identifier LANE { "LANE" };
 
-// On LANE: the device, by the EditItemID Tracktion saves it with ("1042").
+// On LANE: the device, by its ID (DeviceID: "1042").
 inline const juce::Identifier laneDevice { "device" };
 
-// On LANE: the parameter, by its ID in its device (the paramID of its automation curve in Tracktion's AUTOMATIONCURVE).
+// On LANE: the parameter, by its ID in its device, as its curve names it (curveParameter).
 inline const juce::Identifier laneParameter { "parameter" };
 
 // On LANE. int 32..320, default 48: the lane's height in the playlist while it isn't collapsed, in pixels at an interface
@@ -233,36 +228,39 @@ inline const juce::Identifier laneHeight { "height" };
 inline const juce::Identifier laneCollapsed { "collapsed" };
 
 //==============================================================================
-// The song's devices (model/mixer/internal/Mixer.h; docs/tracktion-migration.md, T1 step 5): each track's, a folder's (as a
-// bus) and the master's, in the order its sound goes through them, an instrument first, which Tracktion's devices mirror,
-// each with what it is set to, and each container with its devices. A device is the song's first, which the mirror makes
-// Tracktion's from (a preset's are still made in Tracktion first: docs/tracktion-migration.md, T6 step 6). song
+// The song's devices (model/mixer/internal/Mixer.h): each track's, a folder's (as a bus) and the master's, in the order its
+// sound goes through them, an instrument first, each with what it is set to, and each container with its devices. song
 
 // Child of TRACK and of MASTER: a device. On DEVICE: its ID (DeviceID, of the song's: Song::makeID()); its type:
-// the typeID of one of Phazite's own (src/devices/<area>/: "phaziteEq"), deviceIsPlugin for a plug-in, or the type of one
-// of Tracktion's own, which only tests make; and deviceOff, bool, default false: it is switched off.
+// the typeID of one of Phazite's own (src/devices/<area>/: "phaziteEq"), deviceIsPlugin for a plug-in, or the type of a
+// device registered for the tests (model/devices/internal/Devices.h: registerDeviceType()); and deviceOff, bool, default
+// false: it is switched off.
 inline const juce::Identifier DEVICE { "DEVICE" };
 inline const juce::Identifier deviceID { "id" };
 inline const juce::Identifier deviceType { "type" };
 inline constexpr const char* deviceIsPlugin = "plugin";
 inline const juce::Identifier deviceOff { "off" };
 
-// On a DEVICE (T1, step 8): the track it listens to through its sidechain, by the track's ID (TrackID); none for none.
+// The format a device type of Phazite's own names in its description (model/mixer/DeviceType.h), as a plug-in's names
+// "VST3", with its type ID as the description's identifier: what the browser, the menus and a drag carry; never saved.
+inline constexpr const char* ownDeviceFormat = "Phazite";
+
+// On a DEVICE: the track it listens to through its sidechain, by the track's ID (TrackID); none for none.
 inline const juce::Identifier deviceSidechain { "sidechain" };
 
-// On a DEVICE (T1, step 8): where its window was, the left and the top of it on the screen (int, pixels), where it opens
+// On a DEVICE: where its window was, the left and the top of it on the screen (int, pixels), where it opens
 // again; none for a window never moved. view
 inline const juce::Identifier deviceWindowX { "windowX" };
 inline const juce::Identifier deviceWindowY { "windowY" };
 
-// Children of one of Phazite's own devices' DEVICE (T1, step 5b): VALUES, its parameters' values as they were set by hand
-// (not as automation or a modulator moves them), each a property named by the parameter's ID in the device's description,
-// none for one that was never set (at its default); and SOUNDS, the factory sounds, files and tables it plays, as
-// properties named as on its PLUGIN (getPadSound(), getPadSoundFile(), getOscillatorWavetable(), getOscillatorWavetableFile()).
+// Children of one of Phazite's own devices' DEVICE: VALUES, its parameters' values as they were set by hand (not as
+// automation or a modulator moves them), each a property named by the parameter's ID in the device's description, none
+// for one that was never set (at its default); and SOUNDS, the factory sounds, files and tables it plays, as properties
+// named by getPadSound(), getPadSoundFile(), getOscillatorWavetable() and getOscillatorWavetableFile() (below).
 inline const juce::Identifier VALUES { "VALUES" };
 inline const juce::Identifier SOUNDS { "SOUNDS" };
 
-// On a plug-in's DEVICE (T1, step 5c): which plug-in it is, as scanning found it and a preset names it (preset::plugin):
+// On a plug-in's DEVICE: which plug-in it is, as scanning found it and a preset names it (preset::plugin):
 // its format ("VST3"), name, maker (manufacturer), identifier (its file, or what its format finds it by) and unique ID
 // (int).
 inline const juce::Identifier pluginFormat { "format" };
@@ -277,40 +275,31 @@ inline const juce::Identifier pluginInstrument { "instrument" };
 inline const juce::Identifier deviceMix { "mix" };
 
 // On a plug-in's DEVICE: what the plug-in keeps of its own, which the project stores outside the undo history as it saves,
-// before it copies the plug-in or takes it away, and as a preset loads into it (model/devices/internal/DeviceStates.h):
-// its state, the block it keeps its settings in (base 64), none for an empty one; its program (int), for a plug-in with
-// programs; and its channel layout, for its inputs and its outputs: each bus's channels as JUCE abbreviates them ("L R"),
-// or "disabled" for a bus switched off, separated by commas, none for a plug-in without buses of that kind.
+// before it copies the plug-in or takes it away, and as a preset loads into it (model/plugins/internal/PluginInstances.h):
+// its state, the block it keeps its settings in (base 64), none for an empty one; and its program (int), for a plug-in with
+// programs. state
 inline const juce::Identifier pluginState { "state" };
 inline const juce::Identifier pluginProgram { "program" };
-inline const juce::Identifier pluginInputs { "inputs" };
-inline const juce::Identifier pluginOutputs { "outputs" };
 
-// Children of a plug-in's DEVICE, stored with its state: the values set by hand of its parameters that automation or a
-// modulator moves away from them (its state holds the others), each a VALUE with the parameter's ID as Tracktion knows it
-// (its place in the plug-in's list, which can't name a property in a file) and its value set by hand (float).
+// Children of a plug-in's DEVICE: the values set by hand of its parameters, those set by Phazite's controls, and those of
+// the parameters that automation or a modulator moves away from them, stored with its state (its state holds the others),
+// each a VALUE with the parameter's ID, the plug-in's own (a VST3's number, which can't name a property in a file:
+// sandbox/core/PluginInfo.h), and its value set by hand (float, 0 to 1).
 inline const juce::Identifier VALUE { "VALUE" };
 inline const juce::Identifier valueParameter { "parameter" };
 inline const juce::Identifier valueSetByHand { "value" };
 
-// On a plug-in's DEVICE, stored with its state: each parameter the project refers to (its automation, what modulates it,
-// its value set by hand under automation, its automation lane), as the ID Tracktion knows it by, its place in the
-// plug-in's list, then "=" and the plug-in's own ID for it (a VST3's), which stays the same through the plug-in's updates;
-// separated by spaces ("3=1084 7=2001"). Or none. A plug-in that opens moves what refers to a parameter that its update
-// moved (model/devices/internal/PluginParameters.h).
-inline const juce::Identifier pluginParameterIDs { "parameterIDs" };
-
 // Child of TRACK and of MASTER, among its devices: a container of effects (model/mixer/internal/Containers.h), with its ID,
-// deviceOff and deviceMix, as a device has them, and its name (T1, step 5d); its devices (DEVICE) are its children, in the
-// order its sound goes through them. Its macros, and what they modulate, are still Tracktion's while step 6 lasts.
+// deviceOff and deviceMix, as a device has them, and its name; its devices (DEVICE) are its children, in the order its
+// sound goes through them, and so are its macros (MACRO), with what they modulate.
 inline const juce::Identifier CONTAINER { "CONTAINER" };
 inline const juce::Identifier containerName { "name" };
 
-// Child of a track's TRACK (T1, step 5f): a send to a return, in the order the track's sends were added, which Tracktion's
-// sends mirror, each to its return's bus (model/mixer/internal/Mixer.h). On SEND: its ID (DeviceID, its Tracktion plug-in's
-// while T1 lasts); the return it sends to, by the return's track's ID (sendTo); its level in decibels, as a fader's
-// (sendLevel; -100 for silence; none for 0 dB); and sendPreFader, true for a send before the track's fader, none for one
-// after it. A send to a return the song hasn't any more stays, for an undo that brings the return back.
+// Child of a track's TRACK: a send to a return, in the order the track's sends were added (model/mixer/internal/Mixer.h).
+// On SEND: its ID (DeviceID, of the song's); the return it sends to, by the return's track's ID (sendTo); its level in
+// decibels, as a fader's (sendLevel; -100 for silence; none for 0 dB); and sendPreFader, true for a send before the
+// track's fader, none for one after it. A send to a return the song hasn't any more stays, for an undo that brings the
+// return back.
 inline const juce::Identifier SEND { "SEND" };
 inline const juce::Identifier sendID { "id" };
 inline const juce::Identifier sendTo { "to" };
@@ -318,23 +307,21 @@ inline const juce::Identifier sendLevel { "level" };
 inline const juce::Identifier sendPreFader { "preFader" };
 
 //==============================================================================
-// The song's modulation (model/modulation/internal/Modulation.h; docs/tracktion-migration.md, T1 step 6): each track's
-// modulators and macros, and a container's macros, with what each modulates, which Tracktion's modifiers, macro parameters
-// and their assignments mirror. song
+// The song's modulation (model/modulation/internal/Modulation.h): each track's modulators and macros, and a container's
+// macros, with what each modulates. song
 
-// Child of TRACK and of MASTER: a modulator, in their order. On MODULATOR: its ID (ModulatorID, its Tracktion modifier's
-// while T1 lasts); its type, one of preset::modulatorTypeNames ("lfo"); and deviceOff, true when it is switched off. Its
-// parameters' values set by hand are its VALUES, by the IDs Tracktion gives them ("rate"), as a device's are, none for one
-// never set; a step sequencer's steps are modulatorSteps: each step's value, -1 to 1, to a ten-thousandth, separated by
-// spaces, without the zeros at the end.
+// Child of TRACK and of MASTER: a modulator, in their order. On MODULATOR: its ID (ModulatorID, of the song's); its type,
+// one of preset::modulatorTypeNames ("lfo"); and deviceOff, true when it is switched off. Its parameters' values set by
+// hand are its VALUES, by their IDs in its description (devices/modulation/Modulators.h: "rate"), as a device's are, none
+// for one never set; a step sequencer's steps are modulatorSteps: each step's value, -1 to 1, to a ten-thousandth,
+// separated by spaces, without the zeros at the end.
 inline const juce::Identifier MODULATOR { "MODULATOR" };
 inline const juce::Identifier modulatorID { "id" };
 inline const juce::Identifier modulatorType { "type" };
 inline const juce::Identifier modulatorSteps { "steps" };
 
-// Child of a track's TRACK and of a CONTAINER: a macro, in their order (Tracktion keeps a track's on tracks that hold
-// clips; a container has eight). On MACRO: its ID (ModulatorID, its Tracktion macro parameter's while T1 lasts); its name;
-// and its value, 0 to 1, none for 0.
+// Child of a track's TRACK and of a CONTAINER: a macro, in their order (a track's on tracks and returns, not on folders;
+// a container has eight). On MACRO: its ID (ModulatorID, of the song's); its name; and its value, 0 to 1, none for 0.
 inline const juce::Identifier MACRO { "MACRO" };
 inline const juce::Identifier macroName { "name" };
 inline const juce::Identifier macroValue { "value" };
@@ -348,17 +335,16 @@ inline const juce::Identifier modulatesParameter { "parameter" };
 inline const juce::Identifier modulatesAmount { "amount" };
 
 //==============================================================================
-// The song's automation (model/automation/internal/Automation.h; docs/tracktion-migration.md, T1 step 4): each automated
-// parameter's curve, by its device and its own ID, with its points in beats. Tracktion's curves mirror them
-// (model/mirror/internal/Mirror.h). song
+// The song's automation (model/automation/internal/Automation.h): each automated parameter's curve, by its device and its
+// own ID, with its points in beats. song
 
 // Child of PHAZITE, added with the first curve: the curves (CURVE), in no particular order. A curve whose device the song
 // hasn't any more stays while an undo could bring the device back, and goes as the project opens.
 inline const juce::Identifier AUTOMATION { "AUTOMATION" };
 
 // Child of AUTOMATION: a parameter's curve, with its points (POINT) in time order, two at one beat in the order they go (a
-// jump). On CURVE: the device, by the EditItemID Tracktion saves it with ("1042"); and the parameter, by its ID in its
-// device, as a lane names them (laneDevice, laneParameter).
+// jump). On CURVE: the device, by its ID (DeviceID: "1042"); and the parameter, by its ID in its device, as a lane names
+// them (laneDevice, laneParameter).
 inline const juce::Identifier CURVE { "CURVE" };
 inline const juce::Identifier curveDevice { "device" };
 inline const juce::Identifier curveParameter { "parameter" };
@@ -384,9 +370,7 @@ inline bool isGridProperty (const juce::Identifier& p)
     return p == gridSnap || p == gridAdaptive || p == gridOffset || p == gridStep || p == gridTriplets;
 }
 
-// Written without the undo manager (model/mixer/internal/Mixer.h: rememberWindowPosition(), and
-// model/devices/internal/DeviceStates.h as it saves); the names Tracktion gives them on its devices too, which make their
-// windows from them.
+// Written without the undo manager (model/mixer/internal/Mixer.h: rememberWindowPosition()).
 inline bool isDeviceViewProperty (const juce::Identifier& p)
 {
     return p == deviceWindowX || p == deviceWindowY;
@@ -407,8 +391,8 @@ inline const juce::Identifier SECTIONS { "SECTIONS" };
 // Child of SECTIONS: a section. Sections don't overlap.
 inline const juce::Identifier SECTION { "SECTION" };
 
-// On SECTION. int64, more than 0: its ID (SectionID), which the Edit gives it as it gives its tracks and clips theirs, so
-// that no other item of the project has it. Tracktion's name for an item's ID, so that Tracktion counts it too.
+// On SECTION. int64, more than 0: its ID (SectionID), which the song gives it as it gives its tracks and clips theirs
+// (Song::makeID()), so that no other item of the project has it.
 inline const juce::Identifier sectionID { "id" };
 
 // On SECTION. double, 0 or more: where it starts, in beats from the song's start.
@@ -469,14 +453,13 @@ inline const juce::Identifier chordInversion { "inversion" };
 inline const juce::Identifier CHORDKEY { "CHORDKEY" };
 
 //==============================================================================
-// The song's clips (model/arrangement/internal/Clips.h; docs/tracktion-migration.md, T1 step 3), each on its track's element:
-// its MIDI clips with their notes, and its audio clips with the part of their files each plays and how. Tracktion's clips
-// mirror them (model/mirror/internal/Mirror.h), with the same IDs while T1 lasts. song
+// The song's clips (model/arrangement/internal/Clips.h), each on its track's element: its MIDI clips with their notes,
+// and its audio clips with the part of their files each plays and how. song
 
 // Child of a TRACK that holds clips (trackIsTrack): a clip on it, in no particular order.
 inline const juce::Identifier CLIP { "CLIP" };
 
-// On CLIP. int64, more than 0: its ID (ClipID), which while T1 lasts is its Tracktion clip's.
+// On CLIP. int64, more than 0: its ID (ClipID), which the song gives it (Song::makeID()).
 inline const juce::Identifier clipID { "id" };
 
 // On CLIP: what it holds: clipIsMidi, notes, or clipIsAudio, a part of an audio file.
@@ -499,7 +482,7 @@ inline const juce::Identifier clipOffset { "offset" };
 // On CLIP. bool, default false: it is muted.
 inline const juce::Identifier clipMute { "mute" };
 
-// On CLIP. int64, or none: the alias group it is in, which while T1 lasts has an ID from the Edit's. The clips of a group
+// On CLIP. int64, or none: the alias group it is in, which has an ID of the song's (Song::makeID()). The clips of a group
 // hold the same notes, with the same IDs: an edit to one clip's notes is made to each (model/notes/internal/Notes.h), as FL
 // Studio's pattern clips play one pattern.
 inline const juce::Identifier clipLink { "link" };
@@ -514,8 +497,8 @@ inline const juce::Identifier chordPart { "part" };
 inline const juce::Identifier NOTE { "NOTE" };
 
 // On NOTE. int64, 1 or more: its ID (NoteID, model/base/IDs.h), which no other note of its clip has, so that selections,
-// undo and scripts can name one note (decided 2026-10-14). A copy of a clip, an alias too, keeps its notes' IDs. While T1
-// lasts a new note's comes from the Edit's IDs, so that it is none a note had before.
+// undo and scripts can name one note (decided 2026-10-14). A copy of a clip, an alias too, keeps its notes' IDs. A new
+// note's comes from the song's IDs (Song::makeID()), so that it is none a note had before.
 inline const juce::Identifier noteID { "id" };
 
 // On NOTE. int 0..127: its pitch, as a MIDI note number.
@@ -538,7 +521,7 @@ inline const juce::Identifier noteSlide { "slide" };
 inline const juce::Identifier notePortamento { "portamento" };
 
 // Child of a MIDI CLIP: a controller event a recording took in with the notes, such as a sustain pedal or a bend, in MIDI's
-// own terms (no Tracktion numbers): its kind, controlIsController (a MIDI controller: controlNumber 0..127),
+// own terms: its kind, controlIsController (a MIDI controller: controlNumber 0..127),
 // controlIsPitchWheel, controlIsChannelPressure, controlIsAftertouch (on the note controlNumber) or
 // controlIsProgramChange; where it is, in beats from its clip's content start; and its value, 0..127, or 0..16383 for the
 // pitch wheel.
@@ -555,7 +538,7 @@ inline const juce::Identifier controlValue { "value" };
 
 //==============================================================================
 // On an audio CLIP (model/arrangement/internal/AudioClips.h). One that follows the song's tempo, or is pitched or reversed,
-// plays a render of its file that Phazite makes itself (roadmap step 2.18), which Tracktion's clip plays as a plain clip.
+// plays a render of its file that Phazite makes itself (roadmap step 2.18; model/arrangement/internal/ClipRenders.h).
 
 // The audio file it plays: a path relative to the project's file, with / between its parts whatever the system, or a full
 // path.
@@ -613,21 +596,7 @@ inline const juce::Identifier clipTake { "take" };
 // double, more than 0: how long each take is, in seconds: the looped range's length when it was recorded.
 inline const juce::Identifier clipTakeLength { "takeLength" };
 
-//==============================================================================
-// On Tracktion's NOTEs, in the SEQUENCE of a MIDI clip that mirrors one of the song's: the ID of the song's note it plays
-// (noteID), which the mirror writes, so that the model finds a note of Tracktion's as the song's while T1 lasts. song
-inline const juce::Identifier phaziteNoteID { "phaziteNoteID" };
-
-//==============================================================================
-// The type of Phazite's loudness meter (LoudnessMeterPlugin), a PLUGIN that every project has on its master.
-inline constexpr const char* phaziteLoudnessMeter = "phaziteLoudnessMeter";
-
-// Phazite's own devices (model/devices/internal/Devices.h) are PLUGINs too. Each one's type is the typeID of its description
-// (src/devices/<area>/: "phaziteEq" for the EQ), and its parameters' values are properties of the PLUGIN named by their
-// IDs in that description, as are its automation curves' paramIDs. So no parameter's ID may be a property Tracktion keeps
-// on every PLUGIN (type, id, enabled, process...): its value would take that property's place.
-
-// Phazite's drum sampler (devices/drums/DrumSampler.h) also keeps, on its PLUGIN, what each pad plays: "pad1Sound" up to
+// Phazite's drum sampler (devices/drums/DrumSampler.h) keeps in its DEVICE's SOUNDS what each pad plays: "pad1Sound" up to
 // "pad16Sound" name one of its factory sounds (devices/drums/FactoryDrums.h: "808 Kick"; with none, or a name that is none
 // of theirs, the pad's own in the default kit), and "pad1SoundFile" up to "pad16SoundFile" a sound file it plays instead
 // while they are there: a path relative to the project's folder ("Audio/Kick 01.wav"), or in a preset its full path. pad
@@ -649,7 +618,7 @@ inline const juce::Identifier& getPadSoundFile (int pad)
     return names[juce::jlimit (0, 15, pad)];
 }
 
-// Phazite's wavetable synth (devices/wavetable/WavetableSynth.h) also keeps, on its PLUGIN, what each of its two
+// Phazite's wavetable synth (devices/wavetable/WavetableSynth.h) keeps in its DEVICE's SOUNDS what each of its two
 // oscillators plays: "osc1Wavetable" and "osc2Wavetable" name one of its factory tables (devices/wavetable/
 // FactoryWavetables.h: "Vowels"; with none, or a name that is none of theirs, the first, "Basic Shapes"), and
 // "osc1WavetableFile" and "osc2WavetableFile" a sound file it plays instead while they are there: a path relative to the
@@ -669,9 +638,9 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
 //==============================================================================
 // Presets (model/presets/PresetModel.h): files of their own (".phazitepreset"), outside any project, in JSON, in Phazite's
 // own names: devices by the type and parameter IDs of their descriptions (src/devices/), plug-ins by who they are and the
-// settings they give themselves, and containers, modulators and macros as Phazite names them. The model makes Tracktion's
-// objects from them as a preset loads (roadmap A5, 2026-10-30); nothing of Tracktion's is in them. No format version
-// (section 18 of docs/design.md: none while Phazite is pre-alpha).
+// settings they give themselves, and containers, modulators and macros as Phazite names them. The model makes the song's
+// elements from them as a preset loads (model/presets/internal/Presets.h). No format version (section 18 of
+// docs/design.md: none while Phazite is pre-alpha).
 //
 //   { "kind": "device", "device": DEVICE }            an instrument or an effect
 //   { "kind": "container", "container": CONTAINER }   a container of effects
@@ -721,35 +690,11 @@ namespace preset
 
 namespace phazite
 {
-// An Edit's song (model/base/Song.h): its Phazite state, the PHAZITE element (Song::getState()), with its undo history and
-// its count of IDs, which the Edit holds for as long as it lives (on its state's root, which nothing saves), made with the
-// PHAZITE element if the Edit has none yet (without an undo step). While T1 lasts, Tracktion's items take IDs from the same
-// numbers (the mirror gives Tracktion's the song's IDs, and Tracktion numbers what it makes itself above every ID in its
-// state), so the song takes Tracktion's next too, and the larger of the two (Song::makeID()): Tracktion's and the song's
-// never meet.
-//
-// Every change to the song is an undo step in its history (T1, step 11; model/commands/internal/Undo.h), which
-// phazite::undo() and redo() take back and forth, the mirror bringing Tracktion's Edit in line after. Tracktion's own
-// (te::Edit::getUndoManager()) records what the mirror tells Tracktion to do, which nothing takes back. Never record a
-// change of the Edit's root itself in the song's: the history would hold the root that holds it, and the Edit's whole state
-// would outlive the Edit (CI's leak check found it in tests that did, 2026-11-01). The song's changes are to its own
-// element and below.
-Song& getSong (const te::Edit&);
-
-// The Edit that mirrors a song, or nullptr for a song no Edit holds: for the model's functions that take the song and still
-// reach Tracktion's objects inside, while T6 lasts (docs/tracktion-migration.md). Goes with the mirror.
-te::Edit* findEdit (const Song&);
-
-// The song's state, but without adding it if the Edit has none yet (adding it would count as an unsaved change): then the
-// result is invalid, and reading a property from it gives the default.
-juce::ValueTree findPhaziteState (const te::Edit&);
-
-// The ID a song gives next: past its count (nextID) and every ID it holds, those Tracktion gave what it made and the song
-// took in too (a device made in Tracktion first, a recording's clips, a copied track's).
+// The ID a song gives next: past its count (nextID) and every ID it holds.
 std::uint64_t findNextID (const juce::ValueTree& song);
 
-// Brings the song's count there (findNextID()), and Tracktion's next past that. As a project opens and saves.
-void countIDs (te::Edit&);
+// Brings the song's count there (findNextID()). As a project opens and saves.
+void countIDs (Song&);
 
 // A copy of a part of the song (a track's element, a folder's with its tracks, a device's) made the song's own: every item
 // in it given a new ID of the song's (tracks, their faders and VCAs, clips, devices, containers, sends, modulators and

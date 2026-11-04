@@ -6,29 +6,22 @@
 
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <functional>
 
 namespace phazite
 {
-// Undo and redo for an Edit's song: a step back or forth in its history, after which the mirror brings Tracktion's Edit in
-// line with the song (model/mirror/internal/Mirror.h: reconcileAll()), so that what plays follows it, the values set by
-// hand included. Never Tracktion's Edit::undo() and redo(), whose history only records what the mirror told Tracktion.
+// Undo and redo for a song: a step back or forth in its history, which what plays follows, the values set by hand
+// included.
 void undo (Song&);
 void redo (Song&);
-void undo (te::Edit&);
-void redo (te::Edit&);
 
 // Whether the song has a change to undo, or an undone change to redo.
 bool canUndo (const Song&);
 bool canRedo (const Song&);
-bool canUndo (te::Edit&);
-bool canRedo (te::Edit&);
 
 // FL Studio's undo-or-redo: redoes the change last undone if there is one, else undoes the last change.
 void undoOrRedo (Song&);
-void undoOrRedo (te::Edit&);
 
 // The names menus show for undo and redo: "Undo Change Volume" when the song can undo a named step, else "Undo" (also
 // without a song); likewise "Redo ...". describeUndoOrRedo() is describeRedo() when the song can redo, else
@@ -45,7 +38,6 @@ juce::String describeUndoOrRedo (Song*);
 class UndoStep
 {
 public:
-    UndoStep (te::Edit&, const juce::String& name);
     UndoStep (Song&, const juce::String& name);
     UndoStep (juce::UndoManager&, const juce::String& name); // a song's history, as a command's undo target names it
     ~UndoStep();
@@ -67,16 +59,14 @@ class Gesture
 {
 public:
     Gesture (Song&, const juce::String& name);
-    Gesture (te::Edit&, const juce::String& name);
     ~Gesture();
 
     void commit();
     void rollBack();
     bool isOpen() const noexcept { return open; }
 
-    // Whether a gesture is in progress for a song (an Edit's), which a change that starts meanwhile can join.
+    // Whether a gesture is in progress for a song, which a change that starts meanwhile can join.
     static bool isInProgress (Song&);
-    static bool isInProgress (te::Edit&);
 
 private:
     Song& song;
@@ -86,7 +76,7 @@ private:
 };
 
 //==============================================================================
-// The undo step of what Tracktion records while the song plays (automation, roadmap step 2.1), which the song takes in as
+// The undo step of what is recorded while the song plays (automation, roadmap step 2.1), which the song takes in as
 // recording ends: it begins a named step. Unlike a Gesture, changes made meanwhile begin steps of their own as usual,
 // and what is recorded after one of them joins its step. Begun during a gesture, it joins the gesture's step. Message
 // thread only.
@@ -94,20 +84,15 @@ class RecordingStep
 {
 public:
     RecordingStep (Song&, const juce::String& name);
-    RecordingStep (te::Edit&, const juce::String& name);
 
 private:
     JUCE_DECLARE_NON_COPYABLE (RecordingStep)
 };
 
 //==============================================================================
-// For registering commands (CommandRegistry.h) that act on a selection manager's Edit, the open project's: the action
-// runs, or the test answers, with that Edit (without one, the action does nothing and the test is false); and its song's
-// history as the undo target of a command that changes it.
-std::function<void()> withEdit (const Selection&, std::function<void (te::Edit&)> action);
-std::function<bool()> ifEdit (const Selection&, std::function<bool (te::Edit&)> test);
-
-// The same, with its song (model/base/Song.h), for actions and tests of the song alone.
+// For registering commands (CommandRegistry.h) that act on a selection's song, the open project's: the action runs, or the
+// test answers, with that song (without one, the action does nothing and the test is false); and its history as the undo
+// target of a command that changes it.
 std::function<void()> withSong (const Selection&, std::function<void (Song&)> action);
 std::function<bool()> ifSong (const Selection&, std::function<bool (const Song&)> test);
 std::function<juce::UndoManager*()> undoTargetOf (const Selection&);

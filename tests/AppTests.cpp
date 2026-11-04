@@ -10,12 +10,19 @@
 #include "app/RunMarker.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
 #include "model/notes/internal/Notes.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "model/plugins/internal/PluginInstances.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 #include "services/RecentProjects.h"
@@ -27,7 +34,7 @@ namespace
 juce::File createClosedProject (const juce::File& parentFolder, const juce::String& name)
 {
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), parentFolder, name, error);
+    auto project = phazite::Project::create (parentFolder, name, error);
     INFO (error.toStdString());
     REQUIRE (project != nullptr);
     return project->getFile();
@@ -36,8 +43,7 @@ juce::File createClosedProject (const juce::File& parentFolder, const juce::Stri
 
 TEST_CASE ("The session opens and saves a project")
 {
-    auto& engine = phazite::test::getEngine();
-    auto& uiBehaviour = phazite::getUIBehaviour (engine);
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     const auto file = createClosedProject (temp.folder, "Song");
 
@@ -45,7 +51,7 @@ TEST_CASE ("The session opens and saves a project")
     phazite::RecentProjects recent (settings);
 
     {
-        phazite::ProjectSession session (engine, uiBehaviour, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+        phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
         int changes = 0;
         session.onProjectChanged = [&changes] { ++changes; };
 
@@ -53,9 +59,9 @@ TEST_CASE ("The session opens and saves a project")
         session.openProject (file);
         REQUIRE (session.getProject() != nullptr);
         CHECK (session.getProject()->getFile() == file);
-        CHECK (getEdit (session.getContext()) == &session.getProject()->getEdit());
-        CHECK (session.getSelection().getEdit() == &session.getProject()->getEdit());
-        CHECK (uiBehaviour.getLastFocusedEdit() == &session.getProject()->getEdit());
+        CHECK (findSong (session.getContext()) == &session.getProject()->getSong());
+        CHECK (session.getSelection().getSong() == &session.getProject()->getSong());
+        CHECK (getSession (session.getContext()) != nullptr); // what plays it
         CHECK (recent.getProjects() == juce::Array<juce::File> { file });
         CHECK (changes == 1);
         phazite::test::settle();
@@ -67,7 +73,7 @@ TEST_CASE ("The session opens and saves a project")
         const auto* save = registry.find ("project.save");
         REQUIRE (save != nullptr);
         CHECK (save->isEnabled());
-        session.getProject()->getPhaziteState().setProperty (phazite::schema::outline, "pop", nullptr);
+        session.getProject()->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
         REQUIRE (session.getProject()->hasUnsavedChanges());
         REQUIRE (registry.invoke ("project.save"));
         CHECK_FALSE (session.getProject()->hasUnsavedChanges());
@@ -77,20 +83,17 @@ TEST_CASE ("The session opens and saves a project")
         session.closeThen ([&closed] (bool wasClosed) { closed = wasClosed; });
         CHECK (closed);
     }
-
-    // The session's project goes with it.
-    CHECK (uiBehaviour.getLastFocusedEdit() == nullptr);
 }
 
 TEST_CASE ("The first start makes an empty, untitled project, which its first save names and places")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     const auto unsaved = temp.folder.getChildFile ("Unsaved");
     phazite::Settings settings;
     phazite::RecentProjects recent (settings); // no recent projects: a first start
 
-    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, temp.folder.getChildFile ("Projects"), unsaved);
+    phazite::ProjectSession session (engine, recent, temp.folder.getChildFile ("Projects"), unsaved);
     session.openAtStartup();
 
     REQUIRE (session.getProject() != nullptr);
@@ -105,16 +108,16 @@ TEST_CASE ("The first start makes an empty, untitled project, which its first sa
     // It is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (phazite::getSong (*getEdit (session.getContext())).getUndoManager().canUndo());
+    CHECK_FALSE (session.getProject()->getSong().getUndoManager().canUndo());
 }
 
 TEST_CASE ("An example song opens as a new untitled project, with the computer keyboard on its lead")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     phazite::Settings settings;
     phazite::RecentProjects recent (settings);
-    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
 
     // Help > Example Songs.
     phazite::CommandRegistry registry;
@@ -142,16 +145,16 @@ TEST_CASE ("An example song opens as a new untitled project, with the computer k
     // The song is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (phazite::getSong (*getEdit (context)).getUndoManager().canUndo());
+    CHECK_FALSE (findSong (context)->getUndoManager().canUndo());
 }
 
 TEST_CASE ("A new project starts as the new-project window chooses, with no tracks; the tracks added get its key")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     phazite::Settings settings;
     phazite::RecentProjects recent (settings);
-    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
 
     phazite::NewProjectSettings choice;
     choice.tempo = 90.0;
@@ -165,17 +168,17 @@ TEST_CASE ("A new project starts as the new-project window chooses, with no trac
     CHECK (session.getProject()->getFile().getFileNameWithoutExtension() == "Untitled");
 
     auto& context = session.getContext();
-    auto* edit = getEdit (context);
-    REQUIRE (edit != nullptr);
-    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (90.0));
-    CHECK (phazite::getTimeSignature (phazite::getSong (*edit)) == phazite::TimeSignature { 6, 8 });
-    CHECK (phazite::getSections (phazite::getSong (*edit)).size() == phazite::findOutline ("hipHop")->sections.size());
+    auto* song = findSong (context);
+    REQUIRE (song != nullptr);
+    CHECK (phazite::getTempo (*song) == doctest::Approx (90.0));
+    CHECK (phazite::getTimeSignature (*song) == phazite::TimeSignature { 6, 8 });
+    CHECK (phazite::getSections (*song).size() == phazite::findOutline ("hipHop")->sections.size());
     CHECK (phazite::getAllPlaylistTracks (context).empty());
 
     // What it starts with is in its first save: no unsaved changes, nothing to undo.
     phazite::test::settle();
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
+    CHECK_FALSE (song->getUndoManager().canUndo());
 
     // A track added gets the key chosen.
     const auto track = phazite::addTrackAtEnd (context, false);
@@ -186,10 +189,10 @@ TEST_CASE ("A new project starts as the new-project window chooses, with no trac
 
     // Without a key or an outline: an empty song at 120 BPM in 4/4.
     REQUIRE (session.createProject ({}).wasOk());
-    auto* plainEdit = getEdit (session.getContext());
-    REQUIRE (plainEdit != nullptr);
-    CHECK (phazite::getTempo (phazite::getSong (*plainEdit)) == doctest::Approx (120.0));
-    CHECK (phazite::getSections (phazite::getSong (*plainEdit)).empty());
+    auto* plainSong = findSong (session.getContext());
+    REQUIRE (plainSong != nullptr);
+    CHECK (phazite::getTempo (*plainSong) == doctest::Approx (120.0));
+    CHECK (phazite::getSections (*plainSong).empty());
     CHECK (phazite::getAllPlaylistTracks (session.getContext()).empty());
 }
 
@@ -223,7 +226,7 @@ TEST_CASE ("New-project settings are checked")
 
 TEST_CASE ("Startup opens the most recent project")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     const auto older = createClosedProject (temp.folder, "Older");
     const auto newer = createClosedProject (temp.folder, "Newer");
@@ -233,7 +236,7 @@ TEST_CASE ("Startup opens the most recent project")
     recent.add (older);
     recent.add (newer);
 
-    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
     session.openAtStartup();
 
     REQUIRE (session.getProject() != nullptr);
@@ -243,7 +246,7 @@ TEST_CASE ("Startup opens the most recent project")
 
 TEST_CASE ("The app's services are made together, with the settings in memory")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     phazite::AppServices services (
         engine, { .settingsInMemory = true, .packsFolder = temp.folder, .presetsFolder = temp.folder.getChildFile ("Presets") });
@@ -260,7 +263,7 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     CHECK (services.settings.get (phazite::Settings::recentProjects) == juce::StringArray { project.getFullPathName() });
 
     // So are the plug-ins a scan found, and those that crashed as they loaded.
-    auto& known = engine.getPluginManager().knownPluginList;
+    auto& known = phazite::getPluginHost (services.engineContext).getKnownPlugins();
     juce::PluginDescription scanned;
     scanned.name = "Scanned";
     scanned.pluginFormatName = "VST3";
@@ -270,12 +273,12 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
         [&] { return services.settings.get (phazite::Settings::knownPlugins).contains (scanned.fileOrIdentifier); }));
     known.removeType (scanned);
 
-    auto& plugins = phazite::getPluginHost (*services.engineContext);
+    auto& plugins = phazite::getPluginHost (services.engineContext);
     plugins.setCrashedWhileLoading ({ "Crashed" });
     plugins.sendChangeMessage();
     CHECK (phazite::test::dispatchMessagesUntil (
         [&] { return services.settings.get (phazite::Settings::pluginsCrashedLoading) == juce::StringArray { "Crashed" }; }));
-    plugins.setCrashedWhileLoading ({}); // the host is the Engine's, which the other tests share
+    plugins.setCrashedWhileLoading ({}); // the host is the engine context's, which the other tests share
 
     // The library indexes on its own thread; it is done before the services go.
     CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 10000));
@@ -283,7 +286,7 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
 
 TEST_CASE ("A project that doesn't open leaves Open Recent, and startup makes a first project instead")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     const auto projects = temp.folder.getChildFile ("Projects");
 
@@ -296,7 +299,7 @@ TEST_CASE ("A project that doesn't open leaves Open Recent, and startup makes a 
     phazite::RecentProjects recent (settings);
     recent.add (broken);
 
-    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, projects, temp.folder.getChildFile ("Unsaved"));
+    phazite::ProjectSession session (engine, recent, projects, temp.folder.getChildFile ("Unsaved"));
     juce::StringArray errors;
     session.onError = [&errors] (const juce::String&, const juce::String& message) { errors.add (message); };
     session.openAtStartup();
@@ -312,13 +315,13 @@ TEST_CASE ("A project that doesn't open leaves Open Recent, and startup makes a 
 
 TEST_CASE ("A new project is untitled until its first save asks what to call it and where it goes")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     const auto projects = temp.folder.getChildFile ("Projects");
     const auto unsaved = temp.folder.getChildFile ("Unsaved");
     phazite::Settings settings;
     phazite::RecentProjects recent (settings);
-    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, projects, unsaved);
+    phazite::ProjectSession session (engine, recent, projects, unsaved);
     phazite::CommandRegistry registry;
     session.addCommands (registry);
 
@@ -341,8 +344,8 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     CHECK (recent.getProjects().isEmpty());
     CHECK (session.getExportFolder() == temp.folder.getChildFile ("Exports")); // not the untitled project's own folder
 
-    auto& edit = *getEdit (session.getContext());
-    session.getProject()->getPhaziteState().setProperty (phazite::schema::outline, "pop", &phazite::getSong (edit).getUndoManager());
+    auto& song = *findSong (session.getContext());
+    song.getState().setProperty (phazite::schema::outline, "pop", &song.getUndoManager());
     REQUIRE (session.getProject()->hasUnsavedChanges());
 
     // Save asks, from Documents/Phazite/Projects. Cancelled, the project stays untitled, its changes unsaved.
@@ -360,13 +363,13 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     CHECK (file.existsAsFile());
     CHECK_FALSE (session.isUntitled());
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
-    CHECK (phazite::getSong (edit).getUndoManager().canUndo());
+    CHECK (song.getUndoManager().canUndo());
     CHECK (recent.getProjects() == juce::Array<juce::File> { file });
     CHECK (session.getExportFolder() == file.getSiblingFile ("Renders"));
     CHECK (errors.isEmpty());
 
     // Later saves don't ask.
-    session.getProject()->getPhaziteState().setProperty (phazite::schema::outline, "rock", &phazite::getSong (edit).getUndoManager());
+    song.getState().setProperty (phazite::schema::outline, "rock", &song.getUndoManager());
     REQUIRE (registry.invoke ("project.save"));
     CHECK (suggested.size() == 2);
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
@@ -392,14 +395,14 @@ namespace
 juce::File leaveUntitledProject (const juce::File& folder, bool withAutosave)
 {
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), folder, "Untitled", error);
+    auto project = phazite::Project::create (folder, "Untitled", error);
     REQUIRE (project != nullptr);
     const auto file = project->getFile();
     juce::MemoryBlock autosave;
 
     if (withAutosave)
     {
-        project->getPhaziteState().setProperty (phazite::schema::outline, "pop", nullptr);
+        project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
         REQUIRE (project->autosave().wasOk());
         REQUIRE (phazite::Project::getAutosaveFile (file).loadFileAsData (autosave));
     }
@@ -418,7 +421,7 @@ juce::File leaveUntitledProject (const juce::File& folder, bool withAutosave)
 
 TEST_CASE ("At startup, Phazite offers to restore an untitled project it didn't close properly, and clears up the others")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     const auto projects = temp.folder.getChildFile ("Projects");
     const auto unsaved = temp.folder.getChildFile ("Unsaved");
@@ -430,7 +433,7 @@ TEST_CASE ("At startup, Phazite offers to restore an untitled project it didn't 
     const auto closed = leaveUntitledProject (unsaved.getChildFile ("2026-10-16 09-00-00"), false);
 
     {
-        phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, projects, unsaved);
+        phazite::ProjectSession session (engine, recent, projects, unsaved);
         juce::Array<juce::File> asked;
         session.askToRestore = [&asked] (const juce::File& file, bool untitled, std::function<void (bool)> callback)
         {
@@ -448,7 +451,7 @@ TEST_CASE ("At startup, Phazite offers to restore an untitled project it didn't 
         CHECK (session.getProject()->getFile() == crashed);
         CHECK (session.isUntitled());
         CHECK (session.getProject()->hasUnsavedChanges());
-        CHECK (session.getProject()->getPhaziteState()[phazite::schema::outline].toString() == juce::String ("pop"));
+        CHECK (session.getProject()->getSong().getState()[phazite::schema::outline].toString() == juce::String ("pop"));
     }
 
     // Closed without saving, it is gone too.
@@ -456,7 +459,7 @@ TEST_CASE ("At startup, Phazite offers to restore an untitled project it didn't 
 
     // Discarded, it goes, and startup goes on as usual: here, with a first project.
     const auto discarded = leaveUntitledProject (unsaved.getChildFile ("2026-10-16 11-00-00"), true);
-    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, projects, unsaved);
+    phazite::ProjectSession session (engine, recent, projects, unsaved);
     session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (false); };
     session.openAtStartup();
     CHECK_FALSE (discarded.getParentDirectory().getParentDirectory().exists());
@@ -465,16 +468,16 @@ TEST_CASE ("At startup, Phazite offers to restore an untitled project it didn't 
 
 #if JUCE_WINDOWS
     // A folder another Phazite holds is left alone, whatever is in it. (Linux's locks don't keep a process from itself.)
-    const auto held = phazite::UnsavedFolder::create (engine, temp.folder.getChildFile ("Held"));
+    const auto held = phazite::UnsavedFolder::create (temp.folder.getChildFile ("Held"));
     REQUIRE (held != nullptr);
-    CHECK (phazite::UnsavedFolder::findProjectToRestore (engine, temp.folder.getChildFile ("Held")) == juce::File());
+    CHECK (phazite::UnsavedFolder::findProjectToRestore (temp.folder.getChildFile ("Held")) == juce::File());
     CHECK (held->getFolder().isDirectory());
 #endif
 }
 
 TEST_CASE ("An untitled song's recordings survive a crash before its first autosave")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     phazite::test::TemporaryFolder temp;
     const auto projects = temp.folder.getChildFile ("Projects");
     const auto unsaved = temp.folder.getChildFile ("Unsaved");
@@ -486,7 +489,7 @@ TEST_CASE ("An untitled song's recordings survive a crash before its first autos
     const auto crashed = leaveUntitledProject (unsaved.getChildFile ("2026-10-21 10-00-00"), false);
     const auto take = phazite::test::writeSound (crashed.getSiblingFile ("Audio").getChildFile ("Take 1.wav"), 1.0);
 
-    phazite::ProjectSession session (engine, phazite::getUIBehaviour (engine), recent, projects, unsaved);
+    phazite::ProjectSession session (engine, recent, projects, unsaved);
     juce::Array<juce::File> asked;
     juce::StringArray notices;
     session.askToRestore = [&asked] (const juce::File& file, bool, std::function<void (bool)> callback)
@@ -500,18 +503,17 @@ TEST_CASE ("An untitled song's recordings survive a crash before its first autos
     // Offered and restored: the take is back in the song, at its start, as an unsaved change and no undo step.
     CHECK (asked == juce::Array<juce::File> { crashed });
     REQUIRE (session.getProject() != nullptr);
-    auto& edit = session.getProject()->getEdit();
+    const auto& song = session.getProject()->getSong();
     juce::Array<juce::File> played;
 
-    for (auto* track : te::getAudioTracks (edit))
-        for (auto* clip : track->getClips())
-            if (auto* audio = dynamic_cast<te::WaveAudioClip*> (clip))
-                played.add (audio->getOriginalFile());
+    for (const auto& clip : phazite::getClipStates (song))
+        if (phazite::isAudioState (clip))
+            played.add (phazite::getClipFile (song, clip));
 
     CHECK (played == juce::Array<juce::File> { take });
     CHECK (notices == juce::StringArray { "Recordings recovered" });
     CHECK (session.getProject()->hasUnsavedChanges());
-    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
+    CHECK_FALSE (song.getUndoManager().canUndo());
 }
 
 TEST_CASE ("The run marker tells a start after Phazite didn't close properly")
@@ -534,7 +536,7 @@ TEST_CASE ("The run marker tells a start after Phazite didn't close properly")
 TEST_CASE ("After a crash, Phazite asks how to open the last project, and can open it with its plug-ins off")
 {
     using AfterCrash = phazite::ProjectSession::AfterCrash;
-    auto& engine = phazite::test::getEngine();
+    auto& engine = phazite::test::getEngineContext();
     const phazite::test::TestPlugin testPlugin;
     phazite::test::TemporaryFolder temp;
     const auto projects = temp.folder.getChildFile ("Projects");
@@ -544,12 +546,14 @@ TEST_CASE ("After a crash, Phazite asks how to open the last project, and can op
 
     // The last project open, with a plug-in on its first track.
     juce::File file;
+    phazite::DeviceID plugin;
 
     {
         juce::String error;
-        auto project = phazite::Project::create (engine, projects, "Crashing", error);
+        auto project = phazite::Project::create (projects, "Crashing", error);
         REQUIRE (project != nullptr);
-        phazite::insertDevice (*te::getAudioTracks (project->getEdit())[0], phazite::test::TestPlugin::create (project->getEdit()));
+        auto& song = project->getSong();
+        plugin = phazite::test::TestPlugin::add (song, phazite::getTrackIDs (song).front());
         REQUIRE (project->save().wasOk());
         file = project->getFile();
     }
@@ -558,7 +562,7 @@ TEST_CASE ("After a crash, Phazite asks how to open the last project, and can op
 
     const auto openAfterCrash = [&] (AfterCrash choice, juce::StringArray& notices)
     {
-        auto session = std::make_unique<phazite::ProjectSession> (engine, phazite::getUIBehaviour (engine), recent, projects, unsaved);
+        auto session = std::make_unique<phazite::ProjectSession> (engine, recent, projects, unsaved);
         juce::Array<juce::File> asked;
         session->askAfterCrash = [&asked, choice] (const juce::File& projectFile, std::function<void (AfterCrash)> callback)
         {
@@ -571,29 +575,29 @@ TEST_CASE ("After a crash, Phazite asks how to open the last project, and can op
         return session;
     };
 
-    const auto getPlugin = [] (phazite::ProjectSession& session)
+    // How the plug-in plays in the session's project.
+    const auto getStatus = [plugin] (phazite::ProjectSession& session)
     {
         REQUIRE (session.getProject() != nullptr);
-        return dynamic_cast<te::ExternalPlugin*> (
-            te::getAudioTracks (session.getProject()->getEdit())[0]->pluginList.getPlugins()[0].get());
+        auto* playback = getSession (session.getContext());
+        REQUIRE (playback != nullptr);
+        return playback->getPlugins().getStatus (plugin);
     };
 
     // With its plug-ins off: the plug-in stays unloaded, and Phazite says so; the next project loads them again.
     {
         juce::StringArray notices;
         auto session = openAfterCrash (AfterCrash::openWithoutPlugins, notices);
-        auto* plugin = getPlugin (*session);
-        REQUIRE (plugin != nullptr);
-        CHECK (plugin->getAudioPluginInstance() == nullptr);
+        CHECK (getStatus (*session) == phazite::PluginInstances::Status::off);
+        CHECK (phazite::findPluginInstance (session->getProject()->getSong(), plugin) == nullptr);
         CHECK (notices == juce::StringArray { "Plug-ins off" });
     }
 
     {
         juce::StringArray notices;
         auto session = openAfterCrash (AfterCrash::open, notices);
-        auto* plugin = getPlugin (*session);
-        REQUIRE (plugin != nullptr);
-        CHECK (plugin->getAudioPluginInstance() != nullptr);
+        CHECK (getStatus (*session) == phazite::PluginInstances::Status::playing);
+        CHECK (phazite::findPluginInstance (session->getProject()->getSong(), plugin) != nullptr);
         CHECK (notices.isEmpty());
     }
 

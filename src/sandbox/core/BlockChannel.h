@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The channel a plug-in instance's blocks go through (docs/tracktion-migration.md, T3), in memory Phazite and the helper
-// share: the block Phazite's engine hands over (its audio, processed in place, its sidechain, its MIDI, its parameters'
-// changes at their samples, and where the song is), and the helper's answer in the same place. A block is one round
-// trip: the engine rings the helper's bell with the block's number and waits on its own bell until the helper rings it
-// with the same number, at most until a deadline; a block the helper answers late stays the helper's until it does.
-// Made by Phazite, opened by the helper. Real-time safe on both sides once made.
+// The channel a plug-in instance's blocks go through, in memory Phazite and the helper share: the block Phazite's
+// engine hands over (its audio, processed in place, its sidechain, its MIDI, its parameters' changes at their samples,
+// and where the song is), and the helper's answer in the same place. A block is one round trip: the engine rings the
+// helper's bell with the block's number and waits on its own bell until the helper rings it with the same number, at
+// most until a deadline; a block the helper answers late stays the helper's until it does. Made by Phazite, opened by
+// the helper. Real-time safe on both sides once made.
 #pragma once
 
 #include "SharedMemory.h"

@@ -3,13 +3,14 @@
 // unless something else is looped on purpose: from the song's start to the end of the bar its last clip ends
 // in, so the loop grows as clips go later. A time range selected in the playlist, or a section, can be looped
 // instead. The song keeps the loop, in beats, and where playback starts (Schema.h: loop, playStart), without undo steps,
-// which Tracktion's transport mirrors (model/mirror/internal/Mirror.h: reconcileTransport()), so that both stay on their
-// beats as the tempo changes.
+// so that both stay on their beats as the tempo changes. The transport is the song's playback session's
+// (model/playback/internal/PlaybackSession.h): without one, nothing plays.
 #pragma once
 
 #include "model/arrangement/internal/Selection.h"
+#include "model/base/Beats.h"
+#include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <optional>
 #include <utility>
@@ -18,121 +19,87 @@
 namespace phazite
 {
 class CommandRegistry;
+class PlaybackHost;
 struct Section;
 
 // Where the song ends: at the end of the bar its last clip ends in, as a song in FL Studio ends with the last bar that
 // has something in it, or at its start if it has no clips. Every clip on the song's tracks counts, muted or not, in
-// folders too; sections don't, since an outline can run longer than what is in it so far. Not Tracktion's
-// Edit::getLength(), which counts sections. Go to End goes here, and the song's loop ends here.
-te::TimePosition getSongEnd (const te::Edit&);
+// folders too; sections don't, since an outline can run longer than what is in it so far. Go to End goes here, and the
+// song's loop ends here.
+BeatPosition getSongEnd (const Song&);
 
 // The song as a loop: from its start to its end (getSongEnd()), and at least a bar long, so that a song without clips
 // loops its first bar.
-te::TimeRange getSongLoopRange (const te::Edit&);
+BeatRange getSongLoopBeats (const Song&);
 
 // Whether the loop is the song's, and follows it, rather than a range looped on purpose. Kept in the project.
-bool doesLoopFollowSong (const te::Edit&);
+bool doesLoopFollowSong (const Song&);
 
-// Loops the song, or a range of it. Both turn looping on.
-void loopSong (te::Edit&);
-void loopRange (te::Edit&, te::TimeRange);
+// Loops the song, or a range of it (an empty range changes nothing). Both turn looping on.
+void loopSong (Song&);
+void loopBeats (Song&, BeatRange);
 
 // The loop as a time line's ruler shows and changes it, in song beats: where it is while playback loops (nothing while
 // it doesn't), and a range to loop, which turns looping on (an empty range changes nothing).
-std::optional<std::pair<double, double>> getLoopBeatRange (const te::Edit&);
-void loopBeatRange (te::Edit&, double startBeat, double endBeat);
+std::optional<std::pair<double, double>> getLoopBeatRange (const Song&);
+void loopBeatRange (Song&, double startBeat, double endBeat);
 
-// What the loop goes around while it is on: the song's loop range while the loop follows the song, or else the range
-// looped on purpose, in song beats.
-BeatRange getLoopBeats (const te::Edit&);
+// What the loop goes around: the song's loop range while the loop follows the song, or else the range looped on purpose,
+// in song beats; and the same while looping is on, nothing while it is off (what plays looped).
+BeatRange getLoopBeats (const Song&);
+std::optional<BeatRange> getLoop (const Song&);
 
 // What the loop commands do. Looping is on or off; turning it on puts the loop around the song again if it follows
 // the song. The song is looping when looping is on and the loop follows it.
-bool isLoopOn (const te::Edit&);
-void toggleLoop (te::Edit&);
-bool isLoopingSong (const te::Edit&);
+bool isLoopOn (const Song&);
+void toggleLoop (Song&);
+bool isLoopingSong (const Song&);
 
 // Loops the time range selected in the playlist, or the song when none is.
-void loopSelection (te::Edit&, const RangeSelection&);
+void loopSelection (Song&, const RangeSelection&);
 
 // Loops around the sections, from the earliest start to the latest end. Nothing without sections.
-void loopSections (te::Edit&, const std::vector<Section>&);
+void loopSections (Song&, const std::vector<Section>&);
 
 //==============================================================================
 // Where playback starts: where the playhead was last put (a click in a ruler, Home or End), or the song's start when a
 // project opens. Stopping goes back there, as in FL Studio and Ableton Live, so that a part can be heard again and
 // again while it is tweaked; pausing leaves the playhead where it is. The song keeps it in beats.
-te::TimePosition getPlayStart (const te::Edit&);
-
-BeatPosition getPlayStartBeat (const Song&); // the same, in the song's beats
+BeatPosition getPlayStartBeat (const Song&);
 
 // Puts the playhead somewhere, as a click in a ruler does: playback starts there from now on (and goes on from there,
 // if it is playing).
-void movePlayhead (te::Edit&, te::TimePosition);
+void movePlayhead (Song&, BeatPosition);
 
 // Home: puts the playhead at the song's start, as a click in a ruler would (movePlayhead()): playback starts there.
-void goToStart (te::Edit&);
+void goToStart (Song&);
 
 // End: moves the playhead to the song's end (getSongEnd()), as a click in a ruler would: playback starts there.
-void goToEnd (te::Edit&);
+void goToEnd (Song&);
 
 // Space: plays from where playback starts, or stops and goes back there. A recording that these stop is kept as one
 // undo step, "Record" (Recording.h).
-void playOrStop (te::Edit&);
+void playOrStop (Song&);
 
 // Plays from where the playhead is, or stops it where it is, as Shift+Space does in Ableton Live.
-void playOrPause (te::Edit&);
+void playOrPause (Song&);
 
 // Stops playback and puts the playhead back where playback starts.
-void stopAndReturn (te::Edit&);
+void stopAndReturn (Song&);
 
-// Whether the song plays, and where its playhead is: Tracktion's transport, or Phazite's engine while it plays the project
-// (model/playback/internal/PlaybackSession.h; docs/tracktion-migration.md, T2), which every function here uses.
-bool isSongPlaying (const te::Edit&);
-te::TimePosition getPlayheadTime (const te::Edit&);
+// Stops playback where it is; a recording it stops is kept as one undo step, "Record" (Recording.h).
+void stopPlaying (Song&);
 
-// The same in the song's beats, for the song's functions (the Edit that mirrors it while T6 lasts: findEdit()).
+// Whether the song plays, and where its playhead is, in its beats: its session's, or where playback starts without one.
+bool isSongPlaying (const Song&);
 BeatPosition getPlayheadBeat (const Song&);
 
-// The Low Latency switch, for the session (model/engine/internal/EngineSetup.h: setLowLatency()).
-bool isLowLatencyOn (const te::Edit&);
-void toggleLowLatency (te::Edit&);
+// The Low Latency switch (PlaybackHost.h: setLowLatency()).
+bool isLowLatencyOn (const PlaybackHost&);
+void toggleLowLatency (PlaybackHost&);
 
 //==============================================================================
-// Follows where an Edit's song ends, as clips are added, moved, trimmed or deleted and the tempo changes: keeps the
-// loop around the song while the loop follows it, and stops playback that doesn't loop at the song's end, rather
-// than playing on into silence (as Logic does), going back to where playback starts; and puts the song's loop back
-// after a recording, however it stopped. Each open project has one.
-class SongFollower : private juce::ValueTree::Listener,
-                     private juce::AsyncUpdater,
-                     private juce::Timer
-{
-public:
-    explicit SongFollower (te::Edit&);
-    ~SongFollower() override;
-
-private:
-    te::Edit& edit;
-    juce::ValueTree editState;
-    te::TimePosition songEnd;                     // where the song's loop ends: getSongEnd(), or a bar in for a song without clips
-    std::optional<te::TimePosition> lastPosition; // while playing without a loop: where the playhead was last time
-
-    void changed (const juce::ValueTree&);
-    void handleAsyncUpdate() override;
-    void timerCallback() override; // stops playback at the song's end
-    void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&) override { changed (tree); }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override { changed (child); }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int) override { changed (child); }
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SongFollower)
-};
-
-//==============================================================================
-// The transport's commands, for the selection manager's Edit: Play / Stop, Play / Pause, Go to Start, Go to End and Low
-// Latency.
-void addTransportCommands (CommandRegistry&, Selection&);
-
-// The loop's commands: Loop (on or off), Loop Selection (the time range selected in the playlist), Loop
-// Section (the selected sections) and Loop the Song.
+// The transport's commands, and the loop's.
+void addTransportCommands (CommandRegistry&, Selection&, PlaybackHost&);
 void addLoopCommands (CommandRegistry&, Selection&, RangeSelection&);
 } // namespace phazite

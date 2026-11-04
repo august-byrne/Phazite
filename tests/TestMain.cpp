@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's test runner: doctest (MIT, bundled with Tracktion Engine) inside a JUCE environment.
+// Phazite's test runner: doctest (MIT, external/doctest) inside a JUCE environment.
 // Run all tests with `ctest --preset <preset>`, or run the executable directly for doctest's options,
 // e.g. `phazite_tests --test-case="*project*"` or `phazite_tests --help`.
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "TestHelpers.h"
-#include "app/SandboxedEditor.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/internal/EngineContext.h"
-#include "model/engine/internal/EngineSetup.h"
 #include "model/plugins/internal/PluginHost.h"
 
 #include <cstdlib>
@@ -25,7 +23,6 @@
 
 namespace
 {
-te::Engine* testEngine = nullptr;
 phazite::EngineContext* testEngineContext = nullptr;
 juce::File systemTemporaryFolder;
 
@@ -63,36 +60,7 @@ void keepTimerResolution()
 #endif
 }
 
-// Phazite's settings storage, kept in a temporary folder instead of the user's settings folder.
-class TestPropertyStorage final : public phazite::PropertyStorage
-{
-public:
-    explicit TestPropertyStorage (juce::File folder)
-        : phazite::PropertyStorage ("PhaziteTests"),
-          root (std::move (folder))
-    {
-    }
-
-    juce::File getAppCacheFolder() override { return getFolder ("Cache"); }
-    juce::File getAppPrefsFolder() override { return getFolder ("Settings"); }
-
-private:
-    juce::File root;
-
-    juce::File getFolder (const char* name) const
-    {
-        auto folder = root.getChildFile (name);
-        folder.createDirectory();
-        return folder;
-    }
-};
 } // namespace
-
-te::Engine& phazite::test::getEngine()
-{
-    jassert (testEngine != nullptr);
-    return *testEngine;
-}
 
 phazite::EngineContext& phazite::test::getEngineContext()
 {
@@ -129,34 +97,26 @@ int main (int argc, char** argv)
     // Before anything asks for the temporary folder (getSystemTemporaryFolder() says why).
     const auto temporaryFolder = useTemporaryFolderOfOwn();
 
-    // Tracktion's Engine and Edits expect JUCE's message manager, as in the app. The tests run on this
-    // thread, which becomes the message thread.
+    // The model expects JUCE's message manager, as in the app. The tests run on this thread, which becomes the message
+    // thread.
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
 
-    const auto settingsFolder = temporaryFolder.getChildFile ("Settings");
     int result = 0;
 
     {
         // Audio is processed on one thread only, the one that calls the hosted device: the real-time
         // audit attributes everything that happens during processing to that thread.
-        auto engine = phazite::createEngine ({ .applicationName = "PhaziteTests",
-                                               .behaviour = { .numAudioThreads = 1 },
-                                               .propertyStorage = std::make_unique<TestPropertyStorage> (settingsFolder) });
-        testEngine = engine.get();
-        const auto engineContext = phazite::createEngineContext (*engine);
+        const auto engineContext = phazite::createEngineContext ({ .numAudioThreads = 1 });
         testEngineContext = engineContext.get();
 
-        // Plug-ins in helpers start the tests' helper, which hosts the tests' stand-ins too (host/TestPlugins.h), with their
-        // editors in the app's windows.
+        // Plug-ins in helpers start the tests' helper, which hosts the tests' stand-ins too (host/TestPlugins.h).
         phazite::getPluginHost (*engineContext).setHelperProgram (juce::File (PHAZITE_TEST_HOST));
-        phazite::useSandboxedEditors (phazite::getPluginHost (*engineContext));
 
         doctest::Context context (argc, argv);
         result = context.run();
 
         testEngineContext = nullptr;
-        testEngine = nullptr;
-    } // the Engine is destroyed here, before JUCE shuts down
+    } // the engine context is destroyed here, before JUCE shuts down
 
     temporaryFolder.deleteRecursively();
     return result;

@@ -77,7 +77,7 @@ private:
     juce::TextButton reverseButton { "Reverse" }, followButton { "Follow tempo" };
     std::unique_ptr<SongGesture> fieldDrag; // while a field is dragged: the drag's one undo step
     std::unique_ptr<Waveform> waveform;
-    juce::TimedCallback preparingCheck; // while Tracktion prepares the clip's audio, to show it once it is ready
+    juce::TimedCallback preparingCheck; // while Phazite renders the clip's audio, to show it once it is ready
 
     //==============================================================================
     void projectChanged() override; // another project, or none

@@ -5,7 +5,7 @@
 // (MixerModel.h) show them, turn them on and off, move and remove them and give their mixes and key controls (a
 // container's are its first macros); and its macros are modulators (model/modulation/ModulationModel.h). Each function
 // takes the open project's context, and gives nothing, or does nothing, for an ID of something that is gone. Changes
-// are undo steps of their own, named as each says. The Tracktion side is internal/Containers.h.
+// are undo steps of their own, named as each says. The model's side, by the song, is internal/Containers.h.
 #pragma once
 
 #include "MixerModel.h"

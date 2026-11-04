@@ -2,7 +2,7 @@
 # For CI: each sanitizer report in a test run's output (the first five annotations) as GitHub annotations. The
 # annotations' API serves them without a login, unlike the log, and the problem matchers' annotations of single frames stop
 # at ten a step. A report runs from its WARNING or ERROR line to its SUMMARY line. GitHub keeps an annotation's first 4096
-# characters only, so paths lose the runner's checkout folder (and Tracktion's and JUCE's, their modules folder), frames
+# characters only, so paths lose the runner's checkout folder (and JUCE's, its modules folder), frames
 # their module offsets and build IDs, and each stack its frames after the first ten (the message loop and std::function's
 # insides, as a rule), so that both stacks of a race fit.
 #
@@ -85,7 +85,7 @@ awk '
     inReport {
         line = $0
         gsub("/home/runner/work/Phazite/Phazite/", "", line)
-        gsub("external/tracktion_engine/modules/", "", line)
+        gsub("external/JUCE/modules/", "", line)
         sub(/ \(BuildId: [0-9a-f]+\)$/, "", line)
         sub(/ \([^ ()]*\+0x[0-9a-f]+\)$/, "", line)
 

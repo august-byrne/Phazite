@@ -95,7 +95,7 @@ AudioSettings::AudioSettings (EngineContext& e, const ProjectContext& context)
     : engine (e),
       projectContext (context),
       // No inputs to 512 inputs, 1 to 512 outputs, as stereo pairs; nothing behind a button. MIDI inputs are in their own
-      // tab, because Tracktion (not JUCE's device manager) opens them.
+      // tab, because Phazite opens them itself (model/engine/internal/AudioIO.h), not JUCE's device manager.
       selector (e.getAudioDeviceManager(), 0, 512, 1, 512, false, false, true, false)
 {
     setTitle ("Audio");

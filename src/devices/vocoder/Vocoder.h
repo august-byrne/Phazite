@@ -51,7 +51,7 @@ public:
         brightness,
         stereo, // the bands sent left and right in turn
         output, // decibels
-        mix     // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
+        mix     // applied by its runner (DeviceInfo.h, mixParameterID)
     };
 
     enum class Carrier

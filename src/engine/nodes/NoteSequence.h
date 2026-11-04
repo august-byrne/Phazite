@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What a track's MIDI clips play, as Phazite's engine plays it (docs/tracktion-migration.md, T2): the notes and controller
-// events of every clip on the track, in beats from the song's start, each clip's cut to where the clip is. Built by the model
-// from the song (model/playback/), never changed once built, and shared by the plans that play it.
+// What a track's MIDI clips play, as Phazite's engine plays it: the notes and controller events of every clip on the
+// track, in beats from the song's start, each clip's cut to where the clip is. Built by the model from the song
+// (model/playback/), never changed once built, and shared by the plans that play it.
 #pragma once
 
 #include "devices/core/Processor.h"

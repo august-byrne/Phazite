@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The services the app owns and hands to what needs them: what Phazite keeps outside any project (docs/design.md,
-// section 24). Made right after the Engine, and gone just before it: after the window and the project's session.
+// section 24). Made right after the engine context they play on, which outlives them, and gone just before it: after the
+// window and the project's session.
 #pragma once
 
-#include "model/base/internal/Tracktion.h"
 #include "model/engine/EngineContext.h"
 #include "model/engine/Preview.h"
 #include "services/Library.h"
@@ -26,11 +26,12 @@ struct AppServicesOptions
 
 struct AppServices
 {
-    explicit AppServices (te::Engine&, AppServicesOptions = {});
+    // On the engine context the app makes as it starts (src/app/Main.cpp), or the tests' one.
+    explicit AppServices (EngineContext&, AppServicesOptions = {});
 
     // In this order: each may use those before it. The browser's library indexes Phazite Sounds' folder, and writes its
-    // settings until the window that shows it goes; the previewer's Edit goes before the Engine.
-    std::unique_ptr<EngineContext> engineContext;       // the Engine as the UI reaches it
+    // settings until the window that shows it goes; what the previewer plays goes before the engine context.
+    EngineContext& engineContext;                       // the engine as the UI reaches it
     std::unique_ptr<juce::PropertiesFile> settingsFile; // Phazite's own (Settings::getFileOptions()), or none in memory
     Settings settings;
     RecentProjects recentProjects;
@@ -39,13 +40,13 @@ struct AppServices
     std::unique_ptr<Previewer> previewer; // the browser's
 
     // The plug-ins the scan found, and those that crashed their helpers as they loaded, kept off, at the next start too:
-    // read from the settings as the services start, and kept there as they change.
+    // read from the settings into the engine context's plug-in host as the services start, and kept there as they change.
     struct PluginLists;
     std::unique_ptr<PluginLists> pluginLists;
 
-    // Opens the audio device and the MIDI inputs as the settings saved them (or as a first run chooses), and keeps them
-    // there from then on as they change (model/engine/internal/AudioIO.h): the app's, as it starts. Tests open devices of
-    // their own, and their services save none.
+    // Opens the audio device and the MIDI inputs as the settings saved them (or as a first run chooses), with the
+    // recordings' options, and keeps them there from then on as they change (model/engine/internal/AudioIO.h): the app's,
+    // as it starts. Tests open devices of their own, and their services save none.
     void openAudioDevices();
     struct DeviceSettings;
     std::unique_ptr<DeviceSettings> deviceSettings;

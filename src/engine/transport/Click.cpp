@@ -9,7 +9,7 @@ juce::AudioBuffer<float> makeClick (double sampleRate, bool accent)
 {
     // Two partials a little out of tune with each other, as a woodblock's are, dying away in a few milliseconds, after
     // an attack of half a millisecond so that it doesn't start with a step.
-    // About as loud as Tracktion's clicks were (their peaks near -4.5 and -7 dBFS), a bar's first clearly louder.
+    // Peaks near -4.5 and -7 dBFS, a bar's first clearly louder.
     constexpr double seconds = 0.05, attack = 0.0005;
     const auto decay = accent ? 0.012 : 0.008;
     const auto frequency = accent ? 1760.0 : 1320.0;

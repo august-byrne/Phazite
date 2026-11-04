@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <functional>
-#include <map>
 
 namespace phazite
 {
@@ -29,63 +28,13 @@ namespace
         return (std::uint64_t) (juce::int64) song.getProperty (schema::nextID, (juce::int64) 0);
     }
 
-    // Where the Edit's state holds its song, on its root, which is never saved (a project file is the song alone).
-    const juce::Identifier songHolder { "phaziteSong" };
-
-    // Each Edit that holds a song, by its song (findEdit()), while it lives.
-    std::map<const Song*, te::SafeSelectable<te::Edit>>& getEdits()
-    {
-        static std::map<const Song*, te::SafeSelectable<te::Edit>> edits;
-        return edits;
-    }
 } // namespace
-
-Song& getSong (const te::Edit& edit)
-{
-    auto root = edit.state;
-
-    if (auto* held = dynamic_cast<Song*> (root[songHolder].getObject()))
-        return *held;
-
-    auto* made = new Song (root.getOrCreateChildWithName (schema::PHAZITE, nullptr));
-
-    // Tracktion's items take their IDs from the same numbers while it mirrors the song (Song::makeID()).
-    made->setTracktionIDs ([&mutableEdit = const_cast<te::Edit&> (edit)] { return mutableEdit.createNewItemID().getRawID(); });
-    root.setProperty (songHolder, juce::var (made), nullptr);
-    std::erase_if (getEdits(), [] (const auto& held) { return held.second.get() == nullptr; }); // those gone
-    getEdits()[made] = &const_cast<te::Edit&> (edit);
-    return *made;
-}
-
-te::Edit* findEdit (const Song& song)
-{
-    const auto found = getEdits().find (&song);
-    return found != getEdits().end() ? found->second.get() : nullptr;
-}
-
-juce::ValueTree findPhaziteState (const te::Edit& edit)
-{
-    return edit.state.getChildWithName (schema::PHAZITE);
-}
 
 // Here, with the other counting of IDs and the name of the count (schema::nextID), rather than in Song.cpp.
 std::uint64_t Song::makeID()
 {
     // From 1: no item's ID is 0.
-    auto id = std::max ((std::uint64_t) 1, readNextID (state));
-
-    // While Tracktion mirrors the song, its next ID, brought past the song's (a project whose last items went before it was
-    // saved), so that Tracktion never gives what the song has given.
-    if (takeTracktionID != nullptr)
-    {
-        auto tracktions = takeTracktionID();
-
-        while (tracktions < id)
-            tracktions = takeTracktionID();
-
-        id = tracktions;
-    }
-
+    const auto id = std::max ((std::uint64_t) 1, readNextID (state));
     state.setProperty (schema::nextID, (juce::int64) (id + 1), nullptr);
     return id;
 }
@@ -95,22 +44,12 @@ std::uint64_t findNextID (const juce::ValueTree& song)
     return std::max (readNextID (song), findLargestID (song) + 1);
 }
 
-void countIDs (te::Edit& edit)
+void countIDs (Song& song)
 {
-    auto song = getSong (edit).getState();
-    const auto next = findNextID (song);
+    auto state = song.getState();
 
-    if (next != readNextID (song))
-        song.setProperty (schema::nextID, (juce::int64) next, nullptr);
-
-    // Tracktion's next is past every ID in its state (it counts from the largest it finds, and the song's come from it), so
-    // only a song that counted further needs it brought on.
-    const auto ids = te::EditItemID::findAllIDs (edit.state);
-    const auto largest = ids.empty() ? std::uint64_t (0) : std::max_element (ids.begin(), ids.end())->getRawID();
-
-    if (largest + 1 < next)
-        for (auto id = edit.createNewItemID().getRawID(); id + 1 < next;)
-            id = edit.createNewItemID().getRawID();
+    if (const auto next = findNextID (state); next != readNextID (state))
+        state.setProperty (schema::nextID, (juce::int64) next, nullptr);
 }
 
 CopiedIDs giveNewIDs (Song& song, juce::ValueTree& copy)

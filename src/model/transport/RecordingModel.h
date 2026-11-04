@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Recording audio as the track headers, the mixer, the transport bar and the playlist reach it (docs/design.md, section 17;
-// roadmap step 3.4), by IDs and plain values (no Tracktion here; internal/AudioRecorder.h is its Tracktion side).
+// roadmap step 3.4), by IDs and plain values (internal/AudioRecorder.h is the model's side of it).
 //
 // A track records audio while it is armed, from its input: one of the audio device's inputs, alone (mono) or a pair
 // (stereo). Only a track without an instrument (not a folder or a return) can be armed: a track with one plays what is

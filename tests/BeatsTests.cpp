@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's own beats and IDs (src/model/base/Beats.h and IDs.h), which the model's public functions and the UI pass
-// instead of Tracktion's, and their conversions in the model's prelude.
+// Phazite's own beats and IDs (src/model/base/Beats.h and IDs.h), which the model's functions and the UI pass.
 #include "TestHelpers.h"
-#include "model/base/internal/Tracktion.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/project/internal/Project.h"
 
 #include <unordered_set>
@@ -74,21 +73,14 @@ TEST_CASE ("A beat range runs from its start to its end, never backwards")
     CHECK (bar.getIntersectionWith (BeatRange (BeatPosition::fromBeats (9.0), BeatPosition::fromBeats (10.0))).isEmpty());
 }
 
-TEST_CASE ("The model turns Phazite's beats and IDs into Tracktion's and back")
+TEST_CASE ("A song's items have IDs, each kind its own type, which order and hash as numbers")
 {
-    const BeatRange range { BeatPosition::fromBeats (1.5), BeatPosition::fromBeats (3.25) };
-    const auto inTracktion = phazite::toTracktion (range);
-    CHECK (inTracktion.getStart().inBeats() == doctest::Approx (1.5));
-    CHECK (inTracktion.getEnd().inBeats() == doctest::Approx (3.25));
-    CHECK (phazite::fromTracktion (inTracktion) == range);
-    CHECK (phazite::fromTracktion (phazite::toTracktion (BeatDuration::fromBeats (0.75))) == BeatDuration::fromBeats (0.75));
-
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto* track = te::getAudioTracks (*edit)[0];
-    REQUIRE (track != nullptr);
-    const auto id = phazite::getTrackID (*track);
+    auto song = phazite::createSong();
+    const auto tracks = phazite::getTrackIDs (*song);
+    REQUIRE (tracks.size() == 1);
+    const auto id = tracks.front();
     CHECK (id.isValid());
-    CHECK (phazite::toTracktion (id) == track->itemID);
+    CHECK (phazite::findTrackState (*song, id).isValid());
     CHECK_FALSE (phazite::TrackID().isValid());
 
     // Each kind of item has an ID type of its own; IDs order and hash as numbers.

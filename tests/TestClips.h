@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // MIDI clips, audio clips and notes made through the model, by the song and IDs, for tests that build a song without
-// TestSong.h (docs/tracktion-migration.md, T6 step 3): the song holds its clips and notes itself.
+// TestSong.h: the song holds its clips and notes itself.
 #pragma once
 
 #include "TestHelpers.h"

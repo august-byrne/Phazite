@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // How Phazite's own threads that play audio get the audio device's priority, never raising the whole process's: the
-// engine's workers (engine/core/Workers.h) and the helpers' threads that play plug-ins (docs/tracktion-migration.md, T3).
-// On Windows, the highest priority, and MMCSS's "Pro Audio" task joined from the thread itself, as JUCE's WASAPI thread
+// engine's workers (engine/core/Workers.h) and the helpers' threads that play plug-ins (host/core/Instance.h). On
+// Windows, the highest priority, and MMCSS's "Pro Audio" task joined from the thread itself, as JUCE's WASAPI thread
 // does (JUCE's real-time threads put the whole process in the real-time priority class there, or the high one without
-// an administrator's rights, every thread of the app above other programs'); elsewhere JUCE's real-time threads, or
-// the highest priority where the system allows no real-time threads.
+// an administrator's rights, every thread of the app above other programs'); elsewhere JUCE's real-time threads, or the
+// highest priority where the system allows no real-time threads.
 #pragma once
 
 #include <juce_core/juce_core.h>

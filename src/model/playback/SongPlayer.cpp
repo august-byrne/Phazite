@@ -2,20 +2,21 @@
 #include "internal/SongPlayer.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "internal/PlaybackHost.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
-#include "model/devices/internal/DrumSamplerPlugin.h"
-#include "model/devices/internal/WavetablePlugin.h"
-#include "model/engine/internal/EngineSetup.h"
-#include "model/mirror/internal/Bridge.h"
+#include "model/devices/internal/DrumKit.h"
+#include "model/devices/internal/Wavetables.h"
+#include "model/engine/AudioFiles.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/plugins/internal/SandboxedProcessor.h"
 #include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Metronome.h"
@@ -112,15 +113,10 @@ namespace
     };
 } // namespace
 
-SongPlayer::SongPlayer (te::Edit& e)
-    : edit (e),
-      pluginGestures (std::make_shared<std::function<void (const ParameterRef&, bool)>>())
+SongPlayer::SongPlayer (Song& s, PluginInstances* p)
+    : song (s),
+      plugins (p)
 {
-}
-
-void SongPlayer::setPluginGestureListener (std::function<void (const ParameterRef&, bool starting)> listener)
-{
-    *pluginGestures = std::move (listener);
 }
 
 void SongPlayer::letGoOfPlugins()
@@ -136,7 +132,7 @@ void SongPlayer::makePluginsAnew()
                    { return dynamic_cast<SandboxedProcessor*> (&device.second->getRunner().getProcessor()) != nullptr; });
 }
 
-std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximumBlockSize, bool isRender,
+std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximumBlockSize, const std::optional<Live>& live,
                                                    const std::optional<RenderOf>& of)
 {
     // Another rate or block size: everything that plays is made anew for it.
@@ -156,24 +152,22 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::vector<engine::TempoMap::Tempo> tempos;
     std::vector<engine::TempoMap::TimeSignature> signatures;
 
-    for (const auto& change : getTempoChanges (getSong (edit)))
+    for (const auto& change : getTempoChanges (song))
         tempos.push_back ({ change.beat.inBeats(), change.bpm });
 
-    for (const auto& change : getTimeSignatureChanges (getSong (edit)))
+    for (const auto& change : getTimeSignatureChanges (song))
         signatures.push_back ({ change.beat.inBeats(), change.signature.numerator, change.signature.denominator });
 
     plan->tempo = engine::TempoMap (std::move (tempos), std::move (signatures), sampleRate);
 
-    if (! isRender && isLoopOn (edit))
-    {
-        const auto loop = getLoopBeats (edit);
-        plan->loop = engine::Plan::BeatRange { loop.getStart().inBeats(), loop.getEnd().inBeats() };
-    }
+    if (const auto loop = live.has_value() ? getLoop (song) : std::nullopt)
+        plan->loop = engine::Plan::BeatRange { loop->getStart().inBeats(), loop->getEnd().inBeats() };
 
-    plan->metronome = ! isRender && isMetronomeOn (edit);
+    plan->metronome = live.has_value() && isMetronomeOn (song);
 
     // Each track that holds clips, through its devices.
-    lowLatency = ! isRender && isLowLatency (edit.engine);
+    lowLatency = live.has_value() && live->lowLatency;
+    armed = live.has_value() ? live->armed : std::set<TrackID>();
     used.clear();
     usedFiles.clear();
     usedRegions.clear();
@@ -234,7 +228,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         const auto* only = of.has_value() && channel.id == of->channel && of->devices.has_value() ? &*of->devices : nullptr;
         const auto deviceIDs = addDevices (*plan, places, channel, strip, channel.state, frozen, only);
 
-        if (! isRender && ! strip.hasInstrument && ! isFolderState (channel.state) && ! isReturnState (channel.state))
+        if (live.has_value() && ! strip.hasInstrument && ! isFolderState (channel.state) && ! isReturnState (channel.state))
             strip.inputChannels = getHeardInput (channel.state);
 
         addFaderAutomation (strip, channel.state, false);
@@ -269,7 +263,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     if (! of.has_value())
     {
-        const auto masterState = findPhaziteState (edit).getChildWithName (schema::MASTER);
+        const auto masterState = song.getState().getChildWithName (schema::MASTER);
         const auto masterDeviceIDs = addDevices (*plan, places, {}, master, masterState);
         addFaderAutomation (master, masterState, true);
         addModulation (master, masterState, masterDeviceIDs);
@@ -317,8 +311,8 @@ std::shared_ptr<engine::StripState> SongPlayer::getStrip (std::int64_t id)
 
 std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree& deviceState)
 {
-    // A plug-in: the instance Tracktion loaded, which a render holds while it plays a block, the engine skipping it then
-    // (SandboxedProcessor.h).
+    // A plug-in: its instance in its helper (model/plugins/internal/PluginInstances.h), which a render holds while it
+    // plays a block, the engine skipping it then (SandboxedProcessor.h).
     if (deviceState[schema::deviceType].toString() == schema::deviceIsPlugin)
         return getPluginDevice (deviceState);
 
@@ -345,11 +339,9 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
 
 std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::ValueTree& deviceState)
 {
-    // One that is loaded (not one missing on this computer), in its helper (T3), kept by its ID while Tracktion keeps the
-    // same plug-in: through its channel, with its mix as the engine's.
-    const auto plugin = te::findPluginForID (edit, toTracktion (getDeviceID (deviceState)));
-    auto* external = dynamic_cast<te::ExternalPlugin*> (plugin.get());
-    auto* sandboxed = external != nullptr ? dynamic_cast<SandboxedInstance*> (external->getAudioPluginInstance()) : nullptr;
+    // One that is loaded (not one missing on this computer), in its helper, kept by its ID while the song's instances keep
+    // the same instance: through its channel, with its mix as the engine's.
+    const auto sandboxed = plugins != nullptr ? plugins->find (getDeviceID (deviceState)) : nullptr;
 
     if (sandboxed == nullptr)
         return nullptr;
@@ -358,26 +350,16 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::Val
     auto& node = devices[id];
     const auto* playing = node != nullptr ? dynamic_cast<const SandboxedProcessor*> (&node->getRunner().getProcessor()) : nullptr;
 
-    if (playing == nullptr || &playing->getPlugin() != plugin.get() || &playing->getInstance() != sandboxed)
+    if (playing == nullptr || &playing->getInstance() != sandboxed.get())
     {
-        auto processor = std::make_unique<SandboxedProcessor> (*plugin, *sandboxed);
+        auto processor = std::make_unique<SandboxedProcessor> (sandboxed);
         const auto* made = processor.get();
         node = std::make_shared<engine::DeviceNode> (made->getInfo(), std::move (processor));
         node->getRunner().prepare (preparedRate, preparedBlockSize);
 
-        // Its parameters' values set by hand, which its modulation moves from (takeValueSetByHand() keeps them); and
-        // what its own window grabs, for the automation written by hand (Tracktion names its parameters by their
-        // places).
-        for (const auto* parameter : plugin->getAutomatableParameters())
-            if (const auto index = made->findParameter (parameter->paramID); index >= 0)
-                node->setValue (index, parameter->getCurrentExplicitValue());
-
-        sandboxed->onGesture =
-            [listener = std::weak_ptr (pluginGestures), device = getDeviceID (deviceState)] (int parameter, bool starting)
-        {
-            if (const auto told = listener.lock(); told != nullptr && *told != nullptr)
-                (*told) ({ device, juce::String (parameter) }, starting);
-        };
+        // Its parameters' values set by hand, which its modulation moves from (takeValueSetByHand() keeps them).
+        for (int i = 0; i < (int) sandboxed->getParameterInfos().size(); ++i)
+            node->setValue (i, sandboxed->getParameterValue (i));
     }
 
     if (const auto mix = devices::findParameter (node->getDeviceInfo(), devices::mixParameterID); mix >= 0)
@@ -394,18 +376,12 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
 {
     std::vector<std::int64_t> ids;
 
-    // While Low Latency is on, a device that looks ahead lets the sound through as it comes (model/engine/internal/EngineSetup.h).
+    // While Low Latency is on, a device that looks ahead lets the sound through as it comes (PlaybackHost.h).
     const auto lowLatencyLimit = (int) (lowLatencyLimitSeconds * preparedRate);
 
     // A frozen track's devices before its freeze point are in its frozen file.
     const auto isFrozen = [this, skipFrozen] (const juce::ValueTree& state)
-    {
-        if (skipFrozen)
-            if (const auto plugin = te::findPluginForID (edit, toTracktion (getDeviceID (state))))
-                return isFrozenDevice (*plugin);
-
-        return false;
-    };
+    { return skipFrozen && isFrozenDevice (song, getDeviceID (state)); };
 
     const auto add = [&] (const juce::ValueTree& deviceState)
     {
@@ -493,7 +469,7 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
     // Each track's, bus's and return's: where it goes (the bus it is in, or the master), and what it takes in.
     std::vector<ChannelInfo> infos;
 
-    for (const auto& state : getTrackStates (edit))
+    for (const auto& state : getTrackStates (song))
     {
         if (isFolderState (state) && ! state.hasProperty (schema::channelFader))
             continue; // a plain folder's VCA turns its tracks (setChannel())
@@ -647,7 +623,7 @@ void SongPlayer::setModulatorValues (engine::ModulatorNode& node, const juce::Va
         return;
     }
 
-    // Those set by hand, the others at Tracktion's defaults; its steps; and its switch.
+    // Those set by hand, the others at their defaults (devices/modulation/Modulators.h); its steps; and its switch.
     const auto parameters = devices::getModulatorParameters (*node.getKind());
     const auto values = state.getChildWithName (schema::VALUES);
 
@@ -800,7 +776,7 @@ void SongPlayer::readCurves()
     curves.clear();
     faders.clear();
 
-    for (const auto& state : getCurveStates (edit))
+    for (const auto& state : getCurveStates (song))
     {
         std::vector<engine::CurvePoint> points;
 
@@ -854,11 +830,11 @@ void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& de
 
     if (type == devices::DrumSampler::typeID)
         for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-            loadPadSound (static_cast<devices::DrumSampler&> (processor), edit, sounds, pad);
+            loadPadSound (static_cast<devices::DrumSampler&> (processor), song, sounds, pad);
 
     if (type == devices::WavetableSynth::typeID)
         for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
-            loadOscillatorTable (static_cast<devices::WavetableSynth&> (processor), edit, sounds, osc);
+            loadOscillatorTable (static_cast<devices::WavetableSynth&> (processor), song, sounds, osc);
 }
 
 void SongPlayer::setChannel (const juce::ValueTree& channelState, bool isMaster)
@@ -882,7 +858,7 @@ void SongPlayer::updateAudibility()
 {
     // A track is heard unless it is muted, or in a muted folder, or other tracks are soloed and neither it nor a folder it is
     // in is (a return is never silenced by a solo).
-    const auto trackStates = getTrackStates (edit);
+    const auto trackStates = getTrackStates (song);
     const auto anySoloed =
         std::any_of (trackStates.begin(), trackStates.end(), [] (const auto& state) { return (bool) state[schema::trackSolo]; });
 
@@ -990,6 +966,20 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
         return true;
     }
 
+    // A plug-in's value set by hand, by its own ID; and its settings and program, which its instance takes
+    // (model/plugins/internal/PluginInstances.h).
+    if (tree.hasType (schema::VALUE))
+    {
+        if (auto* node = findDevice (getID (tree.getParent(), schema::deviceID)))
+            if (const auto index = findParameter (*node, tree[schema::valueParameter].toString()); index >= 0)
+                node->setValue (index, (float) tree[schema::valueSetByHand]);
+
+        return true;
+    }
+
+    if (tree.hasType (schema::DEVICE) && (property == schema::pluginState || property == schema::pluginProgram))
+        return true;
+
     // A pad's sound or an oscillator's table.
     if (tree.hasType (schema::SOUNDS))
     {
@@ -1035,14 +1025,16 @@ void SongPlayer::readLive (engine::FileReader& fileReader, const std::atomic<std
 
 std::shared_ptr<engine::AudioFile> SongPlayer::getAudioFile (const juce::File& file)
 {
-    const auto path = file.getFullPathName();
+    // By its path, when it was written and how long it is: a file written again at the same path (a track frozen again) is
+    // read again.
+    const auto path =
+        file.getFullPathName() + "|" + juce::String (file.getLastModificationTime().toMilliseconds()) + "|" + juce::String (file.getSize());
     auto& kept = files[path];
 
     if (kept == nullptr)
     {
         // A file that can't be read (gone, or a render not made yet) plays nothing until a plan finds it.
-        auto formatReader =
-            std::unique_ptr<juce::AudioFormatReader> (edit.engine.getAudioFileFormatManager().readFormatManager.createReaderFor (file));
+        auto formatReader = std::unique_ptr<juce::AudioFormatReader> (getAudioFormats().createReaderFor (file));
 
         if (formatReader == nullptr)
         {
@@ -1082,7 +1074,6 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
             continue;
 
         // What plays for it: its file, or Phazite's render of it, where it plays in seconds.
-        const auto& song = getSong (edit);
         auto file = getAudioFile (getPlayedFile (song, clip));
 
         if (file == nullptr)
@@ -1110,10 +1101,9 @@ void SongPlayer::addAudio (engine::Plan::Strip& strip, const juce::ValueTree& tr
 std::vector<int> SongPlayer::getHeardInput (const juce::ValueTree& trackState) const
 {
     const auto monitoring = trackState[schema::trackMonitoring].toString();
-    const auto* recorder = AudioRecorder::findFor (edit);
-    const auto armed = recorder != nullptr && recorder->isArmed (getTrackID (trackState));
+    const auto isArmed = armed.contains (getTrackID (trackState));
 
-    if (monitoring == schema::monitorAlways || (armed && monitoring.isEmpty()))
+    if (monitoring == schema::monitorAlways || (isArmed && monitoring.isEmpty()))
         return getInputChannels (trackState[schema::trackInput].toString());
 
     return {};
@@ -1121,13 +1111,11 @@ std::vector<int> SongPlayer::getHeardInput (const juce::ValueTree& trackState) c
 
 bool SongPlayer::addFrozenFile (engine::Plan::Strip& strip, const juce::ValueTree& trackState)
 {
-    // Frozen as Tracktion plays it (model/mixer/internal/Freeze.h): its file from the song's start, if it is there.
-    auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (trackState))));
-
-    if (! (bool) trackState[schema::trackFrozen] || track == nullptr)
+    // Its frozen file (model/mixer/internal/Freeze.h) from the song's start, if it is there.
+    if (! (bool) trackState[schema::trackFrozen])
         return false;
 
-    auto file = getAudioFile (te::TemporaryFileManager::getFreezeFileForTrack (*track));
+    auto file = getAudioFile (getFrozenFile (song, getTrackID (trackState)));
 
     if (file == nullptr)
         return false;

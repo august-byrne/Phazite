@@ -25,11 +25,14 @@
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
 #include "model/project/internal/Project.h"
@@ -117,8 +120,8 @@ struct Played
 
 // Plays a device with a preset's values for a second and a half: an instrument a chord and a bass note for half a second
 // (a drum sampler each of its pads in turn, a 32nd note at 120 bpm apart, as a busy beat plays them), an effect a beat of
-// noise bursts over a low tone, with what went in mixed back as its mix says, as its thin plug-in does it
-// (model/devices/DevicePlugin.cpp).
+// noise bursts over a low tone, with what went in mixed back as its mix says, as Phazite's engine plays it
+// (engine/nodes/DeviceRunner.h).
 Played play (const devices::DeviceInfo& info, const std::vector<float>& values, const juce::var& sounds)
 {
     auto processor = makeProcessor (info);
@@ -361,16 +364,17 @@ TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the s
     const auto kitsFolder = getFactoryPresets().getChildFile ("Drum Sampler").getChildFile ("Kits");
     CHECK (device.getPadName (0) == juce::String ("Kick"));
 
-    // The 808's on every pad, and in the sampler.
+    // The 808's on every pad, and in the sampler the engine plays once it has the song again.
     REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("Deep 808 Kit.phazitepreset")));
     CHECK (device.getPadName (0) == juce::String ("808 Kick"));
     CHECK (device.getPadName (15) == juce::String ("808 Ride"));
+    phazite::getSession (song.context)->update();
     auto* sampler = device.getProcessor<devices::DrumSampler>();
     REQUIRE (sampler != nullptr);
     CHECK (&sampler->getPadSound (0) == devices::getFactoryDrum (devices::findFactoryDrum ("808 Kick")).get());
 
     // The song keeps them by their names, and a project's file is the song.
-    const auto sounds = phazite::findDeviceState (*phazite::getEdit (song.context), drums).getChildWithName (phazite::schema::SOUNDS);
+    const auto sounds = phazite::findDeviceState (*phazite::findSong (song.context), drums).getChildWithName (phazite::schema::SOUNDS);
     CHECK (sounds[phazite::schema::getPadSound (0)].toString() == juce::String ("808 Kick"));
 
     // A file put on a pad plays instead, until Reset brings the kit's sound back.
@@ -397,17 +401,18 @@ TEST_SUITE ("golden")
     // PHAZITE_UPDATE_GOLDEN=1, as the golden files are (GoldenFiles.h); then read git diff resources/presets in full.
     TEST_CASE ("Golden presets: Phazite's presets are written as Save Preset writes them")
     {
-        auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        auto* track = te::getAudioTracks (*edit)[0];
+        const auto song = phazite::createSong();
+        const auto track = phazite::getTrackIDs (*song)[0];
+        const auto& plugins = phazite::getPluginHost (phazite::test::getEngineContext());
         const auto update = phazite::test::isUpdatingGoldenFiles();
 
         for (const auto& file : getPresetFiles())
         {
             CAPTURE (file.getRelativePathFrom (getFactoryPresets()).toStdString());
-            auto* device = phazite::addDeviceFromPreset (*edit, track, phazite::readPreset (file), nullptr);
-            REQUIRE (device != nullptr);
+            const auto device = phazite::addDeviceFromPreset (*song, plugins, track, phazite::readPreset (file), nullptr);
+            REQUIRE (device.isValid());
 
-            const auto saved = phazite::makeDevicePreset (*device);
+            const auto saved = phazite::makeDevicePreset (*song, device);
             const auto expected = file.loadFileAsString().replace ("\r\n", "\n");
             const auto actual = juce::JSON::toString (saved, false) + "\n";
             const auto differences = phazite::test::compareLines (expected, actual, 10);
@@ -417,7 +422,7 @@ TEST_SUITE ("golden")
             else
                 CHECK_MESSAGE (differences.isEmpty(), differences.joinIntoString ("\n").toStdString());
 
-            phazite::removeDevice (*device);
+            phazite::removeDevice (*song, device);
         }
     }
 }

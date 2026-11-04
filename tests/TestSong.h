@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A song made through the model's functions, by IDs, beats and plain values, as the UI makes one (docs/tracktion-migration.md,
-// T0): what a test builds with it keeps working however the model holds the song, on Tracktion's objects now, in Phazite's
-// own document from T1. New tests build their songs with it rather than with Tracktion's objects. It is a project in a
-// temporary folder, open in a context of its own as the app opens one, with the commands the app registers for the song.
+// A song made through the model's functions, by IDs, beats and plain values, as the UI makes one: what a test builds
+// with it keeps working however the model holds the song. It is a project in a temporary folder, open in a context of
+// its own as the app opens one, with the commands the app registers for the song.
 #pragma once
 
 #include "TestHelpers.h"
@@ -26,8 +25,8 @@ namespace phazite::test
 class TestSong
 {
 public:
-    // How the project starts: empty but for the track Tracktion makes with every song's Edit (firstTrack), or as the First
-    // Beat example song, a beat and an arpeggio (model/project/ExampleSongs.h), with the presets in resources/presets.
+    // How the project starts: empty but for the track every new song has (firstTrack), or as the First Beat example song,
+    // a beat and an arpeggio (model/project/ExampleSongs.h), with the presets in resources/presets.
     enum class Start
     {
         empty,
@@ -110,8 +109,9 @@ public:
 private:
     TemporaryFolder temporary;
 
-    // Where the project and the sounds go: a folder no earlier song of this run had, as Tracktion keeps what it read of an
-    // audio file by its path.
+    // Where the project and the sounds go: a folder no earlier song of this run had, as Phazite keeps what it read of an
+    // audio file by its path, its size and when it was written (getAudioFileInfo()), which a test's sound written again
+    // within the same moment would keep.
     const juce::File folder;
     std::unique_ptr<Project> project;
 };

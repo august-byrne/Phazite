@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A change of the open project's song that spans several events, such as a drag of the editors' tools: one named undo
-// step from its start to its end, which the model's edits made meanwhile join (Undo.h's Gesture), without Tracktion's
-// types (architecture phase A3). Message thread only.
+// step from its start to its end, which the model's edits made meanwhile join (Undo.h's Gesture), for the UI, which
+// holds it by the project's context alone (architecture phase A3). Message thread only.
 #pragma once
 
 #include <juce_core/juce_core.h>

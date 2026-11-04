@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <juce_audio_formats/juce_audio_formats.h>
 
 namespace phazite
 {
@@ -46,7 +47,7 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
     for (const auto& job : toRender)
     {
         Compiled compiled { job, setup.makePlayer(), nullptr };
-        compiled.plan = compiled.player->compile (setup.sampleRate, setup.blockSize, true, job.of);
+        compiled.plan = compiled.player->compile (setup.sampleRate, setup.blockSize, std::nullopt, job.of);
         jobs.push_back (std::move (compiled));
     }
 

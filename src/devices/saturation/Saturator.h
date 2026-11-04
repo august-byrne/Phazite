@@ -29,7 +29,7 @@ public:
         tone,
         output,
         autoGain,
-        mix // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
+        mix // applied by its runner (DeviceInfo.h, mixParameterID)
     };
 
     enum class Shape

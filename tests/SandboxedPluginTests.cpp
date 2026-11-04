@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Plug-ins hosted in helper processes, as a song has them (docs/tracktion-migration.md, T3 steps 2 and 3;
-// model/plugins/internal/PluginHost.h): Tracktion's plug-in wraps an instance in a helper, one helper for each plug-in;
-// Phazite's engine plays it through its helper, as it is set, with its mix, its automation and its modulators; what it
-// turns itself is set by hand, for touch and the last touched; Tracktion's render of a frozen track plays it too; its
-// settings survive a save; and one that crashes leaves Phazite playing, an effect letting its sound through.
+// Plug-ins hosted in helper processes, as a song has them (model/plugins/internal/PluginHost.h): each an instance in a
+// helper, one helper for each plug-in, which the song's session makes; Phazite's engine plays it through its helper, as
+// it is set, with its mix, its automation and its modulators; what it turns itself is set by hand, for touch and the
+// last touched; the render of a frozen track plays it too; its settings survive a save; and one that crashes leaves
+// Phazite playing, an effect letting its sound through. Its parameters are named by the plug-in's own IDs
+// (host/TestPlugins.h).
 #include "EnginePlayback.h"
 #include "SandboxedPlugins.h"
 #include "TestSong.h"
+#include "app/SandboxedEditor.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
@@ -18,6 +20,8 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/plugins/internal/SandboxedInstance.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/Project.h"
@@ -61,12 +65,26 @@ phazite::TrackID addToneTrack (TestSong& song, phazite::TrackID track, const cha
 
 constexpr float toneLevel = -18.05f; // the tone's RMS through the master's -3 dB
 
+phazite::Song& getSong (TestSong& song)
+{
+    auto* found = phazite::findSong (song.context);
+    REQUIRE (found != nullptr);
+    return *found;
+}
+
 phazite::SandboxedInstance& getSandboxed (TestSong& song, phazite::DeviceID device)
 {
-    auto* sandboxed = phazite::findSandboxedInstance (*phazite::getEdit (song.context), device);
+    auto* sandboxed = phazite::findPluginInstance (getSong (song), device);
     REQUIRE (sandboxed != nullptr);
     return *sandboxed;
 }
+
+// The stand-ins' parameters, by their own IDs.
+constexpr const char* effectGain = "1";
+constexpr const char* synthLevel = "10";
+constexpr const char* crashCrash = "20";
+constexpr const char* hangHang = "30";
+constexpr const char* hangStall = "31";
 } // namespace
 
 TEST_CASE ("A plug-in in a helper plays in Phazite's engine as it is set, with its mix; its instances share their plug-in's helper")
@@ -85,8 +103,8 @@ TEST_CASE ("A plug-in in a helper plays in Phazite's engine as it is set, with i
     auto audio = playback.play (0.6);
     CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
 
-    // Its Gain (Tracktion's first parameter of it) at half, as a control sets it: 6 dB quieter.
-    song.setParameter (effect, "0", 0.5f);
+    // Its Gain at half, as a control sets it: 6 dB quieter.
+    song.setParameter (effect, effectGain, 0.5f);
     audio = playback.play (0.6);
     CHECK (levelOf (audio, 0, 0.2, 0.5) == doctest::Approx (toneLevel - 6.02f).epsilon (0.002));
 
@@ -107,14 +125,14 @@ TEST_CASE ("A plug-in in a helper plays in Phazite's engine as it is set, with i
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 2);
 }
 
-TEST_CASE ("A plug-in in a helper keeps its settings as the project saves, and Tracktion's render of a frozen track plays it")
+TEST_CASE ("A plug-in in a helper keeps its settings as the project saves, and the render of a frozen track plays it")
 {
     SandboxedPlugins sandboxed;
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
     const auto effect = song.addEffect (track, "PhaziteTestEffect");
-    song.setParameter (effect, "0", 0.5f);
+    song.setParameter (effect, effectGain, 0.5f);
     phazite::test::dispatchMessagesUntil ([] { return false; }, 200);
 
     // Its state, as the project stores it: the gain the helper's plug-in has.
@@ -124,7 +142,7 @@ TEST_CASE ("A plug-in in a helper keeps its settings as the project saves, and T
     CHECK (juce::MemoryInputStream (state, false).readFloat() == doctest::Approx (0.5f));
     REQUIRE (song.getProject().save().wasOk());
 
-    // Frozen: Tracktion renders the track through the helper, at that gain.
+    // Frozen: Phazite's engine renders the track offline through the helper, at that gain.
     phazite::test::RenderHost host;
     song.context.getSongSelection().selectOnly (track);
     phazite::toggleFreeze (song.context, host);
@@ -144,8 +162,8 @@ TEST_CASE ("A plug-in in a helper follows its automation and its modulators on P
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone", 8.0);
     const auto effect = song.addEffect (track, "PhaziteTestEffect");
-    const phazite::ParameterRef gain { effect, "0" }; // its Gain, Tracktion's first parameter of it
-    song.setParameter (effect, "0", 0.5f);
+    const phazite::ParameterRef gain { effect, effectGain };
+    song.setParameter (effect, effectGain, 0.5f);
 
     // Automated from 1 down to 0 over two seconds (four beats at 120): on its curve as it plays.
     song.addAutomation (gain, { { phazite::BeatPosition(), 1.0f }, { phazite::BeatPosition::fromBeats (4.0), 0.0f } });
@@ -171,7 +189,7 @@ TEST_CASE ("A plug-in in a helper follows its automation and its modulators on P
     CHECK (levelOf (audio, 0, 0.2, 0.5) == doctest::Approx (toneLevel + juce::Decibels::gainToDecibels (0.25f)).epsilon (0.002));
 
     // Set by hand while it is modulated: from the new value.
-    song.setParameter (effect, "0", 1.0f);
+    song.setParameter (effect, effectGain, 1.0f);
     audio = playback.play (0.6);
     CHECK (levelOf (audio, 0, 0.2, 0.5) == doctest::Approx (toneLevel + juce::Decibels::gainToDecibels (0.75f)).epsilon (0.002));
 
@@ -197,7 +215,8 @@ TEST_CASE ("Plug-in instruments in helpers, handed their blocks as the engine's 
         song.addNote (song.addMidiClip (track, 0.0, 8.0), 69, 2.0 * i, 2.0);
 
         if (i == 2)
-            song.addAutomation ({ synth, "0" }, { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (8.0), 0.5f } });
+            song.addAutomation ({ synth, synthLevel },
+                                { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (8.0), 0.5f } });
     }
 
     EnginePlayback playback;
@@ -215,7 +234,7 @@ TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the paramete
     song.setTempo (120.0);
     const auto track = song.firstTrack;
     const auto synth = song.setInstrument (track, "PhaziteTestSynth");
-    const phazite::ParameterRef level { synth, "0" }; // its Level, Tracktion's first parameter of it
+    const phazite::ParameterRef level { synth, synthLevel };
 
     // Note 127 at beat 1 for a beat: the stand-in turns its Level to 0.75 itself, grabbed for as long.
     const auto clip = song.addMidiClip (track, 0.0, 8.0);
@@ -250,7 +269,7 @@ TEST_CASE ("What a plug-in in a helper turns itself is set by hand: the paramete
     CHECK (points.back().value == doctest::Approx (0.75f));
 
     // One step takes it back.
-    phazite::undo (*phazite::getEdit (song.context));
+    phazite::undo (getSong (song));
     CHECK (phazite::getAutomationPoints (song.context, level).empty());
 }
 
@@ -278,11 +297,11 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
     // The project opened again: the plug-in in a new helper, the old one gone, with its program and its settings.
     playback = nullptr;
     song.reopen();
-    CHECK (phazite::findDeviceState (*phazite::getEdit (song.context), effect)[phazite::schema::pluginProgram] == juce::var (1));
+    CHECK (phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginProgram] == juce::var (1));
     instance = &getSandboxed (song, effect);
     CHECK (instance->getCurrentProgram() == 1);
 
-    // The old helper goes with the old instance, which Tracktion deletes on a timer of its own once its project has closed.
+    // The old helper goes with the old instance, once nothing that played the old project holds it.
     CHECK (phazite::test::dispatchMessagesUntil ([] { return SandboxedPlugins::getHost().getNumHelpers() == 1; }, 10000));
     playback = std::make_unique<EnginePlayback>();
     song.run ("transport.playStop");
@@ -298,18 +317,18 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
     CHECK (&getSandboxed (song, phazite::getEffects (song.context, copy)[0].id) != instance);
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
     CHECK (levelNow() == doctest::Approx (half + 6.02f).epsilon (0.002));
-    phazite::undo (*phazite::getEdit (song.context));
+    phazite::undo (getSong (song));
 
     // Taken away, and back by undo, as it was.
     phazite::removeDevice (song.context, effect);
     CHECK (levelNow() == doctest::Approx (toneLevel).epsilon (0.002));
-    phazite::undo (*phazite::getEdit (song.context));
+    phazite::undo (getSong (song));
     CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));
 
     // A preset of it, saved at half and loaded into it again at full.
     const auto preset = song.getSoundsFolder().getChildFile (juce::String ("Half") + phazite::presetExtension);
     REQUIRE (phazite::saveDevicePreset (song.context, effect, preset));
-    song.setParameter (effect, "0", 1.0f);
+    song.setParameter (effect, effectGain, 1.0f);
     CHECK (levelNow() == doctest::Approx (toneLevel).epsilon (0.002));
     REQUIRE (phazite::loadPresetInto (song.context, effect, preset));
     CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));
@@ -325,7 +344,7 @@ TEST_CASE ("What a plug-in in a helper changes itself is an unsaved change of it
 
     // Another program, as its own window would choose: its Gain changes with it.
     getSandboxed (song, effect).setCurrentProgram (1);
-    auto gain = phazite::getParameter (song.context, { effect, "0" });
+    auto gain = phazite::getParameter (song.context, { effect, effectGain });
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&] { return song.getProject().hasUnsavedChanges() && juce::exactlyEqual (gain.getValue(), 0.5f); }, 20000));
 }
@@ -352,7 +371,9 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
     phazite::ui::setPluginKeys (&keys);
 
     // Its editor, as a plug-in window makes it, as large as the plug-in's own, in a window on the screen.
-    std::unique_ptr<juce::AudioProcessorEditor> editor (getSandboxed (song, effect).createEditorAndMakeActive());
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    auto editor = phazite::createSandboxedEditor (session->getPlugins().find (effect));
     REQUIRE (editor != nullptr);
     CHECK (editor->getWidth() == 300);
     CHECK (editor->getHeight() == 200);
@@ -378,7 +399,7 @@ TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large
     CHECK (process != GetCurrentProcessId());
 
     // The plug-in makes its editor larger: Phazite's follows.
-    song.setParameter (effect, "1", 1.0f); // its Tone
+    song.setParameter (effect, "0", 1.0f); // its Tone
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return editor->getWidth() == 360; }, 20000));
     CHECK (editor->getHeight() == 240);
 
@@ -437,9 +458,8 @@ TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, sa
     song.run ("transport.playStop");
     CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
 
-    // Its Hang on (Tracktion's first parameter of it): its blocks come late, the tone through, until its helper is ended,
-    // a second of late blocks after.
-    song.setParameter (hanging, "0", 1.0f);
+    // Its Hang on: its blocks come late, the tone through, until its helper is ended, a second of late blocks after.
+    song.setParameter (hanging, hangHang, 1.0f);
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {
@@ -461,7 +481,7 @@ TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, sa
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (phazite::getEffects (song.context, track)[0].crashed);
-    CHECK (phazite::getParameter (song.context, { hanging, "0" }).getValue() == doctest::Approx (0.0f));
+    CHECK (phazite::getParameter (song.context, { hanging, hangHang }).getValue() == doctest::Approx (0.0f));
     CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
 }
 
@@ -475,10 +495,10 @@ TEST_CASE ("A plug-in whose helper's message thread stops answering is ended for
     EnginePlayback playback;
     song.run ("transport.playStop");
 
-    // Its Stall on (its second parameter), which stops the helper's message thread: the heartbeat goes unanswered, and
-    // the helper is ended two seconds after, the song playing on meanwhile.
+    // Its Stall on, which stops the helper's message thread: the heartbeat goes unanswered, and the helper is ended two
+    // seconds after, the song playing on meanwhile.
     const auto stalledAt = juce::Time::getMillisecondCounterHiRes();
-    song.setParameter (stalling, "1", 1.0f);
+    song.setParameter (stalling, hangStall, 1.0f);
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {
@@ -546,7 +566,7 @@ TEST_CASE ("A crashed plug-in's slot in the mixer says so, and reloads at a clic
     // It crashes as it plays: its slot says so.
     EnginePlayback playback;
     song.run ("transport.playStop");
-    song.setParameter (crashing, "0", 1.0f);
+    song.setParameter (crashing, crashCrash, 1.0f);
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {
@@ -568,7 +588,7 @@ TEST_CASE ("The plug-in scan finds what a file holds in a helper, and leaves out
 {
     using phazite::test::TestPlugins;
     constexpr int secondsEach = 2;
-    auto scanner = phazite::createPluginScanner (phazite::test::getEngine(), secondsEach);
+    auto scanner = phazite::createPluginScanner (SandboxedPlugins::getHost(), secondsEach);
     const auto format = TestPlugins::createFormat(); // its name, which the helper scans with
     juce::OwnedArray<juce::PluginDescription> found;
 
@@ -607,9 +627,8 @@ TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effe
     song.run ("transport.playStop");
     CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
 
-    // It crashes as it plays (its Crash, Tracktion's first parameter of it, on), blocks coming meanwhile: Phazite plays on,
-    // the tone through.
-    song.setParameter (crashing, "0", 1.0f);
+    // It crashes as it plays (its Crash on), blocks coming meanwhile: Phazite plays on, the tone through.
+    song.setParameter (crashing, crashCrash, 1.0f);
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {

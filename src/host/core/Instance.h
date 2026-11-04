@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A plug-in hosted in a helper (docs/tracktion-migration.md, T3): the instance JUCE's format loaded, prepared for its
-// channel's blocks with its main buses in stereo and a stereo sidechain where it has one, and the thread that plays
-// them, which waits on the channel's bell, plays the block in place and rings Phazite back. A block's parameter changes
-// play at their samples: the block is played in pieces between them. The plug-in's playhead is the song's place in the
-// block. What the plug-in changes itself (its parameters from its window, and the gestures around them, its latency, its
-// state, its list of parameters) is kept for the message thread to tell Phazite (takeNotices()), never told from the
-// thread that changed it, which may be its audio thread. The audio thread is in MMCSS's Pro Audio task, as Phazite's own
-// are (devices/core/AudioThreads.h).
+// A plug-in hosted in a helper: the instance JUCE's format loaded, prepared for its channel's blocks with its main
+// buses in stereo and a stereo sidechain where it has one, and the thread that plays them, which waits on the channel's
+// bell, plays the block in place and rings Phazite back. A block's parameter changes play at their samples: the block
+// is played in pieces between them. The plug-in's playhead is the song's place in the block. What the plug-in changes
+// itself (its parameters from its window, and the gestures around them, its latency, its state, its list of parameters)
+// is kept for the message thread to tell Phazite (takeNotices()), never told from the thread that changed it, which may
+// be its audio thread. The audio thread is in MMCSS's Pro Audio task, as Phazite's own are
+// (devices/core/AudioThreads.h).
 #pragma once
 
 #include "sandbox/core/BlockChannel.h"

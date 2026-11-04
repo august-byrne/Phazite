@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The open project, as commands, panels and dialogs find it: what is selected in it, by IDs, the time range selected across
 // tracks, its undo manager, and what changes in it. The app's ProjectSession owns the one ProjectContext and is the only
-// code (besides tests) that opens an Edit in it. Views listen to it, to show another project or none. Message thread
-// only.
-//
-// No Tracktion here (architecture phase A3): the model, the app and tests reach the open Edit, Tracktion's selection
-// manager and the range selection through internal/ProjectContext.h; model code given the selection manager may read
-// selection.getEdit(), the same Edit. Tracktion's focused Edit and selection (UIBehaviour, which live MIDI and controller
-// mappings use) follow them; Phazite's code never reads those.
+// code (besides tests) that opens a song in it. Views listen to it, to show another project or none. Message thread
+// only. The model, the app and tests reach the open song, the selection and the range selection through
+// internal/ProjectContext.h; model code given the selection may read selection.getSong(), the same song.
 #pragma once
 
 #include "model/arrangement/SongRange.h"
@@ -20,7 +16,6 @@
 namespace phazite
 {
 class EngineContext;
-class UIBehaviour;
 
 // What changed in the open project's song, in groups, for views to show it again. Changes made at once (in one turn of
 // the message loop) come together, after it. View state (model/base/internal/Schema.h), such as how tall a track shows, is no
@@ -52,8 +47,8 @@ public:
         virtual void songChanged (const SongChanges&) {}
     };
 
-    // Keeps Tracktion's focus (the Engine's UIBehaviour) in step, if given one.
-    explicit ProjectContext (EngineContext&, UIBehaviour* tracktionFocus = nullptr);
+    // Plays the song it holds on an engine context, which outlives it (model/engine/internal/EngineContext.h).
+    explicit ProjectContext (EngineContext&);
     ~ProjectContext();
 
     bool hasProject() const noexcept;
@@ -79,7 +74,7 @@ public:
     void addListener (Listener*);
     void removeListener (Listener*);
 
-    struct Impl; // the open Edit, the selection and the range selection (internal/ProjectContext.h)
+    struct Impl; // the open song, the selection and the range selection (internal/ProjectContext.h)
     Impl& getImpl() const noexcept { return *impl; }
 
 private:

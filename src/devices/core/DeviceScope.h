@@ -43,7 +43,7 @@ public:
 
     bool isListening() const noexcept { return listening.load (std::memory_order_acquire); }
 
-    // The rate the device plays at, for an analyzer's frequencies (its thin plug-in sets it as playback is prepared).
+    // The rate the device plays at, for an analyzer's frequencies (its runner sets it as playback is prepared).
     void setSampleRate (double rate) noexcept { sampleRate.store (rate, std::memory_order_relaxed); }
     double getSampleRate() const noexcept { return sampleRate.load (std::memory_order_relaxed); }
 

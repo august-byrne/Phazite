@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A track's modulator or macro in Phazite's engine (docs/tracktion-migration.md, T2 step 5): a modulator's DSP
-// (devices/modulation/Modulators.h), with its parameters' values set by hand, its steps and its switch, or a macro's value,
-// which the message thread sets one at a time without building anything; its value on each control point of a block, which
-// what it modulates reads (one every 32 samples of the song while it plays, of time while it is stopped); and its values as
-// it played them, which its editor shows. Kept by its ID from one plan to the next, so that it runs on through an edit.
+// A track's modulator or macro in Phazite's engine: a modulator's DSP (devices/modulation/Modulators.h), with its
+// parameters' values set by hand, its steps and its switch, or a macro's value, which the message thread sets one at a
+// time without building anything; its value on each control point of a block, which what it modulates reads (one every
+// 32 samples of the song while it plays, of time while it is stopped); and its values as it played them, which its
+// editor shows. Kept by its ID from one plan to the next, so that it runs on through an edit.
 #pragma once
 
 #include "devices/modulation/Modulators.h"

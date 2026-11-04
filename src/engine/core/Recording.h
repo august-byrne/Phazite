@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What Phazite's engine records of a take (docs/tracktion-migration.md, T2 step 9): each armed track's audio input, from
-// the first sample the song plays after the take is given to the engine (after the count-in) for as long as it plays on
-// without a stop or a jump, into a buffer of its own that one reading thread empties; and where in the song that first
-// sample was, with the engine's clock then, so that the take's place is known to the sample. The notes played live
-// meanwhile come out of the engine with the clock they came in at (Engine::takePlayed()). Made and freed on the message
-// thread, handed to the engine whole (Engine::setRecording()); the audio thread writes into it, real-time safe.
+// What Phazite's engine records of a take: each armed track's audio input, from the first sample the song plays after
+// the take is given to the engine (after the count-in) for as long as it plays on without a stop or a jump, into a
+// buffer of its own that one reading thread empties; and where in the song that first sample was, with the engine's
+// clock then, so that the take's place is known to the sample. The notes played live meanwhile come out of the engine
+// with the clock they came in at (Engine::takePlayed()). Made and freed on the message thread, handed to the engine
+// whole (Engine::setRecording()); the audio thread writes into it, real-time safe.
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>

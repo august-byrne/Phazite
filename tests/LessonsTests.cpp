@@ -4,6 +4,7 @@
 // or with the card's Next or Skip; the card rings the control a step is about, and a lesson finished is kept as done.
 #include "AppScreen.h"
 #include "TestHelpers.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -91,9 +92,9 @@ TEST_CASE ("A lesson shows one step at a time with the keymap's keys, each going
 TEST_CASE ("A lesson's step that the song shows done goes on by itself, and a command without a key is found by its name")
 {
     LessonSetup s;
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    setEdit (s.context, edit.get());
-    const auto track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
+    auto song = phazite::createSong();
+    setSong (s.context, song.get());
+    const auto track = phazite::getTrackIDs (*song).front();
 
     REQUIRE (s.registry.invoke ("help.lesson.recording"));
     REQUIRE (s.registry.invoke ("track.add"));
@@ -119,7 +120,7 @@ TEST_CASE ("A lesson's step that the song shows done goes on by itself, and a co
     CHECK (s.lessons.getStep() == 2);
     REQUIRE (s.registry.invoke ("help.stopLesson"));
     CHECK_FALSE (s.lessons.isRunning());
-    setEdit (s.context, nullptr);
+    setSong (s.context, nullptr);
 }
 
 TEST_CASE ("The lesson card shows the step and rings its control, and its buttons go back, on and stop the lesson")

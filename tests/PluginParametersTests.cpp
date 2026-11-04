@@ -1,248 +1,134 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A plug-in's parameters through its updates (src/model/devices/internal/PluginParameters.h): a project saved with one
-// version of the stand-in plug-in, opened with another that moved its parameters.
+// A plug-in's parameters through its updates: the song refers to each by the plug-in's own ID for it (a VST3's number),
+// which an update keeps wherever it moves the parameter in the plug-in's list. A project saved with one version of the
+// stand-in plug-in, opened with another.
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "TestSong.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
-#include "model/devices/internal/DeviceStates.h"
-#include "model/engine/internal/EngineSetup.h"
-#include "model/mixer/internal/Containers.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
-#include "model/project/internal/Project.h"
-
-#include <map>
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace
 {
 using phazite::test::TestPlugin;
 
-te::ExternalPlugin* findStandIn (te::Track& track)
+// A project with the stand-in on its track, in its first version (Gain, then Tone): Gain set by hand to 0.3, then
+// automated from 0.2 to 0.8 and shown in a lane, and Tone moved by an LFO.
+struct Saved
 {
-    for (auto* device : track.pluginList.getPlugins())
-        if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (device))
-            return plugin;
-
-    return nullptr;
-}
-
-// The stand-in anywhere in the Edit, a container's rack included.
-te::ExternalPlugin* findStandIn (te::Edit& edit)
-{
-    for (auto* device : te::getAllPlugins (edit, true))
-        if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (device))
-            return plugin;
-
-    return nullptr;
-}
-
-// A song with the stand-in on its track (in its first version: Gain "0", Tone "1"), Gain set by hand to 0.3, then
-// automated from 0.2 to 0.8 and shown in a lane, and Tone moved by an LFO; saved as a project saves it.
-juce::ValueTree makeSavedSong()
-{
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto& track = *te::getAudioTracks (*edit)[0];
-    auto* plugin = dynamic_cast<te::ExternalPlugin*> (phazite::insertDevice (track, TestPlugin::create (*edit)));
-    REQUIRE (plugin != nullptr);
-
-    auto gain = plugin->getAutomatableParameterByID (TestPlugin::gainID);
-    auto tone = plugin->getAutomatableParameterByID (TestPlugin::toneID);
-    REQUIRE (gain != nullptr);
-    REQUIRE (tone != nullptr);
-
-    gain->setParameter (0.3f, juce::sendNotificationSync);
-    phazite::addPoint (*gain, { phazite::BeatPosition::fromBeats (0.0), 0.2f });
-    phazite::addPoint (*gain, { phazite::BeatPosition::fromBeats (4.0), 0.8f });
-    gain->updateToFollowCurve (te::TimePosition());
-    phazite::showLane (track, phazite::getParameterRef (*gain));
-
-    const auto lfo = phazite::addModulator (track, phazite::ModulatorType::lfo);
-    REQUIRE (lfo.has_value());
-    phazite::setModulation (*lfo, *tone, 0.5f);
-
-    phazite::storeDeviceStates (*edit);
-    return phazite::getSong (*edit).getState().createCopy();
-}
-
-// The song opened again as a project opens, with the stand-in in the version set.
-std::unique_ptr<te::Edit> open (const juce::ValueTree& saved)
-{
-    auto edit = phazite::createEditFromSong (phazite::test::getEngine(), saved.createCopy());
-    REQUIRE (edit != nullptr);
-    return edit;
-}
-
-// The stand-in's element in a saved song (Schema.h: DEVICE).
-juce::ValueTree findStandInState (const juce::ValueTree& tree)
-{
-    if (phazite::isPluginState (tree))
-        return tree;
-
-    for (const auto& child : tree)
-        if (const auto found = findStandInState (child); found.isValid())
-            return found;
-
-    return {};
-}
-
-// What the song keeps of the stand-in's own IDs of its parameters.
-juce::String getStoredIDs (const te::ExternalPlugin& plugin)
-{
-    return phazite::findDeviceState (plugin.edit, phazite::getDeviceID (plugin))[phazite::schema::pluginParameterIDs].toString();
-}
-
-// The values set by hand under automation or modulation that the song keeps for the stand-in, by the parameters' IDs.
-std::map<juce::String, float> getValuesSetByHand (const juce::ValueTree& device)
-{
-    std::map<juce::String, float> values;
-
-    for (const auto& child : device)
-        if (child.hasType (phazite::schema::VALUE))
-            values[child[phazite::schema::valueParameter].toString()] = (float) child[phazite::schema::valueSetByHand];
-
-    return values;
-}
-} // namespace
-
-TEST_CASE ("A project saves a plug-in's own IDs of the parameters it refers to")
-{
-    namespace schema = phazite::schema;
-    TestPlugin testPlugin;
-    const auto saved = makeSavedSong();
-    const auto plugin = findStandInState (saved);
-    REQUIRE (plugin.isValid());
-
-    // Gain, by its place "0", is the plug-in's "1"; Tone, "1", its "0". Nothing for the Drive of later versions.
-    CHECK (plugin[schema::pluginParameterIDs].toString() == "0=1 1=0");
-
-    // Gain's value set by hand under its automation, with the plug-in's settings.
-    const auto values = getValuesSetByHand (plugin);
-    REQUIRE (values.count (TestPlugin::gainID) == 1);
-    CHECK (values.at (TestPlugin::gainID) == doctest::Approx (0.3f));
-}
-
-TEST_CASE ("What a project refers to follows a plug-in's parameters that its update moved")
-{
-    TestPlugin testPlugin;
-    const auto saved = makeSavedSong();
-
-    // Version 2 has Tone first, then Gain, then a new Drive: "0" is now Tone and "1" Gain.
-    testPlugin.setVersion (2);
-    const auto edit = open (saved);
-    auto& track = *te::getAudioTracks (*edit)[0];
-    auto* plugin = findStandIn (track);
-    REQUIRE (plugin != nullptr);
-    const auto tone = plugin->getAutomatableParameterByID ("0");
-    const auto gain = plugin->getAutomatableParameterByID ("1");
-    const auto drive = plugin->getAutomatableParameterByID ("2");
-    REQUIRE (tone != nullptr);
-    REQUIRE (gain != nullptr);
-    REQUIRE (drive != nullptr);
-    REQUIRE (gain->getParameterName() == "Gain");
-    REQUIRE (tone->getParameterName() == "Tone");
-
-    // Gain keeps its automation, its value set by hand and its lane; Tone its LFO; Drive gets nothing.
-    CHECK (phazite::getPoints (*gain).size() == 2);
-    CHECK (gain->getCurrentExplicitValue() == doctest::Approx (0.3f));
-    CHECK (phazite::getModulations (*gain).empty());
-
-    CHECK (phazite::getPoints (*tone).empty());
-    CHECK (tone->getCurrentExplicitValue() == doctest::Approx (0.5f));
-    CHECK (phazite::getModulations (*tone).size() == 1);
-
-    CHECK (phazite::getPoints (*drive).empty());
-    CHECK (phazite::getModulations (*drive).empty());
-
-    const auto lanes = phazite::getLanes (track);
-    REQUIRE (lanes.size() == 1);
-    CHECK (lanes[0].parameter == phazite::getParameterRef (*gain));
-
-    // Saved again, by their new places; the song's value set by hand follows Gain too.
-    CHECK (getStoredIDs (*plugin) == "0=0 1=1");
-    const auto values = getValuesSetByHand (phazite::findDeviceState (*edit, phazite::getDeviceID (*plugin)));
-    REQUIRE (values.count ("1") == 1);
-    CHECK (values.at ("1") == doctest::Approx (0.3f));
-}
-
-TEST_CASE ("What a project refers to lets go of a parameter that a plug-in's update removed")
-{
-    TestPlugin testPlugin;
-    const auto saved = makeSavedSong();
-
-    // Version 3 has Tone alone: "0" is now Tone, and Gain is gone.
-    testPlugin.setVersion (3);
-    const auto edit = open (saved);
-    auto& track = *te::getAudioTracks (*edit)[0];
-    auto* plugin = findStandIn (track);
-    REQUIRE (plugin != nullptr);
-    const auto tone = plugin->getAutomatableParameterByID ("0");
-    REQUIRE (tone != nullptr);
-    REQUIRE (tone->getParameterName() == "Tone");
-
-    // Gain's automation, value set by hand and lane don't land on Tone, which keeps its LFO.
-    CHECK (phazite::getPoints (*tone).empty());
-    CHECK (tone->getCurrentExplicitValue() == doctest::Approx (0.5f));
-    CHECK (phazite::getModulations (*tone).size() == 1);
-    CHECK (phazite::getLanes (track).empty());
-    CHECK_FALSE (plugin->state.getChildWithName (te::IDs::AUTOMATIONCURVE).isValid());
-    CHECK (getStoredIDs (*plugin) == "0=0");
-
-    for (const auto& [id, value] : getValuesSetByHand (phazite::findDeviceState (*edit, phazite::getDeviceID (*plugin))))
-        CHECK (value != doctest::Approx (0.3f)); // none is Gain's
-}
-
-TEST_CASE ("What a project refers to follows the parameters of a plug-in in a container too")
-{
-    TestPlugin testPlugin;
-    juce::ValueTree saved;
-
-    // Its lane is on the container's track, not with the plug-in in the container's rack.
+    Saved()
     {
-        auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        auto& track = *te::getAudioTracks (*edit)[0];
-        REQUIRE (phazite::groupIntoContainer ({ phazite::insertDevice (track, TestPlugin::create (*edit)) }) != nullptr);
-        auto* plugin = findStandIn (*edit);
-        REQUIRE (plugin != nullptr);
-        auto gain = plugin->getAutomatableParameterByID (TestPlugin::gainID);
-        REQUIRE (gain != nullptr);
-        phazite::addPoint (*gain, { phazite::BeatPosition::fromBeats (0.0), 0.2f });
-        phazite::addPoint (*gain, { phazite::BeatPosition::fromBeats (4.0), 0.8f });
-        phazite::showLane (track, phazite::getParameterRef (*gain));
-        phazite::storeDeviceStates (*edit);
-        saved = phazite::getSong (*edit).getState().createCopy();
+        auto& song = getSong();
+        plugin = TestPlugin::add (song, track);
+        REQUIRE (phazite::findPluginInstance (song, plugin) != nullptr);
+        gain = { plugin, TestPlugin::gainID };
+        tone = { plugin, TestPlugin::toneID };
+
+        phazite::setValueSetByHand (song, gain, 0.3f);
+        phazite::addPoint (song, gain, { phazite::BeatPosition::fromBeats (0.0), 0.2f });
+        phazite::addPoint (song, gain, { phazite::BeatPosition::fromBeats (4.0), 0.8f });
+        phazite::showLane (song, track, gain);
+        const auto lfo = phazite::addModulator (song, track, phazite::ModulatorType::lfo);
+        REQUIRE (lfo.isValid());
+        phazite::setModulation (song, lfo, tone, 0.5f);
     }
 
-    testPlugin.setVersion (2);
-    const auto edit = open (saved);
-    auto* plugin = findStandIn (*edit);
-    REQUIRE (plugin != nullptr);
-    const auto gain = plugin->getAutomatableParameterByID ("1");
-    REQUIRE (gain != nullptr);
-    REQUIRE (gain->getParameterName() == "Gain");
-    CHECK (phazite::getPoints (*gain).size() == 2);
+    phazite::Song& getSong() const { return *phazite::findSong (test.context); }
 
-    const auto lanes = phazite::getLanes (*te::getAudioTracks (*edit)[0]);
+    // What Phazite's engine plays of the song now.
+    const phazite::SongPlayer& play() const
+    {
+        auto* session = phazite::getSession (test.context);
+        REQUIRE (session != nullptr);
+        session->update();
+        return session->getPlayer();
+    }
+
+    TestPlugin testPlugin; // known while the song is
+    phazite::test::TestSong test;
+    const phazite::TrackID track = test.firstTrack;
+    phazite::DeviceID plugin;
+    phazite::ParameterRef gain, tone;
+};
+} // namespace
+
+TEST_CASE ("A song refers to a plug-in's parameters by the plug-in's own IDs, which its update keeps")
+{
+    namespace schema = phazite::schema;
+    Saved saved;
+
+    // What refers to Gain names it by the plug-in's "1": its value set by hand and its automation.
+    const auto element = phazite::findDeviceState (saved.getSong(), saved.plugin);
+    CHECK (element.getChildWithName (schema::VALUE)[schema::valueParameter].toString() == juce::String (TestPlugin::gainID));
+    CHECK (phazite::getCurveParameter (phazite::findCurveState (saved.getSong(), saved.gain)) == saved.gain);
+
+    // Version 2 has Tone first, then Gain, then a new Drive: Gain is second in its list now, under the same ID.
+    saved.testPlugin.setVersion (2);
+    saved.test.reopen();
+    auto& song = saved.getSong();
+    auto* instance = phazite::findPluginInstance (song, saved.plugin);
+    REQUIRE (instance != nullptr);
+    REQUIRE (instance->findParameter (TestPlugin::gainID) == 1);
+    const phazite::ParameterRef drive { saved.plugin, "2" };
+    REQUIRE (phazite::describeParameter (song, saved.gain).has_value());
+    REQUIRE (phazite::describeParameter (song, drive).has_value());
+    CHECK (phazite::describeParameter (song, saved.gain)->name == juce::String ("Gain"));
+    CHECK (phazite::describeParameter (song, saved.tone)->name == juce::String ("Tone"));
+    CHECK (phazite::describeParameter (song, drive)->name == juce::String ("Drive"));
+
+    // Gain keeps its automation, its value set by hand and its lane; Tone its LFO; Drive gets nothing.
+    CHECK (phazite::getPoints (song, saved.gain).size() == 2);
+    CHECK (phazite::getValueSetByHand (song, saved.gain) == doctest::Approx (0.3f));
+    CHECK (instance->getParameterValue (1) == doctest::Approx (0.3f));
+    CHECK (phazite::getModulations (song, saved.gain).empty());
+    CHECK (phazite::getPoints (song, saved.tone).empty());
+    CHECK (phazite::getModulations (song, saved.tone).size() == 1);
+    CHECK (phazite::getPoints (song, drive).empty());
+    CHECK (phazite::getModulations (song, drive).empty());
+
+    const auto lanes = phazite::getLanes (song, saved.track);
     REQUIRE (lanes.size() == 1);
-    CHECK (lanes[0].parameter == phazite::getParameterRef (*gain));
+    CHECK (lanes[0].parameter == saved.gain);
+
+    // What Phazite's engine plays moves Gain by its automation and Tone by its LFO, and leaves Drive alone.
+    const auto& player = saved.play();
+    CHECK (player.getPlayedValue (saved.gain, false).has_value());
+    CHECK (player.isMoved (saved.gain));
+    CHECK (player.isMoved (saved.tone));
+    CHECK_FALSE (player.isMoved (drive));
 }
 
-TEST_CASE ("A project opened with the plug-in it was saved with keeps what it refers to as it was")
+TEST_CASE ("A parameter that a plug-in's update removed plays nothing, and the song keeps what refers to it")
 {
-    TestPlugin testPlugin;
-    const auto saved = makeSavedSong();
-    const auto edit = open (saved);
-    auto& track = *te::getAudioTracks (*edit)[0];
-    auto* plugin = findStandIn (track);
-    REQUIRE (plugin != nullptr);
+    Saved saved;
 
-    const auto gain = plugin->getAutomatableParameterByID (TestPlugin::gainID);
-    const auto tone = plugin->getAutomatableParameterByID (TestPlugin::toneID);
-    REQUIRE (gain != nullptr);
-    REQUIRE (tone != nullptr);
-    CHECK (phazite::getPoints (*gain).size() == 2);
-    CHECK (gain->getCurrentExplicitValue() == doctest::Approx (0.3f));
-    CHECK (phazite::getModulations (*tone).size() == 1);
-    CHECK (phazite::getLanes (track).size() == 1);
-    CHECK (getStoredIDs (*plugin) == "0=1 1=0");
+    // Version 3 has Tone alone, first as before: Gain is gone.
+    saved.testPlugin.setVersion (3);
+    saved.test.reopen();
+    auto& song = saved.getSong();
+    auto* instance = phazite::findPluginInstance (song, saved.plugin);
+    REQUIRE (instance != nullptr);
+    REQUIRE (instance->getParameterInfos().size() == 1);
+    CHECK (instance->findParameter (TestPlugin::gainID) < 0);
+    CHECK (instance->findParameter (TestPlugin::toneID) == 0);
+
+    // Gain's automation and value set by hand stay the song's, for a version that has it again, but land on nothing:
+    // Tone keeps its own value and its LFO, and none of Gain's automation.
+    CHECK (phazite::getPoints (song, saved.gain).size() == 2);
+    CHECK (phazite::getValueSetByHand (song, saved.gain) == doctest::Approx (0.3f));
+    CHECK (phazite::getPoints (song, saved.tone).empty());
+    CHECK (instance->getParameterValue (0) == doctest::Approx (0.5f));
+    CHECK (phazite::getModulations (song, saved.tone).size() == 1);
+
+    // What Phazite's engine plays has no Gain to move.
+    const auto& player = saved.play();
+    CHECK_FALSE (player.getPlayedValue (saved.gain, false).has_value());
+    CHECK (player.getPlayedValue (saved.tone, false).has_value());
+    CHECK (player.isMoved (saved.tone));
 }

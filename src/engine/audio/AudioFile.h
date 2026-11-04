@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// An audio file as Phazite's engine plays it (docs/tracktion-migration.md, T2): its samples read in chunks by a reading
-// thread (FileReader.h), each handed to the audio thread through an atomic pointer once read, so that the audio thread never
-// waits for the disk; a chunk not read yet plays as silence, and a render waits for it. A short file is read whole and kept;
-// a longer one is read ahead of where it plays, with the start of each clip that plays it kept, and what it played long ago
-// let go of. What reads the file (its format) is the model's, behind SampleReader.
+// An audio file as Phazite's engine plays it: its samples read in chunks by a reading thread (FileReader.h), each
+// handed to the audio thread through an atomic pointer once read, so that the audio thread never waits for the disk; a
+// chunk not read yet plays as silence, and a render waits for it. A short file is read whole and kept; a longer one is
+// read ahead of where it plays, with the start of each clip that plays it kept, and what it played long ago let go of.
+// What reads the file (its format) is the model's, behind SampleReader.
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song as Phazite's own engine plays it (model/playback/; docs/tracktion-migration.md, T2): the plan the model compiles
-// from the song, and the transport the model's commands drive through it while it plays the project.
+// The song as Phazite's own engine plays it (model/playback/): the plan the model compiles from the song, and the transport
+// the model's commands drive through it while it plays the project.
 #include "EnginePlayback.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
@@ -11,15 +11,14 @@
 #include "model/arrangement/TimelineModel.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
-#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/LevelSource.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
 
@@ -41,49 +40,6 @@ int findFirstSound (const juce::AudioBuffer<float>& audio, int from = 0)
     return -1;
 }
 } // namespace
-
-TEST_CASE ("The engine's tempo map places beats where Tracktion's tempo sequence does")
-{
-    TestSong song;
-    auto& edit = *phazite::getEdit (song.context);
-    juce::Random random (11);
-
-    for (int round = 0; round < 8; ++round)
-    {
-        // Tempos and time signatures along the song, in its tempo map, which Tracktion's mirrors.
-        auto map = phazite::getSong (edit).getState().getChildWithName (phazite::schema::TEMPOMAP);
-        REQUIRE (map.isValid());
-        map.removeAllChildren (nullptr);
-        auto beat = 0.0;
-
-        for (int change = 0; change < 4; ++change)
-        {
-            juce::ValueTree tempo (phazite::schema::TEMPO);
-            tempo.setProperty (phazite::schema::mapBeat, beat, nullptr);
-            tempo.setProperty (phazite::schema::bpm, 40.0 + random.nextInt (200), nullptr);
-            map.appendChild (tempo, nullptr);
-            beat += 4.0 * (1 + random.nextInt (4));
-        }
-
-        const int denominators[] = { 2, 4, 8, 16 };
-        juce::ValueTree signature (phazite::schema::TIMESIGNATURE);
-        signature.setProperty (phazite::schema::mapBeat, 0.0, nullptr);
-        signature.setProperty (phazite::schema::numerator, 2 + random.nextInt (10), nullptr);
-        signature.setProperty (phazite::schema::denominator, denominators[random.nextInt (4)], nullptr);
-        map.appendChild (signature, nullptr);
-        phazite::mirror::reconcileTempoMap (edit);
-
-        phazite::SongPlayer player (edit);
-        const auto plan = player.compile (48000.0, 512, true);
-
-        for (auto at = 0.0; at < beat + 8.0; at += 0.37)
-        {
-            CAPTURE (at);
-            const auto seconds = edit.tempoSequence.toTime (phazite::toTracktion (phazite::BeatPosition::fromBeats (at))).inSeconds();
-            CHECK (plan->tempo.toSamples (at) / 48000.0 == doctest::Approx (seconds).epsilon (1.0e-9));
-        }
-    }
-}
 
 TEST_CASE ("Phazite's engine plays and stops as the transport's commands ask, back to where playback starts")
 {
@@ -125,8 +81,8 @@ TEST_CASE ("Phazite's engine loops the range the song loops, and stops at the so
     CHECK (beat >= 1.0);
     CHECK (beat < 2.1);
 
-    // Without the loop, playback stops at the song's end, and goes back: the song's follower sees the playhead cross it.
-    const auto followTheSong = [] { phazite::test::dispatchMessagesUntil ([] { return false; }, 100); }; // its timer, at 30 Hz
+    // Without the loop, playback stops at the song's end, and goes back: the session's timer sees the playhead cross it.
+    const auto followTheSong = [] { phazite::test::dispatchMessagesUntil ([] { return false; }, 100); }; // at 30 Hz
 
     song.run ("transport.playStop");
     song.setSwitch ("transport.loop", false);
@@ -140,7 +96,7 @@ TEST_CASE ("Phazite's engine loops the range the song loops, and stops at the so
     CHECK (phazite::getPlayheadBeat (song.context).inBeats() == doctest::Approx (0.0));
 }
 
-TEST_CASE ("Phazite's engine clicks the metronome on each beat's sample, and Tracktion's doesn't play meanwhile")
+TEST_CASE ("Phazite's engine clicks the metronome on each beat's sample")
 {
     TestSong song;
     song.setTempo (120.0);
@@ -149,7 +105,6 @@ TEST_CASE ("Phazite's engine clicks the metronome on each beat's sample, and Tra
     EnginePlayback playback;
 
     song.run ("transport.playStop");
-    CHECK_FALSE (phazite::getEdit (song.context)->getTransport().isPlaying());
     const auto played = playback.play (1.0);
 
     // Clicks at 0 and half a second, each heard from its second sample (its first is silent).
@@ -303,7 +258,7 @@ TEST_CASE ("Touch writes what a control does while it is held, from the lane's v
     CHECK (points.back().beat.inBeats() == doctest::Approx (16.0));
 
     // One step takes it back, the control's moves with it.
-    phazite::undo (*phazite::getEdit (song.context));
+    phazite::undo (*phazite::findSong (song.context));
     CHECK (phazite::getAutomationPoints (song.context, lane).size() == 2);
 }
 
@@ -428,7 +383,7 @@ namespace
 juce::AudioBuffer<float> renderOwn (TestSong& song, double seconds = 1.0)
 {
     phazite::test::dispatchPendingMessages();
-    return phazite::renderWithOwnEngine (*phazite::getEdit (song.context), (int) (seconds * 48000.0), 48000.0, 256);
+    return phazite::renderWithOwnEngine (*phazite::findSong (song.context), (int) (seconds * 48000.0), 48000.0, 256);
 }
 
 float levelOf (const juce::AudioBuffer<float>& audio, int side, double from = 0.25, double to = 0.75)
@@ -511,17 +466,17 @@ TEST_CASE ("Phazite's engine mixes a container's devices with what comes into it
     CHECK (levelOf (renderOwn (song), 0) == doctest::Approx (toneLevel).epsilon (0.002));
 }
 
-TEST_CASE ("Phazite's engine plays a plug-in from the instance Tracktion loaded, as the plug-in is set")
+TEST_CASE ("Phazite's engine plays a plug-in from its instance in its helper, as the plug-in is set")
 {
     phazite::test::TestPlugin testPlugin;
     TestSong song;
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
     const auto effect = song.addEffect (track, "PhaziteTestEffect");
-    auto* plugin =
-        dynamic_cast<te::ExternalPlugin*> (te::findPluginForID (*phazite::getEdit (song.context), phazite::toTracktion (effect)).get());
-    REQUIRE (plugin != nullptr);
+    auto& state = *phazite::findSong (song.context);
     EnginePlayback playback;
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::findPluginInstance (state, effect) != nullptr);
 
     // Its gain at 1: the tone as it is.
     song.run ("transport.playStop");
@@ -529,7 +484,7 @@ TEST_CASE ("Phazite's engine plays a plug-in from the instance Tracktion loaded,
     CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
 
     // Turned down as its editor turns it, at half: 6 dB quieter.
-    phazite::test::TestPlugin::setGain (*plugin, 0.5f);
+    phazite::test::TestPlugin::setGain (state, effect, 0.5f);
     audio = playback.play (0.6);
     CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel - 6.02f).epsilon (0.002));
 
@@ -543,9 +498,9 @@ TEST_CASE ("Phazite's engine renders the First Beat example the same to the last
 {
     TestSong song (TestSong::Start::firstBeat);
     phazite::test::dispatchPendingMessages();
-    auto& edit = *phazite::getEdit (song.context);
-    const auto one = phazite::renderWithOwnEngine (edit, 48000 * 4, 48000.0, 256, 1);
-    const auto four = phazite::renderWithOwnEngine (edit, 48000 * 4, 48000.0, 256, 4);
+    auto& state = *phazite::findSong (song.context);
+    const auto one = phazite::renderWithOwnEngine (state, 48000 * 4, 48000.0, 256, 1);
+    const auto four = phazite::renderWithOwnEngine (state, 48000 * 4, 48000.0, 256, 4);
     REQUIRE (one.getMagnitude (0, 0, one.getNumSamples()) > 0.01f);
 
     auto same = true;

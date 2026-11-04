@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist's edits as plain values (no Tracktion here), for PlaylistModel.h and the model's own arrangement code: where
-// tracks dragged in the playlist go, and the shapes of audio clips' fades.
+// The playlist's edits as plain values, for PlaylistModel.h and the model's own arrangement code: where tracks dragged
+// in the playlist go, and the shapes of audio clips' fades.
 #pragma once
 
 #include <juce_core/juce_core.h>

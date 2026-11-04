@@ -70,9 +70,8 @@ namespace
 
 struct Previewer::Impl : private juce::Timer
 {
-    Impl (te::Engine& e, PlaybackHost& h)
-        : tracktion (e),
-          host (h),
+    explicit Impl (PlaybackHost& h)
+        : host (h),
           previews (h.getPreviewEngine())
     {
     }
@@ -136,7 +135,6 @@ struct Previewer::Impl : private juce::Timer
         return master;
     }
 
-    te::Engine& tracktion; // its audio formats, and what it knows of loops' beats (until T6)
     PlaybackHost& host;
     engine::Engine& previews;
     std::shared_ptr<engine::StripState> master;
@@ -155,7 +153,7 @@ struct Previewer::Impl : private juce::Timer
 
 std::unique_ptr<Previewer> createPreviewer (EngineContext& context)
 {
-    return std::make_unique<Previewer> (std::make_unique<Previewer::Impl> (getEngine (context), getPlaybackHost (context)));
+    return std::make_unique<Previewer> (std::make_unique<Previewer::Impl> (getPlaybackHost (context)));
 }
 
 Previewer::Previewer (std::unique_ptr<Impl> i)
@@ -176,11 +174,11 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
     if (! newFile.existsAsFile())
         return false;
 
-    const auto* project = getEdit (context);
+    const auto* project = findSong (context);
     auto& previews = impl->previews;
     const auto rate = previews.getSampleRate();
     const auto blockSize = previews.getMaximumBlockSize();
-    const auto bpm = project != nullptr ? getTempo (getSong (*project)) : 120.0;
+    const auto bpm = project != nullptr ? getTempo (*project) : 120.0;
 
     // The sound on a strip of its own.
     engine::Plan::Strip sound;
@@ -289,7 +287,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
 
 void Previewer::keepInTime (const ProjectContext& context)
 {
-    const auto* project = getEdit (context);
+    const auto* project = findSong (context);
 
     if (impl->file == juce::File() || project == nullptr)
         return;

@@ -6,7 +6,6 @@
 #include "model/base/internal/Selection.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineContext.h"
-#include "model/engine/internal/EngineSetup.h"
 #include "model/project/NewProject.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -21,9 +20,10 @@ namespace phazite
 class ProjectSession : private juce::ChangeListener
 {
 public:
-    // New projects are kept in unsavedFolder (getUnsavedProjectsFolder() in the app) until their first save asks where
-    // they go, starting in projectsFolder, where the Open dialog starts too.
-    ProjectSession (te::Engine&, UIBehaviour&, RecentProjects&, juce::File projectsFolder, juce::File unsavedFolder);
+    // Its projects play on the engine context, which outlives it (the app's: src/app/Main.cpp). New projects are kept in
+    // unsavedFolder (getUnsavedProjectsFolder() in the app) until their first save asks where they go, starting in
+    // projectsFolder, where the Open dialog starts too.
+    ProjectSession (EngineContext&, RecentProjects&, juce::File projectsFolder, juce::File unsavedFolder);
     ~ProjectSession() override;
 
     Project* getProject() const noexcept { return project.get(); }
@@ -32,13 +32,13 @@ public:
     // it goes (model/project/internal/UnsavedProjects.h).
     bool isUntitled() const;
 
-    // The open project's Edit and what is selected in it: tracks and clips (live MIDI input follows the selected
+    // The open project's song and what is selected in it: tracks and clips (live MIDI input follows the selected
     // track), and a time range across tracks.
     ProjectContext& getContext() noexcept { return context; }
     Selection& getSelection() noexcept { return phazite::getSelection (context); }
     RangeSelection& getRangeSelection() noexcept { return phazite::getRangeSelection (context); }
 
-    std::function<void()> onProjectClosing;  // the open project is about to close: let go of its Edit
+    std::function<void()> onProjectClosing;  // the open project is about to close, still open: let go of what holds its song
     std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
     std::function<void()> onExport;          // shows the export window (the main window's), for Export Song
     juce::Component* dialogParent = nullptr; // dialogs appear over this
@@ -101,11 +101,10 @@ public:
     void addCommands (CommandRegistry&);
 
 private:
-    te::Engine& engine;
+    EngineContext& engineContext;
     const juce::File projectsFolder, unsavedFolder;
     RecentProjects& recent;
-    std::unique_ptr<EngineContext> engineContext;        // the Engine, as the project context takes it
-    ProjectContext context;                              // keeps Tracktion's focus in step
+    ProjectContext context;                              // the open project's song, as commands and views reach it
     std::unique_ptr<UnsavedFolder> projectUnsavedFolder; // where the project was made while untitled, until it closes
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
@@ -113,7 +112,7 @@ private:
 
     // The project, and the folder it was made in if it was untitled, deleted once the project has closed.
     void setProject (std::unique_ptr<Project>, std::unique_ptr<UnsavedFolder> = {});
-    juce::Result createUntitled (const juce::String& name, const std::function<void (te::Edit&)>& addContent);
+    juce::Result createUntitled (const juce::String& name, const std::function<void (Song&)>& addContent);
     void openRecentOrFirst();
     void openWithRestoreQuestion (const juce::File&);
     void open (const juce::File&, bool restoreAutosave);

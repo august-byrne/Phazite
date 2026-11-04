@@ -6,13 +6,14 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 #include <array>
 #include <cmath>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <limits>
 
 namespace phazite
@@ -96,7 +97,7 @@ Take::~Take()
 
 std::unique_ptr<Take> Take::start (PlaybackSession& session)
 {
-    auto& edit = session.getEdit();
+    auto& song = session.getSong();
     auto& engine = session.getEngine();
     const auto rate = engine.getSampleRate();
     const auto* plan = engine.getPlan();
@@ -108,50 +109,46 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session)
     take->tempo = plan->tempo;
 
     // A punched take doesn't loop; the song's own loop doesn't loop a take.
-    if (isPunching (edit))
-        take->punch = getLoopBeats (edit);
-    else if (isLoopOn (edit) && ! doesLoopFollowSong (edit))
-        take->loop = getLoopBeats (edit);
+    if (isPunching (song))
+        take->punch = getLoopBeats (song);
+    else if (isLoopOn (song) && ! doesLoopFollowSong (song))
+        take->loop = getLoopBeats (song);
 
-    if (auto* track = getLiveMidiTrack (edit))
-        take->midiTrack = getTrackID (findTrackState (*track));
+    take->midiTrack = getLiveMidiTrack (song);
 
     // Each armed track's input the audio device has, into a file of its own.
     std::vector<std::unique_ptr<engine::Recording::Input>> inputs;
+    auto& recorder = session.getRecorder();
 
-    if (auto* recorder = AudioRecorder::findFor (edit))
+    for (const auto track : recorder.getArmedTracks())
     {
-        for (auto* track : recorder->getArmedTracks())
+        auto channels = getInputChannels (findTrackState (song, track)[schema::trackInput].toString());
+
+        if (channels.empty() || channels.back() >= session.getNumInputs())
+            continue;
+
+        auto audio = std::make_unique<AudioTake>();
+        audio->track = track;
+        audio->file = recorder.getTakeFile (track);
+        audio->file.getParentDirectory().createDirectory();
+        std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (audio->file);
+
+        if (! static_cast<juce::FileOutputStream&> (*stream).openedOk())
+            continue;
+
+        audio->writer = juce::WavAudioFormat().createWriterFor (
+            stream, juce::AudioFormatWriterOptions {}.withSampleRate (rate).withNumChannels ((int) channels.size()).withBitsPerSample (24));
+
+        if (audio->writer == nullptr)
         {
-            auto channels = getInputChannels (findTrackState (*track)[schema::trackInput].toString());
-
-            if (channels.empty() || channels.back() >= session.getNumInputs())
-                continue;
-
-            auto audio = std::make_unique<AudioTake>();
-            audio->track = getTrackID (findTrackState (*track));
-            audio->file = recorder->getTakeFile (*track);
-            audio->file.getParentDirectory().createDirectory();
-            std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (audio->file);
-
-            if (! static_cast<juce::FileOutputStream&> (*stream).openedOk())
-                continue;
-
-            audio->writer = juce::WavAudioFormat().createWriterFor (
-                stream,
-                juce::AudioFormatWriterOptions {}.withSampleRate (rate).withNumChannels ((int) channels.size()).withBitsPerSample (24));
-
-            if (audio->writer == nullptr)
-            {
-                audio->file.deleteFile();
-                continue;
-            }
-
-            auto input = std::make_unique<engine::Recording::Input> (std::move (channels), (int) (bufferSeconds * rate));
-            audio->input = input.get();
-            inputs.push_back (std::move (input));
-            take->audio.push_back (std::move (audio));
+            audio->file.deleteFile();
+            continue;
         }
+
+        auto input = std::make_unique<engine::Recording::Input> (std::move (channels), (int) (bufferSeconds * rate));
+        audio->input = input.get();
+        inputs.push_back (std::move (input));
+        take->audio.push_back (std::move (audio));
     }
 
     if (! take->midiTrack.isValid() && take->audio.empty())
@@ -160,8 +157,9 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session)
     // How late what comes in is: a note by the output's delay and the song's delay compensation, as it was heard; an
     // input's sound by its own delay and the audio settings' correction too.
     const auto compensation = engine::Engine::getOutputLatency (*plan);
+    const auto correction = session.getAudioIO().getRecordingCorrection(); // milliseconds
     take->midiShift = session.getOutputLatency() + compensation;
-    take->audioShift = session.getInputLatency() + take->midiShift + std::llround (getRecordingCorrection (edit.engine) * rate / 1000.0);
+    take->audioShift = session.getInputLatency() + take->midiShift + std::llround (correction * rate / 1000.0);
 
     auto recording = std::make_unique<engine::Recording> (std::move (inputs));
     take->recording = recording.get();
@@ -205,8 +203,7 @@ void Take::close (bool keep)
     session.keepPlayedFrom ({});
 
     // What was armed or set to be heard meanwhile.
-    if (auto* recorder = AudioRecorder::findFor (session.getEdit()))
-        recorder->update();
+    session.getRecorder().update();
 }
 
 void Take::finish()
@@ -250,14 +247,13 @@ void Take::finish()
             place.firstLoopStart = place.loop->getStart();
         }
 
-        placeTake (getSong (session.getEdit()), take->track, take->file, place);
+        placeTake (session.getSong(), take->track, take->file, place);
     }
 }
 
 void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::int64_t length)
 {
-    auto& edit = session.getEdit();
-    auto& song = getSong (edit);
+    auto& song = session.getSong();
 
     if (const auto state = findTrackState (song, midiTrack); ! state.hasType (schema::TRACK) || isFolderState (state))
         return;
@@ -366,7 +362,7 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
     const auto firstStart = toBeat (notes.front().start);
     ClipID clip;
 
-    if (isOverdubOn (edit.engine))
+    if (isOverdubOn (session.getAudioIO()))
     {
         for (const auto& clipState : getClipStates (findTrackState (song, midiTrack)))
             if (! clip.isValid() && isMidiState (clipState) && getClipRange (clipState).getStart() <= firstStart
@@ -384,7 +380,7 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
     if (! clip.isValid())
         return;
 
-    const auto quantize = isRecordQuantizeOn (edit.engine);
+    const auto quantize = isRecordQuantizeOn (session.getAudioIO());
 
     for (const auto& note : notes)
     {

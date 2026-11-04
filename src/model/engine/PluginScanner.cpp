@@ -15,8 +15,8 @@ namespace
     class Scanner : public juce::KnownPluginList::CustomScanner
     {
     public:
-        Scanner (te::Engine& e, int seconds)
-            : engine (e),
+        Scanner (PluginHost& h, int seconds)
+            : host (h),
               secondsEach (seconds)
         {
         }
@@ -39,9 +39,6 @@ namespace
                 const std::lock_guard held (lock);
                 helper = nullptr;
             }
-
-            if (auto callback = engine.getPluginManager().scanCompletedCallback)
-                callback();
         }
 
         // From another thread: the helper ended, so that the file it is on answers at once.
@@ -55,7 +52,7 @@ namespace
         }
 
     private:
-        te::Engine& engine;
+        PluginHost& host;
         const int secondsEach;
         std::mutex lock; // the helper, which a cancel ends from another thread
         std::unique_ptr<sandbox::Helper> helper;
@@ -119,8 +116,7 @@ namespace
 
             if (helper == nullptr || ! helper->isRunning())
             {
-                const auto host = PluginHost::getFor (engine);
-                helper = host != nullptr ? std::make_unique<sandbox::Helper> (host->getHelperProgram()) : nullptr;
+                helper = std::make_unique<sandbox::Helper> (host.getHelperProgram());
 
                 if (helper != nullptr && ! helper->start (startMilliseconds))
                     helper = nullptr;
@@ -135,11 +131,11 @@ namespace
             helper = nullptr; // ended, if it still runs
         }
 
-        // As Tracktion's scanner: a plug-in described as it was before keeps the time it was described then, rather than
+        // A plug-in described as it was before keeps the time it was described then, rather than
         // looking just updated (some formats describe every plug-in again at each scan).
         void keepUpdateTimesOfUnchanged (juce::OwnedArray<juce::PluginDescription>& found) const
         {
-            for (const auto& known : engine.getPluginManager().knownPluginList.getTypes())
+            for (const auto& known : host.getKnownPlugins().getTypes())
                 for (auto* description : found)
                     if (description != nullptr && description->isDuplicateOf (known)
                         && description->lastFileModTime == known.lastFileModTime && description->version == known.version)
@@ -148,16 +144,15 @@ namespace
     };
 } // namespace
 
-std::unique_ptr<juce::KnownPluginList::CustomScanner> createPluginScanner (te::Engine& engine, int secondsEach)
+std::unique_ptr<juce::KnownPluginList::CustomScanner> createPluginScanner (PluginHost& host, int secondsEach)
 {
-    return std::make_unique<Scanner> (engine, secondsEach);
+    return std::make_unique<Scanner> (host, secondsEach);
 }
 
-void usePluginScannerWithTimeLimit (te::Engine& engine)
+void usePluginScannerWithTimeLimit (PluginHost& host)
 {
-    auto& plugins = engine.getPluginManager();
-    auto scanner = std::make_unique<Scanner> (engine, pluginScanSecondsEach);
-    plugins.abortCurrentPluginScan = [current = scanner.get()] { current->cancel(); };
-    plugins.knownPluginList.setCustomScanner (std::move (scanner));
+    auto scanner = std::make_unique<Scanner> (host, pluginScanSecondsEach);
+    host.setScanCanceller ([current = scanner.get()] { current->cancel(); });
+    host.getKnownPlugins().setCustomScanner (std::move (scanner));
 }
 } // namespace phazite

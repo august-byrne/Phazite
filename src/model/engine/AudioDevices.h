@@ -23,6 +23,7 @@ std::optional<int> chooseLowLatencyBufferSize (const juce::Array<int>& available
 
 // For a first run (no audio setup saved yet): Windows' Low Latency Mode with chooseLowLatencyBufferSize()'s buffer, on
 // the default output, where it offers one; otherwise the setup it had. Either way the setup becomes the chosen one, which
-// the Engine saves, so later starts keep it. Returns whether it switched to Low Latency Mode.
+// Phazite's settings keep (internal/AudioIO.h: getSaved()), so later starts keep it. Returns whether it switched to Low
+// Latency Mode.
 bool chooseLowLatencySetup (juce::AudioDeviceManager&);
 } // namespace phazite

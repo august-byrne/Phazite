@@ -154,12 +154,6 @@ namespace
                  (bool) noteState[schema::notePortamento] };
     }
 
-    void reconcileAll (Song& song, const std::vector<juce::ValueTree>& clipStates)
-    {
-        for (const auto& clipState : clipStates)
-            song.reconcile (Song::Part::clip, getClipID (clipState).getRaw());
-    }
-
     // Changes the note with an ID in a clip, and in each of its aliases, which hold the same notes.
     void changeNote (Song& song, const NoteRef& ref, const std::function<void (juce::ValueTree&, juce::UndoManager*)>& change)
     {
@@ -173,8 +167,6 @@ namespace
         for (const auto& alias : aliases)
             if (auto note = findNoteIn (alias, ref.note); note.isValid())
                 change (note, &song.getUndoManager());
-
-        reconcileAll (song, aliases);
     }
 
     // What a note is besides its place, pitch and velocity: muted, a slide note or a portamento note, each written on its
@@ -222,7 +214,6 @@ namespace
             alias.appendChild (note, &song.getUndoManager());
         }
 
-        reconcileAll (song, aliases);
         return NoteID::fromRaw ((std::uint64_t) id);
     }
 
@@ -238,8 +229,6 @@ namespace
         for (auto alias : aliases)
             if (const auto note = findNoteIn (alias, ref.note); note.isValid())
                 alias.removeChild (note, &song.getUndoManager());
-
-        reconcileAll (song, aliases);
     }
 
     // The notes there, each once: of a note in a clip and its copies in the clip's aliases, the first one, since an edit to it
@@ -652,8 +641,6 @@ void setClipNotes (Song& song, ClipID clip, const std::vector<NoteData>& notes)
             alias.appendChild (note, undo);
         }
     }
-
-    reconcileAll (song, aliases);
 }
 
 std::vector<NoteRef> replaceNotes (Song& song, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements)

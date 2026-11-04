@@ -1,40 +1,48 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer as the UI reaches it, by IDs and plain values (src/model/mixer/MixerModel.h).
+#include "EnginePlayback.h"
 #include "HostedDevice.h"
+#include "TestDevices.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "devices/synth/Synth.h"
+#include "engine/nodes/Channel.h"
+#include "engine/nodes/DeviceNode.h"
+#include "engine/nodes/Strip.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
-#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/devices/internal/DeviceStates.h"
-#include "model/engine/internal/EngineSetup.h"
-#include "model/engine/internal/LoudnessMeterPlugin.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
+#include <iterator>
+
 namespace
 {
 // An open project with two tracks, A and B, as the app has it.
-struct Song
+struct TwoTracks
 {
-    Song()
+    TwoTracks()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        phazite::setTrackName (*a, "A");
-        phazite::setTrackName (*b, "B");
-        setEdit (context, edit.get());
+        const auto tracks = phazite::ensureTracks (*song, 2);
+        REQUIRE (tracks.size() == 2);
+        a = tracks[0];
+        b = tracks[1];
+        phazite::setTrackName (*song, a, "A");
+        phazite::setTrackName (*song, b, "B");
+        setSong (context, song.get());
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~TwoTracks() { setSong (context, nullptr); }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -46,16 +54,32 @@ struct Song
         return {};
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
-};
+    // What Phazite's engine plays of a device, and of a channel's fader (a track's by its ID, the master's by none), once
+    // the song's session has given it the song as it is now; nullptr for what it doesn't play.
+    phazite::engine::DeviceNode* findPlayedDevice (phazite::DeviceID device)
+    {
+        return getUpdatedSession().getPlayer().findDevice ((std::int64_t) device.getRaw());
+    }
 
-phazite::TrackID idOf (const te::Track& track)
-{
-    return phazite::getTrackID (track);
-}
+    phazite::engine::Channel* findPlayedChannel (phazite::TrackID channel)
+    {
+        auto* strip = getUpdatedSession().getPlayer().findStrip ((std::int64_t) channel.getRaw());
+        return strip != nullptr ? &strip->getChannel() : nullptr;
+    }
+
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::TrackID a, b;
+
+private:
+    phazite::PlaybackSession& getUpdatedSession()
+    {
+        auto* session = phazite::getSession (context);
+        REQUIRE (session != nullptr);
+        session->update();
+        return *session;
+    }
+};
 
 std::vector<juce::String> namesOf (const std::vector<phazite::DeviceSlot>& slots)
 {
@@ -70,88 +94,92 @@ std::vector<juce::String> namesOf (const std::vector<phazite::DeviceSlot>& slots
 
 TEST_CASE ("The mixer's channels are the playlist's tracks, then the returns, each with what it is and where it goes")
 {
-    Song song;
-    auto& context = song.context;
-    auto* folder = phazite::groupIntoFolder ({ song.b }, nullptr); // a bus, as every new folder is
-    REQUIRE (folder != nullptr);
-    phazite::setTrackName (*folder, "Drums");
-    auto* reverb = phazite::addReturnTrack (*song.edit, "Reverb", nullptr);
-    REQUIRE (reverb != nullptr);
-    phazite::moveTracksAfter ({ reverb }, nullptr); // first in the playlist, but last in the mixer
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto folder = phazite::groupIntoFolder (song, { tracks.b }, nullptr); // a bus, as every new folder is
+    REQUIRE (folder.isValid());
+    phazite::setTrackName (song, folder, "Drums");
+    const auto reverb = phazite::addReturnTrack (song, "Reverb", nullptr);
+    REQUIRE (reverb.isValid());
+    phazite::moveTracksAfter (song, { reverb }, {}); // first in the playlist, but last in the mixer
 
     const auto channels = phazite::getMixerChannels (context);
-    CHECK (channels.tracks == std::vector { idOf (*song.a), idOf (*folder), idOf (*song.b) });
-    CHECK (channels.returns == std::vector { idOf (*reverb) });
+    CHECK (channels.tracks == std::vector { tracks.a, folder, tracks.b });
+    CHECK (channels.returns == std::vector { reverb });
 
     // A track goes into the bus of the folder it is in, and the bus to the master.
-    const auto track = phazite::getChannel (context, idOf (*song.b));
+    const auto track = phazite::getChannel (context, tracks.b);
     REQUIRE (track.has_value());
     CHECK (track->name == juce::String ("B"));
     CHECK (track->kind == phazite::ChannelKind::track);
     CHECK (track->outputBus == juce::String ("Drums"));
-    CHECK (track->colour == phazite::getTrackColour (*song.b, phazite::getPlaylistTracks (*song.edit).indexOf (song.b)));
-    CHECK (phazite::getChannel (context, idOf (*folder))->kind == phazite::ChannelKind::bus);
-    CHECK (phazite::getChannel (context, idOf (*folder))->outputBus.isEmpty());
-    CHECK (phazite::feeds (context, idOf (*song.b), idOf (*folder)));
-    CHECK_FALSE (phazite::feeds (context, idOf (*song.a), idOf (*folder)));
+    const auto rows = phazite::getTrackIDs (song);
+    const auto row = (int) std::distance (rows.begin(), std::find (rows.begin(), rows.end(), tracks.b));
+    CHECK (track->colour == phazite::getTrackColour (song, tracks.b, row));
+    CHECK (phazite::getChannel (context, folder)->kind == phazite::ChannelKind::bus);
+    CHECK (phazite::getChannel (context, folder)->outputBus.isEmpty());
+    CHECK (phazite::feeds (context, tracks.b, folder));
+    CHECK_FALSE (phazite::feeds (context, tracks.a, folder));
 
     // A plain folder only scales its tracks' volumes: it has no sound of its own for them to go into.
-    phazite::setMixedAsBus (context, idOf (*folder), false);
-    CHECK (phazite::getChannel (context, idOf (*folder))->kind == phazite::ChannelKind::plainFolder);
-    CHECK (phazite::getChannel (context, idOf (*song.b))->outputBus.isEmpty());
-    CHECK_FALSE (phazite::feeds (context, idOf (*song.b), idOf (*folder)));
-    CHECK_FALSE (phazite::getPan (context, idOf (*folder)).isValid());
-    CHECK (phazite::getVolume (context, idOf (*folder)).isValid()); // its VCA
+    phazite::setMixedAsBus (context, folder, false);
+    CHECK (phazite::getChannel (context, folder)->kind == phazite::ChannelKind::plainFolder);
+    CHECK (phazite::getChannel (context, tracks.b)->outputBus.isEmpty());
+    CHECK_FALSE (phazite::feeds (context, tracks.b, folder));
+    CHECK_FALSE (phazite::getPan (context, folder).isValid());
+    CHECK (phazite::getVolume (context, folder).isValid()); // its VCA
 
     // A return says which tracks send to it.
-    CHECK (phazite::getChannel (context, idOf (*reverb))->kind == phazite::ChannelKind::returnTrack);
-    CHECK (phazite::getChannel (context, idOf (*reverb))->senders.isEmpty());
+    CHECK (phazite::getChannel (context, reverb)->kind == phazite::ChannelKind::returnTrack);
+    CHECK (phazite::getChannel (context, reverb)->senders.isEmpty());
     CHECK (phazite::getReturns (context).size() == 1);
-    phazite::addSendTo (context, idOf (*song.a), idOf (*reverb));
-    CHECK (phazite::getChannel (context, idOf (*reverb))->senders == juce::StringArray { "A" });
-    CHECK (phazite::feeds (context, idOf (*song.a), idOf (*reverb)));
-    CHECK_FALSE (phazite::canHoldInstrument (context, idOf (*reverb)));
-    CHECK (phazite::canHoldInstrument (context, idOf (*song.a)));
+    phazite::addSendTo (context, tracks.a, reverb);
+    CHECK (phazite::getChannel (context, reverb)->senders == juce::StringArray { "A" });
+    CHECK (phazite::feeds (context, tracks.a, reverb));
+    CHECK_FALSE (phazite::canHoldInstrument (context, reverb));
+    CHECK (phazite::canHoldInstrument (context, tracks.a));
 }
 
 TEST_CASE ("Mute and solo by ID, and the channel the inspector shows")
 {
-    Song song;
-    auto& context = song.context;
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
 
-    phazite::toggleMute (context, idOf (*song.a));
-    CHECK (song.a->isMuted (false));
-    CHECK (phazite::getMuteSolo (context, idOf (*song.a))->muted);
-    phazite::toggleMute (context, idOf (*song.a));
-    CHECK_FALSE (phazite::getMuteSolo (context, idOf (*song.a))->muted);
+    phazite::toggleMute (context, tracks.a);
+    CHECK (phazite::isTrackMuted (song, tracks.a, false));
+    CHECK (phazite::getMuteSolo (context, tracks.a)->muted);
+    phazite::toggleMute (context, tracks.a);
+    CHECK_FALSE (phazite::getMuteSolo (context, tracks.a)->muted);
 
     // A track that others' solos keep quiet.
-    phazite::toggleSolo (context, idOf (*song.b));
-    CHECK (phazite::getMuteSolo (context, idOf (*song.a))->silencedBySolo);
-    CHECK (phazite::getMuteSolo (context, idOf (*song.b))->soloed);
+    phazite::toggleSolo (context, tracks.b);
+    CHECK (phazite::getMuteSolo (context, tracks.a)->silencedBySolo);
+    CHECK (phazite::getMuteSolo (context, tracks.b)->soloed);
 
-    phazite::toggleSoloAlone (context, idOf (*song.a));
-    CHECK (song.a->isSolo (false));
-    CHECK_FALSE (song.b->isSolo (false));
+    phazite::toggleSoloAlone (context, tracks.a);
+    CHECK (phazite::isTrackSoloed (song, tracks.a));
+    CHECK_FALSE (phazite::isTrackSoloed (song, tracks.b));
 
     // The selected track; with none, the first.
-    CHECK (phazite::getInspectedChannel (context) == idOf (*song.a));
-    context.getSongSelection().selectOnly (idOf (*song.b));
-    CHECK (phazite::getInspectedChannel (context) == idOf (*song.b));
+    CHECK (phazite::getInspectedChannel (context) == tracks.a);
+    context.getSongSelection().selectOnly (tracks.b);
+    CHECK (phazite::getInspectedChannel (context) == tracks.b);
     context.getSongSelection().clear();
 }
 
 TEST_CASE ("A channel's devices by ID: its instrument, its effects in their order, switched, moved and removed")
 {
-    Song song;
-    auto& context = song.context;
-    const auto a = idOf (*song.a);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    const auto a = tracks.a;
 
     CHECK_FALSE (phazite::getInstrument (context, a).has_value());
-    phazite::chooseInstrument (context, a, song.find ("phaziteSynth"));
-    phazite::addEffect (context, a, song.find ("phaziteEq"));
-    phazite::addEffect (context, a, song.find ("phaziteCompressor"));
-    phazite::addEffect (context, {}, song.find ("phaziteLimiter")); // the master's
+    phazite::chooseInstrument (context, a, tracks.find ("phaziteSynth"));
+    phazite::addEffect (context, a, tracks.find ("phaziteEq"));
+    phazite::addEffect (context, a, tracks.find ("phaziteCompressor"));
+    phazite::addEffect (context, {}, tracks.find ("phaziteLimiter")); // the master's
 
     const auto instrument = phazite::getInstrument (context, a);
     REQUIRE (instrument.has_value());
@@ -183,26 +211,26 @@ TEST_CASE ("A channel's devices by ID: its instrument, its effects in their orde
     CHECK_FALSE (phazite::getMix (context, eq.id).isValid()); // a device that is gone
 
     // An instrument dropped on a track that has one replaces it; dropped on the master, an effect goes there.
-    CHECK (phazite::addDeviceTo (context, a, song.find ("phaziteDrums")));
+    CHECK (phazite::addDeviceTo (context, a, tracks.find ("phaziteDrums")));
     CHECK (phazite::getInstrument (context, a)->name == juce::String ("Drum Sampler"));
-    CHECK (phazite::addDeviceTo (context, {}, song.find ("phaziteReverb")));
+    CHECK (phazite::addDeviceTo (context, {}, tracks.find ("phaziteReverb")));
     CHECK (namesOf (phazite::getEffects (context, {})).back() == juce::String ("Reverb"));
 }
 
-TEST_CASE ("A channel's devices are the song's, in order and on or off, which Tracktion's mirror one way, undo and redo too")
+TEST_CASE ("A channel's devices are the song's, in order and on or off, which what plays follows, undo and redo too")
 {
     namespace schema = phazite::schema;
-    Song song;
-    auto& context = song.context;
-    auto& edit = *song.edit;
-    const auto a = idOf (*song.a);
-    phazite::chooseInstrument (context, a, song.find ("phaziteSynth"));
-    phazite::addEffect (context, a, song.find ("phaziteEq"));
-    phazite::addEffect (context, a, song.find ("phaziteCompressor"));
-    phazite::addEffect (context, {}, song.find ("phaziteLimiter"));
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto a = tracks.a;
+    phazite::chooseInstrument (context, a, tracks.find ("phaziteSynth"));
+    phazite::addEffect (context, a, tracks.find ("phaziteEq"));
+    phazite::addEffect (context, a, tracks.find ("phaziteCompressor"));
+    phazite::addEffect (context, {}, tracks.find ("phaziteLimiter"));
 
     // The song's: a track's element holds its devices in order, the instrument first, by their IDs and types; the master's
-    // element its own. What Tracktion plays: the track's devices in its list, in order, each switched on or off.
+    // element its own.
     const auto typesIn = [] (const juce::ValueTree& chain)
     {
         juce::StringArray types;
@@ -213,116 +241,120 @@ TEST_CASE ("A channel's devices are the song's, in order and on or off, which Tr
         return types.joinIntoString (" ");
     };
 
-    const auto played = [&song]
-    {
-        juce::StringArray names;
-
-        for (auto* plugin : song.a->pluginList)
-            if (phazite::mirror::isDevice (*plugin))
-                names.add (plugin->getName() + (plugin->isEnabled() ? "" : " (off)"));
-
-        return names.joinIntoString (", ");
-    };
-
-    const auto chain = phazite::findTrackState (*song.a);
+    const auto chain = phazite::findTrackState (song, a);
     CHECK (typesIn (chain) == "phaziteSynth phaziteEq phaziteCompressor");
-    CHECK (typesIn (phazite::findChainState (edit, nullptr)) == "phaziteLimiter");
-    CHECK (played() == "Synth, EQ, Compressor");
+    CHECK (typesIn (phazite::findChainState (song, {})) == "phaziteLimiter");
     const auto effects = phazite::getEffects (context, a);
     REQUIRE (effects.size() == 2);
     CHECK (phazite::getDeviceID (phazite::getDeviceStates (chain)[1]) == effects[0].id);
 
-    // Switched off, moved and removed in the song, which Tracktion follows; undo and redo put both back.
+    // What plays each device: on or off as the song has it, and none for a device the song hasn't any more.
+    const auto isPlayedOn = [&tracks] (phazite::DeviceID device)
+    {
+        auto* node = tracks.findPlayedDevice (device);
+        REQUIRE (node != nullptr);
+        return node->isOn();
+    };
+
+    // Switched off, moved and removed in the song, which what plays follows; undo and redo put both back.
     const auto eq = effects[0].id, compressor = effects[1].id;
+    CHECK (isPlayedOn (eq));
     phazite::setDeviceOn (context, eq, false);
-    CHECK ((bool) phazite::findDeviceState (edit, eq)[schema::deviceOff]);
-    CHECK (played() == "Synth, EQ (off), Compressor");
+    CHECK ((bool) phazite::findDeviceState (song, eq)[schema::deviceOff]);
+    CHECK_FALSE (isPlayedOn (eq));
     phazite::moveEffect (context, eq, 1);
     CHECK (typesIn (chain) == "phaziteSynth phaziteCompressor phaziteEq");
-    CHECK (played() == "Synth, Compressor, EQ (off)");
     phazite::removeDevice (context, compressor);
     CHECK (typesIn (chain) == "phaziteSynth phaziteEq");
-    CHECK (played() == "Synth, EQ (off)");
+    CHECK (tracks.findPlayedDevice (compressor) == nullptr);
 
-    phazite::undo (edit);
+    phazite::undo (song);
     CHECK (typesIn (chain) == "phaziteSynth phaziteCompressor phaziteEq");
-    CHECK (played() == "Synth, Compressor, EQ (off)");
-    phazite::undo (edit);
-    phazite::undo (edit);
-    CHECK (played() == "Synth, EQ, Compressor");
-    phazite::redo (edit);
-    CHECK (played() == "Synth, EQ (off), Compressor");
-
-    // One way: a device of Tracktion's that the song hasn't goes; once they agree, the mirror changes nothing.
-    song.a->pluginList.insertPlugin (edit.getPluginCache().createNewPlugin ("phaziteDelay", {}), 0, nullptr);
-    CHECK (played() == "Delay, Synth, EQ (off), Compressor");
-    phazite::mirror::reconcileDevices (edit);
-    CHECK (played() == "Synth, EQ (off), Compressor");
-
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
-    phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
+    CHECK (isPlayedOn (compressor));
+    phazite::undo (song);
+    phazite::undo (song);
+    CHECK (typesIn (chain) == "phaziteSynth phaziteEq phaziteCompressor");
+    CHECK_FALSE (phazite::findDeviceState (song, eq).hasProperty (schema::deviceOff));
+    CHECK (isPlayedOn (eq));
+    phazite::redo (song);
+    CHECK ((bool) phazite::findDeviceState (song, eq)[schema::deviceOff]);
+    CHECK_FALSE (isPlayedOn (eq));
 }
 
-TEST_CASE ("The values set by hand of Phazite's own devices are the song's, and the mirror makes such a device from the song")
+TEST_CASE ("A channel's CPU meter shows the share of each block's time its devices take as Phazite's engine plays them")
+{
+    using phazite::test::TestBusy;
+    TwoTracks tracks;
+    auto& context = tracks.context;
+
+    // Two devices that each take a fifth of the time, one of them in a container: two fifths of A's, once it has played a
+    // while, nothing of B's, which has none, and nothing before anything plays.
+    const auto first = phazite::test::addTestDevice (*tracks.song, tracks.a, TestBusy::typeID);
+    const auto second = phazite::test::addTestDevice (*tracks.song, tracks.a, TestBusy::typeID);
+    REQUIRE (phazite::groupIntoContainer (context, { second }).isValid());
+    CHECK (phazite::getCpuLoad (context, tracks.a) == 0.0f);
+
+    phazite::test::EnginePlayback playback;
+    playback.play (1.5);
+    const auto both = phazite::getCpuLoad (context, tracks.a);
+    CHECK (both > 1.5 * TestBusy::share);
+    CHECK (both < 3.0 * TestBusy::share); // the time the engine itself took for them, or the test thread waited
+    CHECK (phazite::getCpuLoad (context, tracks.b) == 0.0f);
+
+    // Switched off, a device takes none, and its share falls away as the engine plays on.
+    phazite::setDeviceOn (context, first, false);
+    playback.play (2.0);
+    const auto one = phazite::getCpuLoad (context, tracks.a);
+    CHECK (one > 0.75 * TestBusy::share);
+    CHECK (one < 1.5 * TestBusy::share);
+}
+
+TEST_CASE ("The values set by hand of Phazite's own devices are the song's, which what plays takes in, undo and redo too")
 {
     namespace schema = phazite::schema;
-    Song song;
-    auto& context = song.context;
-    auto& edit = *song.edit;
-    const auto a = idOf (*song.a);
-    phazite::chooseInstrument (context, a, song.find ("phaziteSynth"));
-    const auto synth = phazite::getInstrument (context, a)->id;
-    auto cutoff = phazite::getParameter (context, { synth, "cutoff" });
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    phazite::chooseInstrument (context, tracks.a, tracks.find ("phaziteSynth"));
+    const auto synth = phazite::getInstrument (context, tracks.a)->id;
+    auto cutoff = phazite::getParameter (context, phazite::ParameterRef { synth, "cutoff" });
     REQUIRE (cutoff.exists());
+    const auto index = phazite::devices::findParameter (phazite::devices::Synth::info, "cutoff");
+    REQUIRE (index >= 0);
 
-    // A value set by hand goes into the song, and Tracktion's parameter plays it; an undo takes both back.
-    const auto values = [&edit, synth] { return phazite::findDeviceState (edit, synth).getChildWithName (schema::VALUES); };
-    const auto played = [&edit, synth] { return phazite::findParameter (edit, { synth, "cutoff" })->getCurrentValue(); };
+    // A value set by hand goes into the song, and what plays the device plays it; an undo takes both back.
+    const auto values = [&song, synth] { return phazite::findDeviceState (song, synth).getChildWithName (schema::VALUES); };
+    const auto played = [&tracks, synth, index]
+    {
+        auto* device = tracks.findPlayedDevice (synth);
+        REQUIRE (device != nullptr);
+        return device->getValue (index);
+    };
+
     const auto before = played();
     cutoff.setValue (2000.0f);
     CHECK ((float) values()[juce::Identifier ("cutoff")] == doctest::Approx (2000.0f));
     CHECK (played() == doctest::Approx (2000.0f));
-    phazite::undo (edit);
+    phazite::undo (song);
     CHECK_FALSE (values().hasProperty ("cutoff"));
     CHECK (played() == doctest::Approx (before));
-    phazite::redo (edit);
+    phazite::redo (song);
     CHECK (played() == doctest::Approx (2000.0f));
-
-    // One way: a value set on Tracktion's side alone is none of the song's, and the mirror puts the song's back.
-    phazite::findParameter (edit, { synth, "cutoff" })->setParameter (500.0f, juce::sendNotification);
-    phazite::mirror::reconcileDevices (edit);
-    CHECK (played() == doctest::Approx (2000.0f));
-
-    // A device of Phazite's own that Tracktion lost is made again from the song: in its place, with its ID and its values.
-    phazite::addEffect (context, a, song.find ("phaziteEq"));
-    phazite::getDevices (*song.a).getFirst()->deleteFromParent();
-    CHECK (phazite::getDevices (*song.a).size() == 1);
-    phazite::mirror::reconcileDevices (edit);
-    const auto devices = phazite::getDevices (*song.a);
-    REQUIRE (devices.size() == 2);
-    CHECK (phazite::getDeviceID (*devices.getFirst()) == synth);
-    CHECK (played() == doctest::Approx (2000.0f));
-
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
-    phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
 }
 
-TEST_CASE ("A plug-in is the song's: which it is, its mix, its settings as the project stores them; the mirror makes it from the song")
+TEST_CASE ("A plug-in is the song's: which it is, its mix, and its settings as the project stores them, which an undo makes it from")
 {
     namespace schema = phazite::schema;
     using phazite::test::TestPlugin;
     TestPlugin testPlugin;
-    Song song;
-    auto& context = song.context;
-    auto& edit = *song.edit;
-    const auto a = idOf (*song.a);
-    phazite::addEffect (context, a, song.find ("PhaziteTestEffect"));
-    const auto effects = phazite::getEffects (context, a);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    phazite::addEffect (context, tracks.a, tracks.find ("PhaziteTestEffect"));
+    const auto effects = phazite::getEffects (context, tracks.a);
     REQUIRE (effects.size() == 1);
     const auto id = effects[0].id;
-    const auto element = phazite::findDeviceState (edit, id);
+    const auto element = phazite::findDeviceState (song, id);
 
     // Which plug-in it is, as scanning found it.
     CHECK (element[schema::deviceType].toString() == "plugin");
@@ -332,157 +364,139 @@ TEST_CASE ("A plug-in is the song's: which it is, its mix, its settings as the p
     CHECK (element[schema::pluginIdentifier].toString() == "PhaziteTestEffect");
     CHECK ((int) element[schema::pluginUid] == TestPlugin::getDescription().uniqueId);
 
-    // Its mix is the song's; an undo takes it back.
+    // Its mix is the song's, which what plays it plays; an undo takes it back.
+    const auto playedMix = [&tracks, id]
+    {
+        auto* device = tracks.findPlayedDevice (id);
+        REQUIRE (device != nullptr);
+        const auto mix = phazite::devices::findParameter (device->getDeviceInfo(), phazite::devices::mixParameterID);
+        REQUIRE (mix >= 0);
+        return device->getValue (mix);
+    };
+
     auto mix = phazite::getMix (context, id);
     mix.setValue (0.25f);
     CHECK ((float) element[schema::deviceMix] == doctest::Approx (0.25f));
-    phazite::undo (edit);
+    CHECK (playedMix() == doctest::Approx (0.25f));
+    phazite::undo (song);
     CHECK_FALSE (element.hasProperty (schema::deviceMix));
-    phazite::redo (edit);
+    CHECK (playedMix() == doctest::Approx (1.0f));
+    phazite::redo (song);
 
-    // Its settings, as its window sets them, go into the song as the project stores them, with its channels.
-    const auto played = [&song] { return dynamic_cast<te::ExternalPlugin*> (phazite::getDevices (*song.a).getFirst()); };
-    REQUIRE (played() != nullptr);
-    TestPlugin::setGain (*played(), 0.3f);
-    phazite::storeDeviceStates (edit);
+    // Its settings, as its window sets them, go into the song as the project stores them.
+    TestPlugin::setGain (song, id, 0.3f);
+    song.storeDeviceStates();
     const auto stored = element[schema::pluginState].toString();
     CHECK (stored.isNotEmpty());
-    CHECK (element[schema::pluginInputs].toString() == "L R");
-    CHECK (element[schema::pluginOutputs].toString() == "L R");
 
-    // A plug-in Tracktion lost is made again from the song: with its ID, the settings the song stored and its mix.
-    TestPlugin::setGain (*played(), 0.9f);
-    played()->deleteFromParent();
-    CHECK (phazite::getDevices (*song.a).isEmpty());
-    phazite::mirror::reconcileDevices (edit);
-    REQUIRE (played() != nullptr);
-    CHECK (phazite::getDeviceID (*played()) == id);
-    CHECK (TestPlugin::getGain (*played()) == doctest::Approx (0.3f));
-    CHECK (played()->wetGain->getCurrentValue() == doctest::Approx (0.25f));
-    CHECK (played()->dryGain->getCurrentValue() == doctest::Approx (0.75f));
-
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
-    phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
-
-    // Taken away, it keeps in the song what it held then, for an undo to bring back.
-    TestPlugin::setGain (*played(), 0.6f);
+    // Taken away, it keeps in the song what it held then and plays no more; an undo makes it again from the song, with
+    // those settings and its mix.
+    TestPlugin::setGain (song, id, 0.6f);
     phazite::removeDevice (context, id);
     CHECK (element[schema::pluginState].toString() != stored);
+    CHECK (tracks.findPlayedDevice (id) == nullptr);
+    phazite::undo (song);
+    CHECK (TestPlugin::getGain (song, id) == doctest::Approx (0.6f));
+    CHECK (playedMix() == doctest::Approx (0.25f));
 }
 
-TEST_CASE ("A channel's volume and pan are the song's, which its fader plays one way; the master's starts at -3 dB")
+TEST_CASE ("A channel's volume and pan are the song's, which its fader plays; the master's starts at -3 dB")
 {
     namespace schema = phazite::schema;
-    Song song;
-    auto& context = song.context;
-    auto& edit = *song.edit;
-    const auto a = idOf (*song.a);
-    const auto track = phazite::findTrackState (*song.a);
-    const auto master = phazite::findChainState (edit, nullptr);
-    const auto played = [&context, a] { return phazite::faderPositionToDecibels (phazite::getVolume (context, a).getValue()); };
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto a = tracks.a;
+    const auto track = phazite::findTrackState (song, a);
+    const auto master = phazite::findChainState (song, {});
+    const auto played = [&tracks] (phazite::TrackID channel)
+    {
+        auto* fader = tracks.findPlayedChannel (channel);
+        REQUIRE (fader != nullptr);
+        return std::pair { fader->getVolume(), fader->getPan() };
+    };
 
     // Nothing in the song for a new track's 0 dB at the centre, nor for a new song's master at -3 dB, which it plays.
     CHECK_FALSE (track.hasProperty (schema::channelVolume));
     CHECK_FALSE (track.hasProperty (schema::channelPan));
     CHECK_FALSE (master.hasProperty (schema::channelVolume));
-    CHECK (phazite::getChannelVolume (*edit.getMasterTrack()) == doctest::Approx (-3.0f));
+    CHECK (phazite::getChannelVolume (song, {}) == doctest::Approx (-3.0f));
     CHECK (phazite::faderPositionToDecibels (phazite::getMasterVolume (context).getValue()) == doctest::Approx (-3.0f).epsilon (0.01));
+    CHECK (played ({}).first == doctest::Approx (-3.0f));
+    CHECK (std::abs (played (a).first) < 0.01f);
 
-    // Set by the faders' handles, as the strips set them: the song's, which Tracktion plays; each an undo step.
+    // Set by the faders' handles, as the strips set them: the song's, which its faders play; each an undo step.
     phazite::getVolume (context, a).setValue (phazite::decibelsToFaderPosition (-6.0f));
     phazite::getPan (context, a).setValue (-0.5f);
     phazite::getMasterVolume (context).setValue (phazite::decibelsToFaderPosition (0.0f));
     CHECK ((double) track[schema::channelVolume] == doctest::Approx (-6.0));
     CHECK ((double) track[schema::channelPan] == doctest::Approx (-0.5));
     CHECK (std::abs ((double) master[schema::channelVolume]) < 1.0e-4);
-    CHECK (played() == doctest::Approx (-6.0f).epsilon (0.01));
+    CHECK (played (a).first == doctest::Approx (-6.0f).epsilon (0.01));
+    CHECK (played (a).second == doctest::Approx (-0.5f));
+    CHECK (std::abs (played ({}).first) < 0.01f);
 
-    phazite::undo (edit);
-    phazite::undo (edit);
-    phazite::undo (edit);
+    phazite::undo (song);
+    phazite::undo (song);
+    phazite::undo (song);
     CHECK_FALSE (track.hasProperty (schema::channelVolume));
     CHECK_FALSE (master.hasProperty (schema::channelVolume));
-    CHECK (std::abs (played()) < 0.01f);
-    phazite::redo (edit);
-    CHECK (played() == doctest::Approx (-6.0f).epsilon (0.01));
-
-    // One way: a fader moved on Tracktion's side alone plays the song's again.
-    song.a->getVolumePlugin()->setVolumeDb (-20.0f);
-    phazite::mirror::reconcileDevices (edit);
-    CHECK (played() == doctest::Approx (-6.0f).epsilon (0.01));
-
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
-    phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
+    CHECK (std::abs (played (a).first) < 0.01f);
+    CHECK (played ({}).first == doctest::Approx (-3.0f));
+    phazite::redo (song);
+    CHECK (played (a).first == doctest::Approx (-6.0f).epsilon (0.01));
 }
 
-TEST_CASE ("A send is the song's, to a return by its track, which Tracktion's sends mirror one way")
+TEST_CASE ("A send is the song's, to a return by its track, with its level and its place before or after the fader")
 {
     namespace schema = phazite::schema;
-    Song song;
-    auto& context = song.context;
-    auto& edit = *song.edit;
-    const auto a = idOf (*song.a);
-    const auto reverb = phazite::addReturnWith (context, a, song.find ("phaziteReverb"));
-    const auto track = phazite::findTrackState (*song.a);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto a = tracks.a;
+    const auto reverb = phazite::addReturnWith (context, a, tracks.find ("phaziteReverb"));
+    const auto track = phazite::findTrackState (song, a);
     const auto element = track.getChildWithName (schema::SEND);
     const auto sends = phazite::getSends (context, a);
 
-    // The song's: to the return, by its track, at -6 dB, after the fader; Tracktion's on the return's bus.
+    // The song's: to the return, by its track, at -6 dB, after the fader.
     REQUIRE (element.isValid());
     REQUIRE (sends.size() == 1);
     CHECK ((juce::int64) element[schema::sendID] == (juce::int64) sends[0].id.getRaw());
     CHECK ((juce::int64) element[schema::sendTo] == (juce::int64) reverb.getRaw());
     CHECK ((double) element[schema::sendLevel] == doctest::Approx (-6.0));
     CHECK_FALSE (element.hasProperty (schema::sendPreFader));
+    CHECK (phazite::getSendTarget (song, sends[0].id) == reverb);
     REQUIRE (phazite::getSendTargets (context, a).size() == 1);
     CHECK (phazite::getSendTargets (context, a)[0].send.has_value());
 
-    // Its level and its place before the fader are the song's, which Tracktion plays; an undo takes both back.
+    // Its level and its place before the fader are the song's; an undo takes the place back.
     phazite::getSendLevel (context, sends[0].id).setValue (phazite::decibelsToFaderPosition (-12.0f));
     CHECK ((double) element[schema::sendLevel] == doctest::Approx (-12.0));
-    const auto beforeFader = [&song]
-    {
-        auto& list = song.a->pluginList;
-        return list.indexOf (phazite::getSends (*song.a).getFirst()) < list.indexOf (song.a->getVolumePlugin());
-    };
-
-    CHECK_FALSE (beforeFader());
+    CHECK (phazite::getSendLevel (song, sends[0].id) == doctest::Approx (-12.0f).epsilon (0.01));
+    CHECK_FALSE (phazite::isPreFader (song, sends[0].id));
     phazite::setPreFader (context, sends[0].id, true);
     CHECK ((bool) element[schema::sendPreFader]);
-    CHECK (beforeFader());
-    phazite::undo (edit);
+    CHECK (phazite::isPreFader (song, sends[0].id));
+    phazite::undo (song);
     CHECK_FALSE (element.hasProperty (schema::sendPreFader));
-    CHECK_FALSE (beforeFader());
+    CHECK_FALSE (phazite::isPreFader (song, sends[0].id));
 
-    // One way: a send Tracktion lost is made again from the song, on its return's bus, at its level.
-    phazite::getSends (*song.a).getFirst()->deleteFromParent();
-    CHECK (phazite::getSends (*song.a).isEmpty());
-    phazite::mirror::reconcileDevices (edit);
-    REQUIRE (phazite::getSends (*song.a).size() == 1);
-    CHECK (phazite::getSends (*song.a).getFirst()->getGainDb() == doctest::Approx (-12.0f).epsilon (0.01));
-    CHECK (phazite::getSendTargets (context, a)[0].send.has_value());
-
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
-    phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
-
-    // Removed, the song's goes, and Tracktion's with it.
+    // Removed, the song's goes.
     phazite::removeSend (context, phazite::getSends (context, a)[0].id);
     CHECK_FALSE (track.getChildWithName (schema::SEND).isValid());
-    CHECK (phazite::getSends (*song.a).isEmpty());
+    CHECK (phazite::getSends (song, a).empty());
 }
 
 TEST_CASE ("A device's channel, its handle for an editor, and whether its controls open in a window of their own")
 {
     phazite::test::TestPlugin testPlugin;
-    Song song;
-    auto& context = song.context;
-    const auto a = idOf (*song.a);
-    phazite::addEffect (context, a, song.find ("phaziteEq"));
-    phazite::addEffect (context, a, song.find ("phaziteCompressor"));
-    phazite::addEffect (context, {}, song.find ("phaziteLimiter")); // the master's
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    const auto a = tracks.a;
+    phazite::addEffect (context, a, tracks.find ("phaziteEq"));
+    phazite::addEffect (context, a, tracks.find ("phaziteCompressor"));
+    phazite::addEffect (context, {}, tracks.find ("phaziteLimiter")); // the master's
     const auto eq = phazite::getEffects (context, a)[0];
     const auto compressor = phazite::getEffects (context, a)[1];
     const auto limiter = phazite::getEffects (context, {}).back();
@@ -505,7 +519,7 @@ TEST_CASE ("A device's channel, its handle for an editor, and whether its contro
     CHECK_FALSE (phazite::getDeviceHandle (context, container).isValid());
 
     // A plug-in has its controls in a window of its own.
-    phazite::addEffect (context, a, song.find ("PhaziteTestEffect"));
+    phazite::addEffect (context, a, tracks.find ("PhaziteTestEffect"));
     const auto effects = phazite::getEffects (context, a);
     REQUIRE (effects.size() == 2);
     CHECK (effects.back().opensWindow);
@@ -519,11 +533,11 @@ TEST_CASE ("A device's channel, its handle for an editor, and whether its contro
 
 TEST_CASE ("Sends by ID: to a return or a new one, before or after the fader, and removed")
 {
-    Song song;
-    auto& context = song.context;
-    const auto a = idOf (*song.a);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    const auto a = tracks.a;
 
-    const auto reverb = phazite::addReturnWith (context, a, song.find ("phaziteReverb"));
+    const auto reverb = phazite::addReturnWith (context, a, tracks.find ("phaziteReverb"));
     REQUIRE (reverb.isValid());
     CHECK (phazite::getChannel (context, reverb)->name == juce::String ("Reverb"));
 
@@ -547,10 +561,11 @@ TEST_CASE ("Sends by ID: to a return or a new one, before or after the fader, an
 
 TEST_CASE ("Mixer functions give nothing, and do nothing, for what is gone or with no project open")
 {
-    Song song;
-    auto& context = song.context;
-    const auto gone = idOf (*song.b);
-    phazite::deleteTracks ({ song.b }, nullptr);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto gone = tracks.b;
+    phazite::deleteTracks (song, { tracks.b }, nullptr);
 
     CHECK_FALSE (phazite::getChannel (context, gone).has_value());
     CHECK_FALSE (phazite::getMuteSolo (context, gone).has_value());
@@ -558,11 +573,12 @@ TEST_CASE ("Mixer functions give nothing, and do nothing, for what is gone or wi
     CHECK_FALSE (phazite::getLevel (context, gone).isMeasuring());
     CHECK (phazite::getEffects (context, gone).empty());
     CHECK (phazite::getSends (context, gone).empty());
-    CHECK_FALSE (phazite::addDeviceTo (context, gone, song.find ("phaziteEq")));
-    CHECK_FALSE (phazite::addReturnWith (context, gone, song.find ("phaziteReverb")).isValid());
+    CHECK_FALSE (phazite::addDeviceTo (context, gone, tracks.find ("phaziteEq")));
+    CHECK_FALSE (phazite::addReturnWith (context, gone, tracks.find ("phaziteReverb")).isValid());
     phazite::toggleMute (context, gone);
-    phazite::addEffect (context, gone, song.find ("phaziteEq"));
-    CHECK (phazite::getEffects (context, {}).size() == phazite::getMasterDevices (*song.edit).size()); // not the master's
+    phazite::addEffect (context, gone, tracks.find ("phaziteEq"));
+    CHECK (phazite::getEffects (context, {}).size() == phazite::getEffects (song, {}).size()); // not the master's
+    CHECK (phazite::getEffects (song, {}).empty());
 
     CHECK (phazite::getMasterVolume (context).isValid());
     // Phazite's engine measures the master's loudness, with the project open.
@@ -570,7 +586,7 @@ TEST_CASE ("Mixer functions give nothing, and do nothing, for what is gone or wi
     REQUIRE (loudness.has_value());
     CHECK_FALSE (loudness->integrated.has_value()); // until enough has been measured
 
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
     CHECK (phazite::getMixerChannels (context).tracks.empty());
     CHECK_FALSE (phazite::getMasterVolume (context).isValid());
     CHECK_FALSE (phazite::getLoudness (context).has_value());
@@ -590,18 +606,18 @@ TEST_CASE ("Delay compensation: how long the song's sound waits, and for which d
 {
     // Played through a device, as the app has it: devices know their latency once playback has prepared them.
     phazite::test::HostedDevice device;
-    Song song;
-    auto& context = song.context;
-    song.edit->getTransport().ensureContextAllocated();
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& host = getPlaybackHost (phazite::test::getEngineContext());
     CHECK (phazite::getDelayCompensation (context).devices.empty());
     CHECK (phazite::getDelayCompensation (context).seconds == 0.0);
 
     // A limiter on B and one on the master look ahead; an EQ doesn't, nor a limiter that is off.
-    phazite::addEffect (context, idOf (*song.b), song.find ("phaziteLimiter"));
-    phazite::addEffect (context, idOf (*song.a), song.find ("phaziteEq"));
-    phazite::addEffect (context, {}, song.find ("phaziteLimiter"));
-    phazite::addEffect (context, idOf (*song.a), song.find ("phaziteLimiter"));
-    phazite::setDeviceOn (context, phazite::getEffects (context, idOf (*song.a)).back().id, false);
+    phazite::addEffect (context, tracks.b, tracks.find ("phaziteLimiter"));
+    phazite::addEffect (context, tracks.a, tracks.find ("phaziteEq"));
+    phazite::addEffect (context, {}, tracks.find ("phaziteLimiter"));
+    phazite::addEffect (context, tracks.a, tracks.find ("phaziteLimiter"));
+    phazite::setDeviceOn (context, phazite::getEffects (context, tracks.a).back().id, false);
 
     phazite::test::settle (300);
     device.process (20);
@@ -615,10 +631,10 @@ TEST_CASE ("Delay compensation: how long the song's sound waits, and for which d
     CHECK (compensation.seconds == doctest::Approx (2.0 * compensation.devices[0].second).epsilon (0.02)); // B's, then the master's
 
     // Low latency turns it off; Phazite's devices that look ahead are bypassed then, so report none.
-    phazite::setLowLatency (phazite::test::getEngine(), true);
+    host.setLowLatency (true);
     CHECK (phazite::getDelayCompensation (context).seconds == 0.0);
     CHECK (phazite::getDelayCompensation (context).devices.empty());
-    phazite::setLowLatency (phazite::test::getEngine(), false);
+    host.setLowLatency (false);
     phazite::test::settle (300);
     device.process (20);
     CHECK (phazite::getDelayCompensation (context).seconds == doctest::Approx (compensation.seconds));

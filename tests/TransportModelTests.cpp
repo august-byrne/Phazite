@@ -2,9 +2,9 @@
 // The transport and the tempo as the top bar reaches them, by plain values (src/model/transport/TransportModel.h), and
 // the engine as the UI reaches it (src/model/engine/EngineContext.h).
 #include "TestHelpers.h"
-#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/EngineContext.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -13,16 +13,18 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <algorithm>
+
 TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each change outside a drag")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    auto& undo = phazite::getSong (*edit).getUndoManager();
+    auto& undo = song->getUndoManager();
 
     CHECK_FALSE (phazite::getTempoHandle (context).isValid()); // no project open
     CHECK (phazite::getTempoHandle (context).getValue() == doctest::Approx (120.0));
 
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     auto tempo = phazite::getTempoHandle (context);
     REQUIRE (tempo.isValid());
     undo.clearUndoHistory();
@@ -35,28 +37,28 @@ TEST_CASE ("The top bar's tempo is a drag of one undo step, or a step for each c
     CHECK_FALSE (tempo.isInGesture());
     CHECK (tempo.getValue() == doctest::Approx (90.0));
     CHECK (undo.getUndoDescription() == juce::String ("Change Tempo"));
-    phazite::undo (*edit);
-    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (120.0)); // the whole drag at once
+    phazite::undo (*song);
+    CHECK (phazite::getTempo (*song) == doctest::Approx (120.0)); // the whole drag at once
     CHECK_FALSE (undo.canUndo());
 
     tempo.setValue (140.0); // typed: a step of its own
-    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (140.0));
+    CHECK (phazite::getTempo (*song) == doctest::Approx (140.0));
     CHECK (undo.canUndo());
 
     // A drag in progress when another project opens is kept, and the handle then has nothing.
     tempo.beginGesture();
     tempo.setValue (150.0);
     tempo = phazite::TempoHandle();
-    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (150.0));
+    CHECK (phazite::getTempo (*song) == doctest::Approx (150.0));
     CHECK_FALSE (tempo.isValid());
     tempo.setValue (60.0);
-    CHECK (phazite::getTempo (phazite::getSong (*edit)) == doctest::Approx (150.0));
-    setEdit (context, nullptr);
+    CHECK (phazite::getTempo (*song) == doctest::Approx (150.0));
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("The transport's switches and the time signature by the project's context")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     CHECK_FALSE (phazite::isPlaying (context));
@@ -65,40 +67,38 @@ TEST_CASE ("The transport's switches and the time signature by the project's con
     CHECK_FALSE (phazite::getLiveMidiTrack (context).isValid());
     phazite::setTimeSignature (context, { 3, 4 }); // no project: nothing to change
 
-    setEdit (context, edit.get());
-    CHECK (phazite::isLoopOn (context) == phazite::isLoopOn (*edit));
-    phazite::toggleLoop (*edit);
-    CHECK (phazite::isLoopOn (context) == phazite::isLoopOn (*edit));
+    setSong (context, song.get());
+    CHECK (phazite::isLoopOn (context) == phazite::isLoopOn (*song));
+    phazite::toggleLoop (*song);
+    CHECK (phazite::isLoopOn (context) == phazite::isLoopOn (*song));
 
     CHECK (phazite::getTimeSignature (context) == phazite::TimeSignature { 4, 4 });
     phazite::setTimeSignature (context, { 6, 8 });
     CHECK (phazite::getTimeSignature (context) == phazite::TimeSignature { 6, 8 });
-    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Time Signature"));
-    setEdit (context, nullptr);
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Time Signature"));
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("The engine as the UI reaches it: its audio devices, how busy it is, and the MIDI keyboards connected")
 {
-    auto& engine = phazite::test::getEngine();
-    const auto engineContext = phazite::createEngineContext (engine);
+    auto& engineContext = phazite::test::getEngineContext();
 
-    // Phazite's own device manager, one for the Engine, which every engine context of it shares; never Tracktion's.
-    CHECK (&engineContext->getAudioDeviceManager() == &phazite::test::getEngineContext().getAudioDeviceManager());
-    CHECK (&engineContext->getAudioDeviceManager() != &engine.getDeviceManager().deviceManager);
-    CHECK (engineContext->getCpuUsage() >= 0.0);
+    // The device manager the audio settings show is the one Phazite opens its device on.
+    CHECK (&engineContext.getAudioDeviceManager() == &phazite::getAudioIO (engineContext).getDevices());
+    CHECK (engineContext.getCpuUsage() >= 0.0);
 
     // The MIDI devices connected, as JUCE lists them, each by its ID.
     const auto connected = juce::MidiInput::getAvailableDevices();
-    CHECK (engineContext->getMidiInputs().size() == (size_t) connected.size());
+    CHECK (engineContext.getMidiInputs().size() == (size_t) connected.size());
 
-    for (const auto& input : engineContext->getMidiInputs())
+    for (const auto& input : engineContext.getMidiInputs())
     {
         CAPTURE (input.name.toStdString());
         CHECK (input.id.isNotEmpty());
         CHECK (input.isOn); // on, unless switched off
     }
 
-    engineContext->setMidiInputOn ("no such device", false); // changes nothing
-    const auto after = engineContext->getMidiInputs();
+    engineContext.setMidiInputOn ("no such device", false); // changes nothing
+    const auto after = engineContext.getMidiInputs();
     CHECK (std::all_of (after.begin(), after.end(), [] (const auto& input) { return input.isOn; }));
 }

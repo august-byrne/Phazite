@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A take recorded through Phazite's own engine (docs/tracktion-migration.md, T2 step 9; Recording.h says what recording
-// does): each armed track's audio input into a WAV file in the project's Audio folder, which a thread of its own writes,
-// and the notes played live into the track live MIDI plays, from where the engine starts playing it (after the count-in)
-// to where it stops, known to the sample from the engine's own playhead and clock (engine/core/Recording.h). What came
-// in goes where it was heard: an input's sound earlier by the delays the audio device reports for its input and output,
-// the song's delay compensation and the audio settings' correction (AudioRecorder.h), a note by the output's delay and the
-// delay compensation. While it records, the session that keeps it (PlaybackSession::startTake()) loops the range looped
-// on purpose, takes round it of any length; the song's own loop doesn't loop a take, which plays on past the song's end,
-// nor does a punched one.
+// A take recorded through Phazite's own engine (Recording.h says what recording does): each armed track's audio input into
+// a WAV file in the song's recordings folder (AudioRecorder.h), which a thread of its own writes, and the notes played live
+// into the track live MIDI plays, from where the engine starts playing it (after the count-in) to where it stops, known to
+// the sample from the engine's own playhead and clock (engine/core/Recording.h). What came in goes where it was heard: an
+// input's sound earlier by the delays the audio device reports for its input and output, the song's delay compensation
+// and the audio settings' correction (AudioIO::getRecordingCorrection(), model/engine/internal/AudioIO.h: how much earlier,
+// in milliseconds, for a driver that reports its delays wrongly), a note by the output's delay and the delay compensation.
+// While it records, the session that keeps it (PlaybackSession::startTake()) loops the range looped on purpose, takes
+// round it of any length; the song's own loop doesn't loop a take, which plays on past the song's end, nor does a punched
+// one.
 #pragma once
 
 #include "engine/core/TempoMap.h"

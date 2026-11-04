@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Making the EngineContext (model/engine/EngineContext.h) of an Engine, for the app's services and tests.
+// Making the EngineContext (model/engine/EngineContext.h), for the app and tests, and what it holds: the audio device and
+// MIDI inputs Phazite opens (AudioIO.h), the plug-ins hosted in helper processes (model/plugins/internal/PluginHost.h) and
+// Phazite's engine on the device, with the previews' beside it (model/playback/internal/PlaybackHost.h). The app makes one
+// as it starts (src/app/Main.cpp), which outlives every project context; the tests make one for all of them. Message
+// thread.
 #pragma once
-
-#include "model/base/internal/Tracktion.h"
 
 #include <memory>
 
@@ -10,10 +12,17 @@ namespace phazite
 {
 class AudioIO;
 class EngineContext;
+class PlaybackHost;
+class PluginHost;
 
-std::unique_ptr<EngineContext> createEngineContext (te::Engine&);
-te::Engine& getEngine (EngineContext&); // the one it was made for
+struct EngineOptions
+{
+    int numAudioThreads = 0; // threads that play audio, the audio device's among them; 0 = one per physical core but one
+};
 
-// Its audio device and MIDI inputs (AudioIO.h), which the app opens as its settings saved them and keeps there.
+std::unique_ptr<EngineContext> createEngineContext (EngineOptions = {});
+
 AudioIO& getAudioIO (EngineContext&);
+PlaybackHost& getPlaybackHost (EngineContext&);
+PluginHost& getPluginHost (EngineContext&);
 } // namespace phazite

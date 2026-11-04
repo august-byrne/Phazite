@@ -2,6 +2,7 @@
 #include "internal/Freeze.h"
 #include "FreezeModel.h"
 #include "internal/Mixer.h"
+#include "internal/Sidechain.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
@@ -10,74 +11,79 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
-#include "model/mirror/internal/Bridge.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/playback/internal/OfflineRender.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/AudioRecorder.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
+#include "model/transport/internal/Tempo.h"
 
+#include <juce_audio_formats/juce_audio_formats.h>
+
+#include <algorithm>
+#include <set>
 #include <utility>
 
 namespace phazite
 {
 namespace
 {
-    te::AudioTrack* findAudioTrack (const ProjectContext& context, TrackID id)
+    constexpr const char* frozenFilePrefix = "Frozen ";
+
+    bool isTrackState (const juce::ValueTree& state)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::AudioTrack*> (te::findTrackForID (*edit, toTracktion (id))) : nullptr;
+        return state.hasType (schema::TRACK);
     }
 
-    // Tracktion's AudioTrack renders its frozen file on the message thread when its frozen switch turns on, and undoes the
-    // freeze through the undo manager when it turns off (tracktion_AudioTrack.cpp: freezeTrack(), unFreezeTrack()). Phazite
-    // renders the file in the background and sets the rest itself, so the track mustn't hear its switch: it listens to its
-    // own state through a protected base, which a C-style cast reaches.
-    void setFrozenSwitch (te::AudioTrack& track, bool frozen)
+    // A track that can be frozen or bounced: one of the playlist's with sound of its own, not a folder or a return.
+    bool canRender (const juce::ValueTree& state)
     {
-        auto* trackItself = (juce::ValueTree::Listener*) &track;
-        track.state.setPropertyExcludingListener (trackItself, te::IDs::frozenIndividually, frozen, nullptr);
+        return isTrackState (state) && ! isFolderState (state) && ! isReturnState (state);
+    }
+
+    // Whether a device, or a device in a container, listens to another track through its sidechain.
+    bool listensToSidechain (const Song& song, const juce::ValueTree& device)
+    {
+        if (getSidechainSource (song, getDeviceID (device)).isValid())
+            return true;
+
+        const auto inside = getDeviceStates (device);
+        return std::any_of (inside.begin(), inside.end(),
+                            [&song] (const juce::ValueTree& state) { return getSidechainSource (song, getDeviceID (state)).isValid(); });
     }
 
     // Why a track can't be rendered on its own, frozen or bounced (what it would be, and what is done to it); empty if it
     // can.
-    juce::String getWhyNotRender (const te::Track* track, const juce::String& verb, const juce::String& done)
+    juce::String getWhyNotRender (const Song* song, TrackID track, const juce::String& verb, const juce::String& done)
     {
-        if (track == nullptr)
+        const auto state = song != nullptr ? findTrackState (*song, track) : juce::ValueTree();
+
+        if (! isTrackState (state))
             return "Select a track to " + verb + ".";
 
-        if (track->isFolderTrack())
+        if (isFolderState (state))
             return "Folders and buses can't be " + done + ": their sound is their tracks'.";
 
-        if (getReturnBus (*track) >= 0)
+        if (isReturnState (state))
             return "Returns can't be " + done + ": their sound comes from the tracks that send to them.";
 
-        auto* audioTrack = dynamic_cast<const te::AudioTrack*> (track);
-
-        if (audioTrack == nullptr)
-            return getTrackName (*track) + " can't be " + done + ".";
-
-        if (isRecording (track->edit))
+        if (isRecording (*song))
             return "Stop recording first.";
 
-        if (audioTrack->getClips().isEmpty())
-            return getTrackName (*track) + " has nothing to " + verb + ": it has no clips.";
-
-        if (audioTrack->getOutput().getDestinationTrack() != nullptr)
-            return getTrackName (*track) + "'s sound goes into another track, so it can't be " + done + " on its own.";
+        if (getClipStates (state).empty())
+            return getTrackName (*song, track) + " has nothing to " + verb + ": it has no clips.";
 
         return {};
     }
 
-    // Properties written into a device's state without the device's sound changing: Tracktion's frozen switch, a plug-in
-    // window's place, and a plug-in's own saved state, which every save stores again (model/devices/internal/
-    // DeviceStates.h); and the IDs Phazite gives notes.
+    // Properties written into a device's element without its sound changing: where its window was, and a plug-in's own
+    // state, which every save stores again (model/plugins/internal/PluginInstances.h).
     bool isIgnoredProperty (const juce::Identifier& property)
     {
-        return property == te::IDs::frozen || schema::isDeviceViewProperty (property) || property == te::IDs::state
-               || property == schema::phaziteNoteID;
+        return schema::isDeviceViewProperty (property) || property == schema::pluginState;
     }
 
     bool isSameSound (const juce::ValueTree& a, const juce::ValueTree& b)
@@ -108,46 +114,95 @@ namespace
         return true;
     }
 
-    // What a frozen track's file holds, as its state shows it: its clips, its frozen devices, and its modulators and
-    // macros, which can move them.
-    juce::Array<juce::ValueTree> getWhatTheFreezeHolds (const te::AudioTrack& track)
+    // What a frozen track's file holds, as the song has it: the track's clips, its frozen devices, its modulators and
+    // macros, which can move them, the frozen devices' automation (of the devices in its frozen containers too), and the
+    // song's tempos, which put its notes and clips where they are in seconds.
+    std::vector<juce::ValueTree> getWhatTheFreezeHolds (const Song& song, TrackID track)
     {
-        juce::Array<juce::ValueTree> parts;
+        std::vector<juce::ValueTree> parts;
+        const auto state = findTrackState (song, track);
 
-        for (const auto& child : track.state)
+        for (const auto& clip : getClipStates (state))
+            parts.push_back (clip);
+
+        std::set<DeviceID> devices;
+
+        for (const auto id : getFrozenDevices (song, track))
         {
-            const auto isFrozenPlugin = child.hasType (te::IDs::PLUGIN) && (bool) child.getProperty (te::IDs::frozen, false);
+            const auto device = findDeviceState (song, id);
+            parts.push_back (device);
+            devices.insert (id);
 
-            if (te::Clip::isClipState (child) || isFrozenPlugin || child.hasType (te::IDs::MODIFIERS)
-                || child.hasType (te::IDs::MACROPARAMETERS))
-                parts.add (child);
+            for (const auto& inside : getDeviceStates (device))
+                devices.insert (getDeviceID (inside));
         }
+
+        for (const auto& child : state)
+            if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO))
+                parts.push_back (child);
+
+        for (const auto& curve : song.getState().getChildWithName (schema::AUTOMATION))
+            if (devices.contains (DeviceID::fromRaw ((std::uint64_t) (juce::int64) curve[schema::curveDevice])))
+                parts.push_back (curve);
+
+        for (const auto& tempo : song.getState().getChildWithName (schema::TEMPOMAP))
+            if (tempo.hasType (schema::TEMPO))
+                parts.push_back (tempo);
 
         return parts;
     }
 
-    juce::ValueTree copyWhatTheFreezeHolds (const te::AudioTrack& track)
+    juce::ValueTree copyWhatTheFreezeHolds (const Song& song, TrackID track)
     {
         juce::ValueTree copy ("FROZEN");
 
-        for (const auto& part : getWhatTheFreezeHolds (track))
+        for (const auto& part : getWhatTheFreezeHolds (song, track))
             copy.appendChild (part.createCopy(), nullptr);
 
         return copy;
     }
 
-    bool holdsWhatWasFrozen (const te::AudioTrack& track, const juce::ValueTree& frozen)
+    bool holdsWhatWasFrozen (const Song& song, TrackID track, const juce::ValueTree& frozen)
     {
-        const auto parts = getWhatTheFreezeHolds (track);
+        const auto parts = getWhatTheFreezeHolds (song, track);
 
-        if (parts.size() != frozen.getNumChildren())
+        if ((int) parts.size() != frozen.getNumChildren())
             return false;
 
-        for (int i = 0; i < parts.size(); ++i)
-            if (! isSameSound (parts[i], frozen.getChild (i)))
+        for (int i = 0; i < (int) parts.size(); ++i)
+            if (! isSameSound (parts[(size_t) i], frozen.getChild (i)))
                 return false;
 
         return true;
+    }
+
+    // The element of a type a tree is in (itself, if it is one), or an invalid one.
+    juce::ValueTree findEnclosing (juce::ValueTree tree, const juce::Identifier& type)
+    {
+        for (; tree.isValid(); tree = tree.getParent())
+            if (tree.hasType (type))
+                return tree;
+
+        return {};
+    }
+
+    // Where a track's sound ends in the song, before its tails: the end of its last clip, or of the last clip of a track
+    // whose sound reaches it (the source of one of its sidechains), which plays through it in its render.
+    BeatPosition getTrackEnd (const Song& song, TrackID track)
+    {
+        BeatPosition end;
+
+        for (const auto& other : getTrackStates (song))
+        {
+            if (const auto id = getTrackID (other); id != track)
+                if (const auto fed = getTracksFedBy (song, id); std::find (fed.begin(), fed.end(), track) == fed.end())
+                    continue;
+
+            for (const auto& clip : getClipStates (other))
+                end = std::max (end, getClipRange (song, clip).getEnd());
+        }
+
+        return end;
     }
 
     // The rate a track renders at, and its blocks: the audio device's, as its file plays alongside what it plays
@@ -158,12 +213,11 @@ namespace
         int blockSize = 256;
     };
 
-    RenderFormat getRenderFormat (te::Edit& edit)
+    RenderFormat getRenderFormat (const PlaybackSession* session)
     {
         RenderFormat format;
-        auto* audio = AudioIO::findFor (edit.engine);
 
-        if (auto* device = audio != nullptr ? audio->getDevices().getCurrentAudioDevice() : nullptr)
+        if (auto* device = session != nullptr ? session->getAudioIO().getDevices().getCurrentAudioDevice() : nullptr)
         {
             if (device->getCurrentSampleRate() > 7000.0)
                 format.sampleRate = device->getCurrentSampleRate();
@@ -175,179 +229,122 @@ namespace
         return format;
     }
 
-    // The track a tree is in, or an invalid tree.
-    juce::ValueTree findTrackState (juce::ValueTree tree)
+    // A file's length in seconds, as JUCE's formats read it; 0 for one they can't.
+    double getFileSeconds (const juce::File& file)
     {
-        for (; tree.isValid(); tree = tree.getParent())
-            if (te::TrackList::isTrack (tree))
-                return tree;
-
-        return {};
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+        return reader != nullptr && reader->sampleRate > 0.0 ? (double) reader->lengthInSamples / reader->sampleRate : 0.0;
     }
 } // namespace
 
 //==============================================================================
-int getFreezePointIndex (const te::AudioTrack& track)
+std::vector<DeviceID> getFrozenDevices (const Song& song, TrackID track)
 {
-    const auto& list = track.pluginList;
+    std::vector<DeviceID> devices;
+    const auto state = findTrackState (song, track);
 
-    for (int i = 0; i < list.size(); ++i)
+    if (! canRender (state))
+        return devices;
+
+    for (const auto& device : getDeviceStates (state))
     {
-        auto* plugin = list[i];
-        const auto isSharedContainer = [plugin]
-        {
-            auto* rack = dynamic_cast<te::RackInstance*> (plugin);
-            return rack != nullptr && rack->type != nullptr && te::getRackInstancesInEditForType (*rack->type).size() > 1;
-        };
+        if (listensToSidechain (song, device))
+            break;
 
-        if (dynamic_cast<te::VolumeAndPanPlugin*> (plugin) != nullptr || dynamic_cast<te::AuxSendPlugin*> (plugin) != nullptr
-            || dynamic_cast<te::FreezePointPlugin*> (plugin) != nullptr || plugin->getSidechainSourceID().isValid() || isSharedContainer())
-            return i;
+        devices.push_back (getDeviceID (device));
     }
 
-    return list.size();
+    return devices;
 }
 
-void freezeFromFile (te::AudioTrack& track, const juce::File& rendered)
+juce::File getFrozenFile (const Song& song, TrackID track)
 {
-    auto& engine = track.edit.engine;
-    const auto frozenFile = te::TemporaryFileManager::getFreezeFileForTrack (track);
-    frozenFile.getParentDirectory().createDirectory();
-    te::AudioFile (engine, frozenFile).deleteFile(); // and what Tracktion read of an earlier one
-
-    if (! rendered.moveFileTo (frozenFile))
-        rendered.copyFileTo (frozenFile);
-
-    engine.getAudioFileManager().forceFileUpdate (te::AudioFile (engine, frozenFile));
-
-    if (auto state = findTrackState (track); state.isValid())
-    {
-        state.setProperty (schema::trackFrozen, true, nullptr);
-        mirror::reconcileDevices (track.edit);
-    }
+    return song.getCacheFolder().getChildFile (frozenFilePrefix + juce::String ((juce::int64) track.getRaw()) + ".wav");
 }
 
-void unfreeze (te::AudioTrack& track)
+void freezeFromFile (Song& song, TrackID track, const juce::File& rendered)
 {
-    if (auto state = findTrackState (track); state.isValid())
-    {
+    auto state = findTrackState (song, track);
+
+    if (! canRender (state))
+        return;
+
+    // The rendered file takes the place of an earlier one.
+    const auto file = getFrozenFile (song, track);
+    file.getParentDirectory().createDirectory();
+
+    if (rendered != file && ! rendered.moveFileTo (file) && ! rendered.copyFileTo (file))
+        return;
+
+    state.setProperty (schema::trackFrozen, true, nullptr);
+}
+
+void unfreeze (Song& song, TrackID track)
+{
+    if (auto state = findTrackState (song, track); isTrackState (state))
         state.removeProperty (schema::trackFrozen, nullptr);
-        mirror::reconcileDevices (track.edit);
-    }
 }
 
-bool playFrozenFile (te::AudioTrack& track)
+bool isFrozenDevice (const Song& song, DeviceID id)
 {
-    if (! te::TemporaryFileManager::getFreezeFileForTrack (track).existsAsFile())
+    auto device = findDeviceState (song, id);
+
+    // A device in a container is frozen with its container.
+    if (isContainerState (device.getParent()))
+        device = device.getParent();
+
+    const auto track = device.getParent();
+
+    if (! isTrackState (track) || ! (bool) track[schema::trackFrozen])
         return false;
 
-    // The freeze point, which Tracktion keeps a frozen track by, before the devices that stay live.
-    auto& list = track.pluginList;
-    const auto point = getFreezePointIndex (track);
-
-    if (dynamic_cast<te::FreezePointPlugin*> (list[point]) == nullptr)
-    {
-        // Switched on already: a new plug-in switches itself on through the undo manager.
-        auto state = te::FreezePointPlugin::create();
-        state.setProperty (te::IDs::enabled, true, nullptr);
-        auto freezePoint = track.edit.getPluginCache().getOrCreatePluginFor (state);
-        const auto treeIndex = point < list.size() ? list.state.indexOf (list[point]->state) : -1;
-        list.state.addChild (freezePoint->state, treeIndex, nullptr);
-    }
-
-    for (int i = 0; i < list.size(); ++i)
-    {
-        list[i]->state.setProperty (te::IDs::frozen, i < point, nullptr);
-
-        // A frozen device's window shuts, and those of the devices in a frozen container: what they changed would no longer
-        // be heard.
-        if (i < point)
-        {
-            if (list[i]->windowState != nullptr)
-                list[i]->windowState->closeWindowExplicitly();
-
-            if (auto* container = dynamic_cast<te::RackInstance*> (list[i]); container != nullptr && container->type != nullptr)
-                for (auto* inside : container->type->getPlugins())
-                    if (inside->windowState != nullptr)
-                        inside->windowState->closeWindowExplicitly();
-        }
-    }
-
-    setFrozenSwitch (track, true); // last: the FreezeKeeper takes what the file holds then
-    track.changed();
-    return true;
+    const auto frozen = getFrozenDevices (song, getTrackID (track));
+    return std::find (frozen.begin(), frozen.end(), getDeviceID (device)) != frozen.end();
 }
 
-void playLive (te::AudioTrack& track)
+std::vector<TrackID> getFrozenTracks (const Song& song)
 {
-    setFrozenSwitch (track, false); // first: the FreezeKeeper lets go of it
+    std::vector<TrackID> frozen;
 
-    auto& list = track.pluginList;
-
-    for (int i = list.size(); --i >= 0;)
-    {
-        if (dynamic_cast<te::FreezePointPlugin*> (list[i]) != nullptr)
-            list.state.removeChild (list[i]->state, nullptr);
-        else
-            list[i]->state.setProperty (te::IDs::frozen, false, nullptr);
-    }
-
-    track.changed();
-}
-
-bool isFrozenDevice (const te::Plugin& plugin)
-{
-    auto* track = dynamic_cast<te::AudioTrack*> (plugin.getOwnerTrack());
-    return track != nullptr && track->isFrozen (te::Track::individualFreeze) && plugin.isFrozen();
-}
-
-juce::Array<te::AudioTrack*> getFrozenTracks (const te::Edit& edit)
-{
-    juce::Array<te::AudioTrack*> frozen;
-
-    for (auto* track : te::getAudioTracks (edit))
-        if (track->isFrozen (te::Track::individualFreeze))
-            frozen.add (track);
+    for (const auto& state : getTrackStates (song))
+        if ((bool) state[schema::trackFrozen])
+            frozen.push_back (getTrackID (state));
 
     return frozen;
 }
 
 //==============================================================================
-void forgetMissingFrozenFiles (te::Edit& edit)
+void forgetMissingFrozenFiles (Song& song)
 {
-    for (auto state : getTrackStates (edit))
-        if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, toTracktion (getTrackID (state))));
-            (bool) state[schema::trackFrozen]
-            && (track == nullptr || ! te::TemporaryFileManager::getFreezeFileForTrack (*track).existsAsFile()))
+    for (auto state : getTrackStates (song))
+        if ((bool) state[schema::trackFrozen] && ! getFrozenFile (song, getTrackID (state)).existsAsFile())
             state.removeProperty (schema::trackFrozen, nullptr);
 }
 
-void purgeCache (te::Edit& edit)
+void purgeCache (Song& song)
 {
-    te::TemporaryFileManager::purgeOrphanFreezeAndProxyFiles (edit);
-    purgeClipRenders (getSong (edit));
+    purgeClipRenders (song);
 
-    // Tracktion leaves the frozen files of tracks that are gone.
-    const auto prefix = juce::String ("trackFreeze_0_");
+    // The frozen files of tracks that aren't frozen, or are gone, and what a freeze left half rendered.
+    std::set<juce::String> used;
 
-    for (const auto& entry : juce::RangedDirectoryIterator (edit.getTempDirectory (false), false, prefix + "*.freeze"))
-    {
-        const auto id = te::EditItemID::fromVar (entry.getFile().getFileNameWithoutExtension().substring (prefix.length()));
-        auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, id));
+    for (const auto track : getFrozenTracks (song))
+        used.insert (getFrozenFile (song, track).getFileName());
 
-        if (track == nullptr || ! track->isFrozen (te::Track::individualFreeze))
-            te::AudioFile (edit.engine, entry.getFile()).deleteFile();
-    }
+    if (const auto folder = song.getCacheFolder(); folder.isDirectory())
+        for (const auto& entry : juce::RangedDirectoryIterator (folder, false, juce::String (frozenFilePrefix) + "*.wav"))
+            if (! used.contains (entry.getFile().getFileName()))
+                entry.getFile().deleteFile();
 }
 
 //==============================================================================
-FreezeKeeper::FreezeKeeper (te::Edit& e)
-    : edit (&e),
-      state (e.state)
+FreezeKeeper::FreezeKeeper (Song& s)
+    : song (s),
+      state (s.getState())
 {
-    for (auto* track : getFrozenTracks (e))
-        frozen[track->itemID] = copyWhatTheFreezeHolds (*track);
-
+    takeFrozenTracks();
     state.addListener (this);
 }
 
@@ -356,46 +353,70 @@ FreezeKeeper::~FreezeKeeper()
     state.removeListener (this);
 }
 
-void FreezeKeeper::check (juce::ValueTree& changed)
+void FreezeKeeper::takeFrozenTracks()
 {
-    auto* e = edit.get(); // gone first if the project context outlives it
+    // The tracks that are frozen now, each with what its file holds, kept from before if it was frozen then.
+    std::map<TrackID, juce::ValueTree> now;
 
-    if (checking || e == nullptr)
+    for (const auto track : getFrozenTracks (song))
+    {
+        const auto known = frozen.find (track);
+        now[track] = known != frozen.end() ? known->second : copyWhatTheFreezeHolds (song, track);
+    }
+
+    frozen = std::move (now);
+}
+
+void FreezeKeeper::compare (TrackID track)
+{
+    // What the freeze holds changed: the track plays it live again.
+    if (const auto known = frozen.find (track); known != frozen.end() && ! holdsWhatWasFrozen (song, track, known->second))
+    {
+        frozen.erase (known);
+        unfreeze (song, track);
+    }
+}
+
+void FreezeKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
+{
+    // How tracks show and where windows were change nothing that plays.
+    if (! schema::isTrackViewProperty (property) && ! isIgnoredProperty (property))
+        check (tree);
+}
+
+void FreezeKeeper::check (const juce::ValueTree& changed)
+{
+    if (checking)
         return;
 
     const juce::ScopedValueSetter<bool> busy (checking, true);
-    const auto trackState = findTrackState (changed);
+    const auto track = findEnclosing (changed, schema::TRACK);
 
-    // A track frozen or unfrozen, or tracks added, removed or moved (undo brings a frozen track back frozen): the tracks
-    // that are frozen now, each with what its file holds, kept from before if it was frozen then.
-    if (! trackState.isValid() || trackState == changed)
+    // A track frozen or unfrozen, or tracks added, removed or moved (an undo brings a frozen track back frozen).
+    if (changed == state || changed.hasType (schema::TRACKS) || (track.isValid() && changed == track))
+        takeFrozenTracks();
+
+    if (track.isValid())
     {
-        std::map<te::EditItemID, juce::ValueTree> now;
-
-        for (auto* track : getFrozenTracks (*e))
-        {
-            const auto known = frozen.find (track->itemID);
-            now[track->itemID] = known != frozen.end() ? known->second : copyWhatTheFreezeHolds (*track);
-        }
-
-        frozen = std::move (now);
-
-        if (! trackState.isValid())
-            return;
+        compare (getTrackID (track));
+        return;
     }
 
-    const auto id = te::EditItemID::fromID (trackState);
-    const auto known = frozen.find (id);
-
-    if (known == frozen.end())
+    // A curve of a device whose sound no frozen file holds changes none of them.
+    if (const auto curve = findEnclosing (changed, schema::CURVE);
+        curve.isValid() && ! isFrozenDevice (song, DeviceID::fromRaw ((std::uint64_t) (juce::int64) curve[schema::curveDevice])))
         return;
 
-    // What the freeze holds changed: the track plays it live again.
-    if (auto* track = dynamic_cast<te::AudioTrack*> (te::findTrackForID (*e, id));
-        track != nullptr && ! holdsWhatWasFrozen (*track, known->second))
+    // The song's automation or its tempos, which any frozen track's file may hold.
+    if (changed == state || findEnclosing (changed, schema::AUTOMATION).isValid() || findEnclosing (changed, schema::TEMPOMAP).isValid())
     {
-        frozen.erase (known);
-        unfreeze (*track);
+        std::vector<TrackID> tracks;
+
+        for (const auto& entry : frozen)
+            tracks.push_back (entry.first);
+
+        for (const auto frozenTrack : tracks)
+            compare (frozenTrack);
     }
 }
 
@@ -411,15 +432,15 @@ namespace
 {
     // A track rendered by Phazite's engine in the background (model/playback/internal/OfflineRender.h), before its fader,
     // through its devices or some of them, what feeds it playing only through it, from the song's start to the end of its
-    // last clip and on as long as its tails sound; then made something of on the message thread: frozen, or bounced.
-    // Nothing of the song changes meanwhile.
+    // last clip and on as long as its tails sound, into a WAV file of 32-bit floats; then made something of on the message
+    // thread: frozen, or bounced. Nothing of the song changes meanwhile.
     class RenderOfTrack : public TrackRender::Impl
     {
     public:
-        RenderOfTrack (ProjectContext& c, te::AudioTrack& t, juce::String title, std::function<void (const juce::Result&)> callback)
+        RenderOfTrack (ProjectContext& c, Song& s, TrackID t, juce::String title, std::function<void (const juce::Result&)> callback)
             : context (c),
-              edit (t.edit),
-              trackID (t.itemID),
+              song (&s),
+              track (t),
               renderTitle (std::move (title)),
               onFinished (std::move (callback)),
               alive (std::make_shared<RenderOfTrack*> (this))
@@ -431,9 +452,8 @@ namespace
             alive = nullptr; // no callback from here on
             render = nullptr;
 
-            for (const auto& file : { floats, temporary })
-                if (file.existsAsFile())
-                    file.deleteFile();
+            if (rendered.existsAsFile())
+                rendered.deleteFile();
         }
 
         float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
@@ -442,28 +462,33 @@ namespace
 
     protected:
         ProjectContext& context;
-        te::Edit& edit;
-        const te::EditItemID trackID;
-        juce::File floats;    // what the engine plays into
-        juce::File temporary; // what is used, once rendered: the floats, or what was written of them
+        const Song::Ptr song;
+        const TrackID track;
+        juce::File rendered; // what the engine plays into, used once it is complete
 
-        // Starts the render: of the track, with so much of its devices, into floats at the audio device's rate; written into
-        // the temporary file by what is given, on the render thread, or used as they are.
-        void start (te::AudioTrack& track, std::optional<std::set<std::int64_t>> devices, OfflineRender::Rendered written = {})
+        // Starts the render: of the track, with so much of its devices (all of them for none), at the audio device's rate.
+        void start (std::optional<std::set<std::int64_t>> devices)
         {
-            if (isSongPlaying (edit))
-                stopAndReturn (edit);
+            if (isSongPlaying (*song))
+                stopAndReturn (*song);
 
-            floats.getParentDirectory().createDirectory();
-            renderMissingClipAudio (getSong (edit)); // the engine plays a clip whose render isn't there silent
+            rendered.getParentDirectory().createDirectory();
+            renderMissingClipAudio (*song); // the engine plays a clip whose render isn't there silent
 
-            const auto format = getRenderFormat (edit);
-            const OfflineRender::Job job { floats, track.getLengthIncludingInputTracks().inSeconds(), tailSeconds,
-                                           SongPlayer::RenderOf { (std::int64_t) getTrackID (track).getRaw(), true, std::move (devices) } };
-            const OfflineRender::Setup setup { findSession (edit), [&song = edit] { return std::make_unique<SongPlayer> (song); },
-                                               edit.engine.getEngineBehaviour().getNumberOfCPUsToUseForAudio(), format.sampleRate,
-                                               format.blockSize };
-            render = std::make_unique<OfflineRender> (setup, std::vector { job }, std::move (written),
+            auto* session = findSession (*song);
+            const auto format = getRenderFormat (session);
+            const OfflineRender::Job job { rendered, toSeconds (*song, getTrackEnd (*song, track)), tailSeconds,
+                                           SongPlayer::RenderOf { (std::int64_t) track.getRaw(), true, std::move (devices) } };
+            const OfflineRender::Setup setup {
+                .session = session,
+                .makePlayer = [played = song, session]
+                { return std::make_unique<SongPlayer> (*played, session != nullptr ? &session->getPlugins() : nullptr); },
+                .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
+                .sampleRate = format.sampleRate,
+                .blockSize = format.blockSize
+            };
+
+            render = std::make_unique<OfflineRender> (setup, std::vector { job }, OfflineRender::Rendered(),
                                                       [weakAlive = std::weak_ptr<RenderOfTrack*> (alive)] (const juce::Result& result)
                                                       {
                                                           juce::MessageManager::callAsync (
@@ -475,10 +500,8 @@ namespace
                                                       });
         }
 
-        te::AudioTrack* findTrack() const { return dynamic_cast<te::AudioTrack*> (te::findTrackForID (edit, trackID)); }
-
-        // What a rendered file becomes, on the message thread once the render has finished.
-        virtual juce::Result use (te::AudioTrack&, const juce::File& rendered) = 0;
+        // What the rendered file becomes, on the message thread once the render has finished.
+        virtual juce::Result use (const juce::File&) = 0;
 
     private:
         // How long a track's tails may sound after its last clip, at most.
@@ -495,15 +518,14 @@ namespace
 
             if (result.wasOk())
             {
-                if (auto* track = findTrack(); track != nullptr && temporary.existsAsFile())
-                    result = use (*track, temporary);
+                if (canRender (findTrackState (*song, track)) && rendered.existsAsFile())
+                    result = use (rendered);
                 else
                     result = juce::Result::fail ("The track is gone, or Phazite couldn't render it.");
             }
 
-            for (const auto& file : { floats, temporary })
-                if (file.existsAsFile())
-                    file.deleteFile();
+            if (rendered.existsAsFile())
+                rendered.deleteFile();
 
             if (const auto callback = onFinished; callback != nullptr)
                 callback (result); // last: it may delete this
@@ -513,131 +535,110 @@ namespace
     };
 
     //==============================================================================
-    // Freezing: the track up to its freeze point (the devices before it, as getFreezePointIndex() says), at the audio
-    // device's rate, into Tracktion's frozen-file format, which its frozen file is kept in.
+    // Freezing: the track through its frozen devices (getFrozenDevices()), at the audio device's rate, into the file that
+    // becomes its frozen file.
     class FreezeRender final : public RenderOfTrack
     {
     public:
-        FreezeRender (ProjectContext& c, te::AudioTrack& track, std::function<void (const juce::Result&)> callback)
-            : RenderOfTrack (c, track, "Freezing " + getTrackName (track), std::move (callback))
+        FreezeRender (ProjectContext& c, Song& s, TrackID t, std::function<void (const juce::Result&)> callback)
+            : RenderOfTrack (c, s, t, "Freezing " + getTrackName (s, t), std::move (callback))
         {
-            const auto frozenFile = te::TemporaryFileManager::getFreezeFileForTrack (track);
-            temporary = frozenFile.getSiblingFile ("rendering.freeze").getNonexistentSibling (false);
-            floats = temporary.withFileExtension ("wav");
+            const auto frozenFile = getFrozenFile (s, t);
+            rendered =
+                frozenFile.getSiblingFile (frozenFile.getFileNameWithoutExtension() + " (rendering).wav").getNonexistentSibling (false);
 
             std::set<std::int64_t> frozen;
-            const auto point = getFreezePointIndex (track);
 
-            for (int i = 0; i < point; ++i)
-                frozen.insert ((std::int64_t) getDeviceID (*track.pluginList[i]).getRaw());
+            for (const auto device : getFrozenDevices (s, t))
+                frozen.insert ((std::int64_t) device.getRaw());
 
-            start (track, std::move (frozen), [this, &tracktion = edit.engine] (OfflineRender& offline, int, const auto&)
-                   { return writeFrozen (offline, tracktion); });
+            start (std::move (frozen));
         }
 
     private:
-        // The floats in the frozen-file format.
-        juce::Result writeFrozen (OfflineRender& offline, te::Engine& tracktion)
+        juce::Result use (const juce::File& file) override
         {
-            const auto failed = juce::Result::fail ("Phazite couldn't write the frozen file.");
-            juce::WavAudioFormat wav;
-            const std::unique_ptr<juce::AudioFormatReader> reader (wav.createReaderFor (new juce::FileInputStream (floats), true));
-            std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (temporary);
-
-            if (reader == nullptr || ! static_cast<juce::FileOutputStream&> (*stream).openedOk())
-                return failed;
-
-            auto writer = tracktion.getAudioFileFormatManager().getFrozenFileFormat()->createWriterFor (
-                stream, juce::AudioFormatWriterOptions {}.withSampleRate (reader->sampleRate).withNumChannels (2).withBitsPerSample (32));
-
-            if (writer == nullptr || ! writer->writeFromAudioReader (*reader, 0, reader->lengthInSamples) || offline.isCancelled())
-                return failed;
-
-            return juce::Result::ok();
-        }
-
-        juce::Result use (te::AudioTrack& track, const juce::File& rendered) override
-        {
-            freezeFromFile (track, rendered);
-            return track.isFrozen (te::Track::individualFreeze) ? juce::Result::ok()
-                                                                : juce::Result::fail ("Phazite couldn't keep the frozen file.");
+            freezeFromFile (*song, track, file);
+            return (bool) findTrackState (*song, track)[schema::trackFrozen]
+                       ? juce::Result::ok()
+                       : juce::Result::fail ("Phazite couldn't keep the frozen file.");
         }
     };
 
     //==============================================================================
     // Bouncing: the track before its fader, through all its devices, into a WAV file of floating-point samples in the
-    // project's Audio folder.
+    // song's recordings folder (its project's Audio folder).
     class BounceRender final : public RenderOfTrack
     {
     public:
-        BounceRender (ProjectContext& c, te::AudioTrack& track, std::function<void (const juce::Result&)> callback)
-            : RenderOfTrack (c, track, "Bouncing " + getTrackName (track), std::move (callback)),
-              name (getTrackName (track) + " (Bounce)")
+        BounceRender (ProjectContext& c, Song& s, TrackID t, std::function<void (const juce::Result&)> callback)
+            : RenderOfTrack (c, s, t, "Bouncing " + getTrackName (s, t), std::move (callback)),
+              name (getTrackName (s, t) + " (Bounce)")
         {
-            const auto folder = edit.engine.getEngineBehaviour().getDefaultFolderForAudioRecordings (edit);
-            target = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav", false);
-            floats = temporary =
-                target.getSiblingFile (target.getFileNameWithoutExtension() + " (rendering).wav").getNonexistentSibling (false);
-            start (track, std::nullopt);
+            target = getRecordingsFolder (s).getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav", false);
+            rendered = target.getSiblingFile (target.getFileNameWithoutExtension() + " (rendering).wav").getNonexistentSibling (false);
+            start (std::nullopt);
         }
 
     private:
         const juce::String name;
         juce::File target;
-        juce::Result use (te::AudioTrack& track, const juce::File& rendered) override
+
+        juce::Result use (const juce::File& file) override
         {
-            if (! rendered.moveFileTo (target))
+            if (! file.moveFileTo (target))
                 return juce::Result::fail ("Phazite couldn't write " + target.getFullPathName() + ".");
 
-            te::AudioFile file (edit.engine, target);
-            const auto length = te::TimeDuration::fromSeconds (file.getLength());
+            const auto length = getFileSeconds (target);
 
-            if (length <= te::TimeDuration())
+            if (length <= 0.0)
                 return juce::Result::fail ("Phazite couldn't read the bounced file back.");
 
             // One undo step: the new track under the original, with the original's color and mixer settings, and the
             // original muted and collapsed.
-            const UndoStep step (edit, "Bounce in Place");
-            auto* bounced = insertPlainTrack (edit, &track);
+            auto& bouncedSong = *song;
+            const UndoStep step (bouncedSong, "Bounce in Place");
+            const auto bounced = insertPlainTrack (bouncedSong, track);
 
-            if (bounced == nullptr)
+            if (! bounced.isValid())
                 return juce::Result::fail ("Phazite couldn't add a track for the bounce.");
 
-            setTrackName (*bounced, name);
-            setTrackColours ({ bounced }, getTrackColour (track, getPlaylistTracks (edit).indexOf (&track)));
+            const auto tracks = getTrackIDs (bouncedSong);
+            const auto row = (int) std::distance (tracks.begin(), std::find (tracks.begin(), tracks.end(), track));
+            setTrackName (bouncedSong, bounced, name);
+            setTrackColour (bouncedSong, bounced, getTrackColour (bouncedSong, track, row));
 
-            setChannelVolume (*bounced, getChannelVolume (track));
-            setChannelPan (*bounced, getChannelPan (track));
+            setChannelVolume (bouncedSong, bounced, getChannelVolume (bouncedSong, track));
+            setChannelPan (bouncedSong, bounced, getChannelPan (bouncedSong, track));
 
-            for (auto* send : getSends (track))
-                if (auto* copy = addSend (*bounced, send->getBusNumber(), isPreFader (*send)))
-                    setSendLevel (*copy, getSendLevel (*send));
+            for (const auto send : getSends (bouncedSong, track))
+                if (const auto copy = addSend (bouncedSong, bounced, getSendTarget (bouncedSong, send), isPreFader (bouncedSong, send));
+                    copy.isValid())
+                    setSendLevel (bouncedSong, copy, getSendLevel (bouncedSong, send));
 
-            auto& song = getSong (edit);
-
-            if (! placeClipState (song, makeAudioClipState (song, name, target, BeatPosition(), { 0.0, length.inSeconds() }),
-                                  getTrackID (*bounced))
+            if (! placeClipState (bouncedSong, makeAudioClipState (bouncedSong, name, target, BeatPosition(), { 0.0, length }), bounced)
                       .isValid())
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");
 
-            setTrackMuted (track, true, &getSong (edit).getUndoManager());
-            setCollapsed (track, true);
-            getSelection (context).selectOnly (getTrackID (*bounced));
+            setTrackMuted (bouncedSong, track, true, &bouncedSong.getUndoManager());
+            setCollapsed (bouncedSong, track, true);
+            getSelection (context).selectOnly (bounced);
             return juce::Result::ok();
         }
     };
-
-    te::AudioTrack* getSelectedAudioTrack (const ProjectContext& context)
-    {
-        auto* edit = getEdit (context);
-        const auto selected = getSelectedTracks (getSelection (context));
-        return edit == nullptr || selected.empty() ? nullptr : dynamic_cast<te::AudioTrack*> (findTracks (*edit, selected).getFirst());
-    }
 
     TrackID getSelectedTrackID (const ProjectContext& context)
     {
         const auto selected = getSelectedTracks (getSelection (context));
         return selected.empty() ? TrackID() : selected.front();
+    }
+
+    // What a render of a track is called before it starts: "Freezing Bass", or "Freezing the track" without one.
+    juce::String getRenderTitle (const ProjectContext& context, TrackID track, const juce::String& doing)
+    {
+        auto* song = findSong (context);
+        const auto isTrack = song != nullptr && isTrackState (findTrackState (*song, track));
+        return doing + " " + (isTrack ? getTrackName (*song, track) : juce::String ("the track"));
     }
 
     // Starts a render in the host, or tells the host why it can't.
@@ -679,61 +680,57 @@ juce::String TrackRender::getTitle() const
 //==============================================================================
 bool isFrozen (const ProjectContext& context, TrackID id)
 {
-    auto* track = findAudioTrack (context, id);
-    return track != nullptr && track->isFrozen (te::Track::individualFreeze);
+    auto* song = findSong (context);
+    return song != nullptr && id.isValid() && (bool) findTrackState (*song, id)[schema::trackFrozen];
 }
 
 bool isFrozenDevice (const ProjectContext& context, DeviceID id)
 {
-    auto* edit = getEdit (context);
-    const auto plugin = edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)) : te::Plugin::Ptr();
-    return plugin != nullptr && isFrozenDevice (*plugin);
+    auto* song = findSong (context);
+    return song != nullptr && isFrozenDevice (*song, id);
 }
 
 juce::String getWhyNotFreeze (const ProjectContext& context, TrackID id)
 {
-    auto* edit = getEdit (context);
-    auto* track = edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
+    auto* song = findSong (context);
 
-    if (auto* audioTrack = dynamic_cast<te::AudioTrack*> (track);
-        audioTrack != nullptr && audioTrack->isFrozen (te::Track::individualFreeze))
-        return getTrackName (*audioTrack) + " is frozen already.";
+    if (isFrozen (context, id))
+        return getTrackName (*song, id) + " is frozen already.";
 
-    return getWhyNotRender (track, "freeze", "frozen");
+    return getWhyNotRender (song, id, "freeze", "frozen");
 }
 
 juce::String getWhyNotBounce (const ProjectContext& context, TrackID id)
 {
-    auto* edit = getEdit (context);
-    return getWhyNotRender (edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr, "bounce", "bounced");
+    return getWhyNotRender (findSong (context), id, "bounce", "bounced");
 }
 
 std::unique_ptr<TrackRender> startFreeze (ProjectContext& context, TrackID id, std::function<void (const juce::Result&)> onFinished)
 {
-    auto* track = findAudioTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr || getWhyNotFreeze (context, id).isNotEmpty())
+    if (song == nullptr || getWhyNotFreeze (context, id).isNotEmpty())
         return {};
 
-    auto render = std::make_unique<FreezeRender> (context, *track, std::move (onFinished));
+    auto render = std::make_unique<FreezeRender> (context, *song, id, std::move (onFinished));
     return render->hasStarted() ? std::make_unique<TrackRender> (std::move (render)) : nullptr;
 }
 
 std::unique_ptr<TrackRender> startBounceInPlace (ProjectContext& context, TrackID id, std::function<void (const juce::Result&)> onFinished)
 {
-    auto* track = findAudioTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr || getWhyNotBounce (context, id).isNotEmpty())
+    if (song == nullptr || getWhyNotBounce (context, id).isNotEmpty())
         return {};
 
-    auto render = std::make_unique<BounceRender> (context, *track, std::move (onFinished));
+    auto render = std::make_unique<BounceRender> (context, *song, id, std::move (onFinished));
     return render->hasStarted() ? std::make_unique<TrackRender> (std::move (render)) : nullptr;
 }
 
 void unfreezeTrack (ProjectContext& context, TrackID id)
 {
-    if (auto* track = findAudioTrack (context, id); track != nullptr && track->isFrozen (te::Track::individualFreeze))
-        unfreeze (*track);
+    if (auto* song = findSong (context); song != nullptr && isFrozen (context, id))
+        unfreeze (*song, id);
 }
 
 //==============================================================================
@@ -747,9 +744,7 @@ void toggleFreeze (ProjectContext& context, TrackRenderHost& host)
         return;
     }
 
-    auto* track = getSelectedAudioTrack (context);
-    const auto title = "Freezing " + (track != nullptr ? getTrackName (*track) : juce::String ("the track"));
-    runOrExplain (host, title, getWhyNotFreeze (context, id),
+    runOrExplain (host, getRenderTitle (context, id, "Freezing"), getWhyNotFreeze (context, id),
                   [&context, id] (std::function<void (const juce::Result&)> done) { return startFreeze (context, id, std::move (done)); });
 }
 
@@ -772,9 +767,8 @@ juce::String getFreezeCommandName (const ProjectContext& context)
 void bounceSelectedTrack (ProjectContext& context, TrackRenderHost& host)
 {
     const auto id = getSelectedTrackID (context);
-    auto* track = getSelectedAudioTrack (context);
-    const auto title = "Bouncing " + (track != nullptr ? getTrackName (*track) : juce::String ("the track"));
-    runOrExplain (host, title, getWhyNotBounce (context, id), [&context, id] (std::function<void (const juce::Result&)> done)
+    runOrExplain (host, getRenderTitle (context, id, "Bouncing"), getWhyNotBounce (context, id),
+                  [&context, id] (std::function<void (const juce::Result&)> done)
                   { return startBounceInPlace (context, id, std::move (done)); });
 }
 

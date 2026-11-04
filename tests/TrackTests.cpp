@@ -6,7 +6,6 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/MixerModel.h"
 #include "model/notes/NotesModel.h"
 #include "model/project/ProjectContext.h"
@@ -16,40 +15,44 @@
 
 namespace
 {
-// An Edit with tracks named A, B, C..., a selection, and the track commands, with the playlist's height commands.
+// A song with tracks named A, B, C..., a selection, and the track commands, with the playlist's height commands.
 struct Tracks
 {
     explicit Tracks (int numTracks)
     {
-        phazite::ensureTracks (*edit, numTracks);
+        const auto ids = phazite::ensureTracks (*song, numTracks);
 
         for (int i = 0; i < numTracks; ++i)
-            phazite::setTrackName (*te::getAudioTracks (*edit)[i], juce::String::charToString ((juce::juce_wchar) ('A' + i)));
+            phazite::setTrackName (*song, ids[(size_t) i], juce::String::charToString ((juce::juce_wchar) ('A' + i)));
 
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
-        setEdit (context, edit.get());
+        song->getUndoManager().clearUndoHistory();
+        setSong (context, song.get());
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addTrackCommands (registry, selection);
         phazite::ui::addTrackViewCommands (registry, context);
     }
 
-    ~Tracks() { selection.deselectAll(); }
-
-    te::Track* operator[] (const char* name) const
+    ~Tracks()
     {
-        for (auto* track : phazite::getPlaylistTracks (*edit))
-            if (track->getName() == name)
+        selection.deselectAll();
+        setSong (context, nullptr);
+    }
+
+    phazite::TrackID operator[] (const char* name) const
+    {
+        for (const auto track : phazite::getTrackIDs (*song))
+            if (phazite::getTrackName (*song, track) == name)
                 return track;
 
-        return nullptr;
+        return {};
     }
 
     juce::String getOrder() const
     {
         juce::StringArray names;
 
-        for (auto* track : phazite::getPlaylistTracks (*edit))
-            names.add (track->getName());
+        for (const auto track : phazite::getTrackIDs (*song))
+            names.add (phazite::getTrackName (*song, track));
 
         return names.joinIntoString (" ");
     }
@@ -58,8 +61,8 @@ struct Tracks
     {
         juce::StringArray names;
 
-        for (auto* track : phazite::findTracks (*edit, phazite::getSelectedTracks (selection)))
-            names.add (track->getName());
+        for (const auto track : phazite::getSelectedTracks (selection))
+            names.add (phazite::getTrackName (*song, track));
 
         return names.joinIntoString (" ");
     }
@@ -69,24 +72,24 @@ struct Tracks
         selection.deselectAll();
 
         for (const auto* name : names)
-            selection.addToSelection (phazite::getTrackID (*(*this)[name]));
+            selection.addToSelection ((*this)[name]);
     }
 
-    juce::String getUndoName() const { return phazite::getSong (*edit).getUndoManager().getUndoDescription(); }
+    juce::String getUndoName() const { return song->getUndoManager().getUndoDescription(); }
+
+    // A track's own color, as the song keeps it: transparent while it has none.
+    juce::Colour getOwnColour (phazite::TrackID track) const
+    {
+        return juce::Colour::fromString (phazite::findTrackState (*song, track)[phazite::schema::trackColour].toString());
+    }
 
     // How the playlist shows a track's height, through the model's row of it.
-    phazite::TrackRow rowOf (const te::Track& track) const
-    {
-        return phazite::getTrackRow (context, phazite::getTrackID (track)).value_or (phazite::TrackRow());
-    }
-    int heightOf (const te::Track& track) const { return phazite::ui::getTrackHeight (rowOf (track)); }
-    int shownHeightOf (const te::Track& track) const { return phazite::ui::getShownTrackHeight (rowOf (track)); }
-    void setShownHeight (const te::Track& track, int height)
-    {
-        phazite::ui::setShownTrackHeight (context, phazite::getTrackID (track), height);
-    }
+    phazite::TrackRow rowOf (phazite::TrackID track) const { return phazite::getTrackRow (context, track).value_or (phazite::TrackRow()); }
+    int heightOf (phazite::TrackID track) const { return phazite::ui::getTrackHeight (rowOf (track)); }
+    int shownHeightOf (phazite::TrackID track) const { return phazite::ui::getShownTrackHeight (rowOf (track)); }
+    void setShownHeight (phazite::TrackID track, int height) { phazite::ui::setShownTrackHeight (context, track, height); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     phazite::Selection& selection = getSelection (context);
     phazite::RangeSelection& range = getRangeSelection (context);
@@ -108,52 +111,51 @@ TEST_CASE ("The track palette has eight distinct, named colors")
     }
 }
 
-TEST_CASE ("The playlist shows audio tracks and folders, but not the global tracks")
+TEST_CASE ("The playlist shows tracks and folders, each folder before its tracks, in their rows' colors")
 {
     Tracks tracks (1);
-    auto& edit = *tracks.edit;
-    edit.ensureTempoTrack();
-    edit.ensureArrangerTrack();
+    auto& song = *tracks.song;
 
-    auto* folder = phazite::insertFolder (edit, nullptr, nullptr);
-    REQUIRE (folder != nullptr);
-    phazite::setTrackName (*folder, "Folder");
-    auto* inFolder = phazite::insertPlainTrack (edit, nullptr);
-    REQUIRE (inFolder != nullptr);
-    phazite::moveTrackIntoFolder (*inFolder, *folder);
-    phazite::setTrackName (*inFolder, "Inside");
+    const auto folder = phazite::insertFolder (song, {}, nullptr);
+    REQUIRE (folder.isValid());
+    phazite::setTrackName (song, folder, "Folder");
+    const auto inFolder = phazite::insertPlainTrack (song, {});
+    REQUIRE (inFolder.isValid());
+    phazite::moveTrackIntoFolder (song, inFolder, folder);
+    phazite::setTrackName (song, inFolder, "Inside");
 
     CHECK (tracks.getOrder() == juce::String ("A Folder Inside"));
 
     // A track without a color of its own shows its row's color from the palette.
     const auto& colours = phazite::getTrackColours();
-    CHECK (phazite::getTrackColour (*tracks["A"], 0) == colours[0].colour);
-    CHECK (phazite::getTrackColour (*tracks["A"], 9) == colours[1].colour);
-    phazite::setTrackColour (*tracks["A"], colours[4].colour);
-    CHECK (phazite::getTrackColour (*tracks["A"], 0) == colours[4].colour);
+    CHECK (phazite::getTrackColour (song, tracks["A"], 0) == colours[0].colour);
+    CHECK (phazite::getTrackColour (song, tracks["A"], 9) == colours[1].colour);
+    phazite::setTrackColour (song, tracks["A"], colours[4].colour);
+    CHECK (phazite::getTrackColour (song, tracks["A"], 0) == colours[4].colour);
 }
 
 TEST_CASE ("A new track goes below the selected one, in the next color, and is selected")
 {
     Tracks tracks (2);
+    auto& song = *tracks.song;
     const auto& colours = phazite::getTrackColours();
 
     // With nothing selected, at the bottom.
     REQUIRE (tracks.registry.invoke ("track.add"));
     CHECK (tracks.getUndoName() == juce::String ("Add Track"));
-    auto added = phazite::getPlaylistTracks (*tracks.edit).getLast();
-    phazite::setTrackName (*added, "New");
+    const auto added = phazite::getTrackIDs (song).back();
+    phazite::setTrackName (song, added, "New");
     CHECK (tracks.getOrder() == juce::String ("A B New"));
     CHECK (tracks.getSelectedNames() == juce::String ("New"));
-    CHECK (added->getColour() == colours[2].colour); // B shows the palette's second color
+    CHECK (tracks.getOwnColour (added) == colours[2].colour); // B shows the palette's second color
 
     // Below the selected track.
     tracks.select ({ "A" });
     REQUIRE (tracks.registry.invoke ("track.add"));
-    CHECK (phazite::getPlaylistTracks (*tracks.edit)[1]->getColour() == colours[1].colour);
-    CHECK (phazite::getSelectedTracks (tracks.selection).front() == phazite::getTrackID (*phazite::getPlaylistTracks (*tracks.edit)[1]));
+    CHECK (tracks.getOwnColour (phazite::getTrackIDs (song)[1]) == colours[1].colour);
+    CHECK (phazite::getSelectedTracks (tracks.selection).front() == phazite::getTrackIDs (song)[1]);
 
-    phazite::undo (*tracks.edit);
+    phazite::undo (song);
     CHECK (tracks.getOrder() == juce::String ("A B New"));
 }
 
@@ -168,7 +170,7 @@ TEST_CASE ("Deleting tracks is one undo step, and selects the track that takes t
     CHECK (tracks.getSelectedNames() == juce::String ("D"));
     CHECK (tracks.getUndoName() == juce::String ("Delete 2 Tracks"));
 
-    phazite::undo (*tracks.edit);
+    phazite::undo (*tracks.song);
     CHECK (tracks.getOrder() == juce::String ("A B C D"));
 
     // The last track: the one above it is selected.
@@ -190,8 +192,8 @@ TEST_CASE ("Duplicating a track puts the copy right after it")
     CHECK (tracks.getOrder() == juce::String ("A A B"));
     CHECK (tracks.getUndoName() == juce::String ("Duplicate Track"));
 
-    const auto copy = phazite::getPlaylistTracks (*tracks.edit)[1];
-    CHECK (phazite::getSelectedTracks (tracks.selection) == std::vector { phazite::getTrackID (*copy) });
+    const auto copy = phazite::getTrackIDs (*tracks.song)[1];
+    CHECK (phazite::getSelectedTracks (tracks.selection) == std::vector { copy });
 }
 
 TEST_CASE ("Tracks move up and down, and selected neighbours move together")
@@ -235,47 +237,49 @@ TEST_CASE ("The arrow-key commands step through the tracks")
 TEST_CASE ("Mute and solo switch the selected tracks on together, then off")
 {
     Tracks tracks (3);
+    auto& song = *tracks.song;
     const auto* mute = tracks.registry.find ("track.mute");
     REQUIRE (mute != nullptr);
 
-    phazite::setTrackMuted (*tracks["A"], true);
+    phazite::setTrackMuted (song, tracks["A"], true);
     tracks.select ({ "A", "B" });
     CHECK_FALSE (mute->isTicked());
 
     REQUIRE (tracks.registry.invoke ("track.mute")); // not all were muted: now all are
-    CHECK (tracks["A"]->isMuted (false));
-    CHECK (tracks["B"]->isMuted (false));
+    CHECK (phazite::isTrackMuted (song, tracks["A"], false));
+    CHECK (phazite::isTrackMuted (song, tracks["B"], false));
     CHECK (mute->isTicked());
 
     REQUIRE (tracks.registry.invoke ("track.mute"));
-    CHECK_FALSE (tracks["A"]->isMuted (false));
-    CHECK_FALSE (tracks["B"]->isMuted (false));
+    CHECK_FALSE (phazite::isTrackMuted (song, tracks["A"], false));
+    CHECK_FALSE (phazite::isTrackMuted (song, tracks["B"], false));
 
     REQUIRE (tracks.registry.invoke ("track.solo"));
-    CHECK (tracks["A"]->isSolo (false));
-    CHECK (tracks["B"]->isSolo (false));
-    CHECK_FALSE (tracks["C"]->isSolo (false));
+    CHECK (phazite::isTrackSoloed (song, tracks["A"]));
+    CHECK (phazite::isTrackSoloed (song, tracks["B"]));
+    CHECK_FALSE (phazite::isTrackSoloed (song, tracks["C"]));
 }
 
 TEST_CASE ("Track heights stay within limits, and change for the selection or all tracks")
 {
     Tracks tracks (2);
-    auto& a = *tracks["A"];
-    auto& b = *tracks["B"];
+    auto& song = *tracks.song;
+    const auto a = tracks["A"];
+    const auto b = tracks["B"];
 
-    CHECK_FALSE (phazite::getSavedTrackHeight (a).has_value()); // a new track has none, and shows the standard height
+    CHECK_FALSE (phazite::getSavedTrackHeight (song, a).has_value()); // a new track has none, and shows the standard height
     CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::standard);
-    phazite::setSavedTrackHeight (a, 100000);
+    phazite::setSavedTrackHeight (song, a, 100000);
     CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::maximum);
 
     // The project keeps a height as given, and the playlist shows it within its limits.
-    phazite::setSavedTrackHeight (a, 100000);
-    CHECK (phazite::getSavedTrackHeight (a).value_or (0) == 100000);
+    phazite::setSavedTrackHeight (song, a, 100000);
+    CHECK (phazite::getSavedTrackHeight (song, a).value_or (0) == 100000);
     CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::maximum);
 
-    phazite::setSavedTrackHeight (a, 0);
+    phazite::setSavedTrackHeight (song, a, 0);
     CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::minimum);
-    CHECK_FALSE (phazite::getSong (*tracks.edit).getUndoManager().canUndo()); // heights aren't undo steps
+    CHECK_FALSE (song.getUndoManager().canUndo()); // heights aren't undo steps
 
     tracks.select ({ "B" });
     REQUIRE (tracks.registry.invoke ("track.taller"));
@@ -286,64 +290,67 @@ TEST_CASE ("Track heights stay within limits, and change for the selection or al
     REQUIRE (tracks.registry.invoke ("track.shorter"));
     CHECK (tracks.heightOf (b) == phazite::ui::TrackHeight::standard);
     CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::minimum);
-    CHECK (phazite::isCollapsed (a)); // past the minimum, a track collapses
-    CHECK_FALSE (phazite::isCollapsed (b));
+    CHECK (phazite::isCollapsed (song, a)); // past the minimum, a track collapses
+    CHECK_FALSE (phazite::isCollapsed (song, b));
 }
 
 TEST_CASE ("A track collapses to a thin row by its command, or by getting shorter than the minimum")
 {
     Tracks tracks (2);
-    auto& a = *tracks["A"];
+    auto& song = *tracks.song;
+    const auto a = tracks["A"];
     CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::standard);
 
     tracks.select ({ "A" });
     REQUIRE (tracks.registry.invoke ("track.collapse"));
-    CHECK (phazite::isCollapsed (a));
+    CHECK (phazite::isCollapsed (song, a));
     CHECK (tracks.registry.find ("track.collapse")->isTicked());
     CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::collapsed);
     CHECK (tracks.heightOf (a) == phazite::ui::TrackHeight::standard); // kept for when it expands
     REQUIRE (tracks.registry.invoke ("track.collapse"));
-    CHECK_FALSE (phazite::isCollapsed (a));
+    CHECK_FALSE (phazite::isCollapsed (song, a));
     CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::standard);
 
     // Shorter and shorter: 48, 32, then collapsed. Taller expands it again, from the thin row.
     for (int i = 0; i < 3; ++i)
         REQUIRE (tracks.registry.invoke ("track.shorter"));
 
-    CHECK (phazite::isCollapsed (a));
+    CHECK (phazite::isCollapsed (song, a));
     REQUIRE (tracks.registry.invoke ("track.taller"));
-    CHECK_FALSE (phazite::isCollapsed (a));
+    CHECK_FALSE (phazite::isCollapsed (song, a));
     CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::collapsed + phazite::ui::TrackHeight::step);
 
     // Dragging the edge: halfway between the thin row and the minimum, it snaps to one or the other.
     tracks.setShownHeight (a, 27);
-    CHECK (phazite::isCollapsed (a));
+    CHECK (phazite::isCollapsed (song, a));
     tracks.setShownHeight (a, 29);
-    CHECK_FALSE (phazite::isCollapsed (a));
+    CHECK_FALSE (phazite::isCollapsed (song, a));
     CHECK (tracks.shownHeightOf (a) == phazite::ui::TrackHeight::minimum);
-    CHECK_FALSE (phazite::getSong (*tracks.edit).getUndoManager().canUndo()); // collapsing changes the view, as heights do
+    CHECK_FALSE (song.getUndoManager().canUndo()); // collapsing changes the view, as heights do
 
     // A collapsed folder keeps its height, shorter than a track's at first (its tracks are hidden instead), and doesn't collapse
     // by resizing.
     tracks.select ({ "B" });
     REQUIRE (tracks.registry.invoke ("track.groupIntoFolder"));
-    auto& folder = *tracks["Folder"];
-    phazite::setCollapsed (folder, true);
+    const auto folder = tracks["Folder"];
+    REQUIRE (folder.isValid());
+    phazite::setCollapsed (song, folder, true);
     CHECK (tracks.shownHeightOf (folder) == phazite::ui::TrackHeight::folder);
-    phazite::setCollapsed (folder, false);
+    phazite::setCollapsed (song, folder, false);
     tracks.setShownHeight (folder, 0);
-    CHECK_FALSE (phazite::isCollapsed (folder));
+    CHECK_FALSE (phazite::isCollapsed (song, folder));
     CHECK (tracks.shownHeightOf (folder) == phazite::ui::TrackHeight::minimum);
 }
 
 TEST_CASE ("Tracks group into a folder, which collapses, takes more tracks and ungroups")
 {
     Tracks tracks (3);
+    auto& song = *tracks.song;
 
     // An empty folder goes at the bottom when nothing is selected.
     REQUIRE (tracks.registry.invoke ("track.addFolder"));
     CHECK (tracks.getOrder() == juce::String ("A B C Folder"));
-    phazite::undo (*tracks.edit);
+    phazite::undo (song);
     CHECK (tracks.getOrder() == juce::String ("A B C"));
 
     tracks.select ({ "A", "B" });
@@ -352,86 +359,88 @@ TEST_CASE ("Tracks group into a folder, which collapses, takes more tracks and u
     CHECK (tracks.getOrder() == juce::String ("Folder A B C"));
     CHECK (tracks.getSelectedNames() == juce::String ("Folder"));
 
-    auto* folder = dynamic_cast<te::FolderTrack*> (tracks["Folder"]);
-    REQUIRE (folder != nullptr);
-    CHECK (tracks["A"]->getParentFolderTrack() == folder);
-    CHECK (tracks["B"]->getParentFolderTrack() == folder);
-    CHECK (tracks["C"]->getParentFolderTrack() == nullptr);
+    const auto folder = tracks["Folder"];
+    REQUIRE (phazite::isFolder (song, folder));
+    CHECK (phazite::getParentFolder (song, tracks["A"]) == folder);
+    CHECK (phazite::getParentFolder (song, tracks["B"]) == folder);
+    CHECK_FALSE (phazite::getParentFolder (song, tracks["C"]).isValid());
 
     // Collapsing hides its tracks, and isn't an undo step.
     REQUIRE (tracks.registry.invoke ("track.collapse"));
-    CHECK (phazite::isCollapsed (*folder));
-    CHECK (phazite::isHiddenInCollapsedFolder (*tracks["A"]));
-    CHECK_FALSE (phazite::isHiddenInCollapsedFolder (*tracks["C"]));
+    CHECK (phazite::isCollapsed (song, folder));
+    CHECK (phazite::isHiddenInCollapsedFolder (song, tracks["A"]));
+    CHECK_FALSE (phazite::isHiddenInCollapsedFolder (song, tracks["C"]));
     CHECK (tracks.getUndoName() == juce::String ("Group into Folder"));
     REQUIRE (tracks.registry.invoke ("track.collapse"));
-    CHECK_FALSE (phazite::isCollapsed (*folder));
+    CHECK_FALSE (phazite::isCollapsed (song, folder));
 
     // Another track goes in after its last track.
-    phazite::moveTrackIntoFolder (*tracks["C"], *folder);
+    phazite::moveTrackIntoFolder (song, tracks["C"], folder);
     CHECK (tracks.getOrder() == juce::String ("Folder A B C"));
-    CHECK (tracks["C"]->getParentFolderTrack() == folder);
+    CHECK (phazite::getParentFolder (song, tracks["C"]) == folder);
 
     // Ungrouping takes the tracks out to where the folder was.
     tracks.select ({ "Folder" });
     REQUIRE (tracks.registry.invoke ("track.ungroup"));
     CHECK (tracks.getOrder() == juce::String ("A B C"));
-    CHECK (tracks["A"]->getParentFolderTrack() == nullptr);
+    CHECK_FALSE (phazite::getParentFolder (song, tracks["A"]).isValid());
 
-    phazite::undo (*tracks.edit);
+    phazite::undo (song);
     CHECK (tracks.getOrder() == juce::String ("Folder A B C"));
 }
 
 TEST_CASE ("Pinning a track is kept in the project, but isn't an undo step")
 {
     Tracks tracks (2);
+    auto& song = *tracks.song;
     tracks.select ({ "B" });
 
     REQUIRE (tracks.registry.invoke ("track.pin"));
-    CHECK (phazite::isPinned (*tracks["B"]));
+    CHECK (phazite::isPinned (song, tracks["B"]));
     CHECK (tracks.registry.find ("track.pin")->isTicked());
-    CHECK_FALSE (phazite::getSong (*tracks.edit).getUndoManager().canUndo());
+    CHECK_FALSE (song.getUndoManager().canUndo());
 
     REQUIRE (tracks.registry.invoke ("track.pin"));
-    CHECK_FALSE (phazite::isPinned (*tracks["B"]));
+    CHECK_FALSE (phazite::isPinned (song, tracks["B"]));
 }
 
 TEST_CASE ("Solo leaves the mute switches alone, and a track can be soloed alone")
 {
     Tracks tracks (3);
-    auto& a = *tracks["A"];
-    auto& b = *tracks["B"];
-    auto& c = *tracks["C"];
-    phazite::setTrackMuted (c, true);
+    auto& song = *tracks.song;
+    const auto a = tracks["A"];
+    const auto b = tracks["B"];
+    const auto c = tracks["C"];
+    phazite::setTrackMuted (song, c, true);
 
-    phazite::setTrackSoloed (a, true);
-    CHECK (phazite::isSilencedBySolo (b));
-    CHECK_FALSE (phazite::isSilencedBySolo (a));
-    CHECK_FALSE (phazite::isSilencedBySolo (c)); // muted by its own switch
-    phazite::setTrackSoloed (b, true);
+    phazite::setTrackSoloed (song, a, true);
+    CHECK (phazite::isSilencedBySolo (song, b));
+    CHECK_FALSE (phazite::isSilencedBySolo (song, a));
+    CHECK_FALSE (phazite::isSilencedBySolo (song, c)); // muted by its own switch
+    phazite::setTrackSoloed (song, b, true);
 
     // Alone: the other solos go, and the mute switches stay as they were.
-    phazite::toggleSoloAlone (a);
-    CHECK (a.isSolo (false));
-    CHECK_FALSE (b.isSolo (false));
-    CHECK (c.isMuted (false));
-    CHECK (phazite::isSilencedBySolo (b));
+    phazite::toggleSoloAlone (song, a);
+    CHECK (phazite::isTrackSoloed (song, a));
+    CHECK_FALSE (phazite::isTrackSoloed (song, b));
+    CHECK (phazite::isTrackMuted (song, c, false));
+    CHECK (phazite::isSilencedBySolo (song, b));
 
     // Again: no solo at all, and C is still muted.
-    phazite::toggleSoloAlone (a);
-    CHECK_FALSE (a.isSolo (false));
-    CHECK_FALSE (tracks.edit->areAnyTracksSolo());
-    CHECK (c.isMuted (false));
-    CHECK_FALSE (phazite::isSilencedBySolo (b));
+    phazite::toggleSoloAlone (song, a);
+    CHECK_FALSE (phazite::isTrackSoloed (song, a));
+    CHECK_FALSE (phazite::areAnyTracksSoloed (song));
+    CHECK (phazite::isTrackMuted (song, c, false));
+    CHECK_FALSE (phazite::isSilencedBySolo (song, b));
 }
 
 TEST_CASE ("The track switches work on lists of tracks")
 {
     Tracks tracks (3);
-    auto* a = tracks["A"];
-    auto* b = tracks["B"];
-    auto& song = phazite::getSong (*tracks.edit);
-    const std::vector<phazite::TrackID> both { phazite::getTrackID (*a), phazite::getTrackID (*b) }, onlyA { both[0] }, onlyB { both[1] };
+    const auto a = tracks["A"];
+    const auto b = tracks["B"];
+    auto& song = *tracks.song;
+    const std::vector<phazite::TrackID> both { a, b }, onlyA { a }, onlyB { b };
     const std::vector<phazite::TrackID> none;
 
     struct Switch
@@ -462,36 +471,37 @@ TEST_CASE ("The track switches work on lists of tracks")
     }
 
     // Collapsing and pinning change the view, so they aren't undo steps.
-    phazite::getSong (*tracks.edit).getUndoManager().clearUndoHistory();
+    song.getUndoManager().clearUndoHistory();
     phazite::toggleTracksCollapsed (song, both);
     phazite::toggleTracksPinned (song, both);
-    CHECK_FALSE (phazite::getSong (*tracks.edit).getUndoManager().canUndo());
+    CHECK_FALSE (song.getUndoManager().canUndo());
 
     SUBCASE ("A track in a muted folder isn't muted itself, and Mute switches its own switch")
     {
-        auto* folder = phazite::groupIntoFolder ({ b }, nullptr);
-        REQUIRE (folder != nullptr);
-        phazite::setTrackMuted (*folder, true);
-        CHECK (b->isMuted (true)); // silent, through its folder
+        const auto folder = phazite::groupIntoFolder (song, { b }, nullptr);
+        REQUIRE (folder.isValid());
+        phazite::setTrackMuted (song, folder, true);
+        CHECK (phazite::isTrackMuted (song, b, true)); // silent, through its folder
         CHECK_FALSE (phazite::areAllTracksMuted (song, onlyB));
 
         phazite::toggleTracksMuted (song, onlyB);
-        CHECK (b->isMuted (false));
+        CHECK (phazite::isTrackMuted (song, b, false));
         phazite::toggleTracksMuted (song, onlyB);
-        CHECK_FALSE (b->isMuted (false));
-        CHECK (folder->isMuted (false)); // the folder's own switch stays
+        CHECK_FALSE (phazite::isTrackMuted (song, b, false));
+        CHECK (phazite::isTrackMuted (song, folder, false)); // the folder's own switch stays
     }
 }
 
 TEST_CASE ("Tracks and folders go in after the selection")
 {
     Tracks tracks (3);
+    auto& song = *tracks.song;
 
     // After the last selected track, and selected alone; at the end while nothing is selected.
     tracks.select ({ "A", "B" });
     const auto track = phazite::insertTrackAfterSelection (tracks.selection);
     REQUIRE (track.isValid());
-    phazite::setTrackName (phazite::getSong (*tracks.edit), track, "New");
+    phazite::setTrackName (song, track, "New");
     CHECK (tracks.getOrder() == juce::String ("A B New C"));
     CHECK (tracks.getSelectedNames() == juce::String ("New"));
 
@@ -501,31 +511,32 @@ TEST_CASE ("Tracks and folders go in after the selection")
     CHECK (tracks.getOrder() == juce::String ("A B New C Folder"));
     CHECK (tracks.getSelectedNames() == juce::String ("Folder"));
 
-    // Without an Edit, nothing goes in.
+    // Without a song, nothing goes in.
     tracks.selection.deselectAll();
-    tracks.selection.setEdit (nullptr);
+    tracks.selection.setSong (nullptr);
     CHECK_FALSE (phazite::insertTrackAfterSelection (tracks.selection).isValid());
     CHECK_FALSE (phazite::insertFolderAfterSelection (tracks.selection).isValid());
-    tracks.selection.setEdit (tracks.edit.get());
-    CHECK (phazite::getPlaylistTracks (*tracks.edit).size() == 5);
+    tracks.selection.setSong (&song);
+    CHECK (phazite::getTrackIDs (song).size() == 5);
 }
 
 TEST_CASE ("Selected folders ungroup together")
 {
     Tracks tracks (4);
-    auto* first = phazite::groupIntoFolder ({ tracks["A"], tracks["B"] }, nullptr);
-    REQUIRE (first != nullptr);
-    phazite::setTrackName (*first, "F1");
-    auto* second = phazite::groupIntoFolder ({ tracks["C"] }, nullptr);
-    REQUIRE (second != nullptr);
-    phazite::setTrackName (*second, "F2");
+    auto& song = *tracks.song;
+    const auto first = phazite::groupIntoFolder (song, { tracks["A"], tracks["B"] }, nullptr);
+    REQUIRE (first.isValid());
+    phazite::setTrackName (song, first, "F1");
+    const auto second = phazite::groupIntoFolder (song, { tracks["C"] }, nullptr);
+    REQUIRE (second.isValid());
+    phazite::setTrackName (song, second, "F2");
     CHECK (tracks.getOrder() == juce::String ("F1 A B F2 C D"));
 
     tracks.select ({ "F1", "F2", "D" });
     CHECK (phazite::getSelectedFolders (tracks.selection).size() == 2);
     CHECK (phazite::hasSelectedFolders (tracks.selection));
 
-    phazite::ungroupFolders (*tracks.edit, phazite::getSelectedFolders (tracks.selection));
+    phazite::ungroupFolders (song, phazite::getSelectedFolders (tracks.selection));
     CHECK (tracks.getOrder() == juce::String ("A B C D"));
     CHECK_FALSE (phazite::hasSelectedFolders (tracks.selection));
 }
@@ -555,7 +566,7 @@ TEST_CASE ("Neighbour selection starts at either end")
 TEST_CASE ("Tracks move within their folders")
 {
     Tracks tracks (4);
-    REQUIRE (phazite::groupIntoFolder ({ tracks["B"], tracks["C"] }, nullptr) != nullptr);
+    REQUIRE (phazite::groupIntoFolder (*tracks.song, { tracks["B"], tracks["C"] }, nullptr).isValid());
     CHECK (tracks.getOrder() == juce::String ("A Folder B C D"));
 
     tracks.select ({ "C" });
@@ -573,34 +584,35 @@ TEST_CASE ("Tracks move within their folders")
 TEST_CASE ("Deleting and duplicating tracks directly")
 {
     Tracks tracks (3);
+    auto& song = *tracks.song;
 
     // Each copy goes right after its original. Without a selection, what is selected stays as it was.
     tracks.select ({ "B" });
-    auto copies = phazite::duplicateTracks ({ tracks["A"], tracks["C"] }, nullptr);
+    auto copies = phazite::duplicateTracks (song, { tracks["A"], tracks["C"] }, nullptr);
     REQUIRE (copies.size() == 2);
     CHECK (tracks.getOrder() == juce::String ("A A B C C"));
     CHECK (tracks.getSelectedNames() == juce::String ("B"));
-    CHECK_FALSE (tracks.selection.isSelected (phazite::getTrackID (*copies.getFirst())));
+    CHECK_FALSE (tracks.selection.isSelected (copies.front()));
 
     // With one, the copies are selected instead.
-    copies = phazite::duplicateTracks ({ tracks["B"] }, &tracks.selection);
+    copies = phazite::duplicateTracks (song, { tracks["B"] }, &tracks.selection);
     REQUIRE (copies.size() == 1);
     CHECK (tracks.getOrder() == juce::String ("A A B B C C"));
     CHECK (phazite::getSelectedTracks (tracks.selection).size() == 1);
-    CHECK (phazite::getSelectedTracks (tracks.selection).front() == phazite::getTrackID (*copies.getFirst()));
+    CHECK (phazite::getSelectedTracks (tracks.selection).front() == copies.front());
 
-    phazite::deleteTracks ({ copies.getFirst() }, nullptr);
+    phazite::deleteTracks (song, { copies.front() }, nullptr);
     CHECK (tracks.getOrder() == juce::String ("A A B C C"));
 
-    // A folder goes with its tracks; with a selection manager, the track that takes the first one's place is selected.
-    auto* folder = phazite::groupIntoFolder ({ tracks["B"] }, nullptr);
-    REQUIRE (folder != nullptr);
+    // A folder goes with its tracks; with a selection, the track that takes the first one's place is selected.
+    const auto folder = phazite::groupIntoFolder (song, { tracks["B"] }, nullptr);
+    REQUIRE (folder.isValid());
     CHECK (tracks.getOrder() == juce::String ("A A Folder B C C"));
-    phazite::deleteTracks ({ folder, tracks["B"] }, &tracks.selection);
+    phazite::deleteTracks (song, { folder, tracks["B"] }, &tracks.selection);
     CHECK (tracks.getOrder() == juce::String ("A A C C"));
     CHECK (tracks.getSelectedNames() == juce::String ("C"));
 
-    phazite::deleteTracks ({}, &tracks.selection); // nothing to delete
+    phazite::deleteTracks (song, {}, &tracks.selection); // nothing to delete
     CHECK (tracks.getOrder() == juce::String ("A A C C"));
 }
 
@@ -608,15 +620,14 @@ TEST_CASE ("A duplicated track's clips are its own, the song's, and the original
 {
     Tracks tracks (1);
     auto& context = tracks.context;
-    const auto original = phazite::getTrackID (*tracks["A"]);
+    const auto original = tracks["A"];
     const auto clip = phazite::addMidiClipAt (context, original, phazite::BeatPosition());
     REQUIRE (clip.isValid());
     phazite::addNote (context, clip, 60, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (1.0), 100);
 
-    const auto copies = phazite::duplicateTracks ({ tracks["A"] }, nullptr);
+    const auto copies = phazite::duplicateTracks (*tracks.song, { original }, nullptr);
     REQUIRE (copies.size() == 1);
-    const auto copy = phazite::getTrackID (*copies.getFirst());
-    phazite::mirror::reconcileClips (tracks["A"]->edit); // as anything that places the song's clips again would
+    const auto copy = copies.front();
 
     // Each has its clip, the copy's with an ID of its own, which plays its own copy of the note.
     const auto originalClips = phazite::getClips (context, original), copiedClips = phazite::getClips (context, copy);
@@ -632,17 +643,16 @@ TEST_CASE ("A duplicated track's devices and sends are its own, the song's, and 
 {
     Tracks tracks (1);
     auto& context = tracks.context;
-    const auto original = phazite::getTrackID (*tracks["A"]);
+    const auto original = tracks["A"];
 
     for (const auto& type : phazite::getDeviceTypes (context))
         if (type.description.fileOrIdentifier == juce::String ("phaziteEq"))
             phazite::addEffect (context, original, type);
 
     phazite::addSendToNewReturn (context, original);
-    const auto copies = phazite::duplicateTracks ({ tracks["A"] }, nullptr);
+    const auto copies = phazite::duplicateTracks (*tracks.song, { original }, nullptr);
     REQUIRE (copies.size() == 1);
-    const auto copy = phazite::getTrackID (*copies.getFirst());
-    phazite::mirror::reconcileDevices (tracks["A"]->edit); // as anything that changes a device would
+    const auto copy = copies.front();
 
     // Each has its effect and its send, the copy's with IDs of their own.
     const auto originalEffects = phazite::getEffects (context, original), copiedEffects = phazite::getEffects (context, copy);
@@ -665,13 +675,13 @@ TEST_CASE ("The selected tracks, or all of them")
     CHECK (phazite::hasSelectedTracks (tracks.selection));
     const auto selected = phazite::getSelectedTracksOrAll (tracks.selection);
     REQUIRE (selected.size() == 1);
-    CHECK (selected.front() == phazite::getTrackID (*tracks["B"]));
+    CHECK (selected.front() == tracks["B"]);
 
-    // Without an Edit, there are none.
+    // Without a song, there are none.
     tracks.selection.deselectAll();
-    tracks.selection.setEdit (nullptr);
+    tracks.selection.setSong (nullptr);
     CHECK (phazite::getSelectedTracksOrAll (tracks.selection).empty());
-    tracks.selection.setEdit (tracks.edit.get());
+    tracks.selection.setSong (tracks.song.get());
 }
 
 TEST_CASE ("Palette colours are found by name, whatever the case")
@@ -686,55 +696,56 @@ TEST_CASE ("Palette colours are found by name, whatever the case")
 
 TEST_CASE ("Renaming a track is an undo step, and an empty name gives it its number back")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto* track = te::getAudioTracks (*edit)[0];
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    auto song = phazite::createSong();
+    const auto track = phazite::getTrackIDs (*song)[0];
+    song->getUndoManager().clearUndoHistory();
 
-    phazite::renameTrack (*track, "  Bass ");
-    CHECK (track->getName() == juce::String ("Bass"));
-    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Rename Track"));
+    phazite::renameTrack (*song, track, "  Bass ");
+    CHECK (phazite::getTrackName (*song, track) == juce::String ("Bass"));
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Rename Track"));
 
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
-    phazite::renameTrack (*track, "Bass");
-    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
+    song->getUndoManager().clearUndoHistory();
+    phazite::renameTrack (*song, track, "Bass");
+    CHECK_FALSE (song->getUndoManager().canUndo());
 
-    phazite::renameTrack (*track, "");
-    CHECK (track->getName() != juce::String ("Bass"));
-    CHECK (track->getName().isNotEmpty());
+    phazite::renameTrack (*song, track, "");
+    CHECK (phazite::getTrackName (*song, track) != juce::String ("Bass"));
+    CHECK (phazite::getTrackName (*song, track).isNotEmpty());
 }
 
 TEST_CASE ("Adding a track at the end, coloring tracks and moving them are undo steps of their own")
 {
     Tracks t (3);
+    auto& song = *t.song;
 
-    auto* added = phazite::addTrackAtEnd (*t.edit, false, &t.selection);
-    REQUIRE (added != nullptr);
-    CHECK (phazite::getPlaylistTracks (*t.edit).getLast() == added);
-    CHECK (t.selection.isSelected (phazite::getTrackID (*added)));
+    const auto added = phazite::addTrackAtEnd (song, false, &t.selection);
+    REQUIRE (added.isValid());
+    CHECK (phazite::getTrackIDs (song).back() == added);
+    CHECK (t.selection.isSelected (added));
     CHECK (t.getUndoName() == juce::String ("Add Track"));
-    phazite::setTrackName (*added, "D");
+    phazite::setTrackName (song, added, "D");
 
-    auto* folder = phazite::addTrackAtEnd (*t.edit, true, nullptr);
-    REQUIRE (folder != nullptr);
-    CHECK (folder->isFolderTrack());
+    const auto folder = phazite::addTrackAtEnd (song, true, nullptr);
+    REQUIRE (folder.isValid());
+    CHECK (phazite::isFolder (song, folder));
     CHECK (t.getUndoName() == juce::String ("Add Folder"));
-    phazite::setTrackName (*folder, "F");
+    phazite::setTrackName (song, folder, "F");
 
-    phazite::setTrackColours ({ t["A"], t["B"] }, juce::Colours::red);
-    CHECK (t["A"]->getColour() == juce::Colours::red);
-    CHECK (t["B"]->getColour() == juce::Colours::red);
+    phazite::setTrackColours (song, { t["A"], t["B"] }, juce::Colours::red);
+    CHECK (t.getOwnColour (t["A"]) == juce::Colours::red);
+    CHECK (t.getOwnColour (t["B"]) == juce::Colours::red);
     CHECK (t.getUndoName() == juce::String ("Change Track Colors"));
-    phazite::setTrackColours ({ t["C"] }, juce::Colours::red);
+    phazite::setTrackColours (song, { t["C"] }, juce::Colours::red);
     CHECK (t.getUndoName() == juce::String ("Change Track Color"));
 
     // To the start, in the order given; then after another track.
-    phazite::moveTracksAfter ({ t["C"], t["A"] }, nullptr);
+    phazite::moveTracksAfter (song, { t["C"], t["A"] }, {});
     CHECK (t.getOrder() == juce::String ("C A B D F"));
     CHECK (t.getUndoName() == juce::String ("Move Tracks"));
-    phazite::moveTracksAfter ({ t["C"] }, t["D"]);
+    phazite::moveTracksAfter (song, { t["C"] }, t["D"]);
     CHECK (t.getOrder() == juce::String ("A B D C F"));
     CHECK (t.getUndoName() == juce::String ("Move Track"));
 
-    phazite::undo (*t.edit);
+    phazite::undo (song);
     CHECK (t.getOrder() == juce::String ("C A B D F"));
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// How a device's DSP runs, without any engine: the device's thin Tracktion plug-in (src/model/devices/internal/DevicePlugin.h)
-// prepares it before playback and hands it each block's audio, notes and parameter values.
+// How a device's DSP runs, without any engine: what plays it (Phazite's engine, through its runner:
+// src/engine/nodes/DeviceRunner.h) prepares it before playback and hands it each block's audio, notes and parameter
+// values.
 #pragma once
 
 #include "FallingValue.h"
@@ -88,8 +89,8 @@ public:
     // How long its sound goes on after its input stops, in seconds (a reverb's tail).
     virtual double getTailSeconds() const { return 0.0; }
 
-    // Whether its thin plug-in may let it sleep once what comes in and what it plays have been silent a while: not a
-    // plug-in, which may play with nothing coming in (an arpeggiator's own pattern, a drone).
+    // Whether its runner may let it sleep once what comes in and what it plays have been silent a while: not a plug-in,
+    // which may play with nothing coming in (an arpeggiator's own pattern, a drone).
     virtual bool sleepsOnSilence() const noexcept { return true; }
 
     // Whether it takes a block whole, with its moved parameters' values as changes at their samples (ProcessContext::
@@ -105,11 +106,11 @@ public:
     virtual void start (const ProcessContext&) {}
 
     // Whether something came in other than as a note or sound and waits for its next block, such as a pad its editor
-    // played: its thin plug-in, asleep on silence, wakes for it. Real-time safe.
+    // played: its runner, asleep on silence, wakes for it. Real-time safe.
     virtual bool isWaitingToPlay() const noexcept { return false; }
 
-    // Whether it plays something other than its effect now, such as a compressor letting its key be heard: its thin
-    // plug-in then passes what it plays on whole, whatever its mix. Real-time safe.
+    // Whether it plays something other than its effect now, such as a compressor letting its key be heard: its runner
+    // then passes what it plays on whole, whatever its mix. Real-time safe.
     virtual bool overridesMix() const noexcept { return false; }
 
     // How far it turns the sound down now, in decibels (0 or more), for what shows it besides its editor, such as its slot

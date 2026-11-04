@@ -5,7 +5,6 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
@@ -449,45 +448,21 @@ TrackID auditionNotes (ProjectContext& context, ClipID id, const std::vector<int
     if (! track.isValid() || ! findMidiClip (context, id).isValid() || ! hasInstrument (*song, track))
         return {};
 
-    auto* edit = findEdit (*song);
+    // Into the track, as live MIDI goes, through Phazite's engine while it plays the project.
+    auto* session = findPlayingSession (*song);
 
-    if (edit == nullptr)
+    if (session == nullptr)
         return {};
 
-    // Through Phazite's own engine while it plays the project (docs/tracktion-migration.md, T2).
-    if (auto* session = findPlayingSession (*edit))
-    {
-        session->playGuideNotes ((juce::int64) track.getRaw(), pitches, velocity);
-        return track;
-    }
-
-    // Guide notes go into the track as live MIDI does, so the playback graph has to be running.
-    auto* audioTrack = dynamic_cast<te::AudioTrack*> (mirror::findTrack (*edit, track));
-
-    if (audioTrack == nullptr)
-        return {};
-
-    edit->getTransport().ensureContextAllocated();
-
-    for (const auto pitch : pitches)
-        audioTrack->playGuideNote (pitch, te::MidiChannel (1), juce::jlimit (1, 127, velocity), false, true, false);
-
+    session->playGuideNotes ((juce::int64) track.getRaw(), pitches, velocity);
     return track;
 }
 
 void stopAuditioning (ProjectContext& context, TrackID id)
 {
-    auto* song = findSong (context);
-    auto* edit = song != nullptr ? findEdit (*song) : nullptr;
-
-    if (edit == nullptr)
-        return;
-
-    if (auto* session = findSession (*edit))
-        session->stopGuideNotes ((juce::int64) id.getRaw());
-
-    if (auto* track = dynamic_cast<te::AudioTrack*> (mirror::findTrack (*edit, id)))
-        track->turnOffGuideNotes();
+    if (auto* song = findSong (context))
+        if (auto* session = findSession (*song))
+            session->stopGuideNotes ((juce::int64) id.getRaw());
 }
 
 //==============================================================================

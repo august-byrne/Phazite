@@ -90,10 +90,7 @@ namespace
         symbol->MaxNameLen = MAX_SYM_NAME;
 
         if (DWORD64 displacement = 0; SymFromAddr (process, reinterpret_cast<DWORD64> (address), &displacement, symbol))
-            return juce::String (symbol->Name)
-                .replace ("tracktion::engine::", "te::")
-                .replace ("tracktion::graph::", "tg::")
-                .replace ("tracktion::core::", "tc::");
+            return juce::String (symbol->Name);
 
         return juce::String::toHexString (reinterpret_cast<juce::pointer_sized_int> (address));
     }

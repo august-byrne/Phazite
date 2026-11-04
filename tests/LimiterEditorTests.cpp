@@ -2,13 +2,17 @@
 // The limiter's editor (src/ui/devices/LimiterEditor.h) and the meters it shows (ui::ValueMeter).
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Limiter.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/project/internal/Project.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/LimiterEditor.h"
 
@@ -63,12 +67,14 @@ TEST_CASE ("A value meter jumps up and falls back smoothly, and screen readers r
 
 TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the ceiling a line to drag")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto plugin = edit->getPluginCache().createNewPlugin (Limiter::typeID, {});
-    REQUIRE (phazite::insertMasterDevice (*edit, plugin) != nullptr);
-    phazite::test::settle();
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::insertDeviceState (s, phazite::getMasterID (s), phazite::makeOwnDeviceState (s, Limiter::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    const auto ceiling = [&s, id] { return phazite::getValueSetByHand (s, phazite::ParameterRef { id, "ceiling" }); };
 
-    const auto device = phazite::makeDeviceHandle (*plugin);
+    const auto device = phazite::makeDeviceHandle (s, id);
     CHECK (dynamic_cast<phazite::ui::LimiterEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     auto* limiter = device.getProcessor<Limiter>();
@@ -98,8 +104,8 @@ TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the c
     auto* ceilingKnob = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("ceiling"));
     REQUIRE (ceilingKnob != nullptr);
     ceilingKnob->setValue (-3.0, juce::sendNotificationSync);
-    CHECK (plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue() == doctest::Approx (-3.0f));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Ceiling"));
+    CHECK (ceiling() == doctest::Approx (-3.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Ceiling"));
 
     // Dragging the ceiling's line down in the history lowers it, as one undo step; a double-click puts it back.
     auto& history = editor.getDisplay().getHistory();
@@ -109,13 +115,13 @@ TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the c
     mouse.dragTo ({ 40, y + 10 });
     mouse.dragTo ({ 40, y + 20 });
     mouse.release();
-    const auto lowered = plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue();
+    const auto lowered = ceiling();
     CHECK (lowered < -4.0f);
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Ceiling"));
-    phazite::undo (*edit);
-    CHECK (plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue() == doctest::Approx (-3.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Ceiling"));
+    phazite::undo (s);
+    CHECK (ceiling() == doctest::Approx (-3.0f));
 
     mouse.pause();
     mouse.doubleClick ({ 40, y });
-    CHECK (plugin->getAutomatableParameterByID ("ceiling")->getCurrentValue() == doctest::Approx (-1.0f));
+    CHECK (ceiling() == doctest::Approx (-1.0f));
 }

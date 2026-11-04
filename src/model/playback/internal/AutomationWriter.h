@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Automation written by hand while Phazite's engine plays a project (docs/tracktion-migration.md, T2 step 4), as the write
+// Automation written by hand while Phazite's engine plays a project, as the write
 // modes say (model/automation/AutomationValues.h). On a track that writes, a parameter punches in at the engine's playhead:
 // in touch, as its control is grabbed; in latch, as it is first moved; in write, every automated parameter of the track as
 // playback starts. Meanwhile it plays its value set by hand rather than its lane, from the lane's value there. What it did
@@ -13,7 +13,6 @@
 
 #include "model/automation/AutomationValues.h"
 #include "model/base/Song.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <vector>
 
@@ -24,8 +23,7 @@ class PlaybackSession;
 class AutomationWriter
 {
 public:
-    AutomationWriter (te::Edit&, PlaybackSession&);
-    ~AutomationWriter();
+    AutomationWriter (Song&, PlaybackSession&);
 
     // The session's transport, as it starts and before it stops.
     void playbackStarted();
@@ -39,8 +37,8 @@ public:
     // Automation" step, as no control's drag holds one.
     void pluginGestureChanged (const ParameterRef&, bool starting);
 
-    // A parameter changed, by hand or by its automation, to a value set by hand (the session tells it).
-    void parameterChanged (const ParameterRef&, float valueSetByHand, bool isFollowingAutomation);
+    // A parameter set by hand, by a control or a plug-in's own window (the session tells it).
+    void parameterChanged (const ParameterRef&, float valueSetByHand);
 
     // Whether a pass writes a parameter now, which plays its value set by hand meanwhile: a value set by hand moves no
     // curve's one point then (model/devices/internal/Parameters.h).
@@ -57,7 +55,7 @@ private:
         std::vector<AutomationPoint> points; // from where it punched in, or the loop's start
     };
 
-    te::Edit& edit; // the session's, which can go before the session does (PlaybackSession::hasEdit()): its song and transport
+    Song& song;
     PlaybackSession& session;
     std::vector<Pass> passes;
     bool settingValue = false; // as a pass starts from its lane's value

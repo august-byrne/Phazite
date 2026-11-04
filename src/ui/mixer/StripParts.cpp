@@ -134,10 +134,11 @@ namespace strip
         juce::String tooltip ("Mix: how much of the sound is the effect. At 100% it is the effect alone; lower lets the sound "
                               "that comes in through as well. Double-click for 100%");
 
-        // Tracktion adds the dry sound back without waiting for the effect, as FL Studio's mix knob does.
+        // An effect that delays its sound says by how much: the sound that comes in is delayed as much, so the two stay
+        // together below 100% too.
         if (device.latencySeconds > 0.0)
             tooltip << ". This effect delays its sound by " << juce::jmax (1, juce::roundToInt (device.latencySeconds * 1000.0))
-                    << " ms, so below 100% the two blur together: use the effect's own mix control if it has one";
+                    << " ms, and what comes in with it";
 
         knob->setTooltip (tooltip);
         attachment = std::make_unique<MixAttachment> (*knob, getMix (context, device.id));

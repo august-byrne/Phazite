@@ -2,179 +2,143 @@
 #include "internal/Playback.h"
 #include "internal/Recording.h"
 #include "internal/Take.h"
+#include "internal/Tempo.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/engine/internal/EngineSetup.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
 namespace
 {
-    // Where playback starts, in the song's beats.
-    BeatPosition getPlayStartBeat (const te::Edit& edit)
-    {
-        return phazite::getPlayStartBeat (getSong (edit));
-    }
-
     // Written only when it changes, so a project that never looped anything else has nothing new to save.
-    void setLoopFollowsSong (te::Edit& edit, bool follows)
+    void setLoopFollowsSong (Song& song, bool follows)
     {
-        if (doesLoopFollowSong (edit) != follows)
-            getSong (edit).getState().setProperty (schema::loopFollowsSong, follows, nullptr);
+        if (doesLoopFollowSong (song) != follows)
+            song.getState().setProperty (schema::loopFollowsSong, follows, nullptr);
     }
 
     // The song's switches, each written only while it is on.
-    void setSwitch (te::Edit& edit, const juce::Identifier& property, bool on)
+    void setSwitch (Song& song, const juce::Identifier& property, bool on)
     {
         if (on)
-            getSong (edit).getState().setProperty (property, true, nullptr);
-        else if (auto state = findPhaziteState (edit); state.isValid())
-            state.removeProperty (property, nullptr);
-    }
-
-    // Loops a range of the song on purpose.
-    void loopBeats (te::Edit& edit, BeatRange range)
-    {
-        if (range.isEmpty())
-            return;
-
-        setLoopFollowsSong (edit, false);
-        auto state = getSong (edit).getState();
-        state.setProperty (schema::loopStart, std::max (0.0, range.getStart().inBeats()), nullptr);
-        state.setProperty (schema::loopEnd, range.getEnd().inBeats(), nullptr);
-        setSwitch (edit, schema::loop, true);
-        mirror::reconcileTransport (edit);
-    }
-
-    // Stops playback. A recording that stops with it is kept as one undo step, "Record" (Recording.h).
-    void stopPlaying (te::Edit& edit)
-    {
-        if (auto* session = findPlayingSession (edit))
-        {
-            auto take = session->releaseTake();
-            session->stop();
-
-            // A take recorded through Phazite's engine (Take.h).
-            if (take != nullptr)
-            {
-                const UndoStep step (edit, "Record");
-                take->finish();
-            }
-
-            return;
-        }
-
-        edit.getTransport().stop (false, false);
+            song.getState().setProperty (property, true, nullptr);
+        else
+            song.getState().removeProperty (property, nullptr);
     }
 } // namespace
 
-te::TimePosition getSongEnd (const te::Edit& edit)
+BeatPosition getSongEnd (const Song& song)
 {
-    auto lastClipEnd = te::TimePosition();
+    const auto lastClipEnd = getClipsEnd (song);
 
-    for (auto* track : te::getAudioTracks (edit))
-        for (auto* clip : track->getClips())
-            lastClipEnd = std::max (lastClipEnd, clip->getPosition().getEnd());
-
-    if (lastClipEnd <= te::TimePosition())
+    if (lastClipEnd <= BeatPosition())
         return {}; // no clips: the song ends where it starts
 
     // To the end of the bar the last clip ends in.
-    const auto& tempo = edit.tempoSequence;
-    const auto barsAndBeats = tempo.toBarsAndBeats (lastClipEnd);
-    const auto bars = barsAndBeats.bars + (barsAndBeats.beats.inBeats() > 1.0e-6 ? 1 : 0);
-    return tempo.toTime (te::tempo::BarsAndBeats { bars, {}, 0 });
+    const auto bars = getBars (song);
+    const auto bar = bars.getBarAt (lastClipEnd);
+    const auto start = bars.getBarStart (bar);
+    return lastClipEnd.inBeats() - start.inBeats() > 1.0e-6 ? bars.getBarStart (bar + 1) : start;
 }
 
-te::TimeRange getSongLoopRange (const te::Edit& edit)
+BeatRange getSongLoopBeats (const Song& song)
 {
     // At least a bar long: a song without clips loops its first bar.
-    const auto firstBarEnd = edit.tempoSequence.toTime (te::tempo::BarsAndBeats { 1, {}, 0 });
-    return { te::TimePosition(), std::max (getSongEnd (edit), firstBarEnd) };
+    const auto bars = getBars (song);
+    const auto firstBarEnd = bars.getBarStart (bars.getBarAt (BeatPosition()) + 1);
+    return { BeatPosition(), std::max (getSongEnd (song), firstBarEnd) };
 }
 
-bool doesLoopFollowSong (const te::Edit& edit)
+bool doesLoopFollowSong (const Song& song)
 {
-    return findPhaziteState (edit).getProperty (schema::loopFollowsSong, true);
+    return song.getState().getProperty (schema::loopFollowsSong, true);
 }
 
-void loopSong (te::Edit& edit)
+void loopSong (Song& song)
 {
-    setLoopFollowsSong (edit, true);
-
-    if (auto state = findPhaziteState (edit); state.isValid())
-    {
-        state.removeProperty (schema::loopStart, nullptr);
-        state.removeProperty (schema::loopEnd, nullptr);
-    }
-
-    setSwitch (edit, schema::loop, true);
-    mirror::reconcileTransport (edit);
+    setLoopFollowsSong (song, true);
+    auto state = song.getState();
+    state.removeProperty (schema::loopStart, nullptr);
+    state.removeProperty (schema::loopEnd, nullptr);
+    setSwitch (song, schema::loop, true);
 }
 
-void loopRange (te::Edit& edit, te::TimeRange range)
+void loopBeats (Song& song, BeatRange range)
 {
-    loopBeats (edit, fromTracktion (edit.tempoSequence.toBeats (range)));
+    if (range.isEmpty())
+        return;
+
+    setLoopFollowsSong (song, false);
+    auto state = song.getState();
+    state.setProperty (schema::loopStart, std::max (0.0, range.getStart().inBeats()), nullptr);
+    state.setProperty (schema::loopEnd, range.getEnd().inBeats(), nullptr);
+    setSwitch (song, schema::loop, true);
 }
 
-BeatRange getLoopBeats (const te::Edit& edit)
+BeatRange getLoopBeats (const Song& song)
 {
-    const auto state = findPhaziteState (edit);
+    const auto state = song.getState();
 
-    if (doesLoopFollowSong (edit) || ! state.hasProperty (schema::loopStart) || ! state.hasProperty (schema::loopEnd))
-        return fromTracktion (edit.tempoSequence.toBeats (getSongLoopRange (edit)));
+    if (doesLoopFollowSong (song) || ! state.hasProperty (schema::loopStart) || ! state.hasProperty (schema::loopEnd))
+        return getSongLoopBeats (song);
 
     return { BeatPosition::fromBeats (state[schema::loopStart]), BeatPosition::fromBeats (state[schema::loopEnd]) };
 }
 
-std::optional<std::pair<double, double>> getLoopBeatRange (const te::Edit& edit)
+std::optional<BeatRange> getLoop (const Song& song)
 {
-    if (! isLoopOn (edit))
+    return isLoopOn (song) ? std::optional (getLoopBeats (song)) : std::nullopt;
+}
+
+std::optional<std::pair<double, double>> getLoopBeatRange (const Song& song)
+{
+    if (! isLoopOn (song))
         return {};
 
-    const auto beats = getLoopBeats (edit);
+    const auto beats = getLoopBeats (song);
     return std::pair { beats.getStart().inBeats(), beats.getEnd().inBeats() };
 }
 
-void loopBeatRange (te::Edit& edit, double startBeat, double endBeat)
+void loopBeatRange (Song& song, double startBeat, double endBeat)
 {
     if (endBeat > startBeat)
-        loopBeats (edit, { BeatPosition::fromBeats (std::max (0.0, startBeat)), BeatPosition::fromBeats (endBeat) });
+        loopBeats (song, { BeatPosition::fromBeats (std::max (0.0, startBeat)), BeatPosition::fromBeats (endBeat) });
 }
 
-bool isLoopOn (const te::Edit& edit)
+bool isLoopOn (const Song& song)
 {
-    return findPhaziteState (edit).getProperty (schema::loop, false);
+    return song.getState().getProperty (schema::loop, false);
 }
 
-void toggleLoop (te::Edit& edit)
+void toggleLoop (Song& song)
 {
-    setSwitch (edit, schema::loop, ! isLoopOn (edit));
-    mirror::reconcileTransport (edit);
+    setSwitch (song, schema::loop, ! isLoopOn (song));
 }
 
-bool isLoopingSong (const te::Edit& edit)
+bool isLoopingSong (const Song& song)
 {
-    return isLoopOn (edit) && doesLoopFollowSong (edit);
+    return isLoopOn (song) && doesLoopFollowSong (song);
 }
 
-void loopSelection (te::Edit& edit, const RangeSelection& range)
+void loopSelection (Song& song, const RangeSelection& range)
 {
     if (range.isEmpty())
-        loopSong (edit);
+        loopSong (song);
     else
-        loopBeats (edit, range.getRange());
+        loopBeats (song, range.getRange());
 }
 
-void loopSections (te::Edit& edit, const std::vector<Section>& sections)
+void loopSections (Song& song, const std::vector<Section>& sections)
 {
     if (! sections.empty())
-        loopBeats (edit, getSectionsRange (sections));
+        loopBeats (song, getSectionsRange (sections));
 }
 
 BeatPosition getPlayStartBeat (const Song& song)
@@ -182,186 +146,101 @@ BeatPosition getPlayStartBeat (const Song& song)
     return BeatPosition::fromBeats ((double) song.getState().getProperty (schema::playStart, 0.0));
 }
 
-te::TimePosition getPlayStart (const te::Edit& edit)
-{
-    return edit.tempoSequence.toTime (toTracktion (getPlayStartBeat (edit)));
-}
-
-void movePlayhead (te::Edit& edit, te::TimePosition position)
+void movePlayhead (Song& song, BeatPosition position)
 {
     // The song's start isn't written: a project that never played from elsewhere has nothing new to save.
-    if (const auto beat = edit.tempoSequence.toBeats (position).inBeats(); beat > 0.0)
-        getSong (edit).getState().setProperty (schema::playStart, beat, nullptr);
-    else if (auto state = findPhaziteState (edit); state.isValid())
-        state.removeProperty (schema::playStart, nullptr);
-
-    mirror::reconcileTransport (edit);
-
-    if (auto* session = findPlayingSession (edit))
-        session->locate (fromTracktion (edit.tempoSequence.toBeats (position)));
+    if (position.inBeats() > 0.0)
+        song.getState().setProperty (schema::playStart, position.inBeats(), nullptr);
     else
-        edit.getTransport().setPosition (position);
+        song.getState().removeProperty (schema::playStart, nullptr);
+
+    if (auto* session = findPlayingSession (song))
+        session->locate (position);
 }
 
-void goToStart (te::Edit& edit)
+void goToStart (Song& song)
 {
-    movePlayhead (edit, te::TimePosition());
+    movePlayhead (song, BeatPosition());
 }
 
-void goToEnd (te::Edit& edit)
+void goToEnd (Song& song)
 {
-    movePlayhead (edit, getSongEnd (edit));
+    movePlayhead (song, getSongEnd (song));
 }
 
-void playOrStop (te::Edit& edit)
+void stopPlaying (Song& song)
 {
-    if (isSongPlaying (edit))
-    {
-        stopAndReturn (edit);
-    }
-    else if (auto* session = findPlayingSession (edit))
-    {
-        session->locate (getPlayStartBeat (edit));
-        session->play();
-    }
-    else
-    {
-        edit.getTransport().playFromStart (false);
-    }
-}
+    auto* session = findPlayingSession (song);
 
-void playOrPause (te::Edit& edit)
-{
-    if (isSongPlaying (edit))
-        stopPlaying (edit);
-    else if (auto* session = findPlayingSession (edit))
-        session->play();
-    else
-        edit.getTransport().play (false);
-}
-
-void stopAndReturn (te::Edit& edit)
-{
-    stopPlaying (edit);
-
-    if (auto* session = findPlayingSession (edit))
-    {
-        session->locate (getPlayStartBeat (edit));
+    if (session == nullptr)
         return;
+
+    auto take = session->releaseTake();
+    session->stop();
+
+    // A take recorded through Phazite's engine (Take.h).
+    if (take != nullptr)
+    {
+        const UndoStep step (song, "Record");
+        take->finish();
     }
-
-    auto& transport = edit.getTransport();
-    const auto start = getPlayStart (edit);
-    const auto alreadyThere = transport.getPosition() == start;
-    transport.setPosition (start);
-
-    // For 200 ms after playback starts, Tracktion's position still reads as where it started, so setting it there again
-    // changes nothing, and the playhead would stay where it stopped: the change is sent anyway.
-    if (alreadyThere)
-        transport.state.sendPropertyChangeMessage (te::IDs::position);
 }
 
-bool isSongPlaying (const te::Edit& edit)
+void playOrStop (Song& song)
 {
-    if (const auto* session = findPlayingSession (edit))
-        return session->isPlaying();
+    if (isSongPlaying (song))
+    {
+        stopAndReturn (song);
+    }
+    else if (auto* session = findPlayingSession (song))
+    {
+        session->locate (getPlayStartBeat (song));
+        session->play();
+    }
+}
 
-    return edit.getTransport().isPlaying();
+void playOrPause (Song& song)
+{
+    if (isSongPlaying (song))
+        stopPlaying (song);
+    else if (auto* session = findPlayingSession (song))
+        session->play();
+}
+
+void stopAndReturn (Song& song)
+{
+    stopPlaying (song);
+
+    if (auto* session = findPlayingSession (song))
+        session->locate (getPlayStartBeat (song));
+}
+
+bool isSongPlaying (const Song& song)
+{
+    const auto* session = findPlayingSession (song);
+    return session != nullptr && session->isPlaying();
 }
 
 BeatPosition getPlayheadBeat (const Song& song)
 {
-    auto* edit = findEdit (song);
-    return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (getPlayheadTime (*edit))) : BeatPosition();
+    const auto* session = findPlayingSession (song);
+    return session != nullptr ? session->getPlayhead() : getPlayStartBeat (song);
 }
 
-te::TimePosition getPlayheadTime (const te::Edit& edit)
+bool isLowLatencyOn (const PlaybackHost& host)
 {
-    if (const auto* session = findPlayingSession (edit))
-        return edit.tempoSequence.toTime (toTracktion (session->getPlayhead()));
-
-    return edit.getTransport().getPosition();
+    return host.isLowLatency();
 }
 
-bool isLowLatencyOn (const te::Edit& edit)
+void toggleLowLatency (PlaybackHost& host)
 {
-    return isLowLatency (edit.engine);
-}
-
-void toggleLowLatency (te::Edit& edit)
-{
-    setLowLatency (edit.engine, ! isLowLatency (edit.engine));
-
-    // Phazite's engine takes it in with its next plan, without stopping.
-    if (auto* session = findSession (edit))
-        session->update();
+    host.setLowLatency (! host.isLowLatency());
 }
 
 //==============================================================================
-SongFollower::SongFollower (te::Edit& e)
-    : edit (e),
-      editState (e.state)
+void addTransportCommands (CommandRegistry& registry, Selection& selection, PlaybackHost& host)
 {
-    editState.addListener (this);
-    handleAsyncUpdate(); // a project saved with another loop around its song gets the song's again
-    startTimerHz (30);
-}
-
-SongFollower::~SongFollower()
-{
-    stopTimer();
-    cancelPendingUpdate();
-    editState.removeListener (this);
-}
-
-void SongFollower::handleAsyncUpdate()
-{
-    songEnd = getSongLoopRange (edit).getEnd();
-    mirror::reconcileTransport (edit); // the song's loop around it
-}
-
-void SongFollower::timerCallback()
-{
-    if (! isSongPlaying (edit) || isLoopOn (edit) || isRecording (edit))
-    {
-        lastPosition.reset();
-        return;
-    }
-
-    // Only when the playhead crosses the end: playback started past it plays on, there being nothing to cut short.
-    const auto position = getPlayheadTime (edit);
-
-    if (lastPosition.has_value() && *lastPosition < songEnd && position >= songEnd)
-    {
-        stopAndReturn (edit);
-        lastPosition.reset();
-        return;
-    }
-
-    lastPosition = position;
-}
-
-void SongFollower::changed (const juce::ValueTree& tree)
-{
-    // Clips (where they are and how long), tracks (with their clips) and the tempo (where bars end). Not the
-    // transport, which the loop itself is in.
-    for (auto t = tree; t.isValid(); t = t.getParent())
-    {
-        if (t.hasType (te::IDs::TRANSPORT))
-            return;
-
-        if (te::Clip::isClipState (t) || t.hasType (te::IDs::TRACK) || t.hasType (te::IDs::TEMPOSEQUENCE))
-        {
-            triggerAsyncUpdate();
-            return;
-        }
-    }
-}
-
-//==============================================================================
-void addTransportCommands (CommandRegistry& registry, Selection& selection)
-{
-    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+    const auto hasSong = [&selection] { return selection.getSong() != nullptr; };
 
     // As in FL Studio and Ableton Live, stopping goes back to where playback started, so that a part can be heard
     // again and again while it is tweaked; Play / Pause goes on from where it stopped. Both work over plug-in windows.
@@ -370,8 +249,8 @@ void addTransportCommands (CommandRegistry& registry, Selection& selection)
                     .category = "Transport",
                     .description = "Plays from where you last put the playhead, or stops and goes back there.",
                     .synonyms = { "start", "playback", "return to start" },
-                    .perform = withEdit (selection, playOrStop),
-                    .isEnabled = hasEdit,
+                    .perform = withSong (selection, playOrStop),
+                    .isEnabled = hasSong,
                     .overPlugins = true });
 
     registry.add ({ .id = "transport.playPause",
@@ -379,8 +258,8 @@ void addTransportCommands (CommandRegistry& registry, Selection& selection)
                     .category = "Transport",
                     .description = "Plays from where the playhead is, or stops it there, so that playback goes on from there.",
                     .synonyms = { "pause", "continue", "resume" },
-                    .perform = withEdit (selection, playOrPause),
-                    .isEnabled = hasEdit,
+                    .perform = withSong (selection, playOrPause),
+                    .isEnabled = hasSong,
                     .overPlugins = true });
 
     registry.add ({ .id = "transport.goToStart",
@@ -388,16 +267,16 @@ void addTransportCommands (CommandRegistry& registry, Selection& selection)
                     .category = "Transport",
                     .description = "Moves the playhead to the start of the song.",
                     .synonyms = { "home", "beginning", "rewind", "return" },
-                    .perform = withEdit (selection, goToStart),
-                    .isEnabled = hasEdit });
+                    .perform = withSong (selection, goToStart),
+                    .isEnabled = hasSong });
 
     registry.add ({ .id = "transport.goToEnd",
                     .name = "Go to End",
                     .category = "Transport",
                     .description = "Moves the playhead to the end of the song: the end of the bar its last clip ends in.",
                     .synonyms = { "end", "last", "fast forward" },
-                    .perform = withEdit (selection, goToEnd),
-                    .isEnabled = hasEdit });
+                    .perform = withSong (selection, goToEnd),
+                    .isEnabled = hasSong });
 
     // As Cubase's Constrain Delay Compensation and Studio One's Low Latency Monitoring do (docs/design.md, section 20).
     registry.add ({ .id = "transport.lowLatency",
@@ -406,40 +285,39 @@ void addTransportCommands (CommandRegistry& registry, Selection& selection)
                     .description = "While on, what you play has no delay to wait for: devices that look ahead are bypassed, delay "
                                    "compensation is off and the buffer shrinks. Turn it off to mix.",
                     .synonyms = { "latency", "delay", "lag", "monitoring", "buffer", "delay compensation", "live" },
-                    .perform = withEdit (selection, toggleLowLatency),
-                    .isEnabled = hasEdit,
-                    .isTicked = ifEdit (selection, isLowLatencyOn) });
+                    .perform = [&host] { toggleLowLatency (host); },
+                    .isEnabled = hasSong,
+                    .isTicked = [&host] { return isLowLatencyOn (host); } });
 }
 
 void addLoopCommands (CommandRegistry& registry, Selection& selection, RangeSelection& range)
 {
-    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+    const auto hasSong = [&selection] { return selection.getSong() != nullptr; };
 
     registry.add ({ .id = "transport.loop",
                     .name = "Loop",
                     .category = "Transport",
                     .description = "Plays the song over and over, or the part looped on purpose: at its end, playback starts again.",
                     .synonyms = { "repeat", "cycle", "loop playback" },
-                    .perform = withEdit (selection, toggleLoop),
-                    .isEnabled = hasEdit,
-                    .isTicked = ifEdit (selection, isLoopOn) });
+                    .perform = withSong (selection, toggleLoop),
+                    .isEnabled = hasSong,
+                    .isTicked = ifSong (selection, isLoopOn) });
 
     registry.add ({ .id = "transport.loopSelection",
                     .name = "Loop Selection",
                     .category = "Transport",
                     .description = "Loops the time range selected in the playlist, or the whole song when none is selected.",
                     .synonyms = { "loop range", "cycle region", "loop brace", "set loop" },
-                    .perform = withEdit (selection, [&range] (te::Edit& edit) { loopSelection (edit, range); }),
-                    .isEnabled = hasEdit });
+                    .perform = withSong (selection, [&range] (Song& song) { loopSelection (song, range); }),
+                    .isEnabled = hasSong });
 
-    registry.add (
-        { .id = "section.loop",
-          .name = "Loop Section",
-          .category = "Section",
-          .description = "Loops the selected sections instead of the whole song.",
-          .synonyms = { "repeat section", "cycle", "practice" },
-          .perform = withEdit (selection, [&selection] (te::Edit& edit) { loopSections (edit, getSelectedSections (selection)); }),
-          .isEnabled = [&selection] { return hasSelectedSections (selection); } });
+    registry.add ({ .id = "section.loop",
+                    .name = "Loop Section",
+                    .category = "Section",
+                    .description = "Loops the selected sections instead of the whole song.",
+                    .synonyms = { "repeat section", "cycle", "practice" },
+                    .perform = withSong (selection, [&selection] (Song& song) { loopSections (song, getSelectedSections (selection)); }),
+                    .isEnabled = [&selection] { return hasSelectedSections (selection); } });
 
     registry.add (
         { .id = "transport.loopSong",
@@ -448,8 +326,8 @@ void addLoopCommands (CommandRegistry& registry, Selection& selection, RangeSele
           .description =
               "Loops the whole song again, from its start to the end of the bar its last clip ends in; the loop grows as clips go later.",
           .synonyms = { "loop all", "whole song", "song mode" },
-          .perform = withEdit (selection, loopSong),
-          .isEnabled = hasEdit,
-          .isTicked = ifEdit (selection, isLoopingSong) });
+          .perform = withSong (selection, loopSong),
+          .isEnabled = hasSong,
+          .isTicked = ifSong (selection, isLoopingSong) });
 }
 } // namespace phazite

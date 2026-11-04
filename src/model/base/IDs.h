@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's items as the UI and the model's public functions name them: by IDs, which stay the same while the project
-// is open and when it is saved and opened again (Tracktion's EditItemIDs, saved with each item), never by Tracktion's
-// objects (docs/design.md, section 24, rule 4). An ID of 0 names nothing. Each kind of item has an ID type of its own,
-// so that a clip's ID can't go where a track's is meant.
+// is open and when it is saved and opened again (the song gives each item its own, Song::makeID(), saved with it),
+// never by the model's objects (docs/design.md, section 24, rule 4). An ID of 0 names nothing. Each kind of item has an
+// ID type of its own, so that a clip's ID can't go where a track's is meant.
 #pragma once
 
 #include <cstddef>
@@ -42,7 +42,7 @@ using DeviceID = ItemID<struct DeviceKind>;   // a device on a track or on the m
 using ModulatorID = ItemID<struct ModulatorKind>;
 
 // A note, among its clip's notes: no other note of that clip has its ID, but a copy of the clip (an alias too) keeps it
-// (model/notes/internal/Notes.h). Not one of Tracktion's EditItemIDs, so a note is named by its clip and its ID together.
+// (model/notes/internal/Notes.h), so a note is named by its clip and its ID together.
 using NoteID = ItemID<struct NoteKind>;
 
 // A note by its clip and its ID in it.

@@ -29,8 +29,8 @@ juce::AudioProcessor::BusesProperties SandboxedInstance::getBuses (const sandbox
 }
 
 // A parameter of the plug-in's, by its own ID: a value set from the message thread goes to the helper at once (unless
-// Phazite's engine moves it, and sends it with its blocks), one set while a block plays (automation, as Tracktion's
-// renders play it) joins the next block's changes; one the plug-in set itself comes back without going to it again.
+// Phazite's engine moves it, and sends it with its blocks), one set while a block plays (on its
+// thread) joins the next block's changes; one the plug-in set itself comes back without going to it again.
 class SandboxedInstance::Parameter final : public juce::HostedAudioProcessorParameter
 {
 public:
@@ -70,7 +70,7 @@ public:
 
     bool movedByEngine = false; // message thread
 
-    // What the plug-in set itself: told to Tracktion, not to the helper again (message thread).
+    // What the plug-in set itself: told to its listeners, not to the helper again (message thread).
     void setFromPlugin (float newValue)
     {
         value.store (newValue, std::memory_order_relaxed);
@@ -117,11 +117,10 @@ private:
 };
 
 SandboxedInstance::SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance> instance, const juce::PluginDescription& described,
-                                      std::shared_ptr<void> keep, std::function<void()> gone, EditorMaker editorMaker)
+                                      std::shared_ptr<void> keep, std::function<void()> gone)
     : juce::AudioPluginInstance (getBuses (instance->getInfo())),
       keepHelper (std::move (keep)),
       onGone (std::move (gone)),
-      makeEditor (std::move (editorMaker)),
       remote (std::move (instance)),
       description (described),
       latency (remote->getLatencySamples())
@@ -132,6 +131,7 @@ SandboxedInstance::SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance> i
     {
         auto parameter = std::make_unique<Parameter> (*this, (int) i, info.parameters[i]);
         parameters.push_back (parameter.get());
+        places[info.parameters[i].id] = (int) i;
         addHostedParameter (std::move (parameter));
     }
 
@@ -206,8 +206,15 @@ void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> 
     const auto& reopened = remote->getInfo().parameters;
 
     for (size_t i = 0; i < std::min (parameters.size(), reopened.size()); ++i)
+    {
         if (! juce::exactlyEqual (parameters[i]->getValue(), reopened[i].value))
+        {
             parameters[i]->setFromPlugin (reopened[i].value);
+
+            if (onParameterChanged != nullptr)
+                onParameterChanged ((int) i, reopened[i].value);
+        }
+    }
 
     setLatencySamples (remote->getLatencySamples());
     old = nullptr;       // closed in its helper, which has gone
@@ -234,6 +241,31 @@ void SandboxedInstance::setMovedByEngine (std::span<const int> moved)
 
     for (const auto parameter : moved)
         setMovedByEngine (parameter, true);
+}
+
+int SandboxedInstance::findParameter (const juce::String& ownID) const
+{
+    if (const auto found = places.find (ownID); found != places.end())
+        return found->second;
+
+    return -1;
+}
+
+float SandboxedInstance::getParameterValue (int parameter) const
+{
+    return juce::isPositiveAndBelow (parameter, (int) parameters.size()) ? parameters[(size_t) parameter]->getValue() : 0.0f;
+}
+
+void SandboxedInstance::setParameterValue (int parameter, float value)
+{
+    if (juce::isPositiveAndBelow (parameter, (int) parameters.size()))
+        parameters[(size_t) parameter]->setValue (juce::jlimit (0.0f, 1.0f, value));
+}
+
+juce::String SandboxedInstance::getParameterText (int parameter, float value) const
+{
+    return juce::isPositiveAndBelow (parameter, (int) parameters.size()) ? parameters[(size_t) parameter]->getText (value, 1024)
+                                                                         : juce::String();
 }
 
 void SandboxedInstance::setMovedByEngine (int parameter, bool isMoved)
@@ -307,7 +339,7 @@ void SandboxedInstance::prepareToPlay (double sampleRate, int maximumBlockSize)
 
 void SandboxedInstance::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
-    // One of Tracktion's renders: the channel waited for, and the plug-in for as long as it takes.
+    // A block through JUCE's processor: the channel waited for, and the plug-in for as long as it takes.
     hold();
     playBlock (buffer, midi);
     let();
@@ -360,7 +392,7 @@ void SandboxedInstance::playBlock (juce::AudioBuffer<float>& buffer, const juce:
     info.numChanges = 0;
     takeChanges (info, channel.getChanges(), limits.maxChanges);
 
-    // The song's place, as Tracktion's playhead has it.
+    // The song's place, as the processor's playhead has it.
     if (const auto position = getPlayHead() != nullptr ? getPlayHead()->getPosition() : juce::Optional<juce::AudioPlayHead::PositionInfo>())
     {
         info.tempo = position->getBpm().orFallback (120.0);
@@ -495,16 +527,6 @@ void SandboxedInstance::editorKey (bool isDown, int keyCode, int modifiers)
     triggerAsyncUpdate();
 }
 
-bool SandboxedInstance::hasEditor() const
-{
-    return makeEditor != nullptr && remote->getInfo().hasEditor;
-}
-
-juce::AudioProcessorEditor* SandboxedInstance::createEditor()
-{
-    return hasEditor() && ! hasCrashed() ? makeEditor (*this) : nullptr;
-}
-
 void SandboxedInstance::handleAsyncUpdate()
 {
     std::vector<std::pair<int, float>> changes;
@@ -534,8 +556,7 @@ void SandboxedInstance::handleAsyncUpdate()
     if (newEditorSize.has_value() && onEditorResized != nullptr)
         onEditorResized (newEditorSize->first, newEditorSize->second);
 
-    // As the helper told them: the gestures that begin, the values, then (a message later, once Tracktion has the values)
-    // the gestures that end.
+    // As the helper told them: the gestures that begin, the values, then (a message later) the gestures that end.
     for (const auto& [index, starting] : gestures)
     {
         if (! juce::isPositiveAndBelow (index, (int) parameters.size()))
@@ -555,17 +576,29 @@ void SandboxedInstance::handleAsyncUpdate()
     }
 
     for (const auto& [index, value] : changes)
+    {
         if (juce::isPositiveAndBelow (index, (int) parameters.size()))
+        {
             parameters[(size_t) index]->setFromPlugin (value);
+
+            if (onParameterChanged != nullptr)
+                onParameterChanged (index, value);
+        }
+    }
 
     if (! gesturesToEnd.empty())
         endedGestures.triggerAsyncUpdate();
 
     if (newLatency)
+    {
         setLatencySamples (samples);
 
-    if (newState)
-        updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
+        if (onLatencyChanged != nullptr)
+            onLatencyChanged();
+    }
+
+    if (newState && onStateChanged != nullptr)
+        onStateChanged();
 
     // Its helper gone: no change of its own, which would be an unsaved one; the views are told (the plug-in host's).
     if (lost && hasCrashed() && onLost != nullptr)

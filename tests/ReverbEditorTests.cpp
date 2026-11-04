@@ -2,13 +2,16 @@
 // The reverb's editor (src/ui/devices/ReverbEditor.h).
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/project/internal/Project.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/ReverbEditor.h"
 
@@ -16,12 +19,15 @@ using phazite::devices::Reverb;
 
 TEST_CASE ("The reverb's editor shows a knob for each control, and its graph follows the decay")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto plugin = edit->getPluginCache().createNewPlugin (Reverb::typeID, {});
-    REQUIRE (phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
-    phazite::test::settle();
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::insertDeviceState (s, song.firstTrack, phazite::makeOwnDeviceState (s, Reverb::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    const auto valueOf = [&s, id] (const char* parameter)
+    { return phazite::getValueSetByHand (s, phazite::ParameterRef { id, parameter }); };
 
-    const auto device = phazite::makeDeviceHandle (*plugin);
+    const auto device = phazite::makeDeviceHandle (s, id);
     CHECK (dynamic_cast<phazite::ui::ReverbEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::ReverbEditor editor (device);
@@ -35,8 +41,8 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
     REQUIRE (decay != nullptr);
     decay->setValue (8.0, juce::sendNotificationSync);
     editor.refresh();
-    CHECK (plugin->getAutomatableParameterByID ("decay")->getCurrentValue() == doctest::Approx (8.0f));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Decay"));
+    CHECK (valueOf ("decay") == doctest::Approx (8.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Decay"));
     CHECK (editor.getShownSeconds() > 3.0 * before);
 
     // Dragging the gap at the tail's start to the right lengthens the pre-delay, as one undo step.
@@ -47,8 +53,8 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
     mouse.dragTo (gap + juce::Point<int> (10, 0));
     mouse.dragTo (gap + juce::Point<int> (20, 0));
     mouse.release();
-    CHECK (plugin->getAutomatableParameterByID ("predelay")->getCurrentValue() > 100.0f);
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Pre-Delay"));
+    CHECK (valueOf ("predelay") > 100.0f);
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Pre-Delay"));
 
     // And its end to the left, a shorter decay.
     mouse.pause();
@@ -56,5 +62,5 @@ TEST_CASE ("The reverb's editor shows a knob for each control, and its graph fol
     mouse.press (end);
     mouse.dragTo (end - juce::Point<int> (40, 0));
     mouse.release();
-    CHECK (plugin->getAutomatableParameterByID ("decay")->getCurrentValue() < 8.0f);
+    CHECK (valueOf ("decay") < 8.0f);
 }

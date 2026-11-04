@@ -5,8 +5,10 @@
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/engine/Preview.h"
 #include "model/engine/internal/Preview.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -64,7 +66,7 @@ struct BrowserScreen
 {
     BrowserScreen()
     {
-        setEdit (context, edit.get());
+        setSong (context, song.get());
         browser.onPlace = [this] (const phazite::LibraryItem& item)
         {
             placed.push_back (item);
@@ -82,8 +84,8 @@ struct BrowserScreen
 
     phazite::test::TemporaryFolder temp;
     phazite::SoundPack soundPack { writeSoundPack (temp.folder) };
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::ProjectContext context { phazite::test::getEngineContext() }; // with the Edit open
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // with the song open
     phazite::Settings settings;
     phazite::Library library { phazite::test::getEngineContext(), settings, soundPack.getFolder() };
     std::unique_ptr<phazite::Previewer> previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
@@ -115,14 +117,14 @@ TEST_CASE ("A loop playing stops at a click on it, a one-shot plays again, and s
     CHECK (screen.previewer.isPlaying());
 
     // The song started: it stops.
-    phazite::playOrStop (*screen.edit);
+    phazite::playOrStop (*screen.song);
     CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }, 2000));
 
     // One started while the song plays plays on, until the song stops.
     click ("Break 120 BPM");
     phazite::test::runTimersUntil ([] { return false; }, 300);
     CHECK (screen.previewer.isPlaying());
-    phazite::playOrStop (*screen.edit);
+    phazite::playOrStop (*screen.song);
     CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }, 2000));
 
     // A one-shot clicked again plays again from its start.
@@ -311,21 +313,21 @@ TEST_CASE ("The plug-in picker finds a device as its name is typed, and Enter ad
 
 TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or below the tracks, or at the play start")
 {
-    auto& engine = phazite::test::getEngine();
-    auto edit = phazite::createSongEdit (engine);                        // 120 BPM, 4/4
+    const auto song = phazite::createSong();                             // 120 BPM, 4/4
     phazite::ProjectContext context (phazite::test::getEngineContext()); // the open project, as the app has it
     auto& selection = getSelection (context);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands (registry);
     phazite::ui::Playlist playlist (commands, context);
     phazite::test::TestWindow window (playlist, 1000, 600);
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     phazite::test::dispatchPendingMessages();
 
     auto* lanes = phazite::test::findComponentWithTitle (playlist, "Tracks");
     REQUIRE (lanes != nullptr);
-    auto* track = te::getAudioTracks (*edit)[0];
+    const auto track = phazite::getTrackIDs (*song)[0];
     juce::DragAndDropTarget& target = playlist;
+    const auto startOf = [&song] (phazite::ClipID clip) { return phazite::getClipRange (*song, clip).getStart().inBeats(); };
 
     // A sound dropped on the first track at beat 4.
     phazite::test::TemporaryFolder temp;
@@ -338,14 +340,15 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
 
     REQUIRE (target.isInterestedInDragSource (onTrack));
     target.itemDropped (onTrack);
-    REQUIRE (track->getClips().size() == 1);
-    CHECK (track->getClips()[0]->getStartBeat().inBeats() == doctest::Approx (4.0));
+    const auto kickClips = phazite::getClips (*song, track);
+    REQUIRE (kickClips.size() == 1);
+    CHECK (startOf (kickClips[0]) == doctest::Approx (4.0));
     CHECK (phazite::ui::wasPlaced (sound));
 
     // An instrument dropped below the tracks gets a track of its own.
     phazite::LibraryItem synth;
     synth.kind = phazite::LibraryItem::Kind::instrument;
-    synth.device = phazite::getDeviceTypes (engine).at (0);
+    synth.device = phazite::getDeviceTypes (context).at (0);
     synth.name = synth.device->name;
     REQUIRE (synth.device->isInstrument);
     const auto device = phazite::ui::toDragDescription (synth);
@@ -353,38 +356,37 @@ TEST_CASE ("Items from the browser go onto the playlist: dropped on a track or b
 
     REQUIRE (target.isInterestedInDragSource (below));
     target.itemDropped (below);
-    REQUIRE (te::getAudioTracks (*edit).size() == 2);
-    CHECK (phazite::getInstrument (*te::getAudioTracks (*edit)[1]) != nullptr);
+    const auto tracks = phazite::getTrackIDs (*song);
+    REQUIRE (tracks.size() == 2);
+    CHECK (phazite::getInstrument (*song, tracks[1]).isValid());
     CHECK (phazite::ui::wasPlaced (device));
 
     // A loop that knows its tempo follows the song's, as it played in the preview: two bars at 120 BPM span two bars
     // at 100.
-    auto& song = phazite::getSong (*edit);
-    phazite::setTempo (song, 100.0);
+    phazite::setTempo (*song, 100.0);
     phazite::LibraryItem breakLoop;
     breakLoop.name = "Break 120 BPM";
     breakLoop.file = phazite::test::writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
     const auto beat16 = juce::roundToInt (playlist.getView().beatToX (phazite::BeatPosition::fromBeats (16.0)));
     target.itemDropped (
         { phazite::ui::toDragDescription (breakLoop), &playlist, playlist.getLocalPoint (lanes, juce::Point<int> (beat16, 10)) });
-    REQUIRE (track->getClips().size() == 2);
-    auto* loopClip = dynamic_cast<te::WaveAudioClip*> (track->getClips().getLast());
-    REQUIRE (loopClip != nullptr);
-    const auto loopID = phazite::getClipID (*loopClip);
-    CHECK (phazite::getClipTempo (song, loopID) == doctest::Approx (120.0)); // it follows the song's tempo, from its own
-    CHECK_FALSE (loopClip->getAutoTempo());                                  // as Phazite stretches it, not Tracktion
-    CHECK (phazite::getClipRange (song, loopID).getStart().inBeats() == doctest::Approx (16.0));
-    CHECK (phazite::getClipRange (song, loopID).getLength().inBeats() == doctest::Approx (8.0));
+    const auto withLoop = phazite::getClips (*song, track);
+    REQUIRE (withLoop.size() == 2);
+    const auto loopID = withLoop[0] == kickClips[0] ? withLoop[1] : withLoop[0];
+    CHECK (phazite::isAudioState (phazite::findClipState (*song, loopID)));
+    CHECK (phazite::getClipTempo (*song, loopID) == doctest::Approx (120.0)); // it follows the song's tempo, from its own
+    CHECK (startOf (loopID) == doctest::Approx (16.0));
+    CHECK (phazite::getClipRange (*song, loopID).getLength().inBeats() == doctest::Approx (8.0));
 
     // Enter in the browser puts a sound on the selected track, where Space plays from.
-    phazite::movePlayhead (*edit, edit->tempoSequence.toTime (te::BeatPosition::fromBeats (8.0)));
-    selection.selectOnly (phazite::getTrackID (*track));
+    phazite::movePlayhead (*song, phazite::BeatPosition::fromBeats (8.0));
+    selection.selectOnly (track);
     REQUIRE (playlist.placeFile (kick.file));
-    REQUIRE (track->getClips().size() == 3);
-    CHECK (std::any_of (track->getClips().begin(), track->getClips().end(),
-                        [] (te::Clip* clip) { return std::abs (clip->getStartBeat().inBeats() - 8.0) < 0.001; }));
+    const auto clips = phazite::getClips (*song, track);
+    REQUIRE (clips.size() == 3);
+    CHECK (std::any_of (clips.begin(), clips.end(), [&startOf] (phazite::ClipID clip) { return std::abs (startOf (clip) - 8.0) < 0.001; }));
 
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lists them once a click has downloaded them")

@@ -8,29 +8,24 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineContext.h"
-#include "model/engine/internal/EngineSetup.h"
 #include "model/mixer/internal/Freeze.h"
-#include "model/modulation/internal/Modulation.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
-#include "model/transport/internal/AudioRecorder.h"
 
 namespace phazite
 {
 namespace
 {
-    // A track's element: Tracktion's (TRACK, FOLDERTRACK...), or the song's own in its track list (schema::TRACK).
     bool isTrackElement (const juce::ValueTree& element)
     {
-        return te::TrackList::isTrack (element) || element.hasType (schema::TRACK);
+        return element.hasType (schema::TRACK);
     }
 
     //==============================================================================
-    // Listens to the open Edit's state and tells the context's listeners which groups changed, once per turn of the message
-    // loop. What Tracktion writes as it plays (the transport, the input devices) is no change to the song. A plug-in whose
-    // helper went, or that was reloaded, changes what its device shows (model/plugins/internal/PluginHost.h).
+    // Listens to the open song and tells the context's listeners which groups changed, once per turn of the message loop. A
+    // plug-in whose helper went, or that was reloaded, changes what its device shows (model/plugins/internal/PluginHost.h).
     struct SongWatcher : private juce::ValueTree::Listener,
                          private juce::ChangeListener,
                          private juce::AsyncUpdater
@@ -78,17 +73,11 @@ namespace
         {
             for (auto element = changed; element.isValid(); element = element.getParent())
             {
-                if (element.hasType (te::IDs::TRANSPORT) || element.hasType (te::IDs::INPUTDEVICES))
-                    return;
-
-                if (element.hasType (te::IDs::AUTOMATIONCURVE) || element.hasType (schema::AUTOMATION))
+                if (element.hasType (schema::AUTOMATION))
                     return add (pending.automation);
 
-                // A track's modulators and macros, and what they modulate: the song's (T1, step 6), and Tracktion's, in its
-                // devices' states.
-                if (element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO) || element.hasType (schema::MODULATES)
-                    || element.hasType (te::IDs::MODIFIERS) || element.hasType (te::IDs::MACROPARAMETERS)
-                    || element.hasType (te::IDs::MODIFIERASSIGNMENTS))
+                // A track's modulators and macros, and what they modulate.
+                if (element.hasType (schema::MODULATOR) || element.hasType (schema::MACRO) || element.hasType (schema::MODULATES))
                     return add (pending.modulation);
 
                 if (schema::isTrackViewElement (element))
@@ -104,19 +93,15 @@ namespace
                 if (element.hasType (schema::CHORDLANE))
                     return add (pending.chords);
 
-                // Tracktion's clips, and the song's own (T1, step 3), with their notes.
-                if (te::Clip::isClipState (element) || element.hasType (schema::CLIP))
+                // Clips, with their notes.
+                if (element.hasType (schema::CLIP))
                     return add (pending.clips);
 
-                // The song's devices (T1, step 5), on a track's element or the master's.
+                // Devices, on a track's element or the master's.
                 if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER) || element.hasType (schema::SEND))
                     return add (pending.devices);
 
-                // Devices, and containers' rack types (model/mixer/internal/Containers.h): their names and what they hold.
-                if (element.hasType (te::IDs::PLUGIN) || element.hasType (te::IDs::MASTERPLUGINS) || element.hasType (te::IDs::RACK))
-                    return add (pending.devices);
-
-                if (element.hasType (schema::TEMPOMAP) || element.hasType (te::IDs::TEMPOSEQUENCE))
+                if (element.hasType (schema::TEMPOMAP))
                     return add (pending.tempo);
 
                 if (isTrackElement (element))
@@ -140,7 +125,7 @@ namespace
         // A child that is gone has no parent to say where it was: its own type does, or else its old parent's.
         void markRemoved (const juce::ValueTree& parent, const juce::ValueTree& child)
         {
-            if (child.hasType (te::IDs::AUTOMATIONCURVE) || child.hasType (schema::AUTOMATION) || child.hasType (schema::CURVE))
+            if (child.hasType (schema::AUTOMATION) || child.hasType (schema::CURVE))
                 add (pending.automation);
             else if (child.hasType (schema::MODULATOR) || child.hasType (schema::MACRO) || child.hasType (schema::MODULATES))
                 add (pending.modulation);
@@ -150,10 +135,9 @@ namespace
                 add (pending.sections);
             else if (child.hasType (schema::CHORDLANE))
                 add (pending.chords);
-            else if (te::Clip::isClipState (child) || child.hasType (schema::CLIP))
+            else if (child.hasType (schema::CLIP))
                 add (pending.clips);
-            else if (child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK) || child.hasType (schema::DEVICE)
-                     || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
+            else if (child.hasType (schema::DEVICE) || child.hasType (schema::CONTAINER) || child.hasType (schema::SEND))
                 add (pending.devices);
             else if (isTrackElement (child))
                 add (pending.tracks);
@@ -161,16 +145,13 @@ namespace
                 mark (parent);
         }
 
-        // A track or a device that moved past another, which changes their order. Tracktion sorts a track's elements now and
-        // then (after a clip is added, say), which changes no order that matters: clips, sections and the tempo's changes
-        // have their places in time.
+        // A track or a device that moved past another, which changes their order: clips, sections and the tempo's changes
+        // have their places in time, which no order changes.
         void markMoved (const juce::ValueTree& parent, int oldIndex, int newIndex)
         {
-            // A device in a container moves with its place in the container's rack type.
             const auto moved = parent.getChild (newIndex);
             const auto isTrack = isTrackElement (moved);
-            const auto isDevice = moved.hasType (te::IDs::PLUGIN) || moved.hasType (te::IDs::PLUGININSTANCE)
-                                  || moved.hasType (schema::DEVICE) || moved.hasType (schema::CONTAINER) || moved.hasType (schema::SEND);
+            const auto isDevice = moved.hasType (schema::DEVICE) || moved.hasType (schema::CONTAINER) || moved.hasType (schema::SEND);
 
             // The elements it passed: now between its new place and its old one.
             const auto first = newIndex < oldIndex ? newIndex + 1 : oldIndex;
@@ -183,9 +164,7 @@ namespace
                 if (isTrack && isTrackElement (passed))
                     return add (pending.tracks);
 
-                if (isDevice
-                    && (passed.hasType (te::IDs::PLUGIN) || passed.hasType (te::IDs::PLUGININSTANCE) || passed.hasType (schema::DEVICE)
-                        || passed.hasType (schema::CONTAINER) || passed.hasType (schema::SEND)))
+                if (isDevice && (passed.hasType (schema::DEVICE) || passed.hasType (schema::CONTAINER) || passed.hasType (schema::SEND)))
                     return add (pending.devices);
             }
         }
@@ -195,13 +174,17 @@ namespace
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
             // makes one at each move (docs/performance-audit.md, U1); a channel's volume and pan, a send's level and a
             // macro's value neither. Nor is where a device's window was, which no view shows.
-            if (isParameterValue (tree, property) || tree.hasType (schema::VALUES)
-                || ((tree.hasType (schema::DEVICE) || tree.hasType (te::IDs::PLUGIN)) && schema::isDeviceViewProperty (property))
+            if (isParameterValue (tree, property) || tree.hasType (schema::VALUES) || tree.hasType (schema::VALUE)
+                || (tree.hasType (schema::DEVICE) && schema::isDeviceViewProperty (property))
                 || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
                     && (property == schema::channelVolume || property == schema::channelPan))
                 || (tree.hasType (schema::SEND) && property == schema::sendLevel)
                 || (tree.hasType (schema::MACRO) && property == schema::macroValue))
                 return;
+
+            // A track frozen or played live again changes what its devices show too (their controls are off while frozen).
+            if (tree.hasType (schema::TRACK) && property == schema::trackFrozen)
+                add (pending.devices);
 
             // How tall a track shows, and the like, is view state (Schema.h), not the song.
             if (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
@@ -213,7 +196,7 @@ namespace
         void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
         {
             // A device's first value set by hand, as its other values, is no change that views show.
-            if (! child.hasType (schema::VALUES))
+            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE))
                 mark (child);
         }
         void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markRemoved (parent, child); }
@@ -228,56 +211,54 @@ namespace
 //==============================================================================
 struct ProjectContext::Impl
 {
-    Impl (EngineContext& engine, UIBehaviour* tracktionFocus)
-        : playbackHost (getPlaybackHost (engine)),
-          focus (tracktionFocus),
-          selection (getEngine (engine)),
+    explicit Impl (EngineContext& e)
+        : engine (e),
           songSelection (createSongSelection (selection)),
           songRange (createSongRange (rangeSelection, selection)),
-          songWatcher (std::make_unique<SongWatcher> (listeners, getPluginHost (engine)))
+          songWatcher (std::make_unique<SongWatcher> (listeners, getPluginHost (e)))
     {
     }
 
-    PlaybackHost& playbackHost; // Phazite's own engine, the app's
-    UIBehaviour* const focus;
+    EngineContext& engine; // the app's, which plays the song
+    Song::Ptr song;
     Selection selection;                          // what is selected, by IDs
     std::unique_ptr<SongSelection> songSelection; // the UI's view of selection
     RangeSelection rangeSelection { selection };
     std::unique_ptr<SongRange> songRange; // a view of rangeSelection, by IDs
     juce::ListenerList<Listener> listeners;
-    std::unique_ptr<FreezeKeeper> freezes;                    // unfreezes a frozen track whose clips or frozen devices change
-    std::unique_ptr<DeviceModulationKeeper> deviceModulation; // plays what modulates Phazite's devices in each
-    std::unique_ptr<ClipRenders> clipRenders;                 // renders what the clips play stretched, pitched or reversed
-    std::unique_ptr<AudioRecorder> recorder;                  // records the armed tracks' audio inputs
-    std::unique_ptr<AutomationWatcher> automation;            // the parameter touched last, and recorded automation's undo steps
-    std::unique_ptr<PlaybackSession> playback;                // the song as Phazite's own engine plays it
-    Clipboard clipboard;                                      // what Cut and Copy keep for Paste
+    std::unique_ptr<FreezeKeeper> freezes;         // unfreezes a frozen track whose clips or frozen devices change
+    std::unique_ptr<ClipRenders> clipRenders;      // renders what the clips play stretched, pitched or reversed
+    std::unique_ptr<AutomationWatcher> automation; // the parameter touched last
+    std::unique_ptr<PlaybackSession> playback;     // the song as Phazite's engine plays it
+    DeviceWindowHost* windows = nullptr;           // what shows the devices' windows, the app's
+    Clipboard clipboard;                           // what Cut and Copy keep for Paste
     std::unique_ptr<SongWatcher> songWatcher;
     int projectNumber = 0;
+
+    void dropSong()
+    {
+        playback = nullptr;
+        automation = nullptr;
+        clipRenders = nullptr; // its renders stopped
+        freezes = nullptr;
+        song = nullptr;
+    }
 };
 
-ProjectContext::ProjectContext (EngineContext& engine, UIBehaviour* tracktionFocus)
-    : impl (std::make_unique<Impl> (engine, tracktionFocus))
+ProjectContext::ProjectContext (EngineContext& engine)
+    : impl (std::make_unique<Impl> (engine))
 {
 }
 
 ProjectContext::~ProjectContext()
 {
     impl->songWatcher = nullptr;
-    impl->playback = nullptr;
-    impl->automation = nullptr;
-    impl->recorder = nullptr;
-    impl->clipRenders = nullptr;
-    impl->deviceModulation = nullptr;
-    impl->freezes = nullptr;
-
-    if (impl->focus != nullptr)
-        impl->focus->setFocusedEdit (nullptr);
+    impl->dropSong();
 }
 
 bool ProjectContext::hasProject() const noexcept
 {
-    return getEdit (*this) != nullptr;
+    return impl->song != nullptr;
 }
 
 int ProjectContext::getProjectNumber() const noexcept
@@ -292,8 +273,7 @@ int ProjectContext::getSongVersion() const noexcept
 
 juce::UndoManager* ProjectContext::getUndoManager() const noexcept
 {
-    auto* edit = getEdit (*this);
-    return edit != nullptr ? &getSong (*edit).getUndoManager() : nullptr;
+    return impl->song != nullptr ? &impl->song->getUndoManager() : nullptr;
 }
 
 SongSelection& ProjectContext::getSongSelection() noexcept
@@ -327,15 +307,9 @@ void ProjectContext::removeListener (Listener* listener)
 }
 
 //==============================================================================
-te::Edit* getEdit (const ProjectContext& context)
-{
-    return context.getImpl().selection.getEdit();
-}
-
 Song* findSong (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? &getSong (*edit) : nullptr;
+    return context.getImpl().song.get();
 }
 
 Selection& getSelection (ProjectContext& context)
@@ -353,6 +327,16 @@ RangeSelection& getRangeSelection (ProjectContext& context)
     return context.getImpl().rangeSelection;
 }
 
+EngineContext& getEngineContext (const ProjectContext& context)
+{
+    return context.getImpl().engine;
+}
+
+PlaybackSession* getSession (const ProjectContext& context)
+{
+    return context.getImpl().playback.get();
+}
+
 AutomationWatcher* getAutomationWatcher (const ProjectContext& context)
 {
     return context.getImpl().automation.get();
@@ -368,15 +352,22 @@ Clipboard& getClipboard (ProjectContext& context)
     return context.getImpl().clipboard;
 }
 
-void setEdit (ProjectContext& context, te::Edit* edit)
+void setDeviceWindows (ProjectContext& context, DeviceWindowHost* windows)
+{
+    context.getImpl().windows = windows;
+}
+
+DeviceWindowHost* getDeviceWindows (const ProjectContext& context)
+{
+    return context.getImpl().windows;
+}
+
+void setSong (ProjectContext& context, Song* song)
 {
     auto& impl = context.getImpl();
 
-    if (impl.focus != nullptr)
-        impl.focus->setFocusedEdit (nullptr);
-
     // Another project: views forget what they showed, and the clipboard what it held, which named its files.
-    if (edit != impl.selection.getEdit())
+    if (song != impl.song.get())
     {
         ++impl.projectNumber;
         impl.clipboard = {};
@@ -384,24 +375,19 @@ void setEdit (ProjectContext& context, te::Edit* edit)
 
     impl.songSelection->setNoteClips ({}); // the editors show the new project's clips, or none
     impl.rangeSelection.clear();
-    impl.selection.setEdit (edit);   // nothing of the previous one selected
-    impl.playback = nullptr;         // before the Edit it plays goes
-    impl.automation = nullptr;       // likewise
-    impl.deviceModulation = nullptr; // likewise
-    impl.freezes = nullptr;          // likewise
-    impl.recorder = nullptr;         // likewise, any recording dropped
-    impl.clipRenders = nullptr;      // likewise, its renders stopped
-    impl.freezes = edit != nullptr ? std::make_unique<FreezeKeeper> (*edit) : nullptr;
-    impl.deviceModulation = edit != nullptr ? std::make_unique<DeviceModulationKeeper> (*edit) : nullptr;
-    impl.clipRenders = edit != nullptr ? std::make_unique<ClipRenders> (getSong (*edit)) : nullptr;
-    impl.recorder = edit != nullptr ? std::make_unique<AudioRecorder> (*edit) : nullptr;
-    impl.automation = edit != nullptr ? std::make_unique<AutomationWatcher> (*edit) : nullptr;
-    impl.playback = edit != nullptr ? std::make_unique<PlaybackSession> (*edit, impl.playbackHost) : nullptr;
-    impl.songWatcher->setState (edit != nullptr ? edit->state : juce::ValueTree());
+    impl.selection.setSong (song); // nothing of the previous one selected
+    impl.dropSong();               // what played the previous one, any recording dropped
+    impl.song = song;
 
-    if (impl.focus != nullptr)
-        impl.focus->setFocusedEdit (edit);
+    if (song != nullptr)
+    {
+        impl.freezes = std::make_unique<FreezeKeeper> (*song);
+        impl.clipRenders = std::make_unique<ClipRenders> (*song);
+        impl.automation = std::make_unique<AutomationWatcher> (*song);
+        impl.playback = std::make_unique<PlaybackSession> (*song, getPlaybackHost (impl.engine));
+    }
 
+    impl.songWatcher->setState (song != nullptr ? song->getState() : juce::ValueTree());
     impl.listeners.call ([] (ProjectContext::Listener& l) { l.projectChanged(); });
 }
 } // namespace phazite

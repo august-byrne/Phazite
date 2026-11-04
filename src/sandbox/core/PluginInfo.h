@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What a helper tells Phazite of a plug-in it hosts (docs/tracktion-migration.md, T3): its name and kind, its latency and
-// tail, its buses, its parameters, each by the plug-in's own ID (a VST3's number, never its place in the list), and its
-// programs, as the control channel carries them (Messages.h).
+// What a helper tells Phazite of a plug-in it hosts: its name and kind, its latency and tail, its buses, its
+// parameters, each by the plug-in's own ID (a VST3's number, never its place in the list), and its programs, as the
+// control channel carries them (Messages.h).
 #pragma once
 
 #include "Messages.h"

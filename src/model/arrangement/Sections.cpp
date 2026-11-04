@@ -561,7 +561,7 @@ void pasteSections (Song& song, const SectionsCopy& copy, BeatPosition destinati
 void addSectionCommands (CommandRegistry& registry, Selection& selection)
 {
     const auto undoTarget = undoTargetOf (selection);
-    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+    const auto hasSong = [&selection] { return selection.getSong() != nullptr; };
 
     registry.add ({ .id = "section.add",
                     .name = "Add Section",
@@ -569,7 +569,7 @@ void addSectionCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Adds an 8-bar section after the last one, or at the start of the song if it has none.",
                     .synonyms = { "new section", "part", "arranger", "marker" },
                     .perform = withSong (selection, [&selection] (Song& song) { appendSection (song, &selection); }),
-                    .isEnabled = hasEdit,
+                    .isEnabled = hasSong,
                     .undoTarget = undoTarget });
 }
 } // namespace phazite

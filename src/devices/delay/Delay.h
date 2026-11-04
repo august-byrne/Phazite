@@ -3,7 +3,7 @@
 // in milliseconds, that come back with less of themselves each time (the feedback), each darker and thinner than the one
 // before through a low and a high cut, as tape echoes are. Ping-pong bounces them between the left and the right. A
 // change of the time glides to the new one, as a tape's would, rather than clicking. It puts out the echoes alone: its
-// mix, which its thin plug-in applies, blends them with the sound.
+// mix, which its runner applies, blends them with the sound.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -32,7 +32,7 @@ public:
         pingPong,
         lowCut,
         highCut,
-        mix // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
+        mix // applied by its runner (DeviceInfo.h, mixParameterID)
     };
 
     static const DeviceInfo info;

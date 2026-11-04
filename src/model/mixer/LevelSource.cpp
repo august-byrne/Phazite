@@ -2,62 +2,35 @@
 #include "LevelSource.h"
 #include "internal/LevelSource.h"
 
+#include <juce_audio_basics/juce_audio_basics.h>
+
 namespace phazite
 {
 struct LevelSource::Impl
 {
-    std::function<te::LevelMeasurer*()> find;
-    juce::WeakReference<te::LevelMeasurer> measurer;
-    te::LevelMeasurer::Client client;
-
-    // Phazite's own engine's meter, while it plays the channel, and where this reads it from.
-    std::function<engine::LevelMeter*()> findOwn;
-    engine::LevelMeter* own = nullptr;
+    // What finds the meter, the one it found last, and where this reads it from, which starts again with another meter.
+    std::function<engine::LevelMeter*()> find;
+    engine::LevelMeter* meter = nullptr;
     engine::LevelMeter::Reader reader;
 
-    ~Impl() { detach(); }
-
-    void refresh()
+    // The meter now, found again each time: what plays the song makes its meters anew (another plan, another device), and
+    // one that has gone is never read.
+    engine::LevelMeter* refresh()
     {
-        if (auto* ownNow = findOwn != nullptr ? findOwn() : nullptr)
-        {
-            detach();
-
-            if (ownNow != own)
-                reader = {};
-
-            own = ownNow;
-            return;
-        }
-
-        own = nullptr;
         auto* now = find != nullptr ? find() : nullptr;
 
-        if (now == measurer.get())
-            return;
+        if (now != meter)
+            reader = {};
 
-        detach();
-        measurer = now;
-
-        if (now != nullptr)
-            now->addClient (client);
-    }
-
-    void detach()
-    {
-        if (auto* old = measurer.get())
-            old->removeClient (client);
-
-        measurer = nullptr;
-        client.reset();
+        meter = now;
+        return meter;
     }
 };
 
-LevelSource makeLevelSource (std::function<te::LevelMeasurer*()> findMeasurer, std::function<engine::LevelMeter*()> findOwn)
+LevelSource makeLevelSource (std::function<engine::LevelMeter*()> find)
 {
     auto impl = std::make_unique<LevelSource::Impl>();
-    impl->find = std::move (findMeasurer);
-    impl->findOwn = std::move (findOwn);
+    impl->find = std::move (find);
     impl->refresh();
     return LevelSource (std::move (impl));
 }
@@ -81,22 +54,18 @@ void LevelSource::refresh()
 
 bool LevelSource::isMeasuring() const
 {
-    return impl != nullptr && (impl->own != nullptr || impl->measurer.get() != nullptr);
+    return impl != nullptr && impl->refresh() != nullptr;
 }
 
 int LevelSource::getNumChannels() const
 {
-    if (impl != nullptr && impl->own != nullptr)
-        return impl->own->getNumChannels();
-
-    return isMeasuring() ? impl->client.getNumChannelsUsed() : 0;
+    auto* meter = impl != nullptr ? impl->refresh() : nullptr;
+    return meter != nullptr ? meter->getNumChannels() : 0;
 }
 
 float LevelSource::getAndClearLevel (int channel)
 {
-    if (impl != nullptr && impl->own != nullptr)
-        return juce::Decibels::gainToDecibels (impl->own->getPeakSince (impl->reader, channel), silenceDb);
-
-    return isMeasuring() ? impl->client.getAndClearAudioLevel (channel).dB : silenceDb;
+    auto* meter = impl != nullptr ? impl->refresh() : nullptr;
+    return meter != nullptr ? juce::Decibels::gainToDecibels (meter->getPeakSince (impl->reader, channel), silenceDb) : silenceDb;
 }
 } // namespace phazite

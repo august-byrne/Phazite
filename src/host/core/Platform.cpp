@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What the helper process asks of the operating system (Host.h): to end quietly when a plug-in crashes it, and its CPU
-// time and memory, which T3's measurement reads.
+// time and memory, which the sandbox's benchmarks read (MessageType::stats).
 #include "Host.h"
 
 #if defined(_WIN32)

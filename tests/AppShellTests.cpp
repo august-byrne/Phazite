@@ -58,7 +58,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     // No recent projects: the first start makes an untitled project, with no tracks.
     screen.session.openAtStartup();
     phazite::test::dispatchPendingMessages();
-    REQUIRE (getEdit (screen.session.getContext()) != nullptr);
+    REQUIRE (findSong (screen.session.getContext()) != nullptr);
     phazite::test::settle();
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 

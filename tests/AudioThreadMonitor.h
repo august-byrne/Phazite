@@ -34,7 +34,7 @@ public:
     static int getNumEvents();
 
     // Where the recorded events came from (the first 512 after reset(), from the one numbered firstEvent on), grouped by
-    // call stack and most frequent first, e.g. "12 x  te::Foo::bar <- te::Baz::process <- ...".
+    // call stack and most frequent first, e.g. "12 x  phazite::Foo::bar <- phazite::Baz::process <- ...".
     static juce::StringArray describeCallSites (int framesPerSite = 6, int firstEvent = 0);
 };
 } // namespace phazite::test

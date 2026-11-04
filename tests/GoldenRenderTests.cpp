@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Golden renders (tests/golden/renders): songs made through the model (TestSong.h), each showing what plays in a song, are
-// rendered offline through the reference engine and the candidate (RenderHarness.h; docs/tracktion-migration.md, T0), and
+// rendered offline through the reference engine and the candidate (RenderHarness.h), and
 // the levels of each 100 ms block are compared with a committed fingerprint, so that a change to how Phazite plays a song
 // fails a test. Each render is checked first, so that a broken one never becomes the golden file. GoldenFiles.h says how to
 // regenerate them.

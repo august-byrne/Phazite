@@ -2,6 +2,7 @@
 // The EQ's editor (src/ui/devices/EqEditor.h), and the spectrum its analyzer shows (src/devices/core/Spectrum.h).
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/core/Spectrum.h"
 #include "devices/eq/Equalizer.h"
@@ -9,8 +10,10 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/project/internal/Project.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/EqEditor.h"
 
@@ -21,16 +24,19 @@ namespace
 {
 using Eq = phazite::devices::Equalizer;
 
-te::Plugin::Ptr addEq (te::Edit& edit)
+// An EQ after the song's first track's effects, which the song's session plays.
+phazite::DeviceID addEq (phazite::test::TestSong& song)
 {
-    auto plugin = edit.getPluginCache().createNewPlugin (Eq::typeID, {});
-    phazite::insertDevice (*te::getAudioTracks (edit)[0], plugin);
-    return plugin;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::insertDeviceState (s, song.firstTrack, phazite::makeOwnDeviceState (s, Eq::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    return id;
 }
 
-float valueOf (te::Plugin& plugin, const char* id)
+float valueOf (const phazite::Song& song, phazite::DeviceID eq, const char* id)
 {
-    return plugin.getAutomatableParameterByID (id)->getCurrentValue();
+    return phazite::getValueSetByHand (song, phazite::ParameterRef { eq, id });
 }
 
 // The value a knob shows, by its title; NaN without such a knob.
@@ -76,9 +82,11 @@ TEST_CASE ("A spectrum shows a sine at its frequency and level, and falls slowly
 
 TEST_CASE ("The EQ's editor shows the selected band's controls, and its analyzer listens while it is open")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto eq = addEq (*edit);
-    const auto device = phazite::makeDeviceHandle (*eq);
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    const auto device = phazite::makeDeviceHandle (s, eq);
+    REQUIRE (device.getProcessor<Eq>() != nullptr);
     auto& tap = device.getProcessor<Eq>()->getOutputTap();
 
     {
@@ -100,12 +108,12 @@ TEST_CASE ("The EQ's editor shows the selected band's controls, and its analyzer
 
 TEST_CASE ("Dragging an EQ band's dot moves its frequency and gain as one undo step; a double-click and the wheel work too")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto eq = addEq (*edit);
-    phazite::test::settle();
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto eq = addEq (song);
+    s.getUndoManager().clearUndoHistory();
 
-    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (*eq)));
+    phazite::ui::EqEditor editor ((phazite::makeDeviceHandle (s, eq)));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     phazite::test::Mouse mouse (editor.getGraph());
 
@@ -115,23 +123,23 @@ TEST_CASE ("Dragging an EQ band's dot moves its frequency and gain as one undo s
     mouse.dragTo (dot + juce::Point<int> (60, -40));
     mouse.release();
     CHECK (editor.getSelectedBand() == 3);
-    CHECK (valueOf (*eq, "band4Frequency") > 900.0f);
-    CHECK (valueOf (*eq, "band4Gain") > 3.0f);
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Move Band 4"));
+    CHECK (valueOf (s, eq, "band4Frequency") > 900.0f);
+    CHECK (valueOf (s, eq, "band4Gain") > 3.0f);
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Move Band 4"));
 
-    phazite::undo (*edit);
+    phazite::undo (s);
     editor.refresh();
-    CHECK (valueOf (*eq, "band4Frequency") == doctest::Approx (800.0f));
-    CHECK (valueOf (*eq, "band4Gain") == doctest::Approx (0.0f));
+    CHECK (valueOf (s, eq, "band4Frequency") == doctest::Approx (800.0f));
+    CHECK (valueOf (s, eq, "band4Gain") == doctest::Approx (0.0f));
 
     // A double-click turns the band off, and on again.
     mouse.pause();
     mouse.doubleClick (editor.getDotPosition (3).roundToInt());
-    CHECK (valueOf (*eq, "band4On") == doctest::Approx (0.0f));
+    CHECK (valueOf (s, eq, "band4On") == doctest::Approx (0.0f));
     mouse.doubleClick (editor.getDotPosition (3).roundToInt());
-    CHECK (valueOf (*eq, "band4On") == doctest::Approx (1.0f));
+    CHECK (valueOf (s, eq, "band4On") == doctest::Approx (1.0f));
 
     // The wheel narrows or widens it.
     mouse.wheel (editor.getDotPosition (3).roundToInt(), 0.5f);
-    CHECK (valueOf (*eq, "band4Q") == doctest::Approx (2.0f));
+    CHECK (valueOf (s, eq, "band4Q") == doctest::Approx (2.0f));
 }

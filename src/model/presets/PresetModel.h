@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Presets (docs/design.md, section 9; roadmap step 2.4), by IDs and plain values: a device's settings, a container's
 // devices and macros, or a track's devices, modulators and mix, in a file of their own (".phazitepreset") that any
-// project can take in, written in Phazite's own names (Schema.h: schema::preset), nothing of Tracktion's (roadmap A5,
-// 2026-10-30). Phazite's own presets, which come with it, are such files too. Each function takes the open project's
-// context, and gives nothing, or does nothing, for an ID of something that is gone. The Tracktion side is
-// internal/Presets.h.
+// project can take in, written in Phazite's own names (Schema.h: schema::preset). Phazite's own presets, which come with
+// it, are such files too. Each function takes the open project's context, and gives nothing, or does nothing, for an ID
+// of something that is gone. The song's side is internal/Presets.h.
 #pragma once
 
 #include "model/base/IDs.h"

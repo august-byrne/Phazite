@@ -7,8 +7,10 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/plugins/internal/PluginInstances.h"
 
+#include <algorithm>
+#include <cmath>
 #include <set>
 
 namespace phazite
@@ -108,8 +110,6 @@ namespace
 
         if (playsDrumSampler (song, source))
             setValue ("keyHighCut", 150.0f);
-
-        song.reconcile (Song::Part::device, id.getRaw());
     }
 } // namespace
 
@@ -146,10 +146,9 @@ bool hasSidechain (const Song& song, DeviceID id)
     if (const auto* own = findOwnDevice (state[schema::deviceType].toString().toStdString()))
         return own->hasSidechain;
 
-    // A plug-in's inputs, as its helper tells them (Tracktion's plug-in has them while it mirrors the song's).
-    auto* edit = findEdit (song);
-    auto* device = edit != nullptr ? mirror::findDevice (*edit, id) : nullptr;
-    return device != nullptr && device->canSidechain();
+    // A plug-in's inputs, as its helper tells them while it plays: a sidechain's after its main ones.
+    auto* instance = findPluginInstance (song, id);
+    return instance != nullptr && instance->getRemote().getInfo().hasSidechain;
 }
 
 std::vector<TrackID> getSidechainSources (const Song& song, DeviceID id)
@@ -230,8 +229,6 @@ void setSidechainSource (Song& song, DeviceID id, TrackID source)
     else
         state.removeProperty (schema::deviceSidechain, undo);
 
-    song.reconcile (Song::Part::device, id.getRaw());
-
     if (source.isValid())
         startDucking (song, id, source);
 }
@@ -285,7 +282,5 @@ void forgetSidechainSources (Song& song, const std::vector<TrackID>& tracks)
                 forget (inside);
         }
     }
-
-    song.reconcile (Song::Part::devices);
 }
 } // namespace phazite

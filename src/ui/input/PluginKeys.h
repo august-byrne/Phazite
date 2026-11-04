@@ -46,10 +46,10 @@ public:
     void setSendsAllKeys (juce::Component& window, bool);
     bool sendsAllKeys (const juce::Component& window) const;
 
-    // The main window's keys (WindowKeys: every shortcut, and the computer keyboard) for another of Phazite's own windows
-    // that Tracktion asks for, which is no plug-in's: a built-in device's (app/PluginWindow.h), until unwatch(), or until
-    // these keys go with the main window. Its keyPressed() asks keyPressedAfterListeners(), and it lets go of the keys held
-    // as another window becomes the active one.
+    // The main window's keys (WindowKeys: every shortcut, and the computer keyboard) for another of Phazite's own
+    // windows, which is no plug-in's: a built-in device's (app/PluginWindow.h), until unwatch(), or until these keys go
+    // with the main window. Its keyPressed() asks keyPressedAfterListeners(), and it lets go of the keys held as another
+    // window becomes the active one.
     void watchAsOwnWindow (juce::Component& window);
     bool keyPressedAfterListeners (juce::Component& window, const juce::KeyPress&);
     void releaseKeys (juce::Component& window);
@@ -86,8 +86,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginKeys)
 };
 
-// The app's, which the plug-in windows that Tracktion asks for use (createPluginWindow()); nullptr until the main
-// window makes it.
+// The app's, which devices' windows use (app/PluginWindow.h); nullptr until the main window makes it.
 void setPluginKeys (PluginKeys*);
 PluginKeys* getPluginKeys();
 } // namespace phazite::ui

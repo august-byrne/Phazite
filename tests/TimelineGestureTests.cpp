@@ -13,25 +13,26 @@ using phazite::BeatPosition;
 
 TEST_CASE ("A gesture's changes are one undo step, the first one's, however many steps it begins")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto* track = te::getAudioTracks (*edit)[0];
-    const auto name = track->getName();
+    auto song = phazite::createSong();
+    const auto track = phazite::getTrackIDs (*song).front();
+    const auto name = phazite::getTrackName (*song, track);
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    setEdit (context, edit.get());
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    setSong (context, song.get());
+    song->getUndoManager().clearUndoHistory();
 
     {
         phazite::ui::TimelineGesture gesture;
         gesture.beginStep (context, "Add Note");
-        phazite::setTrackName (*track, "Added");
+        phazite::setTrackName (*song, track, "Added");
         gesture.beginStep (context, "Move Notes"); // the drag after the click
-        phazite::setTrackName (*track, "Moved");
+        phazite::setTrackName (*song, track, "Moved");
     }
 
-    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Add Note"));
-    phazite::undo (*edit);
-    CHECK (track->getName() == name);
-    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Add Note"));
+    phazite::undo (*song);
+    CHECK (phazite::getTrackName (*song, track) == name);
+    CHECK_FALSE (song->getUndoManager().canUndo());
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("A gesture does each thing once, and finds where it began after the content scrolled")

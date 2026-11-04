@@ -30,28 +30,29 @@ namespace
 using phazite::DeviceID;
 using phazite::TrackID;
 
-// A project in a folder of its own, with a track holding an EQ and a compressor, and the commands that group devices.
+// A project in a folder of its own, with two tracks, the first holding an EQ and a compressor, and the commands that group
+// devices.
 struct Song
 {
     Song()
     {
         juce::String error;
-        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Song", error);
+        project = phazite::Project::create (temp.folder, "Song", error);
         REQUIRE (project != nullptr);
-        phazite::ensureTracks (edit(), 2);
-        setEdit (context, &edit());
+        tracks = phazite::ensureTracks (song(), 2);
+        setSong (context, &song());
 
         for (const auto* type : { "phaziteEq", "phaziteCompressor" })
             phazite::addEffect (context, track(), find (type));
 
         phazite::addContainerCommands (registry, getSelection (context));
-        phazite::getSong (edit()).getUndoManager().clearUndoHistory();
+        song().getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~Song() { setSong (context, nullptr); }
 
-    te::Edit& edit() const { return project->getEdit(); }
-    TrackID track (int index = 0) const { return phazite::getTrackID (*te::getAudioTracks (edit())[index]); }
+    phazite::Song& song() const { return project->getSong(); }
+    TrackID track (int index = 0) const { return tracks[(size_t) index]; }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -73,11 +74,12 @@ struct Song
         return ids;
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (edit())); }
+    juce::String describeUndo() const { return phazite::describeUndo (&song()); }
 
     phazite::test::TemporaryFolder temp;
     std::unique_ptr<phazite::Project> project;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
+    std::vector<TrackID> tracks; // the song's, top to bottom
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
 };
@@ -205,5 +207,5 @@ TEST_CASE ("A preset dropped on a mixer channel goes onto it, and a track's make
 
     strip.itemDropped (dragOf (phazite::ui::toDragDescription (library.makeFileItem (trackFile, trackFile.getParentDirectory())), source));
     CHECK (song.describeUndo() == juce::String ("Undo Add Lead"));
-    CHECK (te::getAudioTracks (song.edit()).size() == 3);
+    CHECK (phazite::getTrackIDs (song.song()).size() == 3);
 }

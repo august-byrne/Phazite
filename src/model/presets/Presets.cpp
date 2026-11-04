@@ -1,27 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Presets.h"
 #include "PresetModel.h"
-#include "devices/drums/DrumSampler.h"
-#include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/Tracks.h"
-#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
-#include "model/devices/internal/DevicePlugin.h"
-#include "model/devices/internal/DeviceStates.h"
 #include "model/devices/internal/Devices.h"
-#include "model/mirror/internal/Bridge.h"
+#include "model/devices/internal/Parameters.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <functional>
-#include <iterator>
+#include <optional>
+#include <vector>
 
 namespace phazite
 {
@@ -60,14 +61,12 @@ namespace
     }
 
     //==============================================================================
-    // Phazite's own devices, by their type IDs.
-    const devices::DeviceInfo* findOwnDevice (const juce::String& typeID)
+    // The description of one of Phazite's own devices an element names, or nullptr (a plug-in, a container).
+    const devices::DeviceInfo* findOwnInfo (const juce::ValueTree& device)
     {
-        for (const auto* info : getOwnDevices())
-            if (toString (info->typeID) == typeID)
-                return info;
-
-        return nullptr;
+        return device.hasType (schema::DEVICE) && ! isPluginState (device)
+                   ? findOwnDevice (device[schema::deviceType].toString().toStdString())
+                   : nullptr;
     }
 
     // A parameter's value as a preset writes it: a choice's or a switch's as a whole number, any other as the shortest
@@ -82,311 +81,393 @@ namespace
         return error == std::errc() ? juce::String (text.data(), (size_t) (end - text.data())).getDoubleValue() : (double) value;
     }
 
-    // A plug-in's description, as scanning found it: by its identifier, else by its name, maker and format.
-    std::optional<juce::PluginDescription> findPlugin (te::Engine& engine, const juce::var& identity)
+    // The plug-in a preset names (Schema.h: preset::plugin), which the plug-in host finds among those scanning found: by its
+    // identifier, else by its name, maker and format.
+    juce::PluginDescription readIdentity (const juce::var& identity)
     {
         juce::PluginDescription wanted;
         wanted.fileOrIdentifier = identity[keys::identifier].toString();
         wanted.name = identity[keys::name].toString();
         wanted.manufacturerName = identity[keys::manufacturer].toString();
         wanted.pluginFormatName = identity[keys::format].toString();
-        return findKnownPlugin (engine, wanted);
+        return wanted;
     }
 
-    bool isSamePlugin (const te::ExternalPlugin& plugin, const juce::var& identity)
+    bool isSamePlugin (const juce::ValueTree& device, const juce::var& identity)
     {
-        return plugin.desc.name == identity[keys::name].toString()
-               && plugin.desc.manufacturerName == identity[keys::manufacturer].toString()
-               && plugin.desc.pluginFormatName == identity[keys::format].toString();
+        const auto description = getPluginIdentity (device);
+        return description.name == identity[keys::name].toString()
+               && description.manufacturerName == identity[keys::manufacturer].toString()
+               && description.pluginFormatName == identity[keys::format].toString();
+    }
+
+    // How many steps a step sequencer's element plays (its numSteps set by hand, else its default).
+    int getNumSteps (const juce::ValueTree& sequencer)
+    {
+        constexpr auto kind = devices::ModulatorKind::steps;
+        const auto& info = devices::getModulatorParameters (kind)[(size_t) devices::findModulatorParameter (kind, "numSteps")];
+        const auto value =
+            (float) sequencer.getChildWithName (schema::VALUES).getProperty (juce::Identifier (toString (info.id)), info.defaultValue);
+        return juce::jlimit (1, devices::Modulator::maxSteps, juce::roundToInt (value));
     }
 
     //==============================================================================
     // A device as a preset holds it: its values set by hand, not what automation or modulation played; its sound files by
     // their full paths; nothing that ties it to its project (its automation, what modulates it, its sidechain, whether it
-    // is on).
-    juce::var describeDevice (te::Plugin& device)
+    // is on). Void for an element that is neither one of Phazite's own devices nor a plug-in.
+    juce::var describeDevice (const Song& song, const juce::ValueTree& device)
     {
-        storeDeviceState (device);
+        const auto id = getDeviceID (device);
+        const auto* own = findOwnInfo (device);
+
+        if (own == nullptr && ! isPluginState (device))
+            return {};
+
         auto preset = makeObject();
-        set (preset, keys::name, device.getName());
-        set (preset, keys::instrument, isInstrument (device));
+        set (preset, keys::name, getDeviceName (song, id));
+        set (preset, keys::instrument, isInstrumentState (device));
 
-        if (auto* own = dynamic_cast<DevicePlugin*> (&device))
+        if (own != nullptr)
         {
-            auto state = device.state.createCopy();
-            restoreValuesSetByHand (state);
-            writeDeviceFilePaths (getSong (device.edit), state);
-            const auto& info = own->getDeviceInfo();
-            set (preset, keys::type, toString (info.typeID));
-
-            const auto parameters = makeObject();
+            set (preset, keys::type, toString (own->typeID));
 
             // Every parameter, so that the preset sets the whole device wherever it loads.
-            for (const auto& parameter : info.parameters)
+            const auto values = device.getChildWithName (schema::VALUES);
+            const auto parameters = makeObject();
+
+            for (const auto& parameter : own->parameters)
             {
-                const juce::Identifier id (toString (parameter.id));
-                set (parameters, id, toPresetValue (parameter, state.hasProperty (id) ? (float) state[id] : parameter.defaultValue));
+                const juce::Identifier parameterID (toString (parameter.id));
+                set (parameters, parameterID, toPresetValue (parameter, (float) values.getProperty (parameterID, parameter.defaultValue)));
             }
 
             set (preset, keys::parameters, parameters);
-            const auto sounds = makeObject();
 
-            for (const auto& property : getSoundProperties (info))
-                if (state.hasProperty (property))
-                    set (sounds, property, state[property].toString());
+            // Its sounds, its files by their full paths.
+            auto copy = device.createCopy();
+            writeDeviceFilePaths (song, copy);
+            const auto sounds = copy.getChildWithName (schema::SOUNDS);
+            const auto saved = makeObject();
 
-            if (! sounds.getDynamicObject()->getProperties().isEmpty())
-                set (preset, keys::sounds, sounds);
+            for (const auto& property : getSoundProperties (*own))
+                if (sounds.hasProperty (property))
+                    set (saved, property, sounds[property].toString());
+
+            if (! saved.getDynamicObject()->getProperties().isEmpty())
+                set (preset, keys::sounds, saved);
 
             return preset;
         }
 
-        if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (&device))
-        {
-            const auto identity = makeObject();
-            set (identity, keys::format, plugin->desc.pluginFormatName);
-            set (identity, keys::name, plugin->desc.name);
-            set (identity, keys::manufacturer, plugin->desc.manufacturerName);
-            set (identity, keys::identifier, plugin->desc.fileOrIdentifier);
-            set (identity, keys::uid, plugin->desc.uniqueId);
-            set (preset, keys::plugin, identity);
-            set (preset, keys::state, plugin->state[te::IDs::state].toString());
-            set (preset, keys::program, (int) plugin->state[te::IDs::programNum]);
-            set (preset, keys::mix, getMix (device));
-            return preset;
-        }
-
-        return {};
+        // A plug-in: which one it is, and what it keeps of its own (its state and its program, stored into its element as
+        // the caller stored the song's devices), and its mix.
+        const auto description = getPluginIdentity (device);
+        const auto identity = makeObject();
+        set (identity, keys::format, description.pluginFormatName);
+        set (identity, keys::name, description.name);
+        set (identity, keys::manufacturer, description.manufacturerName);
+        set (identity, keys::identifier, description.fileOrIdentifier);
+        set (identity, keys::uid, description.uniqueId);
+        set (preset, keys::plugin, identity);
+        set (preset, keys::state, device[schema::pluginState].toString());
+        set (preset, keys::program, (int) device[schema::pluginProgram]);
+        set (preset, keys::mix, getMix (song, id));
+        return preset;
     }
 
-    // A modulation's target, as a preset names it (Schema.h); void for one the preset doesn't hold (a send).
-    juce::var describeTarget (const te::AutomatableParameter& parameter, float amount,
-                              const std::function<bool (const juce::var&, te::Plugin&)>& where)
-    {
-        auto* owner = parameter.getPlugin();
-        auto target = makeObject();
+    // Where a modulation's target is, as a preset names it (Schema.h: TARGET), written into the target; false for one the
+    // preset doesn't hold (a send).
+    using Locate = std::function<bool (const juce::var& target, const ParameterRef&)>;
 
-        if (owner == nullptr || ! where (target, *owner))
-            return {};
-
-        set (target, keys::parameter, parameter.paramID);
-        set (target, keys::amount, amount);
-        return target;
-    }
-
-    juce::Array<juce::var> describeModulations (const ModulatorAccess& modulator,
-                                                const std::function<bool (const juce::var&, te::Plugin&)>& where)
+    // What a modulator or a macro modulates, from its element (Schema.h: MODULATES), in the order it was made.
+    juce::Array<juce::var> describeModulations (const juce::ValueTree& modulator, const Locate& where)
     {
         juce::Array<juce::var> targets;
 
-        for (const auto& modulation : getModulations (modulator))
-            if (const auto target = describeTarget (*modulation.parameter, modulation.assignment->value.get(), where); target.isObject())
-                targets.add (target);
+        for (const auto& child : modulator)
+        {
+            if (! child.hasType (schema::MODULATES))
+                continue;
+
+            const auto parameter = getModulatedParameter (child);
+            auto target = makeObject();
+
+            if (! where (target, parameter))
+                continue;
+
+            set (target, keys::parameter, parameter.parameter);
+            set (target, keys::amount, (float) child[schema::modulatesAmount]);
+            targets.add (target);
+        }
 
         return targets;
     }
 
-    juce::var describeMacro (const ModulatorAccess& macro, const std::function<bool (const juce::var&, te::Plugin&)>& where)
+    juce::var describeMacro (const juce::ValueTree& macro, const Locate& where)
     {
         auto preset = makeObject();
-        set (preset, keys::name, macro.macro->macroName.get());
-        set (preset, keys::value, macro.macro->getCurrentBaseValue());
+        set (preset, keys::name, macro[schema::macroName].toString());
+        set (preset, keys::value, (float) macro.getProperty (schema::macroValue, 0.0f));
         set (preset, keys::modulates, describeModulations (macro, where));
         return preset;
     }
 
     // A container: its devices, and its macros with what they modulate in it.
-    juce::var describeContainer (te::Plugin& container)
+    juce::var describeContainer (const Song& song, const juce::ValueTree& container)
     {
-        auto* rack = getContainerRack (container);
         auto preset = makeObject();
+        set (preset, keys::name, container[schema::containerName].toString());
+        set (preset, keys::mix, getMix (song, getDeviceID (container)));
 
-        if (rack == nullptr)
-            return {};
+        const auto inside = getDeviceStates (container);
+        juce::Array<juce::var> devicePresets, macroPresets;
 
-        storeDeviceStates (*rack);
-        set (preset, keys::name, rack->rackName.get());
-        set (preset, keys::mix, getMix (container));
+        for (const auto& device : inside)
+            devicePresets.add (describeDevice (song, device));
 
-        const auto inside = getContainerDevices (container);
-        juce::Array<juce::var> devices, macros;
-
-        for (auto* device : inside)
-            devices.add (describeDevice (*device));
-
-        const auto inContainer = [&inside] (const juce::var& target, te::Plugin& owner)
+        const auto inContainer = [&inside] (const juce::var& target, const ParameterRef& parameter)
         {
-            if (const auto index = inside.indexOf (&owner); index >= 0)
+            for (size_t i = 0; i < inside.size(); ++i)
             {
-                set (target, keys::device, index);
-                return true;
+                if (getDeviceID (inside[i]) == parameter.device)
+                {
+                    set (target, keys::device, (int) i);
+                    return true;
+                }
             }
 
             return false;
         };
 
-        for (auto* macro : getContainerMacros (container))
-            macros.add (describeMacro ({ nullptr, macro }, inContainer));
+        for (const auto& child : container)
+            if (child.hasType (schema::MACRO))
+                macroPresets.add (describeMacro (child, inContainer));
 
-        set (preset, keys::devices, devices);
-        set (preset, keys::macros, macros);
+        set (preset, keys::devices, devicePresets);
+        set (preset, keys::macros, macroPresets);
         return preset;
     }
 
     //==============================================================================
-    // A device made from a preset, on no channel yet: one of Phazite's own with its values and sounds (the sounds copied
-    // into the project), or a plug-in with its own settings; nullptr for a plug-in that isn't installed.
-    te::Plugin::Ptr createDevice (te::Edit& edit, const juce::var& preset)
+    // One of Phazite's own devices' element made from a preset: the values it names, each as its parameter allows it (the
+    // others at their defaults), and its sounds, their files copied into the project.
+    juce::ValueTree makeOwnDevice (Song& song, const devices::DeviceInfo& info, const juce::var& saved)
     {
-        if (const auto* info = findOwnDevice (preset[keys::type].toString()))
-        {
-            juce::ValueTree state (te::IDs::PLUGIN);
-            state.setProperty (te::IDs::type, toString (info->typeID), nullptr);
-            const auto values = preset[keys::parameters];
+        std::vector<std::pair<juce::String, float>> values;
+        const auto named = saved[keys::parameters];
 
-            for (const auto& parameter : info->parameters)
-                if (const juce::Identifier id (toString (parameter.id)); values.hasProperty (id))
-                    state.setProperty (id, devices::constrain (parameter, (float) values[id]), nullptr);
+        for (const auto& parameter : info.parameters)
+            if (const juce::Identifier parameterID (toString (parameter.id)); named.hasProperty (parameterID))
+                values.push_back ({ parameterID.toString(), devices::constrain (parameter, (float) named[parameterID]) });
 
-            for (const auto& property : getSoundProperties (*info))
-                if (const auto sound = preset[keys::sounds][property].toString(); sound.isNotEmpty())
-                    state.setProperty (property, sound, nullptr);
+        auto state = makeOwnDeviceState (song, info.typeID, values);
+        juce::ValueTree sounds (schema::SOUNDS);
 
-            copyDeviceFilesInto (getSong (edit), state);
-            return edit.getPluginCache().createNewPlugin (state);
-        }
+        for (const auto& property : getSoundProperties (info))
+            if (const auto sound = saved[keys::sounds][property].toString(); sound.isNotEmpty())
+                sounds.setProperty (property, sound, nullptr);
 
-        if (const auto identity = preset[keys::plugin]; identity.isObject())
-        {
-            const auto description = findPlugin (edit.engine, identity);
+        if (sounds.getNumProperties() > 0)
+            state.appendChild (sounds, nullptr);
 
-            if (! description.has_value())
-                return {};
+        copyDeviceFilesInto (song, state);
+        return state;
+    }
 
-            auto state = te::ExternalPlugin::create (edit.engine, *description);
+    // A plug-in's element made from a preset: which plug-in it is, as scanning found it, what it keeps of its own (its state
+    // and its program, which its instance opens with) and an effect's mix; invalid for one the plug-in host doesn't know.
+    juce::ValueTree makePlugin (Song& song, const PluginHost& host, const juce::var& saved)
+    {
+        const auto description = findKnownPlugin (host, readIdentity (saved[keys::plugin]));
 
-            if (const auto settings = preset[keys::state].toString(); settings.isNotEmpty())
-                state.setProperty (te::IDs::state, settings, nullptr);
+        if (! description.has_value())
+            return {};
 
-            state.setProperty (te::IDs::programNum, (int) preset[keys::program], nullptr);
-            return edit.getPluginCache().createNewPlugin (state);
-        }
+        DeviceType type;
+        type.name = description->name;
+        type.description = *description;
+        type.isInstrument = description->isInstrument;
+        auto state = makeDeviceState (song, type);
+
+        if (const auto settings = saved[keys::state].toString(); settings.isNotEmpty())
+            state.setProperty (schema::pluginState, settings, nullptr);
+
+        if (saved.hasProperty (keys::program))
+            state.setProperty (schema::pluginProgram, (int) saved[keys::program], nullptr);
+
+        if (const auto mix = juce::jlimit (0.0f, 1.0f, (float) saved.getProperty (keys::mix, 1.0f));
+            ! isInstrumentState (state) && mix < 1.0f)
+            state.setProperty (schema::deviceMix, mix, nullptr);
+
+        return state;
+    }
+
+    // A device preset's device (Schema.h: DEVICE), one of Phazite's own or a plug-in.
+    juce::ValueTree makeDevice (Song& song, const PluginHost& host, const juce::var& saved)
+    {
+        if (const auto* info = findOwnDevice (saved[keys::type].toString().toStdString()))
+            return makeOwnDevice (song, *info, saved);
+
+        if (saved[keys::plugin].isObject())
+            return makePlugin (song, host, saved);
 
         return {};
     }
 
-    // What a preset sets once its device is on a channel: a plug-in's mix.
-    void applyMix (te::Plugin& device, const juce::var& preset)
+    // Whether a device's element has a parameter a preset names: one of Phazite's own devices' by its description; any for a
+    // plug-in, whose instance tells its parameters only once it plays (what names one it hasn't plays nothing).
+    bool hasParameter (const juce::ValueTree& device, const juce::String& parameterID)
     {
-        if (preset.hasProperty (keys::mix) && preset[keys::plugin].isObject())
-            setMix (device, (float) preset[keys::mix]);
+        if (const auto* info = findOwnInfo (device))
+            return devices::findParameter (*info, parameterID.toStdString()) >= 0;
+
+        return isPluginState (device) && parameterID.isNotEmpty();
     }
 
-    // A parameter of a device by its ID, or nullptr.
-    te::AutomatableParameter* findParameter (te::Plugin* device, const juce::String& id)
+    // What a macro of an element not in the song yet modulates, as the song keeps it (Modulation.h: setModulation()).
+    void addModulates (juce::ValueTree macro, const ParameterRef& parameter, float amount)
     {
-        return device != nullptr && id.isNotEmpty() ? device->getAutomatableParameterByID (id).get() : nullptr;
+        juce::ValueTree modulates (schema::MODULATES);
+        modulates.setProperty (schema::modulatesDevice, juce::String ((juce::int64) parameter.device.getRaw()), nullptr);
+        modulates.setProperty (schema::modulatesParameter, parameter.parameter, nullptr);
+        modulates.setProperty (schema::modulatesAmount, std::round ((double) juce::jlimit (-1.0f, 1.0f, amount) * 1.0e4) / 1.0e4, nullptr);
+        macro.appendChild (modulates, nullptr);
     }
 
-    // A macro's name and value, from a preset.
-    void applyMacro (const ModulatorAccess& macro, const juce::var& preset)
+    // A container made from a preset (Schema.h: CONTAINER), with the devices it holds, by their places in the preset (none
+    // for one that couldn't be made, so that the others keep their places: a plug-in that isn't installed, or an
+    // instrument, which a container can't hold).
+    struct MadeContainer
     {
-        if (const auto name = preset[keys::name].toString(); name.isNotEmpty())
-            renameMacro (*macro.macro, name);
+        juce::ValueTree state;
+        std::vector<DeviceID> devices;
+    };
 
-        setDeviceValue (*macro.macro, juce::jlimit (0.0f, 1.0f, (float) preset[keys::value]));
-    }
-
-    // What a modulator or a macro modulates, from a preset; find() gives a target's parameter.
-    void applyModulations (const ModulatorAccess& modulator, const juce::var& preset,
-                           const std::function<te::AutomatableParameter*(const juce::var&)>& find)
+    MadeContainer makeContainer (Song& song, const PluginHost& host, const juce::var& saved)
     {
-        if (const auto* targets = preset[keys::modulates].getArray())
-            for (const auto& target : *targets)
-                if (auto* parameter = find (target); parameter != nullptr && canModulate (modulator, *parameter))
-                    setModulation (modulator, *parameter, juce::jlimit (-1.0f, 1.0f, (float) target[keys::amount]));
-    }
+        MadeContainer made;
+        made.state = juce::ValueTree (schema::CONTAINER);
+        made.state.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
+        const auto name = saved[keys::name].toString();
+        made.state.setProperty (schema::containerName, name.isNotEmpty() ? name : makeContainerName (song), nullptr);
 
-    // A container made from a preset and put on a channel: its devices, mix, name and macros, with what they modulate.
-    te::Plugin* addContainer (te::Edit& edit, te::Track* channel, const juce::var& preset,
-                              const std::function<te::Plugin*(te::Edit&, te::Track*, const te::Plugin::Ptr&)>& place)
-    {
-        te::Plugin::Array made;
-        juce::Array<juce::var> madeFrom;
+        if (const auto mix = juce::jlimit (0.0f, 1.0f, (float) saved.getProperty (keys::mix, 1.0f)); mix < 1.0f)
+            made.state.setProperty (schema::deviceMix, mix, nullptr);
 
-        if (const auto* devices = preset[keys::devices].getArray())
-            for (const auto& device : *devices)
-                if (auto plugin = createDevice (edit, device))
-                {
-                    made.add (plugin);
-                    madeFrom.add (device);
-                }
-
-        auto* container = place (edit, channel, createContainer (edit, made, preset[keys::name].toString()));
-
-        if (container == nullptr)
-            return nullptr;
-
-        setMix (*container, preset.hasProperty (keys::mix) ? (float) preset[keys::mix] : 1.0f);
-        const auto inside = getContainerDevices (*container);
-
-        for (int i = 0; i < inside.size() && i < madeFrom.size(); ++i)
-            applyMix (*inside[i], madeFrom[i]);
-
-        const auto find = [&inside] (const juce::var& target)
+        if (const auto* devicePresets = saved[keys::devices].getArray())
         {
-            const auto index = (int) target.getProperty (keys::device, -1);
-            return juce::isPositiveAndBelow (index, inside.size()) ? findParameter (inside[index], target[keys::parameter].toString())
-                                                                   : nullptr;
-        };
-
-        const auto macros = getContainerMacros (*container);
-
-        if (const auto* saved = preset[keys::macros].getArray())
-        {
-            for (int i = 0; i < macros.size() && i < saved->size(); ++i)
+            for (const auto& device : *devicePresets)
             {
-                const ModulatorAccess macro { nullptr, macros[i] };
-                applyMacro (macro, saved->getReference (i));
-                applyModulations (macro, saved->getReference (i), find);
+                const auto state = makeDevice (song, host, device);
+                const auto fits = state.isValid() && ! isInstrumentState (state);
+                made.devices.push_back (fits ? getDeviceID (state) : DeviceID());
+
+                if (fits)
+                    made.state.appendChild (state, nullptr);
             }
         }
 
-        return container;
+        // Its eight macros, as a new container's (Containers.h: groupIntoContainer()), named and set as the preset's, with
+        // what they modulate in it.
+        const auto* macros = saved[keys::macros].getArray();
+
+        for (int i = 0; i < macrosPerContainer; ++i)
+        {
+            const auto preset = macros != nullptr && i < macros->size() ? macros->getReference (i) : juce::var();
+            const auto macroName = preset[keys::name].toString();
+            juce::ValueTree macro (schema::MACRO);
+            macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
+            macro.setProperty (schema::macroName, macroName.isNotEmpty() ? macroName : "Macro " + juce::String (i + 1), nullptr);
+
+            if (const auto value = juce::jlimit (0.0f, 1.0f, (float) preset[keys::value]); value > 0.0f)
+                macro.setProperty (schema::macroValue, value, nullptr);
+
+            if (const auto* targets = preset[keys::modulates].getArray())
+            {
+                for (const auto& target : *targets)
+                {
+                    const auto index = (int) target.getProperty (keys::device, -1);
+                    const auto device =
+                        juce::isPositiveAndBelow (index, (int) made.devices.size()) ? made.devices[(size_t) index] : DeviceID();
+                    const ParameterRef parameter { device, target[keys::parameter].toString() };
+
+                    if (device.isValid()
+                        && hasParameter (made.state.getChildWithProperty (schema::deviceID, (juce::int64) device.getRaw()),
+                                         parameter.parameter))
+                        addModulates (macro, parameter, (float) target[keys::amount]);
+                }
+            }
+
+            made.state.appendChild (macro, nullptr);
+        }
+
+        return made;
+    }
+
+    // What a modulator or a macro on the song modulates, from a preset; find() names a target's parameter.
+    void applyModulations (Song& song, ModulatorID modulator, const juce::var& preset,
+                           const std::function<ParameterRef (const juce::var&)>& find)
+    {
+        if (const auto* targets = preset[keys::modulates].getArray())
+            for (const auto& target : *targets)
+                if (const auto parameter = find (target); canModulate (song, modulator, parameter))
+                    setModulation (song, modulator, parameter, juce::jlimit (-1.0f, 1.0f, (float) target[keys::amount]));
     }
 
     //==============================================================================
-    // A track's volume and pan as a preset keeps them: in decibels, and from -1 to 1.
-    void describeMix (const juce::var& preset, te::AudioTrack& track)
+    // A preset's values put into one of Phazite's own devices of its type, each as a value set by hand, and a parameter it
+    // doesn't name at its default, so that a preset is the same starting point whatever the device was set to; its sounds
+    // too, copied into the project, and the device's own sound where it names none.
+    void loadInto (Song& song, DeviceID id, const devices::DeviceInfo& info, const juce::var& saved)
     {
-        set (preset, keys::volume, getChannelVolume (track));
-        set (preset, keys::pan, getChannelPan (track));
+        const auto values = saved[keys::parameters];
+
+        for (const auto& parameter : info.parameters)
+        {
+            const juce::Identifier parameterID (toString (parameter.id));
+            const auto value = values.hasProperty (parameterID) ? (float) values[parameterID] : parameter.defaultValue;
+            setValueSetByHand (song, ParameterRef { id, parameterID.toString() }, devices::constrain (parameter, value));
+        }
+
+        // Its sounds as a device of its type off the song holds them, so that their files are copied in.
+        juce::ValueTree device (schema::DEVICE), sounds (schema::SOUNDS);
+        device.setProperty (schema::deviceType, toString (info.typeID), nullptr);
+
+        for (const auto& property : getSoundProperties (info))
+            if (const auto sound = saved[keys::sounds][property].toString(); sound.isNotEmpty())
+                sounds.setProperty (property, sound, nullptr);
+
+        device.appendChild (sounds, nullptr);
+        copyDeviceFilesInto (song, device);
+        const auto copied = device.getChildWithName (schema::SOUNDS);
+
+        for (const auto& property : getSoundProperties (info))
+            if (copied.hasProperty (property))
+                setDeviceSound (song, id, property, copied[property].toString());
+            else if (! saved[keys::sounds].hasProperty (property))
+                setDeviceSound (song, id, property, {}); // its own sound again
     }
-
-    void applyMix (te::AudioTrack& track, const juce::var& preset)
-    {
-        if (preset.hasProperty (keys::volume))
-            setChannelVolume (track, (float) preset[keys::volume]);
-
-        if (preset.hasProperty (keys::pan))
-            setChannelPan (track, (float) preset[keys::pan]);
-    }
-
 } // namespace
 
 //==============================================================================
-juce::var makeDevicePreset (te::Plugin& device)
+juce::var makeDevicePreset (Song& song, DeviceID id)
 {
+    if (! findDeviceState (song, id).isValid())
+        return {};
+
+    // What its channel's plug-ins keep of their own, in their elements first.
+    song.storeDeviceStates (getDeviceChannel (song, id).getRaw());
+    const auto state = findDeviceState (song, id);
     auto preset = makeObject();
 
-    if (getContainerRack (device) != nullptr)
+    if (isContainerState (state))
     {
         set (preset, keys::kind, keys::containerKind);
-        set (preset, keys::container, describeContainer (device));
+        set (preset, keys::container, describeContainer (song, state));
         return preset;
     }
 
-    const auto described = describeDevice (device);
+    const auto described = describeDevice (song, state);
 
     if (! described.isObject())
         return {};
@@ -396,12 +477,15 @@ juce::var makeDevicePreset (te::Plugin& device)
     return preset;
 }
 
-juce::var makeTrackPreset (te::AudioTrack& track)
+juce::var makeTrackPreset (Song& song, TrackID track)
 {
-    storeDeviceStates (track);
+    if (! findTrackState (song, track).hasType (schema::TRACK))
+        return {};
+
+    song.storeDeviceStates (track.getRaw());
+    const auto state = findTrackState (song, track);
     auto saved = makeObject();
-    const auto state = findTrackState (track);
-    set (saved, keys::name, getTrackName (track));
+    set (saved, keys::name, getTrackName (song, track));
     set (saved, keys::colour, juce::Colour::fromString (state[schema::trackColour].toString()).toString());
 
     for (const auto& [property, key] :
@@ -410,61 +494,65 @@ juce::var makeTrackPreset (te::AudioTrack& track)
         if (state.hasProperty (*property))
             set (saved, *key, state[*property]);
 
-    describeMix (saved, track);
+    set (saved, keys::volume, getChannelVolume (song, track));
+    set (saved, keys::pan, getChannelPan (song, track));
 
     // Its instrument, and its effects and containers, in their order.
-    auto* instrument = getInstrument (track);
-    const auto effects = getEffects (track);
+    const auto instrument = getInstrument (song, track);
+    const auto effects = getEffects (song, track);
 
-    if (instrument != nullptr)
-        set (saved, keys::instrument, describeDevice (*instrument));
+    if (instrument.isValid())
+        set (saved, keys::instrument, describeDevice (song, findDeviceState (song, instrument)));
 
     juce::Array<juce::var> effectPresets;
 
-    for (auto* effect : effects)
+    for (const auto effect : effects)
     {
-        if (getContainerRack (*effect) != nullptr)
+        if (const auto effectState = findDeviceState (song, effect); isContainerState (effectState))
         {
             auto container = makeObject();
-            set (container, keys::container, describeContainer (*effect));
+            set (container, keys::container, describeContainer (song, effectState));
             effectPresets.add (container);
         }
         else
         {
-            effectPresets.add (describeDevice (*effect));
+            effectPresets.add (describeDevice (song, effectState));
         }
     }
 
     set (saved, keys::effects, effectPresets);
 
     // Its modulators and macros, with what they modulate on it: its devices', those in its containers, its volume and pan.
-    const auto onTrack = [&track, instrument, &effects] (const juce::var& target, te::Plugin& owner)
+    const auto fader = getFader (song, track);
+
+    const auto onTrack = [&song, fader, instrument, &effects] (const juce::var& target, const ParameterRef& parameter)
     {
-        if (&owner == track.getVolumePlugin())
+        if (parameter.device == fader)
         {
             set (target, keys::mixer, true);
             return true;
         }
 
-        if (&owner == instrument)
+        if (instrument.isValid() && parameter.device == instrument)
         {
             set (target, keys::instrument, true);
             return true;
         }
 
-        for (int i = 0; i < effects.size(); ++i)
+        for (size_t i = 0; i < effects.size(); ++i)
         {
-            if (effects[i] == &owner)
+            if (effects[i] == parameter.device)
             {
-                set (target, keys::effect, i);
+                set (target, keys::effect, (int) i);
                 return true;
             }
 
-            if (const auto inside = getContainerDevices (*effects[i]).indexOf (&owner);
-                getContainerRack (*effects[i]) != nullptr && inside >= 0)
+            const auto inside = getContainerDevices (song, effects[i]);
+
+            if (const auto found = std::find (inside.begin(), inside.end(), parameter.device); found != inside.end())
             {
-                set (target, keys::effect, i);
-                set (target, keys::inside, inside);
+                set (target, keys::effect, (int) i);
+                set (target, keys::inside, (int) std::distance (inside.begin(), found));
                 return true;
             }
         }
@@ -474,37 +562,47 @@ juce::var makeTrackPreset (te::AudioTrack& track)
 
     juce::Array<juce::var> modulators, macros;
 
-    for (const auto& modulator : getModulators (track))
+    for (const auto id : getModulators (song, track))
     {
-        const auto type = getModulatorType (modulator);
+        const auto modulator = findModulatorState (song, id);
 
-        if (! type.has_value())
-            continue;
-
-        if (*type == ModulatorType::macro)
+        if (modulator.hasType (schema::MACRO))
         {
             macros.add (describeMacro (modulator, onTrack));
             continue;
         }
 
+        const auto type = findModulatorType (modulator[schema::modulatorType].toString());
+        const auto kind = getModulatorKind (modulator);
+
+        if (! type.has_value() || ! kind.has_value())
+            continue;
+
         auto preset = makeObject();
         set (preset, keys::type, keys::modulatorTypeNames[(size_t) *type]);
+
+        // Its parameters' values set by hand (a preset loads it switched on).
+        const auto values = modulator.getChildWithName (schema::VALUES);
         const auto parameters = makeObject();
 
-        for (auto* parameter : modulator.modifier->getAutomatableParameters())
-            if (parameter != modulator.modifier->enabledParam.get()) // presets load modulators on
-                set (parameters, parameter->paramID, parameter->getCurrentBaseValue());
+        for (const auto& info : devices::getModulatorParameters (*kind))
+        {
+            const juce::Identifier parameterID (toString (info.id));
+            set (parameters, parameterID, (float) values.getProperty (parameterID, info.defaultValue));
+        }
 
         set (preset, keys::parameters, parameters);
 
-        if (auto* sequencer = dynamic_cast<te::StepModifier*> (modulator.modifier.get()))
+        if (*kind == devices::ModulatorKind::steps)
         {
-            juce::Array<juce::var> steps;
+            auto steps = getModulatorSteps (modulator);
+            steps.resize ((size_t) getNumSteps (modulator), 0.0f);
+            juce::Array<juce::var> savedSteps;
 
-            for (int i = 0; i < juce::roundToInt (sequencer->numStepsParam->getCurrentBaseValue()); ++i)
-                steps.add (sequencer->getStep (i));
+            for (const auto step : steps)
+                savedSteps.add (step);
 
-            set (preset, keys::steps, steps);
+            set (preset, keys::steps, savedSteps);
         }
 
         set (preset, keys::modulates, describeModulations (modulator, onTrack));
@@ -539,99 +637,121 @@ bool writePreset (const juce::var& preset, const juce::File& file)
            && file.replaceWithText (juce::JSON::toString (preset, false) + "\n", false, false, "\n");
 }
 
-te::Plugin* addDeviceFromPreset (te::Edit& edit, te::Track* channel, const juce::var& preset, Selection* selection)
+juce::ValueTree makeDeviceFromPreset (Song& song, const PluginHost& host, const juce::var& preset)
 {
-    const auto place = [selection] (te::Edit& in, te::Track* on, const te::Plugin::Ptr& device)
-    { return device != nullptr ? placeDevice (in, on, device, selection) : nullptr; };
+    const auto kind = findKind (preset[keys::kind].toString());
 
-    if (findKind (preset[keys::kind].toString()) == PresetKind::container)
-        return addContainer (edit, channel, preset[keys::container], place);
+    if (kind == PresetKind::container)
+        return makeContainer (song, host, preset[keys::container]).state;
 
-    const auto saved = preset[keys::device];
-    auto* device = place (edit, channel, createDevice (edit, saved));
+    if (kind == PresetKind::device)
+        return makeDevice (song, host, preset[keys::device]);
 
-    if (device != nullptr)
-        applyMix (*device, saved);
-
-    return device;
+    return {};
 }
 
-te::AudioTrack* addTrackFromPreset (te::Edit& edit, te::Track* after, const juce::var& preset, Selection* selection)
+DeviceID addDeviceFromPreset (Song& song, const PluginHost& host, TrackID channel, const juce::var& preset, Selection* selection)
+{
+    const auto device = makeDeviceFromPreset (song, host, preset);
+    return device.isValid() ? placeDevice (song, channel, device, selection) : DeviceID();
+}
+
+TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, const juce::var& preset, Selection* selection)
 {
     const auto saved = preset[keys::track];
 
     if (! saved.isObject())
-        return nullptr;
+        return {};
 
-    auto* track = insertTrack (edit, after, selection);
+    const auto track = insertTrack (song, after, selection);
 
-    if (track == nullptr)
-        return nullptr;
+    if (! track.isValid())
+        return {};
 
-    setTrackName (*track, saved[keys::name].toString());
+    setTrackName (song, track, saved[keys::name].toString());
 
     if (const auto colour = saved[keys::colour].toString(); colour.isNotEmpty())
-        setTrackColour (*track, juce::Colour::fromString (colour));
+        setTrackColour (song, track, juce::Colour::fromString (colour));
 
     for (const auto& [property, key] :
          { std::pair { &schema::drumMode, &keys::drumMode }, std::pair { &schema::drumOrder, &keys::drumOrder },
            std::pair { &schema::drumHidden, &keys::drumHidden } })
         if (saved.hasProperty (*key))
-            findTrackState (*track).setProperty (*property, saved[*key], nullptr); // view state
+            findTrackState (song, track).setProperty (*property, saved[*key], nullptr); // view state
 
-    applyMix (*track, saved);
+    if (saved.hasProperty (keys::volume))
+        setChannelVolume (song, track, (float) saved[keys::volume]);
 
-    // Its instrument, then its effects and containers in their order.
-    te::Plugin* instrument = nullptr;
-    te::Plugin::Array effects;
+    if (saved.hasProperty (keys::pan))
+        setChannelPan (song, track, (float) saved[keys::pan]);
+
+    // Its instrument, then its effects and containers in their order, each by its place in the preset (none for one that
+    // couldn't be made, so that the others keep their places).
+    DeviceID instrument;
 
     if (const auto device = saved[keys::instrument]; device.isObject())
-        if ((instrument = setInstrument (*track, createDevice (edit, device))) != nullptr)
-            applyMix (*instrument, device);
+        if (const auto state = makeDevice (song, host, device); state.isValid())
+            instrument = setInstrument (song, track, state);
 
-    const auto insert = [] (te::Edit&, te::Track* on, const te::Plugin::Ptr& device)
-    { return device != nullptr && on != nullptr ? insertDevice (*on, device) : nullptr; };
+    std::vector<DeviceID> effects;
+    std::vector<std::vector<DeviceID>> containersDevices;
 
     if (const auto* effectPresets = saved[keys::effects].getArray())
     {
         for (const auto& effect : *effectPresets)
         {
-            te::Plugin* added = nullptr;
+            DeviceID added;
+            std::vector<DeviceID> inside;
 
             if (const auto container = effect[keys::container]; container.isObject())
-                added = addContainer (edit, track, container, insert);
-            else if ((added = insert (edit, track, createDevice (edit, effect))) != nullptr)
-                applyMix (*added, effect);
+            {
+                auto made = makeContainer (song, host, container);
 
-            effects.add (added); // nullptr for one that couldn't be made, so that the others keep their indices
+                if ((added = insertDeviceState (song, track, made.state)).isValid())
+                    inside = std::move (made.devices);
+            }
+            else if (const auto state = makeDevice (song, host, effect); state.isValid() && ! isInstrumentState (state))
+            {
+                added = insertDeviceState (song, track, state);
+            }
+
+            effects.push_back (added);
+            containersDevices.push_back (std::move (inside));
         }
     }
 
     // Its modulators and macros, then what they modulate.
-    const auto find = [track, instrument, &effects] (const juce::var& target) -> te::AutomatableParameter*
+    const auto find = [&song, track, instrument, &effects, &containersDevices] (const juce::var& target) -> ParameterRef
     {
         const auto id = target[keys::parameter].toString();
 
         if ((bool) target[keys::mixer])
         {
-            auto* volume = track->getVolumePlugin();
-            return volume == nullptr ? nullptr : id == "pan" ? volume->panParam.get() : id == "volume" ? volume->volParam.get() : nullptr;
+            if (id == "volume")
+                return { getFader (song, track), getVolumeParameterID (song, track) };
+
+            if (id == "pan")
+                return { getFader (song, track), getPanParameterID (song, track) };
+
+            return {};
         }
 
         if ((bool) target[keys::instrument])
-            return findParameter (instrument, id);
+            return { instrument, id };
 
         const auto effect = (int) target.getProperty (keys::effect, -1);
-        te::Plugin* device = juce::isPositiveAndBelow (effect, effects.size()) ? effects[effect].get() : nullptr;
 
-        if (device != nullptr && target.hasProperty (keys::inside))
+        if (! juce::isPositiveAndBelow (effect, (int) effects.size()))
+            return {};
+
+        if (target.hasProperty (keys::inside))
         {
-            const auto inside = getContainerDevices (*device);
+            const auto& inside = containersDevices[(size_t) effect];
             const auto index = (int) target[keys::inside];
-            device = juce::isPositiveAndBelow (index, inside.size()) ? inside[index] : nullptr;
+            return juce::isPositiveAndBelow (index, (int) inside.size()) ? ParameterRef { inside[(size_t) index], id } : ParameterRef();
         }
 
-        return findParameter (device, id);
+        return { effects[(size_t) effect], id };
     };
 
     if (const auto* modulators = saved[keys::modulators].getArray())
@@ -639,21 +759,22 @@ te::AudioTrack* addTrackFromPreset (te::Edit& edit, te::Track* after, const juce
         for (const auto& modulator : *modulators)
         {
             const auto type = findModulatorType (modulator[keys::type].toString());
-            const auto added = type.has_value() ? addModulator (*track, *type) : std::nullopt;
+            const auto added = type.has_value() ? addModulator (song, track, *type) : ModulatorID();
+            const auto kind = getModulatorKind (findModulatorState (song, added));
 
-            if (! added.has_value() || added->modifier == nullptr)
+            if (! kind.has_value())
                 continue;
 
             if (auto* values = modulator[keys::parameters].getDynamicObject())
                 for (const auto& [id, value] : values->getProperties())
-                    if (auto parameter = added->modifier->getAutomatableParameterByID (id.toString()); parameter != nullptr)
-                        setDeviceValue (*parameter, (float) value);
+                    if (devices::findModulatorParameter (*kind, id.toString().toStdString()) >= 0)
+                        setValueSetByHand (song, ParameterRef { DeviceID::fromRaw (added.getRaw()), id.toString() }, (float) value);
 
             if (const auto* steps = modulator[keys::steps].getArray())
                 for (int i = 0; i < steps->size(); ++i)
-                    setModulatorStep (*added, i, (float) steps->getReference (i));
+                    setModulatorStep (song, added, i, (float) steps->getReference (i));
 
-            applyModulations (*added, modulator, find);
+            applyModulations (song, added, modulator, find);
         }
     }
 
@@ -661,12 +782,17 @@ te::AudioTrack* addTrackFromPreset (te::Edit& edit, te::Track* after, const juce
     {
         for (const auto& macro : *macros)
         {
-            if (auto* made = addMacro (track->getMacroParameterListForWriting(), macro[keys::name].toString()))
-            {
-                const ModulatorAccess access { nullptr, made };
-                applyMacro (access, macro);
-                applyModulations (access, macro, find);
-            }
+            const auto name = macro[keys::name].toString().trim();
+            const auto added =
+                name.isNotEmpty() ? addMacro (song, findTrackState (song, track), name) : addModulator (song, track, ModulatorType::macro);
+
+            if (! added.isValid())
+                continue;
+
+            // A macro's value is its one parameter, by its ID (model/devices/internal/Parameters.h).
+            setValueSetByHand (song, ParameterRef { DeviceID::fromRaw (added.getRaw()), juce::String (added.getRaw()) },
+                               juce::jlimit (0.0f, 1.0f, (float) macro[keys::value]));
+            applyModulations (song, added, macro, find);
         }
     }
 
@@ -696,196 +822,100 @@ std::optional<PresetInfo> readPresetInfo (const juce::File& file)
 
 juce::String getPresetFolderName (const ProjectContext& context, DeviceID id)
 {
-    auto* edit = getEdit (context);
-    const auto device = edit != nullptr && id.isValid() ? te::findPluginForID (*edit, phazite::toTracktion (id)) : nullptr;
+    auto* song = findSong (context);
+    const auto device = song != nullptr && id.isValid() ? findDeviceState (*song, id) : juce::ValueTree();
 
-    if (device == nullptr)
+    if (! device.isValid())
         return {};
 
-    return isContainer (*device) ? juce::String ("Containers") : juce::File::createLegalFileName (device->getName());
+    return isContainerState (device) ? juce::String ("Containers") : juce::File::createLegalFileName (getDeviceName (*song, id));
 }
 
 bool saveDevicePreset (const ProjectContext& context, DeviceID id, const juce::File& file)
 {
-    auto* edit = getEdit (context);
-    const auto device = edit != nullptr && id.isValid() ? te::findPluginForID (*edit, phazite::toTracktion (id)) : nullptr;
-    return device != nullptr && findDeviceState (*edit, id).isValid() && writePreset (makeDevicePreset (*device), file);
+    auto* song = findSong (context);
+    return song != nullptr && id.isValid() && findDeviceState (*song, id).isValid() && writePreset (makeDevicePreset (*song, id), file);
 }
 
 bool saveTrackPreset (const ProjectContext& context, TrackID id, const juce::File& file)
 {
-    auto* edit = getEdit (context);
-    auto* track =
-        edit != nullptr && id.isValid() ? dynamic_cast<te::AudioTrack*> (te::findTrackForID (*edit, phazite::toTracktion (id))) : nullptr;
-    return track != nullptr && getReturnBus (*track) < 0 && writePreset (makeTrackPreset (*track), file);
+    // A track that holds clips: not a folder, a return or the master.
+    auto* song = findSong (context);
+    const auto state = song != nullptr && id.isValid() ? findTrackState (*song, id) : juce::ValueTree();
+    return state.hasType (schema::TRACK) && ! isFolderState (state) && ! isReturnState (state)
+           && writePreset (makeTrackPreset (*song, id), file);
 }
 
 bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target)
 {
-    auto* edit = getEdit (context);
-    auto* track = edit != nullptr && target.isValid() ? te::findTrackForID (*edit, phazite::toTracktion (target)) : nullptr;
-    const auto preset = edit != nullptr ? readPreset (file) : juce::var();
+    auto* song = findSong (context);
+    const auto preset = song != nullptr ? readPreset (file) : juce::var();
 
-    if (! preset.isObject() || (target.isValid() && track == nullptr))
+    if (! preset.isObject() || (target.isValid() && ! findTrackState (*song, target).isValid()))
         return false;
 
     const auto name = file.getFileNameWithoutExtension();
-    const UndoStep step (*edit, "Add " + name);
+    const UndoStep step (*song, "Add " + name);
     auto& selection = getSelection (context);
+    const auto& host = getPluginHost (getEngineContext (context));
 
     if (findKind (preset[keys::kind].toString()) == PresetKind::track)
-        return addTrackFromPreset (*edit, track, preset, &selection) != nullptr;
+        return addTrackFromPreset (*song, host, target, preset, &selection).isValid();
 
     // A container is named after its preset.
-    auto* device = addDeviceFromPreset (*edit, track, preset, &selection);
+    const auto device = addDeviceFromPreset (*song, host, target, preset, &selection);
 
-    if (device != nullptr && isContainer (*device))
-        setContainerName (*device, name);
+    if (device.isValid() && isContainer (*song, device))
+        setContainerName (*song, device, name);
 
-    return device != nullptr;
+    return device.isValid();
 }
-
-//==============================================================================
-namespace
-{
-    // A plug-in's state with its own settings as they are now (its state block and its program), which this stores in the
-    // project first, outside the undo history.
-    juce::ValueTree getSettingsNow (te::ExternalPlugin& plugin)
-    {
-        storeDeviceState (plugin);
-        return plugin.state.createCopy();
-    }
-
-    // A plug-in's own settings, which Tracktion keeps as a block that the plug-in reads only when it loads: put into the
-    // plug-in, and back by undo. Neither writes through the undo manager, which an undoable action mustn't.
-    class PluginSettingsAction : public juce::UndoableAction
-    {
-    public:
-        PluginSettingsAction (te::ExternalPlugin& plugin, const juce::ValueTree& newSettings)
-            : edit (plugin.edit),
-              id (plugin.itemID),
-              before (getSettingsNow (plugin)),
-              after (newSettings.createCopy())
-        {
-        }
-
-        bool perform() override { return apply (after); }
-        bool undo() override { return apply (before); }
-
-    private:
-        te::Edit& edit;
-        const te::EditItemID id;
-        const juce::ValueTree before, after;
-
-        bool apply (const juce::ValueTree& settings)
-        {
-            const auto found = te::findPluginForID (edit, id);
-            auto* plugin = dynamic_cast<te::ExternalPlugin*> (found.get());
-
-            if (plugin == nullptr)
-                return false;
-
-            plugin->restorePluginStateFromValueTree (settings);
-
-            // What a save would write, so that the project holds it at once: in the plug-in's state, and in the song's
-            // element of it (Schema.h: pluginState, pluginProgram), but for a plug-in in a container.
-            auto device = findDeviceState (edit, getDeviceID (*plugin));
-
-            for (const auto& [property, inSong] :
-                 { std::pair { te::IDs::state, schema::pluginState }, std::pair { te::IDs::programNum, schema::pluginProgram } })
-            {
-                if (settings.hasProperty (property))
-                    plugin->state.setProperty (property, settings[property], nullptr);
-                else
-                    plugin->state.removeProperty (property, nullptr);
-
-                if (device.isValid() && settings[property].toString().isNotEmpty())
-                    device.setProperty (inSong, settings[property], nullptr);
-                else if (device.isValid())
-                    device.removeProperty (inSong, nullptr);
-            }
-
-            return true;
-        }
-    };
-
-    // A preset's values put into one of Phazite's own devices of its type, each parameter through the undo manager, and a
-    // parameter it doesn't name at its default, so that a preset is the same starting point whatever the device was set to;
-    // its sounds too, copied into the project, and the device's own sound where it names none.
-    bool loadInto (DevicePlugin& device, const juce::var& saved)
-    {
-        const auto& info = device.getDeviceInfo();
-
-        if (saved[keys::type].toString() != toString (info.typeID))
-            return false;
-
-        const auto values = saved[keys::parameters];
-
-        for (const auto& parameter : info.parameters)
-        {
-            const juce::Identifier id (toString (parameter.id));
-
-            if (auto* found = findParameter (&device, id.toString()))
-            {
-                const auto value = values.hasProperty (id) ? (float) values[id] : parameter.defaultValue;
-                setDeviceValue (*found, devices::constrain (parameter, value));
-            }
-        }
-
-        juce::ValueTree sounds (te::IDs::PLUGIN);
-        sounds.setProperty (te::IDs::type, toString (info.typeID), nullptr);
-
-        for (const auto& property : getSoundProperties (info))
-            if (const auto sound = saved[keys::sounds][property].toString(); sound.isNotEmpty())
-                sounds.setProperty (property, sound, nullptr);
-
-        copyDeviceFilesInto (getSong (device.edit), sounds);
-
-        for (const auto& property : getSoundProperties (info))
-            if (sounds.hasProperty (property))
-                setDeviceSound (device, property, sounds[property].toString());
-            else if (! saved[keys::sounds].hasProperty (property))
-                setDeviceSound (device, property, {}); // its own sound again
-
-        return true;
-    }
-} // namespace
 
 bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& file)
 {
-    auto* edit = getEdit (context);
-    const auto device = edit != nullptr && id.isValid() ? te::findPluginForID (*edit, toTracktion (id)) : te::Plugin::Ptr();
-    const auto preset = device != nullptr ? readPreset (file) : juce::var();
+    auto* song = findSong (context);
+    auto device = song != nullptr && id.isValid() ? findDeviceState (*song, id) : juce::ValueTree();
+    const auto preset = device.isValid() ? readPreset (file) : juce::var();
 
     if (! preset.isObject() || findKind (preset[keys::kind].toString()) != PresetKind::device)
         return false;
 
     const auto saved = preset[keys::device];
+    const auto stepName = "Load Preset " + file.getFileNameWithoutExtension();
 
-    if (auto* own = dynamic_cast<DevicePlugin*> (device.get()))
+    if (const auto* own = findOwnInfo (device))
     {
-        if (saved[keys::type].toString() != toString (own->getDeviceInfo().typeID))
+        if (saved[keys::type].toString() != toString (own->typeID))
             return false;
 
-        const UndoStep step (*edit, "Load Preset " + file.getFileNameWithoutExtension());
-        return loadInto (*own, saved);
+        const UndoStep step (*song, stepName);
+        loadInto (*song, id, *own, saved);
+        return true;
     }
 
-    auto* plugin = dynamic_cast<te::ExternalPlugin*> (device.get());
-
-    if (plugin == nullptr || ! saved[keys::plugin].isObject() || ! isSamePlugin (*plugin, saved[keys::plugin]))
+    if (! isPluginState (device) || ! saved[keys::plugin].isObject() || ! isSamePlugin (device, saved[keys::plugin]))
         return false;
 
-    // A plug-in keeps its settings in a block of its own, and its mix as values.
-    juce::ValueTree settings (te::IDs::PLUGIN);
-    settings.setProperty (te::IDs::state, saved[keys::state].toString(), nullptr);
-    settings.setProperty (te::IDs::programNum, (int) saved[keys::program], nullptr);
-    const UndoStep step (*edit, "Load Preset " + file.getFileNameWithoutExtension());
+    // A plug-in keeps its settings in a block of its own, which its element holds once stored: stored first, outside the
+    // undo history, so that an undo puts back the settings it has now. Its instance takes the preset's program and settings
+    // from the song, and the ones before them again on undo (model/plugins/internal/PluginInstances.h).
+    if (auto* session = getSession (context))
+        session->getPlugins().store (id);
 
-    if (! getSong (*edit).getUndoManager().perform (new PluginSettingsAction (*plugin, settings)))
-        return false;
+    const UndoStep step (*song, stepName);
+    auto* undo = &song->getUndoManager();
 
-    applyMix (*plugin, saved);
+    if (saved.hasProperty (keys::program))
+        device.setProperty (schema::pluginProgram, (int) saved[keys::program], undo);
+
+    if (const auto settings = saved[keys::state].toString(); settings.isNotEmpty())
+        device.setProperty (schema::pluginState, settings, undo);
+    else
+        device.removeProperty (schema::pluginState, undo);
+
+    if (saved.hasProperty (keys::mix))
+        setMix (*song, id, (float) saved[keys::mix]);
+
     return true;
 }
 } // namespace phazite

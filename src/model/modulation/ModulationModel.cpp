@@ -1,35 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModulationModel.h"
 #include "internal/Modulation.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
-#include "model/mirror/internal/Bridge.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace phazite
 {
 namespace
 {
-    te::Track* findTrack (const ProjectContext& context, TrackID id)
+    juce::String toString (std::string_view text)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? te::findTrackForID (*edit, toTracktion (id)) : nullptr;
+        return juce::String (text.data(), text.size());
     }
 
-    std::optional<ModulatorAccess> find (const ProjectContext& context, ModulatorID id)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr ? findModulator (*edit, id) : std::nullopt;
-    }
-
-    // Whether any of the song's modulators or macros modulates a parameter (Schema.h: MODULATES).
+    // Whether any of the song's modulators or macros modulates a parameter (Schema.h: MODULATES): most parameters none
+    // does, which a knob asks at each tick.
     bool isModulated (const Song& song, const ParameterRef& parameter)
     {
         for (const auto& modulator : getModulatorStates (song))
@@ -40,84 +36,88 @@ namespace
         return false;
     }
 
-    // What plays a modulator or a macro while Phazite's engine plays the project, or nullptr.
-    engine::ModulatorNode* findPlayedModulator (const ProjectContext& context, ModulatorID id)
+    // What plays a modulator or a macro while Phazite's engine plays the song, or nullptr.
+    engine::ModulatorNode* findPlayedModulator (const Song& song, ModulatorID id)
     {
-        auto* edit = getEdit (context);
-        auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr;
+        auto* session = findPlayingSession (song);
         return session != nullptr ? session->getPlayer().findModulator ((std::int64_t) id.getRaw()) : nullptr;
     }
 
-    te::AutomatableParameter::Ptr find (const ProjectContext& context, const ParameterRef& parameter)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr ? findParameter (*edit, parameter) : nullptr;
-    }
-
-    ModulatorInfo makeInfo (const ModulatorAccess& modulator)
+    ModulatorInfo makeInfo (const Song& song, ModulatorID id)
     {
         ModulatorInfo info;
-        info.id = modulator.getID();
-        info.track = modulator.getTrack() != nullptr ? getTrackID (*modulator.getTrack()) : TrackID();
-        info.type = getModulatorType (modulator).value_or (ModulatorType::lfo);
-        info.name = getModulatorName (modulator);
-        info.isOn = isModulatorOn (modulator);
-
-        if (auto* rack = modulator.getContainerRack())
-            if (auto* container = findContainerOf (*rack))
-                info.container = getDeviceID (*container);
-
+        info.id = id;
+        info.track = getModulatorTrack (song, id);
+        info.container = getModulatorContainer (song, id);
+        info.type = getModulatorType (song, id).value_or (ModulatorType::lfo);
+        info.name = getModulatorName (song, id);
+        info.isOn = isModulatorOn (song, id);
         return info;
     }
 
-    Modulation makeModulation (const ModulationAccess& modulation)
+    // A modulator's or a macro's parameter by its reference: a modulator's by the modulator's ID, and a macro's value by
+    // the macro's ID as its parameter's too.
+    ParameterRef getRef (ModulatorID id, const juce::String& parameterID)
     {
-        return { modulation.modulator.getID(), getParameterRef (*modulation.parameter), modulation.assignment->value.get() };
+        return { DeviceID::fromRaw (id.getRaw()), parameterID };
     }
 
-    std::vector<Modulation> makeModulations (const std::vector<ModulationAccess>& modulations)
+    juce::String getMacroParameterID (ModulatorID id)
     {
-        std::vector<Modulation> made;
+        return juce::String (id.getRaw());
+    }
 
-        for (const auto& modulation : modulations)
-            made.push_back (makeModulation (modulation));
-
-        return made;
+    bool isModulating (const Song& song, ModulatorID modulator, const ParameterRef& parameter)
+    {
+        const auto modulations = getModulations (song, parameter);
+        return std::any_of (modulations.begin(), modulations.end(),
+                            [modulator] (const Modulation& modulation) { return modulation.modulator == modulator; });
     }
 
     // "Modulate Cutoff", or "Change Modulation" for one there is.
-    void modulateAsStep (const ModulatorAccess& modulator, te::AutomatableParameter& parameter, float amount)
+    void modulateAsStep (Song& song, ModulatorID modulator, const ParameterRef& parameter, float amount)
     {
-        const auto modulations = getModulations (parameter);
-        const auto exists = std::any_of (modulations.begin(), modulations.end(), [&modulator] (const auto& modulation)
-                                         { return modulation.modulator.getID() == modulator.getID(); });
-        const UndoStep step (parameter.getEdit(), exists ? "Change Modulation" : "Modulate " + getParameterName (parameter));
-        setModulation (modulator, parameter, amount);
+        const UndoStep step (song, isModulating (song, modulator, parameter) ? juce::String ("Change Modulation")
+                                                                             : "Modulate " + getParameterName (song, parameter));
+        setModulation (song, modulator, parameter, amount);
     }
 
-    void removeAsStep (const ModulatorAccess& modulator, te::AutomatableParameter& parameter)
+    void removeAsStep (Song& song, ModulatorID modulator, const ParameterRef& parameter)
     {
-        const UndoStep step (parameter.getEdit(), "Remove Modulation");
-        removeModulation (modulator, parameter);
+        if (isModulating (song, modulator, parameter))
+        {
+            const UndoStep step (song, "Remove Modulation");
+            removeModulation (song, modulator, parameter);
+        }
     }
 
-    int getNumSteps (const te::StepModifier& sequencer)
+    // A step sequencer's element, and how many steps it plays; invalid for another modulator.
+    juce::ValueTree findSequencer (const Song& song, ModulatorID id)
     {
-        return juce::jlimit (1, (int) te::StepModifier::maxNumSteps, juce::roundToInt (sequencer.numStepsParam->getCurrentValue()));
+        const auto state = findModulatorState (song, id);
+        return getModulatorKind (state) == devices::ModulatorKind::steps ? state : juce::ValueTree();
     }
 
-    // The track of a handle's parameter, whose modulators can modulate it.
-    te::Track* getTrackOf (const ParameterHandle& handle)
+    int getNumSteps (const juce::ValueTree& sequencer)
     {
-        const auto parameter = findParameter (handle);
-        return parameter != nullptr && parameter->getPlugin() != nullptr ? getTrackOfParameter (*parameter) : nullptr;
+        constexpr auto kind = devices::ModulatorKind::steps;
+        const auto index = devices::findModulatorParameter (kind, "numSteps");
+        const auto& info = devices::getModulatorParameters (kind)[(size_t) index];
+        const auto value =
+            (float) sequencer.getChildWithName (schema::VALUES).getProperty (juce::Identifier (toString (info.id)), info.defaultValue);
+        return juce::jlimit (1, devices::Modulator::maxSteps, juce::roundToInt (value));
     }
 
-    // A modulator by its ID in the Edit of a handle's parameter.
-    std::optional<ModulatorAccess> findFor (const ParameterHandle& handle, ModulatorID id)
+    // A handle's parameter in its song, while there is one, by the reference automation and modulation name it with.
+    std::optional<std::pair<Song*, ParameterRef>> findTarget (const ParameterHandle& handle)
     {
-        const auto parameter = findParameter (handle);
-        return parameter != nullptr ? findModulator (parameter->getEdit(), id) : std::nullopt;
+        auto* song = findSong (handle);
+        const auto ref = handle.getRef();
+
+        if (song == nullptr || ! ref.isValid())
+            return {};
+
+        return std::pair { song, ref };
     }
 } // namespace
 
@@ -126,278 +126,276 @@ std::vector<ModulatorInfo> getModulators (const ProjectContext& context, TrackID
 {
     std::vector<ModulatorInfo> modulators;
 
-    if (auto* track = findTrack (context, id))
-        for (const auto& modulator : getModulators (*track))
-            modulators.push_back (makeInfo (modulator));
+    if (auto* song = findSong (context); song != nullptr && id.isValid() && findTrackState (*song, id).isValid())
+        for (const auto modulator : getModulators (*song, id))
+            modulators.push_back (makeInfo (*song, modulator));
 
     return modulators;
 }
 
 std::optional<ModulatorInfo> getModulator (const ProjectContext& context, ModulatorID id)
 {
-    if (const auto modulator = find (context, id); modulator.has_value() && modulator->getTrack() != nullptr)
-        return makeInfo (*modulator);
+    if (auto* song = findSong (context); song != nullptr && getModulatorTrack (*song, id).isValid())
+        return makeInfo (*song, id);
 
     return {};
 }
 
 ModulatorID addModulator (ProjectContext& context, TrackID id, ModulatorType type)
 {
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
 
-    if (track == nullptr)
+    if (song == nullptr || ! id.isValid() || ! findTrackState (*song, id).isValid())
         return {};
 
-    const UndoStep step (track->edit, "Add " + getModulatorTypeName (type));
-    const auto added = addModulator (*track, type);
-    return added.has_value() ? added->getID() : ModulatorID();
+    const UndoStep step (*song, "Add " + getModulatorTypeName (type));
+    return addModulator (*song, id, type);
 }
 
 void removeModulator (ProjectContext& context, ModulatorID id)
 {
     // A container keeps its eight macros.
-    if (const auto modulator = find (context, id);
-        modulator.has_value() && modulator->getTrack() != nullptr && modulator->getContainerRack() == nullptr)
+    if (auto* song = findSong (context);
+        song != nullptr && getModulatorTrack (*song, id).isValid() && ! getModulatorContainer (*song, id).isValid())
     {
-        const UndoStep step (modulator->getTrack()->edit, "Remove " + getModulatorName (*modulator));
-        removeModulator (*modulator);
+        const UndoStep step (*song, "Remove " + getModulatorName (*song, id));
+        removeModulator (*song, id);
     }
 }
 
 bool isModulatorOn (const ProjectContext& context, ModulatorID id)
 {
-    const auto modulator = find (context, id);
-    return modulator.has_value() && isModulatorOn (*modulator);
+    auto* song = findSong (context);
+    return song != nullptr && isModulatorOn (*song, id);
 }
 
 void setModulatorOn (ProjectContext& context, ModulatorID id, bool on)
 {
-    if (const auto modulator = find (context, id);
-        modulator.has_value() && modulator->modifier != nullptr && isModulatorOn (*modulator) != on)
+    if (auto* song = findSong (context);
+        song != nullptr && findModulatorState (*song, id).hasType (schema::MODULATOR) && isModulatorOn (*song, id) != on)
     {
-        const UndoStep step (modulator->modifier->edit, on ? "Turn Modulator On" : "Turn Modulator Off");
-        setModulatorOn (*modulator, on);
+        const UndoStep step (*song, on ? "Turn Modulator On" : "Turn Modulator Off");
+        setModulatorOn (*song, id, on);
     }
 }
 
 std::vector<ModulatorParameter> getModulatorParameters (const ProjectContext& context, ModulatorID id)
 {
     std::vector<ModulatorParameter> parameters;
+    auto* song = findSong (context);
+    const auto state = song != nullptr ? findModulatorState (*song, id) : juce::ValueTree();
 
-    if (const auto modulator = find (context, id))
-    {
-        if (modulator->modifier != nullptr)
-            for (auto* parameter : modulator->modifier->getAutomatableParameters())
-                if (parameter != modulator->modifier->enabledParam.get()) // on and off is the modulator's switch, not a knob
-                    parameters.push_back ({ parameter->paramID, getModulatorParameterName (*parameter) });
+    // A modulator's as its kind describes them (its switch is not among them, but the modulator's own); a macro's value.
+    if (const auto kind = getModulatorKind (state))
+        for (const auto& info : devices::getModulatorParameters (*kind))
+            parameters.push_back ({ toString (info.id), toString (info.name) });
 
-        if (modulator->macro != nullptr)
-            parameters.push_back ({ modulator->macro->paramID, getModulatorName (*modulator) });
-    }
+    if (state.hasType (schema::MACRO))
+        parameters.push_back ({ getMacroParameterID (id), getModulatorName (*song, id) });
 
     return parameters;
 }
 
 ParameterHandle getModulatorParameter (ProjectContext& context, ModulatorID id, const juce::String& parameterID)
 {
-    const auto modulator = find (context, id);
+    auto* song = findSong (context);
+    const auto state = song != nullptr ? findModulatorState (*song, id) : juce::ValueTree();
 
-    if (! modulator.has_value())
-        return {};
-
-    if (modulator->modifier != nullptr)
+    if (const auto kind = getModulatorKind (state))
     {
-        const auto parameter = modulator->modifier->getAutomatableParameterByID (parameterID);
-        return parameter != nullptr
-                   ? makeParameterHandle (*modulator->modifier, parameterID, "Change " + getModulatorParameterName (*parameter))
-                   : ParameterHandle();
+        const auto index = devices::findModulatorParameter (*kind, parameterID.toStdString());
+
+        if (index < 0)
+            return {};
+
+        const auto& info = devices::getModulatorParameters (*kind)[(size_t) index];
+        return makeParameterHandle (*song, getRef (id, parameterID), "Change " + toString (info.name), false);
     }
 
-    if (modulator->macro == nullptr || modulator->macro->paramID != parameterID)
+    if (! state.hasType (schema::MACRO) || parameterID != getMacroParameterID (id))
         return {};
 
-    return makeMacroHandle (*modulator->macro, "Change " + getModulatorName (*modulator));
+    return makeParameterHandle (*song, getRef (id, parameterID), "Change " + getModulatorName (*song, id), false);
 }
 
 void renameMacro (ProjectContext& context, ModulatorID id, const juce::String& name)
 {
-    const auto modulator = find (context, id);
+    auto* song = findSong (context);
+    const auto state = song != nullptr ? findModulatorState (*song, id) : juce::ValueTree();
 
-    if (! modulator.has_value() || modulator->macro == nullptr || name.trim().isEmpty() || name.trim() == modulator->macro->macroName.get())
+    if (! state.hasType (schema::MACRO) || name.trim().isEmpty() || name.trim() == state[schema::macroName].toString())
         return;
 
-    const UndoStep step (modulator->macro->getEdit(), "Rename Macro");
-    renameMacro (*modulator->macro, name);
+    const UndoStep step (*song, "Rename Macro");
+    renameMacro (*song, id, name);
 }
 
 std::vector<float> getModulatorOutput (const ProjectContext& context, ModulatorID id, double seconds)
 {
-    // As Phazite's engine played it, while it plays the project.
-    if (auto* node = findPlayedModulator (context, id))
-        return node->getHistory (seconds);
-
-    if (const auto modulator = find (context, id); modulator.has_value() && modulator->modifier != nullptr)
-        return modulator->modifier->getValues (te::TimeDuration::fromSeconds (seconds));
+    // As Phazite's engine played it, while it plays the song.
+    if (auto* song = findSong (context))
+        if (auto* node = findPlayedModulator (*song, id))
+            return node->getHistory (seconds);
 
     return {};
 }
 
 float getModulatorValue (const ProjectContext& context, ModulatorID id)
 {
-    if (auto* node = findPlayedModulator (context, id))
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return 0.0f;
+
+    if (auto* node = findPlayedModulator (*song, id))
         return node->isMacro() ? node->getValue() : juce::jlimit (-1.0f, 1.0f, node->getValue());
 
-    if (const auto modulator = find (context, id))
-    {
-        if (modulator->modifier != nullptr)
-            return juce::jlimit (-1.0f, 1.0f, modulator->modifier->getCurrentValue());
-
-        if (modulator->macro != nullptr)
-            return modulator->macro->getCurrentNormalisedValue();
-    }
+    // Without the engine, a macro's value is the one set by hand, and a modulator moves nothing.
+    if (const auto state = findModulatorState (*song, id); state.hasType (schema::MACRO))
+        return (float) state.getProperty (schema::macroValue, 0.0f);
 
     return 0.0f;
 }
 
 bool isBipolar (const ProjectContext& context, ModulatorID id)
 {
-    const auto modulator = find (context, id);
-    return modulator.has_value() && isBipolar (*modulator);
+    auto* song = findSong (context);
+    return song != nullptr && isBipolar (*song, id);
 }
 
 std::vector<float> getSteps (const ProjectContext& context, ModulatorID id)
 {
     std::vector<float> steps;
+    auto* song = findSong (context);
 
-    if (const auto modulator = find (context, id))
-        if (auto* sequencer = dynamic_cast<te::StepModifier*> (modulator->modifier.get()))
-            for (int i = 0; i < getNumSteps (*sequencer); ++i)
-                steps.push_back (sequencer->getStep (i));
+    if (const auto sequencer = song != nullptr ? findSequencer (*song, id) : juce::ValueTree(); sequencer.isValid())
+    {
+        steps = getModulatorSteps (sequencer);
+        steps.resize ((size_t) getNumSteps (sequencer), 0.0f);
+    }
 
     return steps;
 }
 
 void setStep (ProjectContext& context, ModulatorID id, int index, float value)
 {
-    if (const auto modulator = find (context, id))
+    auto* song = findSong (context);
+
+    if (const auto sequencer = song != nullptr ? findSequencer (*song, id) : juce::ValueTree();
+        sequencer.isValid() && juce::isPositiveAndBelow (index, getNumSteps (sequencer)))
     {
-        if (auto* sequencer = dynamic_cast<te::StepModifier*> (modulator->modifier.get());
-            sequencer != nullptr && juce::isPositiveAndBelow (index, getNumSteps (*sequencer)))
-        {
-            const UndoStep step (sequencer->edit, "Change Step");
-            setModulatorStep (*modulator, index, value);
-        }
+        const UndoStep step (*song, "Change Step");
+        setModulatorStep (*song, id, index, value);
     }
 }
 
 //==============================================================================
 std::vector<Modulation> getModulations (const ProjectContext& context, const ParameterRef& ref)
 {
-    const auto parameter = find (context, ref);
-    return parameter != nullptr ? makeModulations (getModulations (*parameter)) : std::vector<Modulation>();
+    auto* song = findSong (context);
+    return song != nullptr ? getModulations (*song, ref) : std::vector<Modulation>();
 }
 
 std::vector<Modulation> getModulations (const ProjectContext& context, ModulatorID id)
 {
-    const auto modulator = find (context, id);
-    return modulator.has_value() ? makeModulations (getModulations (*modulator)) : std::vector<Modulation>();
+    auto* song = findSong (context);
+    return song != nullptr ? getModulations (*song, id) : std::vector<Modulation>();
 }
 
 bool canModulate (const ProjectContext& context, ModulatorID id, const ParameterRef& ref)
 {
-    const auto modulator = find (context, id);
-    const auto parameter = find (context, ref);
-    return modulator.has_value() && parameter != nullptr && canModulate (*modulator, *parameter);
+    auto* song = findSong (context);
+    return song != nullptr && canModulate (*song, id, ref);
 }
 
 void modulate (ProjectContext& context, ModulatorID id, const ParameterRef& ref, float amount)
 {
-    const auto modulator = find (context, id);
-
-    if (const auto parameter = find (context, ref); modulator.has_value() && parameter != nullptr && canModulate (*modulator, *parameter))
-        modulateAsStep (*modulator, *parameter, amount);
+    if (auto* song = findSong (context); song != nullptr && canModulate (*song, id, ref))
+        modulateAsStep (*song, id, ref, amount);
 }
 
 void removeModulation (ProjectContext& context, ModulatorID id, const ParameterRef& ref)
 {
-    const auto modulator = find (context, id);
-
-    if (const auto parameter = find (context, ref); modulator.has_value() && parameter != nullptr)
-        removeAsStep (*modulator, *parameter);
+    if (auto* song = findSong (context))
+        removeAsStep (*song, id, ref);
 }
 
 //==============================================================================
 std::vector<ModulatorInfo> getModulatorsFor (const ParameterHandle& handle)
 {
     std::vector<ModulatorInfo> modulators;
+    const auto target = findTarget (handle);
+
+    if (! target.has_value())
+        return modulators;
+
+    const auto& [song, ref] = *target;
 
     // A device's in a container: its container's macros first.
-    if (const auto parameter = findParameter (handle))
-        if (auto* device = parameter->getPlugin(); device != nullptr && device->isInRack())
-            if (auto* container = findContainerOf (*device))
-                for (auto* macro : getContainerMacros (*container))
-                    modulators.push_back (makeInfo ({ nullptr, macro }));
+    if (const auto container = findContainerOf (*song, ref.device); container.isValid())
+        for (const auto macro : getContainerMacros (*song, container))
+            modulators.push_back (makeInfo (*song, macro));
 
-    if (auto* track = getTrackOf (handle))
-        for (const auto& modulator : getModulators (*track))
-            modulators.push_back (makeInfo (modulator));
+    if (const auto track = getParameterTrack (*song, ref); track.isValid())
+        for (const auto modulator : getModulators (*song, track))
+            modulators.push_back (makeInfo (*song, modulator));
 
     return modulators;
 }
 
 std::vector<Modulation> getModulations (const ParameterHandle& handle)
 {
-    const auto parameter = findParameter (handle);
-    return parameter != nullptr ? makeModulations (getModulations (*parameter)) : std::vector<Modulation>();
+    const auto target = findTarget (handle);
+    return target.has_value() ? getModulations (*target->first, target->second) : std::vector<Modulation>();
 }
 
 ModulatorID modulateWithNew (const ParameterHandle& handle, ModulatorType type, float amount)
 {
-    const auto parameter = findParameter (handle);
-    auto* track = getTrackOf (handle);
+    const auto target = findTarget (handle);
+    const auto track = target.has_value() ? getParameterTrack (*target->first, target->second) : TrackID();
 
-    if (parameter == nullptr || track == nullptr)
+    if (! track.isValid())
         return {};
 
-    const UndoStep step (parameter->getEdit(), "Modulate " + getParameterName (*parameter));
-    const auto added = addModulator (*track, type);
+    auto& song = *target->first;
+    const auto& ref = target->second;
+    const UndoStep step (song, "Modulate " + getParameterName (song, ref));
+    const auto added = addModulator (song, track, type);
 
-    if (! added.has_value() || ! canModulate (*added, *parameter))
+    if (! added.isValid() || ! canModulate (song, added, ref))
         return {};
 
-    setModulation (*added, *parameter, amount);
-    return added->getID();
+    setModulation (song, added, ref, amount);
+    return added;
 }
 
 void modulate (const ParameterHandle& handle, ModulatorID id, float amount)
 {
-    const auto parameter = findParameter (handle);
-
-    if (const auto modulator = findFor (handle, id); parameter != nullptr && modulator.has_value() && canModulate (*modulator, *parameter))
-        modulateAsStep (*modulator, *parameter, amount);
+    if (const auto target = findTarget (handle); target.has_value() && canModulate (*target->first, id, target->second))
+        modulateAsStep (*target->first, id, target->second, amount);
 }
 
 void removeModulation (const ParameterHandle& handle, ModulatorID id)
 {
-    const auto parameter = findParameter (handle);
-
-    if (const auto modulator = findFor (handle, id); parameter != nullptr && modulator.has_value())
-        removeAsStep (*modulator, *parameter);
+    if (const auto target = findTarget (handle))
+        removeAsStep (*target->first, id, target->second);
 }
 
 //==============================================================================
 struct ModulationDrag::Impl
 {
-    Impl (te::AutomatableParameter& p, ModulatorAccess m, float amount)
-        : parameter (&p),
-          modulator (std::move (m)),
+    Impl (Song& s, ModulatorID m, const ParameterRef& p, float amount)
+        : song (&s),
+          modulator (m),
+          parameter (p),
           startAmount (amount),
-          gesture (p.getEdit(), "Change Modulation")
+          gesture (s, "Change Modulation")
     {
     }
 
-    te::AutomatableParameter::Ptr parameter;
-    ModulatorAccess modulator;
+    Song::Ptr song; // kept while the drag lasts, as its gesture's
+    ModulatorID modulator;
+    ParameterRef parameter;
     float startAmount = 0.0f;
     Gesture gesture;
 };
@@ -419,64 +417,59 @@ float ModulationDrag::getStartAmount() const noexcept
 
 void ModulationDrag::setAmount (float amount)
 {
-    setModulation (impl->modulator, *impl->parameter, amount);
+    setModulation (*impl->song, impl->modulator, impl->parameter, amount);
 }
 
 std::unique_ptr<ModulationDrag> beginModulationDrag (const ParameterHandle& handle, ModulatorID id)
 {
-    const auto parameter = findParameter (handle);
-    const auto modulator = findFor (handle, id);
+    const auto target = findTarget (handle);
 
-    if (parameter == nullptr || ! modulator.has_value())
+    if (! target.has_value())
         return {};
 
-    for (const auto& modulation : getModulations (*parameter))
-        if (modulation.modulator.getID() == id)
+    for (const auto& modulation : getModulations (*target->first, target->second))
+        if (modulation.modulator == id)
             return std::make_unique<ModulationDrag> (
-                std::make_unique<ModulationDrag::Impl> (*parameter, *modulator, modulation.assignment->value.get()));
+                std::make_unique<ModulationDrag::Impl> (*target->first, id, target->second, modulation.amount));
 
     return {};
 }
 
 std::optional<ModulationRange> getModulationRange (const ParameterHandle& handle)
 {
-    // Most parameters nothing modulates, which the song tells without Tracktion's parameter (a knob asks at each tick).
-    if (const auto ref = handle.getRef(); ref.isValid())
-        if (auto* song = findSong (handle); song == nullptr || ! isModulated (*song, ref))
-            return {};
+    const auto target = findTarget (handle);
 
-    const auto parameter = findParameter (handle);
-
-    if (parameter == nullptr)
+    if (! target.has_value() || ! isModulated (*target->first, target->second))
         return {};
 
-    const auto modulations = getModulations (*parameter);
+    const auto& song = *target->first;
+    const auto found = locateParameter (song, target->second);
+    const auto modulations = getModulations (song, target->second);
 
-    if (modulations.empty())
+    if (! found.has_value() || modulations.empty())
         return {};
 
-    // From where its value is without modulation, each modulation's reach: a bipolar modulator's both ways. Only those
-    // whose modulators are on, unless all are off.
-    const auto anyOn = std::any_of (modulations.begin(), modulations.end(), [] (const auto& m) { return isModulatorOn (m.modulator); });
-    const auto& range = parameter->valueRange;
-    const auto base =
-        range.convertTo0to1 (range.snapToLegalValue (getPlayedValue (*parameter, false).value_or (parameter->getCurrentBaseValue())));
+    // From where its value is without modulation (its automation's, while the engine plays it), each modulation's reach: a
+    // bipolar modulator's both ways. Only those whose modulators are on, unless all are off.
+    const auto anyOn =
+        std::any_of (modulations.begin(), modulations.end(), [&song] (const Modulation& m) { return isModulatorOn (song, m.modulator); });
+    const auto range = describeParameter (song, *found).range;
+    const auto toPart = [&range] (float value) { return range.convertTo0to1 (range.snapToLegalValue (value)); };
+    const auto base = toPart (getCurrentValue (song, *found, false));
     auto low = base, high = base;
 
     for (const auto& modulation : modulations)
     {
-        if (anyOn && ! isModulatorOn (modulation.modulator))
+        if (anyOn && ! isModulatorOn (song, modulation.modulator))
             continue;
 
-        const auto amount = modulation.assignment->value.get();
-        const auto reach = isBipolar (modulation.modulator) ? std::abs (amount) : 0.0f;
+        const auto amount = modulation.amount;
+        const auto reach = isBipolar (song, modulation.modulator) ? std::abs (amount) : 0.0f;
         low += std::min ({ amount, -reach, 0.0f });
         high += std::max ({ amount, reach, 0.0f });
     }
 
-    const auto now = getPlayedValue (*parameter, true);
-    return ModulationRange { juce::jlimit (0.0f, 1.0f, low), juce::jlimit (0.0f, 1.0f, high),
-                             now.has_value() ? range.convertTo0to1 (range.snapToLegalValue (*now)) : parameter->getCurrentNormalisedValue(),
+    return ModulationRange { juce::jlimit (0.0f, 1.0f, low), juce::jlimit (0.0f, 1.0f, high), toPart (getCurrentValue (song, *found, true)),
                              anyOn };
 }
 } // namespace phazite

@@ -2,12 +2,11 @@
 #pragma once
 
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 
 namespace phazite
 {
 class CommandRegistry;
 
-// Undo, redo and FL Studio's undo-or-redo, for the selection manager's Edit.
+// Undo, redo and FL Studio's undo-or-redo, for the selection's song.
 void addUndoCommands (CommandRegistry&, Selection&);
 } // namespace phazite

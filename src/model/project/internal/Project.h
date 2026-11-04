@@ -2,42 +2,41 @@
 // A Phazite project: a folder that holds the project file and everything the project uses.
 #pragma once
 
-#include "model/base/internal/Tracktion.h"
+#include "model/base/Song.h"
+
+#include <juce_data_structures/juce_data_structures.h>
 
 #include <functional>
 
 namespace phazite
 {
-class SongFollower;
-
 // A new song, as a new project's starts: its tempo map, its master and one empty track, numbered by the song itself
 // (Schema.h).
 juce::ValueTree makeNewSong();
 
-// A new song's Edit, as a new project's starts (Project::create() makes one in a project folder): Phazite's parts (its
-// tempo map, its track list, the master's loudness meter) and one empty track, with no undo steps. Its file, if given, is
-// where its audio files' paths start from. For a song outside a project: tests' songs, and what is rendered alone.
-std::unique_ptr<te::Edit> createSongEdit (te::Engine&, const juce::File& file = {});
+// A new song, as a new project's starts (Project::create() makes one in a project folder): its tempo map, its track list
+// and one empty track, with no undo steps. Its file, if given, is where its audio files' paths start from. For a song
+// outside a project: tests' songs, and what is rendered alone.
+Song::Ptr createSong (const juce::File& file = {});
 
 // Where new projects go unless the user picks another folder: Documents/Phazite/Projects.
 juce::File getDefaultProjectsFolder();
 
-// An Edit made from a song alone (Phazite's state, Schema.h, which it takes), as the mirror builds Tracktion's side of it
-// (docs/tracktion-migration.md, T1): what the song doesn't hold isn't in it. Its file, if given, is where its audio files'
-// paths start from, and its cache folder where its frozen tracks' files are. No undo steps, no unsaved changes.
-std::unique_ptr<te::Edit> createEditFromSong (te::Engine&, const juce::ValueTree& song, const juce::File& file = {},
-                                              const juce::File& cacheFolder = {});
+// A song made of a state (Schema.h: PHAZITE, which it takes), with what every song has added (its tempo map, its track list
+// with the master, its next ID), as a project opens. Its file, if given, is where its audio files' paths start from, and
+// its cache folder where its frozen tracks' files are. No undo steps. Nothing for a state that isn't a song.
+Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file = {}, const juce::File& cacheFolder = {});
 
 //==============================================================================
 // The project folder:
-//   <name>.phazite   the project file: the song (Schema.h), from which an Edit is built as the project opens
+//   <name>.phazite   the project file: the song (Schema.h)
 //   Audio/           recordings and imported audio
 //   Generated/       sounds made by Phazite's generators
 //   Renders/         exports: the song, and its stems
 //   Backups/         earlier versions of the project file (newest numBackupsToKeep), and the autosave
-//   Cache/           what Phazite can make again: frozen tracks' files, and Tracktion's renders of stretched audio clips
-//                    (the Edit's temporary folder; model/mixer/internal/Freeze.h). Closing the project deletes what
-//                    nothing in it uses any more.
+//   Cache/           what Phazite can make again: frozen tracks' files (model/mixer/internal/Freeze.h) and renders of
+//                    stretched audio clips (the song's cache folder). Closing the project deletes what nothing in it uses
+//                    any more.
 //
 // Create, open and destroy Projects on the message thread.
 class Project : private juce::ValueTree::Listener
@@ -47,16 +46,15 @@ public:
     static constexpr int numBackupsToKeep = 10;
 
     // Creates the folder <parentFolder>/<name> with a new project in it, and saves it. addContent, if given, adds what the
-    // project starts with (the starter song, an outline's sections): it goes into that first save, and the project is
-    // then opened from it, so it starts without undo steps or unsaved changes (Tracktion puts clips added in code in
-    // order only after this returns, as an undo step, but does so while it loads a project). Returns nullptr and sets
-    // error if that folder already exists or can't be written, or the saved project can't be opened.
-    static std::unique_ptr<Project> create (te::Engine&, const juce::File& parentFolder, const juce::String& name, juce::String& error,
-                                            const std::function<void (te::Edit&)>& addContent = {});
+    // project starts with (the starter song, an outline's sections): it goes into that first save, so the project starts
+    // without undo steps or unsaved changes. Returns nullptr and sets error if that folder already exists or can't be
+    // written.
+    static std::unique_ptr<Project> create (const juce::File& parentFolder, const juce::String& name, juce::String& error,
+                                            const std::function<void (Song&)>& addContent = {});
 
     // Opens a saved project. With restoreAutosave it opens the autosaved changes instead (see hasNewerAutosave()); saving
     // then still writes to the project file.
-    static std::unique_ptr<Project> open (te::Engine&, const juce::File& projectFile, bool restoreAutosave, juce::String& error);
+    static std::unique_ptr<Project> open (const juce::File& projectFile, bool restoreAutosave, juce::String& error);
 
     // True if the project has an autosave from a session that ended without saving or closing the
     // project, such as a crash: saving and closing both delete the autosave.
@@ -68,7 +66,7 @@ public:
     // Closing a project discards its autosave: the user has saved, or chosen not to.
     ~Project() override;
 
-    te::Edit& getEdit() const noexcept { return *edit; }
+    Song& getSong() const noexcept { return *song; }
     const juce::File& getFile() const noexcept { return file; }
     juce::File getFolder() const { return file.getParentDirectory(); }
     juce::File getAudioFolder() const { return getFolder().getChildFile ("Audio"); }
@@ -76,9 +74,6 @@ public:
     juce::File getRendersFolder() const { return getFolder().getChildFile ("Renders"); }
     juce::File getBackupsFolder() const { return getFolder().getChildFile ("Backups"); }
     juce::File getCacheFolder() const { return getCacheFolder (file); }
-
-    // The song, which the project file holds (phazite::getSong(), model/base/internal/Schema.h).
-    juce::ValueTree getPhaziteState();
 
     // Whether the project holds anything it didn't hold when it was opened (with Phazite's parts added) or last saved,
     // leaving out what isn't a change (isUncountedProperty()). Compares the project with a copy at most once after each
@@ -116,11 +111,12 @@ public:
     juce::Result moveTo (const juce::File& parentFolder, const juce::String& name);
 
 private:
-    Project (std::unique_ptr<te::Edit>, const juce::File&);
+    Project (Song::Ptr, const juce::File&);
 
-    std::unique_ptr<te::Edit> edit;
+    Song::Ptr song;
+    juce::ValueTree songState; // which this listens to (a listener belongs to the tree object it was added to)
     juce::File file;
-    std::unique_ptr<SongFollower> songFollower; // keeps the loop around the song, and stops at its end (Playback.h)
+    int changesOutsideHistory = 0; // the song's count of them as it was last compared (a plug-in's own changes)
 
     class BackgroundWriter; // one file at a time; its destructor waits for the one under way
     std::unique_ptr<BackgroundWriter> autosaveWriter;
@@ -130,8 +126,7 @@ private:
     // written again as another type, which changes nothing. So while the project has no unsaved changes, a notification
     // only sets mayHaveChanged, and hasUnsavedChanges() and autosave() compare the song with this copy, once. Never listen
     // to it or change it. Only the elements of the song that notified are compared (the tracks, the tempo map...), unless
-    // the song itself did (docs/performance-audit.md, U3). What Tracktion writes into the rest of the Edit's state (the
-    // mirror, the playhead, its inputs) isn't saved, so it is no change.
+    // the song itself did (docs/performance-audit.md, U3).
     juce::ValueTree savedState;
     bool mayHaveChanged = false;
     juce::Array<juce::ValueTree> elementsToCompare;
@@ -141,7 +136,7 @@ private:
     // returns the project file that goes in it. If the name is empty, the folder exists or something can't be written, sets
     // error and returns nothing, leaving nothing behind.
     juce::File makeFolderWithFiles (const juce::File& parentFolder, const juce::String& name, juce::String& error) const;
-    void setFile (const juce::File&); // the project file from now on, the Edit's too
+    void setFile (const juce::File&); // the project file from now on, the song's too
 
     void backUpProjectFile();
     void rememberSavedState();
@@ -155,10 +150,8 @@ private:
     // which are saved but aren't the song (decision 4: schema::isTrackViewProperty(), isGridProperty(), PIANOROLL, and
     // isDeviceViewProperty(), where a device's window was, since step 2.12). A property (isUncountedProperty()), or an
     // element with everything in it (isUncountedElement()): notifications and the comparison with savedState leave out the
-    // same. A change of Tracktion's time stamp (lastSignificantChange) is one:
-    // it is how a change Tracktion notices outside the song (a plug-in's own settings, which a save stores in the song)
-    // reaches autosave. Tracktion renews it when its undo history changes, a track's mute or solo changes, or a plug-in
-    // reports a change; view settings are written without the undo manager, so they leave it alone.
+    // same. A plug-in's own change (its settings, which a save stores in the song) counts, as the song counts it
+    // (Song::markChangedOutsideHistory()).
     static bool isUncountedProperty (const juce::ValueTree&, const juce::Identifier& property);
     static bool isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element);
     static bool isCounted (const juce::ValueTree&, const juce::Identifier& property);

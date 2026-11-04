@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite: application entry point.
-// Written against tracktion_engine develop @bb386171 (module 3.5.0) and the JUCE it pins (37c894f8).
 
 #include "AppCommands.h"
 #include "AppServices.h"
-#include "AppUIBehaviour.h"
 #include "MainWindow.h"
 #include "ProjectSession.h"
 #include "RunMarker.h"
 #include "model/commands/CommandRegistry.h"
-#include "model/engine/internal/EngineSetup.h"
+#include "model/engine/EngineContext.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/UnsavedProjects.h"
 #include "ui/input/CommandBridge.h"
@@ -47,11 +46,12 @@ public:
         logger.reset (juce::FileLogger::createDefaultAppLogger ("Phazite", "Phazite.log", "Phazite " + getApplicationVersion()));
         juce::Logger::setCurrentLogger (logger.get());
 
-        // The services load the plug-in list Phazite keeps and open the audio device and the MIDI inputs as its settings
-        // saved them (settings live in %APPDATA%\Phazite\Phazite.settings). Plug-ins are scanned in its helper program.
-        engine = createEngine ({ .uiBehaviour = std::make_unique<AppUIBehaviour>() });
+        // The one engine context: the audio device, Phazite's engine on it and the plug-ins' helpers. The services load the
+        // plug-in list Phazite keeps and open the audio device and the MIDI inputs as its settings saved them (settings
+        // live in %APPDATA%\Phazite\Phazite.settings). Plug-ins are scanned and hosted in its helper program.
+        engineContext = createEngineContext ({});
         runMarker = std::make_unique<RunMarker> (Settings::getFolder().getChildFile ("Running"));
-        services = std::make_unique<AppServices> (*engine);
+        services = std::make_unique<AppServices> (*engineContext);
         services->openAudioDevices();
         logAudioOutput();
 
@@ -60,9 +60,9 @@ public:
 
         commands = std::make_unique<CommandRegistry>();
         commandBridge = std::make_unique<ui::CommandBridge> (*commands); // the commands' keys and menus, from here on
-        session = std::make_unique<ProjectSession> (*engine, getUIBehaviour (*engine), services->recentProjects, getDefaultProjectsFolder(),
+        session = std::make_unique<ProjectSession> (*engineContext, services->recentProjects, getDefaultProjectsFolder(),
                                                     getUnsavedProjectsFolder());
-        mainWindow = std::make_unique<MainWindow> (*engine, *commandBridge, *session, *lookAndFeel, *services);
+        mainWindow = std::make_unique<MainWindow> (*commandBridge, *session, *lookAndFeel, *services);
         addSongCommands (*commands, session->getContext(), *mainWindow);
         session->addCommands (*commands);
         mainWindow->addCommands();
@@ -84,9 +84,8 @@ public:
         if (services != nullptr && commandBridge != nullptr)
             ui::saveKeySettings (*commandBridge, services->settings);
 
-        // Reverse order of creation: the window uses the session and the commands, the session holds
-        // the Edit, and every Edit must go before the Engine. The services keep their settings in the
-        // Engine's settings file.
+        // Reverse order of creation: the window uses the session and the commands, the session holds the open project,
+        // and the project, the services and the previews play on the engine context, which goes last.
         mainWindow = nullptr;
         session = nullptr;
         commandBridge = nullptr;
@@ -94,7 +93,7 @@ public:
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         lookAndFeel = nullptr;
         services = nullptr;
-        engine = nullptr;
+        engineContext = nullptr;
         runMarker = nullptr; // closed properly
 
         juce::Logger::writeToLog ("Phazite closed.");
@@ -105,7 +104,7 @@ public:
     // What plays the sound, in the log.
     void logAudioOutput()
     {
-        if (auto* device = services->engineContext->getAudioDeviceManager().getCurrentAudioDevice())
+        if (auto* device = engineContext->getAudioDeviceManager().getCurrentAudioDevice())
             juce::Logger::writeToLog ("Audio output: " + device->getTypeName() + ", " + device->getName() + ", "
                                       + juce::String (device->getCurrentSampleRate()) + " Hz, "
                                       + juce::String (device->getCurrentBufferSizeSamples()) + " samples");
@@ -138,9 +137,9 @@ public:
 
 private:
     // Declaration order matters: members are destroyed in reverse order, so even if shutdown() is
-    // never called, the window goes first and the Engine last.
+    // never called, the window goes first and the engine context last.
     std::unique_ptr<juce::FileLogger> logger;
-    std::unique_ptr<te::Engine> engine;
+    std::unique_ptr<EngineContext> engineContext;
     std::unique_ptr<RunMarker> runMarker;
     std::unique_ptr<AppServices> services;
     std::unique_ptr<ui::LookAndFeel> lookAndFeel;

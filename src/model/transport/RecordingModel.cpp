@@ -6,9 +6,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/engine/internal/LiveInput.h"
-#include "model/mirror/internal/Bridge.h"
-#include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -16,18 +14,20 @@ namespace phazite
 {
 namespace
 {
-    te::AudioTrack* findTrack (const ProjectContext& context, TrackID id)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? dynamic_cast<te::AudioTrack*> (te::findTrackForID (*edit, toTracktion (id))) : nullptr;
-    }
-
+    // The open song's recorder, which its session owns, or nullptr.
     AudioRecorder* findRecorder (const ProjectContext& context)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr ? AudioRecorder::findFor (*edit) : nullptr;
+        auto* session = getSession (context);
+        return session != nullptr ? &session->getRecorder() : nullptr;
     }
 
+    // A track's element in the open song, if it is a track (not a folder or the master), or else invalid.
+    juce::ValueTree findTrack (const ProjectContext& context, TrackID id)
+    {
+        auto* song = findSong (context);
+        const auto state = song != nullptr && id.isValid() ? findTrackState (*song, id) : juce::ValueTree();
+        return state.hasType (schema::TRACK) && ! isFolderState (state) ? state : juce::ValueTree();
+    }
 } // namespace
 
 std::vector<AudioInput> getAudioInputs (const ProjectContext& context)
@@ -55,45 +55,45 @@ juce::String describeInput (const juce::String& inputID)
 
 bool canRecordAudio (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    return track != nullptr && ! isReturnTrack (*track) && ! hasInstrument (*track);
+    auto* song = findSong (context);
+    return song != nullptr && canRecordAudio (*song, id);
 }
 
 juce::String getTrackInput (const ProjectContext& context, TrackID id)
 {
-    auto* track = findTrack (context, id);
-    return track != nullptr ? findTrackState (*track).getProperty (schema::trackInput).toString() : juce::String();
+    return findTrack (context, id).getProperty (schema::trackInput).toString();
 }
 
 juce::String getLastInput (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? findPhaziteState (*edit).getProperty (schema::lastInput).toString() : juce::String();
+    auto* song = findSong (context);
+    return song != nullptr ? song->getState().getProperty (schema::lastInput).toString() : juce::String();
 }
 
 void setTrackInput (ProjectContext& context, TrackID id, const juce::String& inputID)
 {
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
+    auto track = findTrack (context, id);
 
-    if (track == nullptr || ! canRecordAudio (context, id) || (inputID.isNotEmpty() && getInputChannels (inputID).empty()))
+    if (song == nullptr || ! track.isValid() || ! canRecordAudio (context, id)
+        || (inputID.isNotEmpty() && getInputChannels (inputID).empty()))
         return;
 
-    const UndoStep step (track->edit, "Change Input");
+    const UndoStep step (*song, "Change Input");
 
     if (inputID.isEmpty())
-        findTrackState (*track).removeProperty (schema::trackInput, &getSong (track->edit).getUndoManager());
+        track.removeProperty (schema::trackInput, &song->getUndoManager());
     else
-        findTrackState (*track).setProperty (schema::trackInput, inputID, &getSong (track->edit).getUndoManager());
+        track.setProperty (schema::trackInput, inputID, &song->getUndoManager());
 
     // The input chosen last comes first in the next track's list: remembered, not an undo step.
     if (inputID.isNotEmpty())
-        getSong (track->edit).getState().setProperty (schema::lastInput, inputID, nullptr);
+        song->getState().setProperty (schema::lastInput, inputID, nullptr);
 }
 
 InputMonitoring getInputMonitoring (const ProjectContext& context, TrackID id)
 {
-    const auto* track = findTrack (context, id);
-    const auto value = track != nullptr ? findTrackState (*track).getProperty (schema::trackMonitoring).toString() : juce::String();
+    const auto value = findTrack (context, id).getProperty (schema::trackMonitoring).toString();
     return value == schema::monitorAlways  ? InputMonitoring::always
            : value == schema::monitorNever ? InputMonitoring::never
                                            : InputMonitoring::whileArmed;
@@ -101,35 +101,34 @@ InputMonitoring getInputMonitoring (const ProjectContext& context, TrackID id)
 
 void setInputMonitoring (ProjectContext& context, TrackID id, InputMonitoring monitoring)
 {
-    auto* track = findTrack (context, id);
+    auto* song = findSong (context);
+    auto track = findTrack (context, id);
 
-    if (track == nullptr || ! canRecordAudio (context, id))
+    if (song == nullptr || ! track.isValid() || ! canRecordAudio (context, id))
         return;
 
-    const UndoStep step (track->edit, "Change Input Monitoring");
-    auto* undoManager = &getSong (track->edit).getUndoManager();
+    const UndoStep step (*song, "Change Input Monitoring");
+    auto* undoManager = &song->getUndoManager();
 
     if (monitoring == InputMonitoring::whileArmed)
-        findTrackState (*track).removeProperty (schema::trackMonitoring, undoManager);
+        track.removeProperty (schema::trackMonitoring, undoManager);
     else
-        findTrackState (*track).setProperty (
-            schema::trackMonitoring, monitoring == InputMonitoring::always ? schema::monitorAlways : schema::monitorNever, undoManager);
+        track.setProperty (schema::trackMonitoring, monitoring == InputMonitoring::always ? schema::monitorAlways : schema::monitorNever,
+                           undoManager);
 }
 
 bool isArmed (const ProjectContext& context, TrackID id)
 {
     auto* recorder = findRecorder (context);
-    auto* track = findTrack (context, id);
-    return recorder != nullptr && track != nullptr && recorder->isArmed (*track);
+    return recorder != nullptr && findTrack (context, id).isValid() && recorder->isArmed (id);
 }
 
 void setArmed (ProjectContext& context, TrackID id, bool armed)
 {
     auto* recorder = findRecorder (context);
-    auto* track = findTrack (context, id);
 
-    if (recorder != nullptr && track != nullptr && (! armed || canRecordAudio (context, id)))
-        recorder->setArmed (*track, armed);
+    if (recorder != nullptr && findTrack (context, id).isValid() && (! armed || canRecordAudio (context, id)))
+        recorder->setArmed (id, armed);
 }
 
 void armOnly (ProjectContext& context, TrackID id)
@@ -143,31 +142,26 @@ void armOnly (ProjectContext& context, TrackID id)
 
 std::vector<TrackID> getArmedTracks (const ProjectContext& context)
 {
-    std::vector<TrackID> tracks;
-
-    if (auto* recorder = findRecorder (context))
-        for (auto* track : recorder->getArmedTracks())
-            tracks.push_back (getTrackID (*track));
-
-    return tracks;
+    auto* recorder = findRecorder (context);
+    return recorder != nullptr ? recorder->getArmedTracks() : std::vector<TrackID>();
 }
 
 bool isPunchOn (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr && isPunchOn (*edit);
+    auto* song = findSong (context);
+    return song != nullptr && isPunchOn (*song);
 }
 
 bool canPunch (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr && canPunch (*edit);
+    auto* song = findSong (context);
+    return song != nullptr && canPunch (*song);
 }
 
 void setPunchOn (ProjectContext& context, bool on)
 {
-    if (auto* edit = getEdit (context))
-        setPunchOn (*edit, on);
+    if (auto* song = findSong (context))
+        setPunchOn (*song, on);
 }
 
 ClipTakes getClipTakes (const ProjectContext& context, ClipID id)

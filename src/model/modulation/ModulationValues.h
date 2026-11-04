@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Modulation as plain values (docs/design.md, section 10; roadmap step 2.3), for the model's public functions
-// (ModulationModel.h) and its Tracktion side alike: the kinds of modulators, and what modulation does to a parameter.
+// (ModulationModel.h) and its insides (internal/Modulation.h) alike: the kinds of modulators, and what modulation does to
+// a parameter.
 #pragma once
 
 #include "model/base/IDs.h"

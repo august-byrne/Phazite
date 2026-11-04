@@ -76,7 +76,7 @@ bool isAnythingSelected (const Selection&, const RangeSelection&);
 // "Delete Clip", "Delete 3 Tracks", "Delete Range", or the verb alone when nothing is selected.
 juce::String describeSelection (const Selection&, const RangeSelection&, const juce::String& verb);
 
-// The selection commands, for the selection manager's Edit: delete, delete and close the gap, duplicate,
-// select all and deselect all.
+// The selection commands, for the selection's song: delete, delete and close the gap, duplicate, select all and
+// deselect all.
 void addSelectionCommands (CommandRegistry&, Selection&, RangeSelection&);
 } // namespace phazite

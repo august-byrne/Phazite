@@ -2,10 +2,10 @@
 // Export (docs/design.md, section 18; roadmap step 1.8): the song rendered to a WAV or FLAC file, through the master's
 // devices, from its start to its end (getSongEnd()) with the tails of notes and effects after it, and normalized to an
 // integrated loudness (EBU R128, ITU-R BS.1770) if asked, never pushing its true peak over a ceiling. Phazite's engine
-// plays it offline (docs/tracktion-migration.md, T5), into a temporary file next to the chosen one, which replaces it only
-// when it is complete; the file is then measured again, for the report.
+// plays it offline (model/playback/internal/OfflineRender.h), into a temporary file next to the chosen one, which replaces
+// it only when it is complete; the file is then measured again, for the report.
 //
-// Or its stems (roadmap step 2.11): a file for each channel that reaches the master (internal/Export.h: getStemTracks()),
+// Or its stems (roadmap step 2.11): a file for each channel that reaches the master (internal/Export.h: getStemChannels()),
 // so that together they add up to the mix without the master's devices, all from the song's start so that they line up,
 // in the same format and never normalized. They go into a folder, written next to it and swapped in only when every
 // stem is complete; the folder they replace goes to the recycle bin.

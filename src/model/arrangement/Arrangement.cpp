@@ -68,7 +68,7 @@ void removeTime (Song& song, BeatRange range)
     {
         clearClipsIn (song, track, range); // trims and splits the clips that reach into it
 
-        // Tiny pieces that rounding leaves behind go too, as Tracktion's deleteRegionOfTracks() does.
+        // Tiny pieces that rounding leaves behind go too: those shorter than a tenth of a millisecond.
         for (const auto clip : getClips (song, track))
             if (toSeconds (song, getClipRange (song, clip).getEnd()) - toSeconds (song, getClipRange (song, clip).getStart()) < 0.0001)
                 deleteClips (song, { clip }, false);
@@ -82,7 +82,7 @@ void removeTime (Song& song, BeatRange range)
     removeSectionTime (song, range);
     removeLaneTime (song, range);
 
-    // Tempo changes last, as Tracktion's deleteRegionOfTracks() does.
+    // Tempo changes last, after what is placed on them.
     removeTempoMapTime (song, range);
 }
 

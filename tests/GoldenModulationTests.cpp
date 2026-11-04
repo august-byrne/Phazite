@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden renders of modulation (tests/golden/renders, RenderHarness.h; docs/tracktion-migration.md, T0): each modulator, a
-// track's macro and a container's, moving a parameter of a song made through the model (TestSong.h). Each song is rendered
-// first without its modulation, and its golden render's check asks that the modulation change the sound as it should.
-// Tracktion's random source has no golden render: it isn't seeded, so it moves differently each time.
+// Golden renders of modulation (tests/golden/renders, RenderHarness.h): each modulator, a track's macro and a container's,
+// moving a parameter of a song made through the model (TestSong.h). Each song is rendered first without its modulation, and
+// its golden render's check asks that the modulation change the sound as it should. The random source has no golden render:
+// it isn't seeded, so it moves differently each time.
 #include "RenderHarness.h"
 #include "TestSong.h"
 #include "devices/filter/FilterEffect.h"
@@ -34,8 +34,7 @@ phazite::test::GoldenRender golden (const char* name, const char* about)
 }
 
 // Renders a song as it is, then with a change, as a golden render (RenderHarness.h: checkGoldenChange()). Phazite's engine
-// plays modulation on the song's control points, its modulators from their own starts (docs/tracktion-migration.md, T2
-// step 5), where Tracktion moved them once a block, from 0.51 s before the song: its renders are golden.
+// plays modulation on the song's control points, its modulators from their own starts, the same every time.
 void checkChange (TestSong& song, const std::function<void()>& change, const char* name, const char* about,
                   const phazite::test::ChangeCheck& check)
 {

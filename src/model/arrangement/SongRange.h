@@ -33,7 +33,7 @@ public:
     void removeChangeListener (juce::ChangeListener*);
     bool isSource (const juce::ChangeBroadcaster*) const noexcept;
 
-    struct Impl; // the range selection and the selection manager (for the Edit) behind it
+    struct Impl; // the range selection and the selection (for its song) behind it
     explicit SongRange (std::unique_ptr<Impl>);
 
 private:

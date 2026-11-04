@@ -21,7 +21,6 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/chords/ChordModel.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
@@ -361,8 +360,8 @@ namespace
             outline.name = "Example";
             outline.sections = std::move (sections);
 
-            if (auto* edit = getEdit (context))
-                applyOutline (getSong (*edit), outline);
+            if (auto* song = findSong (context))
+                applyOutline (*song, outline);
         }
 
     private:
@@ -608,8 +607,8 @@ namespace
         const Key key { 5, Scale::major };
 
         // Intro 4, Loop A 8, Loop B 8, Loop A 8, Break 4, Loop B 8, Outro 8.
-        if (auto* edit = getEdit (song.context))
-            applyOutline (getSong (*edit), juce::String ("lofi"));
+        if (auto* played = findSong (song.context))
+            applyOutline (*played, juce::String ("lofi"));
 
         song.layChords (key, { "ii", "V", "I", "vi" }, 0, 12);
         song.layChords (key, { "IV", "iii", "vi", "V" }, 12, 20);
@@ -814,16 +813,16 @@ TrackID findExampleTrackToPlay (const ProjectContext& context, const ExampleSong
     return {};
 }
 
-std::function<void (te::Edit&)> getExampleSongContent (EngineContext& engine, const juce::String& id, const juce::File& factoryPresets)
+std::function<void (Song&)> getExampleSongContent (EngineContext& engine, const juce::String& id, const juce::File& factoryPresets)
 {
-    return [&engine, id, factoryPresets] (te::Edit& edit)
+    return [&engine, id, factoryPresets] (Song& song)
     {
-        // Not undo steps that matter: the project opens from its first save, without them.
-        deleteTracks (getPlaylistTracks (edit), nullptr);
+        // Not undo steps that matter: the project starts from its first save, without them.
+        deleteTracks (song, getTrackIDs (song), nullptr);
         ProjectContext building { engine };
-        setEdit (building, &edit);
+        setSong (building, &song);
         addExampleSong (building, id, factoryPresets);
-        setEdit (building, nullptr);
+        setSong (building, nullptr);
     };
 }
 } // namespace phazite

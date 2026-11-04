@@ -14,12 +14,17 @@
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceWindowContent.h"
@@ -36,24 +41,27 @@ using phazite::devices::Delay;
 using phazite::devices::FilterEffect;
 using phazite::devices::Saturator;
 
-// A device on a track of its own Edit.
+// A device on a track of its own song, open in a context of its own whose session plays it.
 struct Song
 {
     explicit Song (const char* typeID)
     {
-        plugin = edit->getPluginCache().createNewPlugin (typeID, {});
-        phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
-        phazite::test::settle();
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        phazite::setSong (context, song.get());
+        device = phazite::insertDeviceState (*song, phazite::getTrackIDs (*song)[0], phazite::makeOwnDeviceState (*song, typeID));
+        REQUIRE (device.isValid());
+        phazite::getSession (context)->update();
+        song->getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { plugin = nullptr; }
+    ~Song() { phazite::setSong (context, nullptr); }
 
-    float valueOf (const char* id) const { return plugin->getAutomatableParameterByID (id)->getCurrentValue(); }
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    phazite::DeviceHandle getDevice() const { return phazite::makeDeviceHandle (*song, device); }
+    float valueOf (const char* id) const { return phazite::getValueSetByHand (*song, phazite::ParameterRef { device, id }); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::Plugin::Ptr plugin;
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::DeviceID device;
 };
 
 void checkEveryParameterButMixHasAControl (const phazite::ui::DeviceEditorBase& editor, const phazite::devices::DeviceInfo& info)
@@ -69,7 +77,7 @@ void checkEveryParameterButMixHasAControl (const phazite::ui::DeviceEditorBase& 
 TEST_CASE ("The Filter's editor draws its response, and its dot drags the cutoff and resonance as one undo step")
 {
     Song song (FilterEffect::typeID);
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::FilterEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::FilterEditor editor (device);
@@ -89,7 +97,7 @@ TEST_CASE ("The Filter's editor draws its response, and its dot drags the cutoff
     CHECK (song.valueOf ("cutoff") > 200.0f);
     CHECK (song.valueOf ("resonance") > 0.6f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Cutoff"));
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK (song.valueOf ("cutoff") == doctest::Approx (FilterEffect::info.parameters[FilterEffect::cutoff].defaultValue));
     CHECK (song.valueOf ("resonance") == doctest::Approx (0.1f));
 
@@ -101,7 +109,7 @@ TEST_CASE ("The Filter's editor draws its response, and its dot drags the cutoff
 TEST_CASE ("The saturator's editor picks its shape with buttons drawn as their curves, and shows how far the sound reaches")
 {
     Song song (Saturator::typeID);
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::SaturatorEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::SaturatorEditor editor (device);
@@ -134,7 +142,7 @@ TEST_CASE ("The saturator's editor picks its shape with buttons drawn as their c
 TEST_CASE ("The delay's editor drags its first echo for the time and feedback, and its band's ends for the cuts")
 {
     Song song (Delay::typeID);
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::DelayEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::DelayEditor editor (device);
@@ -154,7 +162,7 @@ TEST_CASE ("The delay's editor drags its first echo for the time and feedback, a
     CHECK (song.valueOf ("time") > timeBefore);
     CHECK (song.valueOf ("feedback") > 0.35f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Note")); // the time as a note value, while synced
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK (song.valueOf ("time") == doctest::Approx (timeBefore));
     CHECK (song.valueOf ("feedback") == doctest::Approx (0.35f));
 
@@ -173,7 +181,7 @@ TEST_CASE ("The delay's editor drags its first echo for the time and feedback, a
 TEST_CASE ("The stereo expander's editor shows its image and how alike its sides are as it plays")
 {
     Song song (phazite::devices::StereoExpander::typeID);
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::StereoExpanderEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::StereoExpanderEditor editor (device);
@@ -202,7 +210,7 @@ TEST_CASE ("The stereo expander's editor shows its image and how alike its sides
 TEST_CASE ("The phaser's editor shows where the LFO has each side's notches, and its dot drags the frequency and feedback")
 {
     Song song (phazite::devices::Phaser::typeID);
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::PhaserEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::PhaserEditor editor (device);
@@ -227,7 +235,7 @@ TEST_CASE ("The phaser's editor shows where the LFO has each side's notches, and
     CHECK (song.valueOf ("frequency") < 600.0f);
     CHECK (song.valueOf ("feedback") > 0.4f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Frequency"));
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK (song.valueOf ("frequency") == doctest::Approx (800.0f));
     CHECK (song.valueOf ("feedback") == doctest::Approx (0.3f));
 
@@ -240,7 +248,7 @@ TEST_CASE ("The phaser's editor shows where the LFO has each side's notches, and
 TEST_CASE ("The flanger's editor shows how far each side's copy lags, and its dot drags the delay and feedback")
 {
     Song song (phazite::devices::Flanger::typeID);
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::FlangerEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::FlangerEditor editor (device);
@@ -277,7 +285,7 @@ TEST_CASE ("The flanger's editor shows how far each side's copy lags, and its do
 TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its bands moves the formant as one undo step")
 {
     Song song (phazite::devices::Vocoder::typeID);
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::VocoderEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::VocoderEditor editor (device);
@@ -288,7 +296,7 @@ TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its
     // The buzz at first, at C3; a track as the carrier, while none feeds its sidechain, says so.
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getCarrierText() == juce::String ("Buzz C3"));
-    phazite::setDeviceValue (*song.plugin->getAutomatableParameterByID ("carrier"), 3.0f);
+    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "carrier" }, 3.0f);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getCarrierText() == juce::String ("Track: pick one with Sidechain, above"));
 
@@ -308,7 +316,7 @@ TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its
 TEST_CASE ("A built-in device's editor in a window of its own wraps its parts to the window's width, and scrolls")
 {
     Song song (phazite::devices::Synth::typeID);
-    phazite::ui::DeviceWindowContent content (phazite::makeDeviceHandle (*song.plugin));
+    phazite::ui::DeviceWindowContent content (song.getDevice());
     REQUIRE (content.hasEditor());
     const auto wide = content.getWidth(), high = content.getHeight();
     phazite::test::TestWindow window (content, wide, high);
@@ -336,7 +344,7 @@ TEST_CASE ("A built-in device's editor in a window of its own wraps its parts to
 TEST_CASE ("A built-in device's editor that doesn't wrap keeps its window as wide as it is")
 {
     Song song (phazite::devices::Equalizer::typeID);
-    phazite::ui::DeviceWindowContent content (phazite::makeDeviceHandle (*song.plugin));
+    phazite::ui::DeviceWindowContent content (song.getDevice());
     REQUIRE (content.hasEditor());
     CHECK (content.getMinimumWidth() == content.getWidth());
 }

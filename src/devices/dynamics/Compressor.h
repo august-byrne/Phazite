@@ -48,7 +48,7 @@ public:
         keyLowCut,
         keyHighCut,
         points,                               // its curve (DynamicsCurve.h): how many points it has, then its points
-        mix = points + curves::parameterCount // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
+        mix = points + curves::parameterCount // applied by its runner (DeviceInfo.h, mixParameterID)
     };
 
     enum class Character
@@ -76,8 +76,8 @@ public:
 
     // Message thread: plays the key, as the detector hears it, instead of the sound, for the next half second by the clock;
     // its editor asks again each time it refreshes, so that the key stops when the editor no longer shows, whether the
-    // device played meanwhile or not. It fades between the two over a few milliseconds, and its thin plug-in plays it
-    // whole, whatever the mix.
+    // device played meanwhile or not. It fades between the two over a few milliseconds, and its runner plays it whole,
+    // whatever the mix.
     void listenToKey() noexcept
     {
         listenUntil.store (juce::Time::getMillisecondCounterHiRes() + listenMilliseconds, std::memory_order_relaxed);

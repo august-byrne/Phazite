@@ -31,7 +31,7 @@ struct Song
     Song()
     {
         tracks = phazite::ensureTracks (getSong(), 2);
-        setEdit (context, edit.get());
+        setSong (context, songPtr.get());
         phazite::addClipboardCommands (registry, context);
         clip = phazite::insertMidiClip (getSong(), tracks[0], { at (0.0), at (4.0) }, nullptr);
         phazite::addNote (getSong(), clip, 60, at (1.0), lasting (0.5), 100);
@@ -42,14 +42,11 @@ struct Song
         getSong().getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~Song() { setSong (context, nullptr); }
 
-    phazite::Song& getSong() const { return phazite::getSong (*edit); }
+    phazite::Song& getSong() const { return *songPtr; }
 
-    void playheadAt (double beat)
-    {
-        phazite::movePlayhead (*edit, te::TimePosition::fromSeconds (phazite::toSeconds (getSong(), at (beat))));
-    }
+    void playheadAt (double beat) { phazite::movePlayhead (getSong(), at (beat)); }
 
     bool isEnabled (const char* id) const { return phazite::CommandRegistry::isEnabled (*registry.find (id)); }
 
@@ -78,9 +75,9 @@ struct Song
         return notes;
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    juce::String describeUndo() const { return phazite::describeUndo (songPtr.get()); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    phazite::Song::Ptr songPtr = phazite::createSong(); // 120 BPM, 4/4
     std::vector<phazite::TrackID> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
@@ -121,7 +118,7 @@ TEST_CASE ("Copied clips paste at the playhead on the selected track, as copies,
     // On another track, the automation under it stays where it was.
     CHECK (song.volumeAt (9.0) == doctest::Approx (song.volumeAt (20.0)));
 
-    phazite::undo (*song.edit);
+    phazite::undo (song.getSong());
     CHECK (song.clipsOf (1).empty());
 }
 
@@ -153,7 +150,7 @@ TEST_CASE ("Cut clips paste back onto their own track with the automation that w
     CHECK (song.volumeAt (11.0) == doctest::Approx (0.8f));
     CHECK (song.volumeAt (1.0) == doctest::Approx (0.2f)); // and where it was copied from, still
 
-    phazite::undo (*song.edit);
+    phazite::undo (song.getSong());
     CHECK (song.clipsOf (0).size() == 1);
     CHECK (song.rangeOf (later).getStart().inBeats() == doctest::Approx (10.0));
 }
@@ -220,9 +217,9 @@ TEST_CASE ("Another project empties the clipboard")
     REQUIRE (song.registry.invoke ("edit.copy"));
     CHECK (song.isEnabled ("edit.paste"));
 
-    auto another = phazite::createSongEdit (phazite::test::getEngine());
-    setEdit (song.context, another.get());
+    auto another = phazite::createSong();
+    setSong (song.context, another.get());
     CHECK_FALSE (song.isEnabled ("edit.paste"));
-    setEdit (song.context, song.edit.get());
+    setSong (song.context, song.songPtr.get());
     CHECK_FALSE (song.isEnabled ("edit.paste"));
 }

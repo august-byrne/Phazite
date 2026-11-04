@@ -2,15 +2,14 @@
 // The song's tempo and time signature (docs/design.md, section 4; roadmap step 1.7), which the top bar shows and
 // changes. For now a song has one of each, from its start; changes along the song come later, with a tempo lane. Clips
 // stay on their beats when the tempo changes, as the playlist's time line is in beats: those that follow the tempo
-// stretch with it, the others keep their speed (TempoStretch, TempoValues.h). The song holds them in its tempo map,
-// Phazite's own (schema::TEMPOMAP; docs/tracktion-migration.md, T1), which Tracktion's tempo sequence mirrors.
+// stretch with it, the others keep their speed (TempoStretch, TempoValues.h). The song holds them in its tempo map
+// (schema::TEMPOMAP), which Phazite's engine plays (getTempoMap()).
 #pragma once
 
 #include "engine/core/TempoMap.h"
 #include "model/base/Beats.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/transport/TempoValues.h"
 
 #include <vector>

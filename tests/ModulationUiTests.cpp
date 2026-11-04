@@ -21,32 +21,31 @@ namespace
 using phazite::ModulatorType;
 using phazite::ParameterRef;
 
-// An open project with two tracks, A (with a compressor) and B.
+// An open song with two tracks, A (with a compressor) and B.
 struct Song
 {
     Song()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        setEdit (context, edit.get());
+        const auto tracks = phazite::ensureTracks (*song, 2);
+        a = tracks[0];
+        b = tracks[1];
+        setSong (context, song.get());
 
         for (const auto& each : phazite::getDeviceTypes (context))
             if (each.description.fileOrIdentifier == juce::String ("phaziteCompressor"))
-                phazite::addEffect (context, phazite::getTrackID (*a), each);
+                phazite::addEffect (context, a, each);
 
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        song->getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~Song() { setSong (context, nullptr); }
 
-    ParameterRef makeup() const { return { phazite::getEffects (context, phazite::getTrackID (*a))[0].id, "makeup" }; }
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    ParameterRef makeup() const { return { phazite::getEffects (context, a)[0].id, "makeup" }; }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
+    phazite::TrackID a, b;
 };
 
 // A knob attached to a parameter, in a window.
@@ -119,8 +118,8 @@ TEST_CASE ("A modulator dropped on a knob of its track modulates it; one of anot
 {
     Song song;
     KnobScreen screen (song, song.makeup());
-    const auto lfo = phazite::addModulator (song.context, phazite::getTrackID (*song.a), ModulatorType::lfo);
-    const auto elsewhere = phazite::addModulator (song.context, phazite::getTrackID (*song.b), ModulatorType::random);
+    const auto lfo = phazite::addModulator (song.context, song.a, ModulatorType::lfo);
+    const auto elsewhere = phazite::addModulator (song.context, song.b, ModulatorType::random);
     juce::Component source;
 
     CHECK_FALSE (screen.knob.isInterestedInDragSource (dragOf (elsewhere, source)));
@@ -142,14 +141,14 @@ TEST_CASE ("A modulator dropped on a knob of its track modulates it; one of anot
 TEST_CASE ("A modulator's editor has a knob for each parameter, and a step sequencer's steps are drawn with the mouse")
 {
     Song song;
-    const auto lfo = phazite::addModulator (song.context, phazite::getTrackID (*song.a), ModulatorType::lfo);
+    const auto lfo = phazite::addModulator (song.context, song.a, ModulatorType::lfo);
     phazite::ui::ModulatorEditor lfoEditor { song.context, lfo };
     REQUIRE (lfoEditor.findKnob ("rate") != nullptr);
     REQUIRE (lfoEditor.findKnob ("wave") != nullptr);
     CHECK (lfoEditor.findKnob ("rate")->getTitle() == juce::String ("Rate"));
     CHECK (phazite::test::findComponentWithTitle (lfoEditor, "Output") != nullptr);
 
-    const auto steps = phazite::addModulator (song.context, phazite::getTrackID (*song.a), ModulatorType::steps);
+    const auto steps = phazite::addModulator (song.context, song.a, ModulatorType::steps);
     phazite::ui::ModulatorEditor editor { song.context, steps };
     phazite::test::TestWindow window { editor, editor.getWidth(), editor.getHeight() };
     auto* view = phazite::test::findComponentWithTitle (editor, "Steps");
@@ -172,6 +171,6 @@ TEST_CASE ("A modulator's editor has a knob for each parameter, and a step seque
     CHECK (after[3] == doctest::Approx (before[3]));
     CHECK (song.describeUndo() == juce::String ("Undo Change Steps"));
 
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK (phazite::getSteps (song.context, steps)[1] == doctest::Approx (before[1]));
 }

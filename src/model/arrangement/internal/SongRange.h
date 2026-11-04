@@ -11,6 +11,6 @@ namespace phazite
 {
 class SongRange;
 
-// A view of the range, finding tracks in the selection manager's Edit.
+// A view of the range, finding its tracks in the selection's song.
 std::unique_ptr<SongRange> createSongRange (RangeSelection&, const Selection&);
 } // namespace phazite

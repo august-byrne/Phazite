@@ -28,7 +28,7 @@ namespace
     // played at random lie about 0.083 from it).
     constexpr double worstFit = 0.03;
 
-    constexpr double sixteenthInBeats = 0.25; // Tracktion's "1/4 beat", as Recording.h quantizes
+    constexpr double sixteenthInBeats = 0.25; // as recordings are quantized (Recording.h, Take.h)
 
     struct Fit
     {
@@ -167,25 +167,23 @@ namespace
     }
 } // namespace
 
-bool canCapture (te::Edit& edit)
+bool canCapture (const Song& song)
 {
-    return getLiveMidiTrack (edit) != nullptr && findPlayingSession (edit) != nullptr;
+    return getLiveMidiTrack (song).isValid() && findPlayingSession (song) != nullptr;
 }
 
-ClipID capture (te::Edit& edit, Selection* selection)
+ClipID capture (Song& song, Selection* selection)
 {
-    auto* liveTrack = getLiveMidiTrack (edit);
+    const auto track = getLiveMidiTrack (song);
+    auto* session = findPlayingSession (song);
 
-    if (liveTrack == nullptr || ! canCapture (edit))
+    if (! track.isValid() || session == nullptr)
         return {};
 
-    auto& song = getSong (edit);
-    const auto track = getTrackID (*liveTrack);
-
-    const UndoStep step (edit, "Capture");
-    const bool playing = isSongPlaying (edit);
-    const bool songWasEmpty = getSongEnd (edit).inSeconds() <= 0.0;
-    const auto notes = takePlayedNotes (*findPlayingSession (edit), playing);
+    const UndoStep step (song, "Capture");
+    const bool playing = isSongPlaying (song);
+    const bool songWasEmpty = getSongEnd (song) <= BeatPosition();
+    const auto notes = takePlayedNotes (*session, playing);
 
     if (notes.empty())
         return {};
@@ -249,7 +247,7 @@ ClipID capture (te::Edit& edit, Selection* selection)
     if (! clip.isValid())
         return {};
 
-    const bool quantize = isRecordQuantizeOn (edit.engine);
+    const bool quantize = isRecordQuantizeOn (session->getAudioIO());
 
     for (size_t i = 0; i < notes.size(); ++i)
     {
@@ -304,7 +302,7 @@ void addCaptureCommands (CommandRegistry& registry, Selection& selection)
           .category = "Transport",
           .description = "Turns what you played in the last 30 seconds, recording or not, into a clip on the track live MIDI plays.",
           .synonyms = { "capture midi", "retrospective record", "keep what I played", "flashback", "recover notes" },
-          .perform = withEdit (selection, [&selection] (te::Edit& edit) { capture (edit, &selection); }),
-          .isEnabled = ifEdit (selection, canCapture) });
+          .perform = withSong (selection, [&selection] (Song& song) { capture (song, &selection); }),
+          .isEnabled = ifSong (selection, canCapture) });
 }
 } // namespace phazite

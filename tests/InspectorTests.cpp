@@ -31,15 +31,15 @@ struct Screen
 {
     Screen()
     {
-        phazite::ensureTracks (*edit, 2);
-        setEdit (context, edit.get());
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        phazite::ensureTracks (*song, 2);
+        setSong (context, song.get());
+        song->getUndoManager().clearUndoHistory();
         phazite::test::dispatchPendingMessages();
     }
 
-    ~Screen() { setEdit (context, nullptr); }
+    ~Screen() { setSong (context, nullptr); }
 
-    TrackID track (int index) const { return phazite::getTrackID (*te::getAudioTracks (*edit)[index]); }
+    TrackID track (int index) const { return phazite::getTrackIDs (*song)[(size_t) index]; }
 
     // A label's or a button's text anywhere in the inspector.
     bool shows (const juce::String& text)
@@ -51,7 +51,7 @@ struct Screen
                                [&text] (juce::TextButton* button) { return button->getButtonText() == text; });
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    phazite::Song::Ptr song = phazite::createSong(); // 120 BPM, 4/4
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
@@ -86,7 +86,7 @@ TEST_CASE ("With nothing selected the inspector shows the song; a selected track
     REQUIRE (editors.getFirst()->onReturnKey != nullptr);
     editors.getFirst()->onReturnKey();
     CHECK (phazite::getTrackRow (screen.context, screen.track (1))->name == juce::String ("Bass"));
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)).isNotEmpty());
+    CHECK (phazite::describeUndo (screen.song.get()).isNotEmpty());
 
     // The volume fader is the track's.
     auto* volume = dynamic_cast<juce::Slider*> (phazite::test::findComponentWithTitle (screen.inspector, "Volume"));
@@ -160,7 +160,7 @@ TEST_CASE ("Selected notes show the range of their values, which a step changes 
     const auto clip = phazite::addMidiClipAt (screen.context, screen.track (0), BeatPosition());
     const auto c4 = phazite::addNote (screen.context, clip, 60, BeatPosition(), BeatDuration::fromBeats (1.0), 64);
     const auto e4 = phazite::addNote (screen.context, clip, 64, BeatPosition::fromBeats (1.0), BeatDuration::fromBeats (0.5), 100);
-    phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
+    screen.song->getUndoManager().clearUndoHistory();
     auto& selection = screen.context.getSongSelection();
     selection.setNoteClips ({ clip });
     selection.selectNotes ({ c4, e4 });
@@ -177,7 +177,7 @@ TEST_CASE ("Selected notes show the range of their values, which a step changes 
     step (findField (screen, "Velocity"), true);
     CHECK (noteOf (c4).velocity == 65);
     CHECK (noteOf (e4).velocity == 101);
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Change Velocity"));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Change Velocity"));
     CHECK (screen.shows ("65 to 101"));
 
     // Dragged up, each by as much, as one undo step that takes all of the drag back.
@@ -192,7 +192,7 @@ TEST_CASE ("Selected notes show the range of their values, which a step changes 
         phazite::test::dispatchPendingMessages();
         CHECK (noteOf (c4).velocity > 65);
         CHECK (noteOf (e4).velocity - noteOf (c4).velocity == 36);
-        phazite::undo (*screen.edit);
+        phazite::undo (*screen.song);
         CHECK (noteOf (c4).velocity == 65);
         CHECK (noteOf (e4).velocity == 101);
         phazite::test::dispatchPendingMessages();
@@ -243,7 +243,7 @@ TEST_CASE ("Selected clips' starts, lengths, gain and pitch change together, and
     type (findField (screen, "Length"), "2 bars");
     CHECK (clipOf (first).range.getLength().inBeats() == doctest::Approx (8.0));
     CHECK (clipOf (second).range.getLength().inBeats() == doctest::Approx (8.0));
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Change Clip Length"));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Change Clip Length"));
 
     // Two points of the first track's volume, at 0 and -12 dB: their range, a step up for both, and a value typed for both.
     const auto volume = phazite::getVolume (screen.context, screen.track (0)).getRef();
@@ -264,7 +264,7 @@ TEST_CASE ("Selected clips' starts, lengths, gain and pitch change together, and
     type (findField (screen, "Value"), "-6 dB");
     CHECK (valueOf (0) == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
     CHECK (valueOf (1) == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Set Automation Value"));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Set Automation Value"));
 }
 
 TEST_CASE ("The inspector fills its panel, and scrolls up and down when the panel is shorter than what it shows")

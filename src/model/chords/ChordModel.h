@@ -3,7 +3,7 @@
 // each a numeral in the key there, which the playlist shows under its sections; the keys they are in; progressions laid
 // over a section, a range or the whole song; and parts (chords, a bass line or an arpeggio) made from them, which change
 // with the chords while their notes are the ones the lane made for them. Each edit is one named undo step. A chord is
-// named by its start, since chords don't overlap. No Tracktion here (internal/Chords.h is its Tracktion side).
+// named by its start, since chords don't overlap. Its insides, in the song, are internal/Chords.h.
 #pragma once
 
 #include "model/base/IDs.h"

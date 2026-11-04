@@ -29,22 +29,22 @@ struct Song
 {
     Song()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        setEdit (context, edit.get());
+        const auto tracks = phazite::ensureTracks (*song, 2);
+        a = tracks[0];
+        b = tracks[1];
+        setSong (context, song.get());
 
-        midi = phazite::insertMidiClip (phazite::getSong (*edit), phazite::getTrackID (*a), { beat (4.0), beat (8.0) }, nullptr);
+        midi = phazite::insertMidiClip (*song, a, { beat (4.0), beat (8.0) }, nullptr);
         REQUIRE (midi.isValid());
 
         const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Tone.wav"), 4.0);
-        const auto imported = phazite::importFiles (context, { file.getFullPathName() }, phazite::getTrackID (*b), beat (0.0));
+        const auto imported = phazite::importFiles (context, { file.getFullPathName() }, b, beat (0.0));
         REQUIRE (imported.size() == 1);
         audio = imported[0];
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        song->getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~Song() { setSong (context, nullptr); }
 
     phazite::AudioClipInfo get() const
     {
@@ -53,13 +53,12 @@ struct Song
         return *info;
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
     phazite::test::TemporaryFolder temp;
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
+    phazite::TrackID a, b;
     phazite::ClipID midi, audio;
 };
 } // namespace
@@ -69,7 +68,7 @@ TEST_CASE ("An audio clip by ID: its file, where all of it plays, and how")
     Song song;
     const auto info = song.get();
     CHECK (info.clip.id == song.audio);
-    CHECK (info.clip.track == phazite::getTrackID (*song.b));
+    CHECK (info.clip.track == song.b);
     CHECK (info.fileName == juce::String ("Tone.wav"));
     CHECK (info.sampleRate == doctest::Approx (44100.0));
     CHECK (info.channels == 1);
@@ -113,8 +112,8 @@ TEST_CASE ("An audio clip's gain and pitch change as undo steps of their own, wi
     CHECK (song.get().gain == doctest::Approx (phazite::maxClipGain));
     phazite::setClipGain (context, song.audio, -100.0f);
     CHECK (song.get().gain == doctest::Approx (phazite::minClipGain));
-    phazite::undo (*song.edit);
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
+    phazite::undo (*song.song);
     CHECK (song.get().gain == doctest::Approx (6.0f));
 
     // In semitones, with cents as hundredths, the clip keeping its length.
@@ -134,7 +133,7 @@ TEST_CASE ("An audio clip's gain and pitch change as undo steps of their own, wi
     }
 
     CHECK (song.get().gain == doctest::Approx (3.0f));
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK (song.get().gain == doctest::Approx (6.0f));
 }
 
@@ -174,7 +173,7 @@ TEST_CASE ("A reversed clip plays the same part of its audio, backwards, where i
     // The clip plays the file from half a second in, for two and a half seconds.
     phazite::trimClipStart (context, song.audio, beat (1.0));
     phazite::trimClipEnd (context, song.audio, beat (6.0));
-    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
+    song.song->getUndoManager().clearUndoHistory();
 
     phazite::setClipReversed (context, song.audio, true);
     CHECK (song.get().reversed);
@@ -186,15 +185,15 @@ TEST_CASE ("A reversed clip plays the same part of its audio, backwards, where i
     CHECK (song.get().content.getStart().inBeats() == doctest::Approx (-1.0));
     CHECK (song.get().content.getEnd().inBeats() == doctest::Approx (7.0));
 
-    // Tracktion makes the reversed copy of the file in the background; the clip is silent until it is ready.
+    // Phazite renders the file reversed in the background; the clip is silent until the render is ready.
     CHECK (song.get().state != phazite::AudioState::missing);
     CHECK (phazite::test::dispatchMessagesUntil ([&song] { return song.get().state == phazite::AudioState::ready; }, 10000));
 
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK_FALSE (song.get().reversed);
     CHECK (song.get().content.getStart().inBeats() == doctest::Approx (0.0));
 
-    phazite::redo (*song.edit);
+    phazite::redo (*song.song);
     CHECK (song.get().reversed);
     CHECK (song.get().content.getStart().inBeats() == doctest::Approx (-1.0));
 
@@ -209,7 +208,7 @@ TEST_CASE ("A clip that follows the tempo keeps its start and its audio, and its
     Song song;
     auto& context = song.context;
     phazite::trimClipStart (context, song.audio, beat (2.0)); // it plays the file from a second in
-    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
+    song.song->getUndoManager().clearUndoHistory();
 
     // From the song's tempo, so nothing changes yet.
     phazite::setClipFollowsTempo (context, song.audio, true);
@@ -222,7 +221,7 @@ TEST_CASE ("A clip that follows the tempo keeps its start and its audio, and its
     CHECK (song.get().content.getEnd().inBeats() == doctest::Approx (8.0));
 
     // The time in the file that plays at a beat, which the waveforms draw: a second in where the clip starts.
-    const auto& model = phazite::getSong (*song.edit);
+    const auto& model = *song.song;
     REQUIRE (phazite::isAudioState (phazite::findClipState (model, song.audio)));
     CHECK (phazite::getFileTimeAt (model, song.audio, beat (2.0)) == doctest::Approx (1.0));
     CHECK (phazite::getFileTimeAt (model, song.audio, beat (0.0)) == doctest::Approx (0.0)); // trimmed off
@@ -239,7 +238,7 @@ TEST_CASE ("A clip that follows the tempo keeps its start and its audio, and its
     CHECK (phazite::getFileTimeAt (model, song.audio, beat (3.0)) == doctest::Approx (2.0)); // a beat a second
     phazite::setClipTempo (context, song.audio, 1000.0);
     CHECK (song.get().tempo == doctest::Approx (phazite::maxClipTempo));
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
 
     // At its own speed again, from where it starts.
     phazite::setClipFollowsTempo (context, song.audio, false);
@@ -250,13 +249,13 @@ TEST_CASE ("A clip that follows the tempo keeps its start and its audio, and its
     CHECK (song.get().clip.range.getEnd().inBeats() == doctest::Approx (8.0));
     CHECK (song.get().content.getStart().inBeats() == doctest::Approx (0.0));
 
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK (song.get().followsTempo);
     CHECK (song.get().clip.range.getEnd().inBeats() == doctest::Approx (5.0));
 
     // A tempo setting changes nothing while the clip plays at its own speed.
-    phazite::undo (*song.edit);
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
+    phazite::undo (*song.song);
     CHECK_FALSE (song.get().followsTempo);
     phazite::setClipTempo (context, song.audio, 90.0);
     CHECK (song.get().clip.range.getEnd().inBeats() == doctest::Approx (8.0));
@@ -284,14 +283,14 @@ TEST_CASE ("The selection says which editor the dock's first tab shows, and whic
 
     // A track: its audio clip, the one at the playhead or the nearest; a track without audio clips shows in the piano roll.
     selection.clear();
-    selection.add (phazite::getTrackID (*song.b));
+    selection.add (song.b);
     CHECK (phazite::getClipTypeToEdit (context) == phazite::ClipType::audio);
     CHECK (phazite::getAudioClipToEdit (context, beat (20.0)) == song.audio);
-    CHECK (phazite::getAudioClipNearest (context, phazite::getTrackID (*song.b), beat (3.0)) == song.audio);
-    CHECK_FALSE (phazite::getAudioClipNearest (context, phazite::getTrackID (*song.a), beat (3.0)).has_value());
+    CHECK (phazite::getAudioClipNearest (context, song.b, beat (3.0)) == song.audio);
+    CHECK_FALSE (phazite::getAudioClipNearest (context, song.a, beat (3.0)).has_value());
 
     selection.clear();
-    selection.add (phazite::getTrackID (*song.a));
+    selection.add (song.a);
     CHECK (phazite::getClipTypeToEdit (context) == phazite::ClipType::midi);
     CHECK_FALSE (phazite::getAudioClipToEdit (context, beat (0.0)).has_value());
 }

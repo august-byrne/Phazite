@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// An audio clip as Phazite's engine plays it (docs/tracktion-migration.md, T2): a part of an audio file (AudioFile.h), from a
-// sample of the song for so many, at a gain, faded in and out by one of Phazite's fade shapes, cut off at its edges. A file
-// at another rate than the engine's plays through 5-point Lagrange interpolation, as Tracktion played it. Built by the model
-// from the song, with the file Phazite's renders of stretched, pitched and reversed clips are in when a clip needs one.
+// An audio clip as Phazite's engine plays it: a part of an audio file (AudioFile.h), from a sample of the song for so
+// many, at a gain, faded in and out by one of Phazite's fade shapes, cut off at its edges. A file at another rate than
+// the engine's plays through 5-point Lagrange interpolation. Built by the model from the song, with the file Phazite's
+// renders of stretched, pitched and reversed clips are in when a clip needs one.
 #pragma once
 
 #include "AudioFile.h"

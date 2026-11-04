@@ -316,7 +316,7 @@ struct AudioClipEditor::Waveform : public juce::Component
             }
         }
 
-        // While Tracktion prepares the audio, or without its file, say so.
+        // While Phazite renders the audio, or without its file, say so.
         if (shown.state != AudioState::ready)
         {
             g.setColour (p.textMuted);
@@ -647,7 +647,7 @@ void AudioClipEditor::refresh()
     fitView(); // wherever the clip and its audio are now in the song
     waveform->clipChanged();
 
-    // Tracktion says nothing when it has prepared the audio: look again until it has.
+    // Nothing tells the editor when the audio's render is ready: look again until it is.
     if (info.has_value() && info->state == AudioState::preparing)
     {
         if (! preparingCheck.isTimerRunning())

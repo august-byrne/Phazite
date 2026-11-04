@@ -70,22 +70,16 @@ namespace
     }
 } // namespace
 
-void Selection::setEdit (te::Edit* newEdit)
+void Selection::setSong (Song* newSong)
 {
-    if (newEdit == edit.get())
+    if (newSong == heldSong.get())
         return;
 
-    edit = newEdit;
+    heldSong = newSong;
     clearItems();
     clearNotesAndPoints();
     noteClips.clear();
     changed();
-}
-
-Song* Selection::getSong() const
-{
-    auto* in = edit.get();
-    return in != nullptr ? &phazite::getSong (*in) : nullptr;
 }
 
 bool Selection::isThere (Item item) const

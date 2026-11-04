@@ -3,6 +3,7 @@
 // shows as view state, points and their edits as named undo steps, shapes, automation that keeps its beats when the
 // tempo changes, the write modes (what they write, on Phazite's engine: EnginePlaybackTests.cpp), the selected points'
 // commands, and the parameter touched last.
+#include "EnginePlayback.h"
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -15,9 +16,9 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -38,28 +39,23 @@ phazite::BeatPosition beats (double b)
     return phazite::BeatPosition::fromBeats (b);
 }
 
-phazite::TrackID idOf (const te::Track& track)
-{
-    return phazite::getTrackID (track);
-}
-
 // An open project with two tracks, A (with a synth, then a compressor) and B, as the app has it, and no undo history.
 struct Song
 {
     Song()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        phazite::setTrackName (*a, "A");
-        phazite::setTrackName (*b, "B");
-        setEdit (context, edit.get());
-        phazite::chooseInstrument (context, idOf (*a), find ("phaziteSynth"));
-        phazite::addEffect (context, idOf (*a), find ("phaziteCompressor"));
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        const auto tracks = phazite::ensureTracks (*song, 2);
+        a = tracks[0];
+        b = tracks[1];
+        phazite::setTrackName (*song, a, "A");
+        phazite::setTrackName (*song, b, "B");
+        phazite::setSong (context, song.get());
+        phazite::chooseInstrument (context, a, find ("phaziteSynth"));
+        phazite::addEffect (context, a, find ("phaziteCompressor"));
+        song->getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~Song() { phazite::setSong (context, nullptr); }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -74,19 +70,18 @@ struct Song
     // A's compressor's makeup gain, from -12 to 24 dB, and A's volume.
     ParameterRef makeup() const
     {
-        const auto effects = phazite::getEffects (context, idOf (*a));
+        const auto effects = phazite::getEffects (context, a);
         REQUIRE (effects.size() == 1);
         return { effects[0].id, "makeup" };
     }
 
-    ParameterRef volume() { return phazite::getVolume (context, idOf (*a)).getRef(); }
+    ParameterRef volume() { return phazite::getVolume (context, a).getRef(); }
 
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
+    phazite::TrackID a, b;
 };
 
 std::vector<ParameterRef> lanesOf (const phazite::ProjectContext& context, phazite::TrackID track)
@@ -114,7 +109,7 @@ TEST_CASE ("A track's automatable parameters are its volume and pan, then its de
 {
     Song song;
     auto& context = song.context;
-    const auto targets = phazite::getAutomationTargets (context, idOf (*song.a));
+    const auto targets = phazite::getAutomationTargets (context, song.a);
     REQUIRE (targets.size() > 4);
 
     CHECK (targets[0].parameter == song.volume());
@@ -129,7 +124,7 @@ TEST_CASE ("A track's automatable parameters are its volume and pan, then its de
     REQUIRE (makeup != targets.end());
     CHECK (makeup->name == juce::String ("Makeup"));
     CHECK (makeup->deviceName == juce::String ("Compressor"));
-    CHECK (makeup->track == idOf (*song.a));
+    CHECK (makeup->track == song.a);
     CHECK (makeup->kind == ParameterKind::other);
     CHECK_FALSE (makeup->automated);
     CHECK (std::none_of (targets.begin(), targets.end(),
@@ -154,7 +149,7 @@ TEST_CASE ("Lanes show under the track whose device they are, as view state with
 {
     Song song;
     auto& context = song.context;
-    const auto a = idOf (*song.a);
+    const auto a = song.a;
 
     CHECK (phazite::getAutomationLanes (context, a).empty());
     CHECK (phazite::showAutomationLane (context, song.makeup()) == a);
@@ -162,8 +157,8 @@ TEST_CASE ("Lanes show under the track whose device they are, as view state with
     CHECK (phazite::showAutomationLane (context, song.makeup()) == a); // shown already: it stays where it is
     CHECK (lanesOf (context, a) == std::vector { song.makeup(), song.volume() });
     CHECK (phazite::getAutomationLanes (context, a)[0].height == phazite::AutomationLane::defaultHeight);
-    CHECK (lanesOf (context, idOf (*song.b)).empty());
-    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo());
+    CHECK (lanesOf (context, song.b).empty());
+    CHECK_FALSE (song.song->getUndoManager().canUndo());
 
     phazite::setAutomationLaneHeight (context, song.makeup(), 1000);
     CHECK (phazite::getAutomationLanes (context, a)[0].height == phazite::AutomationLane::maxHeight);
@@ -179,7 +174,7 @@ TEST_CASE ("Lanes show under the track whose device they are, as view state with
     // A lane of a device that is gone doesn't show, and a parameter that isn't there gets none.
     const auto makeup = song.makeup();
     phazite::showAutomationLane (context, makeup);
-    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo()); // none of it was an undo step
+    CHECK_FALSE (song.song->getUndoManager().canUndo()); // none of it was an undo step
     phazite::removeDevice (context, makeup.device);
     CHECK (lanesOf (context, a).empty());
     CHECK_FALSE (phazite::showAutomationLane (context, makeup).isValid());
@@ -189,28 +184,28 @@ TEST_CASE ("Showing a lane opens its track, and the folders it is in")
 {
     Song song;
     auto& context = song.context;
-    auto* folder = phazite::groupIntoFolder ({ song.a }, nullptr);
-    REQUIRE (folder != nullptr);
-    phazite::setCollapsed (context, idOf (*song.a), true);
-    phazite::setCollapsed (context, idOf (*folder), true);
+    const auto folder = phazite::groupIntoFolder (*song.song, { song.a }, nullptr);
+    REQUIRE (folder.isValid());
+    phazite::setCollapsed (context, song.a, true);
+    phazite::setCollapsed (context, folder, true);
 
     phazite::showAutomationLane (context, song.makeup());
-    CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->collapsed);
-    CHECK_FALSE (phazite::getTrackRow (context, idOf (*folder))->collapsed);
+    CHECK_FALSE (phazite::getTrackRow (context, song.a)->collapsed);
+    CHECK_FALSE (phazite::getTrackRow (context, folder)->collapsed);
 }
 
 TEST_CASE ("Automation never hides: every automated parameter has a lane, which collapses to a thin row")
 {
     Song song;
     auto& context = song.context;
-    const auto a = idOf (*song.a);
+    const auto a = song.a;
     const auto makeup = song.makeup(), volume = song.volume();
 
     // Automation written where no lane showed (as recording, or an older project, gives it) shows one after the others.
     phazite::showAutomationLane (context, volume);
     phazite::addAutomationPoint (context, makeup, { beats (4), -9.0f });
     CHECK (lanesOf (context, a) == std::vector { volume, makeup });
-    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
+    song.song->getUndoManager().clearUndoHistory();
 
     // A lane collapses and expands where it is; showing it expands it too. None of it is an undo step.
     phazite::setAutomationLaneCollapsed (context, makeup, true);
@@ -225,14 +220,14 @@ TEST_CASE ("Automation never hides: every automated parameter has a lane, which 
     CHECK_FALSE (phazite::getAutomationLanes (context, a)[1].collapsed);
     phazite::setAutomationLanesCollapsed (context, a, false);
     CHECK_FALSE (phazite::getAutomationLanes (context, a)[0].collapsed);
-    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo());
+    CHECK_FALSE (song.song->getUndoManager().canUndo());
 
     // Removing a lane with automation deletes the automation, as one step that brings both back.
     phazite::removeAutomationLane (context, makeup);
     CHECK (lanesOf (context, a) == std::vector { volume });
     CHECK (phazite::getAutomationPoints (context, makeup).empty());
     CHECK (song.describeUndo() == juce::String ("Undo Delete Automation"));
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK (lanesOf (context, a) == std::vector { volume, makeup });
     CHECK (phazite::getAutomationPoints (context, makeup).size() == 1);
 }
@@ -241,7 +236,7 @@ TEST_CASE ("Show Automation expands the selected tracks' lanes, or collapses the
 {
     Song song;
     auto& context = song.context;
-    const auto a = idOf (*song.a);
+    const auto a = song.a;
     phazite::CommandRegistry registry;
     phazite::addAutomationCommands (registry, context);
     context.getSongSelection().selectOnly (a);
@@ -314,9 +309,9 @@ TEST_CASE ("Points are added, moved, bent, deleted and drawn in beats, each edit
     CHECK (beatsOf (phazite::getAutomationPoints (context, makeup)) == std::vector { 2.0, 6.0 });
     CHECK (song.describeUndo() == juce::String ("Undo Draw Automation"));
 
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     CHECK (beatsOf (phazite::getAutomationPoints (context, makeup)) == std::vector { 0.0, 8.0 });
-    phazite::redo (*song.edit);
+    phazite::redo (*song.song);
     CHECK (beatsOf (phazite::getAutomationPoints (context, makeup)) == std::vector { 2.0, 6.0 });
 
     phazite::removeAutomationLane (context, makeup);
@@ -371,36 +366,36 @@ TEST_CASE ("Automation keeps its beats when the tempo or the time signature chan
     auto& context = song.context;
     const auto makeup = song.makeup();
     phazite::addAutomationPoint (context, makeup, { beats (4), -9.0f });
-    const auto parameter = phazite::findParameter (*song.edit, makeup);
-    REQUIRE (parameter != nullptr);
-    CHECK (parameter->getCurve().getPointTime (0).inSeconds() == doctest::Approx (2.0)); // at 120 BPM
+    const auto secondsOfPoint = [&song, &context, makeup]
+    { return phazite::toSeconds (*song.song, phazite::getAutomationPoints (context, makeup)[0].beat); };
+    CHECK (secondsOfPoint() == doctest::Approx (2.0)); // at 120 BPM
 
-    phazite::setTempo (phazite::getSong (*song.edit), 60.0);
+    phazite::setTempo (*song.song, 60.0);
     CHECK (phazite::getAutomationPoints (context, makeup)[0].beat.inBeats() == doctest::Approx (4.0));
-    CHECK (parameter->getCurve().getPointTime (0).inSeconds() == doctest::Approx (4.0));
+    CHECK (secondsOfPoint() == doctest::Approx (4.0));
 
-    phazite::undo (*song.edit);
-    CHECK (phazite::getTempo (phazite::getSong (*song.edit)) == doctest::Approx (120.0));
-    CHECK (parameter->getCurve().getPointTime (0).inSeconds() == doctest::Approx (2.0));
+    phazite::undo (*song.song);
+    CHECK (phazite::getTempo (*song.song) == doctest::Approx (120.0));
+    CHECK (phazite::getAutomationPoints (context, makeup)[0].beat.inBeats() == doctest::Approx (4.0));
+    CHECK (secondsOfPoint() == doctest::Approx (2.0));
 
-    phazite::setTimeSignature (phazite::getSong (*song.edit), { 3, 4 });
+    phazite::setTimeSignature (*song.song, { 3, 4 });
     CHECK (phazite::getAutomationPoints (context, makeup)[0].beat.inBeats() == doctest::Approx (4.0));
 }
 
-TEST_CASE ("Write modes are each track's, the song's, which Tracktion's tracks mirror, and changing one is no undo step")
+TEST_CASE ("Write modes are each track's, the song's, and changing one is no undo step")
 {
     Song song;
     auto& context = song.context;
-    const auto a = idOf (*song.a), b = idOf (*song.b);
+    const auto a = song.a, b = song.b;
     CHECK (phazite::getAutomationMode (context, a) == AutomationMode::read);
 
     phazite::setAutomationMode (context, a, AutomationMode::touch);
     CHECK (phazite::getAutomationMode (context, a) == AutomationMode::touch);
     CHECK (phazite::getAutomationMode (context, b) == AutomationMode::read);
-    CHECK (phazite::findTrackState (*song.a)[phazite::schema::trackAutomationMode].toString() == juce::String ("touch"));
-    CHECK ((song.a->automationMode.get() == te::AutomationMode::touch)); // Tracktion's toString() for it isn't doctest's
-    CHECK (phazite::isWritingAutomation (*song.edit));
-    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo());
+    CHECK (phazite::findTrackState (*song.song, a)[phazite::schema::trackAutomationMode].toString() == juce::String ("touch"));
+    CHECK (phazite::isWritingAutomation (*song.song));
+    CHECK_FALSE (song.song->getUndoManager().canUndo());
 
     // The commands set the selected tracks' modes.
     phazite::CommandRegistry registry;
@@ -416,7 +411,7 @@ TEST_CASE ("Write modes are each track's, the song's, which Tracktion's tracks m
     CHECK_FALSE (registry.find ("automation.read")->isTicked());
 
     REQUIRE (registry.invoke ("automation.read"));
-    CHECK_FALSE (phazite::isWritingAutomation (*song.edit));
+    CHECK_FALSE (phazite::isWritingAutomation (*song.song));
 }
 
 TEST_CASE ("The parameter touched last is a control's, not automation's or a device's many at once")
@@ -432,7 +427,7 @@ TEST_CASE ("The parameter touched last is a control's, not automation's or a dev
     CHECK (phazite::getLastTouchedParameter (context) == touched);
 
     // A device added sets its parameters all at once: no one touched those.
-    phazite::addEffect (context, idOf (*song.a), song.find ("phaziteEq"));
+    phazite::addEffect (context, song.a, song.find ("phaziteEq"));
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::getLastTouchedParameter (context) == touched);
 
@@ -442,7 +437,7 @@ TEST_CASE ("The parameter touched last is a control's, not automation's or a dev
     CHECK (phazite::getCurrentName (*registry.find ("automation.automateLastTouched")) == juce::String ("Automate Makeup"));
     CHECK (registry.find ("automation.automateLastTouched")->overPlugins);
     REQUIRE (registry.invoke ("automation.automateLastTouched"));
-    CHECK (lanesOf (context, idOf (*song.a)) == std::vector { touched });
+    CHECK (lanesOf (context, song.a) == std::vector { touched });
 
     // Its device gone, there is none.
     phazite::removeDevice (context, touched.device);
@@ -460,7 +455,7 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
     phazite::addAutomationPoint (context, makeup, { beats (4), -9.0f });
 
     auto& selection = context.getSongSelection();
-    selection.selectOnly (idOf (*song.a));
+    selection.selectOnly (song.a);
     selection.selectAutomationPoints (makeup, { 2, 1 });
     CHECK (selection.getTracks().empty()); // points are selected alone
     CHECK (selection.getSelectedAutomationPoints().parameter == makeup);
@@ -494,7 +489,7 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
 
     // Selecting anything else deselects them.
     selection.selectAutomationPoints (makeup, { 0 });
-    selection.selectOnly (idOf (*song.b));
+    selection.selectOnly (song.b);
     CHECK_FALSE (selection.getSelectedAutomationPoints().parameter.isValid());
     CHECK_FALSE (phazite::CommandRegistry::isEnabled (*registry.find ("automation.raisePoints")));
 }
@@ -503,7 +498,7 @@ TEST_CASE ("Show Automation collapses the selected tracks' lanes while one shows
 {
     Song song;
     auto& context = song.context;
-    const auto a = idOf (*song.a), b = idOf (*song.b);
+    const auto a = song.a, b = song.b;
     phazite::addAutomationPoint (context, song.makeup(), { beats (0), -3.0f });
 
     phazite::CommandRegistry registry;
@@ -526,64 +521,40 @@ TEST_CASE ("Show Automation collapses the selected tracks' lanes while one shows
     CHECK (registry.find ("automation.showLanes")->isTicked());
 }
 
-TEST_CASE ("Automation is the song's own, which Tracktion's curves mirror one way, undo and redo too")
+TEST_CASE ("Automation is the song's own, in beats, undo and redo too")
 {
     Song song;
-    auto& edit = *song.edit;
+    auto& document = *song.song;
     const auto makeup = song.makeup();
-    const auto parameter = phazite::findParameter (edit, makeup);
-    REQUIRE (parameter != nullptr);
-    const auto& curve = parameter->getCurve();
 
-    // A point goes into the song's curve for the parameter, in beats, and Tracktion's follows, in seconds at 120 BPM.
+    // A point goes into the song's curve for the parameter, in beats.
     phazite::addAutomationPoint (song.context, makeup, { beats (4), -9.0f });
-    const auto state = phazite::findCurveState (edit, makeup);
+    const auto state = phazite::findCurveState (document, makeup);
     REQUIRE (state.isValid());
     CHECK (state.getParent().hasType (phazite::schema::AUTOMATION));
     CHECK (phazite::getCurveParameter (state) == makeup);
     REQUIRE (state.getNumChildren() == 1);
     CHECK ((double) state.getChild (0)[phazite::schema::pointBeat] == doctest::Approx (4.0));
     CHECK ((float) state.getChild (0)[phazite::schema::pointValue] == doctest::Approx (-9.0f));
-    REQUIRE (curve.getNumPoints() == 1);
-    CHECK (curve.getPointTime (0).inSeconds() == doctest::Approx (2.0));
-    CHECK (curve.getPointValue (0) == doctest::Approx (-9.0f));
 
-    // An undo takes both away, the song's curve with its last point, and a redo puts both back.
-    phazite::undo (edit);
-    CHECK_FALSE (phazite::findCurveState (edit, makeup).isValid());
-    CHECK (curve.getNumPoints() == 0);
-    phazite::redo (edit);
+    // An undo takes the song's curve away with its last point, and a redo puts it back.
+    phazite::undo (document);
+    CHECK_FALSE (phazite::findCurveState (document, makeup).isValid());
+    CHECK (phazite::getAutomationPoints (song.context, makeup).empty());
+    phazite::redo (document);
+    CHECK (phazite::findCurveState (document, makeup).isValid());
     CHECK (phazite::getAutomationPoints (song.context, makeup).size() == 1);
-    CHECK (curve.getNumPoints() == 1);
-
-    // One way: a point in Tracktion's curve is none of the song's, and the mirror takes it out, as it empties a curve of
-    // Tracktion's that the song has none for. Once they agree, it changes nothing.
-    parameter->getCurve().addPoint (te::TimePosition::fromSeconds (3.0), -10.0f, 0.0f, nullptr);
-    const auto volume = phazite::findParameter (edit, song.volume());
-    REQUIRE (volume != nullptr);
-    volume->getCurve().addPoint (te::TimePosition(), 0.5f, 0.0f, nullptr);
-    CHECK (phazite::getAutomationPoints (song.context, makeup).size() == 1);
-    CHECK (phazite::getAutomationPoints (song.context, song.volume()).empty());
-
-    phazite::mirror::reconcileAutomation (edit);
-    CHECK (curve.getNumPoints() == 1);
-    CHECK (volume->getCurve().getNumPoints() == 0);
-
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
-    phazite::mirror::reconcileAutomation (edit);
-    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
 }
 
 TEST_CASE ("A control turned moves its curve's one point, the song's too, in the control's undo step")
 {
-    // As Tracktion moves it, with the song playing or not (it has a playback context then).
+    // With the song's session playing it.
     Song song;
     auto& context = song.context;
-    song.edit->getTransport().ensureContextAllocated();
     phazite::addAutomationPoint (context, song.volume(), { beats (2), 0.5f });
-    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
+    song.song->getUndoManager().clearUndoHistory();
 
-    auto volume = phazite::getVolume (context, idOf (*song.a));
+    auto volume = phazite::getVolume (context, song.a);
     volume.beginGesture();
     volume.setValue (0.7f);
     volume.endGesture();
@@ -593,11 +564,10 @@ TEST_CASE ("A control turned moves its curve's one point, the song's too, in the
     CHECK (points[0].beat.inBeats() == doctest::Approx (2.0));
     CHECK (points[0].value == doctest::Approx (0.7f));
 
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     points = phazite::getAutomationPoints (context, song.volume());
     REQUIRE (points.size() == 1);
     CHECK (points[0].value == doctest::Approx (0.5f));
-    CHECK (phazite::findParameter (*song.edit, song.volume())->getCurve().getPointValue (0) == doctest::Approx (0.5f));
 }
 
 TEST_CASE ("A duplicated track's automation is its own devices', and the original's stays")
@@ -607,15 +577,15 @@ TEST_CASE ("A duplicated track's automation is its own devices', and the origina
     phazite::addAutomationPoint (context, song.makeup(), { beats (4), -9.0f });
     phazite::addAutomationPoint (context, song.volume(), { beats (2), 0.25f });
 
-    juce::Array<te::Track*> copies;
+    std::vector<phazite::TrackID> copies;
 
     {
-        const phazite::UndoStep step (*song.edit, "Duplicate Track");
-        copies = phazite::duplicateTracks ({ song.a }, nullptr);
+        const phazite::UndoStep step (*song.song, "Duplicate Track");
+        copies = phazite::duplicateTracks (*song.song, { song.a }, nullptr);
     }
 
     REQUIRE (copies.size() == 1);
-    const auto copy = idOf (*copies[0]);
+    const auto copy = copies[0];
     const auto copiedEffects = phazite::getEffects (context, copy);
     REQUIRE (copiedEffects.size() == 1);
     const ParameterRef copiedMakeup { copiedEffects[0].id, "makeup" };
@@ -629,12 +599,12 @@ TEST_CASE ("A duplicated track's automation is its own devices', and the origina
         REQUIRE (copiedPoints.size() == 1);
         CHECK (copiedPoints[0].beat.inBeats() == doctest::Approx (points[0].beat.inBeats()));
         CHECK (copiedPoints[0].value == doctest::Approx (points[0].value));
-        CHECK (phazite::findParameter (*song.edit, copied)->getCurve().getNumPoints() == 1);
+        CHECK (phazite::findCurveState (*song.song, copied).isValid());
     }
 
     // The copy's curves go with it in one undo.
-    phazite::undo (*song.edit);
-    CHECK_FALSE (phazite::findCurveState (*song.edit, copiedMakeup).isValid());
+    phazite::undo (*song.song);
+    CHECK_FALSE (phazite::findCurveState (*song.song, copiedMakeup).isValid());
     CHECK (phazite::getAutomationPoints (context, song.makeup()).size() == 1);
 }
 
@@ -645,44 +615,53 @@ TEST_CASE ("A duplicated track's lanes show its own devices")
     phazite::showAutomationLane (context, song.makeup());
     phazite::showAutomationLane (context, song.volume());
 
-    const auto copies = phazite::duplicateTracks ({ song.a }, nullptr);
+    const auto copies = phazite::duplicateTracks (*song.song, { song.a }, nullptr);
     REQUIRE (copies.size() == 1);
-    const auto copy = idOf (*copies[0]);
+    const auto copy = copies[0];
     const auto copiedEffects = phazite::getEffects (context, copy);
     REQUIRE (copiedEffects.size() == 1);
 
     CHECK (lanesOf (context, copy)
            == std::vector { ParameterRef { copiedEffects[0].id, "makeup" }, phazite::getVolume (context, copy).getRef() });
-    CHECK (lanesOf (context, idOf (*song.a)) == std::vector { song.makeup(), song.volume() });
+    CHECK (lanesOf (context, song.a) == std::vector { song.makeup(), song.volume() });
 }
 
 TEST_CASE ("Lanes and the values automation plays are no unsaved changes")
 {
     phazite::test::TemporaryFolder temp;
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Automated", error);
+    auto project = phazite::Project::create (temp.folder, "Automated", error);
     REQUIRE (project != nullptr);
     phazite::test::settle();
 
-    auto& edit = project->getEdit();
-    auto* track = te::getAudioTracks (edit)[0];
-    auto* volume = track->getVolumePlugin();
-    REQUIRE (volume != nullptr);
+    auto& song = project->getSong();
+    const auto track = phazite::getTrackIDs (song)[0];
+    const ParameterRef volume { phazite::getFader (song, track), phazite::getVolumeParameterID (song, track) };
+    REQUIRE (volume.isValid());
 
     // Automation is a change; then it is saved.
-    phazite::addPoint (*volume->volParam, { phazite::BeatPosition(), 0.5f, 0.0f });
+    phazite::addPoint (song, volume, { phazite::BeatPosition(), 0.5f, 0.0f });
     CHECK (project->hasUnsavedChanges());
     REQUIRE (project->save().wasOk());
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // The value Tracktion writes as the automation plays isn't one, nor is a lane.
-    volume->state.setProperty (te::IDs::volume, 0.25f, nullptr);
-    phazite::showLane (*track, phazite::getParameterRef (*volume->volParam));
+    // The values the automation plays aren't one, nor is a lane.
+    {
+        phazite::ProjectContext context { phazite::test::getEngineContext() };
+        phazite::setSong (context, &song);
+        phazite::test::EnginePlayback playback;
+        phazite::getSession (context)->play();
+        playback.play (0.5);
+        phazite::getSession (context)->stop();
+        phazite::setSong (context, nullptr);
+    }
+
+    phazite::showLane (song, track, volume);
     phazite::test::settle();
     CHECK_FALSE (project->hasUnsavedChanges());
 
-    // A value set by hand is: the song's (Schema.h: channelPan), not what Tracktion's fader keeps of it.
-    phazite::setChannelPan (*track, 0.5f);
+    // A value set by hand is (Schema.h: channelPan).
+    phazite::setChannelPan (song, track, 0.5f);
     CHECK (project->hasUnsavedChanges());
 }
 
@@ -690,7 +669,7 @@ TEST_CASE ("A control's menu automates its parameter, and a device's menu lists 
 {
     Song song;
     auto& context = song.context;
-    const auto a = idOf (*song.a);
+    const auto a = song.a;
 
     // Automate shows the lane, opening the track; Delete Automation deletes the points as one step, and the lane.
     phazite::setCollapsed (context, a, true);
@@ -741,9 +720,8 @@ TEST_CASE ("A return's row is in the playlist while the return has lanes, after 
 {
     Song song;
     auto& context = song.context;
-    auto* returnTrack = phazite::addReturnTrack (*song.edit, "Reverb", nullptr);
-    REQUIRE (returnTrack != nullptr);
-    const auto id = idOf (*returnTrack);
+    const auto id = phazite::addReturnTrack (*song.song, "Reverb", nullptr);
+    REQUIRE (id.isValid());
 
     // It holds no clips, and has no lanes yet: no row (the mixer shows it).
     const auto hasRow = [&context, id]

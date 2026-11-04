@@ -2,7 +2,7 @@
 // The mixer's model (docs/design.md, section 8): a channel for every track, in the playlist's order; devices on
 // tracks, folders and the master (folders are buses, Buses.h); return tracks, and sends to them from any track,
 // before or after its fader. The song holds them all (Schema.h: DEVICE, CONTAINER, SEND, and each channel's fader on its
-// TRACK or MASTER), by their IDs (docs/tracktion-migration.md, T6), and what plays them is made from the song.
+// TRACK or MASTER), by their IDs, and what plays them is made from the song.
 //
 // A channel is named by its track's ID; the master's is the master's ID (Tracks.h: getMasterID()), or none, as the
 // mixer's public model names it (MixerModel.h).
@@ -12,7 +12,6 @@
 #include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/mixer/DeviceType.h"
 #include "model/mixer/internal/Buses.h"
 
@@ -24,6 +23,8 @@
 namespace phazite
 {
 class CommandRegistry;
+class PluginHost;
+class ProjectContext;
 struct DeviceSlot;
 
 //==============================================================================
@@ -33,10 +34,6 @@ struct DeviceSlot;
 juce::ValueTree findChainState (const Song&, TrackID channel);
 std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
 juce::ValueTree findDeviceState (const Song&, DeviceID);
-inline juce::ValueTree findDeviceState (const te::Edit& edit, DeviceID id)
-{
-    return findDeviceState (getSong (edit), id);
-}
 DeviceID getDeviceID (const juce::ValueTree& deviceState);
 bool isPluginState (const juce::ValueTree& deviceState);
 bool isContainerState (const juce::ValueTree& deviceState);
@@ -83,7 +80,8 @@ DeviceID insertDeviceState (Song&, TrackID channel, juce::ValueTree device, int 
 DeviceID setInstrument (Song&, TrackID, juce::ValueTree instrument);
 
 // Removes a device, as one undo step named after it: a container with what it holds (Containers.h), and a device in a
-// container from its row, what it holds of its own stored first (DeviceStates.h), so that an undo brings it back as it was.
+// container from its row, what it holds of its own stored first (Song::storeDeviceStates()), so that an undo brings it
+// back as it was.
 // A bus left without devices becomes a plain folder again, unless it was made a bus on purpose.
 void removeDevice (Song&, DeviceID);
 
@@ -205,41 +203,22 @@ void removeSend (Song&, DeviceID send);
 // The mixer's commands: add a return track.
 void addMixerCommands (CommandRegistry&, Selection&);
 
-// A device as a slot shows it (MixerModel.h).
-DeviceSlot makeDeviceSlot (const Song&, DeviceID);
+// A device as a slot of the open project's shows it (MixerModel.h): with how late its sound comes out, whether its plug-in
+// crashed, whether it is frozen with its track (FreezeModel.h), and whether its window shows (the project context's
+// DeviceWindowHost).
+DeviceSlot makeDeviceSlot (const ProjectContext&, DeviceID);
 
 //==============================================================================
-// Tracktion's side, until the step of docs/tracktion-migration.md's T6 that replaces each: the plug-ins found by
-// scanning (step 7); a parameter set by hand, a plug-in's key parameters and an effect's mix as parameters (step 4); a
-// device's window (step 5); a channel's meter (step 6); and a device of Tracktion's taken into the song (a preset's).
+// The devices that can be added (DeviceType.h): Phazite's own and the plug-ins found by scanning, which the plug-in host
+// keeps (model/plugins/internal/PluginHost.h). The plug-in scanning found that a description names: by its identifier and
+// name, else by its name, maker and format, as a preset finds it. And the description of the plug-in an element names:
+// the one scanning found, or else the element's own, for a plug-in that isn't installed here.
+std::vector<DeviceType> getDeviceTypes (const PluginHost&);
+std::optional<juce::PluginDescription> findKnownPlugin (const PluginHost&, const juce::PluginDescription&);
+juce::PluginDescription getPluginDescription (const PluginHost&, const juce::ValueTree& device);
 
-// The devices that can be added (DeviceType.h): Phazite's own and the plug-ins found by scanning. The plug-in scanning
-// found that a description names: by its identifier and name, else by its name, maker and format, as a preset finds it.
-// And the description of the plug-in an element names: the one scanning found, or else the element's own, which
-// Tracktion keeps as a plug-in it can't load.
-std::vector<DeviceType> getDeviceTypes (te::Engine&);
-std::optional<juce::PluginDescription> findKnownPlugin (te::Engine&, const juce::PluginDescription&);
-juce::PluginDescription getPluginDescription (te::Engine&, const juce::ValueTree& device);
-
-// Sets a device's parameter to a value set by hand, as it snaps to its range and steps: the song's, for one of Phazite's own
-// devices in a chain (Schema.h: VALUES), a fader's volume or pan, a send's level, a modulator's or a macro's, and
-// Tracktion's parameter, which plays it. In the caller's undo step. A plug-in's parameter is the plug-in's own, which its
-// state holds (stored as the project saves: DeviceStates.h).
-void setDeviceValue (te::AutomatableParameter&, float value);
-
-// A plug-in's key parameters, by ID (MixerModel.h): its quick control, then the first others (not the dry and wet levels,
-// which its mix sets). None for Phazite's own devices or a container. And the parameters an effect's mix sets: one of
-// Phazite's own effects' mix, or the dry and wet levels Tracktion gives a plug-in or a container.
-juce::StringArray getKeyControls (te::Plugin&, int maximum);
-te::AutomatableParameter::Array getMixParameters (te::Plugin&);
-
-// Whether a device's window shows now.
-bool isWindowOpen (const te::Plugin&);
-
-// A channel's meter in Tracktion: nullptr for a plain folder, which has no sound of its own.
-te::LevelMeasurer* getLevelMeasurer (te::Track&);
-
-// The element of a device of Tracktion's (one a preset made), with what its state holds: a plug-in's settings, a
-// container's devices.
-juce::ValueTree makeDeviceState (te::Plugin&);
+// A plug-in's key parameters, by its own IDs (MixerModel.h): its first parameters that can be automated, as its instance
+// tells them, up to so many. None for a plug-in that doesn't play (with no instance), for Phazite's own devices, whose
+// editors show all of theirs, or for a container, which shows its macros.
+juce::StringArray getKeyControls (const Song&, DeviceID, int maximum);
 } // namespace phazite

@@ -192,7 +192,7 @@ struct ContainerBody : public juce::Component
     ProjectContext& context;
     const DeviceID container;
     juce::Label name;
-    juce::OwnedArray<Knob> mixKnob; // its mix, a dry/wet blend that Tracktion delays to match its devices
+    juce::OwnedArray<Knob> mixKnob; // its mix, a dry/wet blend whose dry sound the engine delays to match its devices
     std::unique_ptr<MixAttachment> mixAttachment;
     juce::OwnedArray<Macro> macros;
     std::unique_ptr<DevicesView::Row> devices;
@@ -1381,7 +1381,7 @@ void DevicesView::timerCallback()
     {
         row->updateValues();
 
-        // A device's window opened or closed (its close button, Tracktion): its card shows it.
+        // A device's window opened or closed (by its own close button, say): its card shows it.
         if (std::any_of (row->panels.begin(), row->panels.end(), [] (const Panel* panel) { return panel->windowsChanged(); }))
         {
             row->refresh();

@@ -5,7 +5,6 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/devices/ParameterRef.h"
 
 #include <functional>
@@ -28,17 +27,6 @@ ParameterHandle makeCreatingHandle (Song&, std::function<DeviceID (const Song&)>
                                     const juce::String& identity, const juce::String& parameterID, juce::NormalisableRange<float>,
                                     const juce::String& createName, const juce::String& undoName);
 
-// The same by Tracktion's objects, for the code that still holds them (model/mirror/internal/Bridge.h): a plug-in's
-// parameter by its ID, a handle of nothing if the plug-in is nullptr; a modulator's parameter; and a track's or a
-// container's macro.
-ParameterHandle makeParameterHandle (te::Plugin*, const juce::String& parameterID, const juce::String& undoName = {});
-ParameterHandle makeParameterHandle (te::Modifier&, const juce::String& parameterID, const juce::String& undoName = {});
-ParameterHandle makeMacroHandle (const te::MacroParameter&, const juce::String& undoName = {});
-
 // The song whose parameter a handle changes, or nullptr for a handle of nothing or once the song is gone.
 Song* findSong (const ParameterHandle&);
-
-// Tracktion's parameter a handle changes, while Tracktion's Edit mirrors the song (docs/tracktion-migration.md, T6 step
-// 9), or nullptr for a handle of nothing or once its parameter is gone.
-te::AutomatableParameter::Ptr findParameter (const ParameterHandle&);
 } // namespace phazite

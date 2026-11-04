@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The sandbox (src/sandbox/, src/host/; docs/tracktion-migration.md, T3): a block channel's round trip, its deadline and
+// The sandbox (src/sandbox/, src/host/): a block channel's round trip, its deadline and
 // a block the helper answers late; and the tests' helper program, started for real, hosting the tests' stand-ins: a
 // plug-in opened from its description with its parameters by their own IDs, parameters' changes played at their
 // samples, values set by hand and the plug-in's own changes and gestures, its state, an instrument's notes, latency, a

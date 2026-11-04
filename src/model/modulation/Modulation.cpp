@@ -3,53 +3,56 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
-#include "model/devices/internal/DevicePlugin.h"
-#include "model/mirror/internal/Bridge.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace phazite
 {
 namespace
 {
-    std::optional<ModulatorType> getModulatorType (const te::Modifier& modifier)
+    juce::String toString (std::string_view text)
     {
-        for (const auto type : allModulatorTypes)
-            if (type != ModulatorType::macro && modifier.state.hasType (getModifierType (type)))
-                return type;
-
-        return {};
+        return juce::String (text.data(), text.size());
     }
 
-    bool isOn (const te::AutomatableParameter::Ptr& parameter)
+    juce::UndoManager* getUndo (Song& song)
     {
-        return parameter != nullptr && parameter->getCurrentValue() >= 0.5f;
+        return &song.getUndoManager();
     }
 
-    // Whether a modulator's assignment belongs to this one.
-    bool isFrom (const te::AutomatableParameter::ModifierAssignment& assignment, const ModulatorAccess& modulator)
+    // A modulator's parameter's value set by hand, as its element keeps it (Schema.h: VALUES), else its default.
+    float getValue (const juce::ValueTree& modulator, devices::ModulatorKind kind, std::string_view id)
     {
-        auto* source = modulator.getSource();
-        return source != nullptr && assignment.isForModifierSource (*source);
+        const auto index = devices::findModulatorParameter (kind, id);
+
+        if (index < 0)
+            return 0.0f;
+
+        const auto& info = devices::getModulatorParameters (kind)[(size_t) index];
+        return (float) modulator.getChildWithName (schema::VALUES).getProperty (juce::Identifier (toString (info.id)), info.defaultValue);
     }
 
-    // While the song doesn't play, a parameter shows its value as modulated where the playhead is.
-    void followModulation (te::AutomatableParameter& parameter)
+    // How many steps a step sequencer plays.
+    int getNumSteps (const juce::ValueTree& modulator)
     {
-        auto& edit = parameter.getEdit();
-
-        if (! isSongPlaying (edit))
-            parameter.updateToFollowCurve (getPlayheadTime (edit));
+        return juce::jlimit (1, devices::Modulator::maxSteps,
+                             juce::roundToInt (getValue (modulator, devices::ModulatorKind::steps, "numSteps")));
     }
 
-    // A channel's element in the song: a track's TRACK, or the master track's MASTER.
-    juce::ValueTree findChannelState (const te::Track& track)
+    // Whether a channel's element can hold modulators: a track's, a folder's or the master's; and macros: a track's or a
+    // return's, which hold clips or take them in, not a folder's or the master's.
+    bool canHoldModulators (const juce::ValueTree& channel)
     {
-        return track.isMasterTrack() ? findChainState (track.edit, nullptr) : findTrackState (track);
+        return channel.hasType (schema::TRACK) || channel.hasType (schema::MASTER);
+    }
+
+    bool canHoldMacros (const juce::ValueTree& owner)
+    {
+        return (owner.hasType (schema::TRACK) && ! isFolderState (owner)) || owner.hasType (schema::CONTAINER);
     }
 
     // What a modulator modulates, by the parameter, in the song (Schema.h: MODULATES); invalid for none.
@@ -77,30 +80,16 @@ namespace
         else
             modulator.setProperty (schema::modulatorSteps, values.joinIntoString (" "), undo);
     }
+
+    // A channel's element of a modulator's or a macro's: its parent's, or a container's macro's container's parent's.
+    juce::ValueTree findOwnerChannel (const juce::ValueTree& modulator)
+    {
+        const auto parent = modulator.getParent();
+        return parent.hasType (schema::CONTAINER) ? parent.getParent() : parent;
+    }
 } // namespace
 
 //==============================================================================
-const juce::Identifier& getModifierType (ModulatorType type)
-{
-    switch (type)
-    {
-        case ModulatorType::envelopeFollower:
-            return te::IDs::ENVELOPEFOLLOWER;
-        case ModulatorType::steps:
-            return te::IDs::STEP;
-        case ModulatorType::random:
-            return te::IDs::RANDOM;
-        case ModulatorType::breakpoints:
-            return te::IDs::BREAKPOINTOSCILLATOR;
-        case ModulatorType::noteFollower:
-            return te::IDs::MIDITRACKER;
-        case ModulatorType::lfo:
-        case ModulatorType::macro:
-        default:
-            return te::IDs::LFO;
-    }
-}
-
 std::optional<ModulatorType> findModulatorType (const juce::String& name)
 {
     for (size_t i = 0; i < std::size (schema::preset::modulatorTypeNames); ++i)
@@ -164,21 +153,14 @@ std::vector<juce::ValueTree> getModulatorStates (const Song& song)
 
 juce::ValueTree findModulatorState (const Song& song, ModulatorID id)
 {
+    if (! id.isValid())
+        return {};
+
     for (const auto& state : getModulatorStates (song))
         if (getModulatorID (state) == id)
             return state;
 
     return {};
-}
-
-std::vector<juce::ValueTree> getModulatorStates (const te::Edit& edit)
-{
-    return getModulatorStates (getSong (edit));
-}
-
-juce::ValueTree findModulatorState (const te::Edit& edit, ModulatorID id)
-{
-    return findModulatorState (getSong (edit), id);
 }
 
 ModulatorID getModulatorID (const juce::ValueTree& modulatorState)
@@ -188,7 +170,7 @@ ModulatorID getModulatorID (const juce::ValueTree& modulatorState)
 
 ParameterRef getModulatedParameter (const juce::ValueTree& modulates)
 {
-    return { DeviceID::fromRaw (te::EditItemID::fromVar (modulates[schema::modulatesDevice]).getRawID()),
+    return { DeviceID::fromRaw ((std::uint64_t) (juce::int64) modulates[schema::modulatesDevice]),
              modulates[schema::modulatesParameter].toString() };
 }
 
@@ -203,159 +185,101 @@ std::vector<float> getModulatorSteps (const juce::ValueTree& modulatorState)
 }
 
 //==============================================================================
-te::AutomatableParameter::ModifierSource* ModulatorAccess::getSource() const
+std::vector<ModulatorID> getModulators (const Song& song, TrackID track)
 {
-    if (modifier != nullptr)
-        return modifier.get();
+    std::vector<ModulatorID> modulators, macros;
 
-    return macro.get();
-}
-
-te::Track* ModulatorAccess::getTrack() const
-{
-    if (modifier != nullptr)
-        return te::getTrackContainingModifier (modifier->edit, modifier);
-
-    if (auto* rack = getContainerRack())
+    for (const auto& child : findChainState (song, track))
     {
-        auto* container = findContainerOf (*rack);
-        return container != nullptr ? getTrackOfContainer (*container) : nullptr;
+        if (child.hasType (schema::MODULATOR) && getModulatorKind (child).has_value())
+            modulators.push_back (getModulatorID (child));
+        else if (child.hasType (schema::MACRO))
+            macros.push_back (getModulatorID (child));
     }
 
-    if (macro != nullptr)
-        if (auto* list = dynamic_cast<te::MacroParameterList*> (&macro->automatableEditElement))
-            return list->getTrack();
-
-    return nullptr;
-}
-
-te::RackType* ModulatorAccess::getContainerRack() const
-{
-    auto* list = macro != nullptr ? dynamic_cast<te::MacroParameterList*> (&macro->automatableEditElement) : nullptr;
-    const auto owner = list != nullptr ? list->state.getParent() : juce::ValueTree();
-
-    if (! owner.hasType (te::IDs::RACK))
-        return nullptr;
-
-    return macro->getEdit().getRackList().getRackTypeForID (te::EditItemID::fromID (owner)).get();
-}
-
-ModulatorID ModulatorAccess::getID() const
-{
-    if (modifier != nullptr)
-        return getModulatorID (*modifier);
-
-    return macro != nullptr ? getModulatorID (*macro) : ModulatorID();
-}
-
-ModulatorID getModulatorID (const te::Modifier& modifier)
-{
-    return ModulatorID::fromRaw (modifier.itemID.getRawID());
-}
-
-ModulatorID getModulatorID (const te::MacroParameter& macro)
-{
-    // A macro's parameter ID is its item's ID.
-    return ModulatorID::fromRaw (te::EditItemID::fromVar (macro.paramID).getRawID());
-}
-
-std::optional<ModulatorAccess> findModulator (const te::Edit& edit, ModulatorID id)
-{
-    if (! id.isValid())
-        return {};
-
-    const auto itemID = te::EditItemID::fromRawID (id.getRaw());
-
-    if (auto modifier = te::findModifierForID (edit, itemID))
-        return ModulatorAccess { modifier, nullptr };
-
-    if (auto macro = te::getMacroParameterForID (const_cast<te::Edit&> (edit), itemID))
-        return ModulatorAccess { nullptr, macro };
-
-    return {};
-}
-
-std::vector<ModulatorAccess> getModulators (te::Track& track)
-{
-    std::vector<ModulatorAccess> modulators;
-
-    if (auto* list = track.getModifierList())
-        for (auto* modifier : list->getModifiers())
-            if (getModulatorType (*modifier).has_value())
-                modulators.push_back ({ modifier, nullptr });
-
-    // Tracktion keeps macros on tracks that hold clips (and returns), not on folders or the master.
-    if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))
-        for (auto* macro : audio->getMacroParameters())
-            modulators.push_back ({ nullptr, macro });
-
+    modulators.insert (modulators.end(), macros.begin(), macros.end());
     return modulators;
 }
 
-std::optional<ModulatorType> getModulatorType (const ModulatorAccess& modulator)
+std::optional<ModulatorType> getModulatorType (const Song& song, ModulatorID id)
 {
-    if (modulator.modifier != nullptr)
-        return getModulatorType (*modulator.modifier);
+    const auto state = findModulatorState (song, id);
 
-    return modulator.macro != nullptr ? std::optional (ModulatorType::macro) : std::nullopt;
+    if (state.hasType (schema::MACRO))
+        return ModulatorType::macro;
+
+    return state.hasType (schema::MODULATOR) ? findModulatorType (state[schema::modulatorType].toString()) : std::nullopt;
 }
 
-juce::String getModulatorName (const ModulatorAccess& modulator)
+TrackID getModulatorTrack (const Song& song, ModulatorID id)
 {
+    const auto state = findModulatorState (song, id);
+    return state.isValid() ? getTrackID (findOwnerChannel (state)) : TrackID();
+}
+
+DeviceID getModulatorContainer (const Song& song, ModulatorID id)
+{
+    const auto parent = findModulatorState (song, id).getParent();
+    return parent.hasType (schema::CONTAINER) ? getDeviceID (parent) : DeviceID();
+}
+
+juce::String getModulatorName (const Song& song, ModulatorID id)
+{
+    const auto state = findModulatorState (song, id);
+
     // A macro has a name of its own, "Macro 1" at first.
-    if (modulator.macro != nullptr && modulator.macro->macroName.get().isNotEmpty())
-        return modulator.macro->macroName.get();
+    if (state.hasType (schema::MACRO) && state[schema::macroName].toString().isNotEmpty())
+        return state[schema::macroName].toString();
 
-    const auto type = getModulatorType (modulator);
-    auto* track = modulator.getTrack();
+    const auto type = getModulatorType (song, id);
 
-    if (! type.has_value() || track == nullptr)
+    if (! type.has_value())
         return {};
 
-    // Its place among its track's of its kind.
+    // Its place among its owner's of its kind.
     int number = 0;
 
-    for (const auto& each : getModulators (*track))
+    for (const auto& each : state.getParent())
     {
-        if (getModulatorType (each) == type)
+        if (each.getType() == state.getType()
+            && (each.hasType (schema::MACRO) || each[schema::modulatorType] == state[schema::modulatorType]))
             ++number;
 
-        if (each.getID() == modulator.getID())
+        if (each == state)
             break;
     }
 
     return getModulatorTypeName (*type) + " " + juce::String (number);
 }
 
-std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType type)
+ModulatorID addModulator (Song& song, TrackID track, ModulatorType type)
 {
+    auto channel = track.isValid() ? findChainState (song, track) : juce::ValueTree();
+
     if (type == ModulatorType::macro)
     {
-        if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))
-        {
-            auto& macros = audio->getMacroParameterListForWriting();
+        if (! channel.hasType (schema::TRACK) || ! canHoldMacros (channel))
+            return {};
 
-            if (auto* macro = addMacro (macros, "Macro " + juce::String (macros.getMacroParameters().size() + 1)))
-                return ModulatorAccess { nullptr, macro };
-        }
+        int count = 0;
 
-        return {};
+        for (const auto& child : channel)
+            if (child.hasType (schema::MACRO))
+                ++count;
+
+        return addMacro (song, channel, "Macro " + juce::String (count + 1));
     }
 
-    // The song's, at the end of the track's, which the mirror makes.
-    auto& edit = track.edit;
-    auto channel = findChannelState (track);
-
-    if (! channel.isValid() || track.getModifierList() == nullptr)
+    if (! canHoldModulators (channel))
         return {};
 
-    const auto id = ModulatorID::fromRaw (getSong (edit).makeID());
+    const auto id = ModulatorID::fromRaw (song.makeID());
     juce::ValueTree modulator (schema::MODULATOR);
     modulator.setProperty (schema::modulatorID, (juce::int64) id.getRaw(), nullptr);
     modulator.setProperty (schema::modulatorType, schema::preset::modulatorTypeNames[(size_t) type], nullptr);
 
-    // Tracktion's LFOs and random sources start going one way only, and its step sequencers and envelope followers at
-    // no depth, moving nothing: Phazite's start otherwise.
+    // LFOs and random sources start going both ways, and step sequencers and envelope followers at full depth, where their
+    // parameters' defaults would have them going one way only, or moving nothing.
     juce::ValueTree values (schema::VALUES);
 
     if (type == ModulatorType::lfo || type == ModulatorType::random)
@@ -366,394 +290,178 @@ std::optional<ModulatorAccess> addModulator (te::Track& track, ModulatorType typ
     if (values.getNumProperties() > 0)
         modulator.appendChild (values, nullptr);
 
-    channel.appendChild (modulator, &getSong (edit).getUndoManager());
-    mirror::reconcileModulation (edit);
-    auto added = findModulator (edit, id);
-
     // A step sequencer's steps rise across as many steps as it starts with.
-    if (auto* sequencer = added.has_value() ? dynamic_cast<te::StepModifier*> (added->modifier.get()) : nullptr)
+    if (type == ModulatorType::steps)
     {
-        const auto numSteps = juce::jlimit (1, (int) te::StepModifier::maxNumSteps, juce::roundToInt (sequencer->numSteps.get()));
+        const auto numSteps = getNumSteps (modulator);
+        std::vector<float> steps;
 
         for (int i = 0; i < numSteps; ++i)
-            setModulatorStep (*added, i, numSteps > 1 ? -1.0f + 2.0f * (float) i / (float) (numSteps - 1) : 0.0f);
+            steps.push_back (numSteps > 1 ? -1.0f + 2.0f * (float) i / (float) (numSteps - 1) : 0.0f);
+
+        writeSteps (modulator, steps, nullptr);
     }
 
-    return added;
+    channel.appendChild (modulator, getUndo (song));
+    return id;
 }
 
-te::MacroParameter* addMacro (te::MacroParameterList& macros, const juce::String& name)
+ModulatorID addMacro (Song& song, juce::ValueTree owner, const juce::String& name)
 {
-    auto& edit = macros.edit;
-    const auto id = ModulatorID::fromRaw (getSong (edit).makeID());
+    if (! canHoldMacros (owner) || ! owner.isAChildOf (song.getState()))
+        return {};
 
-    // A track's is the song's (Schema.h: MACRO), which the mirror makes; a container's not yet on a channel (a preset's) is
-    // Tracktion's until it is.
-    if (auto track = macros.getTrack() != nullptr ? findTrackState (*macros.getTrack()) : juce::ValueTree(); track.isValid())
-    {
-        juce::ValueTree macro (schema::MACRO);
-        macro.setProperty (schema::modulatorID, (juce::int64) id.getRaw(), nullptr);
-        macro.setProperty (schema::macroName, name, nullptr);
-        track.appendChild (macro, &getSong (edit).getUndoManager());
-        mirror::reconcileModulation (edit);
-    }
-    else
-    {
-        // Made with its value in its state, so that redoing the step puts it back at 0 too.
-        juce::ValueTree macro (te::IDs::MACROPARAMETER);
-        macro.setProperty (te::IDs::id, (juce::int64) id.getRaw(), nullptr);
-        macro.setProperty (te::IDs::name, name, nullptr);
-        macro.setProperty (te::IDs::value, 0.0f, nullptr);
-        macros.state.addChild (macro, -1, &edit.getUndoManager());
-    }
-
-    for (auto* added : macros.getMacroParameters())
-        if (getModulatorID (*added) == id)
-            return added;
-
-    return nullptr;
+    // Its value is 0 while its element has none (Schema.h: macroValue), so that redoing the step puts it back at 0 too.
+    const auto id = ModulatorID::fromRaw (song.makeID());
+    juce::ValueTree macro (schema::MACRO);
+    macro.setProperty (schema::modulatorID, (juce::int64) id.getRaw(), nullptr);
+    macro.setProperty (schema::macroName, name, nullptr);
+    owner.appendChild (macro, getUndo (song));
+    return id;
 }
 
-void renameMacro (te::MacroParameter& macro, const juce::String& name)
+void renameMacro (Song& song, ModulatorID id, const juce::String& name)
 {
     const auto trimmed = name.trim();
-    auto& edit = macro.getEdit();
 
-    if (trimmed.isEmpty())
-        return;
+    if (auto state = findModulatorState (song, id); state.hasType (schema::MACRO) && trimmed.isNotEmpty())
+        state.setProperty (schema::macroName, trimmed, getUndo (song));
+}
 
-    if (auto state = findModulatorState (edit, getModulatorID (macro)); state.isValid())
+void removeModulator (Song& song, ModulatorID id)
+{
+    // With what it modulates (its MODULATES).
+    if (auto state = findModulatorState (song, id); state.isValid())
+        state.getParent().removeChild (state, getUndo (song));
+}
+
+bool isBipolar (const Song& song, ModulatorID id)
+{
+    const auto state = findModulatorState (song, id);
+    const auto kind = getModulatorKind (state);
+
+    if (! kind.has_value())
+        return false;
+
+    switch (*kind)
     {
-        state.setProperty (schema::macroName, trimmed, &getSong (edit).getUndoManager());
-        mirror::reconcileModulation (edit);
+        case devices::ModulatorKind::lfo:
+        case devices::ModulatorKind::random:
+        case devices::ModulatorKind::breakpoints:
+            return getValue (state, *kind, "biopolar") >= 0.5f;
+        case devices::ModulatorKind::steps:
+            return true; // steps go from -1 to 1
+        case devices::ModulatorKind::envelopeFollower:
+        case devices::ModulatorKind::noteFollower:
+            break;
     }
-    else
-    {
-        macro.macroName = trimmed;
-    }
+
+    return false;
 }
 
-juce::String getModulatorParameterName (const te::AutomatableParameter& parameter)
+bool isModulatorOn (const Song& song, ModulatorID id)
 {
-    const auto& id = parameter.paramID;
-
-    if (id == "biopolar")
-        return "Polarity";
-
-    if (id == "syncType")
-        return "Sync";
-
-    if (id == "numActivePoints")
-        return "Points";
-
-    if (id == "stageZeroValue")
-        return "Start Level";
-
-    // The breakpoint envelope's points: "stageTwoTime" is "Point 2 Time".
-    const juce::StringArray stages { "One", "Two", "Three", "Four" };
-
-    for (int i = 0; i < stages.size(); ++i)
-        for (const auto* part : { "Value", "Time", "Curve" })
-            if (id == "stage" + stages[i] + part)
-                return "Point " + juce::String (i + 1) + " "
-                       + (juce::String (part) == "Value" ? juce::String ("Level") : juce::String (part));
-
-    if (id == "type" && dynamic_cast<const te::MIDITrackerModifier*> (&parameter.automatableEditElement) != nullptr)
-        return "Follows";
-
-    if (id == "lowPassEnabled")
-        return "Low Pass";
-
-    if (id == "highPassEnabled")
-        return "High Pass";
-
-    if (id == "lowPassFrequency")
-        return "Low Pass Frequency";
-
-    if (id == "highPassFrequency")
-        return "High Pass Frequency";
-
-    return parameter.getParameterName();
+    const auto state = findModulatorState (song, id);
+    return state.hasType (schema::MACRO) || (state.hasType (schema::MODULATOR) && ! (bool) state[schema::deviceOff]);
 }
 
-void removeModulator (const ModulatorAccess& modulator)
+void setModulatorOn (Song& song, ModulatorID id, bool on)
 {
-    auto* track = modulator.getTrack();
+    auto state = findModulatorState (song, id);
 
-    if (track == nullptr)
-        return;
-
-    // With what it modulates (its MODULATES), which the mirror takes away with Tracktion's.
-    auto& edit = track->edit;
-
-    if (auto state = findModulatorState (edit, modulator.getID()); state.isValid())
-    {
-        state.getParent().removeChild (state, &getSong (edit).getUndoManager());
-        mirror::reconcileModulation (edit);
-    }
-}
-
-bool isBipolar (const ModulatorAccess& modulator)
-{
-    auto* modifier = modulator.modifier.get();
-
-    if (auto* lfo = dynamic_cast<te::LFOModifier*> (modifier))
-        return isOn (lfo->bipolarParam);
-
-    if (auto* random = dynamic_cast<te::RandomModifier*> (modifier))
-        return isOn (random->bipolarParam);
-
-    if (auto* breakpoints = dynamic_cast<te::BreakpointOscillatorModifier*> (modifier))
-        return isOn (breakpoints->bipolarParam);
-
-    return dynamic_cast<te::StepModifier*> (modifier) != nullptr; // steps go from -1 to 1
-}
-
-bool isModulatorOn (const ModulatorAccess& modulator)
-{
-    return modulator.modifier == nullptr || isOn (modulator.modifier->enabledParam);
-}
-
-void setModulatorOn (const ModulatorAccess& modulator, bool on)
-{
-    auto* modifier = modulator.modifier.get();
-    auto state = modifier != nullptr ? findModulatorState (modifier->edit, modulator.getID()) : juce::ValueTree();
-
-    if (! state.isValid() || isModulatorOn (modulator) == on)
+    if (! state.hasType (schema::MODULATOR) || isModulatorOn (song, id) == on)
         return;
 
     if (on)
-        state.removeProperty (schema::deviceOff, &getSong (modifier->edit).getUndoManager());
+        state.removeProperty (schema::deviceOff, getUndo (song));
     else
-        state.setProperty (schema::deviceOff, true, &getSong (modifier->edit).getUndoManager());
-
-    mirror::reconcileModulation (modifier->edit);
-
-    for (const auto& modulation : getModulations (modulator))
-        followModulation (*modulation.parameter);
+        state.setProperty (schema::deviceOff, true, getUndo (song));
 }
 
-void setModulatorStep (const ModulatorAccess& modulator, int index, float value)
+void setModulatorStep (Song& song, ModulatorID id, int index, float value)
 {
-    auto* modifier = modulator.modifier.get();
-    auto state = modifier != nullptr ? findModulatorState (modifier->edit, modulator.getID()) : juce::ValueTree();
+    auto state = findModulatorState (song, id);
 
-    if (! state.isValid() || ! juce::isPositiveAndBelow (index, (int) te::StepModifier::maxNumSteps))
+    if (! state.hasType (schema::MODULATOR) || ! juce::isPositiveAndBelow (index, devices::Modulator::maxSteps))
         return;
 
     auto steps = getModulatorSteps (state);
     steps.resize (std::max (steps.size(), (size_t) index + 1), 0.0f);
     steps[(size_t) index] = juce::jlimit (-1.0f, 1.0f, value);
-    writeSteps (state, steps, &getSong (modifier->edit).getUndoManager());
-    mirror::reconcileModulation (modifier->edit);
+    writeSteps (state, steps, getUndo (song));
 }
 
 //==============================================================================
-std::vector<ModulationAccess> getModulations (const te::AutomatableParameter& parameter)
+std::vector<Modulation> getModulations (const Song& song, const ParameterRef& parameter)
 {
-    std::vector<ModulationAccess> modulations;
-    auto& edit = parameter.getEdit();
+    std::vector<Modulation> modulations;
 
-    for (auto* assignment : parameter.getAssignments())
-    {
-        // Each assignment names its source in its state.
-        const auto source = te::EditItemID::fromProperty (assignment->state, te::IDs::source);
+    if (! locateParameter (song, parameter).has_value())
+        return modulations;
 
-        if (auto modulator = findModulator (edit, ModulatorID::fromRaw (source.getRawID()));
-            modulator.has_value() && isFrom (*assignment, *modulator))
-            modulations.push_back ({ *modulator, &const_cast<te::AutomatableParameter&> (parameter), assignment });
-    }
+    for (const auto& state : getModulatorStates (song))
+        for (const auto& child : state)
+            if (child.hasType (schema::MODULATES) && getModulatedParameter (child) == parameter)
+                modulations.push_back ({ getModulatorID (state), parameter, (float) child[schema::modulatesAmount] });
 
     return modulations;
 }
 
-std::vector<ModulationAccess> getModulations (const ModulatorAccess& modulator)
+std::vector<Modulation> getModulations (const Song& song, ModulatorID id)
 {
-    std::vector<ModulationAccess> modulations;
+    std::vector<Modulation> modulations;
 
-    if (auto* source = modulator.getSource(); source != nullptr && modulator.getTrack() != nullptr)
-        for (auto* parameter : te::getAllParametersBeingModifiedBy (modulator.getTrack()->edit, *source))
-            for (const auto& modulation : getModulations (*parameter))
-                if (modulation.modulator.getID() == modulator.getID())
-                    modulations.push_back (modulation);
+    for (const auto& child : findModulatorState (song, id))
+        if (const auto parameter = getModulatedParameter (child);
+            child.hasType (schema::MODULATES) && locateParameter (song, parameter).has_value())
+            modulations.push_back ({ id, parameter, (float) child[schema::modulatesAmount] });
 
     return modulations;
 }
 
-bool canModulate (const ModulatorAccess& modulator, const te::AutomatableParameter& parameter)
+bool canModulate (const Song& song, ModulatorID id, const ParameterRef& parameter)
 {
-    // A macro's own value is set by hand, or by its automation.
-    if (&parameter.automatableEditElement == modulator.modifier.get() || dynamic_cast<const te::MacroParameter*> (&parameter) != nullptr)
+    const auto state = findModulatorState (song, id);
+    const auto found = state.isValid() ? locateParameter (song, parameter) : std::nullopt;
+
+    // A modulator's own parameters and a macro's value are set by hand.
+    if (! found.has_value() || found->source == ParameterSource::modulator || found->source == ParameterSource::macro)
         return false;
 
-    if (auto* rack = modulator.getContainerRack())
-    {
-        auto* device = parameter.getPlugin();
-        return device != nullptr && device->isInRack() && device->getOwnerRackType().get() == rack;
-    }
+    // A container's macros modulate the devices in it.
+    if (const auto owner = state.getParent(); owner.hasType (schema::CONTAINER))
+        return (found->source == ParameterSource::device || found->source == ParameterSource::plugin)
+               && findContainerOf (song, parameter.device) == getDeviceID (owner);
 
-    auto* track = modulator.getTrack();
-    return track != nullptr && getTrackOfParameter (parameter) == track;
+    const auto track = getModulatorTrack (song, id);
+    return track.isValid() && getParameterTrack (song, parameter) == track;
 }
 
-void setModulation (const ModulatorAccess& modulator, te::AutomatableParameter& parameter, float amount)
+void setModulation (Song& song, ModulatorID id, const ParameterRef& parameter, float amount)
 {
-    auto& edit = parameter.getEdit();
-    auto state = findModulatorState (edit, modulator.getID());
+    auto state = findModulatorState (song, id);
 
-    if (! state.isValid())
+    if (! state.isValid() || ! parameter.isValid())
         return;
 
-    // In the song, by the parameter (its device's ID as a curve names it), which the mirror plays.
-    auto* undo = &getSong (edit).getUndoManager();
-    const auto ref = getParameterRef (parameter);
-    auto modulates = findModulatesState (state, ref);
+    // By the parameter's device's ID as a curve names it, and its own ID.
+    auto* undo = getUndo (song);
+    auto modulates = findModulatesState (state, parameter);
 
     if (! modulates.isValid())
     {
         modulates = juce::ValueTree (schema::MODULATES);
-        modulates.setProperty (schema::modulatesDevice, toTracktion (ref.device).toString(), nullptr);
-        modulates.setProperty (schema::modulatesParameter, ref.parameter, nullptr);
+        modulates.setProperty (schema::modulatesDevice, juce::String ((juce::int64) parameter.device.getRaw()), nullptr);
+        modulates.setProperty (schema::modulatesParameter, parameter.parameter, nullptr);
         state.appendChild (modulates, undo);
     }
 
     modulates.setProperty (schema::modulatesAmount, std::round ((double) juce::jlimit (-1.0f, 1.0f, amount) * 1.0e4) / 1.0e4, undo);
-    mirror::reconcileModulation (edit);
-    followModulation (parameter);
 }
 
-void removeModulation (const ModulatorAccess& modulator, te::AutomatableParameter& parameter)
+void removeModulation (Song& song, ModulatorID id, const ParameterRef& parameter)
 {
-    auto& edit = parameter.getEdit();
-
-    if (auto modulates = findModulatesState (findModulatorState (edit, modulator.getID()), getParameterRef (parameter));
-        modulates.isValid())
-    {
-        modulates.getParent().removeChild (modulates, &getSong (edit).getUndoManager());
-        mirror::reconcileModulation (edit);
-    }
-
-    followModulation (parameter);
-}
-
-//==============================================================================
-namespace
-{
-    bool isSame (const DeviceModulation& a, const DeviceModulation& b)
-    {
-        const auto sameSource = [] (const DeviceModulation::Source& x, const DeviceModulation::Source& y)
-        { return x.modifier == y.modifier && x.macro == y.macro; };
-
-        const auto sameRoute = [] (const engine::Modulation::Route& x, const engine::Modulation::Route& y)
-        { return x.parameter == y.parameter && x.source == y.source && juce::exactlyEqual (x.amount, y.amount); };
-
-        const auto& routes = a.plan.routes;
-        return std::equal (a.sources.begin(), a.sources.end(), b.sources.begin(), b.sources.end(), sameSource)
-               && std::equal (routes.begin(), routes.end(), b.plan.routes.begin(), b.plan.routes.end(), sameRoute);
-    }
-
-    // Whether a modulation adds its source's value times its amount, as Phazite makes them: no offset or curve, and a
-    // macro's whole range.
-    bool isPlain (const ModulationAccess& modulation)
-    {
-        const auto& assignment = *modulation.assignment;
-        return juce::exactlyEqual (assignment.offset.get(), 0.0f) && juce::exactlyEqual (assignment.curve.get(), 0.0f)
-               && juce::exactlyEqual (assignment.inputStart.get(), 0.0f) && juce::exactlyEqual (assignment.inputEnd.get(), 1.0f);
-    }
-} // namespace
-
-void updateDeviceModulation (DevicePlugin& device)
-{
-    const auto& info = device.getDeviceInfo();
-    auto modulation = std::make_unique<DeviceModulation>();
-    auto& plan = modulation->plan;
-    plan.isModulated.assign (info.parameters.size(), false);
-
-    for (size_t i = 0; i < info.parameters.size(); ++i)
-    {
-        auto* parameter = device.findParameter (info.parameters[i].id);
-
-        if (parameter == nullptr)
-            continue;
-
-        // One with a modulation made otherwise, or moved by anything else of Tracktion's, stays Tracktion's to move, once a
-        // block.
-        const auto modulations = getModulations (*parameter);
-
-        if ((int) modulations.size() != parameter->getAssignments().size()
-            || ! std::all_of (modulations.begin(), modulations.end(), isPlain))
-            continue;
-
-        for (const auto& each : modulations)
-        {
-            const auto& modulator = each.modulator;
-            auto& sources = modulation->sources;
-            auto source = std::find_if (sources.begin(), sources.end(), [&modulator] (const DeviceModulation::Source& s)
-                                        { return s.modifier == modulator.modifier && s.macro == modulator.macro; });
-
-            if (source == sources.end())
-            {
-                DeviceModulation::Source added;
-                added.modifier = modulator.modifier;
-                added.macro = modulator.macro;
-                added.lfo = dynamic_cast<te::LFOModifier*> (modulator.modifier.get());
-                source = sources.insert (sources.end(), std::move (added));
-                plan.sources.emplace_back();
-            }
-
-            plan.routes.push_back ({ (int) i, (int) std::distance (sources.begin(), source), each.assignment->value.get() });
-            plan.isModulated[i] = true;
-        }
-    }
-
-    if (plan.routes.empty())
-        modulation = nullptr;
-
-    // As it was: left playing, rather than started again.
-    if (const auto* playing = device.getModulation();
-        modulation == nullptr ? playing == nullptr : playing != nullptr && isSame (*playing, *modulation))
-        return;
-
-    device.setModulation (std::move (modulation));
-}
-
-void updateDeviceModulation (te::Edit& edit)
-{
-    for (auto* plugin : te::getAllPlugins (edit, false))
-        if (auto* device = dynamic_cast<DevicePlugin*> (plugin))
-            updateDeviceModulation (*device);
-}
-
-DeviceModulationKeeper::DeviceModulationKeeper (te::Edit& e)
-    : edit (e),
-      state (e.state)
-{
-    updateDeviceModulation (edit);
-    state.addListener (this);
-}
-
-DeviceModulationKeeper::~DeviceModulationKeeper()
-{
-    state.removeListener (this);
-    cancelPendingUpdate();
-}
-
-void DeviceModulationKeeper::changed (const juce::ValueTree& parent, const juce::ValueTree& child)
-{
-    // Modulators, macros and what they modulate; and devices (in containers too), containers' rack types and tracks,
-    // which come and go with theirs. Not what tracks and devices hold otherwise, such as clips and notes.
-    const auto isModulation = [] (const juce::ValueTree& v)
-    { return v.hasType (te::IDs::MODIFIERASSIGNMENTS) || v.hasType (te::IDs::MODIFIERS) || v.hasType (te::IDs::MACROPARAMETERS); };
-
-    if (isModulation (parent) || isModulation (child) || child.hasType (te::IDs::PLUGIN) || child.hasType (te::IDs::RACK)
-        || te::TrackList::isTrack (child))
-        triggerAsyncUpdate();
-}
-
-void DeviceModulationKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier&)
-{
-    // Of properties, only an amount: an assignment's, in a device's MODIFIERASSIGNMENTS.
-    if (tree.getParent().hasType (te::IDs::MODIFIERASSIGNMENTS))
-        triggerAsyncUpdate();
+    if (auto modulates = findModulatesState (findModulatorState (song, id), parameter); modulates.isValid())
+        modulates.getParent().removeChild (modulates, getUndo (song));
 }
 } // namespace phazite

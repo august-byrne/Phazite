@@ -16,8 +16,8 @@ namespace
     // The open song's bars; while none is open, a new song's, in 4/4.
     Bars getBars (const ProjectContext& context)
     {
-        auto* edit = getEdit (context);
-        return edit != nullptr ? phazite::getBars (getSong (*edit)) : Bars();
+        auto* song = findSong (context);
+        return song != nullptr ? phazite::getBars (*song) : Bars();
     }
 } // namespace
 
@@ -79,55 +79,50 @@ void forEachGridLine (const ProjectContext& context, GridStep step, BeatRange ra
 
 GridSettings loadGridSettings (const ProjectContext& context, GridOwner owner)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? loadGridSettings (getSong (*edit), owner) : GridSettings();
+    auto* song = findSong (context);
+    return song != nullptr ? loadGridSettings (*song, owner) : GridSettings();
 }
 
 void saveGridSettings (ProjectContext& context, GridOwner owner, const GridSettings& grid)
 {
-    if (auto* edit = getEdit (context))
-        saveGridSettings (getSong (*edit), owner, grid);
+    if (auto* song = findSong (context))
+        saveGridSettings (*song, owner, grid);
 }
 
 //==============================================================================
 BeatPosition getPlayheadBeat (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr ? fromTracktion (edit->tempoSequence.toBeats (getPlayheadTime (*edit))) : BeatPosition();
+    auto* song = findSong (context);
+    return song != nullptr ? getPlayheadBeat (*song) : BeatPosition();
 }
 
 void movePlayhead (ProjectContext& context, BeatPosition beat)
 {
-    if (auto* edit = getEdit (context))
-        movePlayhead (*edit, edit->tempoSequence.toTime (toTracktion (beat)));
+    if (auto* song = findSong (context))
+        movePlayhead (*song, beat);
 }
 
 std::optional<BeatRange> getLoop (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    const auto loop = edit != nullptr ? getLoopBeatRange (*edit) : std::nullopt;
-
-    if (! loop.has_value())
-        return {};
-
-    return BeatRange (BeatPosition::fromBeats (loop->first), BeatPosition::fromBeats (loop->second));
+    auto* song = findSong (context);
+    return song != nullptr ? getLoop (*song) : std::nullopt;
 }
 
 void loopRange (ProjectContext& context, BeatRange range)
 {
-    if (auto* edit = getEdit (context))
-        loopBeatRange (*edit, range.getStart().inBeats(), range.getEnd().inBeats());
+    if (auto* song = findSong (context))
+        loopBeats (*song, range);
 }
 
 void toggleLoop (ProjectContext& context)
 {
-    if (auto* edit = getEdit (context))
-        toggleLoop (*edit);
+    if (auto* song = findSong (context))
+        toggleLoop (*song);
 }
 
 void loopSong (ProjectContext& context)
 {
-    if (auto* edit = getEdit (context))
-        loopSong (*edit);
+    if (auto* song = findSong (context))
+        loopSong (*song);
 }
 } // namespace phazite

@@ -7,23 +7,20 @@
 //
 // Saved projects are compared after normaliseProject(), which leaves out only what changes from run to run or from one
 // machine to another:
-//   N1  the root's appVersion, creationTime and projectID become "(varies)", and lastSignificantChange goes;
-//       modifiedBy stays (it must be empty: Phazite never saves the user's name)
-//   N2  INPUTDEVICES loses its children: the inputs of the machine that saved the project
-//   N3  linkID values (shared by a clip and its aliases) become link-1, link-2... in document order
-//   N4  backslashes in 'source' paths become '/', and the project folder's absolute path becomes $PROJECT
-//   N5  decimal numbers are written with 7 significant digits (std::chars_format::general), -0 as 0; never the
+//   N1  linkID values (shared by a clip and its aliases) become link-1, link-2... in document order
+//   N2  backslashes in 'source' paths become '/', and the project folder's absolute path becomes $PROJECT
+//   N3  decimal numbers are written with 7 significant digits (std::chars_format::general), -0 as 0; never the
 //       values of id, colour, name, source and linkID
-//   N6  each element's children are sorted, stably, by tag (tracks of every kind count as TRACK, clips of every kind
-//       as CLIP): only siblings with different keys change places, so the order of tracks, clips, plug-ins, notes
-//       and points within them is always compared
-//   N7  attributes are sorted by name
-//   N8  an empty element (no attributes, no children) goes only if its tag is in getDroppableEmptyTags(): any other
+//   N4  each element's children are sorted, stably, by tag: only siblings with different tags change places, so the
+//       order of tracks, clips, devices, notes and points within them is always compared
+//   N5  attributes are sorted by name
+//   N6  an empty element (no attributes, no children) goes only if its tag is in getDroppableEmptyTags(): any other
 //       empty element appearing or vanishing is a difference
 #pragma once
 
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "model/base/Song.h"
 
 #include <functional>
 #include <memory>
@@ -45,18 +42,18 @@ bool isUpdatingGoldenFiles();
 juce::File getActualFolder();
 
 // Delivers the messages and runs the timers that are due for some milliseconds, as the app's message loop would, so
-// that what Tracktion and Phazite do asynchronously is done.
+// that what Phazite does asynchronously is done.
 void settle (int milliseconds = 250);
 
 // An XML file, which must be a document.
 std::unique_ptr<juce::XmlElement> readXml (const juce::File&);
 
 //==============================================================================
-// The tags of empty elements that Tracktion itself adds or drops between a save and the next one of the reopened
-// project. Never a tag of Phazite's (PHAZITE, PIANOROLL, LASTKEY): a read that adds an empty one of those must show.
+// The tags of empty elements that may come or go between a save and the next one of the reopened project: none, so
+// that a read that adds an empty element of Phazite's (PHAZITE, PIANOROLL, LASTKEY) shows.
 const juce::StringArray& getDroppableEmptyTags();
 
-// A saved project without what varies between runs and machines (N1 to N8 above). projectFolder is the folder of the
+// A saved project without what varies between runs and machines (N1 to N6 above). projectFolder is the folder of the
 // project the save belongs to, whose path becomes $PROJECT.
 std::unique_ptr<juce::XmlElement> normaliseProject (const juce::XmlElement& saved, const juce::File& projectFolder,
                                                     const juce::StringArray& droppableEmptyTags = getDroppableEmptyTags());
@@ -72,11 +69,11 @@ struct XmlComparison
 };
 
 // The differences between two normalised projects, one per line, at most maxDifferences, each with its path:
-//   EDIT/PHAZITE/TRACKS/TRACK#1015/TRACK#1004@height: expected "96", got "64"
-//   EDIT/PHAZITE/PIANOROLL: missing
+//   PHAZITE/TRACKS/TRACK#1015/TRACK#1004@height: expected "96", got "64"
+//   PHAZITE/PIANOROLL: missing
 // An element in a path is TAG#id if it has an id, otherwise TAG[n] among its siblings of that tag without one, or
 // just TAG if it is the only one. Children are matched by those keys; two values are the same if their texts are, or
-// if both are decimal numbers (N5) that differ by at most a millionth of the larger.
+// if both are decimal numbers (N3) that differ by at most a millionth of the larger.
 juce::StringArray findDifferences (const juce::XmlElement& expected, const juce::XmlElement& actual, XmlComparison = {});
 
 // Shortens a list of more than maxDifferences differences (at least one) to that many lines: the first ones, and a line
@@ -113,12 +110,12 @@ void checkGoldenText (const juce::String& relativePath, const juce::String& actu
 
 // The values in an XML document (attribute values and text, at every depth) that hold one of the names as a whole
 // word, ignoring case, in document order, each with its path as findDifferences() writes it:
-//   EDIT@modifiedBy: "Tim Smith"
-//   EDIT/TRACK#1003/AUDIOCLIP#1010@source: "C:\Users\tim\Music\Tone.wav"
+//   PHAZITE@savedBy: "Tim Smith"
+//   PHAZITE/TRACKS/TRACK#1003/CLIP#1010@file: "C:\Users\tim\Music\Tone.wav"
 // Values are read from the XML, so a letter that JUCE writes as a character reference (every letter outside ASCII,
-// such as &#233;) counts as itself. Tags and attribute names aren't searched: they are Tracktion's and Phazite's own.
+// such as &#233;) counts as itself. Tags and attribute names aren't searched: they are Phazite's own.
 // A whole word has no letter or digit just before or after it, so "tim" counts between path separators and before an
-// apostrophe, but not in TIMESIG, creationTime or "Timeline".
+// apostrophe, but not in TIMESIGNATURE, savedTime or "Timeline".
 juce::StringArray findValuesNaming (const juce::XmlElement&, const juce::StringArray& names);
 
 // Checks (one CHECK) that no value in a save names the person running the tests, listing each value that does (as
@@ -130,6 +127,6 @@ void checkNoUserName (const juce::String& what, const juce::XmlElement& save);
 
 //==============================================================================
 // One of the built-in devices that the device list offers (phazite::getDeviceTypes()), by its type, such as
-// phazite::devices::Reverb::typeID, made as the browser makes it.
-te::Plugin::Ptr createBuiltInDevice (te::Edit&, const char* xmlTypeName);
+// phazite::devices::Reverb::typeID, made as the browser makes it: its element, for a track (insertDeviceState()).
+juce::ValueTree makeBuiltInDevice (Song&, const char* typeID);
 } // namespace phazite::test

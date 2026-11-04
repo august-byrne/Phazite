@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Clips in the playlist: which are selected, the color they show, and the edits the Smart Tool makes. The song holds its
 // clips (schema::CLIP, on their tracks' elements): where each is, in beats, its name, mute and alias group, and a MIDI
-// clip's notes (model/notes/internal/Notes.h) or an audio clip's part of its file (AudioClips.h), by their IDs
-// (docs/tracktion-migration.md, T6 step 3).
+// clip's notes (model/notes/internal/Notes.h) or an audio clip's part of its file (AudioClips.h), by their IDs.
 #pragma once
 
 #include "model/arrangement/PlaylistValues.h"

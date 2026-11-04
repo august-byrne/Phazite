@@ -50,16 +50,16 @@ Build Phazite first, as [docs/building.md](docs/building.md) describes: on Windo
 | `src/app/` | The app: startup, the main window with its menus and dialogs, the open project, and the services it owns |
 | `src/ui/` | What you see and touch, by area: the theme and design tokens, base controls, keys and keymaps, device editors, and one folder per view (playlist, piano roll, audio clip editor, mixer, browser, and the window's shell) |
 | `src/services/` | What the app keeps outside a project: settings, recent projects, the browser's library and the Phazite Sounds download |
-| `src/model/` | The project model, by area (commands, engine, project, transport, arrangement, notes, chords, mixer, automation, modulation, presets), without window code; the only code that uses Tracktion Engine |
-| `src/engine/` | Phazite's own playback engine, which plays what the model compiles from the song, without Tracktion ([tracktion-migration.md](docs/tracktion-migration.md), T2) |
-| `src/sandbox/` | What Phazite shares with the helper processes that host plug-ins, so that one that crashes can't take Phazite with it: shared memory, the channel a plug-in's blocks go through, the control channel's messages ([tracktion-migration.md](docs/tracktion-migration.md), T3) |
+| `src/model/` | The song model, by area (commands, engine, project, transport, arrangement, notes, chords, mixer, automation, modulation, presets), with what compiles the song into what the engine plays (playback) and the plug-ins hosted in helpers (plugins), without window code |
+| `src/engine/` | Phazite's own playback engine, which plays what the model compiles from the song, live and in renders |
+| `src/sandbox/` | What Phazite shares with the helper processes that host plug-ins, so that one that crashes can't take Phazite with it: shared memory, the channel a plug-in's blocks go through, the control channel's messages |
 | `src/host/` | The helper program that hosts plug-ins for Phazite (`PhaziteHost`, next to the app) |
 | `src/devices/` | The DSP of Phazite's own instruments and effects, using JUCE's core and DSP modules only, so that a device could run on another engine |
 | `resources/` | Keymaps, song outlines, chord progressions, presets, icons and the Inter font |
 | `tests/` | The unit, golden and real-time tests, and the benchmarks (`phazite_tests`, with doctest) |
 | `docs/` | The design, the roadmap, the known bugs and the audits |
 | `tools/` | Machine setup, `format.sh`, `check-architecture.sh`, and `soundkit/`, which makes [Phazite Sounds](https://github.com/august-byrne/phazite-sounds) |
-| `external/` | The submodules: Tracktion Engine (with JUCE), Rubber Band Library and WindowsToolchain. Read-only |
+| `external/` | The submodules: JUCE, Rubber Band Library, doctest and WindowsToolchain. Read-only |
 | `.githooks/`, `.github/` | The git hooks, and the continuous integration (CI) on GitHub Actions |
 
 [CLAUDE.md](CLAUDE.md#repository-layout) describes every folder and file in detail.
@@ -69,7 +69,7 @@ Build Phazite first, as [docs/building.md](docs/building.md) describes: on Windo
 The code is layered so that the UI can change without touching the rules of editing, every edit can be tested without a window, and parts of the engine could be replaced later ([design, section 24](docs/design.md#24-code-structure)):
 
 - **Dependencies point down:** the app uses the UI, the UI uses the services and the model, the services may use the model, the model may use the engine (`src/engine/`) and the sandbox (`src/sandbox/`), and never the other way round; the helper program (`src/host/`) uses the sandbox, and nothing uses it. Every layer may use `src/devices/`, which uses none of them.
-- **No window code below the UI**, and **Tracktion stays in the model**: the UI calls model functions that take and return Phazite's own types (IDs and plain values), never Tracktion's.
+- **No window code below the UI**, and **the model's insides stay in the model**: the UI calls model functions that take and return Phazite's own types (IDs and plain values), and includes none of the model's `internal/` headers.
 - **The UI decides nothing about the project:** it runs a command or calls a model function, and every change to a project is one named undo step.
 - **Every user action is a command**, with a stable id such as `edit.undo`, a name and a description; default shortcuts go in the keymaps in `resources/keymaps/`, not in code.
 - **Colors, sizes and fonts come from the design tokens** (`src/ui/theme/DesignTokens.h`), never literals.
@@ -78,14 +78,14 @@ The code is layered so that the UI can change without touching the rules of edit
 
 ### The audio thread
 
-The audio thread is the audio callback and everything it calls, such as plug-in, device and Tracktion node processing. It must deliver every block of audio on time, so code there must not:
+The audio thread is the audio callback and everything it calls: Phazite's engine playing a block, with its devices and the plug-ins' round trips to their helpers. It must deliver every block of audio on time, so code there must not:
 
 - allocate or free memory (`new`/`delete`, growing containers, creating strings, allocating `std::function` captures): allocate up front when preparing;
 - take locks or wait for other threads (`std::mutex`, `juce::CriticalSection`, `MessageManagerLock`, ...);
 - post to the message thread (`triggerAsyncUpdate`, `sendChangeMessage`, `callAsync`): set an atomic flag and poll it from a `juce::Timer` instead;
 - do file or network I/O, log, throw exceptions or run unbounded loops.
 
-Threads share data only through lock-free FIFOs and `std::atomic` values. Tracktion's own instruments and effects break these rules, so Phazite doesn't use them. After a change that touches playback, run the real-time audit (`phazite_tests --test-suite=realtime-audit`), which counts allocations on the audio thread; [docs/realtime-audit.md](docs/realtime-audit.md) lists what is known.
+Threads share data only through lock-free FIFOs and `std::atomic` values. Phazite's own devices follow these rules, and plug-ins play in helper processes, so that one that breaks them holds up only its own sound. After a change that touches playback, run the real-time audit (`phazite_tests --test-suite=realtime-audit`), which counts allocations on the audio thread; [docs/realtime-audit.md](docs/realtime-audit.md) lists what is known.
 
 ### Code style
 
@@ -113,7 +113,7 @@ Every push and pull request runs [CI](.github/workflows/ci.yml) on GitHub's mach
 
 ### Licenses
 
-Phazite is AGPL-3.0-or-later. Only add code under licenses compatible with it: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license); fonts may also be under the SIL Open Font License 1.1. Never turn on Tracktion's proprietary options (Elastique, ReWire, REX). No sounds or samples go in this repository: they belong in [phazite-sounds](https://github.com/august-byrne/phazite-sounds), under CC0. Add every new dependency to [docs/third-party.md](docs/third-party.md).
+Phazite is AGPL-3.0-or-later. Only add code under licenses compatible with it: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license); fonts may also be under the SIL Open Font License 1.1. Never compile in code that is under a proprietary license alone. No sounds or samples go in this repository: they belong in [phazite-sounds](https://github.com/august-byrne/phazite-sounds), under CC0. Add every new dependency to [docs/third-party.md](docs/third-party.md).
 
 ### No secrets
 
@@ -166,15 +166,15 @@ The hooks don't replace reading the diff: gitleaks can't recognize personal data
 
 | Submodule | Pinned at |
 |---|---|
-| `external/tracktion_engine` | `bb386171` on Tracktion's `develop` branch (2026-10-07; module version 3.5.0) |
-| `external/tracktion_engine/modules/juce` | `37c894f8`, the commit Tracktion pins (JUCE 8.0.13 plus 7 commits on `develop`) |
+| `external/JUCE` | `37c894f8` (JUCE 8.0.13 plus 7 commits on `develop`) |
+| `external/doctest` | `ae7a1353` (doctest 2.4.11) |
 | `external/rubberband` | `1d95888b` (Rubber Band Library 4.0) |
 | `external/WindowsToolchain` | `1373361e` (v0.14.0 plus 11 commits) |
 
-- Run `git submodule update --init --recursive --depth 1` after every pull or branch switch. Never run `git submodule update --remote`: it would move JUCE away from the commit Tracktion pins.
-- Everything under `external/` is read-only: don't edit, reformat or "fix" it, and never add JUCE separately. Don't commit a moved submodule pointer (`git status` shows "(new commits)") unless the change is a deliberate dependency bump, which [CLAUDE.md](CLAUDE.md#submodules-and-third-party-code) describes.
+- Run `git submodule update --init --recursive --depth 1` after every pull or branch switch. Never run `git submodule update --remote`: it would move the dependencies off the commits Phazite pins.
+- Everything under `external/` is read-only: don't edit, reformat or "fix" it, and never add a second copy of JUCE. Don't commit a moved submodule pointer (`git status` shows "(new commits)") unless the change is a deliberate dependency bump, which [CLAUDE.md](CLAUDE.md#submodules-and-third-party-code) describes.
 
 ## Working with Claude Code
 
-- [CLAUDE.md](CLAUDE.md) holds the project instructions that Claude Code loads by itself, and [.claude/settings.json](.claude/settings.json) the shared configuration: it pre-approves the build commands, read-only git commands and the format and architecture checks, and keeps Tracktion's own CLAUDE.md files (written for Tracktion's contributors) out of Claude's context.
+- [CLAUDE.md](CLAUDE.md) holds the project instructions that Claude Code loads by itself, and [.claude/settings.json](.claude/settings.json) the shared configuration: it pre-approves the build commands, read-only git commands and the format and architecture checks.
 - Put personal notes in `CLAUDE.local.md` and personal settings in `.claude/settings.local.json`; git ignores both.

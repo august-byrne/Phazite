@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Devices.h"
 #include "devices/delay/Delay.h"
+#include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/dynamics/Multiband.h"
@@ -13,32 +14,12 @@
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
-#include "internal/DevicePlugin.h"
-#include "internal/DrumSamplerPlugin.h"
-#include "internal/WavetablePlugin.h"
+#include "devices/wavetable/WavetableSynth.h"
+
+#include <vector>
 
 namespace phazite
 {
-void registerDevices (te::Engine& engine)
-{
-    auto& plugins = engine.getPluginManager();
-    plugins.createBuiltInType<DevicePluginOf<devices::Equalizer>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Compressor>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Limiter>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Reverb>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Synth>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::FilterEffect>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Multiband>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Saturator>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Delay>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::StereoExpander>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Phaser>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Flanger>>();
-    plugins.createBuiltInType<DevicePluginOf<devices::Vocoder>>();
-    plugins.createBuiltInType<DrumSamplerPlugin>();
-    plugins.createBuiltInType<WavetablePlugin>();
-}
-
 std::span<const devices::DeviceInfo* const> getOwnDevices()
 {
     // In the order menus list them: the instruments, then the effects by what they do (tone, dynamics, colour, space,
@@ -84,9 +65,19 @@ namespace
         { &devices::StereoExpander::info, make<devices::StereoExpander> },
     };
 
+    std::vector<OwnDevice>& getRegistered() // message thread
+    {
+        static std::vector<OwnDevice> registered;
+        return registered;
+    }
+
     const OwnDevice* findOwn (std::string_view typeID)
     {
         for (const auto& device : ownDevices)
+            if (device.info->typeID == typeID)
+                return &device;
+
+        for (const auto& device : getRegistered())
             if (device.info->typeID == typeID)
                 return &device;
 
@@ -106,8 +97,9 @@ std::unique_ptr<devices::Processor> createOwnDevice (std::string_view typeID)
     return device != nullptr ? device->create() : nullptr;
 }
 
-bool isInstrument (te::Plugin& device)
+void registerDeviceType (const devices::DeviceInfo& info, DeviceFactory create)
 {
-    return device.isSynth() && dynamic_cast<te::RackInstance*> (&device) == nullptr;
+    if (findOwn (info.typeID) == nullptr)
+        getRegistered().push_back ({ &info, create });
 }
 } // namespace phazite

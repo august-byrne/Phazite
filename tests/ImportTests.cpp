@@ -60,10 +60,10 @@ void writeMidi (const juce::File& file)
 std::unique_ptr<phazite::Project> createProject (const juce::File& folder)
 {
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), folder, "Import", error);
+    auto project = phazite::Project::create (folder, "Import", error);
     INFO (error.toStdString());
     REQUIRE (project != nullptr);
-    phazite::ensureTracks (project->getEdit(), 1);
+    phazite::ensureTracks (project->getSong(), 1);
     return project;
 }
 } // namespace
@@ -84,8 +84,8 @@ TEST_CASE ("Imported audio is copied into the project once, and keeps working af
     writeWav (kick, 22050); // half a second
 
     auto project = createProject (temp.folder);
-    auto& song = phazite::getSong (project->getEdit());
-    const auto track = phazite::getTrackID (*te::getAudioTracks (project->getEdit())[0]);
+    auto& song = project->getSong();
+    const auto track = phazite::getTrackIDs (song).front();
 
     const auto clip = phazite::importFile (song, track, kick, beats (4.0));
     REQUIRE (clip.isValid());
@@ -116,10 +116,10 @@ TEST_CASE ("Imported audio is copied into the project once, and keeps working af
     project = nullptr;
 
     juce::String error;
-    auto reopened = phazite::Project::open (phazite::test::getEngine(), file, false, error);
+    auto reopened = phazite::Project::open (file, false, error);
     REQUIRE (reopened != nullptr);
-    const auto& reopenedSong = phazite::getSong (reopened->getEdit());
-    const auto clips = phazite::getClips (reopenedSong, phazite::getTrackID (*te::getAudioTracks (reopened->getEdit())[0]));
+    const auto& reopenedSong = reopened->getSong();
+    const auto clips = phazite::getClips (reopenedSong, phazite::getTrackIDs (reopenedSong).front());
     REQUIRE (clips.size() == 1);
     const auto reopenedClip = phazite::findClipState (reopenedSong, clips.front());
     REQUIRE (phazite::isAudioState (reopenedClip));
@@ -133,8 +133,8 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
     writeMidi (midiFile);
 
     auto project = createProject (temp.folder.getChildFile ("Projects"));
-    auto& song = phazite::getSong (project->getEdit());
-    const auto track = phazite::getTrackID (*te::getAudioTracks (project->getEdit())[0]);
+    auto& song = project->getSong();
+    const auto track = phazite::getTrackIDs (song).front();
 
     const auto clip = phazite::importFile (song, track, midiFile, beats (8.0));
     REQUIRE (clip.isValid());
@@ -206,9 +206,8 @@ TEST_CASE ("Dropped files go on the track that suits them, or on new tracks belo
     writeMidi (chords);
 
     auto project = createProject (temp.folder.getChildFile ("Project"));
-    auto& edit = project->getEdit();
-    auto& song = phazite::getSong (edit);
-    const auto target = phazite::getTrackID (*te::getAudioTracks (edit)[0]);
+    auto& song = project->getSong();
+    const auto target = phazite::getTrackIDs (song).front();
     song.getUndoManager().clearUndoHistory();
 
     // The audio suits the empty track; the MIDI file gets a new track below it, named after the file. A file that is
@@ -234,6 +233,6 @@ TEST_CASE ("Dropped files go on the track that suits them, or on new tracks belo
     CHECK (phazite::getClipTrack (song, more[0]) != target);
     CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Add File"));
 
-    phazite::undo (edit);
-    CHECK (phazite::getPlaylistTracks (edit).size() == 2);
+    phazite::undo (song);
+    CHECK (phazite::getTrackIDs (song).size() == 2);
 }

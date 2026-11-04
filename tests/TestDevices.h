@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Devices made for tests, run through the same thin Tracktion plug-in as Phazite's own (model/devices/
-// DevicePlugin.h): an effect (a gain), an instrument that plays the velocity of the note it holds, an effect with
-// latency and a mix (a delay), and an effect that plays its sidechain.
+// Devices made for tests, which songs hold and Phazite's engine plays as its own (registered as such:
+// model/devices/internal/Devices.h): an effect (a gain), an instrument that plays the velocity of the note it holds, an
+// effect with latency and a mix (a delay), an effect that plays its sidechain, and one that takes a share of the time.
 #pragma once
 
 #include "TestHelpers.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/DelayLine.h"
-#include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/Devices.h"
+#include "model/mixer/internal/Mixer.h"
 
 #include <array>
 #include <vector>
@@ -169,27 +170,54 @@ struct TestSidechain final : devices::Processor
     }
 };
 
-// Registers them with the tests' engine, once.
+// Takes a fifth of the time of what it plays, as a device busy working out its sound would, and leaves the sound as it
+// is; it never sleeps on silence. For the CPU meters.
+struct TestBusy final : devices::Processor
+{
+    static constexpr const char* typeID = "phaziteTestBusy";
+    static constexpr double share = 0.2;
+    static constexpr devices::DeviceInfo info { .typeID = typeID, .name = "Test Busy", .kind = devices::DeviceKind::effect };
+
+    void prepare (double rate, int) override { sampleRate = rate; }
+    void reset() override {}
+
+    void process (const devices::ProcessContext& block) override
+    {
+        const auto until =
+            juce::Time::getHighResolutionTicks() + juce::Time::secondsToHighResolutionTicks (share * block.numSamples / sampleRate);
+
+        while (juce::Time::getHighResolutionTicks() < until)
+        {
+        }
+    }
+
+    bool sleepsOnSilence() const noexcept override { return false; }
+
+    double sampleRate = 44100.0;
+};
+
+// Registers them as devices songs can hold, once.
 inline void registerTestDevices()
 {
     [[maybe_unused]] static const bool registered = []
     {
-        auto& plugins = getEngine().getPluginManager();
-        plugins.createBuiltInType<DevicePluginOf<TestGain>>();
-        plugins.createBuiltInType<DevicePluginOf<TestTone>>();
-        plugins.createBuiltInType<DevicePluginOf<TestDelay>>();
-        plugins.createBuiltInType<DevicePluginOf<TestSidechain>>();
+        const auto add = [] (const devices::DeviceInfo& info, DeviceFactory make) { registerDeviceType (info, make); };
+        add (TestGain::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestGain>(); });
+        add (TestTone::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestTone>(); });
+        add (TestDelay::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestDelay>(); });
+        add (TestSidechain::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestSidechain>(); });
+        add (TestBusy::info, []() -> std::unique_ptr<devices::Processor> { return std::make_unique<TestBusy>(); });
         return true;
     }();
 }
 
-// A new test device of that type in the Edit, kept alive by keep.
-inline DevicePlugin& createTestDevice (te::Edit& edit, const char* type, te::Plugin::Ptr& keep)
+// A new test device of that type at the end of a track's devices (an instrument in place of its instrument), as a model
+// function adds one, in the caller's undo step; its ID.
+inline DeviceID addTestDevice (Song& song, TrackID track, const char* type)
 {
     registerTestDevices();
-    keep = edit.getPluginCache().createNewPlugin (type, {});
-    auto* device = dynamic_cast<DevicePlugin*> (keep.get());
-    REQUIRE (device != nullptr);
-    return *device;
+    const auto id = insertDeviceState (song, track, makeOwnDeviceState (song, type));
+    REQUIRE (id.isValid());
+    return id;
 }
 } // namespace phazite::test

@@ -29,25 +29,23 @@ struct PianoRollScreen
 {
     PianoRollScreen()
     {
-        phazite::ensureTracks (*edit, 2);
-        tracks = te::getAudioTracks (*edit);
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        tracks = phazite::ensureTracks (song, 2);
+        song.getUndoManager().clearUndoHistory();
 
         phazite::ui::addTimelineCommands (registry, [this] { return &pianoRoll; });
         pianoRoll.addCommands (registry);
-        setEdit (context, edit.get());
+        setSong (context, &song);
         phazite::test::dispatchPendingMessages();
 
         notes = phazite::test::findComponentWithTitle (pianoRoll, "Notes");
         REQUIRE (notes != nullptr);
     }
 
-    ~PianoRollScreen() { setEdit (context, nullptr); }
+    ~PianoRollScreen() { setSong (context, nullptr); }
 
     phazite::ClipID addClip (int track, double start, double length)
     {
-        const auto clip =
-            phazite::insertMidiClip (song, phazite::getTrackID (*tracks[track]), { beats (start), beats (start + length) }, nullptr);
+        const auto clip = phazite::insertMidiClip (song, tracks[(size_t) track], { beats (start), beats (start + length) }, nullptr);
         REQUIRE (clip.isValid());
         return clip;
     }
@@ -73,9 +71,9 @@ struct PianoRollScreen
     // A clip's notes, in the order the song holds them.
     std::vector<phazite::NoteData> notesOf (phazite::ClipID clip) const { return phazite::getClipNotes (song, clip); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
-    phazite::Song& song = phazite::getSong (*edit);
-    juce::Array<te::AudioTrack*> tracks;
+    phazite::Song::Ptr songPtr = phazite::createSong(); // 120 BPM, 4/4
+    phazite::Song& song = *songPtr;
+    std::vector<phazite::TrackID> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     phazite::Selection& selection = getSelection (context);
     phazite::CommandRegistry registry;
@@ -174,13 +172,13 @@ TEST_CASE ("While a clip linked to the one shown plays, the piano roll's playhea
     };
 
     // At beat 9.5 the alias plays beat 1.5 of the notes.
-    phazite::movePlayhead (*screen.edit, te::TimePosition::fromSeconds (4.75));
+    phazite::movePlayhead (screen.song, beats (9.5));
     CHECK (phazite::test::dispatchMessagesUntil ([&screen] { return screen.pianoRoll.isPlayheadShowingLinkedClip(); }));
     CHECK (playhead->isVisible());
     CHECK (playheadAt (1.5));
 
     // In the clip itself, it is the song's own position again.
-    phazite::movePlayhead (*screen.edit, te::TimePosition::fromSeconds (0.5));
+    phazite::movePlayhead (screen.song, beats (1.0));
     CHECK (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.pianoRoll.isPlayheadShowingLinkedClip(); }));
     CHECK (playheadAt (1.0));
 }
@@ -196,7 +194,7 @@ TEST_CASE ("The piano roll counts bars from the start of the clip it shows")
     CHECK (screen.pianoRoll.getView().start.inBeats() == doctest::Approx (32.0)); // it opens at bar 1
 
     // Moved in the song, the clip still starts at bar 1, and the view stays on its notes.
-    phazite::moveClip (screen.song, clip, beats (48.0), phazite::getTrackID (*screen.tracks[0]));
+    phazite::moveClip (screen.song, clip, beats (48.0), screen.tracks[0]);
     phazite::test::dispatchPendingMessages();
     CHECK (screen.pianoRoll.getTimeOrigin().inBeats() == doctest::Approx (48.0));
     CHECK (screen.pianoRoll.getView().start.inBeats() == doctest::Approx (48.0));
@@ -224,12 +222,12 @@ TEST_CASE ("Selecting a track shows its clip nearest the playhead, or lets the f
     const auto later = screen.addClip (0, 16.0, 4.0);
 
     // The playhead is in neither clip: the nearer one shows.
-    phazite::movePlayhead (*screen.edit, screen.edit->tempoSequence.toTime (phazite::toTracktion (beats (13.0))));
-    screen.select (phazite::getTrackID (*screen.tracks[0]));
+    phazite::movePlayhead (screen.song, beats (13.0));
+    screen.select (screen.tracks[0]);
     CHECK (screen.pianoRoll.getClips() == std::vector { later });
 
     // A track without clips shows from the bar the playhead is in, and a click there starts a clip.
-    const auto second = phazite::getTrackID (*screen.tracks[1]);
+    const auto second = screen.tracks[1];
     screen.select (second);
     CHECK (screen.pianoRoll.getTrack() == second);
     CHECK (screen.pianoRoll.getClips().empty());
@@ -247,7 +245,7 @@ TEST_CASE ("Selecting a track shows its clip nearest the playhead, or lets the f
     CHECK (screen.pianoRoll.getClips() == std::vector { started });
 
     // One undo step takes back the clip with its note.
-    phazite::undo (*screen.edit);
+    phazite::undo (screen.song);
     CHECK (phazite::getClips (screen.song, second).empty());
 }
 
@@ -262,7 +260,7 @@ TEST_CASE ("The piano roll paints notes, with and without a key")
     CHECK (screen.pianoRoll.getTrack().isValid());
     CHECK (screen.window.paintEverything().getWidth() == 1000);
 
-    phazite::setTrackKey (*screen.tracks[0], phazite::Key { 2, phazite::Scale::dorian });
+    phazite::setTrackKey (screen.song, screen.tracks[0], phazite::Key { 2, phazite::Scale::dorian });
     phazite::test::dispatchPendingMessages();
     CHECK (screen.window.paintEverything().getWidth() == 1000);
 }
@@ -277,10 +275,11 @@ TEST_CASE ("On a track without an instrument, the piano roll asks for one, since
     REQUIRE (button != nullptr);
     CHECK (button->getButtonText() == juce::String ("Choose instrument"));
 
-    auto synth = screen.edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {});
-    REQUIRE (phazite::setInstrument (*screen.tracks[0], synth) != nullptr);
+    const auto synth =
+        phazite::setInstrument (screen.song, screen.tracks[0], phazite::makeOwnDeviceState (screen.song, phazite::devices::Synth::typeID));
+    REQUIRE (synth.isValid());
     phazite::test::dispatchPendingMessages();
-    CHECK (button->getButtonText() == synth->getName());
+    CHECK (button->getButtonText() == phazite::getDeviceName (screen.song, synth));
 }
 
 TEST_CASE ("A note drawn past its clip, where the next clip on the track starts, doesn't stretch the clip over it")
@@ -299,7 +298,7 @@ TEST_CASE ("A note drawn past its clip, where the next clip on the track starts,
     CHECK (phazite::getClipRange (screen.song, next).getStart().inBeats() == doctest::Approx (4.0));
     CHECK (screen.notesOf (next).empty());
 
-    phazite::undo (*screen.edit); // one step
+    phazite::undo (screen.song); // one step
     CHECK (screen.notesOf (first).empty());
 }
 
@@ -313,13 +312,13 @@ TEST_CASE ("A note added and dragged is one undo step, however long the drag tak
     mouse.press (screen.at (1.0));
     REQUIRE (screen.notesOf (clip).size() == 1);
     mouse.dragTo (screen.at (2.0));
-    phazite::test::settle (500); // Tracktion starts a new undo step 350 ms after a change, though not while the mouse is down
+    phazite::test::settle (500); // a pause, with the mouse still down
     mouse.dragTo (screen.at (3.0));
     mouse.release();
 
     CHECK (screen.notesOf (clip).front().start.inBeats() > 2.5);
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Add Note"));
-    phazite::undo (*screen.edit);
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Add Note"));
+    phazite::undo (screen.song);
     CHECK (screen.notesOf (clip).empty()); // the note and all its moves, in one step
 }
 
@@ -347,7 +346,7 @@ TEST_CASE ("The mouse adds, selects, copies, resizes and deletes notes, each cha
     REQUIRE (notes().size() == 2);
     const auto first = notes()[0].getRef(), second = notes()[1].getRef();
     CHECK (selected() == std::vector { second });
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Add Note"));
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Add Note"));
 
     // Ctrl+click adds the first to the selection.
     const auto inside = [&context] (phazite::NoteRef note) { return phazite::getNote (context, note)->start.inBeats() + 0.05; };
@@ -363,7 +362,7 @@ TEST_CASE ("The mouse adds, selects, copies, resizes and deletes notes, each cha
     REQUIRE (notes().size() == 4);
     CHECK (selected().size() == 2);
     CHECK_FALSE (isSelected (first));
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Copy Notes"));
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Copy Notes"));
     CHECK (phazite::getNote (context, first)->start.inBeats() < 1.5); // where it was
 
     // Dragging the end of the first note makes it longer.
@@ -373,12 +372,12 @@ TEST_CASE ("The mouse adds, selects, copies, resizes and deletes notes, each cha
     mouse.release();
     mouse.pause();
     CHECK (phazite::getNote (context, first)->getEnd().inBeats() > 2.2);
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Resize Notes"));
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Resize Notes"));
 
     // A right-click deletes a note, and Undo puts the same note back.
     mouse.click (screen.at (inside (second)), juce::ModifierKeys::rightButtonModifier);
     CHECK_FALSE (phazite::getNote (context, second).has_value());
     CHECK (notes().size() == 3);
-    phazite::undo (*screen.edit);
+    phazite::undo (screen.song);
     CHECK (phazite::getNote (context, second).has_value());
 }

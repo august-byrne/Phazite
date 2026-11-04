@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GoldenFiles.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
 
 #include <algorithm>
@@ -19,13 +20,13 @@ namespace
     constexpr const char* moreDifferences = "(more differences not listed)";
 
     //==============================================================================
-    // N5: values that are never rounded, though they may look like numbers.
+    // N3: values that are never rounded, though they may look like numbers.
     bool isNeverRounded (const juce::String& attribute)
     {
         return attribute == "id" || attribute == "colour" || attribute == "name" || attribute == "source" || attribute == "linkID";
     }
 
-    // A decimal number as N5 rounds it: only digits, signs, points and exponents, with a point or an exponent, all of
+    // A decimal number as N3 rounds it: only digits, signs, points and exponents, with a point or an exponent, all of
     // which std::from_chars reads as a double.
     std::optional<double> readDecimalNumber (const juce::String& text)
     {
@@ -43,7 +44,7 @@ namespace
         return value;
     }
 
-    // N5: 7 significant digits, and -0 as 0.
+    // N3: 7 significant digits, and -0 as 0.
     juce::String writeDecimalNumber (double value)
     {
         if (juce::exactlyEqual (value, 0.0))
@@ -55,24 +56,13 @@ namespace
         return juce::String (buffer, (size_t) (result.ptr - buffer));
     }
 
-    // N6: tracks of every kind sort as TRACK, and clips of every kind as CLIP, so they keep their order among themselves.
+    // N4: by tag.
     juce::String getSortKey (const juce::XmlElement& element)
     {
-        if (element.isTextElement())
-            return "#text";
-
-        const juce::Identifier tag (element.getTagName());
-
-        if (te::TrackList::isTrack (tag))
-            return "TRACK";
-
-        if (te::Clip::isClipState (tag))
-            return "CLIP";
-
-        return element.getTagName();
+        return element.isTextElement() ? juce::String ("#text") : element.getTagName();
     }
 
-    // N1, N2 and N4 to N8 (normaliseProject() does N3 on the result).
+    // N2 to N6 (normaliseProject() does N1 on the result).
     struct Normaliser
     {
         juce::StringArray folderPaths; // the project folder's path, with each separator
@@ -89,13 +79,7 @@ namespace
             {
                 const auto name = attribute.name.toString();
 
-                if (isRoot && name == "lastSignificantChange")
-                    continue;
-
-                if (isRoot && (name == "appVersion" || name == "creationTime" || name == "projectID"))
-                    attributes.emplace_back (name, "(varies)");
-                else
-                    attributes.emplace_back (name, normaliseValue (name, attribute.value));
+                attributes.emplace_back (name, normaliseValue (name, attribute.value));
             }
 
             std::sort (attributes.begin(), attributes.end(),
@@ -108,10 +92,9 @@ namespace
 
             std::vector<std::unique_ptr<juce::XmlElement>> children;
 
-            if (! saved.hasTagName ("INPUTDEVICES"))
-                for (const auto* child : saved.getChildIterator())
-                    if (auto normalisedChild = normalise (*child, false))
-                        children.push_back (std::move (normalisedChild));
+            for (const auto* child : saved.getChildIterator())
+                if (auto normalisedChild = normalise (*child, false))
+                    children.push_back (std::move (normalisedChild));
 
             std::stable_sort (children.begin(), children.end(),
                               [] (const auto& left, const auto& right) { return getSortKey (*left).compare (getSortKey (*right)) < 0; });
@@ -126,7 +109,7 @@ namespace
             return element;
         }
 
-        // N4 and N5.
+        // N2 and N3.
         juce::String normaliseValue (const juce::String& attribute, juce::String value) const
         {
             for (const auto& path : folderPaths)
@@ -143,7 +126,7 @@ namespace
         }
     };
 
-    // N3: the ids that link clips to their aliases, numbered in document order.
+    // N1: the ids that link clips to their aliases, numbered in document order.
     void renumberLinks (juce::XmlElement& element, juce::StringArray& linkIDs)
     {
         if (const auto linkID = element.getStringAttribute ("linkID"); linkID.isNotEmpty())
@@ -191,7 +174,7 @@ namespace
                 keyed.key = keyed.tag + "[" + juce::String (keyed.index) + "]";
             }
 
-            // Siblings with the same id (which Tracktion doesn't write) are told apart by their order.
+            // Siblings with the same id (or none) are told apart by their order.
             if (const auto earlier = numWithKey[keyed.key.toStdString()]++; earlier > 0)
                 keyed.key << "[" << earlier << "]";
 
@@ -230,7 +213,7 @@ namespace
         return "\"" + value + "\"";
     }
 
-    // The same text, or decimal numbers (N5) that differ by at most a millionth of the larger.
+    // The same text, or decimal numbers (N3) that differ by at most a millionth of the larger.
     bool areSameValues (const juce::String& attribute, const juce::String& expected, const juce::String& actual)
     {
         if (expected == actual)
@@ -488,9 +471,7 @@ std::unique_ptr<juce::XmlElement> readXml (const juce::File& file)
 //==============================================================================
 const juce::StringArray& getDroppableEmptyTags()
 {
-    static const juce::StringArray tags {
-        "INPUTDEVICES", // every Edit has one (Edit::initialiseAudioDevices); its children, the machine's inputs, N2 removes
-    };
+    static const juce::StringArray tags {};
 
     return tags;
 }
@@ -632,15 +613,15 @@ void checkNoUserName (const juce::String& what, const juce::XmlElement& save)
 }
 
 //==============================================================================
-te::Plugin::Ptr createBuiltInDevice (te::Edit& edit, const char* xmlTypeName)
+juce::ValueTree makeBuiltInDevice (Song& song, const char* typeID)
 {
-    te::Plugin::Ptr device;
+    juce::ValueTree device;
 
-    for (const auto& type : phazite::getDeviceTypes (edit.engine))
-        if (device == nullptr && type.description.fileOrIdentifier == xmlTypeName)
-            device = phazite::createDevice (edit, type);
+    for (const auto& type : phazite::getDeviceTypes (getPluginHost (getEngineContext())))
+        if (! device.isValid() && type.description.fileOrIdentifier == typeID)
+            device = phazite::makeDeviceState (song, type);
 
-    REQUIRE (device != nullptr);
+    REQUIRE (device.isValid());
     return device;
 }
 } // namespace phazite::test

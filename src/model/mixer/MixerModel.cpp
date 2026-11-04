@@ -12,12 +12,12 @@
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/ParameterHandle.h"
-#include "model/engine/internal/EngineSetup.h"
+#include "model/engine/EngineContext.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
-#include "model/engine/internal/LoudnessMeterPlugin.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
-#include "model/plugins/internal/PluginHost.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
@@ -27,20 +27,6 @@ namespace phazite
 {
 namespace
 {
-    // Tracktion's track or device for one of the song's, for what is still reached through it (docs/tracktion-migration.md,
-    // T6: parameters, windows, meters and plug-ins' instances).
-    te::Track* findTrack (const ProjectContext& context, TrackID id)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr && id.isValid() ? mirror::findTrack (*edit, id) : nullptr;
-    }
-
-    te::Plugin* findDevice (const ProjectContext& context, DeviceID id)
-    {
-        auto* edit = getEdit (context);
-        return edit != nullptr ? mirror::findDevice (*edit, id) : nullptr;
-    }
-
     // A track of the playlist's (a track, a folder or a return); and one with sound of its own (not a folder).
     bool isTrack (const Song& song, TrackID id)
     {
@@ -57,12 +43,12 @@ namespace
         return std::find (tracks.begin(), tracks.end(), track) != tracks.end();
     }
 
-    std::vector<DeviceSlot> makeSlots (const Song& song, const std::vector<DeviceID>& devices)
+    std::vector<DeviceSlot> makeSlots (const ProjectContext& context, const std::vector<DeviceID>& devices)
     {
         std::vector<DeviceSlot> slots;
 
         for (const auto device : devices)
-            slots.push_back (makeDeviceSlot (song, device));
+            slots.push_back (makeDeviceSlot (context, device));
 
         return slots;
     }
@@ -109,39 +95,55 @@ namespace
         return from != returnTrack && hasSound (song, from) && isReturnTrack (song, returnTrack)
                && ! contains (getTracksFedBy (song, returnTrack), from);
     }
+
+    // How late a device's sound comes out, in seconds: as Phazite's engine plays it while it plays the device's project;
+    // otherwise a plug-in's, as its helper last told it; none for a device that is off. While Low Latency is on, one that
+    // looks ahead further than its limit is bypassed (PlaybackHost.h).
+    double getLatencySeconds (const Song& song, DeviceID id, const PlaybackHost& host)
+    {
+        if (! isDeviceOn (song, id))
+            return 0.0;
+
+        auto latency = 0.0;
+
+        if (auto* session = findPlayingSession (song))
+        {
+            auto* node = session->getPlayer().findDevice ((std::int64_t) id.getRaw());
+            latency = node != nullptr && node->isOn()
+                          ? (double) node->getRunner().getLatencySamples() / session->getEngine().getSampleRate()
+                          : 0.0;
+        }
+        else if (auto* instance = findPluginInstance (song, id); instance != nullptr && instance->getPreparedRate() > 0.0)
+        {
+            latency = (double) instance->getRemote().getLatencySamples() / instance->getPreparedRate();
+        }
+
+        return host.isLowLatency() && latency > lowLatencyLimitSeconds ? 0.0 : latency;
+    }
 } // namespace
 
-DeviceSlot makeDeviceSlot (const Song& song, DeviceID id)
+DeviceSlot makeDeviceSlot (const ProjectContext& context, DeviceID id)
 {
-    auto* edit = findEdit (song);
-    auto* device = edit != nullptr ? mirror::findDevice (*edit, id) : nullptr;
-    const auto on = isDeviceOn (song, id);
+    auto* song = findSong (context);
 
-    // How late its sound comes out, as Phazite's engine plays it while it plays the device's project, in seconds; or as
-    // Tracktion knows it otherwise. While Low Latency is on, one that looks ahead further than its limit is bypassed
-    // (EngineSetup.h).
-    auto latency = device != nullptr && on ? device->getLatencySeconds() : 0.0;
+    if (song == nullptr)
+        return { .id = id };
 
-    if (auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr)
-    {
-        auto* node = session->getPlayer().findDevice ((std::int64_t) id.getRaw());
-        latency = node != nullptr && node->isOn() ? node->getRunner().getLatencySamples() / session->getEngine().getSampleRate() : 0.0;
-        latency = isLowLatency (edit->engine) && latency > lowLatencyLimitSeconds ? 0.0 : latency;
-    }
+    const auto* windows = getDeviceWindows (context);
 
     return { .id = id,
-             .name = getDeviceName (song, id),
-             .isOn = on,
-             .hasMix = hasMix (song, id),
-             .latencySeconds = latency,
-             .isContainer = isContainer (song, id),
-             .opensWindow = opensWindow (song, id),
-             .popsOut = popsOut (song, id),
-             .windowOpen = popsOut (song, id) && device != nullptr && isWindowOpen (*device),
-             .frozen = device != nullptr && isFrozenDevice (*device),
-             .crashed = device != nullptr && hasCrashed (*device),
-             .hasSidechain = hasSidechain (song, id),
-             .sidechain = describeSidechainSource (song, id) };
+             .name = getDeviceName (*song, id),
+             .isOn = isDeviceOn (*song, id),
+             .hasMix = hasMix (*song, id),
+             .latencySeconds = getLatencySeconds (*song, id, getPlaybackHost (getEngineContext (context))),
+             .isContainer = isContainer (*song, id),
+             .opensWindow = opensWindow (*song, id),
+             .popsOut = popsOut (*song, id),
+             .windowOpen = popsOut (*song, id) && windows != nullptr && windows->isOpen (id),
+             .frozen = isFrozenDevice (*song, id),
+             .crashed = hasCrashed (*song, id),
+             .hasSidechain = hasSidechain (*song, id),
+             .sidechain = describeSidechainSource (*song, id) };
 }
 
 //==============================================================================
@@ -194,21 +196,19 @@ bool feeds (const ProjectContext& context, TrackID from, TrackID to)
 TrackID getInspectedChannel (const ProjectContext& context)
 {
     auto* song = findSong (context);
-    auto* edit = getEdit (context);
 
-    if (song == nullptr || edit == nullptr)
+    if (song == nullptr)
         return {};
 
     if (const auto selected = getSelectedTracks (getSelection (context)); ! selected.empty())
         return selected.front();
 
-    te::Track* track = getSelectedAudioTrack (getSelection (context));
+    // The track of the selected clips, notes or devices, or else the one live MIDI plays.
+    if (const auto selected = getSelectedTrack (getSelection (context)); selected.isValid())
+        return selected;
 
-    if (track == nullptr)
-        track = getLiveMidiTrack (*edit);
-
-    if (track != nullptr)
-        return getTrackID (*track);
+    if (const auto live = getLiveMidiTrack (*song); live.isValid())
+        return live;
 
     const auto tracks = getTrackIDs (*song);
     return tracks.empty() ? TrackID() : tracks.front();
@@ -247,15 +247,15 @@ ParameterHandle getPan (ProjectContext& context, TrackID id)
 
 namespace
 {
-    // A channel's meter (a track's by its ID, the master's by 0) in Phazite's own engine, while it plays the project.
-    engine::LevelMeter* findOwnMeter (ProjectContext& context, std::int64_t id)
+    // A channel's meter (a track's by its ID, the master's by 0) in Phazite's engine, while it plays the project: nullptr
+    // for a plain folder, which has no sound of its own.
+    engine::LevelMeter* findMeter (const ProjectContext& context, std::int64_t id)
     {
         auto* song = findSong (context);
-        auto* edit = getEdit (context);
 
         // A track's while it is the song's (the engine may play one deleted a moment ago), the master's always.
-        if (auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr)
-            if (id == 0 || (song != nullptr && findTrackState (*song, TrackID::fromRaw ((std::uint64_t) id)).isValid()))
+        if (auto* session = song != nullptr ? findPlayingSession (*song) : nullptr)
+            if (id == 0 || findTrackState (*song, TrackID::fromRaw ((std::uint64_t) id)).isValid())
                 if (auto* strip = session->getPlayer().findStrip (id))
                     return &strip->getChannel().getMeter();
 
@@ -265,21 +265,11 @@ namespace
 
 LevelSource getLevel (ProjectContext& context, TrackID id)
 {
-    if (getEdit (context) == nullptr || ! id.isValid())
+    if (findSong (context) == nullptr || ! id.isValid())
         return {};
 
-    // The track is looked up again only once it has gone (its deletion undone brings back another object).
-    return makeLevelSource (
-        [edit = te::SafeSelectable<te::Edit> (getEdit (context)), id,
-         track = te::SafeSelectable<te::Track>()]() mutable -> te::LevelMeasurer*
-        {
-            if (auto* e = edit.get(); e != nullptr && track.get() == nullptr)
-                track = mirror::findTrack (*e, id);
-
-            auto* t = track.get();
-            return t != nullptr ? getLevelMeasurer (*t) : nullptr;
-        },
-        [&context, id] { return findOwnMeter (context, (std::int64_t) id.getRaw()); });
+    // Found again at each refresh: the strip comes and goes as the engine plays another plan.
+    return makeLevelSource ([&context, id] { return findMeter (context, (std::int64_t) id.getRaw()); });
 }
 
 ParameterHandle getMasterVolume (ProjectContext& context)
@@ -291,15 +281,7 @@ ParameterHandle getMasterVolume (ProjectContext& context)
 
 LevelSource getMasterLevel (ProjectContext& context)
 {
-    // The playback context, which holds the master's levels, comes and goes as playback is set up again.
-    return makeLevelSource (
-        [edit = te::SafeSelectable<te::Edit> (getEdit (context))]() -> te::LevelMeasurer*
-        {
-            auto* e = edit.get();
-            auto* playback = e != nullptr ? e->getCurrentPlaybackContext() : nullptr;
-            return playback != nullptr ? &playback->masterLevels : nullptr;
-        },
-        [&context] { return findOwnMeter (context, 0); });
+    return makeLevelSource ([&context] { return findMeter (context, 0); });
 }
 
 std::optional<MuteSolo> getMuteSolo (const ProjectContext& context, TrackID id)
@@ -345,13 +327,13 @@ std::optional<DeviceSlot> getInstrument (const ProjectContext& context, TrackID 
     if (! instrument.isValid())
         return {};
 
-    return makeDeviceSlot (*song, instrument);
+    return makeDeviceSlot (context, instrument);
 }
 
 std::vector<DeviceSlot> getEffects (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
-    return song != nullptr ? makeSlots (*song, getEffects (*song, id)) : std::vector<DeviceSlot>();
+    return song != nullptr ? makeSlots (context, getEffects (*song, id)) : std::vector<DeviceSlot>();
 }
 
 bool canHoldInstrument (const ProjectContext& context, TrackID id)
@@ -363,11 +345,9 @@ bool canHoldInstrument (const ProjectContext& context, TrackID id)
 std::vector<ParameterHandle> getKeyControls (ProjectContext& context, DeviceID id, int maximum)
 {
     std::vector<ParameterHandle> handles;
-    auto* song = findSong (context);
-    auto* device = findDevice (context, id);
 
-    if (song != nullptr && device != nullptr)
-        for (const auto& parameterID : phazite::getKeyControls (*device, maximum))
+    if (auto* song = findSong (context))
+        for (const auto& parameterID : phazite::getKeyControls (*song, id, maximum))
             handles.push_back (makeParameterHandle (*song, { id, parameterID }));
 
     return handles;
@@ -375,8 +355,8 @@ std::vector<ParameterHandle> getKeyControls (ProjectContext& context, DeviceID i
 
 MixHandle getMix (ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
-    return device != nullptr ? makeMixHandle (*device) : MixHandle();
+    auto* song = findSong (context);
+    return song != nullptr && findDeviceState (*song, id).isValid() ? makeMixHandle (*song, id) : MixHandle();
 }
 
 void setDeviceOn (ProjectContext& context, DeviceID id, bool on)
@@ -458,12 +438,12 @@ void replaceEffect (ProjectContext& context, DeviceID id, const DeviceType& type
 
 std::optional<juce::String> reloadDevice (ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
+    auto* song = findSong (context);
 
-    if (device == nullptr || ! hasCrashed (*device))
+    if (song == nullptr || ! hasCrashed (*song, id))
         return {};
 
-    if (juce::String error; ! reload (*device, error))
+    if (juce::String error; ! reloadPlugin (*song, id, error))
         return error.isNotEmpty() ? error : juce::String ("It didn't load.");
 
     return {};
@@ -472,22 +452,22 @@ std::optional<juce::String> reloadDevice (ProjectContext& context, DeviceID id)
 void showDeviceWindow (ProjectContext& context, DeviceID id)
 {
     auto* song = findSong (context);
-    auto* device = findDevice (context, id);
+    auto* windows = getDeviceWindows (context);
 
-    if (song != nullptr && device != nullptr && (opensWindow (*song, id) || popsOut (*song, id)) && ! isFrozenDevice (*device))
-        device->showWindowExplicitly();
+    if (song != nullptr && windows != nullptr && (opensWindow (*song, id) || popsOut (*song, id)) && ! isFrozenDevice (*song, id))
+        windows->show (id);
 }
 
 bool isDeviceWindowOpen (const ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
-    return device != nullptr && isWindowOpen (*device);
+    auto* windows = getDeviceWindows (context);
+    return windows != nullptr && windows->isOpen (id);
 }
 
 DeviceHandle getDeviceHandle (ProjectContext& context, DeviceID id)
 {
-    auto* device = findDevice (context, id);
-    return device != nullptr ? makeDeviceHandle (*device) : DeviceHandle();
+    auto* song = findSong (context);
+    return song != nullptr ? makeDeviceHandle (*song, id) : DeviceHandle();
 }
 
 std::optional<TrackID> getDeviceChannel (const ProjectContext& context, DeviceID id)
@@ -505,7 +485,7 @@ std::optional<TrackID> getDeviceChannel (const ProjectContext& context, DeviceID
 
 std::vector<DeviceType> getDeviceTypes (const ProjectContext& context)
 {
-    return phazite::getDeviceTypes (getSelection (context).engine);
+    return getEngineContext (context).getDeviceTypes();
 }
 
 void chooseInstrument (ProjectContext& context, TrackID id, const DeviceType& type)
@@ -727,26 +707,34 @@ DeviceID duckUnder (ProjectContext& context, TrackID ducked, TrackID key)
 }
 
 //==============================================================================
-float getCpuLoad (const ProjectContext& context, TrackID id)
+float getCpuLoad (const ProjectContext& context, TrackID channel)
 {
-    auto* track = findTrack (context, id);
+    // As Phazite's engine plays them, while it plays the project: a container is a mix around its devices, which play as
+    // the channel's other devices do.
+    const auto* song = findSong (context);
+    const auto* session = song != nullptr ? findPlayingSession (*song) : nullptr;
 
-    if (track == nullptr)
+    if (session == nullptr)
         return 0.0f;
 
-    auto load = 0.0;
+    auto load = 0.0f;
 
-    for (auto* device : track->pluginList)
+    const auto add = [&] (DeviceID id)
     {
-        load += device->getCpuUsage();
+        if (const auto* node = session->getPlayer().findDevice ((std::int64_t) id.getRaw()))
+            load += node->getLoad();
+    };
 
-        // A container's devices, which play in its rack.
-        if (auto* container = dynamic_cast<te::RackInstance*> (device); container != nullptr && container->type != nullptr)
-            for (auto* inside : container->type->getPlugins())
-                load += inside->getCpuUsage();
+    for (const auto id : getDevices (*song, channel))
+    {
+        add (id);
+
+        if (isContainer (*song, id))
+            for (const auto inside : getContainerDevices (*song, id))
+                add (inside);
     }
 
-    return (float) juce::jlimit (0.0, 1.0, load);
+    return load;
 }
 
 //==============================================================================
@@ -779,37 +767,22 @@ std::vector<Connection> getConnections (const ProjectContext& context)
 //==============================================================================
 std::optional<Loudness> getLoudness (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
+    // Phazite's engine's own meter of what goes out, while it plays the project.
+    auto* song = findSong (context);
+    auto* session = song != nullptr ? findPlayingSession (*song) : nullptr;
 
-    // Phazite's engine's own meter, while it plays the project.
-    if (auto* session = edit != nullptr ? findPlayingSession (*edit) : nullptr)
-    {
-        const auto readings = session->getEngine().getLoudnessMeter().getReadings();
-        return Loudness { readings.momentary, readings.shortTerm, readings.integrated, readings.truePeak };
-    }
-
-    auto* meter = edit != nullptr ? findLoudnessMeter (*edit) : nullptr;
-
-    if (meter == nullptr)
+    if (session == nullptr)
         return {};
 
-    const auto readings = meter->getReadings();
-    const auto valid = [] (bool isValid, float value) { return isValid ? std::optional<float> (value) : std::nullopt; };
-    return Loudness { valid (readings.momentaryValid, readings.momentaryLufs), valid (readings.shortTermValid, readings.shortTermLufs),
-                      valid (readings.integratedValid, readings.integratedLufs),
-                      valid (readings.truePeakDb > te::LoudnessMeter::silenceFloorDb, readings.truePeakDb) };
+    const auto readings = session->getEngine().getLoudnessMeter().getReadings();
+    return Loudness { readings.momentary, readings.shortTerm, readings.integrated, readings.truePeak };
 }
 
 void resetLoudness (ProjectContext& context)
 {
-    if (auto* edit = getEdit (context))
-    {
-        if (auto* session = findPlayingSession (*edit))
+    if (auto* song = findSong (context))
+        if (auto* session = findPlayingSession (*song))
             session->getEngine().getLoudnessMeter().reset();
-
-        if (auto* meter = findLoudnessMeter (*edit))
-            meter->resetReadings();
-    }
 }
 
 //==============================================================================
@@ -817,9 +790,8 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
 {
     DelayCompensation compensation;
     auto* song = findSong (context);
-    auto* edit = getEdit (context);
 
-    if (song == nullptr || edit == nullptr)
+    if (song == nullptr)
         return compensation;
 
     // Each device's, as Phazite's engine plays it, while it plays the project: the master's first, then the channels'.
@@ -830,7 +802,7 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
 
     for (const auto channel : channels)
         for (const auto device : getDevices (*song, channel))
-            if (const auto latency = makeDeviceSlot (*song, device).latencySeconds; latency > 0.0)
+            if (const auto latency = makeDeviceSlot (context, device).latencySeconds; latency > 0.0)
                 compensation.devices.push_back ({ getDeviceName (*song, device) + " on "
                                                       + (channel.isValid() ? getTrackName (*song, channel) : juce::String ("Master")),
                                                   latency });
@@ -838,10 +810,11 @@ DelayCompensation getDelayCompensation (const ProjectContext& context)
     std::stable_sort (compensation.devices.begin(), compensation.devices.end(),
                       [] (const auto& a, const auto& b) { return a.second > b.second; });
 
-    // What the engine waits for, the longest of its paths; the latest device while it plays nothing.
-    if (edit->isLatencyCompensationEnabled())
+    // What the engine waits for, the longest of its paths; the latest device while it plays nothing. None while Low Latency
+    // is on, which turns delay compensation off.
+    if (! getPlaybackHost (getEngineContext (context)).isLowLatency())
     {
-        auto* session = findPlayingSession (*edit);
+        auto* session = findPlayingSession (*song);
         const auto* plan = session != nullptr ? session->getEngine().getPlan() : nullptr;
 
         if (plan != nullptr)

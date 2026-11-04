@@ -31,12 +31,11 @@ struct LaneScreen
 {
     LaneScreen()
     {
-        phazite::ensureTracks (*edit, 2);
-        tracks = te::getAudioTracks (*edit);
-        setEdit (context, edit.get());
+        tracks = phazite::ensureTracks (*song, 2);
+        phazite::setSong (context, song.get());
         volume = phazite::getVolume (context, trackID (0)).getRef();
         phazite::showAutomationLane (context, volume);
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        song->getUndoManager().clearUndoHistory();
 
         phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
@@ -48,10 +47,10 @@ struct LaneScreen
     ~LaneScreen()
     {
         window.removeKeyListener (&shortcutKeys);
-        setEdit (context, nullptr);
+        phazite::setSong (context, nullptr);
     }
 
-    phazite::TrackID trackID (int track) const { return phazite::getTrackID (*tracks[track]); }
+    phazite::TrackID trackID (int track) const { return tracks[(size_t) track]; }
 
     // The lane's view, which the mouse uses (its tooltip and title name it after its parameter).
     juce::Component& lane (const juce::String& title = "Automation of Volume")
@@ -82,10 +81,10 @@ struct LaneScreen
         return beats;
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
-    juce::Array<te::AudioTrack*> tracks;
+    phazite::Song::Ptr song = phazite::createSong(); // 120 BPM, 4/4
+    std::vector<phazite::TrackID> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     ParameterRef volume;
     phazite::CommandRegistry registry;
@@ -123,7 +122,7 @@ TEST_CASE ("Dragging a point moves it on the grid as one step, and a double-clic
     LaneScreen screen;
     phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (4.0), 0.5f });
     phazite::test::dispatchPendingMessages();
-    phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
+    screen.song->getUndoManager().clearUndoHistory();
 
     phazite::test::Mouse mouse (screen.lane());
     mouse.press (screen.at (4.0, 0.5f));
@@ -139,9 +138,9 @@ TEST_CASE ("Dragging a point moves it on the grid as one step, and a double-clic
     CHECK (screen.describeUndo() == juce::String ("Undo Move Automation Points"));
 
     // One step takes the whole drag back.
-    phazite::undo (*screen.edit);
+    phazite::undo (*screen.song);
     CHECK (screen.getBeats() == std::vector { 4.0 });
-    phazite::redo (*screen.edit);
+    phazite::redo (*screen.song);
 
     mouse.doubleClick (screen.at (6.0, screen.getPoints()[0].value));
     CHECK (screen.getPoints().empty());
@@ -181,7 +180,7 @@ TEST_CASE ("A press on the line adds a point on it, which a drag pulls, as one s
     phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (2.0), 0.2f });
     phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (6.0), 0.6f });
     phazite::test::dispatchPendingMessages();
-    phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
+    screen.song->getUndoManager().clearUndoHistory();
     phazite::test::Mouse mouse (screen.lane());
 
     // At beat 3 the line is at 0.3, away from the bend handle in its middle (beat 4).
@@ -199,7 +198,7 @@ TEST_CASE ("A press on the line adds a point on it, which a drag pulls, as one s
     CHECK (points[0].value == doctest::Approx (0.2f).epsilon (0.05)); // the line's ends stay
     CHECK (points[2].value == doctest::Approx (0.6f).epsilon (0.05));
     CHECK (screen.describeUndo() == juce::String ("Undo Add Automation Point"));
-    phazite::undo (*screen.edit);
+    phazite::undo (*screen.song);
     CHECK (screen.getBeats() == std::vector { 2.0, 6.0 });
 
     // A click on the line puts a point on it, where the line is, so that nothing sounds different; Alt places it off the
@@ -451,7 +450,7 @@ TEST_CASE ("Right-clicking a fader shows its menu instead of moving it")
     fader.onContextMenu = [&shown] { ++shown; };
 
     const auto before = fader.getValue();
-    const auto undoBefore = phazite::getSong (*screen.edit).getUndoManager().getNumActionsInCurrentTransaction();
+    const auto undoBefore = screen.song->getUndoManager().getNumActionsInCurrentTransaction();
     const auto stepBefore = screen.describeUndo();
     phazite::test::Mouse mouse (fader);
     mouse.press ({ 20, 50 }, juce::ModifierKeys::rightButtonModifier);
@@ -460,5 +459,5 @@ TEST_CASE ("Right-clicking a fader shows its menu instead of moving it")
     CHECK (shown == 1);
     CHECK (fader.getValue() == doctest::Approx (before));
     CHECK (screen.describeUndo() == stepBefore); // no step
-    CHECK (phazite::getSong (*screen.edit).getUndoManager().getNumActionsInCurrentTransaction() == undoBefore);
+    CHECK (screen.song->getUndoManager().getNumActionsInCurrentTransaction() == undoBefore);
 }

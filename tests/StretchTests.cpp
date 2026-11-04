@@ -2,7 +2,8 @@
 // How Phazite stretches audio (src/devices/stretch/Stretch.h; roadmap step 2.18): drum hits come out once each and on
 // their beats, a held chord stays clean between its notes, pitch moves by semitones, and backwards is backwards. Each
 // drum hit is noise of its own, so that every copy of it can be found in what comes out by correlating with its start:
-// SoundTouch, which Tracktion stretched clips with, played up to half of them twice (docs/design.md, section 23).
+// SoundTouch, which stretched Phazite's clips before Rubber Band did, played up to half of them twice (docs/design.md,
+// section 23).
 #include "TestHelpers.h"
 #include "devices/stretch/Stretch.h"
 

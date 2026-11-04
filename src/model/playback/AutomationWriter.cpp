@@ -45,39 +45,31 @@ namespace
         return track.isValid() ? getAutomationMode (song, track) : AutomationMode::read;
     }
 
-    // Whether a parameter steps, each point holding until the next: a choice or a switch of one of Phazite's own devices,
-    // or a plug-in's that says so (Tracktion's parameter, until the session owns the plug-ins' instances: T6 step 5).
+    // Whether a parameter steps, each point holding until the next: a choice or a switch of one of Phazite's own devices, or
+    // a plug-in's that says so (its range moves in steps).
     bool isDiscrete (const Song& song, const ParameterRef& parameter)
     {
-        if (const auto description = describeParameter (song, parameter); description.has_value() && description->info.has_value())
+        const auto description = describeParameter (song, parameter);
+
+        if (! description.has_value())
+            return false;
+
+        if (description->info.has_value())
             return description->info->unit == devices::Unit::choice || description->info->unit == devices::Unit::toggle;
 
-        auto* edit = findEdit (song);
-        const auto tracktions = edit != nullptr ? findParameter (*edit, parameter) : nullptr;
-        return tracktions != nullptr && tracktions->isDiscrete();
+        return description->range.interval > 0.0f;
     }
 } // namespace
 
-AutomationWriter::AutomationWriter (te::Edit& e, PlaybackSession& s)
-    : edit (e),
-      session (s)
+AutomationWriter::AutomationWriter (Song& s, PlaybackSession& owner)
+    : song (s),
+      session (owner)
 {
-}
-
-AutomationWriter::~AutomationWriter()
-{
-    if (! session.hasEdit())
-        return;
-
-    for (const auto& pass : passes)
-        if (const auto parameter = findParameter (edit, pass.parameter))
-            parameter->resetRecordingStatus();
 }
 
 void AutomationWriter::playbackStarted()
 {
     // In write mode, every automated parameter of the track, from its lane's value where playback starts.
-    auto& song = getSong (edit);
 
     for (const auto& curve : getCurveStates (song))
         if (const auto ref = getCurveParameter (curve); locateParameter (song, ref).has_value())
@@ -90,7 +82,7 @@ void AutomationWriter::playbackStopped()
     if (passes.empty())
         return;
 
-    const RecordingStep step (getSong (edit), "Record Automation");
+    const RecordingStep step (song, "Record Automation");
 
     for (const auto& pass : std::exchange (passes, {}))
         punchOut (pass);
@@ -98,7 +90,7 @@ void AutomationWriter::playbackStopped()
 
 void AutomationWriter::gestureBegan (const ParameterRef& parameter)
 {
-    const auto mode = getModeOf (getSong (edit), parameter);
+    const auto mode = getModeOf (song, parameter);
 
     if (! session.isPlaying() || mode == AutomationMode::read)
         return;
@@ -129,8 +121,6 @@ void AutomationWriter::gestureEnded (const ParameterRef& parameter)
     std::erase_if (passes, [&parameter] (const Pass& each) { return each.parameter == parameter; });
     punchOut (ended);
 
-    auto& song = getSong (edit);
-
     if (const auto track = getParameterTrack (song, parameter); track.isValid() && ended.mode == AutomationMode::write)
         setAutomationMode (song, track, AutomationMode::latch);
 }
@@ -148,7 +138,6 @@ AutomationWriter::Pass* AutomationWriter::findPass (const ParameterRef& paramete
 
 AutomationWriter::Pass* AutomationWriter::punchIn (const ParameterRef& parameter, AutomationMode mode, bool byMove)
 {
-    auto& song = getSong (edit);
     const auto description = describeParameter (song, parameter);
 
     if (! description.has_value())
@@ -172,10 +161,6 @@ AutomationWriter::Pass* AutomationWriter::punchIn (const ParameterRef& parameter
         setValueSetByHand (song, parameter, value);
     }
 
-    // Tracktion's parameter, which a plug-in's own window moves: its curve's one point stays meanwhile (adoptMovedPoint()).
-    if (const auto tracktions = findParameter (edit, parameter))
-        tracktions->startRecordingStatus();
-
     return &passes.back();
 }
 
@@ -184,9 +169,9 @@ void AutomationWriter::record (Pass& pass, float value)
     // Back at the loop's start: the pass so far goes to the loop's end, and another starts.
     const auto beat = session.getPlayhead();
 
-    if (beat < pass.points.back().beat && isLoopOn (edit))
+    if (beat < pass.points.back().beat && isLoopOn (song))
     {
-        const auto loop = getLoopBeats (edit);
+        const auto loop = getLoopBeats (song);
         const auto last = pass.points.back().value;
         write (pass, std::exchange (pass.points, { { loop.getStart(), last, 0.0f } }), loop.getEnd());
     }
@@ -198,16 +183,13 @@ void AutomationWriter::punchOut (const Pass& pass)
 {
     session.getPlayer().setWriting (pass.parameter, false);
 
-    if (const auto parameter = findParameter (edit, pass.parameter))
-        parameter->resetRecordingStatus();
-
     // Stopped after the loop went back to its start: to its end, then from its start.
     const auto end = session.getPlayhead();
     auto points = pass.points;
 
-    if (end < points.back().beat && isLoopOn (edit))
+    if (end < points.back().beat && isLoopOn (song))
     {
-        const auto loop = getLoopBeats (edit);
+        const auto loop = getLoopBeats (song);
         const auto last = points.back().value;
         write (pass, std::exchange (points, { { loop.getStart(), last, 0.0f } }), loop.getEnd());
     }
@@ -217,8 +199,6 @@ void AutomationWriter::punchOut (const Pass& pass)
 
 void AutomationWriter::write (const Pass& pass, std::vector<AutomationPoint> points, BeatPosition end)
 {
-    auto& song = getSong (edit);
-
     if (! locateParameter (song, pass.parameter).has_value()) // its device gone meanwhile
         return;
 
@@ -238,7 +218,7 @@ void AutomationWriter::write (const Pass& pass, std::vector<AutomationPoint> poi
 
 void AutomationWriter::pluginGestureChanged (const ParameterRef& parameter, bool starting)
 {
-    if (! session.isPlayingProject() || ! locateParameter (getSong (edit), parameter).has_value())
+    if (! session.isPlayingProject() || ! locateParameter (song, parameter).has_value())
         return;
 
     if (starting)
@@ -247,20 +227,20 @@ void AutomationWriter::pluginGestureChanged (const ParameterRef& parameter, bool
         return;
     }
 
-    const RecordingStep step (getSong (edit), "Record Automation");
+    const RecordingStep step (song, "Record Automation");
     gestureEnded (parameter);
 }
 
-void AutomationWriter::parameterChanged (const ParameterRef& parameter, float valueSetByHand, bool isFollowingAutomation)
+void AutomationWriter::parameterChanged (const ParameterRef& parameter, float valueSetByHand)
 {
     // A control moved by hand: written if its pass is on, or if its track is in latch or write (touch needs it grabbed).
-    if (isFollowingAutomation || settingValue || ! session.isPlaying() || ! session.hasEdit() || ! parameter.isValid())
+    if (settingValue || ! session.isPlaying() || ! parameter.isValid())
         return;
 
     auto* pass = findPass (parameter);
 
     if (pass == nullptr)
-        if (const auto mode = getModeOf (getSong (edit), parameter); mode == AutomationMode::latch || mode == AutomationMode::write)
+        if (const auto mode = getModeOf (song, parameter); mode == AutomationMode::latch || mode == AutomationMode::write)
             pass = punchIn (parameter, mode, true);
 
     if (pass != nullptr)

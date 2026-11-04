@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Notes as plain values (architecture phase A3: no Tracktion here), as the piano roll shows them and the transforms change
-// them, with keys and scales, the chords the piano roll stamps, and drums' names (docs/design.md, section 7). Positions
-// are song beats (a clip's content start plus the note's own beat), so the notes of several clips line up. The transforms
-// (quantize, legato, chop, transpose) work on copies of the notes, so that the piano roll can show what one would do before
-// it is applied. Notes.h holds their Tracktion side.
+// Notes as plain values, as the piano roll shows them and the transforms change them, with keys and scales, the chords
+// the piano roll stamps, and drums' names (docs/design.md, section 7). Positions are song beats (a clip's content start
+// plus the note's own beat), so the notes of several clips line up. The transforms (quantize, legato, chop, transpose)
+// work on copies of the notes, so that the piano roll can show what one would do before it is applied. Notes.h holds
+// them in the song.
 #pragma once
 
 #include "model/base/Beats.h"

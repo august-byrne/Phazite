@@ -166,15 +166,15 @@ juce::String describeSelected (const phazite::Selection& selection, const phazit
 }
 
 // Where the playhead is, in beats: "playhead at 2.000".
-juce::String describePlayhead (const te::Edit& edit)
+juce::String describePlayhead (const phazite::Song& song)
 {
-    return "playhead at " + juce::String (edit.tempoSequence.toBeats (phazite::getPlayheadTime (edit)).inBeats(), 3);
+    return "playhead at " + juce::String (phazite::getPlayheadBeat (song).inBeats(), 3);
 }
 
 // The loop's range in beats, whether looping is on or not (Loop's tick says which): "loop 2.000-6.000 beats".
-juce::String describeLoop (const te::Edit& edit)
+juce::String describeLoop (const phazite::Song& song)
 {
-    const auto loop = edit.tempoSequence.toBeats (edit.getTransport().getLoopRange());
+    const auto loop = phazite::getLoopBeats (song);
     return "loop " + juce::String (loop.getStart().inBeats(), 3) + "-" + juce::String (loop.getEnd().inBeats(), 3) + " beats";
 }
 
@@ -194,7 +194,7 @@ juce::String makeGoldenText (const char* about, const juce::StringArray& lines)
 std::unique_ptr<phazite::Project> createProject (const juce::File& parentFolder)
 {
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), parentFolder, "Script", error);
+    auto project = phazite::Project::create (parentFolder, "Script", error);
     INFO (error.toStdString());
     REQUIRE (project != nullptr);
     return project;
@@ -209,13 +209,12 @@ struct Script
 {
     Script()
     {
-        auto& song = phazite::getSong (edit);
         REQUIRE_FALSE (phazite::getTrackIDs (song).empty());
         one = phazite::getTrackIDs (song).front();
         phazite::setTrackName (song, one, "One");
-        phazite::getSong (edit).getUndoManager().clearUndoHistory();
+        song.getUndoManager().clearUndoHistory();
 
-        setEdit (context, &edit);
+        setSong (context, &song);
         addModelCommands (registry, context);
         snapshot ("start");
     }
@@ -232,7 +231,7 @@ struct Script
     {
         REQUIRE_MESSAGE (registry.invoke (id), ("The script runs " + id + ", which is unknown or greyed out there.").toStdString());
 
-        const auto step = phazite::getSong (edit).getUndoManager().getUndoDescription();
+        const auto step = song.getUndoManager().getUndoDescription();
         undoLines.add (id + ": " + (step.isEmpty() ? juce::String ("(nothing to undo)") : step));
         snapshot (id);
     }
@@ -240,7 +239,7 @@ struct Script
     // A change the script makes itself, as an undo step of its own.
     void setup (const juce::String& what, const std::function<void()>& change)
     {
-        phazite::getSong (edit).getUndoManager().beginNewTransaction ("Script: " + what);
+        song.getUndoManager().beginNewTransaction ("Script: " + what);
         change();
         snapshot (what);
     }
@@ -281,7 +280,7 @@ struct Script
     {
         const auto tracks = phazite::getSelectedTracks (selection);
         REQUIRE (tracks.size() == 1);
-        REQUIRE (phazite::isFolder (phazite::getSong (edit), tracks.front()) == folder);
+        REQUIRE (phazite::isFolder (song, tracks.front()) == folder);
         return tracks.front();
     }
 
@@ -303,8 +302,8 @@ struct Script
         }
 
         addIfChanged (selected, describeSelected (selection, range));
-        addIfChanged (playhead, describePlayhead (edit));
-        addIfChanged (loop, describeLoop (edit));
+        addIfChanged (playhead, describePlayhead (song));
+        addIfChanged (loop, describeLoop (song));
     }
 
     // Adds a line of state unless the last snapshot added the same one.
@@ -320,7 +319,7 @@ struct Script
     // Destroyed in the reverse order: the notes' selection first, then the commands, the selection and the project.
     phazite::test::TemporaryFolder temp;
     std::unique_ptr<phazite::Project> project = createProject (temp.folder);
-    te::Edit& edit = project->getEdit();
+    phazite::Song& song = project->getSong();
     phazite::TrackID one;
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
     phazite::Selection& selection = getSelection (context);
@@ -365,12 +364,11 @@ TEST_SUITE ("golden")
                  [&s, &two]
                  {
                      two = s.getSelectedTrack (false);
-                     phazite::setTrackName (phazite::getSong (s.edit), two, "Two");
+                     phazite::setTrackName (s.song, two, "Two");
                  });
 
         s.run ({ "track.addFolder" });
-        s.setup ("name the new folder Empty",
-                 [&s] { phazite::setTrackName (phazite::getSong (s.edit), s.getSelectedTrack (true), "Empty"); });
+        s.setup ("name the new folder Empty", [&s] { phazite::setTrackName (s.song, s.getSelectedTrack (true), "Empty"); });
         s.run ({ "track.ungroup" });
 
         s.select ("One", { one });
@@ -389,7 +387,7 @@ TEST_SUITE ("golden")
                  [&s, &group]
                  {
                      group = s.getSelectedTrack (true);
-                     phazite::setTrackName (phazite::getSong (s.edit), group, "Group");
+                     phazite::setTrackName (s.song, group, "Group");
                  });
 
         s.run ({ "track.mute" }); // the folder
@@ -420,7 +418,7 @@ TEST_SUITE ("golden")
         s.setup ("add a MIDI clip on One, with two notes",
                  [&s, &clip, one]
                  {
-                     auto& song = phazite::getSong (s.edit);
+                     auto& song = s.song;
                      clip = phazite::insertMidiClip (song, one, { beats (0.0), beats (4.0) }, &s.selection);
                      REQUIRE (clip.isValid());
                      REQUIRE (s.selection.isSelected (clip));
@@ -433,13 +431,13 @@ TEST_SUITE ("golden")
         s.run ({ "edit.duplicateAsAlias", "clip.makeUnique" });
         s.select ("the clip", clip);
         s.run ({ "transport.goToEnd", "transport.goToStart" });
-        s.setup ("put the playhead at 1 s", [&s] { phazite::movePlayhead (s.edit, te::TimePosition::fromSeconds (1.0)); });
+        s.setup ("put the playhead at 1 s", [&s] { phazite::movePlayhead (s.song, beats (2.0)); });
         s.run ({ "edit.split" });
 
         s.setup ("select the clip's notes",
                  [&s, &clip]
                  {
-                     const auto notes = phazite::getRefs (phazite::getClipNotes (phazite::getSong (s.edit), clip));
+                     const auto notes = phazite::getRefs (phazite::getClipNotes (s.song, clip));
 
                      s.selection.selectOnly (clip);
                      s.selection.setNoteClips ({ clip });
@@ -461,7 +459,7 @@ TEST_SUITE ("golden")
         s.setup ("import a tone onto Two at beat 8, and select it",
                  [&s, two]
                  {
-                     auto& song = phazite::getSong (s.edit);
+                     auto& song = s.song;
                      const auto tone = phazite::test::writeSound (s.temp.folder.getChildFile ("Tone.wav"), 2.0);
                      const auto audio = phazite::importFile (song, two, tone, beats (8.0));
                      REQUIRE (phazite::hasAudioClips (song, { audio }));

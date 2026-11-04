@@ -16,23 +16,20 @@ namespace
         return song.getFile() != juce::File() ? song.getFile().getParentDirectory() : juce::File();
     }
 
-    // The properties of a device's state that name files: none for most devices.
+    // The properties of a device's sounds (Schema.h: SOUNDS) that name files: a drum sampler's pads' and a wavetable synth's
+    // oscillators', whose names differ; none for other elements.
     std::vector<juce::Identifier> getFileProperties (const juce::ValueTree& state)
     {
         std::vector<juce::Identifier> properties;
 
-        if (! state.hasType (te::IDs::PLUGIN))
+        if (! state.hasType (schema::SOUNDS))
             return properties;
 
-        const auto type = state[te::IDs::type].toString();
+        for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+            properties.push_back (schema::getPadSoundFile (pad));
 
-        if (type == devices::DrumSampler::typeID)
-            for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-                properties.push_back (schema::getPadSoundFile (pad));
-
-        if (type == devices::WavetableSynth::typeID)
-            for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
-                properties.push_back (schema::getOscillatorWavetableFile (osc));
+        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
+            properties.push_back (schema::getOscillatorWavetableFile (osc));
 
         return properties;
     }

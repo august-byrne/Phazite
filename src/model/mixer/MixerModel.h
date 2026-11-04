@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The mixer as the UI shows it (docs/design.md, section 8), by IDs and plain values: its channels in their order, what
-// each is and holds and where its sound goes, and the handles its controls change things through (architecture phase
-// A3: no Tracktion here). Each function takes the open project's context and gives nothing, or does nothing, for an ID
-// of something that is gone. The changes are undo steps of their own, named as the functions in Mixer.h name them,
-// unless they say otherwise.
+// each is and holds and where its sound goes, and the handles its controls change things through. Each function takes
+// the open project's context and gives nothing, or does nothing, for an ID of something that is gone. The changes are
+// undo steps of their own, named as the functions in Mixer.h name them, unless they say otherwise.
 #pragma once
 
 #include "DeviceType.h"
@@ -238,8 +237,9 @@ std::vector<SidechainChoice> getDuckUnderChoices (const ProjectContext&, TrackID
 DeviceID duckUnder (ProjectContext&, TrackID ducked, TrackID key);
 
 //==============================================================================
-// How much of each block's time a channel's devices take to process, from 0 to 1, as Tracktion measures each device (its
-// containers' devices included): what a strip's CPU meter shows. Read it from a timer.
+// How much of each block's time a channel's devices take to process, from 0 to 1, each device's (its containers' devices
+// included): what a strip's CPU meter shows, as Phazite's engine plays them (0 while it doesn't play the project). Read
+// it from a timer.
 float getCpuLoad (const ProjectContext&, TrackID);
 
 //==============================================================================
@@ -272,7 +272,7 @@ struct Loudness
     std::optional<float> truePeak;                         // dBTP
 };
 
-std::optional<Loudness> getLoudness (const ProjectContext&); // nothing without a project, or a loudness meter on its master
+std::optional<Loudness> getLoudness (const ProjectContext&); // nothing while Phazite's engine doesn't play the project
 void resetLoudness (ProjectContext&);
 
 //==============================================================================

@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// One of Phazite's own devices as an engine plays it (docs/tracktion-migration.md, T2): its engine-neutral DSP
-// (src/devices/) with what every device gets around it, whichever engine plays it, Tracktion's (through the device's thin
-// plug-in, model/devices/internal/DevicePlugin.h) or Phazite's own. It glides each continuous parameter from one block's
-// value to the next and moves the modulated and automated ones itself, in stretches of a block, each starting on the
-// song's control points, one every 32 samples from its start (docs/performance-audit.md, A7; docs/design.md, section 10),
-// so that a song sounds the same at any block size (a device that takes its blocks whole, a plug-in in its helper, gets
-// a block in one call, with its moved parameters' values on those points as changes at their samples, and an instrument
-// of them may be handed it early, to play beside the others: start()); it applies an
-// effect's mix, with what came in delayed as much as the effect delays its sound; it plays a mono channel in stereo; and
-// it sleeps on silence (docs/performance-audit.md, A1).
+// One of Phazite's own devices, or a plug-in in its helper, as Phazite's engine plays it (DeviceNode.h): its
+// engine-neutral DSP (src/devices/, or the plug-in's channel: model/plugins/internal/SandboxedProcessor.h) with what
+// every device gets around it. It glides each continuous parameter from one block's value to the next and moves the
+// modulated and automated ones itself, in stretches of a block, each starting on the song's control points, one every
+// 32 samples from its start (docs/performance-audit.md, A7; docs/design.md, section 10), so that a song sounds the same
+// at any block size (a device that takes its blocks whole, a plug-in in its helper, gets a block in one call, with its
+// moved parameters' values on those points as changes at their samples, and an instrument of them may be handed it
+// early, to play beside the others: start()); it applies an effect's mix, with what came in delayed as much as the
+// effect delays its sound; it plays a mono channel in stereo; and it sleeps on silence (docs/performance-audit.md, A1).
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -37,17 +36,12 @@ struct Modulation
     // What moves parameters: a modulator, or a macro.
     struct Source
     {
-        // Set for each block: whether it is on, and its value as the block starts; and for an LFO whose wave is set by the
-        // point of its cycle alone, its wave, from where its cycle is as the block starts, moving so far in a sample. Or, in
-        // Phazite's engine, its value on each control point of the block, from the one at or before its start
-        // (modulation/ModulatorNode.h), which each stretch takes from the point it starts on.
+        // Set for each block: whether it is on, and its value on each control point of the block, from the one at or
+        // before its start (modulation/ModulatorNode.h), which each stretch takes from the point it starts on. Without
+        // those, its value as the block starts.
         bool isOn = true;
         std::span<const float> points;
         float value = 0.0f;
-        bool followsWave = false;
-        devices::LfoShape shape;
-        float phase = 0.0f;
-        double cyclesPerSample = 0.0;
 
         // The runner's: its value as the last block started and as this one does, which it glides between.
         bool started = false;
@@ -88,6 +82,7 @@ public:
 
     bool isInstrument() const noexcept { return info.kind == devices::DeviceKind::instrument; }
     int getLatencySamples() const noexcept { return latencySamples; } // once prepared
+    double getSampleRate() const noexcept { return sampleRate; }      // once prepared
     double getTailSeconds() const { return processor->getTailSeconds(); }
 
     // Before playback starts, off the audio thread: it may allocate. Also where an effect's mix starts from.
@@ -193,6 +188,7 @@ private:
 
     juce::AudioBuffer<float> stereo; // for a mono channel: sized in prepare(), as long as the stretches played at once
     int latencySamples = 0;
+    double sampleRate = 44100.0;
 
     // An effect's mix (DeviceInfo.h, mixParameterID): what came in, delayed as much as the effect delays its sound.
     int mixIndex = -1;

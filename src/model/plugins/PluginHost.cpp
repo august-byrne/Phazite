@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PluginHost.h"
 #include "engine/nodes/DeviceRunner.h"
-#include "model/playback/internal/PlaybackSession.h"
 #include "sandbox/client/Helper.h"
 
 #include <algorithm>
@@ -29,13 +28,6 @@ namespace
     {
         return description.createXml()->toString (juce::XmlElement::TextFormat().withoutHeader().singleLine());
     }
-
-    // Each Engine's host, for what reaches it from a device (message thread).
-    std::map<const te::Engine*, std::weak_ptr<PluginHost>>& getHosts()
-    {
-        static std::map<const te::Engine*, std::weak_ptr<PluginHost>> hosts;
-        return hosts;
-    }
 } // namespace
 
 // A helper running, the instances opened in it by their IDs, and whether it has gone. Its helper goes first as it goes,
@@ -60,22 +52,18 @@ struct PluginHost::Running
     }
 };
 
-PluginHost::PluginHost (te::Engine& e)
-    : engine (e),
-      program (getDefaultHelperProgram()),
+PluginHost::PluginHost()
+    : program (getDefaultHelperProgram()),
       messageHangMilliseconds (sandbox::Helper::messageHangMilliseconds),
       audioHangMilliseconds (sandbox::Helper::audioHangMilliseconds)
 {
-    // Every plug-in Tracktion makes from now on, in a helper.
-    auto& plugins = engine.getPluginManager();
-    tracktions = plugins.createPluginInstance;
-    plugins.createPluginInstance = [this] (const juce::PluginDescription& description, double rate, int blockSize, juce::String& error)
-    { return createInstance (description, rate, blockSize, error); };
+    juce::addDefaultFormatsToManager (formats);
+    knownPlugins.addChangeListener (this);
 }
 
 PluginHost::~PluginHost()
 {
-    engine.getPluginManager().createPluginInstance = tracktions;
+    knownPlugins.removeChangeListener (this);
 
     // Instances that outlive it tell it nothing more.
     for (const auto& [key, weak] : helpers)
@@ -90,26 +78,15 @@ PluginHost::~PluginHost()
     }
 }
 
-std::shared_ptr<PluginHost> PluginHost::getFor (te::Engine& engine)
+void PluginHost::cancelScan()
 {
-    auto& kept = getHosts()[&engine];
-
-    if (auto host = kept.lock())
-        return host;
-
-    auto host = std::make_shared<PluginHost> (engine);
-    kept = host;
-    return host;
+    if (scanCanceller != nullptr)
+        scanCanceller();
 }
 
 void PluginHost::setHelperProgram (const juce::File& helperProgram)
 {
     program = helperProgram;
-}
-
-void PluginHost::setEditorMaker (SandboxedInstance::EditorMaker maker)
-{
-    editorMaker = std::move (maker);
 }
 
 void PluginHost::setHangLimits (int messageThreadMilliseconds, int audioThreadMilliseconds)
@@ -219,8 +196,8 @@ void PluginHost::track (Running& running, std::int64_t id, SandboxedInstance& in
         instance.helperLost();
 }
 
-std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juce::PluginDescription& description, double sampleRate,
-                                                                       int blockSize, juce::String& error)
+std::unique_ptr<SandboxedInstance> PluginHost::createInstance (const juce::PluginDescription& description, const juce::MemoryBlock& state,
+                                                               double sampleRate, int blockSize, juce::String& error)
 {
     if (hasCrashedWhileLoading (description))
     {
@@ -236,13 +213,13 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const juc
     sandbox::BlockChannel::Limits limits;
     limits.maxSamples = std::max (smallestChannel, blockSize);
     limits.maxChanges = engine::DeviceRunner::maximumChanges; // what Phazite's engine moves in a block
-    auto remote = open (*running, description, {}, sampleRate > 0.0 ? sampleRate : 44100.0, limits, error);
+    auto remote = open (*running, description, state, sampleRate > 0.0 ? sampleRate : 44100.0, limits, error);
 
     if (remote == nullptr)
         return nullptr;
 
     const auto id = remote->getID();
-    auto instance = std::make_unique<SandboxedInstance> (std::move (remote), description, running, running->unlist (id), editorMaker);
+    auto instance = std::make_unique<SandboxedInstance> (std::move (remote), description, running, running->unlist (id));
     track (*running, id, *instance);
     return instance;
 }
@@ -275,60 +252,4 @@ bool PluginHost::reload (SandboxedInstance& instance, juce::String& error)
     return true;
 }
 
-SandboxedInstance* findSandboxedInstance (te::Edit& edit, DeviceID device)
-{
-    if (auto* plugin = dynamic_cast<te::ExternalPlugin*> (te::findPluginForID (edit, toTracktion (device)).get()))
-        return dynamic_cast<SandboxedInstance*> (plugin->getAudioPluginInstance());
-
-    return nullptr;
-}
-
-bool hasCrashed (const te::Plugin& device)
-{
-    const auto* plugin = dynamic_cast<const te::ExternalPlugin*> (&device);
-
-    if (plugin == nullptr)
-        return false;
-
-    if (const auto* sandboxed = dynamic_cast<const SandboxedInstance*> (plugin->getAudioPluginInstance()))
-        return sandboxed->hasCrashed();
-
-    const auto host = PluginHost::getFor (device.engine);
-    return plugin->getAudioPluginInstance() == nullptr && host != nullptr && host->hasCrashedWhileLoading (plugin->desc);
-}
-
-bool reload (te::Plugin& device, juce::String& error)
-{
-    auto* plugin = dynamic_cast<te::ExternalPlugin*> (&device);
-    const auto host = plugin != nullptr ? PluginHost::getFor (device.engine) : nullptr;
-
-    if (host == nullptr || ! hasCrashed (device))
-        return false;
-
-    // One whose helper went opens in a new one, the same instance; one that crashed as it loaded loads again.
-    if (auto* sandboxed = dynamic_cast<SandboxedInstance*> (plugin->getAudioPluginInstance()))
-    {
-        if (! host->reload (*sandboxed, error))
-            return false;
-    }
-    else
-    {
-        host->forgetCrashWhileLoading (plugin->desc);
-        plugin->forceFullReinitialise();
-
-        if (plugin->getAudioPluginInstance() == nullptr)
-        {
-            error = plugin->getLoadError();
-            return false;
-        }
-    }
-
-    // Its window made again, and the song given to the engine again, with it.
-    device.engine.getUIBehaviour().recreatePluginWindowContentAsync (device);
-
-    if (auto* session = findSession (device.edit))
-        session->update();
-
-    return true;
-}
 } // namespace phazite

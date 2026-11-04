@@ -3,13 +3,9 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
-#include "model/devices/internal/DeviceStates.h"
 #include "model/engine/AppInfo.h"
-#include "model/engine/internal/EngineSetup.h"
-#include "model/engine/internal/LoudnessMeterPlugin.h"
-#include "model/mirror/internal/Bridge.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Freeze.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
@@ -30,7 +26,7 @@ namespace
         return {};
     }
 
-    // The same value as the file holds it. Values read from a file are text, and Tracktion may write one back as a number
+    // The same value as the file holds it. Values read from a file are text, and the model may write one back as a number
     // or a bool, which notifies a change though nothing changed. JUCE compares values of different types one way round
     // only (4.0 == "4" holds, "4" == 4.0 doesn't: saving would write "4.0"), so both ways must hold.
     bool isSameValue (const juce::var& a, const juce::var& b)
@@ -38,54 +34,15 @@ namespace
         return a == b && b == a;
     }
 
-    // What every project has, added before the project watches for changes: Phazite's state with its tempo map, its track
-    // list and its next ID, which Tracktion's tempo sequence, tracks, clips, devices, automation and transport mirror
-    // (without the curves of devices gone, which no undo can bring back now), and the master's loudness meter. It isn't the
-    // user's change, so it is neither an undo step nor an unsaved change.
-    void addPhaziteParts (te::Edit& edit)
+    // What a save writes that the song doesn't hold yet: its devices' states as they are now, outside the undo history
+    // (Song::storeDeviceStates()), and its next ID past every ID it holds.
+    void storeForSaving (Song& song)
     {
-        const auto wasChanged = edit.hasChangedSinceSaved();
-        // Where its files are, as the Edit finds them: its file, and its temporary folder (the project's Cache folder).
-        getSong (edit).setFile (edit.editFileRetriever != nullptr ? edit.editFileRetriever() : juce::File());
-        getSong (edit).setCacheFolder (edit.getTempDirectory (true));
-        getSong (edit).setMirror ([&edit] (Song::Part part, std::uint64_t id) { mirror::reconcile (edit, part, id); });
-        getSong (edit).setDeviceStateStore (
-            [&edit] (std::uint64_t id)
-            {
-                if (id == 0)
-                    storeDeviceStates (edit);
-                else if (auto* track = mirror::findTrack (edit, TrackID::fromRaw (id)))
-                    storeDeviceStates (*track);
-            });
-        ensureTempoMap (getSong (edit));
-        getTrackList (edit);
-        countIDs (edit);
-        mirror::reconcileTempoMap (edit);
-        mirror::reconcileTracks (edit);
-        mirror::reconcileClips (edit);
-        forgetMissingFrozenFiles (edit);
-        mirror::reconcileDevices (edit);
-        forgetCurvesOfGoneDevices (getSong (edit));
-        mirror::reconcileAutomation (edit);
-        mirror::reconcileTransport (edit);
-        ensureLoudnessMeter (edit);
-        getSong (edit).getUndoManager().clearUndoHistory();
-        edit.getUndoManager().clearUndoHistory();
-
-        if (! wasChanged)
-            edit.resetChangedStatus();
+        song.storeDeviceStates();
+        countIDs (song);
     }
 
-    // What a save writes that the Edit doesn't hold yet: the devices' states as they are now, outside the undo history
-    // (model/devices/internal/DeviceStates.h), and the song's next ID past the IDs Tracktion gave what the song took in.
-    void storeForSaving (te::Edit& edit)
-    {
-        storeDeviceStates (edit);
-        countIDs (edit);
-    }
-
-    // Writes a song into a project file, through a temporary file that takes its place once it is whole: the song alone
-    // (docs/tracktion-migration.md, T1), from which the mirror builds Tracktion's Edit again as the project opens.
+    // Writes a song into a project file, through a temporary file that takes its place once it is whole.
     bool writeProjectFile (const juce::ValueTree& song, const juce::File& file)
     {
         const auto xml = song.createXml();
@@ -134,9 +91,9 @@ juce::ValueTree makeNewSong()
     return song.getState();
 }
 
-std::unique_ptr<te::Edit> createSongEdit (te::Engine& engine, const juce::File& file)
+Song::Ptr createSong (const juce::File& file)
 {
-    return createEditFromSong (engine, makeNewSong(), file);
+    return makeSong (makeNewSong(), file);
 }
 
 juce::File getDefaultProjectsFolder()
@@ -144,31 +101,31 @@ juce::File getDefaultProjectsFolder()
     return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (appName).getChildFile ("Projects");
 }
 
-std::unique_ptr<te::Edit> createEditFromSong (te::Engine& engine, const juce::ValueTree& song, const juce::File& file,
-                                              const juce::File& cacheFolder)
+Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file, const juce::File& cacheFolder)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    if (! song.hasType (schema::PHAZITE))
+    if (! state.hasType (schema::PHAZITE))
         return {};
 
-    // Its master, which Tracktion makes with the Edit by the song's IDs, numbered by the song if it has none yet.
-    if (! song.getChildWithName (schema::MASTER).isValid())
-    {
-        Song numbering (song);
-        getMasterState (numbering);
-    }
-
-    auto edit = createEditFromState (engine, mirror::makeEditState (song), file, cacheFolder);
-
-    if (edit != nullptr)
-        addPhaziteParts (*edit);
-
-    return edit;
+    // What every song has: its tempo map, its track list with the master, and its next ID past every ID it holds; without
+    // the frozen files that are gone and the curves of devices gone, which no undo can bring back now; and playing from its
+    // start. None of it is the user's change, so it is neither an undo step nor an unsaved change.
+    Song::Ptr song (new Song (state));
+    song->setFile (file);
+    song->setCacheFolder (cacheFolder);
+    ensureTempoMap (*song);
+    getTrackList (*song);
+    countIDs (*song);
+    forgetMissingFrozenFiles (*song);
+    forgetCurvesOfGoneDevices (*song);
+    song->getState().removeProperty (schema::playStart, nullptr);
+    song->getUndoManager().clearUndoHistory();
+    return song;
 }
 
-std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& parentFolder, const juce::String& name, juce::String& error,
-                                          const std::function<void (te::Edit&)>& addContent)
+std::unique_ptr<Project> Project::create (const juce::File& parentFolder, const juce::String& name, juce::String& error,
+                                          const std::function<void (Song&)>& addContent)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -178,18 +135,16 @@ std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& 
         return {};
 
     const auto file = folder.getChildFile (folder.getFileName() + fileExtension);
-    auto edit = createSongEdit (engine, file);
+    auto song = makeSong (makeNewSong(), file, getCacheFolder (file));
 
-    if (edit == nullptr)
+    // What it starts with goes into its first save: no undo step, and no unsaved change.
+    if (addContent != nullptr)
     {
-        error = "Phazite couldn't create the project.";
-        return {};
+        addContent (*song);
+        song->getUndoManager().clearUndoHistory();
     }
 
-    if (addContent != nullptr)
-        addContent (*edit);
-
-    std::unique_ptr<Project> project (new Project (std::move (edit), file));
+    std::unique_ptr<Project> project (new Project (std::move (song), file));
 
     for (const auto& subfolder :
          { project->getAudioFolder(), project->getGeneratedFolder(), project->getRendersFolder(), project->getBackupsFolder() })
@@ -201,15 +156,10 @@ std::unique_ptr<Project> Project::create (te::Engine& engine, const juce::File& 
         return {};
     }
 
-    if (addContent == nullptr)
-        return project;
-
-    // Opened again from that save, which Tracktion puts in order while it loads.
-    project = nullptr;
-    return open (engine, file, false, error);
+    return project;
 }
 
-std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& projectFile, bool restoreAutosave, juce::String& error)
+std::unique_ptr<Project> Project::open (const juce::File& projectFile, bool restoreAutosave, juce::String& error)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -221,24 +171,18 @@ std::unique_ptr<Project> Project::open (te::Engine& engine, const juce::File& pr
 
     const auto autosaveFile = getAutosaveFile (projectFile);
     const bool useAutosave = restoreAutosave && autosaveFile.existsAsFile();
+    auto song = makeSong (readSong (useAutosave ? autosaveFile : projectFile), projectFile, getCacheFolder (projectFile));
 
-    // The song, which the mirror builds Tracktion's Edit from, on this, the message thread.
-    const auto sourceFile = useAutosave ? autosaveFile : projectFile;
-    auto edit = createEditFromSong (engine, readSong (sourceFile), projectFile, getCacheFolder (projectFile));
-
-    if (edit == nullptr)
+    if (song == nullptr)
     {
         error = "Phazite couldn't read the project file " + projectFile.getFullPathName() + ".";
         return {};
     }
 
-    std::unique_ptr<Project> project (new Project (std::move (edit), projectFile));
+    std::unique_ptr<Project> project (new Project (std::move (song), projectFile));
 
     if (useAutosave)
-    {
-        project->changedSinceSave = true; // the restored changes aren't in the project file yet
-        project->edit->markAsChanged();
-    }
+        project->changedSinceSave = project->changedSinceAutosave = true; // the restored changes aren't in the project file yet
 
     return project;
 }
@@ -295,21 +239,18 @@ private:
     }
 };
 
-Project::Project (std::unique_ptr<te::Edit> e, const juce::File& f)
-    : edit (std::move (e)),
+Project::Project (Song::Ptr s, const juce::File& f)
+    : song (std::move (s)),
+      songState (song->getState()),
       file (f),
-      songFollower (std::make_unique<SongFollower> (*edit)),
       autosaveWriter (std::make_unique<BackgroundWriter>())
 {
-    // The Edit's temporary folder, where its frozen tracks' files are, is the project's Cache folder (opening the project
-    // made it so already, as the frozen tracks needed it). Closing the project empties it of what nothing uses; opening it
-    // doesn't, as clips find the renders they use only when they play.
-    edit->setTempDirectory (getCacheFolder());
-
-    // A project opens with the playhead at the song's start, where playback starts.
-    movePlayhead (*edit, te::TimePosition());
-    rememberSavedState(); // what opening made of it, Phazite's parts included, isn't a change
-    edit->state.addListener (this);
+    // The song's cache folder, where its frozen tracks' files are, is the project's Cache folder. Closing the project empties
+    // it of what nothing uses; opening it doesn't, as clips find the renders they use only when they play.
+    song->setCacheFolder (getCacheFolder());
+    rememberSavedState(); // what opening made of it isn't a change
+    changesOutsideHistory = song->getChangesOutsideHistory();
+    songState.addListener (this);
 }
 
 Project::~Project()
@@ -317,22 +258,16 @@ Project::~Project()
     JUCE_ASSERT_MESSAGE_THREAD
 
     autosaveWriter = nullptr; // before the autosave goes
-    songFollower = nullptr;
-    edit->state.removeListener (this);
+    songState.removeListener (this);
     getAutosaveFile (file).deleteFile();
-    purgeCache (*edit);
-}
-
-juce::ValueTree Project::getPhaziteState()
-{
-    return phazite::getSong (*edit).getState();
+    purgeCache (*song);
 }
 
 bool Project::hasUnsavedChanges()
 {
     JUCE_ASSERT_MESSAGE_THREAD
     compareWithSavedState();
-    return changedSinceSave || edit->hasChangedSinceSaved();
+    return changedSinceSave;
 }
 
 juce::Result Project::save()
@@ -344,17 +279,16 @@ juce::Result Project::save()
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
-        storeForSaving (*edit);
+        storeForSaving (*song);
 
-        if (! writeProjectFile (phazite::getSong (*edit).getState(), file))
+        if (! writeProjectFile (song->getState(), file))
             return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ".");
-
-        edit->resetChangedStatus(); // Tracktion's flag, which the undo history and plug-ins' own changes set
     }
 
     changedSinceSave = false;
     changedSinceAutosave = false;
-    rememberSavedState(); // what the file holds now
+    changesOutsideHistory = song->getChangesOutsideHistory(); // stored in the song as it saved
+    rememberSavedState();                                     // what the file holds now
     getAutosaveFile (file).deleteFile();
     return juce::Result::ok();
 }
@@ -373,9 +307,9 @@ juce::Result Project::autosave()
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
-        storeForSaving (*edit);
+        storeForSaving (*song);
 
-        if (! writeProjectFile (phazite::getSong (*edit).getState(), target))
+        if (! writeProjectFile (song->getState(), target))
             return juce::Result::fail ("Phazite couldn't write the autosave " + target.getFullPathName() + ".");
     }
 
@@ -403,8 +337,8 @@ void Project::autosaveInBackground()
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
-        storeForSaving (*edit);
-        autosaveWriter->write (phazite::getSong (*edit).getState().createCopy(), target);
+        storeForSaving (*song);
+        autosaveWriter->write (song->getState().createCopy(), target);
     }
 
     changedSinceAutosave = false;
@@ -434,9 +368,9 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
         return {};
 
     const juce::ScopedValueSetter<bool> writing (isWriting, true);
-    storeForSaving (*edit);
+    storeForSaving (*song);
 
-    if (! writeProjectFile (phazite::getSong (*edit).getState(), newFile))
+    if (! writeProjectFile (song->getState(), newFile))
     {
         newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
         error = "Phazite couldn't write the project file " + newFile.getFullPathName() + ".";
@@ -499,14 +433,13 @@ juce::File Project::makeFolderWithFiles (const juce::File& parentFolder, const j
 
 void Project::setFile (const juce::File& newFile)
 {
-    // The Edit finds its file through editFileRetriever, and through it the files it uses, by their paths relative to it;
-    // its clips keep the files they found until told to look again.
+    // The song finds the files it plays by their paths relative to it; what plays it finds them again.
     file = newFile;
-    edit->editFileRetriever = [newFile] { return newFile; };
-    edit->setTempDirectory (getCacheFolder()); // the copy of the old one
-    edit->sendSourceFileUpdate();
-    getSong (*edit).setFile (newFile);
-    getSong (*edit).setCacheFolder (getCacheFolder());
+    song->setFile (newFile);
+    song->setCacheFolder (getCacheFolder()); // the copy of the old one
+
+    if (auto* session = findSession (*song))
+        session->update();
 }
 
 void Project::backUpProjectFile()
@@ -538,27 +471,34 @@ void Project::backUpProjectFile()
 
 void Project::rememberSavedState()
 {
-    savedState = phazite::getSong (*edit).getState().createCopy();
+    savedState = song->getState().createCopy();
     mayHaveChanged = compareAll = false;
     elementsToCompare.clearQuick();
 }
 
 void Project::compareWithSavedState()
 {
+    // A plug-in's own change, which a save stores in the song.
+    if (const auto outside = song->getChangesOutsideHistory(); outside != changesOutsideHistory)
+    {
+        changesOutsideHistory = outside;
+        changedSinceSave = changedSinceAutosave = true;
+    }
+
     if (! mayHaveChanged)
         return;
 
     // The elements that notified, each with its copy at the same place in savedState: the song's own elements keep their
     // places unless one was added or removed, which notifies the song itself.
-    const auto song = phazite::getSong (*edit).getState();
-    const auto isSame = [this, &song] (const juce::ValueTree& element)
+    const auto state = song->getState();
+    const auto isSame = [this, &state] (const juce::ValueTree& element)
     {
-        const auto index = song.indexOf (element);
+        const auto index = state.indexOf (element);
         return index >= 0 && index < savedState.getNumChildren() && holdTheSameProject (element, savedState.getChild (index));
     };
 
     const auto same =
-        compareAll ? holdTheSameProject (song, savedState) : std::all_of (elementsToCompare.begin(), elementsToCompare.end(), isSame);
+        compareAll ? holdTheSameProject (state, savedState) : std::all_of (elementsToCompare.begin(), elementsToCompare.end(), isSame);
 
     mayHaveChanged = compareAll = false;
     elementsToCompare.clearQuick();
@@ -575,17 +515,9 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
     if (isWriting)
         return;
 
-    // A plug-in's own change, which Tracktion tells by its time stamp, and which a save stores in the song.
-    if (tree == edit->state && property == te::IDs::lastSignificantChange)
-    {
-        changedSinceSave = changedSinceAutosave = true;
-        return;
-    }
+    const auto state = song->getState();
 
-    // Only the song is saved: what Tracktion writes into the rest of the Edit's state (the mirror, the playhead) isn't.
-    const auto song = findPhaziteState (*edit);
-
-    if (! (tree == song || tree.isAChildOf (song)) || ! isCounted (tree, property))
+    if (! (tree == state || tree.isAChildOf (state)) || ! isCounted (tree, property))
         return;
 
     if (changedSinceSave)
@@ -598,10 +530,10 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
     mayHaveChanged = true;
     auto element = tree;
 
-    while (element.getParent().isValid() && element.getParent() != song)
+    while (element.getParent().isValid() && element.getParent() != state)
         element = element.getParent();
 
-    if (element == song || element.getParent() != song)
+    if (element == state || element.getParent() != state)
         compareAll = true;
     else
         elementsToCompare.addIfNotAlreadyThere (element);
@@ -705,7 +637,7 @@ AutosaveTimer::~AutosaveTimer()
 
 void AutosaveTimer::timerCallback()
 {
-    const auto recording = isRecording (project.getEdit());
+    const auto recording = isRecording (project.getSong());
     const auto recordingEnded = wasRecording && ! recording;
     wasRecording = recording;
 
@@ -745,7 +677,7 @@ void AutosaveTimer::timerCallback()
     // Due once changes have waited; while the song plays, once it stops, unless it plays on for too long.
     const auto wait = (juce::uint32) (autosavedOnce ? intervalSeconds : firstDelaySeconds) * 1000;
     const auto waited = now - changedSince;
-    const auto playing = isSongPlaying (project.getEdit());
+    const auto playing = isSongPlaying (project.getSong());
 
     if (recordingEnded || (waited >= wait && (! playing || waited >= wait + (juce::uint32) maxWaitWhilePlayingSeconds * 1000)))
     {

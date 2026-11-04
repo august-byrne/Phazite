@@ -2,8 +2,8 @@
 // A device's parameter as a control uses it (a knob, a fader): its value, range and default, and the changes to it,
 // each one named undo step that this owns rather than the control (CLAUDE.md, "the UI decides nothing about the
 // project"; roadmap phase A2). It finds its parameter each time, so it is safe to keep after the device is deleted: it
-// then does nothing. The model hands handles out (model/mixer/MixerModel.h, DeviceHandle.h); its Tracktion side is in
-// internal/ParameterHandle.h.
+// then does nothing. The model hands handles out (model/mixer/MixerModel.h, DeviceHandle.h), which it makes of the
+// song's parameters (internal/ParameterHandle.h).
 #pragma once
 
 #include "ParameterRef.h"

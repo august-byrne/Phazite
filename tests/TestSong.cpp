@@ -31,10 +31,10 @@ TestSong::TestSong (Start start)
     juce::String error;
     REQUIRE (folder.createDirectory().wasOk());
     project = Project::create (
-        getEngine(), folder, "Song", error,
+        folder, "Song", error,
         start == Start::firstBeat ? getExampleSongContent (getEngineContext(), "firstBeat", getFactoryPresetsFolder()) : nullptr);
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
-    setEdit (context, &project->getEdit());
+    setSong (context, &project->getSong());
     addSongCommands (commands, context, renders);
 
     const auto tracks = getAllPlaylistTracks (context);
@@ -45,7 +45,7 @@ TestSong::TestSong (Start start)
 TestSong::~TestSong()
 {
     renders.render = nullptr; // a freeze or a bounce still running, which needs the project
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 Project& TestSong::getProject() const
@@ -62,13 +62,13 @@ void TestSong::reopen()
 {
     REQUIRE (project->save().wasOk());
     const auto file = project->getFile();
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
     project = nullptr;
 
     juce::String error;
-    project = Project::open (getEngine(), file, false, error);
+    project = Project::open (file, false, error);
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
-    setEdit (context, &project->getEdit());
+    setSong (context, &project->getSong());
 }
 
 void TestSong::run (const juce::String& commandID)

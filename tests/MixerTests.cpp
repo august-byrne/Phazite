@@ -7,459 +7,461 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
+#include "engine/nodes/Channel.h"
+#include "engine/nodes/DeviceNode.h"
+#include "engine/nodes/Strip.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/Selection.h"
 #include "model/commands/internal/Undo.h"
-#include "model/engine/internal/LoudnessMeterPlugin.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/devices/internal/Parameters.h"
+#include "model/engine/internal/EngineContext.h"
+#include "model/mixer/DeviceType.h"
 #include "model/mixer/MixHandle.h"
+#include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/MixHandle.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
-
-using namespace tracktion::literals;
+#include "model/project/internal/ProjectContext.h"
 
 namespace
 {
 using phazite::devices::Compressor, phazite::devices::Delay, phazite::devices::Equalizer, phazite::devices::Reverb, phazite::devices::Synth;
+namespace schema = phazite::schema;
 
-// An Edit with two tracks, A and B.
+// A song with two tracks, A and B, open in a context of its own, so that Phazite's engine plays it.
 struct Mix
 {
     Mix()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        phazite::setTrackName (*a, "A");
-        phazite::setTrackName (*b, "B");
+        const auto tracks = phazite::ensureTracks (*song, 2);
+        REQUIRE (tracks.size() == 2);
+        a = tracks[0];
+        b = tracks[1];
+        phazite::setTrackName (*song, a, "A");
+        phazite::setTrackName (*song, b, "B");
+        setSong (context, song.get());
     }
 
-    te::Plugin::Ptr create (const char* xmlType) const { return edit->getPluginCache().createNewPlugin (xmlType, {}); }
+    ~Mix() { setSong (context, nullptr); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
+    // One of Phazite's own devices, new, put on a channel at a place among its devices (-1: after them), in no undo step of
+    // its own; none if the channel can't hold it.
+    phazite::DeviceID add (phazite::TrackID channel, const char* type, int index = -1)
+    {
+        return phazite::insertDeviceState (*song, channel, phazite::makeOwnDeviceState (*song, type), index);
+    }
+
+    // What Phazite's engine plays of a channel (a track's by its ID, the master's by none) and of a device, once the song's
+    // session has given it the song as it is now: nullptr for what it doesn't play. A plain folder has no strip, and so no
+    // meter: no sound of its own.
+    phazite::engine::Channel* findPlayedChannel (phazite::TrackID channel)
+    {
+        auto* strip = getUpdatedSession().getPlayer().findStrip ((std::int64_t) channel.getRaw());
+        return strip != nullptr ? &strip->getChannel() : nullptr;
+    }
+
+    phazite::engine::DeviceNode* findPlayedDevice (phazite::DeviceID device)
+    {
+        return getUpdatedSession().getPlayer().findDevice ((std::int64_t) device.getRaw());
+    }
+
+    bool hasMeter (phazite::TrackID channel) { return findPlayedChannel (channel) != nullptr; }
+
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::TrackID a, b;
+
+private:
+    phazite::PlaybackSession& getUpdatedSession()
+    {
+        auto* session = phazite::getSession (context);
+        REQUIRE (session != nullptr);
+        session->update();
+        return *session;
+    }
 };
+
+phazite::DeviceID idOf (const juce::ValueTree& channel, const juce::Identifier& property)
+{
+    return phazite::DeviceID::fromRaw ((std::uint64_t) (juce::int64) channel[property]);
+}
 } // namespace
 
 TEST_CASE ("Devices go before the fader, instruments first")
 {
     Mix mix;
-    auto* reverb = phazite::insertDevice (*mix.a, mix.create (Reverb::typeID));
-    REQUIRE (reverb != nullptr);
+    auto& song = *mix.song;
+    const auto reverb = mix.add (mix.a, Reverb::typeID);
+    REQUIRE (reverb.isValid());
 
-    auto* synth = phazite::insertDevice (*mix.a, mix.create (Synth::typeID), -1);
-    REQUIRE (synth != nullptr);
+    const auto synth = mix.add (mix.a, Synth::typeID, -1);
+    REQUIRE (synth.isValid());
 
     // The instrument went first though it was added at the end; the fader and meter aren't devices.
-    const auto devices = phazite::getDevices (*mix.a);
-    REQUIRE (devices.size() == 2);
-    CHECK (devices[0] == synth);
-    CHECK (devices[1] == reverb);
-    CHECK (mix.a->pluginList.indexOf (reverb) < mix.a->pluginList.indexOf (mix.a->getVolumePlugin()));
+    CHECK (phazite::getDevices (song, mix.a) == std::vector { synth, reverb });
 
-    auto* delay = phazite::insertDevice (*mix.a, mix.create (Delay::typeID), 1);
-    CHECK (phazite::getDevices (*mix.a)[1] == delay);
+    const auto delay = mix.add (mix.a, Delay::typeID, 1);
+    CHECK (phazite::getDevices (song, mix.a)[1] == delay);
 
-    phazite::moveDevice (*delay, 2);
-    CHECK (phazite::getDevices (*mix.a)[2] == delay);
-    phazite::moveDevice (*delay, 0);
-    CHECK (phazite::getDevices (*mix.a)[0] == delay);
-    CHECK (phazite::getDevices (*mix.a)[1] == synth);
+    phazite::moveDevice (song, delay, 2);
+    CHECK (phazite::getDevices (song, mix.a)[2] == delay);
+    phazite::moveDevice (song, delay, 0);
+    CHECK (phazite::getDevices (song, mix.a)[0] == delay);
+    CHECK (phazite::getDevices (song, mix.a)[1] == synth);
 
-    phazite::removeDevice (*reverb);
-    CHECK (phazite::getDevices (*mix.a).size() == 2);
+    phazite::removeDevice (song, reverb);
+    CHECK (phazite::getDevices (song, mix.a).size() == 2);
 }
 
 TEST_CASE ("A track's instrument plays its notes, and its effects come after it")
 {
     Mix mix;
-    CHECK (phazite::getInstrument (*mix.a) == nullptr);
-    CHECK_FALSE (phazite::needsInstrument (*mix.a)); // no notes yet
+    auto& song = *mix.song;
+    CHECK_FALSE (phazite::getInstrument (song, mix.a).isValid());
+    CHECK_FALSE (phazite::needsInstrument (song, mix.a)); // no notes yet
 
     // Notes without an instrument make no sound.
-    phazite::test::addMidiClip (phazite::getSong (*mix.edit), phazite::getTrackID (*mix.a),
-                                { phazite::test::at (0.0), phazite::test::at (4.0) });
-    CHECK (phazite::needsInstrument (*mix.a));
+    phazite::test::addMidiClip (song, mix.a, { phazite::test::at (0.0), phazite::test::at (4.0) });
+    CHECK (phazite::needsInstrument (song, mix.a));
 
     // An effect doesn't play notes.
-    auto* reverb = phazite::insertDevice (*mix.a, mix.create (Reverb::typeID));
-    REQUIRE (reverb != nullptr);
-    CHECK (phazite::getInstrument (*mix.a) == nullptr);
-    CHECK (phazite::needsInstrument (*mix.a));
-    CHECK (phazite::getEffects (*mix.a) == juce::Array<te::Plugin*> { reverb });
+    const auto reverb = mix.add (mix.a, Reverb::typeID);
+    REQUIRE (reverb.isValid());
+    CHECK_FALSE (phazite::getInstrument (song, mix.a).isValid());
+    CHECK (phazite::needsInstrument (song, mix.a));
+    CHECK (phazite::getEffects (song, mix.a) == std::vector { reverb });
 
-    auto* synth = phazite::setInstrument (*mix.a, mix.create (Synth::typeID));
-    REQUIRE (synth != nullptr);
-    CHECK (phazite::getInstrument (*mix.a) == synth);
-    CHECK_FALSE (phazite::needsInstrument (*mix.a));
-    CHECK (phazite::getEffects (*mix.a) == juce::Array<te::Plugin*> { reverb });
+    const auto synth = phazite::setInstrument (song, mix.a, phazite::makeOwnDeviceState (song, Synth::typeID));
+    REQUIRE (synth.isValid());
+    CHECK (phazite::getInstrument (song, mix.a) == synth);
+    CHECK (phazite::hasInstrument (song, mix.a));
+    CHECK_FALSE (phazite::needsInstrument (song, mix.a));
+    CHECK (phazite::getEffects (song, mix.a) == std::vector { reverb });
 
     // Another instrument takes the first one's place; an effect isn't one.
-    auto* other = phazite::setInstrument (*mix.a, mix.create (Synth::typeID));
-    REQUIRE (other != nullptr);
-    CHECK (phazite::getDevices (*mix.a) == juce::Array<te::Plugin*> { other, reverb });
-    CHECK (phazite::setInstrument (*mix.a, mix.create (Delay::typeID)) == nullptr);
-    CHECK (phazite::getInstrument (*mix.a) == other);
+    const auto other = phazite::setInstrument (song, mix.a, phazite::makeOwnDeviceState (song, Synth::typeID));
+    REQUIRE (other.isValid());
+    CHECK (phazite::getDevices (song, mix.a) == std::vector { other, reverb });
+    CHECK_FALSE (phazite::setInstrument (song, mix.a, phazite::makeOwnDeviceState (song, Delay::typeID)).isValid());
+    CHECK (phazite::getInstrument (song, mix.a) == other);
 }
 
 TEST_CASE ("A new folder is a bus; a plain one becomes a bus with its first device, and plain again without one")
 {
     Mix mix;
-    auto* folder = phazite::groupIntoFolder ({ mix.a, mix.b }, nullptr);
-    REQUIRE (folder != nullptr);
+    auto& song = *mix.song;
+    const auto folder = phazite::groupIntoFolder (song, { mix.a, mix.b }, nullptr);
+    REQUIRE (folder.isValid());
+    const auto folderState = phazite::findTrackState (song, folder);
 
     // A bus from the start (design question 11): its tracks' sound goes through its own fader and meter.
-    CHECK (phazite::isBus (*folder));
-    CHECK (folder->getVCAPlugin() == nullptr);
-    CHECK (phazite::getLevelMeasurer (*folder) != nullptr);
-    CHECK (phazite::isBus (*phazite::insertFolder (*mix.edit, nullptr, nullptr)));
+    CHECK (phazite::isBus (song, folder));
+    CHECK (folderState.hasProperty (schema::channelFader));
+    CHECK_FALSE (folderState.hasProperty (schema::channelVCA));
+    CHECK (mix.hasMeter (folder));
+    CHECK (phazite::isBus (song, phazite::insertFolder (song, {}, nullptr)));
 
     // Made plain with its switch, its volume scales its tracks' volumes instead, as a VCA does.
-    phazite::setMixedAsBus (*folder, false);
-    CHECK_FALSE (phazite::isBus (*folder));
-    REQUIRE (folder->getVCAPlugin() != nullptr);
-    phazite::setChannelVolume (*folder, -3.0f);
-    CHECK (phazite::getLevelMeasurer (*folder) == nullptr); // a plain folder has no sound of its own
+    phazite::setMixedAsBus (song, folder, false);
+    CHECK_FALSE (phazite::isBus (song, folder));
+    REQUIRE (folderState.hasProperty (schema::channelVCA));
+    CHECK_FALSE (folderState.hasProperty (schema::channelFader));
+    phazite::setChannelVolume (song, folder, -3.0f);
+    CHECK_FALSE (mix.hasMeter (folder)); // a plain folder has no sound of its own
+    REQUIRE (mix.findPlayedChannel (mix.a) != nullptr);
+    CHECK (mix.findPlayedChannel (mix.a)->getVolume() == doctest::Approx (-3.0f));
 
-    auto* compressor = phazite::insertDevice (*folder, mix.create (Compressor::typeID));
-    REQUIRE (compressor != nullptr);
-    CHECK (phazite::isBus (*folder));
-    CHECK (folder->getVCAPlugin() == nullptr);
-    REQUIRE (folder->getVolumePlugin() != nullptr);
-    CHECK (folder->getVolumePlugin()->getVolumeDb() == doctest::Approx (-3.0f));
-    CHECK (phazite::getLevelMeasurer (*folder) != nullptr);
-    CHECK (phazite::getDevices (*folder).size() == 1);
-    CHECK (phazite::getVolumeDevice (*folder) == folder->getVolumePlugin());
+    const auto compressor = mix.add (folder, Compressor::typeID);
+    REQUIRE (compressor.isValid());
+    CHECK (phazite::isBus (song, folder));
+    CHECK_FALSE (folderState.hasProperty (schema::channelVCA));
+    REQUIRE (folderState.hasProperty (schema::channelFader));
+    CHECK (phazite::getChannelVolume (song, folder) == doctest::Approx (-3.0f));
+    CHECK (mix.hasMeter (folder));
+    CHECK (phazite::getDevices (song, folder).size() == 1);
+    CHECK (phazite::getFader (song, folder) == idOf (folderState, schema::channelFader));
+    REQUIRE (mix.findPlayedChannel (folder) != nullptr);
+    CHECK (mix.findPlayedChannel (folder)->getVolume() == doctest::Approx (-3.0f));
+    CHECK (std::abs (mix.findPlayedChannel (mix.a)->getVolume()) < 1.0e-4f); // its own fader alone again
 
-    phazite::removeDevice (*compressor);
-    CHECK_FALSE (phazite::isBus (*folder));
-    REQUIRE (folder->getVCAPlugin() != nullptr);
-    CHECK (folder->getVCAPlugin()->getVolumeDb() == doctest::Approx (-3.0f));
+    phazite::removeDevice (song, compressor);
+    CHECK_FALSE (phazite::isBus (song, folder));
+    REQUIRE (folderState.hasProperty (schema::channelVCA));
+    CHECK (phazite::getChannelVolume (song, folder) == doctest::Approx (-3.0f));
 }
 
-TEST_CASE ("A channel's fader is the song's, by its ID, which Tracktion's and an Edit built from the song alone follow")
+TEST_CASE ("A channel's fader is the song's, by its ID, which what plays the channel plays")
 {
-    namespace schema = phazite::schema;
     Mix mix;
-    const auto idOf = [] (const te::Plugin* device)
-    { return device != nullptr ? (juce::int64) device->itemID.getRawID() : (juce::int64) 0; };
-    const auto a = phazite::findTrackState (*mix.a);
-    CHECK ((juce::int64) a[schema::channelFader] == idOf (mix.a->getVolumePlugin()));
-    CHECK ((juce::int64) phazite::getMasterState (*mix.edit)[schema::channelFader] == idOf (mix.edit->getMasterVolumePlugin().get()));
+    auto& song = *mix.song;
+    const auto a = phazite::findTrackState (song, mix.a);
+    const auto master = phazite::getMasterState (song);
+    CHECK (idOf (a, schema::channelFader).isValid());
+    CHECK (phazite::getFader (song, mix.a) == idOf (a, schema::channelFader));
+    CHECK (phazite::getFader (song, {}) == idOf (master, schema::channelFader));
+    CHECK (phazite::getFader (song, mix.a) != phazite::getFader (song, {}));
+    CHECK (phazite::findChannelOfFader (song, phazite::getFader (song, mix.a)) == a);
 
     // A folder starts as a bus, with a fader; made plain, a VCA of its own takes the fader's place and its meter goes, and
     // undo brings them back.
-    auto* folder = phazite::groupIntoFolder ({ mix.b }, nullptr);
-    REQUIRE (folder != nullptr);
-    const auto folderState = phazite::findTrackState (*folder);
-    const auto faderID = (juce::int64) folderState[schema::channelFader];
-    CHECK (faderID == idOf (folder->getVolumePlugin()));
+    const auto folder = phazite::groupIntoFolder (song, { mix.b }, nullptr);
+    REQUIRE (folder.isValid());
+    const auto folderState = phazite::findTrackState (song, folder);
+    const auto fader = idOf (folderState, schema::channelFader);
+    CHECK (fader.isValid());
+    CHECK (mix.hasMeter (folder));
 
-    phazite::setMixedAsBus (*folder, false);
+    phazite::setMixedAsBus (song, folder, false);
     CHECK_FALSE (folderState.hasProperty (schema::channelFader));
-    CHECK ((juce::int64) folderState[schema::channelVCA] == idOf (folder->getVCAPlugin()));
-    CHECK (folder->getVolumePlugin() == nullptr);
-    CHECK (folder->pluginList.getPluginsOfType<te::LevelMeterPlugin>().isEmpty());
+    const auto vca = idOf (folderState, schema::channelVCA);
+    CHECK (vca.isValid());
+    CHECK (vca != fader);
+    CHECK (phazite::getFader (song, folder) == vca);
+    CHECK (phazite::getVolumeParameterID (song, folder) == juce::String (schema::vcaVolume));
+    CHECK_FALSE (mix.hasMeter (folder));
 
-    phazite::undo (*mix.edit);
-    CHECK ((juce::int64) folderState[schema::channelFader] == faderID);
-    CHECK (idOf (folder->getVolumePlugin()) == faderID);
-    CHECK (folder->getVCAPlugin() == nullptr);
+    phazite::undo (song);
+    CHECK (idOf (folderState, schema::channelFader) == fader);
+    CHECK_FALSE (folderState.hasProperty (schema::channelVCA));
+    CHECK (phazite::getFader (song, folder) == fader);
+    CHECK (mix.hasMeter (folder));
 
-    // A fader Tracktion lost is made again with the song's ID, before the meter.
-    mix.a->getVolumePlugin()->deleteFromParent();
-    phazite::mirror::reconcileTracks (*mix.edit);
-    CHECK (idOf (mix.a->getVolumePlugin()) == (juce::int64) a[schema::channelFader]);
-    CHECK (mix.a->pluginList.indexOf (mix.a->getVolumePlugin()) < mix.a->pluginList.indexOf (mix.a->getLevelMeterPlugin()));
-
-    // Built again from the song alone: the same faders, the master's too, at the song's volumes.
-    phazite::setChannelVolume (*mix.a, -6.0f);
-    const auto rebuilt = phazite::createEditFromSong (phazite::test::getEngine(), phazite::getSong (*mix.edit).getState().createCopy());
-    REQUIRE (rebuilt != nullptr);
-    auto* rebuiltA = dynamic_cast<te::AudioTrack*> (te::findTrackForID (*rebuilt, mix.a->itemID));
-    auto* rebuiltFolder = dynamic_cast<te::FolderTrack*> (te::findTrackForID (*rebuilt, folder->itemID));
-    REQUIRE (rebuiltA != nullptr);
-    REQUIRE (rebuiltFolder != nullptr);
-    CHECK (idOf (rebuiltA->getVolumePlugin()) == idOf (mix.a->getVolumePlugin()));
-    CHECK (rebuiltA->getVolumePlugin()->getVolumeDb() == doctest::Approx (-6.0f).epsilon (1.0e-3));
-    CHECK (idOf (rebuiltFolder->getVolumePlugin()) == faderID);
-    CHECK (idOf (rebuilt->getMasterVolumePlugin().get()) == idOf (mix.edit->getMasterVolumePlugin().get()));
-    CHECK (rebuilt->getMasterVolumePlugin()->getVolumeDb() == doctest::Approx (-3.0f).epsilon (1.0e-3));
+    // What plays each channel plays the song's volumes, the master's at -3 dB.
+    phazite::setChannelVolume (song, mix.a, -6.0f);
+    REQUIRE (mix.findPlayedChannel (mix.a) != nullptr);
+    REQUIRE (mix.findPlayedChannel ({}) != nullptr);
+    CHECK (mix.findPlayedChannel (mix.a)->getVolume() == doctest::Approx (-6.0f).epsilon (1.0e-3));
+    CHECK (mix.findPlayedChannel ({})->getVolume() == doctest::Approx (-3.0f).epsilon (1.0e-3));
 }
 
-TEST_CASE ("Return tracks take a bus, and sends feed them from before or after the fader")
+TEST_CASE ("Return tracks take in what sends feed them from before or after the fader, and no solo silences them")
 {
     Mix mix;
-    auto* reverbReturn = phazite::addReturnTrack (*mix.edit, "Reverb", nullptr);
-    REQUIRE (reverbReturn != nullptr);
-    CHECK (reverbReturn->getName() == juce::String ("Reverb"));
-    CHECK (phazite::getReturnBus (*reverbReturn) == 0);
-    CHECK (mix.edit->getAuxBusName (0) == juce::String ("Reverb"));
-    CHECK (phazite::getReturnBus (*mix.a) == -1);
-    CHECK (phazite::getPlaylistTracks (*mix.edit).getLast() == reverbReturn); // a channel, like any track
+    auto& song = *mix.song;
+    const auto reverbReturn = phazite::addReturnTrack (song, "Reverb", nullptr);
+    REQUIRE (reverbReturn.isValid());
+    CHECK (phazite::getTrackName (song, reverbReturn) == juce::String ("Reverb"));
+    CHECK (phazite::isReturnTrack (song, reverbReturn));
+    CHECK_FALSE (phazite::isReturnTrack (song, mix.a));
+    CHECK (phazite::getTrackIDs (song).back() == reverbReturn); // a channel, like any track
 
-    // The return's devices come after its input.
-    auto* reverb = phazite::insertDevice (*reverbReturn, mix.create (Reverb::typeID));
-    REQUIRE (reverb != nullptr);
-    CHECK (reverbReturn->pluginList.indexOf (reverb) == 1);
+    // A return holds effects, as a track does.
+    const auto reverb = mix.add (reverbReturn, Reverb::typeID);
+    REQUIRE (reverb.isValid());
+    CHECK (phazite::getEffects (song, reverbReturn) == std::vector { reverb });
 
-    auto* send = phazite::addSend (*mix.a, 0, false);
-    REQUIRE (send != nullptr);
-    CHECK (send->getBusNumber() == 0);
-    CHECK (send->getGainDb() == doctest::Approx (-6.0f));
-    CHECK_FALSE (phazite::isPreFader (*send));
-    CHECK (phazite::getSends (*mix.a).size() == 1);
+    const auto send = phazite::addSend (song, mix.a, reverbReturn, false);
+    REQUIRE (send.isValid());
+    CHECK (phazite::getSendTarget (song, send) == reverbReturn);
+    CHECK (phazite::getSendLevel (song, send) == doctest::Approx (-6.0f));
+    CHECK_FALSE (phazite::isPreFader (song, send));
+    CHECK (phazite::getSends (song, mix.a) == std::vector { send });
 
-    phazite::setPreFader (*send, true);
-    CHECK (phazite::isPreFader (*send));
-    CHECK (mix.a->pluginList.indexOf (send) == mix.a->pluginList.indexOf (mix.a->getVolumePlugin()) - 1);
-    phazite::setPreFader (*send, false);
-    CHECK_FALSE (phazite::isPreFader (*send));
+    phazite::setPreFader (song, send, true);
+    CHECK (phazite::isPreFader (song, send));
+    phazite::setPreFader (song, send, false);
+    CHECK_FALSE (phazite::isPreFader (song, send));
 
-    auto* second = phazite::addReturnTrack (*mix.edit, "Delay", nullptr);
-    REQUIRE (second != nullptr);
-    CHECK (phazite::getReturnBus (*second) == 1);
-    CHECK (phazite::findReturnTrack (*mix.edit, 1) == second);
-    CHECK (phazite::getReturnTracks (*mix.edit).size() == 2);
+    const auto second = phazite::addReturnTrack (song, "Delay", nullptr);
+    REQUIRE (second.isValid());
+    CHECK (phazite::getReturnTracks (song) == std::vector { reverbReturn, second });
 
     // Returns are solo-safe: soloing a track leaves them audible, so its sends to them are heard.
-    phazite::setTrackSoloed (*mix.a, true);
-    CHECK_FALSE (phazite::isSilencedBySolo (*reverbReturn));
-    CHECK (phazite::isSilencedBySolo (*mix.b));
-    phazite::setTrackSoloed (*mix.a, false);
+    phazite::setTrackSoloed (song, mix.a, true);
+    CHECK_FALSE (phazite::isSilencedBySolo (song, reverbReturn));
+    CHECK (phazite::isSilencedBySolo (song, mix.b));
+    phazite::setTrackSoloed (song, mix.a, false);
 }
 
-TEST_CASE ("The master's loudness meter reads a stereo sine at its level")
+TEST_CASE ("The device list offers Phazite's own devices, instruments first, then the plug-ins found")
 {
+    phazite::test::TestPlugin testPlugin;
     Mix mix;
-    auto* meter = phazite::ensureLoudnessMeter (*mix.edit);
-    REQUIRE (meter != nullptr);
-    CHECK (phazite::ensureLoudnessMeter (*mix.edit) == meter); // only one
-    CHECK (phazite::getMasterDevices (*mix.edit).isEmpty());   // it isn't a device
+    juce::StringArray own;
+    bool pluginAfterThem = false;
 
-    // A device on the master goes before it.
-    auto* eq = phazite::insertMasterDevice (*mix.edit, mix.create (Equalizer::typeID));
-    REQUIRE (eq != nullptr);
-    CHECK (mix.edit->getMasterPluginList().indexOf (eq) < mix.edit->getMasterPluginList().indexOf (meter));
-
-    // A 1 kHz sine at -20 dBFS in both channels measures -20 LUFS (ITU-R BS.1770).
-    constexpr double sampleRate = 48000.0;
-    constexpr int blockSize = 480;
-    meter->initialise ({ 0_tp, sampleRate, blockSize });
-
-    juce::AudioBuffer<float> buffer (2, blockSize);
-    const auto amplitude = juce::Decibels::decibelsToGain (-20.0f);
-    auto phase = 0.0;
-
-    for (int block = 0; block < 100; ++block) // a second
+    for (const auto& type : phazite::getDeviceTypes (phazite::getPluginHost (phazite::test::getEngineContext())))
     {
-        for (int i = 0; i < blockSize; ++i)
+        if (type.description.pluginFormatName == juce::String (schema::ownDeviceFormat))
         {
-            const auto sample = amplitude * (float) std::sin (phase);
-            buffer.setSample (0, i, sample);
-            buffer.setSample (1, i, sample);
-            phase += juce::MathConstants<double>::twoPi * 1000.0 / sampleRate;
+            CHECK_FALSE (pluginAfterThem);
+            own.add (type.description.fileOrIdentifier);
+            CHECK (type.description.manufacturerName == juce::String ("Phazite"));
+
+            // Each makes a device of the song's, of its type.
+            const auto device = phazite::makeDeviceState (*mix.song, type);
+            CHECK (device[schema::deviceType].toString() == type.description.fileOrIdentifier);
         }
-
-        meter->applyToBuffer ({ &buffer, 0, blockSize, nullptr, 0.0, {}, true, false, false, false });
-    }
-
-    const auto readings = meter->getReadings();
-    CHECK (readings.momentaryValid);
-    CHECK (readings.momentaryLufs == doctest::Approx (-20.0f).epsilon (0.02));
-    CHECK (readings.truePeakDb == doctest::Approx (-20.0f).epsilon (0.02));
-
-    // After 3.5 s of silence the readings have fallen, and it rests; the next sound is measured again at once.
-    buffer.clear();
-
-    for (int block = 0; block < 400; ++block)
-        meter->applyToBuffer ({ &buffer, 0, blockSize, nullptr, 0.0, {}, true, false, false, false });
-
-    CHECK (meter->getReadings().momentaryLufs < -60.0f);
-    meter->resetReadings();
-
-    for (int block = 0; block < 100; ++block)
-    {
-        for (int i = 0; i < blockSize; ++i)
+        else if (type.description.fileOrIdentifier == phazite::test::TestPlugin::getDescription().fileOrIdentifier)
         {
-            const auto sample = amplitude * (float) std::sin (phase);
-            buffer.setSample (0, i, sample);
-            buffer.setSample (1, i, sample);
-            phase += juce::MathConstants<double>::twoPi * 1000.0 / sampleRate;
-        }
-
-        meter->applyToBuffer ({ &buffer, 0, blockSize, nullptr, 0.0, {}, true, false, false, false });
-    }
-
-    CHECK (meter->getReadings().momentaryLufs == doctest::Approx (-20.0f).epsilon (0.02));
-}
-
-TEST_CASE ("The device list offers Phazite's own devices, instruments first, and none of Tracktion's")
-{
-    // Tracktion's instruments and effects break the real-time rules (docs/realtime-audit.md, finding 16).
-    Mix mix;
-    juce::StringArray builtIn;
-
-    for (const auto& type : phazite::getDeviceTypes (phazite::test::getEngine()))
-    {
-        if (te::PluginManager::isBuiltInPlugin (type.description))
-        {
-            builtIn.add (type.description.fileOrIdentifier);
-            CHECK (phazite::createDevice (*mix.edit, type) != nullptr);
-
-            if (type.description.fileOrIdentifier.startsWith ("phazite"))
-                CHECK (type.description.manufacturerName == juce::String ("Phazite"));
+            pluginAfterThem = true;
         }
     }
 
-    CHECK (builtIn
+    CHECK (pluginAfterThem);
+    CHECK (own
            == juce::StringArray { "phaziteSynth", "phaziteWavetable", "phaziteDrums", "phaziteEq", "phaziteFilter", "phaziteCompressor",
                                   "phaziteMultiband", "phaziteLimiter", "phaziteSaturator", "phaziteDelay", "phaziteReverb",
                                   "phazitePhaser", "phaziteFlanger", "phaziteVocoder", "phaziteStereoExpander" });
 }
 
-TEST_CASE ("Phazite's effects have a mix of their own, and name their key controls")
+TEST_CASE ("Phazite's effects have a mix of their own, and no key controls")
 {
     Mix mix;
-    auto* eq = phazite::insertDevice (*mix.a, mix.create ("phaziteEq"));
-    REQUIRE (eq != nullptr);
+    auto& song = *mix.song;
+    const auto eq = mix.add (mix.a, Equalizer::typeID);
+    REQUIRE (eq.isValid());
 
-    REQUIRE (phazite::hasMix (*eq));
-    CHECK (phazite::getMix (*eq) == doctest::Approx (1.0f)); // all effect to start with
-    phazite::setMix (*eq, 0.3f);
-    CHECK (phazite::getMix (*eq) == doctest::Approx (0.3f));
-    CHECK (eq->getAutomatableParameterByID ("mix")->getCurrentValue() == doctest::Approx (0.3f));
-    REQUIRE (phazite::getMixParameters (*eq).size() == 1);
-    CHECK (phazite::getMixParameters (*eq)[0]->paramID == juce::String ("mix"));
+    REQUIRE (phazite::hasMix (song, eq));
+    CHECK (phazite::getMix (song, eq) == doctest::Approx (1.0f)); // all effect to start with
+    phazite::setMix (song, eq, 0.3f);
+    CHECK (phazite::getMix (song, eq) == doctest::Approx (0.3f));
+    CHECK (phazite::getValueSetByHand (song, phazite::ParameterRef { eq, phazite::devices::mixParameterID.data() })
+           == doctest::Approx (0.3f));
+    CHECK (phazite::getKeyControls (song, eq, 2).isEmpty());
 }
 
 TEST_CASE ("A folder's bus switch makes it a bus that stays one, and plain again while it has no effects")
 {
     Mix mix;
-    auto* folder = phazite::groupIntoFolder ({ mix.a, mix.b }, nullptr);
-    REQUIRE (folder != nullptr);
+    auto& song = *mix.song;
+    const auto folder = phazite::groupIntoFolder (song, { mix.a, mix.b }, nullptr);
+    REQUIRE (folder.isValid());
 
-    phazite::setMixedAsBus (*folder, true);
-    CHECK (phazite::isBus (*folder));
+    phazite::setMixedAsBus (song, folder, true);
+    CHECK (phazite::isBus (song, folder));
 
     // Made a bus with the switch, it stays one when its last effect goes.
-    auto* compressor = phazite::insertDevice (*folder, mix.create (Compressor::typeID));
-    REQUIRE (compressor != nullptr);
-    phazite::removeDevice (*compressor);
-    CHECK (phazite::isBus (*folder));
+    const auto compressor = mix.add (folder, Compressor::typeID);
+    REQUIRE (compressor.isValid());
+    phazite::removeDevice (song, compressor);
+    CHECK (phazite::isBus (song, folder));
 
     // With an effect, it stays a bus: making it plain would take the effect away.
-    auto* reverb = phazite::insertDevice (*folder, mix.create (Reverb::typeID));
-    REQUIRE (reverb != nullptr);
-    phazite::setMixedAsBus (*folder, false);
-    CHECK (phazite::isBus (*folder));
+    const auto reverb = mix.add (folder, Reverb::typeID);
+    REQUIRE (reverb.isValid());
+    phazite::setMixedAsBus (song, folder, false);
+    CHECK (phazite::isBus (song, folder));
 
-    phazite::removeDevice (*reverb);
-    phazite::setMixedAsBus (*folder, false);
-    CHECK_FALSE (phazite::isBus (*folder));
-    REQUIRE (folder->getVCAPlugin() != nullptr);
+    phazite::removeDevice (song, reverb);
+    phazite::setMixedAsBus (song, folder, false);
+    CHECK_FALSE (phazite::isBus (song, folder));
+    REQUIRE (phazite::findTrackState (song, folder).hasProperty (schema::channelVCA));
 
     // A bus that became one by getting an effect turns plain again without it, as before.
-    auto* delay = phazite::insertDevice (*folder, mix.create (Delay::typeID));
-    REQUIRE (delay != nullptr);
-    CHECK (phazite::isBus (*folder));
-    phazite::removeDevice (*delay);
-    CHECK_FALSE (phazite::isBus (*folder));
+    const auto delay = mix.add (folder, Delay::typeID);
+    REQUIRE (delay.isValid());
+    CHECK (phazite::isBus (song, folder));
+    phazite::removeDevice (song, delay);
+    CHECK_FALSE (phazite::isBus (song, folder));
 }
 
 TEST_CASE ("A return with an effect comes in one step, named after the effect, with a send to it")
 {
     phazite::test::TestPlugin testPlugin;
     Mix mix;
+    auto& song = *mix.song;
 
     // Phazite's reverb, at 25 % on a track, plays only its effect on a return: the dry sound reaches the master through the
     // track itself.
-    const auto reverb = mix.create (Reverb::typeID);
-    REQUIRE (phazite::getMix (*reverb) == doctest::Approx (0.25f));
-    auto* reverbReturn = phazite::addReturnWithEffect (*mix.a, reverb);
-    REQUIRE (reverbReturn != nullptr);
-    CHECK (reverbReturn->getName() == juce::String ("Reverb"));
-    CHECK (reverbReturn->isSoloIsolate (false));
-    CHECK (phazite::getEffects (*reverbReturn) == juce::Array<te::Plugin*> { reverb.get() });
-    CHECK (phazite::getMix (*reverb) == doctest::Approx (1.0f));
+    const auto mixIndex = phazite::devices::findParameter (Reverb::info, phazite::devices::mixParameterID);
+    REQUIRE (mixIndex >= 0);
+    REQUIRE (Reverb::info.parameters[(size_t) mixIndex].defaultValue == doctest::Approx (0.25f));
+    const auto reverb = phazite::makeOwnDeviceState (song, Reverb::typeID);
+    const auto reverbReturn = phazite::addReturnWithEffect (song, mix.a, reverb);
+    REQUIRE (reverbReturn.isValid());
+    CHECK (phazite::getTrackName (song, reverbReturn) == juce::String ("Reverb"));
+    CHECK (phazite::isReturnTrack (song, reverbReturn));
+    CHECK (phazite::getEffects (song, reverbReturn) == std::vector { phazite::getDeviceID (reverb) });
+    CHECK (phazite::getMix (song, phazite::getDeviceID (reverb)) == doctest::Approx (1.0f));
 
-    const auto sends = phazite::getSends (*mix.a);
+    const auto sends = phazite::getSends (song, mix.a);
     REQUIRE (sends.size() == 1);
-    CHECK (sends[0]->getBusNumber() == phazite::getReturnBus (*reverbReturn));
-    CHECK_FALSE (phazite::isPreFader (*sends[0]));
+    CHECK (phazite::getSendTarget (song, sends[0]) == reverbReturn);
+    CHECK_FALSE (phazite::isPreFader (song, sends[0]));
 
-    // Another one gets a name of its own. A plug-in plays only its effect there too.
-    auto* second = phazite::addReturnWithEffect (*mix.b, mix.create (Reverb::typeID));
-    REQUIRE (second != nullptr);
-    CHECK (second->getName() == juce::String ("Reverb 2"));
+    // Another one gets a name of its own. A plug-in plays only its effect there too, whatever mix it came with.
+    const auto second = phazite::addReturnWithEffect (song, mix.b, phazite::makeOwnDeviceState (song, Reverb::typeID));
+    REQUIRE (second.isValid());
+    CHECK (phazite::getTrackName (song, second) == juce::String ("Reverb 2"));
 
-    const auto plugin = phazite::test::TestPlugin::create (*mix.edit);
-    phazite::setMix (*plugin, 0.5f);
-    auto* pluginReturn = phazite::addReturnWithEffect (*mix.b, plugin);
-    REQUIRE (pluginReturn != nullptr);
-    CHECK (pluginReturn->getName() == juce::String ("Test Effect"));
-    CHECK (phazite::getMix (*plugin) == doctest::Approx (1.0f));
+    auto plugin = phazite::makeDeviceState (song, phazite::makeDeviceType (phazite::test::TestPlugin::getDescription()));
+    plugin.setProperty (schema::deviceMix, 0.5f, nullptr);
+    const auto pluginReturn = phazite::addReturnWithEffect (song, mix.b, plugin);
+    REQUIRE (pluginReturn.isValid());
+    CHECK (phazite::getTrackName (song, pluginReturn) == juce::String ("Test Effect"));
+    CHECK (phazite::getMix (song, phazite::getDeviceID (plugin)) == doctest::Approx (1.0f));
 
     // Instruments don't go on returns.
-    CHECK (phazite::addReturnWithEffect (*mix.a, mix.create (Synth::typeID)) == nullptr);
+    CHECK_FALSE (phazite::addReturnWithEffect (song, mix.a, phazite::makeOwnDeviceState (song, Synth::typeID)).isValid());
 }
 
-TEST_CASE ("A plug-in's mix crossfades between the sound that comes in and the effect")
+TEST_CASE ("A plug-in's mix is the song's, which what plays it plays, and its key controls are its own parameters")
 {
     phazite::test::TestPlugin testPlugin;
     Mix mix;
-    auto* plugin = phazite::insertDevice (*mix.a, phazite::test::TestPlugin::create (*mix.edit));
-    REQUIRE (plugin != nullptr);
-    REQUIRE (phazite::hasMix (*plugin));
-    auto& external = dynamic_cast<te::ExternalPlugin&> (*plugin);
+    auto& song = *mix.song;
+    const auto plugin = phazite::test::TestPlugin::add (song, mix.a);
+    REQUIRE (phazite::hasMix (song, plugin));
 
-    // Tracktion passes a plug-in's sound at its wet level and what comes in at its dry level: all effect to start with.
-    CHECK (phazite::getMix (*plugin) == doctest::Approx (1.0f));
+    // All effect to start with.
+    CHECK (phazite::getMix (song, plugin) == doctest::Approx (1.0f));
 
-    phazite::setMix (*plugin, 0.25f);
-    CHECK (external.wetGain->getCurrentValue() == doctest::Approx (0.25f));
-    CHECK (external.dryGain->getCurrentValue() == doctest::Approx (0.75f));
-    CHECK (phazite::getMix (*plugin) == doctest::Approx (0.25f));
-    CHECK (phazite::getMixParameters (*plugin).size() == 2);
+    const auto playedMix = [&mix, plugin]
+    {
+        auto* device = mix.findPlayedDevice (plugin);
+        REQUIRE (device != nullptr);
+        const auto index = phazite::devices::findParameter (device->getDeviceInfo(), phazite::devices::mixParameterID);
+        REQUIRE (index >= 0);
+        return device->getValue (index);
+    };
 
-    // The mix sets the dry and wet levels, so the slot's key controls are the plug-in's own.
-    CHECK (phazite::getKeyControls (*plugin, 2)
+    phazite::setMix (song, plugin, 0.25f);
+    CHECK (phazite::getMix (song, plugin) == doctest::Approx (0.25f));
+    CHECK ((float) phazite::findDeviceState (song, plugin)[schema::deviceMix] == doctest::Approx (0.25f));
+    CHECK (playedMix() == doctest::Approx (0.25f));
+
+    // Its key controls are the plug-in's own parameters, by its own IDs.
+    CHECK (phazite::getKeyControls (song, plugin, 2)
            == juce::StringArray { phazite::test::TestPlugin::gainID, phazite::test::TestPlugin::toneID });
 
     // An instrument has no mix.
-    auto* synth = phazite::setInstrument (*mix.a, mix.create (Synth::typeID));
-    REQUIRE (synth != nullptr);
-    CHECK_FALSE (phazite::hasMix (*synth));
-    CHECK (phazite::getMix (*synth) == doctest::Approx (1.0f));
+    const auto synth = phazite::setInstrument (song, mix.a, phazite::makeOwnDeviceState (song, Synth::typeID));
+    REQUIRE (synth.isValid());
+    CHECK_FALSE (phazite::hasMix (song, synth));
+    CHECK (phazite::getMix (song, synth) == doctest::Approx (1.0f));
 }
 
 TEST_CASE ("New return tracks are numbered in turn")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::Selection selection (phazite::test::getEngine());
-    selection.setEdit (edit.get());
+    const auto song = phazite::createSong();
+    phazite::Selection selection;
+    selection.setSong (song.get());
 
-    auto* first = phazite::addNewReturnTrack (*edit, &selection);
-    REQUIRE (first != nullptr);
-    CHECK (first->getName() == juce::String ("Return 1"));
-    CHECK (selection.isSelected (phazite::getTrackID (*first)));
+    const auto first = phazite::addNewReturnTrack (*song, &selection);
+    REQUIRE (first.isValid());
+    CHECK (phazite::getTrackName (*song, first) == juce::String ("Return 1"));
+    CHECK (selection.isSelected (first));
 
-    // Without a selection manager, the selection stays as it was.
-    auto* second = phazite::addNewReturnTrack (*edit, nullptr);
-    REQUIRE (second != nullptr);
-    CHECK (second->getName() == juce::String ("Return 2"));
-    CHECK (selection.isSelected (phazite::getTrackID (*first)));
-    CHECK (phazite::getReturnBus (*second) != phazite::getReturnBus (*first));
+    // Without a selection, the selection stays as it was.
+    const auto second = phazite::addNewReturnTrack (*song, nullptr);
+    REQUIRE (second.isValid());
+    CHECK (phazite::getTrackName (*song, second) == juce::String ("Return 2"));
+    CHECK (selection.isSelected (first));
+    CHECK_FALSE (selection.isSelected (second));
+    CHECK (phazite::getReturnTracks (*song) == std::vector { first, second });
     selection.deselectAll();
 }
 
 TEST_CASE ("The device menus' choices are undo steps named after the device")
 {
     Mix mix;
-    auto& undo = phazite::getSong (*mix.edit).getUndoManager();
-    const auto types = phazite::getDeviceTypes (phazite::test::getEngine());
+    auto& song = *mix.song;
+    auto& undo = song.getUndoManager();
+    const auto types = phazite::getDeviceTypes (phazite::getPluginHost (phazite::test::getEngineContext()));
     const auto find = [&types] (const char* type)
     {
         for (const auto& each : types)
@@ -470,85 +472,87 @@ TEST_CASE ("The device menus' choices are undo steps named after the device")
         return phazite::DeviceType {};
     };
 
-    REQUIRE (phazite::chooseInstrument (*mix.a, find ("phaziteSynth")) != nullptr);
+    REQUIRE (phazite::chooseInstrument (song, mix.a, find ("phaziteSynth")).isValid());
     CHECK (undo.getUndoDescription() == juce::String ("Add Synth"));
-    REQUIRE (phazite::chooseInstrument (*mix.a, find ("phaziteDrums")) != nullptr);
+    REQUIRE (phazite::chooseInstrument (song, mix.a, find ("phaziteDrums")).isValid());
     CHECK (undo.getUndoDescription() == juce::String ("Replace Instrument with Drum Sampler"));
 
-    REQUIRE (phazite::addEffect (*mix.edit, mix.a, find ("phaziteEq")) != nullptr);
+    REQUIRE (phazite::addEffect (song, mix.a, find ("phaziteEq")).isValid());
     CHECK (undo.getUndoDescription() == juce::String ("Add EQ"));
-    REQUIRE (phazite::addEffect (*mix.edit, nullptr, find ("phaziteLimiter")) != nullptr);
-    CHECK (phazite::getMasterDevices (*mix.edit).getLast()->getName() == juce::String ("Limiter"));
+    REQUIRE (phazite::addEffect (song, {}, find ("phaziteLimiter")).isValid());
+    CHECK (phazite::getDeviceName (song, phazite::getEffects (song, {}).back()) == juce::String ("Limiter"));
 
-    auto* reverbReturn = phazite::addReturnWith (*mix.b, find ("phaziteReverb"));
-    REQUIRE (reverbReturn != nullptr);
+    const auto reverbReturn = phazite::addReturnWith (song, mix.b, find ("phaziteReverb"));
+    REQUIRE (reverbReturn.isValid());
     CHECK (undo.getUndoDescription() == juce::String ("Add Reverb Return"));
-    CHECK (phazite::getMix (*phazite::getEffects (*reverbReturn).getFirst()) == doctest::Approx (1.0f));
+    REQUIRE (phazite::getEffects (song, reverbReturn).size() == 1);
+    CHECK (phazite::getMix (song, phazite::getEffects (song, reverbReturn).front()) == doctest::Approx (1.0f));
 }
 
 TEST_CASE ("The mixer strip's edits are undo steps of their own, and a mix drag is one")
 {
     Mix mix;
-    auto& undo = phazite::getSong (*mix.edit).getUndoManager();
-    auto* eq = phazite::insertDevice (*mix.a, mix.create ("phaziteEq"));
-    auto* compressor = phazite::insertDevice (*mix.a, mix.create ("phaziteCompressor"));
-    REQUIRE (eq != nullptr);
-    REQUIRE (compressor != nullptr);
+    auto& song = *mix.song;
+    auto& undo = song.getUndoManager();
+    const auto eq = mix.add (mix.a, Equalizer::typeID);
+    const auto compressor = mix.add (mix.a, Compressor::typeID);
+    REQUIRE (eq.isValid());
+    REQUIRE (compressor.isValid());
     undo.clearUndoHistory();
 
-    phazite::setDeviceOn (*eq, false);
-    CHECK_FALSE (eq->isEnabled());
+    phazite::setDeviceOn (song, eq, false);
+    CHECK_FALSE (phazite::isDeviceOn (song, eq));
     CHECK (undo.getUndoDescription() == juce::String ("Turn Device Off"));
 
-    phazite::moveDevice (*compressor, 0);
-    CHECK (phazite::getEffects (*mix.a).getFirst() == compressor);
+    phazite::moveDevice (song, compressor, 0);
+    CHECK (phazite::getEffects (song, mix.a).front() == compressor);
     CHECK (undo.getUndoDescription() == juce::String ("Move Device"));
 
     // A drag of the mix knob is one step from its first move to its last; a key press is a step of its own.
     {
-        auto handle = phazite::makeMixHandle (*eq);
+        auto handle = phazite::makeMixHandle (song, eq);
         handle.beginGesture();
         handle.setValue (0.8f);
         handle.setValue (0.5f);
         handle.endGesture();
         CHECK (handle.getValue() == doctest::Approx (0.5f));
         CHECK (undo.getUndoDescription() == juce::String ("Change Mix"));
-        phazite::undo (*mix.edit);
-        CHECK (phazite::getMix (*eq) == doctest::Approx (1.0f));
+        phazite::undo (song);
+        CHECK (phazite::getMix (song, eq) == doctest::Approx (1.0f));
 
         handle.setValue (0.25f);
         CHECK (undo.getUndoDescription() == juce::String ("Change Mix"));
     }
 
-    phazite::removeDevice (*compressor);
+    phazite::removeDevice (song, compressor);
     CHECK (undo.getUndoDescription() == juce::String ("Remove Compressor"));
 
     // Sends.
-    auto* reverbReturn = phazite::addReturnTrack (*mix.edit, "Reverb", nullptr);
-    REQUIRE (reverbReturn != nullptr);
-    auto* send = phazite::addSendTo (*mix.a, phazite::getReturnBus (*reverbReturn));
-    REQUIRE (send != nullptr);
+    const auto reverbReturn = phazite::addReturnTrack (song, "Reverb", nullptr);
+    REQUIRE (reverbReturn.isValid());
+    const auto send = phazite::addSendTo (song, mix.a, reverbReturn);
+    REQUIRE (send.isValid());
     CHECK (undo.getUndoDescription() == juce::String ("Add Send"));
-    CHECK_FALSE (phazite::isPreFader (*send));
+    CHECK_FALSE (phazite::isPreFader (song, send));
 
-    phazite::setPreFader (*send, true);
-    CHECK (phazite::isPreFader (*send));
+    phazite::setPreFader (song, send, true);
+    CHECK (phazite::isPreFader (song, send));
     CHECK (undo.getUndoDescription() == juce::String ("Change Send"));
 
-    phazite::removeSend (*send);
-    CHECK (phazite::getSends (*mix.a).isEmpty());
+    phazite::removeSend (song, send);
+    CHECK (phazite::getSends (song, mix.a).empty());
     CHECK (undo.getUndoDescription() == juce::String ("Remove Send"));
 
-    const auto returnsBefore = phazite::getReturnTracks (*mix.edit).size();
-    REQUIRE (phazite::addSendToNewReturn (*mix.b) != nullptr);
-    CHECK (phazite::getReturnTracks (*mix.edit).size() == returnsBefore + 1);
+    const auto returnsBefore = phazite::getReturnTracks (song).size();
+    REQUIRE (phazite::addSendToNewReturn (song, mix.b).isValid());
+    CHECK (phazite::getReturnTracks (song).size() == returnsBefore + 1);
     CHECK (undo.getUndoDescription() == juce::String ("Add Send"));
 
     // The bus switch, on a folder that starts as a bus.
-    auto* folder = phazite::groupIntoFolder ({ mix.b }, nullptr);
-    REQUIRE (folder != nullptr);
-    phazite::setMixedAsBus (*folder, false);
+    const auto folder = phazite::groupIntoFolder (song, { mix.b }, nullptr);
+    REQUIRE (folder.isValid());
+    phazite::setMixedAsBus (song, folder, false);
     CHECK (undo.getUndoDescription() == juce::String ("Make Folder Plain"));
-    phazite::setMixedAsBus (*folder, true);
+    phazite::setMixedAsBus (song, folder, true);
     CHECK (undo.getUndoDescription() == juce::String ("Mix Folder as Bus"));
 }

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's tempo map as the engine plays it (docs/tracktion-migration.md, T2): where each of the song's beats falls in
-// samples, at a sample rate. The song keeps it in beats (model/transport/internal/Tempo.h): each tempo and time signature
-// from a beat on, the first at the song's start. A beat is one of the time signature's own, a quarter note in 4/4 and an
-// eighth in 6/8, and a tempo counts quarter notes in a minute, as Tracktion's tempo sequence counts them, which the song
-// has played through so far.
+// The song's tempo map as the engine plays it: where each of the song's beats falls in samples, at a sample rate. The
+// song keeps it in beats (model/transport/internal/Tempo.h): each tempo and time signature from a beat on, the first at
+// the song's start. A beat is one of the time signature's own, a quarter note in 4/4 and an eighth in 6/8, and a tempo
+// counts quarter notes in a minute, whatever the time signature.
 #pragma once
 
 #include <vector>

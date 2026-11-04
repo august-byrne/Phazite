@@ -6,6 +6,8 @@
 #include "TestClips.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/engine/AudioFiles.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/project/Export.h"
@@ -24,37 +26,35 @@ using phazite::ExportSettings;
 
 namespace
 {
-// An Edit at 120 BPM in 4/4 (a bar lasts 2 s) whose song is a steady A (220 Hz) at a quarter of full scale, in a clip
-// from its start to 1.5 s: the song ends with its first bar, at 2 s.
+// A song at 120 BPM in 4/4 (a bar lasts 2 s) that is a steady A (220 Hz) at a quarter of full scale, in a clip from its
+// start to 1.5 s: the song ends with its first bar, at 2 s.
 struct SineSong
 {
     SineSong()
     {
-        clip = phazite::test::addAudioClip (phazite::getSong (*edit), phazite::getTrackID (*te::getAudioTracks (*edit)[0]), "Sine", sound,
-                                            0.0, 1.5);
+        clip = phazite::test::addAudioClip (*song, phazite::ensureTracks (*song, 1)[0], "Sine", sound, 0.0, 1.5);
         REQUIRE (clip.isValid());
     }
 
     phazite::test::TemporaryFolder temp;
     const juce::File sound = phazite::test::writeSound (temp.folder.getChildFile ("Sine.wav"), 2.0);
     const juce::File renders = temp.folder.getChildFile ("Renders");
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ClipID clip;
 };
 
 // Exports, and waits for the report.
-ExportReport exportAndWait (te::Edit& edit, const juce::File& file, const ExportSettings& settings)
+ExportReport exportAndWait (phazite::Song& song, const juce::File& file, const ExportSettings& settings)
 {
     std::optional<ExportReport> report;
-    const auto running = phazite::startExport (edit, file, settings, [&report] (const ExportReport& r) { report = r; });
+    const auto running = phazite::startExport (song, file, settings, [&report] (const ExportReport& r) { report = r; });
     REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
     return *report;
 }
 
 std::unique_ptr<juce::AudioFormatReader> openFile (const juce::File& file)
 {
-    return std::unique_ptr<juce::AudioFormatReader> (
-        phazite::test::getEngine().getAudioFileFormatManager().readFormatManager.createReaderFor (file));
+    return std::unique_ptr<juce::AudioFormatReader> (phazite::getAudioFormats().createReaderFor (file));
 }
 
 // The files in a folder, by name.
@@ -66,6 +66,17 @@ juce::StringArray getFileNames (const juce::File& folder)
         names.add (file.getFileName());
 
     names.sort (true);
+    return names;
+}
+
+// The names of the channels an export of stems writes a file for, in their order.
+juce::StringArray getStemNames (const phazite::Song& song)
+{
+    juce::StringArray names;
+
+    for (const auto channel : phazite::getStemChannels (song))
+        names.add (phazite::getTrackName (song, channel));
+
     return names;
 }
 
@@ -129,15 +140,15 @@ TEST_CASE ("Export settings are checked")
 
 TEST_CASE ("An export covers the song to its end, and needs a song")
 {
-    SineSong song;
-    CHECK (phazite::getExportRange (*song.edit) == te::TimeRange (te::TimePosition(), te::TimePosition::fromSeconds (2.0)));
-    CHECK (phazite::canExport (*song.edit));
+    SineSong sine;
+    CHECK (phazite::getExportRange (*sine.song) == phazite::BeatRange (phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0)));
+    CHECK (phazite::canExport (*sine.song));
 
-    phazite::deleteClips (phazite::getSong (*song.edit), { song.clip }, false);
-    CHECK_FALSE (phazite::canExport (*song.edit));
+    phazite::deleteClips (*sine.song, { sine.clip }, false);
+    CHECK_FALSE (phazite::canExport (*sine.song));
 
-    const auto file = song.renders.getChildFile ("Song.wav");
-    const auto report = exportAndWait (*song.edit, file, {});
+    const auto file = sine.renders.getChildFile ("Song.wav");
+    const auto report = exportAndWait (*sine.song, file, {});
     CHECK (report.result.failed());
     CHECK (report.file == file);
     CHECK_FALSE (file.exists());
@@ -145,9 +156,9 @@ TEST_CASE ("An export covers the song to its end, and needs a song")
 
 TEST_CASE ("A song exports to a WAV file that plays it")
 {
-    SineSong song;
-    const auto file = song.renders.getChildFile ("Song.wav");
-    const auto report = exportAndWait (*song.edit, file, {});
+    SineSong sine;
+    const auto file = sine.renders.getChildFile ("Song.wav");
+    const auto report = exportAndWait (*sine.song, file, {});
     REQUIRE (report.result.wasOk());
     CHECK (report.file == file);
 
@@ -174,16 +185,16 @@ TEST_CASE ("A song exports to a WAV file that plays it")
     CHECK (report.integratedLufs > -18.0);
     CHECK (report.integratedLufs < -14.0);
     CHECK (report.truePeakDb < -12.0);
-    CHECK (getFileNames (song.renders) == juce::StringArray { "Song.wav" });
+    CHECK (getFileNames (sine.renders) == juce::StringArray { "Song.wav" });
 }
 
 TEST_CASE ("An export meets the loudness target it was given")
 {
-    SineSong song;
+    SineSong sine;
 
     ExportSettings streaming;
     streaming.loudnessTarget = -14.0;
-    const auto loud = exportAndWait (*song.edit, song.renders.getChildFile ("Streaming.wav"), streaming);
+    const auto loud = exportAndWait (*sine.song, sine.renders.getChildFile ("Streaming.wav"), streaming);
     REQUIRE (loud.result.wasOk());
     CHECK (loud.integratedLufs == doctest::Approx (-14.0).epsilon (0.005)); // within 0.07 LU
     CHECK (loud.truePeakDb <= -1.0);
@@ -195,7 +206,7 @@ TEST_CASE ("An export meets the loudness target it was given")
     broadcast.sampleRate = 48000.0;
     broadcast.bitDepth = 16;
     broadcast.loudnessTarget = -23.0;
-    const auto quiet = exportAndWait (*song.edit, song.renders.getChildFile ("Broadcast.flac"), broadcast);
+    const auto quiet = exportAndWait (*sine.song, sine.renders.getChildFile ("Broadcast.flac"), broadcast);
     REQUIRE (quiet.result.wasOk());
     CHECK (quiet.integratedLufs == doctest::Approx (-23.0).epsilon (0.005));
     CHECK (quiet.seconds == doctest::Approx (2.0).epsilon (0.001));
@@ -211,12 +222,12 @@ TEST_CASE ("An export meets the loudness target it was given")
 TEST_CASE ("The ceiling holds an export's true peak, under its target if it must")
 {
     // A sine's true peak is about 1 dB over its loudness, so -5 LUFS would take it over a ceiling of -6 dBTP.
-    SineSong song;
+    SineSong sine;
     ExportSettings settings;
     settings.loudnessTarget = -5.0;
     settings.truePeakCeiling = -6.0;
 
-    const auto report = exportAndWait (*song.edit, song.renders.getChildFile ("Song.wav"), settings);
+    const auto report = exportAndWait (*sine.song, sine.renders.getChildFile ("Song.wav"), settings);
     REQUIRE (report.result.wasOk());
     CHECK (report.truePeakDb <= -6.0 + 0.01);
     CHECK (report.truePeakDb > -6.5);
@@ -226,38 +237,38 @@ TEST_CASE ("The ceiling holds an export's true peak, under its target if it must
 
 TEST_CASE ("An export replaces a file only once it is complete")
 {
-    SineSong song;
-    const auto file = song.renders.getChildFile ("Song.wav");
+    SineSong sine;
+    const auto file = sine.renders.getChildFile ("Song.wav");
     REQUIRE (file.create().wasOk());
     REQUIRE (file.replaceWithText ("an earlier export"));
 
     // Cancelled: the file stays as it was, and nothing else is left in the folder.
     {
         const auto running =
-            phazite::startExport (*song.edit, file, {}, [] (const ExportReport&) { FAIL ("a cancelled export reports nothing"); });
+            phazite::startExport (*sine.song, file, {}, [] (const ExportReport&) { FAIL ("a cancelled export reports nothing"); });
     }
 
     phazite::test::dispatchPendingMessages();
     CHECK (file.loadFileAsString() == "an earlier export");
-    CHECK (getFileNames (song.renders) == juce::StringArray { "Song.wav" });
+    CHECK (getFileNames (sine.renders) == juce::StringArray { "Song.wav" });
 
     // Complete: replaced.
-    const auto report = exportAndWait (*song.edit, file, {});
+    const auto report = exportAndWait (*sine.song, file, {});
     REQUIRE (report.result.wasOk());
     CHECK (openFile (file) != nullptr);
-    CHECK (getFileNames (song.renders) == juce::StringArray { "Song.wav" });
+    CHECK (getFileNames (sine.renders) == juce::StringArray { "Song.wav" });
 }
 
 TEST_CASE ("The project's engine plays nothing of it while an export has its plug-ins, and plays it again after")
 {
-    SineSong song;
+    SineSong sine;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, song.edit.get());
+    phazite::setSong (context, sine.song.get());
     const auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
     REQUIRE (engine.getPlan() != nullptr);
 
     std::optional<ExportReport> report;
-    auto running = phazite::startExport (*song.edit, song.renders.getChildFile ("Song.wav"), ExportSettings {},
+    auto running = phazite::startExport (*sine.song, sine.renders.getChildFile ("Song.wav"), ExportSettings {},
                                          [&report] (const ExportReport& r) { report = r; });
     CHECK (engine.getPlan() == nullptr); // the render has it
     REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
@@ -265,11 +276,11 @@ TEST_CASE ("The project's engine plays nothing of it while an export has its plu
     CHECK (engine.getPlan() != nullptr);
 
     // And after one that is cancelled.
-    running = phazite::startExport (*song.edit, song.renders.getChildFile ("Again.wav"), ExportSettings {}, [] (const ExportReport&) {});
+    running = phazite::startExport (*sine.song, sine.renders.getChildFile ("Again.wav"), ExportSettings {}, [] (const ExportReport&) {});
     CHECK (engine.getPlan() == nullptr);
     running = nullptr;
     CHECK (engine.getPlan() != nullptr);
-    setEdit (context, nullptr);
+    phazite::setSong (context, nullptr);
 }
 //==============================================================================
 namespace
@@ -281,8 +292,7 @@ struct Band
 {
     Band()
     {
-        phazite::ensureTracks (*edit, 6);
-        const auto tracks = te::getAudioTracks (*edit);
+        const auto tracks = phazite::ensureTracks (*song, 6);
         kick = tracks[0];
         snare = tracks[1];
         bass = tracks[2];
@@ -290,40 +300,39 @@ struct Band
         lead = tracks[4];
         empty = tracks[5];
 
-        play (*kick, "Kick", 110.0);
-        play (*snare, "Snare", 440.0);
-        play (*bass, "Bass", 165.0);
-        play (*pad, "Pad", 880.0);
-        play (*lead, "Lead", 330.0);
-        phazite::setTrackName (*empty, "Empty");
-        phazite::setTrackMuted (*pad, true);
+        play (kick, "Kick", 110.0);
+        play (snare, "Snare", 440.0);
+        play (bass, "Bass", 165.0);
+        play (pad, "Pad", 880.0);
+        play (lead, "Lead", 330.0);
+        phazite::setTrackName (*song, empty, "Empty");
+        phazite::setTrackMuted (*song, pad, true);
 
-        drums = phazite::groupIntoFolder ({ kick, snare }, nullptr);
-        REQUIRE (drums != nullptr);
-        phazite::setTrackName (*drums, "Drums");
-        auto* plain = phazite::groupIntoFolder ({ lead }, nullptr);
-        REQUIRE (plain != nullptr);
-        phazite::setTrackName (*plain, "Plain");
-        phazite::setMixedAsBus (*plain, false);
+        drums = phazite::groupIntoFolder (*song, { kick, snare }, nullptr);
+        REQUIRE (drums.isValid());
+        phazite::setTrackName (*song, drums, "Drums");
+        const auto plain = phazite::groupIntoFolder (*song, { lead }, nullptr);
+        REQUIRE (plain.isValid());
+        phazite::setTrackName (*song, plain, "Plain");
+        phazite::setMixedAsBus (*song, plain, false);
 
-        reverb = phazite::addReturnTrack (*edit, "Reverb", nullptr);
-        REQUIRE (reverb != nullptr);
-        REQUIRE (phazite::addSend (*bass, phazite::getReturnBus (*reverb), false) != nullptr); // at -6 dB
+        reverb = phazite::addReturnTrack (*song, "Reverb", nullptr);
+        REQUIRE (reverb.isValid());
+        REQUIRE (phazite::addSend (*song, bass, reverb, false).isValid()); // at -6 dB
     }
 
-    void play (te::AudioTrack& track, const juce::String& name, double frequency)
+    void play (phazite::TrackID track, const juce::String& name, double frequency)
     {
-        phazite::setTrackName (track, name);
+        phazite::setTrackName (*song, track, name);
         const auto sound = phazite::test::writeSound (temp.folder.getChildFile (name + ".wav"), 2.0, frequency);
-        REQUIRE (phazite::test::addAudioClip (phazite::getSong (track.edit), phazite::getTrackID (track), name, sound, 0.0, 1.5).isValid());
+        REQUIRE (phazite::test::addAudioClip (*song, track, name, sound, 0.0, 1.5).isValid());
     }
 
     phazite::test::TemporaryFolder temp;
     const juce::File renders = temp.folder.getChildFile ("Renders");
     const juce::File folder = renders.getChildFile ("Band Stems");
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::AudioTrack *kick = nullptr, *snare = nullptr, *bass = nullptr, *pad = nullptr, *lead = nullptr, *empty = nullptr, *reverb = nullptr;
-    te::FolderTrack* drums = nullptr;
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::TrackID kick, snare, bass, pad, lead, empty, reverb, drums;
 };
 
 ExportSettings stems()
@@ -346,25 +355,16 @@ juce::AudioBuffer<float> readAll (const juce::File& file)
 TEST_CASE ("Stems are the channels that reach the master and play something, in the mixer's order")
 {
     Band band;
-    juce::StringArray names;
-
-    for (auto* track : phazite::getStemTracks (*band.edit))
-        names.add (track->getName());
 
     // Kick and Snare are in their bus's stem; Lead is its own, as its folder is plain; Pad is muted and Empty has nothing.
-    CHECK (names == juce::StringArray { "Drums", "Bass", "Lead", "Reverb" });
-    CHECK (phazite::getStemFileName (0, *band.drums, phazite::getFileSuffix (ExportSettings::Format::wav)) == "01 Drums.wav");
-    CHECK (phazite::getStemFileName (11, *band.lead, phazite::getFileSuffix (ExportSettings::Format::flac)) == "12 Lead.flac");
+    CHECK (getStemNames (*band.song) == juce::StringArray { "Drums", "Bass", "Lead", "Reverb" });
+    CHECK (phazite::getStemFileName (0, "Drums", phazite::getFileSuffix (ExportSettings::Format::wav)) == "01 Drums.wav");
+    CHECK (phazite::getStemFileName (11, "Lead", phazite::getFileSuffix (ExportSettings::Format::flac)) == "12 Lead.flac");
     CHECK (phazite::getStemsFolder (band.renders.getChildFile ("Band.wav")) == band.folder);
 
     // A solo leaves the others silent, and a return plays on (returns are solo-safe).
-    phazite::setTrackSoloed (*band.bass, true);
-    names.clear();
-
-    for (auto* track : phazite::getStemTracks (*band.edit))
-        names.add (track->getName());
-
-    CHECK (names == juce::StringArray { "Bass", "Reverb" });
+    phazite::setTrackSoloed (*band.song, band.bass, true);
+    CHECK (getStemNames (*band.song) == juce::StringArray { "Bass", "Reverb" });
 
     // Settings: never a loudness target for stems.
     auto settings = stems();
@@ -376,7 +376,7 @@ TEST_CASE ("Stems are the channels that reach the master and play something, in 
 TEST_CASE ("Stems export into a folder, a file for each channel, each its own sound, lined up from the song's start")
 {
     Band band;
-    const auto report = exportAndWait (*band.edit, band.folder, stems());
+    const auto report = exportAndWait (*band.song, band.folder, stems());
     REQUIRE (report.result.wasOk());
     CHECK (report.file == band.folder);
     CHECK (report.seconds == doctest::Approx (2.0).epsilon (0.001));
@@ -409,8 +409,8 @@ TEST_CASE ("Stems export into a folder, a file for each channel, each its own so
     CHECK (sendRatio == doctest::Approx (0.5).epsilon (0.05));
 
     // The mute switches are as they were.
-    CHECK_FALSE (band.bass->isMuted (false));
-    CHECK (band.pad->isMuted (false));
+    CHECK_FALSE (phazite::isTrackMuted (*band.song, band.bass, false));
+    CHECK (phazite::isTrackMuted (*band.song, band.pad, false));
 }
 
 TEST_CASE ("A cancelled export of stems leaves no stems, and the folder that was there")
@@ -419,20 +419,20 @@ TEST_CASE ("A cancelled export of stems leaves no stems, and the folder that was
     REQUIRE (band.folder.getChildFile ("Old.txt").create().wasOk());
 
     {
-        const auto running = phazite::startExport (*band.edit, band.folder, stems(),
+        const auto running = phazite::startExport (*band.song, band.folder, stems(),
                                                    [] (const ExportReport&) { FAIL ("a cancelled export reports nothing"); });
     }
 
     phazite::test::dispatchPendingMessages();
     CHECK (getFileNames (band.renders) == juce::StringArray { "Band Stems" });
     CHECK (getFileNames (band.folder) == juce::StringArray { "Old.txt" });
-    CHECK_FALSE (band.bass->isMuted (false));
+    CHECK_FALSE (phazite::isTrackMuted (*band.song, band.bass, false));
 
     // Nothing to export: no stems, and a reason.
-    for (auto* track : std::initializer_list<te::Track*> { band.bass, band.lead, band.drums, band.reverb })
-        phazite::setTrackMuted (*track, true);
+    for (const auto track : { band.bass, band.lead, band.drums, band.reverb })
+        phazite::setTrackMuted (*band.song, track, true);
 
-    const auto report = exportAndWait (*band.edit, band.renders.getChildFile ("None"), stems());
+    const auto report = exportAndWait (*band.song, band.renders.getChildFile ("None"), stems());
     CHECK (report.result.failed());
     CHECK (report.result.getErrorMessage() == "No channel plays anything, so there are no stems to export.");
     CHECK (getFileNames (band.renders) == juce::StringArray { "Band Stems" });
@@ -441,16 +441,6 @@ TEST_CASE ("A cancelled export of stems leaves no stems, and the folder that was
 //==============================================================================
 namespace
 {
-juce::StringArray getStemNames (const te::Edit& edit)
-{
-    juce::StringArray names;
-
-    for (auto* track : phazite::getStemTracks (edit))
-        names.add (track->getName());
-
-    return names;
-}
-
 struct ExportWindow
 {
     ExportWindow()
@@ -462,13 +452,13 @@ struct ExportWindow
         };
     }
 
-    SineSong song;
+    SineSong sine;
     phazite::Settings settings; // in memory
-    const juce::File file = song.renders.getChildFile ("Song.wav");
-    phazite::ui::ExportPanel panel { settings, file, 2.0, getStemNames (*song.edit),
+    const juce::File file = sine.renders.getChildFile ("Song.wav");
+    phazite::ui::ExportPanel panel { settings, file, 2.0, getStemNames (*sine.song),
                                      [this] (const ExportSettings& chosen, const juce::File& to,
                                              std::function<void (const ExportReport&)> onFinished)
-                                     { return phazite::startExport (*song.edit, to, chosen, std::move (onFinished)); } };
+                                     { return phazite::startExport (*sine.song, to, chosen, std::move (onFinished)); } };
     phazite::test::TestWindow window { panel, 560, 660 };
     phazite::test::Mouse mouse { panel };
     juce::Array<juce::File> asked; // the files the window asked to replace
@@ -565,8 +555,8 @@ TEST_CASE ("The export window exports stems into a folder next to the song's fil
     CHECK_FALSE (w.panel.getLoudnessBox().isEnabled());
     CHECK_FALSE (w.panel.getTargetField().isEnabled());
     CHECK_FALSE (w.panel.getSettings().loudnessTarget.has_value());
-    CHECK (w.panel.getAbout().contains (te::getAudioTracks (*w.song.edit)[0]->getName()));
-    CHECK (w.panel.getDestination() == w.song.renders.getChildFile ("Song Stems"));
+    CHECK (w.panel.getAbout().contains (phazite::getTrackName (*w.sine.song, phazite::getTrackIDs (*w.sine.song)[0])));
+    CHECK (w.panel.getDestination() == w.sine.renders.getChildFile ("Song Stems"));
     phazite::test::checkChildrenApart (w.panel);
 
     // A folder there already, which it didn't export: it asks first, and leaves it if not.
@@ -596,7 +586,7 @@ TEST_CASE ("The export window exports stems into a folder next to the song's fil
 TEST_CASE ("The export window says why an export failed")
 {
     ExportWindow w;
-    phazite::deleteClips (phazite::getSong (*w.song.edit), { w.song.clip }, false); // nothing to export
+    phazite::deleteClips (*w.sine.song, { w.sine.clip }, false); // nothing to export
 
     w.click (w.panel.getExportButton());
     REQUIRE (w.waitUntilDone());

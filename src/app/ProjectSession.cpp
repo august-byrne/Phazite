@@ -2,6 +2,7 @@
 #include "ProjectSession.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/project/ExampleSongs.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Export.h"
@@ -22,23 +23,22 @@ namespace
     }
 } // namespace
 
-ProjectSession::ProjectSession (te::Engine& e, UIBehaviour& ui, RecentProjects& recentProjects, juce::File projects, juce::File unsaved)
-    : engine (e),
+ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentProjects, juce::File projects, juce::File unsaved)
+    : engineContext (engine),
       projectsFolder (std::move (projects)),
       unsavedFolder (std::move (unsaved)),
       recent (recentProjects),
-      engineContext (createEngineContext (e)),
-      context (*engineContext, &ui)
+      context (engine)
 {
-    engineContext->addChangeListener (this);
+    engineContext.addChangeListener (this);
     getSelection().addChangeListener (this);
 }
 
 ProjectSession::~ProjectSession()
 {
     getSelection().removeChangeListener (this);
-    engineContext->removeChangeListener (this);
-    setProject (nullptr); // closes the project on the message thread, before the Engine goes
+    engineContext.removeChangeListener (this);
+    setProject (nullptr); // closes the project on the message thread, before the engine context goes
 }
 
 void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster* source)
@@ -49,7 +49,7 @@ void ProjectSession::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (source == &getSelection())
         followSelectedTrack (getSelection());
     else
-        routeLiveMidiInput (project->getEdit()); // a MIDI input plugged in, or the audio device changed
+        routeLiveMidiInput (project->getSong()); // a MIDI input plugged in, or the audio device changed
 }
 
 bool ProjectSession::isUntitled() const
@@ -61,7 +61,7 @@ void ProjectSession::openAtStartup (bool afterCrash)
 {
     // An untitled project that an earlier Phazite didn't close properly, such as in a crash, comes first: its changes are
     // nowhere else.
-    const auto leftover = UnsavedFolder::findProjectToRestore (engine, unsavedFolder);
+    const auto leftover = UnsavedFolder::findProjectToRestore (unsavedFolder);
 
     const auto openAsUsual = [this, leftover]
     {
@@ -92,7 +92,7 @@ void ProjectSession::openAtStartup (bool afterCrash)
                                 if (choice == AfterCrash::openWithoutPlugins)
                                 {
                                     pluginsOffUntilOpen = true;
-                                    setPluginsLoad (engine, false);
+                                    getPluginHost (engineContext).setLoadsPlugins (false);
                                 }
 
                                 openAsUsual();
@@ -137,14 +137,14 @@ void ProjectSession::openRecentOrFirst()
 void ProjectSession::restoreUntitled (const juce::File& file, bool restore)
 {
     // Restored, it goes on untitled in its folder; discarded, the folder goes.
-    if (auto folder = UnsavedFolder::takeOver (engine, file); folder != nullptr && restore)
+    if (auto folder = UnsavedFolder::takeOver (file); folder != nullptr && restore)
     {
         juce::String error;
 
-        if (auto restored = Project::open (engine, file, true, error))
+        if (auto restored = Project::open (file, true, error))
         {
             // Recordings made after the last autosave, which a crash left out of the song, come back on tracks of their own.
-            const auto recovered = UnsavedFolder::recoverUnusedAudio (restored->getEdit());
+            const auto recovered = UnsavedFolder::recoverUnusedAudio (restored->getSong());
             setProject (std::move (restored), std::move (folder));
 
             if (recovered > 0)
@@ -162,15 +162,15 @@ void ProjectSession::restoreUntitled (const juce::File& file, bool restore)
     openRecentOrFirst();
 }
 
-juce::Result ProjectSession::createUntitled (const juce::String& name, const std::function<void (te::Edit&)>& addContent)
+juce::Result ProjectSession::createUntitled (const juce::String& name, const std::function<void (Song&)>& addContent)
 {
-    auto folder = UnsavedFolder::create (engine, unsavedFolder);
+    auto folder = UnsavedFolder::create (unsavedFolder);
 
     if (folder == nullptr)
         return juce::Result::fail ("Phazite couldn't make a folder for a new project in " + unsavedFolder.getFullPathName() + ".");
 
     juce::String error;
-    auto created = Project::create (engine, folder->getFolder(), name, error, addContent);
+    auto created = Project::create (folder->getFolder(), name, error, addContent);
 
     if (created == nullptr)
         return juce::Result::fail (error);
@@ -199,7 +199,7 @@ void ProjectSession::openExampleSong (const juce::String& id)
             if (! closed)
                 return;
 
-            const auto content = getExampleSongContent (*engineContext, song->id, Library::getDefaultFactoryPresetsFolder());
+            const auto content = getExampleSongContent (engineContext, song->id, Library::getDefaultFactoryPresetsFolder());
 
             if (const auto result = createUntitled (song->name, content); result.failed())
             {
@@ -249,7 +249,7 @@ juce::String ProjectSession::suggestName (const juce::File& folder, const juce::
 juce::Result ProjectSession::createProject (const NewProjectSettings& settings)
 {
     // What the project starts with is part of its first save, not undo steps.
-    return createUntitled ("Untitled", [settings] (te::Edit& edit) { addNewProjectContent (edit, settings); });
+    return createUntitled ("Untitled", [settings] (Song& song) { addNewProjectContent (song, settings); });
 }
 
 juce::File ProjectSession::getExportFolder() const
@@ -485,7 +485,7 @@ void ProjectSession::open (const juce::File& file, bool restoreAutosave)
 {
     juce::String error;
 
-    if (auto opened = Project::open (engine, file, restoreAutosave, error))
+    if (auto opened = Project::open (file, restoreAutosave, error))
     {
         setProject (std::move (opened));
         return;
@@ -501,28 +501,33 @@ void ProjectSession::open (const juce::File& file, bool restoreAutosave)
 void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::unique_ptr<UnsavedFolder> newUnsavedFolder)
 {
     autosaveTimer = nullptr;
-    setEdit (context, nullptr);
 
+    // What holds the song (an export, a render, the devices' windows, which store what their plug-ins changed) goes while
+    // it is still open and playing, before the context lets go of it.
     if (project != nullptr && onProjectClosing != nullptr)
         onProjectClosing();
 
+    setSong (context, nullptr);
     project = std::move (newProject);                    // the previous project closes here, deleting its autosave
     projectUnsavedFolder = std::move (newUnsavedFolder); // and then the folder it was made in, if it was untitled
 
-    // Plug-ins load again for the next project, once the one that opens without them is open.
-    if (std::exchange (pluginsOffUntilOpen, false))
-    {
-        setPluginsLoad (engine, true);
+    // Plug-ins load again for the next project, once the one that opens without them is open (its song in the context,
+    // which makes what plays it).
+    const auto pluginsWereOff = std::exchange (pluginsOffUntilOpen, false);
 
-        if (project != nullptr)
-            showNotice ("Plug-ins off", "\"" + project->getFile().getFileNameWithoutExtension()
-                                            + "\" is open with its plug-ins off: they stay as they were, silent. Open it again "
-                                              "(File > Open Recent) to turn them on.");
-    }
+    if (pluginsWereOff && project != nullptr)
+        showNotice ("Plug-ins off", "\"" + project->getFile().getFileNameWithoutExtension()
+                                        + "\" is open with its plug-ins off: they stay as they were, silent. Open it again "
+                                          "(File > Open Recent) to turn them on.");
+
+    if (project != nullptr)
+        setSong (context, &project->getSong());
+
+    if (pluginsWereOff)
+        getPluginHost (engineContext).setLoadsPlugins (true);
 
     if (project != nullptr)
     {
-        setEdit (context, &project->getEdit());
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
         autosaveTimer->onRepeatedFailures = [this]
         {
@@ -534,7 +539,7 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
         if (! isUntitled()) // it is in Open Recent once it is saved
             recent.add (project->getFile());
 
-        routeLiveMidiInput (project->getEdit()); // MIDI keyboards and the computer keyboard play it
+        routeLiveMidiInput (project->getSong()); // MIDI keyboards and the computer keyboard play it
     }
 
     if (onProjectChanged != nullptr)
@@ -638,6 +643,6 @@ void ProjectSession::addCommands (CommandRegistry& registry)
                                    "Renders folder unless you choose another, and normalizes the song's loudness if you ask.",
                     .synonyms = { "render", "bounce", "mixdown", "wav", "flac", "audio file", "loudness", "lufs", "stems", "multitrack" },
                     .perform = [this] { exportSong(); },
-                    .isEnabled = [this] { return project != nullptr && canExport (project->getEdit()); } });
+                    .isEnabled = [this] { return project != nullptr && canExport (project->getSong()); } });
 }
 } // namespace phazite

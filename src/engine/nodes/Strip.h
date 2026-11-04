@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A track, a bus, a return or the master as Phazite's engine plays it (docs/tracktion-migration.md, T2), kept by its ID
-// from one plan to the next: its channel (Channel.h), the buffer it plays into, what it sends before its fader and what a
-// sidechain hears of it, and where its notes are as it plays them. And what joins paths: the delay that lines a path up
-// with a later one (delay compensation), a send's level, and a container's mix of its devices' sound with what came in.
+// A track, a bus, a return or the master as Phazite's engine plays it, kept by its ID from one plan to the next: its
+// channel (Channel.h), the buffer it plays into, what it sends before its fader and what a sidechain hears of it, and
+// where its notes are as it plays them. And what joins paths: the delay that lines a path up with a later one (delay
+// compensation), a send's level, and a container's mix of its devices' sound with what came in.
 #pragma once
 
 #include "Channel.h"

@@ -6,20 +6,25 @@
 #include "TestHelpers.h"
 #include "TestPlugin.h"
 #include "devices/reverb/Reverb.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace
 {
-te::Plugin::Ptr addReverb (te::Edit& edit)
+// A reverb at the end of the song's first track; its ID.
+phazite::DeviceID addReverb (phazite::Song& song)
 {
-    auto plugin = edit.getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {});
-    phazite::insertDevice (*te::getAudioTracks (edit)[0], plugin);
-    return plugin;
+    const auto reverb = phazite::insertDeviceState (song, phazite::getTrackIDs (song)[0],
+                                                    phazite::makeOwnDeviceState (song, phazite::devices::Reverb::typeID));
+    REQUIRE (reverb.isValid());
+    return reverb;
 }
 } // namespace
 
@@ -29,15 +34,18 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     CHECK_FALSE (empty.isValid());
     CHECK (empty.getValue() == doctest::Approx (0.0f));
 
+    // The plug-in plays in the session of the context that holds its song.
     phazite::test::TestPlugin testPlugin;
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::Plugin::Ptr plugin = phazite::test::TestPlugin::create (*edit);
-    phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
-    auto handle = phazite::makeParameterHandle (plugin.get(), phazite::test::TestPlugin::toneID);
+    auto song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::setSong (context, song.get());
+    const auto plugin = phazite::test::TestPlugin::add (*song, phazite::getTrackIDs (*song)[0]);
+    auto handle = phazite::makeParameterHandle (*song, { plugin, phazite::test::TestPlugin::toneID });
 
     REQUIRE (handle.isValid());
-    CHECK (handle.refersToSameParameter (phazite::makeParameterHandle (plugin.get(), phazite::test::TestPlugin::toneID, "Another Name")));
-    CHECK_FALSE (handle.refersToSameParameter (phazite::makeParameterHandle (plugin.get(), phazite::test::TestPlugin::gainID)));
+    CHECK (
+        handle.refersToSameParameter (phazite::makeParameterHandle (*song, { plugin, phazite::test::TestPlugin::toneID }, "Another Name")));
+    CHECK_FALSE (handle.refersToSameParameter (phazite::makeParameterHandle (*song, { plugin, phazite::test::TestPlugin::gainID })));
     CHECK_FALSE (handle.refersToSameParameter (empty));
     CHECK (empty.refersToSameParameter (phazite::ParameterHandle()));
     CHECK (handle.getName() == juce::String ("Tone"));
@@ -49,8 +57,8 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     CHECK_FALSE (handle.getInfo().has_value());              // not one of Phazite's own devices
 
     // When the project closes, the handle finds nothing and changes nothing.
-    plugin = nullptr;
-    edit = nullptr;
+    phazite::setSong (context, nullptr);
+    song = nullptr;
     CHECK_FALSE (handle.isValid());
     CHECK (handle.getName().isEmpty());
     handle.beginGesture();
@@ -61,12 +69,11 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
 
 TEST_CASE ("Changes through a parameter handle are named undo steps: one per gesture, and one per single change")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto reverb = addReverb (*edit);
-    phazite::test::settle();
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    auto song = phazite::createSong();
+    const auto reverb = addReverb (*song);
+    song->getUndoManager().clearUndoHistory();
 
-    auto handle = phazite::makeParameterHandle (reverb.get(), "size"); // its steps are called "Change Size"
+    auto handle = phazite::makeParameterHandle (*song, { reverb, "size" }); // its steps are called "Change Size"
 
     // A drag: every value it passes through is one step, however long it takes.
     handle.beginGesture();
@@ -78,43 +85,41 @@ TEST_CASE ("Changes through a parameter handle are named undo steps: one per ges
     handle.endGesture();
     CHECK_FALSE (handle.isInGesture());
     CHECK (handle.getValue() == doctest::Approx (0.8f));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Size"));
+    CHECK (phazite::describeUndo (song.get()) == juce::String ("Undo Change Size"));
 
-    phazite::undo (*edit);
-    CHECK (handle.getValue() == doctest::Approx (0.5f)); // where the drag began, played again
-    phazite::redo (*edit);
+    phazite::undo (*song);
+    CHECK (handle.getValue() == doctest::Approx (0.5f)); // where the drag began
+    phazite::redo (*song);
     CHECK (handle.getValue() == doctest::Approx (0.8f));
 
     // A key press: a step of its own, so undo goes back that far only.
     handle.setValue (0.5f);
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Size"));
-    phazite::undo (*edit);
+    CHECK (phazite::describeUndo (song.get()) == juce::String ("Undo Change Size"));
+    phazite::undo (*song);
     CHECK (handle.getValue() == doctest::Approx (0.8f));
 
     // A name given for the steps.
-    auto damping = phazite::makeParameterHandle (reverb.get(), "damping", "Change Reverb Damping");
+    auto damping = phazite::makeParameterHandle (*song, { reverb, "damping" }, "Change Reverb Damping");
     damping.setValue (9000.0f);
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Reverb Damping"));
+    CHECK (phazite::describeUndo (song.get()) == juce::String ("Undo Change Reverb Damping"));
 
     // A handle that goes away during a drag keeps the drag's change.
     {
-        auto width = phazite::makeParameterHandle (reverb.get(), "width");
+        auto width = phazite::makeParameterHandle (*song, { reverb, "width" });
         width.beginGesture();
         width.setValue (0.25f);
     }
 
-    CHECK (phazite::makeParameterHandle (reverb.get(), "width").getValue() == doctest::Approx (0.25f));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Width"));
+    CHECK (phazite::makeParameterHandle (*song, { reverb, "width" }).getValue() == doctest::Approx (0.25f));
+    CHECK (phazite::describeUndo (song.get()) == juce::String ("Undo Change Width"));
 }
 
 TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::Plugin::Ptr keep;
-    auto& device = phazite::test::createTestDevice (*edit, phazite::test::TestGain::typeID, keep);
-    REQUIRE (phazite::insertDevice (*te::getAudioTracks (*edit)[0], keep) != nullptr); // the song's, which handles reach
+    auto song = phazite::createSong();
+    const auto device = phazite::test::addTestDevice (*song, phazite::getTrackIDs (*song)[0], phazite::test::TestGain::typeID);
 
-    const auto mode = phazite::makeParameterHandle (&device, "mode");
+    const auto mode = phazite::makeParameterHandle (*song, { device, "mode" });
     const auto info = mode.getInfo();
     REQUIRE (info.has_value());
     CHECK (info->unit == phazite::devices::Unit::choice);
@@ -122,20 +127,19 @@ TEST_CASE ("A parameter handle describes the parameters of Phazite's own devices
     CHECK (info->choices[1] == "Inverted");
     CHECK (mode.getRange().interval == doctest::Approx (1.0f));
 
-    const auto gain = phazite::makeParameterHandle (&device, "gain");
+    const auto gain = phazite::makeParameterHandle (*song, { device, "gain" });
     CHECK (gain.getRange().start == doctest::Approx (-60.0f));
     CHECK (gain.getInfo()->unit == phazite::devices::Unit::decibels);
 }
 
 TEST_CASE ("A gesture begun during another for the same project joins it: a drag that moves two parameters is one step")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto reverb = addReverb (*edit);
-    phazite::test::settle();
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    auto song = phazite::createSong();
+    const auto reverb = addReverb (*song);
+    song->getUndoManager().clearUndoHistory();
 
-    auto size = phazite::makeParameterHandle (reverb.get(), "size", "Move Both");
-    auto damping = phazite::makeParameterHandle (reverb.get(), "damping");
+    auto size = phazite::makeParameterHandle (*song, { reverb, "size" }, "Move Both");
+    auto damping = phazite::makeParameterHandle (*song, { reverb, "damping" });
     size.beginGesture();
     damping.beginGesture();
     CHECK (size.isInGesture());
@@ -146,8 +150,8 @@ TEST_CASE ("A gesture begun during another for the same project joins it: a drag
     size.endGesture();
     CHECK_FALSE (damping.isInGesture());
 
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Move Both"));
-    phazite::undo (*edit);
+    CHECK (phazite::describeUndo (song.get()) == juce::String ("Undo Move Both"));
+    phazite::undo (*song);
     CHECK (size.getValue() == doctest::Approx (0.5f));
     CHECK (damping.getValue() == doctest::Approx (6000.0f));
 }

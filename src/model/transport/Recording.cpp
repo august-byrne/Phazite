@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Recording.h"
 #include "internal/AudioRecorder.h"
-#include "internal/Metronome.h"
 #include "internal/Playback.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
@@ -12,134 +11,135 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/LiveInput.h"
-#include "model/mirror/internal/Bridge.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
 {
-bool canRecord (te::Edit& edit)
+bool canRecord (const Song& song)
 {
-    const auto* recorder = AudioRecorder::findFor (edit);
-    return findPlayingSession (edit) != nullptr && (getLiveMidiTrack (edit) != nullptr || (recorder != nullptr && recorder->canRecord()));
+    const auto* session = findPlayingSession (song);
+    return session != nullptr && (getLiveMidiTrack (song).isValid() || session->getRecorder().canRecord());
 }
 
-bool isRecording (const te::Edit& edit)
+bool isRecording (const Song& song)
 {
-    const auto* session = findSession (edit);
+    const auto* session = findSession (song);
     return session != nullptr && session->isRecording();
 }
 
-void startRecording (te::Edit& edit)
+void startRecording (Song& song)
 {
-    if (isRecording (edit) || ! canRecord (edit))
+    if (isRecording (song) || ! canRecord (song))
         return;
 
     // Phazite's engine records what it plays (Take.h): from where playback starts, after the count-in, or from where the
     // song is if it plays already.
-    auto* session = findPlayingSession (edit);
+    auto* session = findPlayingSession (song);
     const auto playing = session->isPlaying();
 
     if (session->startTake() && ! playing)
     {
-        session->locate (fromTracktion (edit.tempoSequence.toBeats (getPlayStart (edit))));
-        session->play (isCountInOn (edit));
+        session->locate (getPlayStartBeat (song));
+        session->play (session->getAudioIO().isCountInOn());
     }
 }
 
-void stopRecording (te::Edit& edit)
+void stopRecording (Song& song)
 {
-    if (isRecording (edit))
-        stopAndReturn (edit);
+    if (isRecording (song))
+        stopAndReturn (song);
 }
 
-void toggleRecording (te::Edit& edit)
+void toggleRecording (Song& song)
 {
-    if (isRecording (edit))
-        stopRecording (edit);
+    if (isRecording (song))
+        stopRecording (song);
     else
-        startRecording (edit);
+        startRecording (song);
 }
 
-bool canToggleRecording (te::Edit& edit)
+bool canToggleRecording (const Song& song)
 {
-    return isRecording (edit) || canRecord (edit);
-}
-
-//==============================================================================
-bool isOverdubOn (te::Engine& engine)
-{
-    const auto* audio = AudioIO::findFor (engine);
-    return audio == nullptr || audio->isOverdubOn();
-}
-
-void setOverdubOn (te::Engine& engine, bool on)
-{
-    if (auto* audio = AudioIO::findFor (engine))
-        audio->setOverdubOn (on);
-}
-
-void toggleOverdub (te::Engine& engine)
-{
-    setOverdubOn (engine, ! isOverdubOn (engine));
-}
-
-bool isRecordQuantizeOn (te::Engine& engine)
-{
-    const auto* audio = AudioIO::findFor (engine);
-    return audio != nullptr && audio->isRecordQuantizeOn();
-}
-
-void setRecordQuantizeOn (te::Engine& engine, bool on)
-{
-    if (auto* audio = AudioIO::findFor (engine))
-        audio->setRecordQuantizeOn (on);
-}
-void toggleRecordQuantize (te::Engine& engine)
-{
-    setRecordQuantizeOn (engine, ! isRecordQuantizeOn (engine));
+    return isRecording (song) || canRecord (song);
 }
 
 //==============================================================================
-bool isPunchOn (const te::Edit& edit)
+bool isOverdubOn (const AudioIO& audio)
 {
-    return (bool) findPhaziteState (edit).getProperty (schema::punch, false);
+    return audio.isOverdubOn();
 }
 
-bool canPunch (const te::Edit& edit)
+void setOverdubOn (AudioIO& audio, bool on)
 {
-    return isLoopOn (edit) && ! doesLoopFollowSong (edit);
+    audio.setOverdubOn (on);
 }
 
-void setPunchOn (te::Edit& edit, bool on)
+void toggleOverdub (AudioIO& audio)
 {
-    getSong (edit).getState().setProperty (schema::punch, on, nullptr); // like the loop's switch, not an undo step
+    setOverdubOn (audio, ! isOverdubOn (audio));
 }
 
-bool isPunching (const te::Edit& edit)
+bool isRecordQuantizeOn (const AudioIO& audio)
 {
-    return isPunchOn (edit) && canPunch (edit);
+    return audio.isRecordQuantizeOn();
 }
 
-void togglePunch (te::Edit& edit)
+void setRecordQuantizeOn (AudioIO& audio, bool on)
 {
-    setPunchOn (edit, ! isPunchOn (edit));
+    audio.setRecordQuantizeOn (on);
+}
+
+void toggleRecordQuantize (AudioIO& audio)
+{
+    setRecordQuantizeOn (audio, ! isRecordQuantizeOn (audio));
+}
+
+//==============================================================================
+bool isPunchOn (const Song& song)
+{
+    return (bool) song.getState().getProperty (schema::punch, false);
+}
+
+bool canPunch (const Song& song)
+{
+    return isLoopOn (song) && ! doesLoopFollowSong (song);
+}
+
+void setPunchOn (Song& song, bool on)
+{
+    song.getState().setProperty (schema::punch, on, nullptr); // like the loop's switch, not an undo step
+}
+
+bool isPunching (const Song& song)
+{
+    return isPunchOn (song) && canPunch (song);
+}
+
+void togglePunch (Song& song)
+{
+    setPunchOn (song, ! isPunchOn (song));
 }
 
 //==============================================================================
 namespace
 {
-    // The selected tracks with an input, which arming arms.
-    juce::Array<te::AudioTrack*> getArmableTracks (const Selection& selection)
+    // The recorder of the selection's song, which its session owns, or nullptr.
+    AudioRecorder* findRecorder (const Selection& selection)
     {
-        juce::Array<te::AudioTrack*> tracks;
-        auto* recorder = selection.getEdit() != nullptr ? AudioRecorder::findFor (*selection.getEdit()) : nullptr;
+        auto* song = selection.getSong();
+        auto* session = song != nullptr ? findSession (*song) : nullptr;
+        return session != nullptr ? &session->getRecorder() : nullptr;
+    }
 
-        if (recorder != nullptr)
+    // The selected tracks that can record audio and have an input, which arming arms.
+    std::vector<TrackID> getArmableTracks (const Selection& selection)
+    {
+        std::vector<TrackID> tracks;
+
+        if (auto* song = selection.getSong(); song != nullptr && findRecorder (selection) != nullptr)
             for (const auto id : selection.getTracks())
-                if (auto* track = dynamic_cast<te::AudioTrack*> (mirror::findTrack (*selection.getEdit(), id)))
-                    if (! getInputChannels (findTrackState (*track)[schema::trackInput].toString()).empty() && ! hasInstrument (*track))
-                        tracks.add (track);
+                if (canRecordAudio (*song, id) && ! getInputChannels (findTrackState (*song, id)[schema::trackInput].toString()).empty())
+                    tracks.push_back (id);
 
         return tracks;
     }
@@ -160,22 +160,22 @@ namespace
 
 bool canArmSelectedTracks (const Selection& selection)
 {
-    return ! getArmableTracks (selection).isEmpty();
+    return ! getArmableTracks (selection).empty();
 }
 
 bool areSelectedTracksArmed (const Selection& selection)
 {
     const auto tracks = getArmableTracks (selection);
-    auto* recorder = selection.getEdit() != nullptr ? AudioRecorder::findFor (*selection.getEdit()) : nullptr;
-    return recorder != nullptr && areAllOn (tracks, [recorder] (te::AudioTrack* track) { return recorder->isArmed (*track); });
+    const auto* recorder = findRecorder (selection);
+    return recorder != nullptr && areAllOn (tracks, [recorder] (TrackID track) { return recorder->isArmed (track); });
 }
 
 void toggleArmSelectedTracks (const Selection& selection)
 {
-    if (auto* recorder = selection.getEdit() != nullptr ? AudioRecorder::findFor (*selection.getEdit()) : nullptr)
+    if (auto* recorder = findRecorder (selection))
         toggleAll (
-            getArmableTracks (selection), [recorder] (te::AudioTrack* track) { return recorder->isArmed (*track); },
-            [recorder] (te::AudioTrack* track, bool on) { recorder->setArmed (*track, on); });
+            getArmableTracks (selection), [recorder] (TrackID track) { return recorder->isArmed (track); },
+            [recorder] (TrackID track, bool on) { recorder->setArmed (track, on); });
 }
 
 bool canStepTakes (const Selection& selection)
@@ -192,7 +192,7 @@ void stepTakes (const Selection& selection, int direction)
 }
 
 //==============================================================================
-void addRecordingCommands (CommandRegistry& registry, Selection& selection)
+void addRecordingCommands (CommandRegistry& registry, Selection& selection, AudioIO& audio)
 {
     registry.add ({ .id = "transport.record",
                     .name = "Record",
@@ -200,25 +200,25 @@ void addRecordingCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Records what you play onto the track live MIDI plays, and the armed tracks' audio inputs, from where "
                                    "playback starts, or stops recording.",
                     .synonyms = { "rec", "take", "record midi", "record audio" },
-                    .perform = withEdit (selection, toggleRecording),
-                    .isEnabled = ifEdit (selection, canToggleRecording),
-                    .isTicked = ifEdit (selection, isRecording) });
+                    .perform = withSong (selection, toggleRecording),
+                    .isEnabled = ifSong (selection, canToggleRecording),
+                    .isTicked = ifSong (selection, isRecording) });
 
     registry.add ({ .id = "transport.overdub",
                     .name = "Overdub",
                     .category = "Transport",
                     .description = "Recording adds what you play to the clips already there; off, it takes their place.",
                     .synonyms = { "merge recordings", "replace", "blend", "record mode" },
-                    .perform = [&selection] { toggleOverdub (selection.engine); },
-                    .isTicked = [&selection] { return isOverdubOn (selection.engine); } });
+                    .perform = [&audio] { toggleOverdub (audio); },
+                    .isTicked = [&audio] { return isOverdubOn (audio); } });
 
     registry.add ({ .id = "transport.quantizeRecordings",
                     .name = "Quantize Recordings",
                     .category = "Transport",
                     .description = "Moves the notes you record to the nearest sixteenth as they go in.",
                     .synonyms = { "input quantize", "record quantize", "snap recording", "timing" },
-                    .perform = [&selection] { toggleRecordQuantize (selection.engine); },
-                    .isTicked = [&selection] { return isRecordQuantizeOn (selection.engine); } });
+                    .perform = [&audio] { toggleRecordQuantize (audio); },
+                    .isTicked = [&audio] { return isRecordQuantizeOn (audio); } });
 
     registry.add ({ .id = "transport.punch",
                     .name = "Punch In",
@@ -226,9 +226,9 @@ void addRecordingCommands (CommandRegistry& registry, Selection& selection)
                     .description = "Record keeps only what is played in the looped range, in place of what was there, cross-fading at its "
                                    "edges. Loop a range to punch in.",
                     .synonyms = { "punch in", "punch out", "auto punch", "replace a part", "drop in" },
-                    .perform = withEdit (selection, togglePunch),
-                    .isEnabled = ifEdit (selection, canPunch),
-                    .isTicked = ifEdit (selection, isPunching) });
+                    .perform = withSong (selection, togglePunch),
+                    .isEnabled = ifSong (selection, canPunch),
+                    .isTicked = ifSong (selection, isPunching) });
 
     registry.add ({ .id = "track.arm",
                     .name = "Arm Track",

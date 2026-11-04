@@ -6,7 +6,6 @@
 
 #include "devices/core/DeviceInfo.h"
 #include "model/base/Song.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <vector>
 

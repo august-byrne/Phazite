@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// How tests hear a song, and tell two engines apart (docs/tracktion-migration.md, T0): the song rendered offline, always
-// the same way, through an engine; the render's fingerprint, the RMS and peak level of each 100 ms block on each side; and
-// fingerprints compared, with a golden one (tests/golden/renders/) and with another engine's. Levels may be toleranceDb
+// How tests hear a song: the song rendered offline, always the same way, through Phazite's engine; the render's
+// fingerprint, the RMS and peak level of each 100 ms block on each side; and fingerprints compared, with a golden one
+// (tests/golden/renders/) and with another render's. Levels may be toleranceDb
 // apart, and a level below floorDb counts as floorDb: that absorbs the differences between compilers' maths libraries,
 // and where a reverb's tail is cut off. A fingerprint doesn't notice a change of phase only, or of frequency at the same
 // level: a golden render's check (GoldenRender) looks at what it shows. Golden renders never use anything random

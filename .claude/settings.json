@@ -1,7 +1,4 @@
 {
-  "claudeMdExcludes": [
-    "**/external/tracktion_engine/**/CLAUDE.md"
-  ],
   "permissions": {
     "allow": [
       "PowerShell(cmake --list-presets *)",

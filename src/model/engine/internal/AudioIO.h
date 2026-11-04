@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The audio device and MIDI inputs Phazite plays through, opened by Phazite rather than Tracktion
-// (docs/tracktion-migration.md, T4): JUCE's device manager and MIDI inputs, one set for each Engine, which every engine
-// context of it shares (getFor(), as the plug-in host is shared), opened as the app's settings saved them (the app's
-// AppServices: Settings) and kept there as they change. Tracktion's own device manager opens nothing
-// (EngineBehaviour::autoInitialiseDeviceManager()). What the MIDI inputs and the computer keyboard play goes to the engine
-// that plays the open project, into the track live MIDI plays (setLiveMidi(), from model/playback/). With the MIDI
-// recordings' options and the recordings' correction, which are Phazite's settings too. Message thread, but where it says.
+// The audio device and MIDI inputs Phazite plays through: JUCE's device manager and MIDI inputs, which the engine context
+// owns (EngineContext.h), opened as the app's settings saved them (the app's AppServices: Settings) and kept there as they
+// change. What the MIDI inputs and the computer keyboard play goes to the engine
+// that plays the open project, into the track live MIDI plays (setLiveMidi(), from model/playback/). With the
+// recordings' options and their correction, which are Phazite's settings too. Message thread, but where it says.
 #pragma once
 
 #include "engine/core/Engine.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
@@ -27,11 +24,6 @@ public:
     AudioIO();
     ~AudioIO() override;
 
-    // An Engine's, made with its first engine context and kept while any is (model/engine/EngineContext.h); or, for code
-    // that has the Engine alone, the one it has, if any.
-    static std::shared_ptr<AudioIO> getFor (const te::Engine&);
-    static AudioIO* findFor (const te::Engine&);
-
     juce::AudioDeviceManager& getDevices() noexcept { return devices; }
 
     // What Phazite's settings keep of them.
@@ -40,6 +32,7 @@ public:
         std::unique_ptr<juce::XmlElement> audioSetup; // JUCE's device manager's state, or none yet (a first run)
         juce::StringArray midiInputsOff;              // by their IDs: every other MIDI input plays
         bool overdub = true, recordQuantize = false;  // the MIDI recordings' options (model/transport/internal/Recording.h)
+        bool countIn = false;                         // a bar of clicks before recording (model/transport/internal/Metronome.h)
         double recordingCorrection = 0.0;             // milliseconds (model/transport/internal/AudioRecorder.h)
     };
 
@@ -66,6 +59,8 @@ public:
     void setOverdubOn (bool);
     bool isRecordQuantizeOn() const noexcept { return recordQuantize; }
     void setRecordQuantizeOn (bool);
+    bool isCountInOn() const noexcept { return countIn; }
+    void setCountInOn (bool);
     double getRecordingCorrection() const noexcept { return recordingCorrection; }
     void setRecordingCorrection (double milliseconds);
 
@@ -74,8 +69,9 @@ public:
     void setLiveMidi (engine::Engine*, std::int64_t track);
     void stopLiveMidi (const engine::Engine&); // if it goes to that engine
 
-    // Plays a note-on or note-off into it as a MIDI keyboard would (the computer keyboard's, from the message thread; the
-    // MIDI inputs', from their threads). Lock-free; other messages, and notes while it goes nowhere, do nothing.
+    // Plays a note-on or note-off into it as a MIDI keyboard would (the computer keyboard's, from the message thread).
+    // Lock-free; other messages, and notes while it goes nowhere, do nothing. What the MIDI inputs play goes there too, from
+    // their threads, with their pitch bends and controllers.
     void playLive (const juce::MidiMessage&) noexcept;
 
 private:
@@ -84,7 +80,7 @@ private:
     juce::StringArray midiInputsOff;
     bool midiOpened = false; // once open() has opened them: tests open none
     juce::MidiDeviceListConnection midiDevicesChanged;
-    bool overdub = true, recordQuantize = false;
+    bool overdub = true, recordQuantize = false, countIn = false;
     double recordingCorrection = 0.0;
 
     std::atomic<engine::Engine*> liveEngine { nullptr };
@@ -93,7 +89,8 @@ private:
 
     void openMidiInputsOn(); // closes those switched off or gone, and opens those on
     void changeListenerCallback (juce::ChangeBroadcaster*) override { sendChangeMessage(); }
-    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message) override { playLive (message); }
+    void playLiveEvent (const juce::MidiMessage&) noexcept; // any message the engine plays
+    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message) override { playLiveEvent (message); }
 
     JUCE_DECLARE_NON_COPYABLE (AudioIO)
 };

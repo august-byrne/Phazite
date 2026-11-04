@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A project as Phazite's own engine plays it (docs/tracktion-migration.md, T2): its song compiled into what the engine plays
-// (SongPlayer.h), given again as the song changes, at most once a turn of the message loop, a value set by hand at once;
-// the transport the model's functions use while Phazite's engine plays the project (model/transport/internal/Playback.h),
-// in the song's beats; the notes played live into it; the automation written by hand while it plays (AutomationWriter.h),
-// which gets the parameters' changes and a plug-in's window's gestures from it; and the take it records
-// (model/transport/internal/Take.h).
-// ProjectContext makes one for each Edit it holds, which joins the app's PlaybackHost.
+// A project as Phazite's engine plays it: its song compiled into what the engine plays (SongPlayer.h), given again as the
+// song changes, at most once a turn of the message loop, a value set by hand at once; the plug-ins it holds, each an
+// instance in its helper (model/plugins/internal/PluginInstances.h); the transport, in the song's beats, which stops at the
+// song's end while nothing is looped; the notes played live into it; the automation written by hand while it plays
+// (AutomationWriter.h); and the tracks armed to record their inputs (model/transport/internal/AudioRecorder.h), with the
+// take it records (model/transport/internal/Take.h). ProjectContext makes one for the song it holds, which joins the app's
+// PlaybackHost.
 #pragma once
 
 #include "AutomationWriter.h"
@@ -13,9 +13,9 @@
 #include "engine/core/Engine.h"
 #include "model/base/Beats.h"
 #include "model/base/IDs.h"
-#include "model/base/internal/Tracktion.h"
+#include "model/base/Song.h"
+#include "model/plugins/internal/PluginInstances.h"
 
-#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -26,29 +26,36 @@
 namespace phazite
 {
 class AudioIO;
-class Song;
+class AudioRecorder;
 class PlaybackHost;
 class Take;
 
 class PlaybackSession : private juce::ValueTree::Listener,
-                        private te::ParameterChangeHandler::Listener,
-                        private juce::AsyncUpdater
+                        private Song::ParameterListener,
+                        private PluginInstances::Listener,
+                        private juce::AsyncUpdater,
+                        private juce::Timer // which stops playback at the song's end
 {
 public:
-    PlaybackSession (te::Edit&, PlaybackHost&);
+    PlaybackSession (Song&, PlaybackHost&);
     ~PlaybackSession() override;
 
-    te::Edit& getEdit() const noexcept { return edit; }
-    bool hasEdit() const noexcept { return exists.get() != nullptr; } // false once the Edit has gone
+    Song& getSong() const noexcept { return *song; }
     SongPlayer& getPlayer() noexcept { return player; }
     const SongPlayer& getPlayer() const noexcept { return player; }
     AutomationWriter& getWriter() noexcept { return writer; }
+    PluginInstances& getPlugins() noexcept { return plugins; }
+    AudioRecorder& getRecorder() noexcept { return *recorder; }
+    const AudioRecorder& getRecorder() const noexcept { return *recorder; }
+    PlaybackHost& getHost() const noexcept { return host; }
+    AudioIO& getAudioIO() const noexcept;
     engine::Engine& getEngine() noexcept; // the host's, which plays it
 
-    // Whether Phazite's engine plays this project now: its Edit is there, and it is the project the host plays.
+    // Whether Phazite's engine plays this project now: it is the project the host plays.
     bool isPlayingProject() const;
 
-    // The transport, through the host's engine. The playhead is in the song's beats.
+    // The transport, through the host's engine. The playhead is in the song's beats. Playing on past the song's end with
+    // nothing looped, it stops and goes back to where it started (as Stop does), unless it started past the end.
     bool isPlaying() const;
     void play (bool countIn = false); // a bar of clicks first, from a stop (Engine.h)
     void stop();
@@ -73,18 +80,13 @@ public:
     void keepPlayedFrom (std::optional<std::int64_t> clock);
 
     // Live MIDI (the computer keyboard and the MIDI inputs, model/engine/internal/AudioIO.h) plays the track it goes to
-    // (model/engine/internal/LiveInput.h), none at first, through Phazite's engine while the engine plays the project, in
-    // its next block. After that track or the project the engine plays changes, followLiveMidi() sends it there again.
+    // (model/engine/internal/LiveInput.h), none at first, while the engine plays the project, in its next block. After that
+    // track or the project the engine plays changes, followLiveMidi() sends it there again.
     TrackID getLiveTrack() const noexcept { return liveTrack; }
     void setLiveTrack (TrackID);
     void followLiveMidi();
 
-    // While Phazite's engine plays the project, Tracktion's playback graph plays nothing: it is held, never prepared, in a
-    // silent node, so that a plug-in, which both reach, only ever plays through Phazite's engine. followLiveMidi() holds it
-    // or lets it go as the project the engine plays changes.
-    void holdTracktion (bool);
-
-    // The piano roll's guide notes into a track, through Phazite's engine; and their ends.
+    // The piano roll's guide notes into a track; and their ends.
     void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity);
     void stopGuideNotes (std::int64_t track);
 
@@ -98,51 +100,49 @@ public:
     bool isLentToRender() const noexcept { return lentToRender; }
 
 private:
-    te::Edit& edit;
-    te::SafeSelectable<te::Edit> exists; // until the Edit goes, which can be before this does
+    Song::Ptr song;
     PlaybackHost& host;
-    std::shared_ptr<AudioIO> audio; // where live MIDI comes from
+    juce::ValueTree songState;
     bool lentToRender = false;
+    PluginInstances plugins;
+    std::unique_ptr<AudioRecorder> recorder;
     SongPlayer player;
     AutomationWriter writer;
-    juce::ValueTree editState; // the song is its PHAZITE element, which a bare Edit gets when something is first written
 
     TrackID liveTrack;
     std::vector<std::pair<std::int64_t, int>> guideNotes; // each track's sounding
 
-    te::EditPlaybackContext* heldContext = nullptr; // the context whose graph is held, or none
     std::unique_ptr<Take> take;
     std::int64_t playStartClock = 0;
 
-    void changed (const juce::ValueTree& tree, const juce::ValueTree& child = {});
+    BeatPosition songEnd;                     // where the song's loop ends, which playing on past stops at
+    std::optional<BeatPosition> lastPlayhead; // while playing without a loop: where the playhead was last time
+    void timerCallback() override;
+
+    void changed (const juce::ValueTree& tree);
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree&) override { changed (parent); }
+    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&, int) override { changed (parent); }
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { changed (parent); }
     void handleAsyncUpdate() override { update(); }
 
-    // A parameter changed in Tracktion's Edit (by hand, by a plug-in itself or by its automation): for what plays a
-    // plug-in, and for the automation written by hand.
-    void pluginParameterChanged (te::AutomatableParameter&, bool isFollowingAutomation) override;
+    // A value set by hand (a plug-in's, by a control or in its window, plays at once); a plug-in's own window's gestures;
+    // and its latency, which needs a new plan.
+    void valueSetByHand (const ParameterRef&, float value, bool byPlugin) override;
+    void pluginGestureChanged (const ParameterRef&, bool starting) override;
+    void pluginLatencyChanged() override { triggerAsyncUpdate(); }
 
     JUCE_DECLARE_NON_COPYABLE (PlaybackSession)
 };
 
-// The session of an Edit (one a ProjectContext holds), or nullptr; and the one through which Phazite's engine plays it now
-// (isPlayingProject()), or nullptr while Tracktion's does.
-PlaybackSession* findSession (const te::Edit&);
-PlaybackSession* findPlayingSession (const te::Edit&);
-PlaybackSession* findSession (const Song&); // the same by the Edit's song
+// The session of a song (one a ProjectContext holds), or nullptr; and the one through which Phazite's engine plays it now
+// (isPlayingProject()), or nullptr.
+PlaybackSession* findSession (const Song&);
 PlaybackSession* findPlayingSession (const Song&);
 
-// A parameter's value as Phazite's engine played it last, while the engine plays the parameter's project and its automation
-// or modulation moves it (SongPlayer::getPlayedValue()), with its modulation or without; nothing otherwise, while its value
-// is the one set by hand.
-std::optional<float> getPlayedValue (const te::AutomatableParameter&, bool withModulation);
-
-// The song rendered by Phazite's own engine, offline, from its start: so many samples at a rate, in blocks of a size, in
-// stereo, through the master's devices and its plug-ins, which the project's session lends it (lendToRender()), as an export
+// The song rendered by Phazite's engine, offline, from its start: so many samples at a rate, in blocks of a size, in
+// stereo, through the master's devices and its plug-ins, which the song's session lends it (lendToRender()), as an export
 // renders it (OfflineRender.h) and the golden renders' harness compares it; on so many threads, the same to the last bit
 // however many. Message thread.
-juce::AudioBuffer<float> renderWithOwnEngine (te::Edit&, int numSamples, double sampleRate, int blockSize, int numThreads = 1);
+juce::AudioBuffer<float> renderWithOwnEngine (Song&, int numSamples, double sampleRate, int blockSize, int numThreads = 1);
 } // namespace phazite

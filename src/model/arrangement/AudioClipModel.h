@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// An audio clip as the audio clip editor shows it (docs/design.md, section 7; roadmap step 2.6), by IDs and plain values
-// (no Tracktion here): its audio file, where the whole file plays in the song, and how the clip plays it: its gain, its
-// pitch, backwards or not, and whether it follows the song's tempo. Each function takes the open project's context, and
-// gives nothing, or does nothing, for an ID that isn't an audio clip's. Each change is an undo step of its own, named as
-// its comment says; while a gesture is open (SongGesture.h), as while a field is dragged, it joins the gesture's step.
+// An audio clip as the audio clip editor shows it (docs/design.md, section 7; roadmap step 2.6), by IDs and plain
+// values: its audio file, where the whole file plays in the song, and how the clip plays it: its gain, its pitch,
+// backwards or not, and whether it follows the song's tempo. Each function takes the open project's context, and gives
+// nothing, or does nothing, for an ID that isn't an audio clip's. Each change is an undo step of its own, named as its
+// comment says; while a gesture is open (SongGesture.h), as while a field is dragged, it joins the gesture's step.
 // Trims, fades and slips are the playlist's edits (PlaylistModel.h), which the editor makes too.
 #pragma once
 
@@ -14,7 +14,7 @@
 
 namespace phazite
 {
-// What the editor offers. Tracktion's clips reach further down (to -100 dB), and as far in pitch.
+// What the editor offers.
 inline constexpr float minClipGain = -60.0f, maxClipGain = 24.0f;  // decibels
 inline constexpr float maxClipPitch = 48.0f;                       // semitones, up or down
 inline constexpr double minClipTempo = 20.0, maxClipTempo = 300.0; // beats per minute, as the song's tempo

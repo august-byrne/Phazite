@@ -11,9 +11,10 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/project/internal/Project.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DrumSamplerEditor.h"
@@ -43,17 +44,26 @@ float playNext (DrumSampler& sampler)
     sampler.process (block);
     return buffer.getMagnitude (0, 0, buffer.getNumSamples());
 }
+
+// A drum sampler as the song's first track's instrument, which the song's session plays.
+phazite::DeviceID addSampler (phazite::test::TestSong& song)
+{
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::setInstrument (s, song.firstTrack, phazite::makeOwnDeviceState (s, DrumSampler::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    return id;
+}
 } // namespace
 
 TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops sounds on them")
 {
-    phazite::test::TemporaryFolder project, elsewhere;
-    auto edit = phazite::createSongEdit (phazite::test::getEngine(), project.folder.getChildFile ("Song.phazite"));
-    const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
-    REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
-    phazite::test::settle();
+    phazite::test::TemporaryFolder elsewhere;
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = addSampler (song);
 
-    const auto device = phazite::makeDeviceHandle (*plugin);
+    const auto device = phazite::makeDeviceHandle (s, id);
     CHECK (dynamic_cast<phazite::ui::DrumSamplerEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
     auto* sampler = device.getProcessor<DrumSampler>();
     REQUIRE (sampler != nullptr);
@@ -80,8 +90,8 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
         std::find_if (knobs.begin(), knobs.end(), [] (auto* knob) { return knob->getTitle() == juce::String ("Pad 3 Level"); });
     REQUIRE (level != knobs.end());
     (*level)->setValue (-12.0, juce::sendNotificationSync);
-    CHECK (plugin->getAutomatableParameterByID ("pad3Level")->getCurrentValue() == doctest::Approx (-12.0f));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Pad 3 Level"));
+    CHECK (phazite::getValueSetByHand (s, phazite::ParameterRef { id, "pad3Level" }) == doctest::Approx (-12.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Pad 3 Level"));
 
     // A sound dropped on a pad plays there, named after its file.
     const auto file = elsewhere.folder.getChildFile ("Shaker.wav");
@@ -102,22 +112,21 @@ TEST_CASE ("The drum sampler's editor plays and selects its pads, and drops soun
     CHECK (editor.getSelectedPad() == 14);
     CHECK (editor.getPad (14).getDescription() == juce::String ("Shaker"));
     CHECK (device.hasPadSound (14));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Put Shaker on Pad 15"));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Put Shaker on Pad 15"));
 
-    phazite::undo (*edit);
+    phazite::undo (s);
     editor.refresh();
     CHECK (editor.getPad (14).getDescription() == juce::String ("High Tom 2"));
 }
 
 TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's ramp and its cut to drag, and where it plays")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
-    REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
-    phazite::test::settle();
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = addSampler (song);
+    s.getUndoManager().clearUndoHistory();
 
-    const auto device = phazite::makeDeviceHandle (*plugin);
+    const auto device = phazite::makeDeviceHandle (s, id);
     auto* sampler = device.getProcessor<DrumSampler>();
     REQUIRE (sampler != nullptr);
     sampler->prepare (48000.0, 4800);
@@ -125,7 +134,8 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     phazite::ui::DrumSamplerEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     auto& waveform = editor.getWaveform();
-    const auto valueOf = [&plugin] (const char* id) { return plugin->getAutomatableParameterByID (id)->getCurrentValue(); };
+    const auto valueOf = [&s, id] (const char* parameter)
+    { return phazite::getValueSetByHand (s, phazite::ParameterRef { id, parameter }); };
 
     // As tall as the dock is short, the pads still fit, at least 44 pixels each.
     CHECK (editor.getMinimumHeight() <= 235);
@@ -140,7 +150,7 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     mouse.dragTo ({ waveform.getWidth() / 2, y });
     mouse.release();
     CHECK (valueOf ("pad1Length") < 10000.0f);
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Pad 1 Length"));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Pad 1 Length"));
 
     // The attack's ramp, dragged right: a longer attack.
     mouse.pause();
@@ -149,7 +159,7 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
     mouse.dragTo ({ attackX + 20, 4 });
     mouse.release();
     CHECK (valueOf ("pad1Attack") > 0.5f);
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Pad 1 Attack"));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Pad 1 Attack"));
 
     // As it plays, its playhead moves along it.
     sampler->audition (0, 1.0f);
@@ -160,13 +170,12 @@ TEST_CASE ("The drum sampler's editor draws the pad's sound, with its attack's r
 
 TEST_CASE ("A pad clicked in the drum sampler's editor sounds at once, however long the sampler was silent")
 {
-    // The sampler sleeps once it has been silent a while (model/devices/internal/DevicePlugin.h): a click then waited in it
-    // unheard, and every click since sounded at once when the song's first note woke it. (An instrument has no switch of its
-    // own since 2026-11-01, so it is never off: DevicesViewTests.cpp.)
+    // The sampler sleeps once it has been silent a while (engine/nodes/DeviceRunner.h): a click then waited in it unheard,
+    // and every click since sounded at once when the song's first note woke it. (An instrument has no switch of its own
+    // since 2026-11-01, so it is never off: DevicesViewTests.cpp.)
     phazite::test::HostedDevice output;
     phazite::test::TestSong song;
     const auto drums = song.setInstrument (song.firstTrack, DrumSampler::typeID);
-    phazite::getEdit (song.context)->getTransport().ensureContextAllocated(); // as live notes have it in the app
     phazite::test::settle (500);
 
     phazite::ui::DrumSamplerEditor editor (phazite::getDeviceHandle (song.context, drums));

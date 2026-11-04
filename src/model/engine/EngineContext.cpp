@@ -3,7 +3,7 @@
 #include "AudioDevices.h"
 #include "internal/AudioIO.h"
 #include "internal/EngineContext.h"
-#include "internal/EngineSetup.h"
+#include "internal/PluginScanner.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -13,24 +13,29 @@ namespace phazite
 {
 struct EngineContext::Impl
 {
-    te::Engine& engine;
-    std::shared_ptr<AudioIO> audio = AudioIO::getFor (engine);         // the audio device and MIDI inputs (T4): the Engine's one
-    PlaybackHost playback { engine, audio->getDevices() };             // Phazite's own engine (docs/tracktion-migration.md, T2)
-    std::shared_ptr<PluginHost> plugins = PluginHost::getFor (engine); // plug-ins in helper processes (T3): the Engine's one
+    explicit Impl (int numThreads)
+        : playback (audio, plugins, numThreads)
+    {
+        usePluginScannerWithTimeLimit (plugins); // scanned in Phazite's helper program, with a time limit for each
+    }
+
+    AudioIO audio;         // the audio device and MIDI inputs
+    PluginHost plugins;    // plug-ins in helper processes
+    PlaybackHost playback; // Phazite's engine on the device, with the previews' beside it
 
     // Whether the output last asked about is Bluetooth, which takes a look through Windows' devices to find out.
     juce::String checkedOutput {};
     bool checkedIsBluetooth = false;
 };
 
-std::unique_ptr<EngineContext> createEngineContext (te::Engine& engine)
+std::unique_ptr<EngineContext> createEngineContext (EngineOptions options)
 {
-    return std::make_unique<EngineContext> (std::make_unique<EngineContext::Impl> (engine));
-}
+    JUCE_ASSERT_MESSAGE_THREAD
 
-te::Engine& getEngine (EngineContext& context)
-{
-    return context.getImpl().engine;
+    // Not one thread per logical CPU: the second thread of a core adds little to audio, and the window and the system need a
+    // core of their own (docs/performance-audit.md, A2).
+    const auto threads = options.numAudioThreads > 0 ? options.numAudioThreads : std::max (1, juce::SystemStats::getNumPhysicalCpus() - 1);
+    return std::make_unique<EngineContext> (std::make_unique<EngineContext::Impl> (threads));
 }
 
 PlaybackHost& getPlaybackHost (EngineContext& context)
@@ -40,12 +45,12 @@ PlaybackHost& getPlaybackHost (EngineContext& context)
 
 AudioIO& getAudioIO (EngineContext& context)
 {
-    return *context.getImpl().audio;
+    return context.getImpl().audio;
 }
 
 PluginHost& getPluginHost (EngineContext& context)
 {
-    return *context.getImpl().plugins;
+    return context.getImpl().plugins;
 }
 
 EngineContext::EngineContext (std::unique_ptr<Impl> i)
@@ -57,7 +62,7 @@ EngineContext::~EngineContext() = default;
 
 juce::AudioDeviceManager& EngineContext::getAudioDeviceManager()
 {
-    return impl->audio->getDevices();
+    return impl->audio.getDevices();
 }
 
 double EngineContext::getCpuUsage() const
@@ -67,7 +72,7 @@ double EngineContext::getCpuUsage() const
 
 EngineContext::AudioOutput EngineContext::getAudioOutput() const
 {
-    auto& devices = impl->audio->getDevices();
+    auto& devices = impl->audio.getDevices();
     AudioOutput output;
     auto* device = devices.getCurrentAudioDevice();
 
@@ -98,22 +103,22 @@ EngineContext::AudioOutput EngineContext::getAudioOutput() const
 
 bool EngineContext::isLowLatency() const
 {
-    return phazite::isLowLatency (impl->engine);
+    return impl->playback.isLowLatency();
 }
 
 double EngineContext::getRecordingCorrection() const
 {
-    return impl->audio->getRecordingCorrection();
+    return impl->audio.getRecordingCorrection();
 }
 
 void EngineContext::setRecordingCorrection (double milliseconds)
 {
-    impl->audio->setRecordingCorrection (milliseconds);
+    impl->audio.setRecordingCorrection (milliseconds);
 }
 
 bool EngineContext::hasAsioDrivers() const
 {
-    for (auto* type : impl->audio->getDevices().getAvailableDeviceTypes())
+    for (auto* type : impl->audio.getDevices().getAvailableDeviceTypes())
         if (type->getTypeName() == "ASIO")
             return ! type->getDeviceNames().isEmpty();
 
@@ -124,7 +129,7 @@ std::vector<EngineContext::MidiInput> EngineContext::getMidiInputs() const
 {
     std::vector<MidiInput> inputs;
 
-    for (const auto& input : impl->audio->getMidiInputs())
+    for (const auto& input : impl->audio.getMidiInputs())
         inputs.push_back ({ input.id, input.name, input.isOn });
 
     return inputs;
@@ -132,7 +137,7 @@ std::vector<EngineContext::MidiInput> EngineContext::getMidiInputs() const
 
 void EngineContext::setMidiInputOn (const juce::String& id, bool on)
 {
-    impl->audio->setMidiInputOn (id, on);
+    impl->audio.setMidiInputOn (id, on);
 }
 juce::StringArray EngineContext::getAudioFileExtensions() const
 {
@@ -148,16 +153,16 @@ juce::StringArray EngineContext::getAudioFileExtensions() const
 
 std::vector<DeviceType> EngineContext::getDeviceTypes() const
 {
-    return phazite::getDeviceTypes (impl->engine);
+    return phazite::getDeviceTypes (impl->plugins);
 }
 
 void EngineContext::addChangeListener (juce::ChangeListener* listener)
 {
-    impl->audio->addChangeListener (listener);
+    impl->audio.addChangeListener (listener);
 }
 
 void EngineContext::removeChangeListener (juce::ChangeListener* listener)
 {
-    impl->audio->removeChangeListener (listener);
+    impl->audio.removeChangeListener (listener);
 }
 } // namespace phazite

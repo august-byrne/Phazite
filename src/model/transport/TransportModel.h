@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The transport and the song's tempo as the top bar shows them (docs/design.md, section 4), by plain values
-// (architecture phase A3: no Tracktion here). Each function takes the open project's context, and gives nothing, or
-// does nothing, while no project is open. The changes are undo steps of their own, as Tempo.h names them.
+// The transport and the song's tempo as the top bar shows them (docs/design.md, section 4), by plain values. Each function
+// takes the open project's context, and gives nothing, or does nothing, while no project is open. The changes are undo steps of their own, as Tempo.h names them.
 #pragma once
 
 #include "TempoValues.h"
@@ -44,7 +43,7 @@ public:
     void endGesture();
     bool isInGesture() const;
 
-    struct Impl; // the project's Edit
+    struct Impl; // the project's song
     explicit TempoHandle (std::unique_ptr<Impl>);
 
 private:

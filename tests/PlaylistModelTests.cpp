@@ -29,11 +29,6 @@ phazite::BeatDuration beats (double length)
     return phazite::BeatDuration::fromBeats (length);
 }
 
-phazite::TrackID idOf (const te::Track& track)
-{
-    return phazite::getTrackID (track);
-}
-
 // A clip as the playlist is told of it, made in the order of its ID.
 phazite::ClipInfo clipAt (std::uint64_t id, double start, double length, phazite::ClipType kind = phazite::ClipType::midi)
 {
@@ -50,21 +45,22 @@ struct Song
 {
     Song()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        phazite::setTrackName (*a, "A");
-        phazite::setTrackName (*b, "B");
+        const auto tracks = phazite::ensureTracks (*song, 2);
+        a = tracks[0];
+        b = tracks[1];
+        phazite::setTrackName (*song, a, "A");
+        phazite::setTrackName (*song, b, "B");
 
-        auto& song = phazite::getSong (*edit);
-        clip = phazite::insertMidiClip (song, idOf (*a), { beat (4.0), beat (8.0) }, nullptr);
+        clip = phazite::insertMidiClip (*song, a, { beat (4.0), beat (8.0) }, nullptr);
         REQUIRE (clip.isValid());
-        phazite::test::addMidiNote (song, clip, 60, beat (0.0), beats (1.0), 100);
-        phazite::test::addMidiNote (song, clip, 64, beat (2.0), beats (1.0), 100);
-        setEdit (context, edit.get());
+        phazite::test::addMidiNote (*song, clip, 60, beat (0.0), beats (1.0), 100);
+        phazite::test::addMidiNote (*song, clip, 64, beat (2.0), beats (1.0), 100);
+        setSong (context, song.get());
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~Song() { setSong (context, nullptr); }
+
+    phazite::Song& getSong() const { return *song; }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -76,10 +72,9 @@ struct Song
         return {};
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
+    phazite::TrackID a, b;
     phazite::ClipID clip;
 };
 } // namespace
@@ -88,53 +83,53 @@ TEST_CASE ("The playlist's rows are its tracks top to bottom, without those in c
 {
     Song song;
     auto& context = song.context;
-    auto* folder = phazite::groupIntoFolder ({ song.b }, nullptr);
-    REQUIRE (folder != nullptr);
+    const auto folder = phazite::groupIntoFolder (song.getSong(), { song.b }, nullptr);
+    REQUIRE (folder.isValid());
 
     auto rows = phazite::getPlaylistRows (context);
     REQUIRE (rows.size() == 3);
-    CHECK (rows[0].id == idOf (*song.a));
+    CHECK (rows[0].id == song.a);
     CHECK (rows[0].name == juce::String ("A"));
     CHECK (rows[0].kind == phazite::TrackType::track);
-    CHECK (rows[0].colour == phazite::getTrackColour (*song.a, 0));
+    CHECK (rows[0].colour == phazite::getTrackColour (song.getSong(), song.a, 0));
     CHECK (rows[0].depth == 0);
-    CHECK (rows[1].id == idOf (*folder));
+    CHECK (rows[1].id == folder);
     CHECK (rows[1].kind == phazite::TrackType::folder);
-    CHECK (rows[2].id == idOf (*song.b));
+    CHECK (rows[2].id == song.b);
     CHECK (rows[2].depth == 1);
-    CHECK (phazite::isInside (context, idOf (*song.b), idOf (*folder)));
-    CHECK_FALSE (phazite::isInside (context, idOf (*song.a), idOf (*folder)));
-    CHECK_FALSE (phazite::isInside (context, idOf (*folder), idOf (*folder)));
-    CHECK (phazite::canHoldClips (context, idOf (*song.a)));
-    CHECK_FALSE (phazite::canHoldClips (context, idOf (*folder)));
+    CHECK (phazite::isInside (context, song.b, folder));
+    CHECK_FALSE (phazite::isInside (context, song.a, folder));
+    CHECK_FALSE (phazite::isInside (context, folder, folder));
+    CHECK (phazite::canHoldClips (context, song.a));
+    CHECK_FALSE (phazite::canHoldClips (context, folder));
 
     // A collapsed folder hides its tracks from the rows; they are still the playlist's.
-    phazite::setCollapsed (context, idOf (*folder), true);
+    phazite::setCollapsed (context, folder, true);
     rows = phazite::getPlaylistRows (context);
     REQUIRE (rows.size() == 2);
     CHECK (rows[1].collapsed);
-    CHECK (phazite::getAllPlaylistTracks (context) == std::vector { idOf (*song.a), idOf (*folder), idOf (*song.b) });
-    REQUIRE (phazite::getTrackRow (context, idOf (*song.b)).has_value());
-    CHECK (phazite::getTrackRow (context, idOf (*song.b))->depth == 1);
+    CHECK (phazite::getAllPlaylistTracks (context) == std::vector { song.a, folder, song.b });
+    REQUIRE (phazite::getTrackRow (context, song.b).has_value());
+    CHECK (phazite::getTrackRow (context, song.b)->depth == 1);
 
     // Heights are view state: no undo steps.
-    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
-    CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->savedHeight.has_value());
-    phazite::setSavedTrackHeight (context, idOf (*song.a), 120);
-    CHECK (phazite::getTrackRow (context, idOf (*song.a))->savedHeight.value_or (0) == 120);
-    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo());
+    song.getSong().getUndoManager().clearUndoHistory();
+    CHECK_FALSE (phazite::getTrackRow (context, song.a)->savedHeight.has_value());
+    phazite::setSavedTrackHeight (context, song.a, 120);
+    CHECK (phazite::getTrackRow (context, song.a)->savedHeight.value_or (0) == 120);
+    CHECK_FALSE (song.getSong().getUndoManager().canUndo());
 
     // A track with an instrument takes a double-click's MIDI clip.
-    CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->hasInstrument);
-    phazite::chooseInstrument (context, idOf (*song.a), song.find ("phaziteSynth"));
-    CHECK (phazite::getTrackRow (context, idOf (*song.a))->hasInstrument);
+    CHECK_FALSE (phazite::getTrackRow (context, song.a)->hasInstrument);
+    phazite::chooseInstrument (context, song.a, song.find ("phaziteSynth"));
+    CHECK (phazite::getTrackRow (context, song.a)->hasInstrument);
 
     // Nothing for what is gone, or without a project.
-    const auto gone = idOf (*song.b);
-    phazite::deleteTracks ({ song.b }, nullptr);
+    const auto gone = song.b;
+    phazite::deleteTracks (song.getSong(), { song.b }, nullptr);
     CHECK_FALSE (phazite::getTrackRow (context, gone).has_value());
     CHECK (phazite::getClips (context, gone).empty());
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
     CHECK (phazite::getPlaylistRows (context).empty());
     CHECK (phazite::getAllPlaylistTracks (context).empty());
 }
@@ -143,31 +138,31 @@ TEST_CASE ("A folder's row sums up its tracks' clips, a lane for each track that
 {
     Song song;
     auto& context = song.context;
-    auto* folder = phazite::groupIntoFolder ({ song.a, song.b }, nullptr);
-    REQUIRE (folder != nullptr);
+    const auto folder = phazite::groupIntoFolder (song.getSong(), { song.a, song.b }, nullptr);
+    REQUIRE (folder.isValid());
 
     // A's clip, on the first lane; B has none, but holds clips, so it has the second lane.
-    auto summary = phazite::getFolderSummary (context, idOf (*folder));
+    auto summary = phazite::getFolderSummary (context, folder);
     CHECK (summary.lanes == 2);
     REQUIRE (summary.clips.size() == 1);
     CHECK (summary.clips[0].range == phazite::BeatRange { beat (4.0), beats (4.0) });
     CHECK (summary.clips[0].lane == 0);
-    CHECK (summary.clips[0].colour == phazite::getTrackRow (context, idOf (*song.a))->colour);
+    CHECK (summary.clips[0].colour == phazite::getTrackRow (context, song.a)->colour);
     CHECK_FALSE (summary.clips[0].muted);
 
     // B's clip on the second lane, and a muted clip fainter.
-    const auto second = phazite::addMidiClipAt (context, idOf (*song.b), beat (8.0));
+    const auto second = phazite::addMidiClipAt (context, song.b, beat (8.0));
     REQUIRE (second.isValid());
     phazite::toggleClipsMuted (context, { second });
-    summary = phazite::getFolderSummary (context, idOf (*folder));
+    summary = phazite::getFolderSummary (context, folder);
     REQUIRE (summary.clips.size() == 2);
     CHECK (summary.clips[1].lane == 1);
     CHECK (summary.clips[1].muted);
 
     // Collapsed, it still sums them up; a track, or what is gone, has nothing to sum up.
-    phazite::setCollapsed (context, idOf (*folder), true);
-    CHECK (phazite::getFolderSummary (context, idOf (*folder)).clips.size() == 2);
-    CHECK (phazite::getFolderSummary (context, idOf (*song.a)).lanes == 0);
+    phazite::setCollapsed (context, folder, true);
+    CHECK (phazite::getFolderSummary (context, folder).clips.size() == 2);
+    CHECK (phazite::getFolderSummary (context, song.a).lanes == 0);
     CHECK (phazite::getFolderSummary (context, {}).clips.empty());
 }
 
@@ -175,21 +170,21 @@ TEST_CASE ("Tracks by ID are renamed, colored, moved and added, each as one undo
 {
     Song song;
     auto& context = song.context;
-    auto& undo = phazite::getSong (*song.edit).getUndoManager();
+    auto& undo = song.getSong().getUndoManager();
     undo.clearUndoHistory();
 
-    phazite::renameTrack (context, idOf (*song.a), "Lead");
-    CHECK (song.a->getName() == juce::String ("Lead"));
+    phazite::renameTrack (context, song.a, "Lead");
+    CHECK (phazite::getTrackName (song.getSong(), song.a) == juce::String ("Lead"));
     CHECK (undo.getUndoDescription() == juce::String ("Rename Track"));
 
-    phazite::setTrackColours (context, { idOf (*song.a), idOf (*song.b) }, juce::Colours::red);
+    phazite::setTrackColours (context, { song.a, song.b }, juce::Colours::red);
     CHECK (phazite::getPlaylistRows (context)[1].colour == juce::Colours::red);
     CHECK (undo.getUndoDescription() == juce::String ("Change Track Colors"));
 
-    phazite::moveTracksTo (context, { idOf (*song.a) }, idOf (*song.b), phazite::TrackDrop::after);
-    CHECK (phazite::getAllPlaylistTracks (context) == std::vector { idOf (*song.b), idOf (*song.a) });
-    phazite::moveTracksTo (context, { idOf (*song.a) }, idOf (*song.b), phazite::TrackDrop::before);
-    CHECK (phazite::getAllPlaylistTracks (context) == std::vector { idOf (*song.a), idOf (*song.b) });
+    phazite::moveTracksTo (context, { song.a }, song.b, phazite::TrackDrop::after);
+    CHECK (phazite::getAllPlaylistTracks (context) == std::vector { song.b, song.a });
+    phazite::moveTracksTo (context, { song.a }, song.b, phazite::TrackDrop::before);
+    CHECK (phazite::getAllPlaylistTracks (context) == std::vector { song.a, song.b });
     CHECK (undo.getUndoDescription() == juce::String ("Move Track"));
 
     const auto added = phazite::addTrackAtEnd (context, true);
@@ -204,13 +199,11 @@ TEST_CASE ("Dragged tracks go before or after a track, into a folder after its l
 {
     Song song;
     auto& context = song.context;
-    phazite::ensureTracks (*song.edit, 4);
-    const auto tracks = te::getAudioTracks (*song.edit);
-    const auto c = idOf (*tracks[2]), d = idOf (*tracks[3]);
-    const auto a = idOf (*song.a), b = idOf (*song.b);
-    auto* folderTrack = phazite::groupIntoFolder ({ tracks[2] }, nullptr); // A, B, Folder (C), D
-    REQUIRE (folderTrack != nullptr);
-    const auto folder = idOf (*folderTrack);
+    const auto tracks = phazite::ensureTracks (song.getSong(), 4);
+    const auto c = tracks[2], d = tracks[3];
+    const auto a = song.a, b = song.b;
+    const auto folder = phazite::groupIntoFolder (song.getSong(), { c }, nullptr); // A, B, Folder (C), D
+    REQUIRE (folder.isValid());
     const auto order = [&context] { return phazite::getAllPlaylistTracks (context); };
     REQUIRE (order() == std::vector { a, b, folder, c, d });
 
@@ -240,7 +233,7 @@ TEST_CASE ("Dragged tracks go before or after a track, into a folder after its l
     CHECK (phazite::isInside (context, c, folder));
 
     // Each move is one undo step.
-    phazite::undo (*song.edit);
+    phazite::undo (song.getSong());
     CHECK (order() == std::vector { folder, c, b, d, a });
 }
 
@@ -248,12 +241,12 @@ TEST_CASE ("Each row knows the colors of the folders it is in, outermost first")
 {
     Song song;
     auto& context = song.context;
-    auto* inner = phazite::groupIntoFolder ({ song.b }, nullptr);
-    REQUIRE (inner != nullptr);
-    auto* outer = phazite::groupIntoFolder ({ inner }, nullptr);
-    REQUIRE (outer != nullptr);
-    phazite::setTrackColours (context, { idOf (*outer) }, juce::Colours::red);
-    phazite::setTrackColours (context, { idOf (*inner) }, juce::Colours::blue);
+    const auto inner = phazite::groupIntoFolder (song.getSong(), { song.b }, nullptr);
+    REQUIRE (inner.isValid());
+    const auto outer = phazite::groupIntoFolder (song.getSong(), { inner }, nullptr);
+    REQUIRE (outer.isValid());
+    phazite::setTrackColours (context, { outer }, juce::Colours::red);
+    phazite::setTrackColours (context, { inner }, juce::Colours::blue);
 
     const auto rows = phazite::getPlaylistRows (context); // A, outer, inner, B
     REQUIRE (rows.size() == 4);
@@ -261,37 +254,37 @@ TEST_CASE ("Each row knows the colors of the folders it is in, outermost first")
     CHECK (rows[1].folderColours.empty());
     CHECK (rows[2].folderColours == std::vector { juce::Colours::red });
     CHECK (rows[3].folderColours == std::vector { juce::Colours::red, juce::Colours::blue });
-    CHECK (phazite::getTrackRow (context, idOf (*song.b))->folderColours == rows[3].folderColours);
+    CHECK (phazite::getTrackRow (context, song.b)->folderColours == rows[3].folderColours);
 }
 
 TEST_CASE ("Collapse All collapses every row and lane while any is expanded, and expands them all otherwise, without undo steps")
 {
     Song song;
     auto& context = song.context;
-    auto* folder = phazite::groupIntoFolder ({ song.b }, nullptr);
-    REQUIRE (folder != nullptr);
-    phazite::showAutomationLane (context, phazite::getVolume (context, idOf (*song.a)).getRef());
-    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
+    const auto folder = phazite::groupIntoFolder (song.getSong(), { song.b }, nullptr);
+    REQUIRE (folder.isValid());
+    phazite::showAutomationLane (context, phazite::getVolume (context, song.a).getRef());
+    song.getSong().getUndoManager().clearUndoHistory();
     REQUIRE (phazite::isAnyRowExpanded (context));
 
-    phazite::toggleAllRowsCollapsed (*song.edit);
+    phazite::toggleAllRowsCollapsed (song.getSong());
     CHECK_FALSE (phazite::isAnyRowExpanded (context));
-    CHECK (phazite::getTrackRow (context, idOf (*song.a))->collapsed);
-    CHECK (phazite::getTrackRow (context, idOf (*folder))->collapsed);
-    CHECK (phazite::getTrackRow (context, idOf (*song.b))->collapsed); // hidden in its folder, collapsed too
-    CHECK (phazite::getAutomationLanes (context, idOf (*song.a))[0].collapsed);
+    CHECK (phazite::getTrackRow (context, song.a)->collapsed);
+    CHECK (phazite::getTrackRow (context, folder)->collapsed);
+    CHECK (phazite::getTrackRow (context, song.b)->collapsed); // hidden in its folder, collapsed too
+    CHECK (phazite::getAutomationLanes (context, song.a)[0].collapsed);
 
     // A lane expanded again counts: the next Collapse All collapses it.
-    phazite::setAutomationLaneCollapsed (context, phazite::getVolume (context, idOf (*song.a)).getRef(), false);
+    phazite::setAutomationLaneCollapsed (context, phazite::getVolume (context, song.a).getRef(), false);
     CHECK (phazite::isAnyRowExpanded (context));
-    phazite::toggleAllRowsCollapsed (*song.edit);
+    phazite::toggleAllRowsCollapsed (song.getSong());
     CHECK_FALSE (phazite::isAnyRowExpanded (context));
 
-    phazite::toggleAllRowsCollapsed (*song.edit);
-    CHECK_FALSE (phazite::getTrackRow (context, idOf (*song.a))->collapsed);
-    CHECK_FALSE (phazite::getTrackRow (context, idOf (*folder))->collapsed);
-    CHECK_FALSE (phazite::getAutomationLanes (context, idOf (*song.a))[0].collapsed);
-    CHECK_FALSE (phazite::getSong (*song.edit).getUndoManager().canUndo());
+    phazite::toggleAllRowsCollapsed (song.getSong());
+    CHECK_FALSE (phazite::getTrackRow (context, song.a)->collapsed);
+    CHECK_FALSE (phazite::getTrackRow (context, folder)->collapsed);
+    CHECK_FALSE (phazite::getAutomationLanes (context, song.a)[0].collapsed);
+    CHECK_FALSE (song.getSong().getUndoManager().canUndo());
 }
 
 TEST_CASE ("Clips by ID: what the playlist draws of them, and the tools' edits")
@@ -299,10 +292,10 @@ TEST_CASE ("Clips by ID: what the playlist draws of them, and the tools' edits")
     Song song;
     auto& context = song.context;
 
-    const auto clips = phazite::getClips (context, idOf (*song.a));
+    const auto clips = phazite::getClips (context, song.a);
     REQUIRE (clips.size() == 1);
     CHECK (clips[0].id == song.clip);
-    CHECK (clips[0].track == idOf (*song.a));
+    CHECK (clips[0].track == song.a);
     CHECK (clips[0].kind == phazite::ClipType::midi);
     CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
     CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (8.0));
@@ -317,8 +310,8 @@ TEST_CASE ("Clips by ID: what the playlist draws of them, and the tools' edits")
     CHECK (notes[1].end == doctest::Approx (3.0));
 
     // Moved to the other track, trimmed, split, copied as an alias, muted, nudged and deleted.
-    phazite::moveClip (context, song.clip, beat (8.0), idOf (*song.b));
-    CHECK (phazite::getClip (context, song.clip)->track == idOf (*song.b));
+    phazite::moveClip (context, song.clip, beat (8.0), song.b);
+    CHECK (phazite::getClip (context, song.clip)->track == song.b);
     phazite::trimClipEnd (context, song.clip, beat (14.0));
     CHECK (phazite::getClip (context, song.clip)->range.getEnd().inBeats() == doctest::Approx (14.0));
     phazite::trimClipStart (context, song.clip, beat (9.0));
@@ -328,7 +321,7 @@ TEST_CASE ("Clips by ID: what the playlist draws of them, and the tools' edits")
     const auto halves = phazite::splitClips (context, { song.clip }, beat (12.0));
     REQUIRE (halves.size() == 1);
     CHECK (phazite::getClip (context, halves[0])->range.getStart().inBeats() == doctest::Approx (12.0));
-    CHECK (phazite::getClips (context, idOf (*song.b)).size() == 2);
+    CHECK (phazite::getClips (context, song.b).size() == 2);
 
     const auto aliases = phazite::copyClips (context, { song.clip }, true);
     REQUIRE (aliases.size() == 1);
@@ -345,13 +338,13 @@ TEST_CASE ("Clips by ID: what the playlist draws of them, and the tools' edits")
     CHECK (phazite::getNoteShapes (context, song.clip).empty());
 
     // Draw and Paint place a copy of the last clip used.
-    const auto placed = phazite::placeClip (context, idOf (*song.a), beat (16.0), halves[0]);
+    const auto placed = phazite::placeClip (context, song.a, beat (16.0), halves[0]);
     REQUIRE (placed.isValid());
-    CHECK (phazite::getClip (context, placed)->track == idOf (*song.a));
+    CHECK (phazite::getClip (context, placed)->track == song.a);
     CHECK (phazite::getClip (context, placed)->range.getStart().inBeats() == doctest::Approx (16.0));
 
     // A double-click adds an empty MIDI clip, selected.
-    const auto added = phazite::addMidiClipAt (context, idOf (*song.a), beat (24.0));
+    const auto added = phazite::addMidiClipAt (context, song.a, beat (24.0));
     REQUIRE (added.isValid());
     CHECK (phazite::getClip (context, added)->range.getStart().inBeats() == doctest::Approx (24.0));
     CHECK (context.getSongSelection().isSelected (added));
@@ -366,12 +359,12 @@ TEST_CASE ("Audio clips by ID are faded, crossfaded and slipped")
     CHECK (phazite::canImport (context, file));
     CHECK_FALSE (phazite::canImport (context, temp.folder.getChildFile ("Notes.txt")));
 
-    const auto imported = phazite::importFiles (context, { file.getFullPathName() }, idOf (*song.b), beat (0.0));
+    const auto imported = phazite::importFiles (context, { file.getFullPathName() }, song.b, beat (0.0));
     REQUIRE (imported.size() == 1);
     const auto first = imported[0];
     REQUIRE (phazite::getClip (context, first).has_value());
     CHECK (phazite::getClip (context, first)->kind == phazite::ClipType::audio);
-    CHECK (phazite::getClip (context, first)->track == idOf (*song.b));
+    CHECK (phazite::getClip (context, first)->track == song.b);
     CHECK (phazite::getClip (context, first)->range.getEnd().inBeats() == doctest::Approx (8.0));
 
     // A fade in to a quarter of the clip, as a part of its length.
@@ -384,8 +377,8 @@ TEST_CASE ("Audio clips by ID are faded, crossfaded and slipped")
     const auto halves = phazite::splitClips (context, { first }, beat (4.0));
     REQUIRE (halves.size() == 1);
     const auto second = halves[0];
-    CHECK (phazite::getCrossfadeSpots (context, idOf (*song.a), beats (0.01)).empty());
-    const auto spots = phazite::getCrossfadeSpots (context, idOf (*song.b), beats (0.01));
+    CHECK (phazite::getCrossfadeSpots (context, song.a, beats (0.01)).empty());
+    const auto spots = phazite::getCrossfadeSpots (context, song.b, beats (0.01));
     REQUIRE (spots.size() == 1);
     CHECK (spots[0].first == first);
     CHECK (spots[0].second == second);
@@ -397,7 +390,7 @@ TEST_CASE ("Audio clips by ID are faded, crossfaded and slipped")
     CHECK (right->range.getStart().inBeats() == doctest::Approx (3.0));
     CHECK (left->fadeOut == doctest::Approx (0.4)); // 2 of its 5 beats
     CHECK (right->fadeIn == doctest::Approx (0.4));
-    CHECK (phazite::getClipSubRows (phazite::getClips (context, idOf (*song.b))) == std::vector<phazite::ClipSubRow> (2)); // the whole row
+    CHECK (phazite::getClipSubRows (phazite::getClips (context, song.b)) == std::vector<phazite::ClipSubRow> (2)); // the whole row
 
     // Slipped: what plays inside moves a beat earlier, and the clip stays where it is.
     CHECK (phazite::getSlipOffset (context, first) == doctest::Approx (0.0));
@@ -447,9 +440,7 @@ TEST_CASE ("The playlist's sections, play start and time line by plain values")
     CHECK (phazite::getSongSections (context).empty());
     CHECK (phazite::getTimelineEnd (context).inBeats() == doctest::Approx (8.0)); // the clip's end
 
-    REQUIRE (
-        phazite::insertSection (phazite::getSong (*song.edit), {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (32.0) })
-            .isValid());
+    REQUIRE (phazite::insertSection (song.getSong(), {}, { .name = "Intro", .length = phazite::BeatDuration::fromBeats (32.0) }).isValid());
     const auto sections = phazite::getSongSections (context);
     REQUIRE (sections.size() == 1);
     CHECK (sections[0].name == juce::String ("Intro"));
@@ -458,7 +449,7 @@ TEST_CASE ("The playlist's sections, play start and time line by plain values")
     CHECK (sections[0].colour == phazite::getRoleColour ({}));                     // without a role or a color of its own
     CHECK (phazite::getTimelineEnd (context).inBeats() == doctest::Approx (32.0)); // sections count, unlike for the song's end
 
-    phazite::movePlayhead (*song.edit, song.edit->tempoSequence.toTime (te::BeatPosition::fromBeats (6.0)));
+    phazite::movePlayhead (song.getSong(), beat (6.0));
     CHECK (phazite::getPlayStartBeat (context).inBeats() == doctest::Approx (6.0));
 }
 
@@ -466,7 +457,7 @@ TEST_CASE ("Sections by ID are added, renamed, colored, moved, copied and resize
 {
     Song song;
     auto& context = song.context;
-    auto& undo = phazite::getSong (*song.edit).getUndoManager();
+    auto& undo = song.getSong().getUndoManager();
     const auto startsOf = [&context]
     {
         std::vector<double> starts;
@@ -508,8 +499,8 @@ TEST_CASE ("Sections by ID are added, renamed, colored, moved, copied and resize
     REQUIRE (sections.size() == 2);
     CHECK (sections[1].name == juce::String ("Intro"));
     CHECK (startsOf() == std::vector { 0.0, 32.0 });
-    REQUIRE (phazite::getClips (context, idOf (*song.a)).size() == 1);
-    CHECK (phazite::getClips (context, idOf (*song.a))[0].range.getStart().inBeats() == doctest::Approx (36.0));
+    REQUIRE (phazite::getClips (context, song.a).size() == 1);
+    CHECK (phazite::getClips (context, song.a)[0].range.getStart().inBeats() == doctest::Approx (36.0));
 
     // Copied to the start as aliases: the sections after it make room, and its clip is linked to the original.
     const auto copy = phazite::copySection (context, sections[1].id, beat (0.0), true);
@@ -517,7 +508,7 @@ TEST_CASE ("Sections by ID are added, renamed, colored, moved, copied and resize
     CHECK (undo.getUndoDescription() == juce::String ("Copy Section as Aliases"));
     CHECK (phazite::getSongSection (context, copy)->name == juce::String ("Intro"));
     CHECK (startsOf() == std::vector { 0.0, 32.0, 64.0 });
-    const auto clips = phazite::getClips (context, idOf (*song.a));
+    const auto clips = phazite::getClips (context, song.a);
     REQUIRE (clips.size() == 2);
     CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
     CHECK (clips[0].linked);
@@ -542,23 +533,23 @@ TEST_CASE ("The time range selected across tracks, by IDs")
     auto& range = song.context.getSongRange();
     CHECK (range.isEmpty());
 
-    range.set ({ beat (2.0), beat (6.0) }, { idOf (*song.a), idOf (*song.b) });
+    range.set ({ beat (2.0), beat (6.0) }, { song.a, song.b });
     CHECK_FALSE (range.isEmpty());
     CHECK (range.getRange().getStart().inBeats() == doctest::Approx (2.0));
     CHECK (range.getRange().getEnd().inBeats() == doctest::Approx (6.0));
-    CHECK (range.getTracks() == std::vector { idOf (*song.a), idOf (*song.b) });
+    CHECK (range.getTracks() == std::vector { song.a, song.b });
     CHECK (getRangeSelection (song.context).getTracks().size() == 2); // what the model's commands act on
     CHECK (range.isSource (&getRangeSelection (song.context)));
     CHECK_FALSE (range.isSource (nullptr));
 
     // Tracks that are gone are left out, and with none left it is empty.
-    const auto gone = idOf (*song.b);
-    phazite::deleteTracks ({ song.b }, nullptr);
-    CHECK (range.getTracks() == std::vector { idOf (*song.a) });
+    const auto gone = song.b;
+    phazite::deleteTracks (song.getSong(), { song.b }, nullptr);
+    CHECK (range.getTracks() == std::vector { song.a });
     range.set ({ beat (0.0), beat (1.0) }, { gone });
     CHECK (range.isEmpty());
 
-    range.set ({ beat (0.0), beat (1.0) }, { idOf (*song.a) });
+    range.set ({ beat (0.0), beat (1.0) }, { song.a });
     range.clear();
     CHECK (range.isEmpty());
 }

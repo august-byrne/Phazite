@@ -5,24 +5,4 @@
 # The linux-tsan test preset passes this file to the tests. To run the app with it:
 #   TSAN_OPTIONS=suppressions=tools/tsan-suppressions.txt setarch $(uname -m) -R build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite
 
-# Finding 18: Tracktion's audio file cache replaces a file's AudioFileInfo, under the file's lock, each time it
-# maps the file again, while playback reads the sample rate, length and channel count without that lock.
-race:tracktion::engine::AudioFileCache::CachedFile::createNewReader
-
-
-# Finding 20: while the song is stopped, a plug-in with automation reads the transport's position on the audio thread
-# (Plugin::applyToBufferWithAutomation) from a CachedValue that the message thread writes when the playhead moves.
-# Phazite's own code calls getPosition() on the message thread only; naming the plug-in function would hide every race
-# in any device's processing.
-race:tracktion::engine::TransportControl::getPosition
-
-# Finding 21: Tracktion's RenderManager deletes a finished render job (the reversed copy of an audio clip's file, say) on
-# the message thread as soon as JUCE's thread pool says the job no longer runs, while the pool's thread can still be
-# writing to the job: JUCE clears the job's running flag before its other fields. Both sides are Tracktion's and JUCE's
-# code, and this function only deletes finished jobs.
-race:tracktion::engine::RenderManager::handleAsyncUpdate
-
-# Finding 25: building a playback graph on the message thread writes each modulator's sample rate
-# (Modifier::baseClassInitialise), which the audio thread reads unsynchronised for the graph still playing, in the LFO's
-# timer (LFOModifier::LFOModifierTimer::updateStreamTime). Phazite's code doesn't call this function.
-race:tracktion::engine::Modifier::getSampleRate
+# None now.

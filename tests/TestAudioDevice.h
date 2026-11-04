@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // An audio device for tests, of a type of its own on JUCE's device manager ("Phazite Test Device"): opened as the app opens
 // a device, its blocks played when a test asks, on the thread that asks, with what comes into its inputs given. For
-// HostedDevice.h, RealTimePlayback.h and the real-time audit, in place of Tracktion's hosted device
-// (docs/tracktion-migration.md, T4).
+// HostedDevice.h, RealTimePlayback.h and the real-time audit.
 #pragma once
 
 #include <juce_audio_devices/juce_audio_devices.h>

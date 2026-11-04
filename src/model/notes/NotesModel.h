@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's notes as the piano roll reaches them (docs/design.md, section 7), by IDs and plain values (architecture phase
-// A3: no Tracktion here): the MIDI clips it shows and their notes (NoteValues.h), other tracks' notes as ghosts, the
-// edits its tools make, a track's key, drum mode and its rows, and notes played as they are placed. Each function takes
-// the open project's context, and does nothing, or gives nothing, for an ID of something that is gone. Edits join the
-// caller's undo step (a gesture's or a command's), unless their comments say they are steps of their own.
+// The song's notes as the piano roll reaches them (docs/design.md, section 7), by IDs and plain values: the MIDI clips
+// it shows and their notes (NoteValues.h), other tracks' notes as ghosts, the edits its tools make, a track's key, drum
+// mode and its rows, and notes played as they are placed. Each function takes the open project's context, and does
+// nothing, or gives nothing, for an ID of something that is gone. Edits join the caller's undo step (a gesture's or a
+// command's), unless their comments say they are steps of their own.
 #pragma once
 
 #include "NoteValues.h"

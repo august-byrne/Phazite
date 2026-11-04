@@ -13,6 +13,8 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/AudioIO.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/NotesModel.h"
@@ -29,13 +31,13 @@
 
 TEST_CASE ("Overdub and quantizing recordings are the app's settings, which their commands switch")
 {
-    auto& engine = phazite::test::getEngine();
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
 
-    auto edit = phazite::createSongEdit (engine);
-    phazite::Selection selection (engine);
-    selection.setEdit (edit.get());
+    auto song = phazite::createSong();
+    phazite::Selection selection;
+    selection.setSong (song.get());
     phazite::CommandRegistry registry;
-    phazite::addRecordingCommands (registry, selection);
+    phazite::addRecordingCommands (registry, selection, audio);
 
     const auto* overdub = registry.find ("transport.overdub");
     const auto* quantize = registry.find ("transport.quantizeRecordings");
@@ -45,34 +47,34 @@ TEST_CASE ("Overdub and quantizing recordings are the app's settings, which thei
     CHECK_FALSE (quantize->isTicked());
 
     REQUIRE (registry.invoke ("transport.overdub"));
-    CHECK_FALSE (phazite::isOverdubOn (engine));
+    CHECK_FALSE (phazite::isOverdubOn (audio));
 
     REQUIRE (registry.invoke ("transport.quantizeRecordings"));
-    CHECK (phazite::isRecordQuantizeOn (engine));
+    CHECK (phazite::isRecordQuantizeOn (audio));
     CHECK (quantize->isTicked());
 
     // Back as they were, for the other tests.
-    phazite::setOverdubOn (engine, true);
-    phazite::setRecordQuantizeOn (engine, false);
+    phazite::setOverdubOn (audio, true);
+    phazite::setRecordQuantizeOn (audio, false);
     CHECK (overdub->isTicked());
     CHECK_FALSE (quantize->isTicked());
-    selection.setEdit (nullptr);
+    selection.setSong (nullptr);
 }
 
 TEST_CASE ("Recording needs a track for live MIDI to play")
 {
     phazite::test::TestSong song;
-    auto& edit = *phazite::getEdit (song.context);
-    phazite::routeLiveMidiInput (edit);
-    CHECK_FALSE (phazite::canRecord (edit)); // no instrument anywhere
-    CHECK_FALSE (phazite::canToggleRecording (edit));
+    auto& songState = *phazite::findSong (song.context);
+    phazite::routeLiveMidiInput (songState);
+    CHECK_FALSE (phazite::canRecord (songState)); // no instrument anywhere
+    CHECK_FALSE (phazite::canToggleRecording (songState));
 
-    phazite::startRecording (edit);
-    CHECK_FALSE (phazite::isRecording (edit));
+    phazite::startRecording (songState);
+    CHECK_FALSE (phazite::isRecording (songState));
 
     song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
-    phazite::routeLiveMidiInput (edit);
-    CHECK (phazite::canRecord (edit));
+    phazite::routeLiveMidiInput (songState);
+    CHECK (phazite::canRecord (songState));
 }
 
 //==============================================================================
@@ -139,7 +141,7 @@ struct EngineTake
         song.setTempo (120.0);
         song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
         song.setSwitch ("transport.countIn", false);
-        phazite::routeLiveMidiInput (*phazite::getEdit (song.context)); // live MIDI plays the track with an instrument
+        phazite::routeLiveMidiInput (*phazite::findSong (song.context)); // live MIDI plays the track with an instrument
         playback.play (0.01);
         REQUIRE (phazite::getLiveMidiTrack (song.context) == song.firstTrack);
         song.context.getUndoManager()->clearUndoHistory();
@@ -150,10 +152,11 @@ struct EngineTake
     // A note played live: so long after the last, for so long, as the engine plays on.
     void playNote (int pitch, double after, double seconds)
     {
+        auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
         playback.play (after);
-        phazite::playLiveMidi (phazite::test::getEngine(), juce::MidiMessage::noteOn (1, pitch, 0.8f));
+        audio.playLive (juce::MidiMessage::noteOn (1, pitch, 0.8f));
         playback.play (seconds);
-        phazite::playLiveMidi (phazite::test::getEngine(), juce::MidiMessage::noteOff (1, pitch));
+        audio.playLive (juce::MidiMessage::noteOff (1, pitch));
     }
 
     // The notes of the track's clips, in time order.
@@ -202,7 +205,7 @@ TEST_CASE ("What is played while recording becomes a clip on live MIDI's track, 
     CHECK (notes[0].length.inBeats() == doctest::Approx (0.5).epsilon (withinABlock));
     CHECK (take.song.context.getUndoManager()->getUndoDescription() == juce::String ("Record"));
 
-    phazite::undo (*phazite::getEdit (take.song.context));
+    phazite::undo (*phazite::findSong (take.song.context));
     CHECK (phazite::getClips (take.song.context, take.song.firstTrack).empty());
 }
 
@@ -227,7 +230,7 @@ TEST_CASE ("The song's own loop doesn't loop a take, and a looped range folds wh
     SUBCASE ("A range looped on purpose, a second long: each time round's notes in one clip over it")
     {
         EngineTake take;
-        phazite::loopBeatRange (*phazite::getEdit (take.song.context), 0.0, 2.0);
+        phazite::loopBeatRange (*phazite::findSong (take.song.context), 0.0, 2.0);
         take.song.run ("transport.record");
         take.playNote (60, 0.25, 0.25); // at half a beat, the first time round
         take.playNote (62, 1.1, 0.2);   // at 1.6 s: 1.2 beats into the second time round
@@ -251,7 +254,7 @@ TEST_CASE ("The song's own loop doesn't loop a take, and a looped range folds wh
 TEST_CASE ("Punched in, a take keeps only the notes played in the looped range")
 {
     EngineTake take;
-    phazite::loopBeatRange (*phazite::getEdit (take.song.context), 1.0, 3.0);
+    phazite::loopBeatRange (*phazite::findSong (take.song.context), 1.0, 3.0);
     phazite::setPunchOn (take.song.context, true);
     take.song.run ("transport.record");
     take.playNote (60, 0.25, 0.1); // at half a beat: before the range
@@ -279,12 +282,13 @@ TEST_CASE ("Overdub adds a take's notes to the clip there, and without it they t
         EngineTake take;
         const auto there = take.song.addMidiClip (take.song.firstTrack, 0.0, 4.0);
         take.song.addNote (there, 48, 2.0, 1.0);
-        phazite::setOverdubOn (phazite::test::getEngine(), overdub);
+        auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+        phazite::setOverdubOn (audio, overdub);
         take.song.run ("transport.record");
         take.playNote (60, 0.25, 0.25);
         take.playback.play (0.25);
         take.song.run ("transport.record");
-        phazite::setOverdubOn (phazite::test::getEngine(), true);
+        phazite::setOverdubOn (audio, true);
 
         std::vector<int> pitches;
 

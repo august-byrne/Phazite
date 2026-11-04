@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The editors of Phazite's own devices (roadmap step 1.6), which device windows (src/app/PluginWindow.h) show: a
 // device's own editor, or until it has one, a knob for each of its parameters. They work through the model's
-// DeviceHandle and ParameterHandles, so the model owns every undo step and the editors use no Tracktion types.
+// DeviceHandle and ParameterHandles, so the model owns every undo step and the editors reach the song by IDs alone.
 #pragma once
 
 #include "model/devices/DeviceHandle.h"

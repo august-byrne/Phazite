@@ -10,7 +10,6 @@
 #include "model/base/internal/Selection.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
-#include "model/engine/internal/EngineSetup.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -28,15 +27,15 @@ namespace
 struct OpenSong
 {
     explicit OpenSong (int numTracks)
-        : edit (phazite::createSongEdit (phazite::test::getEngine()))
+        : tracks (phazite::ensureTracks (*song, numTracks))
     {
-        phazite::ensureTracks (*edit, numTracks);
-        setEdit (context, edit.get());
+        setSong (context, song.get());
     }
 
-    ~OpenSong() { setEdit (context, nullptr); }
+    ~OpenSong() { setSong (context, nullptr); }
 
-    std::unique_ptr<te::Edit> edit;
+    phazite::Song::Ptr song = phazite::createSong();
+    std::vector<phazite::TrackID> tracks;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 };
 
@@ -52,13 +51,27 @@ bool isNear (int samples, int expected)
     return std::abs (samples - expected) <= 2;
 }
 
-void addInstrument (te::AudioTrack& track)
+void addInstrument (phazite::Song& song, phazite::TrackID track)
 {
-    phazite::insertDevice (track, track.edit.getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
+    REQUIRE (phazite::setInstrument (song, track, phazite::makeOwnDeviceState (song, phazite::devices::Synth::typeID)).isValid());
 }
 
-// Plays a note until it sounds as wanted, a few times at most, and says when it sounded the last time: Tracktion makes its
-// graph again after a change in its own time, which a sanitizer's build makes slow.
+// One of Phazite's own devices after a channel's devices (the master's with getMasterID()), with values set by hand.
+phazite::DeviceID addDevice (phazite::Song& song, phazite::TrackID channel, const char* typeID,
+                             const std::vector<std::pair<juce::String, float>>& values = {})
+{
+    const auto id = phazite::insertDeviceState (song, channel, phazite::makeOwnDeviceState (song, typeID, values));
+    REQUIRE (id.isValid());
+    return id;
+}
+
+phazite::PlaybackHost& getPlaybackHost()
+{
+    return phazite::getPlaybackHost (phazite::test::getEngineContext());
+}
+
+// Plays a note until it sounds as wanted, a few times at most, and says when it sounded the last time: the engine is given
+// the song again after a change in the message loop's own time, which a sanitizer's build makes slow.
 int playUntil (const std::function<int()>& playNote, const std::function<bool (int samples)>& wanted)
 {
     auto samples = playNote();
@@ -75,35 +88,35 @@ int playUntil (const std::function<int()>& playNote, const std::function<bool (i
 
 TEST_CASE ("Live MIDI goes to the first track with an instrument")
 {
-    OpenSong song (3);
-    auto& edit = song.edit;
-    const auto tracks = te::getAudioTracks (*edit);
-    CHECK (phazite::getLiveMidiTrack (*edit) == nullptr); // nowhere at first
-    addInstrument (*tracks[1]);
+    OpenSong open (3);
+    auto& song = *open.song;
+    const auto& tracks = open.tracks;
+    CHECK_FALSE (phazite::getLiveMidiTrack (song).isValid()); // nowhere at first
+    addInstrument (song, tracks[1]);
 
-    phazite::routeLiveMidiInput (*edit);
-    CHECK (phazite::getLiveMidiTrack (*edit) == tracks[1]);
+    phazite::routeLiveMidiInput (song);
+    CHECK (phazite::getLiveMidiTrack (song) == tracks[1]);
 
     // Another track can take it over, and it then plays only there.
-    REQUIRE (phazite::setLiveMidiTrack (*tracks[2]));
-    CHECK (phazite::getLiveMidiTrack (*edit) == tracks[2]);
+    REQUIRE (phazite::setLiveMidiTrack (song, tracks[2]));
+    CHECK (phazite::getLiveMidiTrack (song) == tracks[2]);
 
     // A project that already sends live MIDI somewhere keeps that.
-    phazite::routeLiveMidiInput (*edit);
-    CHECK (phazite::getLiveMidiTrack (*edit) == tracks[2]);
+    phazite::routeLiveMidiInput (song);
+    CHECK (phazite::getLiveMidiTrack (song) == tracks[2]);
 }
 
 TEST_CASE ("Without an instrument, live MIDI goes nowhere")
 {
-    OpenSong song (1);
-    phazite::routeLiveMidiInput (*song.edit);
-    CHECK (phazite::getLiveMidiTrack (*song.edit) == nullptr);
+    OpenSong open (1);
+    phazite::routeLiveMidiInput (*open.song);
+    CHECK_FALSE (phazite::getLiveMidiTrack (*open.song).isValid());
 
-    // Nor anywhere in an Edit that no project context holds, which has no session to keep it.
-    auto alone = phazite::createSongEdit (phazite::test::getEngine());
-    addInstrument (*te::getAudioTracks (*alone)[0]);
+    // Nor anywhere in a song that no project context holds, which has no session to keep it.
+    auto alone = phazite::createSong();
+    addInstrument (*alone, phazite::getTrackIDs (*alone).front());
     phazite::routeLiveMidiInput (*alone);
-    CHECK (phazite::getLiveMidiTrack (*alone) == nullptr);
+    CHECK_FALSE (phazite::getLiveMidiTrack (*alone).isValid());
 }
 
 TEST_CASE ("Playing and routing live MIDI don't count as unsaved changes")
@@ -114,24 +127,24 @@ TEST_CASE ("Playing and routing live MIDI don't count as unsaved changes")
 
     {
         juce::String error;
-        auto project = phazite::Project::create (phazite::test::getEngine(), folder, "Live", error);
+        auto project = phazite::Project::create (folder, "Live", error);
         REQUIRE (project != nullptr);
 
-        auto& edit = project->getEdit();
-        phazite::ensureTracks (edit, 1);
-        addInstrument (*te::getAudioTracks (edit)[0]);
+        auto& song = project->getSong();
+        const auto track = phazite::ensureTracks (song, 1).front();
+        addInstrument (song, track);
         REQUIRE (project->save().wasOk());
         REQUIRE_FALSE (project->hasUnsavedChanges());
 
         // What opening a project and playing it do: where live MIDI goes, and the playhead moved.
         phazite::ProjectContext context { phazite::test::getEngineContext() };
-        setEdit (context, &edit);
-        phazite::routeLiveMidiInput (edit);
-        CHECK (phazite::getLiveMidiTrack (edit) == te::getAudioTracks (edit)[0]);
-        phazite::movePlayhead (edit, te::TimePosition::fromSeconds (2.0));
+        setSong (context, &song);
+        phazite::routeLiveMidiInput (song);
+        CHECK (phazite::getLiveMidiTrack (song) == track);
+        phazite::movePlayhead (song, phazite::BeatPosition::fromBeats (4.0));
 
         CHECK_FALSE (project->hasUnsavedChanges());
-        setEdit (context, nullptr);
+        setSong (context, nullptr);
     }
 
     folder.deleteRecursively();
@@ -139,41 +152,40 @@ TEST_CASE ("Playing and routing live MIDI don't count as unsaved changes")
 
 TEST_CASE ("Live MIDI follows the selected track, if it has an instrument")
 {
-    OpenSong song (3);
-    auto& edit = song.edit;
-    const auto tracks = te::getAudioTracks (*edit);
-    addInstrument (*tracks[0]);
-    addInstrument (*tracks[2]);
-    phazite::routeLiveMidiInput (*edit);
-    REQUIRE (phazite::getLiveMidiTrack (*edit) == tracks[0]);
+    OpenSong open (3);
+    auto& song = *open.song;
+    const auto& tracks = open.tracks;
+    addInstrument (song, tracks[0]);
+    addInstrument (song, tracks[2]);
+    phazite::routeLiveMidiInput (song);
+    REQUIRE (phazite::getLiveMidiTrack (song) == tracks[0]);
 
-    phazite::Selection selection (phazite::test::getEngine());
-    selection.setEdit (edit.get());
+    phazite::Selection selection;
+    selection.setSong (&song);
 
-    selection.selectOnly (phazite::getTrackID (*tracks[2]));
+    selection.selectOnly (tracks[2]);
     phazite::followSelectedTrack (selection);
-    CHECK (phazite::getLiveMidiTrack (*edit) == tracks[2]);
+    CHECK (phazite::getLiveMidiTrack (song) == tracks[2]);
 
     // A track without an instrument can't play it, so live MIDI stays where it was.
-    CHECK_FALSE (phazite::hasInstrument (*tracks[1]));
-    selection.selectOnly (phazite::getTrackID (*tracks[1]));
+    CHECK_FALSE (phazite::hasInstrument (song, tracks[1]));
+    selection.selectOnly (tracks[1]);
     phazite::followSelectedTrack (selection);
-    CHECK (phazite::getLiveMidiTrack (*edit) == tracks[2]);
+    CHECK (phazite::getLiveMidiTrack (song) == tracks[2]);
 
     selection.deselectAll();
 }
 
 TEST_CASE ("The computer keyboard's notes play live into the track live MIDI plays, through Phazite's engine")
 {
-    OpenSong song (2);
-    auto& edit = song.edit;
-    addInstrument (*te::getAudioTracks (*edit)[1]);
-    phazite::routeLiveMidiInput (*edit);
-    const auto track = phazite::getLiveMidiTrack (song.context);
+    OpenSong open (2);
+    addInstrument (*open.song, open.tracks[1]);
+    phazite::routeLiveMidiInput (*open.song);
+    const auto track = phazite::getLiveMidiTrack (open.context);
     REQUIRE (track.isValid());
 
     phazite::test::EnginePlayback playback;
-    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    auto& host = getPlaybackHost();
     host.getPlayedEvents(); // none from before
     auto playedSince = [&host, before = host.getPlayedEvents().size()]() mutable
     {
@@ -184,9 +196,8 @@ TEST_CASE ("The computer keyboard's notes play live into the track live MIDI pla
         return since;
     };
 
-    auto& engine = phazite::test::getEngine();
-    phazite::playLiveMidi (engine, juce::MidiMessage::noteOn (1, 60, 0.8f));
-    phazite::playLiveMidi (engine, juce::MidiMessage::noteOff (1, 60));
+    playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    playLive (juce::MidiMessage::noteOff (1, 60));
     playback.play (0.05);
     auto played = playedSince();
     REQUIRE (played.size() == 2);
@@ -196,22 +207,21 @@ TEST_CASE ("The computer keyboard's notes play live into the track live MIDI pla
     CHECK (played[1].event.type == phazite::devices::NoteEvent::Type::noteOff);
 
     // Only notes: a controller, even All Notes Off, plays nothing.
-    phazite::playLiveMidi (engine, juce::MidiMessage::allNotesOff (1));
-    phazite::playLiveMidi (engine, juce::MidiMessage::controllerEvent (1, 1, 64));
+    playLive (juce::MidiMessage::allNotesOff (1));
+    playLive (juce::MidiMessage::controllerEvent (1, 1, 64));
     playback.play (0.05);
     CHECK (playedSince().empty());
 }
 
 TEST_CASE ("A live note sounds at once, and waits only for devices that are switched on and look ahead")
 {
-    auto& engine = phazite::test::getEngine();
     phazite::test::HostedDevice device;
 
-    OpenSong song (2);
-    auto& edit = song.edit;
-    const auto tracks = te::getAudioTracks (*edit);
-    addInstrument (*tracks[0]);
-    phazite::routeLiveMidiInput (*edit);
+    OpenSong open (2);
+    auto& song = *open.song;
+    const auto& tracks = open.tracks;
+    addInstrument (song, tracks[0]);
+    phazite::routeLiveMidiInput (song);
     phazite::test::settle (500);
 
     // A note played between two blocks, as a MIDI input plays one: how long after it it sounds.
@@ -219,7 +229,7 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     {
         device.process (50);
         const auto samples = device.samplesFromNoteToSound ([] { playLive (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100)); });
-        phazite::playLiveMidi (engine, juce::MidiMessage::noteOff (1, 60));
+        playLive (juce::MidiMessage::noteOff (1, 60));
         device.process (200);
         return samples;
     };
@@ -229,8 +239,7 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     CHECK (atOnce < 16);
 
     // A limiter on another track looks ahead, and delay compensation holds what is played back to match it...
-    auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
-    phazite::insertDevice (*tracks[1], limiter);
+    const auto limiter = addDevice (song, tracks[1], phazite::devices::Limiter::typeID);
     phazite::test::settle (500);
     phazite::devices::Limiter itsDSP;
     itsDSP.prepare (phazite::test::HostedDevice::sampleRate, phazite::test::HostedDevice::blockSize);
@@ -239,30 +248,29 @@ TEST_CASE ("A live note sounds at once, and waits only for devices that are swit
     CHECK (isNear (playUntil (playNote, [&] (int samples) { return isNear (samples, atOnce + latency); }), atOnce + latency));
 
     // ...but not once it is switched off.
-    phazite::setDeviceOn (*limiter, false);
+    phazite::setDeviceOn (song, limiter, false);
     phazite::test::settle (500);
     CHECK (isNear (playUntil (playNote, [atOnce] (int samples) { return isNear (samples, atOnce); }), atOnce));
 }
 
 TEST_CASE ("Low latency plays live notes without delay compensation, and back with it when it is off")
 {
-    auto& engine = phazite::test::getEngine();
     phazite::test::HostedDevice device;
 
     // A limiter, which looks ahead, on another track.
-    OpenSong song (2);
-    auto& edit = song.edit;
-    const auto tracks = te::getAudioTracks (*edit);
-    addInstrument (*tracks[0]);
-    phazite::insertDevice (*tracks[1], edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {}));
-    phazite::routeLiveMidiInput (*edit);
+    OpenSong open (2);
+    auto& song = *open.song;
+    const auto& tracks = open.tracks;
+    addInstrument (song, tracks[0]);
+    addDevice (song, tracks[1], phazite::devices::Limiter::typeID);
+    phazite::routeLiveMidiInput (song);
     phazite::test::settle (500);
 
     const auto playNote = [&]
     {
         device.process (50);
         const auto samples = device.samplesFromNoteToSound ([] { playLive (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100)); });
-        phazite::playLiveMidi (engine, juce::MidiMessage::noteOff (1, 60));
+        playLive (juce::MidiMessage::noteOff (1, 60));
         device.process (200);
         return samples;
     };
@@ -270,40 +278,39 @@ TEST_CASE ("Low latency plays live notes without delay compensation, and back wi
     const auto compensated = playUntil (playNote, [] (int samples) { return samples > 90; });
     CHECK (compensated > 90); // the limiter's look-ahead, about 99 samples
 
-    phazite::setLowLatency (engine, true);
+    auto& host = getPlaybackHost();
+    host.setLowLatency (true);
     phazite::test::settle (500);
-    CHECK (phazite::isLowLatency (engine));
+    CHECK (host.isLowLatency());
     const auto low = playUntil (playNote, [] (int samples) { return samples >= 0 && samples < 16; });
     CHECK (low >= 0);
     CHECK (low < 16);
 
-    phazite::setLowLatency (engine, false);
+    host.setLowLatency (false);
     phazite::test::settle (500);
     CHECK (isNear (playUntil (playNote, [compensated] (int samples) { return isNear (samples, compensated); }), compensated));
 }
 
 TEST_CASE ("Every live note sounds, however long the message thread was busy")
 {
-    // The blocks are processed while the test's message thread waits, as the app's does through a long repaint: Tracktion
-    // dropped the notes waiting when JUCE's approximate clock caught up between two blocks, about every other one here,
-    // until Phazite kept that clock up to date; Phazite's engine reads no such clock.
-    auto& engine = phazite::test::getEngine();
+    // The blocks are processed while the test's message thread waits, as the app's does through a long repaint: every
+    // note played meanwhile still sounds, as soon as the first did.
     phazite::test::HostedDevice device;
 
-    OpenSong song (2);
-    auto& edit = song.edit;
-    addInstrument (*te::getAudioTracks (*edit)[0]);
+    OpenSong open (2);
+    auto& song = *open.song;
+    addInstrument (song, open.tracks[0]);
     auto lookAhead = 0; // samples: what the master's devices look ahead by delays what is played live as much
 
     SUBCASE ("Alone in the song")
     {
     }
 
-    // As the notes were lost when they were first seen to be.
+    // With devices that look ahead on the master, as when notes were once seen to be lost.
     SUBCASE ("With a limiter and a multiband on the master")
     {
         for (const auto* type : { phazite::devices::Limiter::typeID, phazite::devices::Multiband::typeID })
-            phazite::insertMasterDevice (*edit, edit->getPluginCache().createNewPlugin (type, {}));
+            addDevice (song, phazite::getMasterID (song), type);
 
         phazite::devices::Limiter limiter;
         phazite::devices::Multiband multiband;
@@ -315,20 +322,20 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
         }
     }
 
-    phazite::routeLiveMidiInput (*edit);
+    phazite::routeLiveMidiInput (song);
     phazite::test::settle (500);
 
     const auto playNote = [&]
     {
         device.process (50);
         const auto samples = device.samplesFromNoteToSound ([] { playLive (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100)); });
-        phazite::playLiveMidi (engine, juce::MidiMessage::noteOff (1, 60));
+        playLive (juce::MidiMessage::noteOff (1, 60));
         device.process (200);
         return samples;
     };
 
-    // Once the graph plays the note, in the block it came in (after the master's look-ahead), every note after it sounds as
-    // soon.
+    // Once the engine plays the note, in the block it came in (after the master's look-ahead), every note after it sounds
+    // as soon.
     const auto first = playUntil (playNote, [] (int samples) { return samples >= 0; });
     REQUIRE (first >= 0);
     CHECK (first < phazite::test::HostedDevice::blockSize + lookAhead);
@@ -340,27 +347,24 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
 TEST_CASE ("Low latency leaves what renders play as the song has it")
 {
     // A synth's chord into a limiter on the master, which low latency would bypass while playing.
-    auto& engine = phazite::test::getEngine();
-    auto edit = phazite::createSongEdit (engine);
-    auto& track = *te::getAudioTracks (*edit)[0];
-    addInstrument (track);
-    auto& song = phazite::getSong (*edit);
-    const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (track),
-                                                  { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) }, "Chord");
+    auto song = phazite::createSong();
+    const auto track = phazite::getTrackIDs (*song).front();
+    addInstrument (*song, track);
+    const auto clip =
+        phazite::test::addMidiClip (*song, track, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) }, "Chord");
 
     for (int note : { 48, 55, 60, 64 })
-        phazite::test::addMidiNote (song, clip, note, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (3.0), 120);
+        phazite::test::addMidiNote (*song, clip, note, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (3.0), 120);
 
-    auto limiter = edit->getPluginCache().createNewPlugin (phazite::devices::Limiter::typeID, {});
-    phazite::insertMasterDevice (*edit, limiter);
-    phazite::setDeviceValue (*limiter->getAutomatableParameterByID ("gain"), 12.0f);
+    addDevice (*song, phazite::getMasterID (*song), phazite::devices::Limiter::typeID, { { "gain", 12.0f } });
 
     // A second of it, as an export renders it (Phazite's engine, offline).
-    const auto render = [&edit] { return phazite::renderWithOwnEngine (*edit, 48000, 48000.0, 512); };
+    const auto render = [&song] { return phazite::renderWithOwnEngine (*song, 48000, 48000.0, 512); };
+    auto& host = getPlaybackHost();
     const auto asItIs = render();
-    phazite::setLowLatency (engine, true);
+    host.setLowLatency (true);
     const auto whileLow = render();
-    phazite::setLowLatency (engine, false);
+    host.setLowLatency (false);
 
     REQUIRE (asItIs.getNumSamples() == whileLow.getNumSamples());
     CHECK (asItIs.getMagnitude (0, asItIs.getNumSamples()) > 0.5f);

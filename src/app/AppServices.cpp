@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppServices.h"
-#include "SandboxedEditor.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/Preview.h"
@@ -10,9 +9,9 @@ namespace phazite
 {
 struct AppServices::PluginLists final : private juce::ChangeListener
 {
-    PluginLists (juce::KnownPluginList& list, PluginHost& h, Settings& s)
-        : known (list),
-          host (h),
+    PluginLists (PluginHost& h, Settings& s)
+        : host (h),
+          known (h.getKnownPlugins()),
           settings (s)
     {
         if (const auto xml = juce::parseXML (settings.get (Settings::knownPlugins)))
@@ -29,8 +28,8 @@ struct AppServices::PluginLists final : private juce::ChangeListener
         host.removeChangeListener (this);
     }
 
-    juce::KnownPluginList& known;
     PluginHost& host;
+    juce::KnownPluginList& known;
     Settings& settings;
 
     void changeListenerCallback (juce::ChangeBroadcaster* changed) override
@@ -58,6 +57,7 @@ struct AppServices::DeviceSettings final : private juce::ChangeListener
         saved.midiInputsOff = settings.get (Settings::midiInputsOff);
         saved.overdub = settings.get (Settings::recordOverdub);
         saved.recordQuantize = settings.get (Settings::recordQuantize);
+        saved.countIn = settings.get (Settings::recordCountIn);
         saved.recordingCorrection = settings.get (Settings::recordingCorrection);
         audio.open (saved);
         save(); // a first run's choice
@@ -78,30 +78,30 @@ struct AppServices::DeviceSettings final : private juce::ChangeListener
         settings.set (Settings::midiInputsOff, saved.midiInputsOff);
         settings.set (Settings::recordOverdub, saved.overdub);
         settings.set (Settings::recordQuantize, saved.recordQuantize);
+        settings.set (Settings::recordCountIn, saved.countIn);
         settings.set (Settings::recordingCorrection, saved.recordingCorrection);
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { save(); }
 };
-AppServices::AppServices (te::Engine& engine, AppServicesOptions options)
-    : engineContext (createEngineContext (engine)),
+
+AppServices::AppServices (EngineContext& context, AppServicesOptions options)
+    : engineContext (context),
       settingsFile (options.settingsInMemory ? nullptr : std::make_unique<juce::PropertiesFile> (Settings::getFileOptions())),
       settings (settingsFile.get()),
       recentProjects (settings),
       soundPack (options.packsFolder, options.soundPackRelease),
-      library (*engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),
-      previewer (createPreviewer (*engineContext))
+      library (engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),
+      previewer (createPreviewer (engineContext))
 {
-    // Plug-ins in helper processes (docs/tracktion-migration.md, T3), with their editors in the app's windows; the scan's
-    // list, and those that crashed as they loaded kept off.
-    useSandboxedEditors (getPluginHost (*engineContext));
-    pluginLists = std::make_unique<PluginLists> (engine.getPluginManager().knownPluginList, getPluginHost (*engineContext), settings);
+    // Plug-ins in helper processes: the scan's list, and those that crashed as they loaded kept off.
+    pluginLists = std::make_unique<PluginLists> (getPluginHost (engineContext), settings);
 }
 
 void AppServices::openAudioDevices()
 {
     if (deviceSettings == nullptr)
-        deviceSettings = std::make_unique<DeviceSettings> (getAudioIO (*engineContext), settings);
+        deviceSettings = std::make_unique<DeviceSettings> (getAudioIO (engineContext), settings);
 }
 
 AppServices::~AppServices() = default;

@@ -7,48 +7,52 @@
 // played in the looped range is kept, the take not looping. Overdub, the default, adds the notes to the clips already
 // there; with it off, they take those clips' place. Recorded notes can be quantized to sixteenths as they go in. However
 // recording stops, the take is one undo step, "Record" (Playback.h's stop functions keep it too). Overdub and quantizing
-// are the app's settings, for every project, which Phazite keeps (model/engine/internal/AudioIO.h).
+// are the app's settings, for every project, which Phazite keeps (model/engine/internal/AudioIO.h). The song records
+// through its playback session (model/playback/internal/PlaybackSession.h) while Phazite's engine plays it: without one,
+// nothing records.
 #pragma once
 
+#include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 
 namespace phazite
 {
+class AudioIO;
 class CommandRegistry;
 
-// Whether recording can start: live MIDI plays one of the Edit's tracks, or a track is armed with an input.
-bool canRecord (te::Edit&);
-bool isRecording (const te::Edit&);
+// Whether recording can start: the engine plays the song, and live MIDI plays one of its tracks, or a track is armed with
+// an input.
+bool canRecord (const Song&);
+bool isRecording (const Song&);
 
 // Starts recording, playing from where playback starts (after the count-in, when it is on), or from where the song is
 // if it plays already. Nothing if it can't.
-void startRecording (te::Edit&);
+void startRecording (Song&);
 
 // Stops recording and playback, back where playback started, and keeps what was played as one undo step, "Record".
-void stopRecording (te::Edit&);
+void stopRecording (Song&);
 
 // The Record command: stops a recording, or starts one if it can.
-void toggleRecording (te::Edit&);
-bool canToggleRecording (te::Edit&);
+void toggleRecording (Song&);
+bool canToggleRecording (const Song&);
 
-bool isOverdubOn (te::Engine&);
-void setOverdubOn (te::Engine&, bool);
-void toggleOverdub (te::Engine&);
+bool isOverdubOn (const AudioIO&);
+void setOverdubOn (AudioIO&, bool);
+void toggleOverdub (AudioIO&);
 
-bool isRecordQuantizeOn (te::Engine&);
-void setRecordQuantizeOn (te::Engine&, bool);
-void toggleRecordQuantize (te::Engine&);
+bool isRecordQuantizeOn (const AudioIO&);
+void setRecordQuantizeOn (AudioIO&, bool);
+void toggleRecordQuantize (AudioIO&);
 
 // Punch (RecordingModel.h): the project's switch, kept with it like the loop's, not an undo step; it punches only while a
 // range is looped on purpose (canPunch()), and shows as on only then.
-bool isPunchOn (const te::Edit&);
-bool canPunch (const te::Edit&);
-void setPunchOn (te::Edit&, bool);
-bool isPunching (const te::Edit&); // on, and a range looped
-void togglePunch (te::Edit&);
+bool isPunchOn (const Song&);
+bool canPunch (const Song&);
+void setPunchOn (Song&, bool);
+bool isPunching (const Song&); // on, and a range looped
+void togglePunch (Song&);
 
-// Arm Track: the selected tracks that have inputs armed, or disarmed if they all were.
+// Arm Track: the selected tracks that can record audio and have inputs armed, or disarmed if they all were.
 bool canArmSelectedTracks (const Selection&);
 bool areSelectedTracksArmed (const Selection&);
 void toggleArmSelectedTracks (const Selection&);
@@ -57,7 +61,7 @@ void toggleArmSelectedTracks (const Selection&);
 bool canStepTakes (const Selection&);
 void stepTakes (const Selection&, int direction);
 
-// The commands, for the selection manager's Edit: Record, Overdub, Quantize Recordings, Punch In, Arm Track, and Next and
-// Previous Take.
-void addRecordingCommands (CommandRegistry&, Selection&);
+// The commands, for the selection's song and the app's audio: Record, Overdub, Quantize Recordings, Punch In, Arm Track,
+// and Next and Previous Take.
+void addRecordingCommands (CommandRegistry&, Selection&, AudioIO&);
 } // namespace phazite

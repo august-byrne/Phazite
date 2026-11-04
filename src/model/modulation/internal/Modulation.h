@@ -1,143 +1,89 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Modulation's Tracktion side (model/modulation/ModulationModel.h), for the model, the app and tests: a track's
-// modulators, which are Tracktion's modifiers, and its macros, which are Tracktion's macro parameters, found by their
-// ModulatorIDs; and what they modulate, which are Tracktion's modifier assignments. Each is the song's (Schema.h:
-// MODULATOR, MACRO, MODULATES; T1 step 6), which the model changes, and Tracktion's mirror. Not for the UI.
+// Modulation (model/modulation/ModulationModel.h), for the model, the app and tests: each track's modulators and macros,
+// and each container's macros, which the song holds (Schema.h: MODULATOR, MACRO), found by their ModulatorIDs; and what
+// each modulates (Schema.h: MODULATES), by the parameters' references (model/devices/internal/Parameters.h). Phazite's
+// engine plays them from the song (model/playback/internal/SongPlayer.h). The changes join the caller's undo step. Not for
+// the UI.
 #pragma once
 
 #include "devices/modulation/Modulators.h"
+#include "model/base/IDs.h"
 #include "model/base/Song.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/devices/ParameterRef.h"
 #include "model/modulation/ModulationValues.h"
 
 #include <optional>
+#include <vector>
 
 namespace phazite
 {
-class DevicePlugin;
-
 //==============================================================================
-// A modulator or a macro: what moves the parameters assigned to it (Tracktion's ModifierSource), as one or the other.
-struct ModulatorAccess
-{
-    te::Modifier::Ptr modifier;    // a modulator
-    te::MacroParameter::Ptr macro; // or a macro
-
-    te::AutomatableParameter::ModifierSource* getSource() const;
-    te::Track* getTrack() const;            // whose it is: a container's macro's, its container's track
-    te::RackType* getContainerRack() const; // a container's macro's: the rack type its container plays
-    ModulatorID getID() const;
-};
-
-std::optional<ModulatorAccess> findModulator (const te::Edit&, ModulatorID);
-ModulatorID getModulatorID (const te::Modifier&);
-ModulatorID getModulatorID (const te::MacroParameter&);
-
-// The song's modulation (Schema.h: MODULATOR, MACRO, MODULATES; T1 step 6), which Tracktion's modifiers, macro parameters
-// and their assignments mirror (model/mirror/internal/Mirror.h: reconcileModulation()): every modulator's and macro's
-// element (the tracks', the master's and the containers'); one's by its ID, invalid for one the song hasn't (a container's
-// a preset made, before it is on a channel); and the ID an element names. The model changes them, and the mirror follows.
+// The song's modulators and macros as it holds them: every one's element (the tracks', the master's and the containers');
+// one's by its ID, invalid for one the song hasn't; and the ID an element names.
 std::vector<juce::ValueTree> getModulatorStates (const Song&);
 juce::ValueTree findModulatorState (const Song&, ModulatorID);
-std::vector<juce::ValueTree> getModulatorStates (const te::Edit&);
-juce::ValueTree findModulatorState (const te::Edit&, ModulatorID);
 ModulatorID getModulatorID (const juce::ValueTree& modulatorState);
 
 // What a MODULATES element names; a step sequencer's steps as its element keeps them; a modulator's type by the name the
-// song gives it (Schema.h: modulatorType), and Tracktion's modifier that plays one of a type.
+// song gives it (Schema.h: modulatorType); and its kind as Phazite's engine plays it (devices/modulation/Modulators.h),
+// whose parameters it has: nothing for a macro.
 ParameterRef getModulatedParameter (const juce::ValueTree& modulates);
 std::vector<float> getModulatorSteps (const juce::ValueTree& modulatorState);
 std::optional<ModulatorType> findModulatorType (const juce::String& name);
-const juce::Identifier& getModifierType (ModulatorType);
-
-// A modulator's kind as Phazite's engine plays it (devices/modulation/Modulators.h), whose parameters it has; nothing for a
-// macro.
 std::optional<devices::ModulatorKind> getModulatorKind (const juce::ValueTree& modulatorState);
 
-// A track's modulators, in their order, then its macros: the master's and folders' too.
-std::vector<ModulatorAccess> getModulators (te::Track&);
+//==============================================================================
+// A channel's modulators, in their order, then its macros: a track's, a folder's or the master's (by its ID, or none). A
+// container's macros are its own (model/mixer/internal/Containers.h: getContainerMacros()).
+std::vector<ModulatorID> getModulators (const Song&, TrackID);
 
-std::optional<ModulatorType> getModulatorType (const ModulatorAccess&);
-juce::String getModulatorName (const ModulatorAccess&); // "LFO 2": its kind's name and its place among those of its track
+// What a modulator or a macro is; whose it is (a container's macro's: its container's channel); the container whose macro
+// it is, none for others; and its name: a macro's own ("Macro 1"), or a modulator's kind and its place among those of its
+// kind on its channel ("LFO 2").
+std::optional<ModulatorType> getModulatorType (const Song&, ModulatorID);
+TrackID getModulatorTrack (const Song&, ModulatorID);
+DeviceID getModulatorContainer (const Song&, ModulatorID);
+juce::String getModulatorName (const Song&, ModulatorID);
 
-// Adds one to the end of a track's modulators (a macro after its macros), joining the caller's step; nothing for a track
-// that can't hold one (a macro: only tracks that hold clips can). It starts as Phazite sets it up: LFOs and random
-// sources move both ways, and a step sequencer and an envelope follower at full depth, the steps rising.
-std::optional<ModulatorAccess> addModulator (te::Track&, ModulatorType);
+// Adds one to the end of a channel's modulators (a macro after its macros, named "Macro" and its number); none for a
+// channel that can't hold it: modulators go on tracks, folders and the master, macros only on tracks and returns. It starts
+// as Phazite sets it up: LFOs and random sources move both ways, and a step sequencer and an envelope follower at full
+// depth, the steps rising.
+ModulatorID addModulator (Song&, TrackID, ModulatorType);
 
-// Adds a macro to a list of them (a track's or a container's), named as given ("Macro 1"), at 0, so that what it
-// modulates doesn't move until it is turned; made with its value in its state, so that redoing the step puts it back at
-// 0 too. Joins the caller's step.
-te::MacroParameter* addMacro (te::MacroParameterList&, const juce::String& name);
+// Adds a macro to a track's or a container's element in the song (a TRACK that isn't a folder, or a CONTAINER), named as
+// given, at 0, so that what it modulates doesn't move until it is turned. Returns it, or none for another element.
+ModulatorID addMacro (Song&, juce::ValueTree owner, const juce::String& name);
 
-// Renames a macro, joining the caller's step; a name of nothing but spaces leaves it as it is.
-void renameMacro (te::MacroParameter&, const juce::String& name);
+// Renames a macro; a name of nothing but spaces leaves it as it is.
+void renameMacro (Song&, ModulatorID, const juce::String& name);
 
-// The name a modulator's editor shows for one of its parameters: Tracktion's, but clearer ("Polarity", "Point 1 Level").
-juce::String getModulatorParameterName (const te::AutomatableParameter&);
-void removeModulator (const ModulatorAccess&); // and what it modulates; joins the caller's step
+// Removes a modulator or a macro, with what it modulates.
+void removeModulator (Song&, ModulatorID);
 
-// Whether its values go from -1 to 1, rather than from 0 to 1 (a macro's, an envelope follower's).
-bool isBipolar (const ModulatorAccess&);
+// Whether its values go from -1 to 1, rather than from 0 to 1: an LFO's, a random source's and a breakpoint envelope's as
+// their polarity says, a step sequencer's always; not an envelope follower's, a note follower's or a macro's.
+bool isBipolar (const Song&, ModulatorID);
 
-// Whether a modulator is on (its modifier's enabled parameter, which Tracktion's modulation reads); a macro always is.
-// Switching one joins the caller's step, and what it modulates plays as it now is, modulated or not.
-bool isModulatorOn (const ModulatorAccess&);
-void setModulatorOn (const ModulatorAccess&, bool on);
+// Whether a modulator is on (Schema.h: deviceOff); a macro always is. Off, it moves nothing, and what it modulates plays
+// its value.
+bool isModulatorOn (const Song&, ModulatorID);
+void setModulatorOn (Song&, ModulatorID, bool on);
 
-// A step sequencer's step, -1 to 1 (the song's: Schema.h modulatorSteps), joining the caller's step.
-void setModulatorStep (const ModulatorAccess&, int index, float value);
+// A step sequencer's step, -1 to 1, of devices::Modulator::maxSteps (Schema.h: modulatorSteps).
+void setModulatorStep (Song&, ModulatorID, int index, float value);
 
 //==============================================================================
-// What a modulator or a macro modulates: a parameter, by an amount (Tracktion's assignment's value) from -1 to 1, as a
-// part of the parameter's range.
-struct ModulationAccess
-{
-    ModulatorAccess modulator;
-    te::AutomatableParameter::Ptr parameter;
-    te::AutomatableParameter::ModifierAssignment::Ptr assignment;
-};
+// What modulators and macros modulate (ModulationValues.h: Modulation): a parameter's, in the order of the song's
+// modulators; and a modulator's, in the order its modulations were made. Only parameters the song has.
+std::vector<Modulation> getModulations (const Song&, const ParameterRef&);
+std::vector<Modulation> getModulations (const Song&, ModulatorID);
 
-std::vector<ModulationAccess> getModulations (const te::AutomatableParameter&); // in the order they were made
-std::vector<ModulationAccess> getModulations (const ModulatorAccess&);
+// Whether a modulator can modulate a parameter: one of its own channel's devices' (those in its containers too), or its
+// channel's volume, pan or sends, but no modulator's and no macro's. A container's macros modulate its devices' alone.
+bool canModulate (const Song&, ModulatorID, const ParameterRef&);
 
-// Whether a modulator can modulate a parameter: one of its own track's devices' (those in its containers too), or its
-// track's volume, pan or sends, but none of its own (nor a macro's). A container's macros modulate its devices'.
-bool canModulate (const ModulatorAccess&, const te::AutomatableParameter&);
-
-// Makes a modulation or changes its amount, and takes it away, joining the caller's step. The parameter then plays its
-// value as modulated where the playhead is, while the song doesn't play.
-void setModulation (const ModulatorAccess&, te::AutomatableParameter&, float amount);
-void removeModulation (const ModulatorAccess&, te::AutomatableParameter&);
-
-//==============================================================================
-// Gives one of Phazite's devices, or each of them in an Edit, what modulates its parameters as Tracktion's assignments
-// say (model/devices/internal/DeviceModulation.h), so that the device moves them itself in every stretch of a block
-// (roadmap A5, part 4). A device whose modulation is as it was keeps playing it. Message thread.
-void updateDeviceModulation (DevicePlugin&);
-void updateDeviceModulation (te::Edit&);
-
-// Keeps each of Phazite's devices in an Edit playing what modulates it: from the start, and after each turn of the
-// message loop in which devices, modulators or macros came or went, or what they modulate changed. The project context
-// keeps one for the open Edit.
-class DeviceModulationKeeper : private juce::ValueTree::Listener,
-                               private juce::AsyncUpdater
-{
-public:
-    explicit DeviceModulationKeeper (te::Edit&);
-    ~DeviceModulationKeeper() override;
-
-private:
-    te::Edit& edit;
-    juce::ValueTree state;
-
-    void changed (const juce::ValueTree& parent, const juce::ValueTree& child);
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
-    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { changed (parent, child); }
-    void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { changed (parent, child); }
-    void handleAsyncUpdate() override { updateDeviceModulation (edit); }
-
-    JUCE_DECLARE_NON_COPYABLE (DeviceModulationKeeper)
-};
+// Makes a modulation or changes its amount (-1 to 1, to a ten-thousandth), and takes it away.
+void setModulation (Song&, ModulatorID, const ParameterRef&, float amount);
+void removeModulation (Song&, ModulatorID, const ParameterRef&);
 } // namespace phazite

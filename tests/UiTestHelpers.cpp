@@ -196,8 +196,8 @@ namespace
 {
     // While a test mouse lets go, JUCE has a display, as a screen gives, where the machine has none (Linux CI's): a drag let
     // go fades its image out through a copy of it, which JUCE's animator scales for the display it is on, and with none it
-    // read nothing and crashed (2026-11-01). Only then: Tracktion takes a machine without displays for one without a screen,
-    // as it is (Desktop::isHeadless()), and leaves its screen saver alone, which there would crash too.
+    // read nothing and crashed (2026-11-01). Only then: otherwise the machine is one without a screen, as it is
+    // (Desktop::isHeadless()), to what asks, such as code that turns the screen saver off, which without a screen crashes.
     class DisplayWhileReleasing
     {
     public:

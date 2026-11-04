@@ -14,8 +14,8 @@ struct SongGesture::Impl
 SongGesture::SongGesture (ProjectContext& context, const juce::String& name)
     : impl (std::make_unique<Impl>())
 {
-    if (auto* edit = getEdit (context))
-        impl->gesture = std::make_unique<Gesture> (*edit, name);
+    if (auto* song = findSong (context))
+        impl->gesture = std::make_unique<Gesture> (*song, name);
 }
 
 SongGesture::~SongGesture() = default; // the Gesture commits as it goes

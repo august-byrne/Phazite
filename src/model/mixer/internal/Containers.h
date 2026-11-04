@@ -1,21 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Containers (model/mixer/ContainerModel.h), for the model, the app and tests; not for the UI. A container is the song's
 // (Schema.h: CONTAINER, with its name, mix, devices and its eight macros, MACRO), on a channel, playing its devices one
-// after another, as one device. Containers don't nest, and hold no instrument. Tracktion mirrors one
-// (model/mirror/internal/Mirror.h) as a rack instance playing a rack type of its own (Tracktion plays every instance of a
-// type through one graph), which holds its devices in a row, wired one after the other (audio and MIDI).
-//
-// Rack types stay in the Edit for the whole session, also once no container plays them, as Tracktion's own rack list
-// keeps them: Tracktion's plug-in cache keeps a container that was removed, to bring the same object back when the
-// removal is undone, and that object plays the rack type object it was made with, while a rack type removed and added
-// again by undo and redo would be another object. So rack types are added without undo steps and never removed in a
-// session; an Edit built from the song as a project opens has only those its containers play.
+// after another, as one device, with its mix of their sound and the sound that comes into it, as Phazite's engine plays
+// it (model/playback/internal/SongPlayer.h). Containers don't nest, and hold no instrument.
 #pragma once
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <vector>
 
@@ -64,35 +56,4 @@ void groupSelectedDevices (Selection&);
 bool canUngroupSelectedContainer (const Selection&);
 void ungroupSelectedContainer (Selection&);
 void addContainerCommands (CommandRegistry&, Selection&);
-
-//==============================================================================
-// Tracktion's side, for the mirror and for presets, which make their devices in Tracktion until they are the song's
-// (docs/tracktion-migration.md, T6 step 6).
-
-// Whether one of Tracktion's devices is a container, and the rack type it plays (nullptr for another device); and the
-// container that plays a rack type.
-bool isContainer (const te::Plugin&);
-te::RackType* getContainerRack (const te::Plugin&);
-te::RackInstance* findContainerOf (const te::RackType&);
-
-// A rack type's devices, in the order of their places in its state.
-juce::Array<te::Plugin*> getRackDevices (const te::RackType&);
-
-// A new container of devices made for it, as a preset's are (model/presets/internal/Presets.h), on no channel yet: its rack
-// type with the devices in their order (not an instrument), wired, and its eight macros; named, or with a new container's
-// name. Joins the caller's step.
-te::Plugin::Ptr createContainer (te::Edit&, const te::Plugin::Array& devices, const juce::String& name);
-
-// Deletes Tracktion's container, closing the windows of the devices it still holds (the mirror's, as the song's container
-// goes).
-void deleteContainer (te::RackInstance&);
-
-// Adds a rack type to the Edit for the session (see above): a new one, empty but for its pins, or a copy of one (from
-// a preset, or another container's, with new IDs). Not an undo step.
-te::RackType::Ptr addContainerRack (te::Edit&);
-te::RackType::Ptr addContainerRack (te::Edit&, const juce::ValueTree& rackState);
-
-// Wires a container's devices one after the other, in their order, from its input to its output (straight through
-// while it holds none), unless they are wired in their order already.
-void wireContainer (te::RackType&);
 } // namespace phazite

@@ -18,9 +18,9 @@
 
 namespace phazite
 {
-// Phazite's one window: the AppShell, whose title bar shows this window's menus. It also owns the dialogs, and the
-// computer keyboard, which plays notes while this window has the keyboard focus. Freezes and bounces render in a progress
-// window over it (TrackRenderHost).
+// Phazite's one window: the AppShell, whose title bar shows this window's menus. It also owns the dialogs, the devices'
+// windows, and the computer keyboard, which plays notes while this window has the keyboard focus. Freezes and bounces
+// render in a progress window over it (TrackRenderHost).
 class MainWindow : public juce::DocumentWindow,
                    public TrackRenderHost,
                    private juce::MenuBarModel,
@@ -28,7 +28,7 @@ class MainWindow : public juce::DocumentWindow,
                    private juce::Timer
 {
 public:
-    MainWindow (te::Engine&, ui::CommandBridge&, ProjectSession&, ui::LookAndFeel&, AppServices&);
+    MainWindow (ui::CommandBridge&, ProjectSession&, ui::LookAndFeel&, AppServices&);
     ~MainWindow() override;
 
     // A freeze or a bounce, in a progress window with Cancel; and what came of it, an error if it failed.
@@ -55,17 +55,17 @@ public:
     juce::BorderSize<int> getBorderThickness() const override { return {}; }
 
 private:
-    te::Engine& engine;
     ui::CommandBridge& commands;
     ProjectSession& session;
     ui::LookAndFeel& lookAndFeel;
     AppServices& services;
     ui::ComputerKeyboard computerKeyboard;
-    ui::KeyDispatcher shortcutKeys;             // runs commands from keys, in this window and over plug-in windows
-    std::unique_ptr<ui::WindowKeys> windowKeys; // the window's shortcuts and the computer keyboard, in the order they get keys
-    std::unique_ptr<ui::PluginKeys> pluginKeys; // play, stop and the computer keyboard over plug-in windows
-    PluginWindowServices pluginWindowServices;  // what plug-in windows' menus work with
-    ui::AppShell* shell = nullptr;              // owned by the window as its content
+    ui::KeyDispatcher shortcutKeys;               // runs commands from keys, in this window and over plug-in windows
+    std::unique_ptr<ui::WindowKeys> windowKeys;   // the window's shortcuts and the computer keyboard, in the order they get keys
+    std::unique_ptr<ui::PluginKeys> pluginKeys;   // play, stop and the computer keyboard over plug-in windows
+    PluginWindowServices pluginWindowServices;    // what plug-in windows' menus work with
+    std::unique_ptr<DeviceWindows> deviceWindows; // the open project's devices' windows, which use the keys above
+    ui::AppShell* shell = nullptr;                // owned by the window as its content
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow; // hover help; null when it is turned off
     juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow, progressionsWindow,
@@ -74,7 +74,7 @@ private:
     juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
 
     void showSettings (std::optional<ui::SettingsPanel::Tab>); // no tab: Audio, or the open window's tab
-    void showPluginList();
+    void showPluginList();                                     // the plug-ins scanning found, with a scan for VST3s
     void showWelcome (ui::WelcomePanel::Page);
     void showExport();       // for the open project's song
     void showProgressions(); // the chord progressions, for the open project's chord lane

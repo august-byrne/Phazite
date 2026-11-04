@@ -29,13 +29,13 @@ struct Example
     {
         juce::String error;
         project = phazite::Project::create (
-            phazite::test::getEngine(), temp.folder, id, error,
+            temp.folder, id, error,
             phazite::getExampleSongContent (phazite::test::getEngineContext(), id, phazite::test::getFactoryPresetsFolder()));
         REQUIRE_MESSAGE (project != nullptr, error.toStdString());
-        setEdit (context, &project->getEdit());
+        setSong (context, &project->getSong());
     }
 
-    ~Example() { setEdit (context, nullptr); }
+    ~Example() { setSong (context, nullptr); }
 
     // Any of its tracks by name: the returns too, which the playlist shows only while they have automation lanes.
     phazite::TrackID track (const juce::String& name) const
@@ -98,7 +98,7 @@ TEST_CASE ("Every example song opens as a new project without undo steps or unsa
         Example example (song.id);
         phazite::test::settle();
         CHECK_FALSE (example.project->hasUnsavedChanges());
-        CHECK_FALSE (phazite::getSong (example.project->getEdit()).getUndoManager().canUndo());
+        CHECK_FALSE (example.project->getSong().getUndoManager().canUndo());
         CHECK (phazite::findExampleTrackToPlay (example.context, song).isValid());
 
         // Its clips lie end to end, each with its track's row to itself (none overlap, the samples' copies neither).

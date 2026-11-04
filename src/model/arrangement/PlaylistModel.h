@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist as the UI shows it (docs/design.md, section 6), by IDs and plain values (architecture phase A3: no
-// Tracktion here): the tracks' rows, the clips on them and what the playlist draws of them, the edits its tools make,
-// and what is dropped on it. Each function takes the open project's context, and gives nothing, or does nothing, for an
-// ID of something that is gone. Edits are undo steps of their own where the model's functions they call are (Tracks.h,
-// Clips.h); while a gesture is open (SongGesture.h), its edits join its one step.
+// The playlist as the UI shows it (docs/design.md, section 6), by IDs and plain values: the tracks' rows, the clips on
+// them and what the playlist draws of them, the edits its tools make, and what is dropped on it. Each function takes
+// the open project's context, and gives nothing, or does nothing, for an ID of something that is gone. Edits are undo
+// steps of their own where the model's functions they call are (Tracks.h, Clips.h); while a gesture is open
+// (SongGesture.h), its edits join its one step.
 #pragma once
 
 #include "PlaylistValues.h"
@@ -120,13 +120,13 @@ std::vector<ClipInfo> getClips (const ProjectContext&, TrackID); // left to righ
 std::optional<ClipInfo> getClip (const ProjectContext&, ClipID);
 bool canHoldClips (const ProjectContext&, TrackID); // a track, not a folder
 
-// Clips on a track that overlap play together (Tracktion mixes them, as FL Studio and REAPER do), so the playlist shows
-// them one under another in their track's row, as REAPER offsets overlapping items, rather than one over another, where
-// they are hard to tell apart and to grab (docs/design.md, section 6). For a track's clips (getClips()), in their order:
-// each one's sub-row, from the top, and how many sub-rows the clips it overlaps, directly or through others, share the
-// row out into; a clip that overlaps none (or less than a thousandth of a beat: they touch) has the whole row. Clips
-// made earlier (Tracktion's IDs grow as items are made) take the higher sub-rows, so a clip being dragged never moves
-// those made before it. Two audio clips that overlap only in a crossfade, the first fading out and the second in over
+// Clips on a track that overlap play together (mixed, as in FL Studio and REAPER), so the playlist shows them one under
+// another in their track's row, as REAPER offsets overlapping items, rather than one over another, where they are hard
+// to tell apart and to grab (docs/design.md, section 6). For a track's clips (getClips()), in their order: each one's
+// sub-row, from the top, and how many sub-rows the clips it overlaps, directly or through others, share the row out
+// into; a clip that overlaps none (or less than a thousandth of a beat: they touch) has the whole row. Clips made
+// earlier (the song's IDs grow as items are made) take the higher sub-rows, so a clip being dragged never moves those
+// made before it. Two audio clips that overlap only in a crossfade, the first fading out and the second in over
 // all of it (setCrossfade()), share a sub-row.
 struct ClipSubRow
 {

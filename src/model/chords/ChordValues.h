@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Chords as plain values (docs/design.md, section 14; roadmap step 2.7): Phazite's own chord format, a Roman numeral
 // relative to a key, so that a chord follows the key when it changes; what a numeral is in a key (its root, notes and
-// name); and the parts made from chords: their styles, and their notes. Tracktion's chord track takes only the seven
-// chords of a key's scale, so the chord lane and its parts are Phazite's own (design.md, section 14). No Tracktion here.
+// name); and the parts made from chords: their styles, and their notes.
 #pragma once
 
 #include "model/notes/NoteValues.h"

@@ -8,8 +8,8 @@
 //     phazite_tests.exe --test-suite=device --no-skip
 // with, in the environment: PHAZITE_GLITCH_OUTPUT (the output's name, by default the first that isn't Bluetooth),
 // PHAZITE_GLITCH_TYPE ("Windows Audio", the default, or "Windows Audio (Low Latency Mode)"), PHAZITE_GLITCH_SECONDS (30),
-// PHAZITE_GLITCH_PATH ("app", the default: through Tracktion's device manager as the app plays; or "engine": Phazite's
-// engine alone), PHAZITE_GLITCH_SONG ("off": the pilot alone, to compare), PHAZITE_GLITCH_THREADS (the engine's threads,
+// PHAZITE_GLITCH_PATH ("app", the default: through the app's device manager, whose callback plays the engine as the app
+// plays it; or "engine": Phazite's engine alone), PHAZITE_GLITCH_SONG ("off": the pilot alone, to compare), PHAZITE_GLITCH_THREADS (the engine's threads,
 // by default the app's), PHAZITE_GLITCH_BUSY (threads kept busy at the normal priority meanwhile, as a busy UI would, 0 by
 // default), PHAZITE_GLITCH_ALLOCATE (1: those threads allocate as they go, as a UI painting does), PHAZITE_GLITCH_RESTART
 // (milliseconds between the song stopped and played again from its start, 0 by default) and PHAZITE_GLITCH_STALL
@@ -26,7 +26,7 @@
 #include "engine/nodes/LoudnessMeter.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/engine/EngineContext.h"
-#include "model/engine/internal/EngineSetup.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -284,14 +284,12 @@ struct Player final : juce::AudioIODeviceCallback
 TEST_CASE ("Device glitches: an example song through Phazite's engine on a real output in a shared mode, its mix captured"
            * doctest::test_suite ("device") * doctest::skip())
 {
-    // As the app plays (PHAZITE_GLITCH_PATH "app", the default): the output opened through Tracktion's device manager, whose
-    // callback and Phazite's engine's play on it, with Tracktion's threads as the app has them. Or ("engine") Phazite's
-    // engine alone, on a device manager of its own.
+    // As the app plays (PHAZITE_GLITCH_PATH "app", the default): the output opened on the app's device manager, whose
+    // callback, the app's PlaybackHost, plays Phazite's engine on it. Or ("engine") Phazite's engine alone, on a device
+    // manager of its own.
     const auto asApp = getVariable ("PHAZITE_GLITCH_PATH", "app") == "app";
-    auto& tracktion = phazite::test::getEngine();
-    auto& behaviour = static_cast<phazite::EngineBehaviour&> (tracktion.getEngineBehaviour());
     juce::AudioDeviceManager own;
-    auto& devices = asApp ? tracktion.getDeviceManager().deviceManager : own;
+    auto& devices = asApp ? phazite::test::getEngineContext().getAudioDeviceManager() : own;
     const auto typeBefore = devices.getCurrentAudioDeviceType();
     const auto setupBefore = devices.getAudioDeviceSetup();
 
@@ -310,15 +308,12 @@ TEST_CASE ("Device glitches: an example song through Phazite's engine on a real 
 
     REQUIRE (outputName.isNotEmpty());
 
-    // The engine's threads, as the app's (unless asked for others), and Tracktion's, set while nothing plays.
+    // The engine's threads, as the app's (unless asked for others), set while nothing plays.
     auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
     auto& engine = host.getEngine();
     const auto threads =
         getVariable ("PHAZITE_GLITCH_THREADS", juce::String (std::max (1, juce::SystemStats::getNumPhysicalCpus() - 1))).getIntValue();
     engine.setNumThreads (threads);
-
-    if (asApp)
-        behaviour.setNumAudioThreads (threads);
 
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     setup.outputDeviceName = outputName;
@@ -340,17 +335,17 @@ TEST_CASE ("Device glitches: an example song through Phazite's engine on a real 
     phazite::test::TemporaryFolder temp;
     juce::String error;
     auto project = phazite::Project::create (
-        tracktion, temp.folder, "houseGroove", error,
+        temp.folder, "houseGroove", error,
         phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     const auto withSong = getVariable ("PHAZITE_GLITCH_SONG", "on") != "off"; // off: the pilot alone, to compare
-    setEdit (context, &project->getEdit());
+    phazite::setSong (context, &project->getSong());
     phazite::getMasterVolume (context).setValue (0.0f);
     phazite::test::settle();
 
     if (withSong)
-        phazite::playOrStop (project->getEdit());
+        phazite::playOrStop (project->getSong());
 
     phazite::test::dispatchPendingMessages();
 
@@ -406,7 +401,7 @@ TEST_CASE ("Device glitches: an example song through Phazite's engine on a real 
             if (withSong && restartEvery > 0 && juce::Time::getMillisecondCounter() >= nextToggle)
             {
                 const auto playing = phazite::isPlaying (context);
-                phazite::playOrStop (project->getEdit());
+                phazite::playOrStop (project->getSong());
                 nextToggle += playing ? 300 : restartEvery;
                 restarts += playing ? 0 : 1;
             }
@@ -424,15 +419,14 @@ TEST_CASE ("Device glitches: an example song through Phazite's engine on a real 
     capture.stop();
 
     if (withSong)
-        phazite::playOrStop (project->getEdit());
-    setEdit (context, nullptr);
+        phazite::playOrStop (project->getSong());
+    phazite::setSong (context, nullptr);
     project = nullptr;
 
     if (asApp)
     {
         devices.setCurrentAudioDeviceType (typeBefore, true);
         devices.setAudioDeviceSetup (setupBefore, true);
-        behaviour.setNumAudioThreads (1);
     }
     else
     {
@@ -467,11 +461,11 @@ TEST_CASE ("Device timing: House Groove's first blocks from a stop, each as long
     phazite::test::TemporaryFolder temp;
     juce::String error;
     auto project = phazite::Project::create (
-        phazite::test::getEngine(), temp.folder, "houseGroove", error,
+        temp.folder, "houseGroove", error,
         phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, &project->getEdit());
+    phazite::setSong (context, &project->getSong());
     phazite::test::settle();
 
     juce::AudioBuffer<float> block (2, 480);
@@ -485,7 +479,7 @@ TEST_CASE ("Device timing: House Groove's first blocks from a stop, each as long
         if (idleMilliseconds > 0)
             juce::Thread::sleep (idleMilliseconds);
 
-        phazite::playOrStop (project->getEdit());
+        phazite::playOrStop (project->getSong());
         phazite::test::dispatchPendingMessages();
         std::vector<double> took;
 
@@ -496,7 +490,7 @@ TEST_CASE ("Device timing: House Groove's first blocks from a stop, each as long
             took.push_back (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - start) * 1000.0);
         }
 
-        phazite::playOrStop (project->getEdit());
+        phazite::playOrStop (project->getSong());
         phazite::test::dispatchPendingMessages();
 
         report << run << ": the first blocks ";
@@ -509,7 +503,7 @@ TEST_CASE ("Device timing: House Groove's first blocks from a stop, each as long
                << juce::String (*std::max_element (took.begin() + 6, took.end()), 2) << " ms at most after the first six\n";
     }
 
-    setEdit (context, nullptr);
+    phazite::setSong (context, nullptr);
     project = nullptr;
     engine.setNumThreads (1);
     host.prepare (48000.0, 256);
@@ -526,15 +520,15 @@ TEST_CASE ("Device sound: House Groove's intro rendered, its clicks found where 
     phazite::test::TemporaryFolder temp;
     juce::String error;
     auto project = phazite::Project::create (
-        phazite::test::getEngine(), temp.folder, "houseGroove", error,
+        temp.folder, "houseGroove", error,
         phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, &project->getEdit());
+    phazite::setSong (context, &project->getSong());
     phazite::test::settle();
 
     constexpr double rate = 48000.0, beat = 60.0 / 124.0;
-    const auto audio = phazite::renderWithOwnEngine (project->getEdit(), (int) (8 * 4 * beat * rate), rate, 480);
+    const auto audio = phazite::renderWithOwnEngine (project->getSong(), (int) (8 * 4 * beat * rate), rate, 480);
     const auto* left = audio.getReadPointer (0);
     const auto n = audio.getNumSamples();
     std::vector<float> d2 ((size_t) n, 0.0f);
@@ -580,7 +574,7 @@ TEST_CASE ("Device sound: House Groove's intro rendered, its clicks found where 
                << juce::String (click.size, 4) << ", " << juce::String (click.ratio, 0) << " times its neighbourhood's\n";
     }
 
-    setEdit (context, nullptr);
+    phazite::setSong (context, nullptr);
     MESSAGE (report);
 }
 
@@ -592,19 +586,19 @@ TEST_CASE ("Device sound: House Groove's intro played live sounds the same when 
     phazite::test::TemporaryFolder temp;
     juce::String error;
     auto project = phazite::Project::create (
-        phazite::test::getEngine(), temp.folder, "houseGroove", error,
+        temp.folder, "houseGroove", error,
         phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, &project->getEdit());
+    phazite::setSong (context, &project->getSong());
     phazite::test::settle();
-    auto* session = phazite::findSession (project->getEdit());
+    auto* session = phazite::findSession (project->getSong());
     REQUIRE (session != nullptr);
 
     const auto playIntro = [&] (bool newPlans)
     {
         phazite::test::EnginePlayback playback;
-        phazite::playOrStop (project->getEdit());
+        phazite::playOrStop (project->getSong());
         juce::AudioBuffer<float> audio (2, 0);
 
         for (int part = 0; part < 30; ++part)
@@ -619,7 +613,7 @@ TEST_CASE ("Device sound: House Groove's intro played live sounds the same when 
                 audio.copyFrom (channel, audio.getNumSamples() - next.getNumSamples(), next, channel, 0, next.getNumSamples());
         }
 
-        phazite::playOrStop (project->getEdit());
+        phazite::playOrStop (project->getSong());
         phazite::test::dispatchPendingMessages();
         return audio;
     };
@@ -636,7 +630,7 @@ TEST_CASE ("Device sound: House Groove's intro played live sounds the same when 
             at = i;
         }
 
-    setEdit (context, nullptr);
+    phazite::setSong (context, nullptr);
     MESSAGE ("\nPlayed live as it is, and given the song again every half second: the largest difference "
              << largest << " at " << juce::String (at / phazite::test::EnginePlayback::sampleRate, 3) << " s, the mix's peak "
              << asItIs.getMagnitude (0, asItIs.getNumSamples()));
@@ -704,11 +698,11 @@ TEST_CASE ("Device sound: where in House Groove's intro the sound above 6 kHz is
     phazite::test::TemporaryFolder temp;
     juce::String error;
     auto project = phazite::Project::create (
-        phazite::test::getEngine(), temp.folder, "houseGroove", error,
+        temp.folder, "houseGroove", error,
         phazite::getExampleSongContent (phazite::test::getEngineContext(), "houseGroove", phazite::test::getFactoryPresetsFolder()));
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, &project->getEdit());
+    phazite::setSong (context, &project->getSong());
     phazite::test::settle();
 
     phazite::TrackID drums;
@@ -725,7 +719,7 @@ TEST_CASE ("Device sound: where in House Groove's intro the sound above 6 kHz is
     const auto render = [&] (const juce::String& what)
     {
         constexpr double rate = 48000.0;
-        const auto audio = phazite::renderWithOwnEngine (project->getEdit(), (int) (8 * 4 * beat * rate), rate, 480);
+        const auto audio = phazite::renderWithOwnEngine (project->getSong(), (int) (8 * 4 * beat * rate), rate, 480);
         report << what << " (peak "
                << juce::Decibels::toString (juce::Decibels::gainToDecibels (audio.getMagnitude (0, audio.getNumSamples())))
                << "): " << measure (audio, rate) << "\n";
@@ -740,7 +734,7 @@ TEST_CASE ("Device sound: where in House Groove's intro the sound above 6 kHz is
     phazite::setDeviceOn (context, master.front().id, false);
     render ("Without either");
 
-    setEdit (context, nullptr);
+    phazite::setSong (context, nullptr);
     MESSAGE (report);
 }
 

@@ -10,7 +10,7 @@ namespace phazite::engine
 {
 namespace
 {
-    constexpr double easeSeconds = 0.015; // a new volume or pan, as Tracktion's fader eased to one
+    constexpr double easeSeconds = 0.015; // to a new volume or pan
     constexpr double fadeSeconds = 0.005; // a channel muted or heard again
 
     float toGain (float decibels) noexcept

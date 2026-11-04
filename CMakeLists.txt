@@ -1,4 +1,4 @@
-# Phazite: an open-source DAW (AGPL-3.0) built on Tracktion Engine and JUCE.
+# Phazite: an open-source DAW (AGPL-3.0) built on JUCE.
 #
 # Configure and build through the presets, with the same two commands on every OS:
 #   cmake --preset windows-debug
@@ -17,7 +17,7 @@ if(WIN32 AND NOT MSVC)
 endif()
 
 # --- MSVC settings. They only affect targets created after this point; other compilers ignore them. ---
-# Static C runtime, as in Tracktion's own examples: the app runs without a VC++ redistributable.
+# Static C runtime: the app runs without a VC++ redistributable.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Debug info inside each .obj (/Z7) instead of one shared .pdb that parallel compiles queue up for.
 set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
@@ -58,23 +58,22 @@ set(PHAZITE_MIB_PER_COMPILE_JOB 2560 CACHE STRING
     "Peak memory (MiB) assumed per compile job when limiting parallel compiles")
 phazite_limit_parallel_compiles(${PHAZITE_MIB_PER_COMPILE_JOB})
 
-# --- Dependencies: Tracktion Engine, which also adds the JUCE version it pins (modules/juce). ---
-phazite_require_submodules(external/tracktion_engine external/tracktion_engine/modules/juce)
+# --- Dependencies: JUCE, and doctest for the tests. ---
+phazite_require_submodules(external/JUCE external/doctest)
 
-set(_phazite_juceaide_dir "${CMAKE_BINARY_DIR}/external/tracktion_engine/modules/juce/tools")
+set(_phazite_juceaide_dir "${CMAKE_BINARY_DIR}/external/JUCE/tools")
 phazite_reset_stale_juceaide("${_phazite_juceaide_dir}")
 
-set(TE_ADD_EXAMPLES OFF CACHE BOOL "" FORCE)
-add_subdirectory(external/tracktion_engine EXCLUDE_FROM_ALL)   # keeps their install rules out of ours
+add_subdirectory(external/JUCE EXCLUDE_FROM_ALL)   # keeps its install rules out of ours
 
 phazite_check_juceaide_toolchain("${_phazite_juceaide_dir}")
 
-# --- phazite_core: Tracktion Engine, JUCE and Phazite's model and services code, compiled once ---
+# --- phazite_core: JUCE and Phazite's model and services code, compiled once ---
 # A static library that the app and the tests both link. JUCE's modules are INTERFACE libraries that
 # add their .cpp files to whichever target links them, so only this library links them (PRIVATE, which
 # for a static library still passes their system libraries on to the executables). The executables get
 # the module headers and the same definitions through phazite_use_core() below, as JUCE does for its
-# plug-in wrapper targets. All JUCE and Tracktion options therefore go here, so every file agrees.
+# plug-in wrapper targets. All JUCE options therefore go here, so every file agrees.
 add_library(phazite_core STATIC)
 
 target_sources(phazite_core PRIVATE
@@ -242,7 +241,6 @@ target_sources(phazite_core PRIVATE
     src/model/base/Toggles.h
     src/model/base/internal/Schema.h
     src/model/base/internal/Selection.h
-    src/model/base/internal/Tracktion.h
     src/model/chords/ChordModel.cpp
     src/model/chords/ChordModel.h
     src/model/chords/ChordValues.cpp
@@ -262,30 +260,19 @@ target_sources(phazite_core PRIVATE
     src/model/devices/DeviceHandle.cpp
     src/model/devices/DeviceHandle.h
     src/model/devices/DeviceFiles.cpp
-    src/model/devices/DevicePlugin.cpp
-    src/model/devices/DeviceStates.cpp
     src/model/devices/DrumKit.cpp
-    src/model/devices/DrumSamplerPlugin.cpp
     src/model/devices/Devices.cpp
     src/model/devices/ParameterHandle.cpp
     src/model/devices/ParameterHandle.h
     src/model/devices/ParameterRef.h
     src/model/devices/Parameters.cpp
-    src/model/devices/PluginParameters.cpp
-    src/model/devices/WavetablePlugin.cpp
     src/model/devices/Wavetables.cpp
     src/model/devices/internal/DeviceFiles.h
     src/model/devices/internal/DeviceHandle.h
-    src/model/devices/internal/DeviceModulation.h
-    src/model/devices/internal/DevicePlugin.h
-    src/model/devices/internal/DeviceStates.h
     src/model/devices/internal/Devices.h
     src/model/devices/internal/DrumKit.h
-    src/model/devices/internal/DrumSamplerPlugin.h
     src/model/devices/internal/ParameterHandle.h
     src/model/devices/internal/Parameters.h
-    src/model/devices/internal/PluginParameters.h
-    src/model/devices/internal/WavetablePlugin.h
     src/model/devices/internal/Wavetables.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
@@ -296,31 +283,17 @@ target_sources(phazite_core PRIVATE
     src/model/engine/AudioIO.cpp
     src/model/engine/EngineContext.cpp
     src/model/engine/EngineContext.h
-    src/model/engine/EngineSetup.cpp
     src/model/engine/LiveInput.cpp
-    src/model/engine/LoudnessMeterPlugin.cpp
     src/model/engine/PluginScanner.cpp
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
     src/model/engine/PreviewLoop.cpp
     src/model/engine/internal/AudioIO.h
     src/model/engine/internal/EngineContext.h
-    src/model/engine/internal/EngineSetup.h
     src/model/engine/internal/LiveInput.h
-    src/model/engine/internal/LoudnessMeterPlugin.h
     src/model/engine/internal/PluginScanner.h
     src/model/engine/internal/Preview.h
     src/model/engine/internal/PreviewLoop.h
-    src/model/mirror/AutomationMirror.cpp
-    src/model/mirror/Bridge.cpp
-    src/model/mirror/ClipMirror.cpp
-    src/model/mirror/DeviceMirror.cpp
-    src/model/mirror/ModulationMirror.cpp
-    src/model/mirror/TempoMirror.cpp
-    src/model/mirror/TrackMirror.cpp
-    src/model/mirror/TransportMirror.cpp
-    src/model/mirror/internal/Bridge.h
-    src/model/mirror/internal/Mirror.h
     src/model/mixer/Buses.cpp
     src/model/mixer/ContainerModel.cpp
     src/model/mixer/ContainerModel.h
@@ -366,9 +339,11 @@ target_sources(phazite_core PRIVATE
     src/model/playback/internal/PlaybackSession.h
     src/model/playback/internal/SongPlayer.h
     src/model/plugins/PluginHost.cpp
+    src/model/plugins/PluginInstances.cpp
     src/model/plugins/SandboxedInstance.cpp
     src/model/plugins/SandboxedProcessor.cpp
     src/model/plugins/internal/PluginHost.h
+    src/model/plugins/internal/PluginInstances.h
     src/model/plugins/internal/SandboxedInstance.h
     src/model/plugins/internal/SandboxedProcessor.h
     src/model/presets/PresetModel.h
@@ -410,7 +385,7 @@ target_sources(phazite_core PRIVATE
     src/model/transport/internal/Recording.h
     src/model/transport/internal/Take.h
     src/model/transport/internal/Tempo.h
-    # sandbox: what Phazite and the helpers that host plug-ins share, engine-neutral (docs/tracktion-migration.md, T3)
+    # sandbox: what Phazite and the helpers that host plug-ins share, engine-neutral
     src/sandbox/client/Helper.cpp
     src/sandbox/client/Helper.h
     src/sandbox/client/RemoteInstance.cpp
@@ -522,7 +497,6 @@ if(NOT MSVC)
     set_source_files_properties(src/devices/stretch/RubberBandLibrary.cpp PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
-# No time-stretcher of Tracktion's: Phazite stretches clips and previews itself, with Rubber Band (src/devices/stretch/).
 target_compile_definitions(phazite_core PRIVATE
     PHAZITE_VERSION_STRING="${PROJECT_VERSION}"
     JUCE_PLUGINHOST_VST3=1
@@ -544,23 +518,15 @@ endif()
 
 target_link_libraries(phazite_core
     PRIVATE
-        tracktion::tracktion_core
-        tracktion::tracktion_engine
-        tracktion::tracktion_graph
         juce::juce_audio_devices
+        juce::juce_audio_formats
         juce::juce_audio_processors
         juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_gui_extra
         juce::juce_cryptography # SHA-256, to check downloads
     PUBLIC
         juce::juce_recommended_warning_flags) # for Phazite's own files in every target, too
-
-# Tracktion's and JUCE's .cpp files compile as part of phazite_core, so they get these warnings too. One
-# Tracktion line is unreachable while JUCE_CATCH_UNHANDLED_EXCEPTIONS is 0 (JUCE's default), and MSVC
-# reports it (C4702). Silence that warning for that one file, so every warning a build prints is ours.
-if(MSVC)
-    set_source_files_properties(external/tracktion_engine/modules/tracktion_engine/tracktion_engine_playback.cpp
-        PROPERTIES COMPILE_OPTIONS "/wd4702")
-endif()
 
 # JUCE's recommended config flags add /MP, which MSVC refuses alongside the /showIncludes flag that
 # Ninja relies on (warning D9030 for every file). CMake's own MSVC defaults already provide the same
@@ -575,18 +541,9 @@ endif()
 
 # Links a target (an executable, phazite_ui or phazite_app) to phazite_core and gives it the module headers
 # and phazite_core's definitions (including JUCE's JUCE_MODULE_AVAILABLE_* ones), without compiling the
-# modules a second time. WITHOUT_TRACKTION leaves Tracktion's modules folder out of its include path (JUCE's,
-# inside it, stays), so that it can include neither Tracktion nor the model's internal/ headers, which do
-# (docs/design.md, section 24, rule 4).
+# modules a second time.
 function(phazite_use_core target)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "WITHOUT_TRACKTION" "" "")
-    set(include_directories $<TARGET_PROPERTY:phazite_core,INCLUDE_DIRECTORIES>)
-
-    if(arg_WITHOUT_TRACKTION)
-        set(include_directories $<FILTER:${include_directories},EXCLUDE,/tracktion_engine/modules/?$>)
-    endif()
-
-    target_include_directories(${target} PRIVATE ${include_directories})
+    target_include_directories(${target} PRIVATE $<TARGET_PROPERTY:phazite_core,INCLUDE_DIRECTORIES>)
     target_compile_definitions(${target} PRIVATE $<TARGET_PROPERTY:phazite_core,COMPILE_DEFINITIONS>)
     target_link_libraries(${target} PRIVATE phazite_core)
 endfunction()
@@ -788,7 +745,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/timeline/TimelineView.cpp
     src/ui/timeline/TimelineView.h)
 
-phazite_use_core(phazite_ui WITHOUT_TRACKTION)
+phazite_use_core(phazite_ui)
 
 # --- phazite_app: the app's parts (the main window, the open project, the song's commands), in a library the tests
 # link, so the app's logic can be tested without a window. The Phazite executable is Main.cpp. ---
@@ -799,8 +756,6 @@ target_sources(phazite_app PRIVATE
     src/app/AppCommands.h
     src/app/AppServices.cpp
     src/app/AppServices.h
-    src/app/AppUIBehaviour.cpp
-    src/app/AppUIBehaviour.h
     src/app/ClipWaveforms.cpp
     src/app/ClipWaveforms.h
     src/app/MainWindow.cpp
@@ -837,9 +792,9 @@ phazite_use_core(Phazite)
 target_link_libraries(Phazite PRIVATE phazite_app phazite_ui)
 
 # --- PhaziteHost: the helper program that hosts plug-ins for Phazite, each in a process of its own or with others, so
-# that one that crashes or hangs can't take the song with it (docs/tracktion-migration.md, T3). It links phazite_core,
-# as phazite_soundkit does, for JUCE and the sandbox's code, and compiles without Tracktion; its code is in phazite_host,
-# which the tests' helper links too. It goes next to the app, which starts it. ---
+# that one that crashes or hangs can't take the song with it. It links phazite_core, as phazite_soundkit does, for JUCE
+# and the sandbox's code; its code is in phazite_host, which the tests' helper links too. It goes next to the app, which
+# starts it. ---
 add_library(phazite_host STATIC)
 target_sources(phazite_host PRIVATE
     src/host/core/Editor.cpp
@@ -849,7 +804,7 @@ target_sources(phazite_host PRIVATE
     src/host/core/Instance.cpp
     src/host/core/Instance.h
     src/host/core/Platform.cpp)
-phazite_use_core(phazite_host WITHOUT_TRACKTION)
+phazite_use_core(phazite_host)
 
 juce_add_gui_app(PhaziteHost
     PRODUCT_NAME "PhaziteHost"
@@ -861,7 +816,7 @@ juce_add_gui_app(PhaziteHost
 
 target_sources(PhaziteHost PRIVATE src/host/app/HostMain.cpp src/host/app/Formats.cpp)
 target_compile_definitions(PhaziteHost PRIVATE JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:PhaziteHost,JUCE_VERSION>")
-phazite_use_core(PhaziteHost WITHOUT_TRACKTION)
+phazite_use_core(PhaziteHost)
 target_link_libraries(PhaziteHost PRIVATE phazite_host)
 
 add_dependencies(Phazite PhaziteHost)
@@ -908,7 +863,7 @@ juce_add_console_app(phazite_soundkit)
 target_sources(phazite_soundkit PRIVATE tools/soundkit/SoundKit.cpp)
 phazite_use_core(phazite_soundkit)
 
-# --- Tests: doctest (MIT), bundled with Tracktion Engine. Run them with `ctest --preset <preset>`. ---
+# --- Tests: doctest (MIT, external/doctest). Run them with `ctest --preset <preset>`. ---
 option(PHAZITE_BUILD_TESTS "Build Phazite's unit tests (phazite_tests)" ON)
 
 if(PHAZITE_BUILD_TESTS)
@@ -955,15 +910,12 @@ if(PHAZITE_BUILD_TESTS)
         tests/DesignTokenTests.cpp
         tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp
-        tests/DeviceModulationTests.cpp
-        tests/DevicePluginTests.cpp
         tests/DeviceStatesTests.cpp
         tests/DevicesViewTests.cpp
         tests/DrumRowTests.cpp
         tests/DrumSamplerEditorTests.cpp
         tests/DrumSamplerTests.cpp
         tests/DspTests.cpp
-        tests/EngineSetupTests.cpp
         tests/EnginePlayback.h
         tests/EnginePlaybackTests.cpp
         tests/EngineTests.cpp
@@ -1009,7 +961,6 @@ if(PHAZITE_BUILD_TESTS)
         tests/NotesModelTests.cpp
         tests/PanelLayoutTests.cpp
         tests/PanelsTests.cpp
-        tests/ParameterDescriptionTests.cpp
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp
@@ -1082,6 +1033,7 @@ if(PHAZITE_BUILD_TESTS)
 
     phazite_use_core(phazite_tests)
     target_link_libraries(phazite_tests PRIVATE phazite_app phazite_ui)
+    target_include_directories(phazite_tests SYSTEM PRIVATE external/doctest) # its warnings off: it is third-party
 
     # The tests' helper: the app's, with the tests' stand-ins for plug-ins (tests/host/TestPlugins.h), which the tests
     # start in its place.
@@ -1098,7 +1050,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/host/TestPlugins.cpp
         tests/host/TestPlugins.h)
     target_compile_definitions(phazite_test_host PRIVATE JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:phazite_test_host,JUCE_VERSION>")
-    phazite_use_core(phazite_test_host WITHOUT_TRACKTION)
+    phazite_use_core(phazite_test_host)
     target_link_libraries(phazite_test_host PRIVATE phazite_host)
 
     add_dependencies(phazite_tests phazite_test_host)

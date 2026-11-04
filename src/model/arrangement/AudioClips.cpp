@@ -79,7 +79,6 @@ namespace
             auto sound = getSound (song, alias);
             change (sound);
             writeSound (song, alias, sound);
-            song.reconcile (Song::Part::clip, getClipID (alias).getRaw());
         }
     }
 
@@ -165,7 +164,6 @@ void setAudioPart (Song& song, juce::ValueTree clipState, BeatPosition start, Fi
     clipState.setProperty (schema::clipStart, std::max (0.0, start.inBeats()), um);
     clipState.setProperty (schema::clipFileStart, std::max (0.0, part.start), um);
     clipState.setProperty (schema::clipFileEnd, std::max (part.start, part.end), um);
-    song.reconcile (Song::Part::clip, getClipID (clipState).getRaw());
 }
 
 double getClipFade (const juce::ValueTree& clipState, bool fadeIn)
@@ -198,8 +196,6 @@ void setClipFade (Song& song, juce::ValueTree clipState, bool fadeIn, double sec
         clipState.setProperty (property, seconds, &song.getUndoManager());
     else
         clipState.removeProperty (property, &song.getUndoManager());
-
-    song.reconcile (Song::Part::clip, getClipID (clipState).getRaw());
 }
 
 FadeCurve getClipFadeCurve (const juce::ValueTree& clipState, bool fadeIn)
@@ -226,8 +222,6 @@ void setClipFadeCurve (Song& song, juce::ValueTree clipState, bool fadeIn, FadeC
         clipState.removeProperty (bendProperty, um);
     else
         clipState.setProperty (bendProperty, bend, um);
-
-    song.reconcile (Song::Part::clip, getClipID (clipState).getRaw());
 }
 
 engine::FadeCurve toEngineFade (FadeCurve curve)
@@ -298,7 +292,6 @@ void setClipGain (Song& song, ClipID clip, float decibels)
     {
         const auto gain = juce::jlimit (minClipGain, maxClipGain, decibels);
         setOrRemove (clipState, schema::clipGain, juce::exactlyEqual (gain, 0.0f) ? juce::var() : juce::var (gain), &song.getUndoManager());
-        song.reconcile (Song::Part::clip, clip.getRaw());
     }
 }
 

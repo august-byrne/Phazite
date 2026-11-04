@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's loudness as Phazite's engine measures what goes out (docs/tracktion-migration.md, T2 step 6), by EBU R128 and
-// ITU-R BS.1770-4: through the K-weighting filters, the momentary loudness (the last 400 ms) and the short-term (the last
-// 3 s), the integrated loudness since it was last reset, gated as R128 gates it (blocks quieter than -70 LUFS, then those
-// more than 10 LU below the rest, left out; the blocks kept in a histogram of tenths of a LU, so that its memory stays the
-// same however long it measures), and the true peak, four times oversampled, held. The audio thread measures; any thread
-// reads.
+// The song's loudness as Phazite's engine measures what goes out, by EBU R128 and ITU-R BS.1770-4: through the
+// K-weighting filters, the momentary loudness (the last 400 ms) and the short-term (the last 3 s), the integrated
+// loudness since it was last reset, gated as R128 gates it (blocks quieter than -70 LUFS, then those more than 10 LU
+// below the rest, left out; the blocks kept in a histogram of tenths of a LU, so that its memory stays the same however
+// long it measures), and the true peak, four times oversampled, held. The audio thread measures; any thread reads.
 #pragma once
 
 #include <juce_dsp/juce_dsp.h>

@@ -12,16 +12,9 @@ namespace phazite
 {
 namespace
 {
-    // Every output channel the device has, as Tracktion opened them; no input unless the setup chose one (Phazite opens no
+    // Every output channel the device has; no input unless the setup chose one (Phazite opens no
     // microphone by itself: a track's input opens it, model/transport/internal/AudioRecorder.h).
     constexpr int allOutputs = 512;
-
-    // Each Engine's, for what has the Engine alone (message thread).
-    std::map<const te::Engine*, std::weak_ptr<AudioIO>>& getAll()
-    {
-        static std::map<const te::Engine*, std::weak_ptr<AudioIO>> all;
-        return all;
-    }
 } // namespace
 
 AudioIO::AudioIO()
@@ -42,29 +35,12 @@ AudioIO::~AudioIO()
     devices.closeAudioDevice();
 }
 
-std::shared_ptr<AudioIO> AudioIO::getFor (const te::Engine& engine)
-{
-    auto& kept = getAll()[&engine];
-
-    if (auto io = kept.lock())
-        return io;
-
-    auto io = std::make_shared<AudioIO>();
-    kept = io;
-    return io;
-}
-
-AudioIO* AudioIO::findFor (const te::Engine& engine)
-{
-    const auto found = getAll().find (&engine);
-    return found != getAll().end() ? found->second.lock().get() : nullptr;
-}
-
 void AudioIO::open (const Saved& saved)
 {
     JUCE_ASSERT_MESSAGE_THREAD
     overdub = saved.overdub;
     recordQuantize = saved.recordQuantize;
+    countIn = saved.countIn;
     recordingCorrection = saved.recordingCorrection;
     midiInputsOff = saved.midiInputsOff;
 
@@ -89,6 +65,7 @@ AudioIO::Saved AudioIO::getSaved() const
     saved.midiInputsOff = midiInputsOff;
     saved.overdub = overdub;
     saved.recordQuantize = recordQuantize;
+    saved.countIn = countIn;
     saved.recordingCorrection = recordingCorrection;
     return saved;
 }
@@ -172,6 +149,12 @@ void AudioIO::setRecordQuantizeOn (bool on)
         sendChangeMessage();
 }
 
+void AudioIO::setCountInOn (bool on)
+{
+    if (std::exchange (countIn, on) != on)
+        sendChangeMessage();
+}
+
 void AudioIO::setRecordingCorrection (double milliseconds)
 {
     if (! juce::exactlyEqual (std::exchange (recordingCorrection, milliseconds), milliseconds))
@@ -196,6 +179,12 @@ void AudioIO::stopLiveMidi (const engine::Engine& engine)
 }
 
 void AudioIO::playLive (const juce::MidiMessage& message) noexcept
+{
+    if (message.isNoteOn() || message.isNoteOff())
+        playLiveEvent (message);
+}
+
+void AudioIO::playLiveEvent (const juce::MidiMessage& message) noexcept
 {
     playingLive.fetch_add (1);
 

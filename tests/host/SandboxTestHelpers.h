@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// For tests of plug-ins in helpers (docs/tracktion-migration.md, T3): the tests' helper program, the tests' stand-ins
+// For tests of plug-ins in helpers (src/sandbox/, src/host/): the tests' helper program, the tests' stand-ins
 // opened in one (TestPlugins.h), the helper's notices handed to them, and a block played through one. Included after
 // TestHelpers.h, which brings doctest.
 #pragma once

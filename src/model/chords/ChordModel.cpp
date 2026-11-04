@@ -11,6 +11,8 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <juce_audio_basics/juce_audio_basics.h>
+
 namespace phazite
 {
 namespace

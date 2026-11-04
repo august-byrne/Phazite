@@ -5,7 +5,7 @@
 // pan and sends, each by an amount. A parameter's modulation moves it around its value, or its automation's, as the song
 // plays. Each function takes the open project's context, and gives nothing, or does nothing, for an ID of something that
 // is gone. Edits are undo steps of their own, named as each says, unless a gesture is open (SongGesture.h): then they
-// join its one step. The Tracktion side is internal/Modulation.h.
+// join its one step. The song's side is internal/Modulation.h.
 #pragma once
 
 #include "ModulationValues.h"
@@ -44,9 +44,10 @@ ParameterHandle getModulatorParameter (ProjectContext&, ModulatorID, const juce:
 // Renames a macro, a track's or a container's ("Rename Macro"); a name of nothing but spaces leaves it as it is.
 void renameMacro (ProjectContext&, ModulatorID, const juce::String& name);
 
-// Its output over the last seconds, as the song played, oldest first, for its editor: from -1 to 1 for a bipolar one,
-// else from 0 to 1. Tracktion keeps up to three seconds. And its output now, for its slot's meter (a macro's: its value,
-// from 0 to 1).
+// Its output over the last seconds, as Phazite's engine played it, oldest first, for its editor: from -1 to 1 for a
+// bipolar one, else from 0 to 1. The engine keeps up to three seconds; nothing while it doesn't play the project. And its
+// output now, for its slot's meter (a macro's: its value, from 0 to 1, the one set by hand while the engine doesn't play
+// the project; a modulator's 0 then).
 std::vector<float> getModulatorOutput (const ProjectContext&, ModulatorID, double seconds);
 float getModulatorValue (const ProjectContext&, ModulatorID);
 bool isBipolar (const ProjectContext&, ModulatorID);

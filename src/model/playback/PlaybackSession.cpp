@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PlaybackSession.h"
 #include "internal/PlaybackHost.h"
-#include "model/automation/internal/Automation.h"
-#include "model/base/internal/Schema.h"
 #include "model/engine/internal/AudioIO.h"
-#include "model/engine/internal/LiveInput.h"
+#include "model/transport/internal/AudioRecorder.h"
+#include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Take.h"
 
 #include <algorithm>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -15,90 +15,90 @@ namespace phazite
 {
 namespace
 {
-    // Every session, for findPlayingSession(). Message thread only.
+    // Every session, for findSession(). Message thread only.
     std::vector<PlaybackSession*>& getSessions()
     {
         static std::vector<PlaybackSession*> sessions;
         return sessions;
     }
-
-    // Whether a change is the song's: in the Edit's PHAZITE element, or the element itself.
-    bool isInSong (juce::ValueTree tree)
-    {
-        for (; tree.isValid(); tree = tree.getParent())
-            if (tree.hasType (schema::PHAZITE))
-                return true;
-
-        return false;
-    }
 } // namespace
 
-PlaybackSession::PlaybackSession (te::Edit& e, PlaybackHost& h)
-    : edit (e),
-      exists (&e),
+PlaybackSession::PlaybackSession (Song& s, PlaybackHost& h)
+    : song (&s),
       host (h),
-      audio (AudioIO::getFor (e.engine)),
-      player (e),
-      writer (e, *this),
-      editState (e.state)
+      songState (s.getState()),
+      plugins (s, h.getPluginHost(), h.getEngine().getSampleRate()),
+      player (s, &plugins),
+      writer (s, *this)
 {
+    recorder = std::make_unique<AudioRecorder> (*this);
+    plugins.setListener (this);
     player.readLive (host.getFileReader(), host.getEngine().getBlocksPlayed());
-    player.setPluginGestureListener ([this] (const ParameterRef& parameter, bool starting)
-                                     { writer.pluginGestureChanged (parameter, starting); });
-    edit.getParameterChangeHandler().addListener (*this);
-    editState.addListener (this);
+    song->addParameterListener (this);
+    songState.addListener (this);
     getSessions().push_back (this);
     host.add (*this);
+
+    // The engine plays this song from now on: stopped, from where its playback starts.
+    host.getEngine().stop();
+    host.getEngine().locate (getPlayStartBeat (s).inBeats());
     update();
+    startTimerHz (30);
 }
 
 PlaybackSession::~PlaybackSession()
 {
+    stopTimer();
     take = nullptr; // a take not finished keeps nothing
     cancelPendingUpdate();
-    editState.removeListener (this);
+    songState.removeListener (this);
+    song->removeParameterListener (this);
+    plugins.setListener (nullptr);
+    recorder = nullptr; // what it opened for the tracks closes
 
     // Live MIDI goes nowhere until the session the engine plays next (if any) sends it there again (host.remove()).
     if (host.getPlayingSession() == this)
-        audio->stopLiveMidi (host.getEngine());
+        getAudioIO().stopLiveMidi (host.getEngine());
 
-    // The Edit may have gone first (it is deleted while a context still holds it).
-    if (exists.get() != nullptr)
-    {
-        holdTracktion (false);
-        edit.getParameterChangeHandler().removeListener (*this);
-        player.letGoOfPlugins();
-    }
-
+    player.letGoOfPlugins();
     host.remove (*this);
     std::erase (getSessions(), this);
 }
 
-void PlaybackSession::changed (const juce::ValueTree& tree, const juce::ValueTree& child)
+AudioIO& PlaybackSession::getAudioIO() const noexcept
 {
-    if (isInSong (tree) || child.hasType (schema::PHAZITE))
-        triggerAsyncUpdate();
+    return host.getAudioIO();
+}
+
+void PlaybackSession::changed (const juce::ValueTree&)
+{
+    triggerAsyncUpdate();
 }
 
 void PlaybackSession::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
     // A value set by hand plays at once; anything else, in a new plan.
-    if (isInSong (tree) && ! player.takeValue (tree, property))
+    if (! player.takeValue (tree, property))
         triggerAsyncUpdate();
 }
 
-void PlaybackSession::pluginParameterChanged (te::AutomatableParameter& parameter, bool isFollowingAutomation)
+void PlaybackSession::valueSetByHand (const ParameterRef& parameter, float value, bool byPlugin)
 {
-    // A plug-in's value set by hand (as Tracktion keeps it) plays at once too.
-    if (! isFollowingAutomation)
-        player.takeValueSetByHand (getParameterRef (parameter), parameter.getCurrentExplicitValue());
+    // A plug-in's value set in its own window plays at once (a value set by a control is in the song: takeValue()).
+    if (byPlugin)
+        player.takeValueSetByHand (parameter, value);
 
-    writer.parameterChanged (getParameterRef (parameter), parameter.getCurrentBaseValue(), isFollowingAutomation);
+    writer.parameterChanged (parameter, value);
+}
+
+void PlaybackSession::pluginGestureChanged (const ParameterRef& parameter, bool starting)
+{
+    writer.pluginGestureChanged (parameter, starting);
 }
 
 bool PlaybackSession::isPlayingProject() const
 {
-    return exists.get() != nullptr && host.getPlayingSession() == this;
+    return host.getPlayingSession() == this;
 }
 
 engine::Engine& PlaybackSession::getEngine() noexcept
@@ -116,12 +116,13 @@ void PlaybackSession::play (bool countIn)
     update(); // what it plays as the song is now, should a change still be on its way
     host.getEngine().play (countIn);
     playStartClock = host.getEngine().getClock();
+    lastPlayhead.reset();
     writer.playbackStarted();
 }
 
 bool PlaybackSession::startTake()
 {
-    if (take == nullptr && exists.get() != nullptr)
+    if (take == nullptr)
     {
         update(); // the song as it is now, whose tempo and delays the take starts with
         take = Take::start (*this);
@@ -172,11 +173,34 @@ void PlaybackSession::stop()
 void PlaybackSession::locate (BeatPosition beat)
 {
     host.getEngine().locate (beat.inBeats());
+    lastPlayhead.reset();
 }
 
 BeatPosition PlaybackSession::getPlayhead() const
 {
     return BeatPosition::fromBeats (host.getEngine().getPlayheadBeat());
+}
+
+void PlaybackSession::timerCallback()
+{
+    // Playing on with nothing looped, and nothing recorded: it stops as the playhead crosses the song's end, and goes back
+    // to where playback starts. Playback started past the end plays on, there being nothing to cut short.
+    if (! isPlayingProject() || ! isPlaying() || isLoopOn (*song) || take != nullptr)
+    {
+        lastPlayhead.reset();
+        return;
+    }
+
+    const auto playhead = getPlayhead();
+
+    if (lastPlayhead.has_value() && *lastPlayhead < songEnd && playhead >= songEnd)
+    {
+        stop();
+        locate (getPlayStartBeat (*song));
+        return;
+    }
+
+    lastPlayhead = playhead;
 }
 
 void PlaybackSession::setLiveTrack (TrackID track)
@@ -187,17 +211,11 @@ void PlaybackSession::setLiveTrack (TrackID track)
 
 void PlaybackSession::followLiveMidi()
 {
-    if (exists.get() == nullptr)
-        return;
-
-    // While the engine plays this project, into its track; Tracktion's graph held silent meanwhile.
-    const auto playing = isPlayingProject();
-
-    if (playing)
-        audio->setLiveMidi (&host.getEngine(), (std::int64_t) liveTrack.getRaw());
-
-    holdTracktion (playing);
+    // While the engine plays this project, into its track.
+    if (isPlayingProject())
+        getAudioIO().setLiveMidi (&host.getEngine(), (std::int64_t) liveTrack.getRaw());
 }
+
 void PlaybackSession::playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity)
 {
     for (const auto pitch : pitches)
@@ -220,10 +238,20 @@ void PlaybackSession::update()
 {
     cancelPendingUpdate();
     auto& engine = host.getEngine();
+    songEnd = getSongLoopBeats (*song).getEnd();
+    plugins.sync();
 
     if (isPlayingProject() && ! lentToRender)
     {
-        auto plan = player.compile (engine.getSampleRate(), engine.getMaximumBlockSize(), false);
+        SongPlayer::Live live;
+        live.lowLatency = host.isLowLatency();
+
+        if (recorder != nullptr)
+            for (const auto track : recorder->getArmedTracks())
+                live.armed.insert (track);
+
+        plugins.setSampleRate (engine.getSampleRate());
+        auto plan = player.compile (engine.getSampleRate(), engine.getMaximumBlockSize(), live);
 
         // A take loops the range looped on purpose, or nothing (Take.h).
         if (take != nullptr)
@@ -241,7 +269,7 @@ void PlaybackSession::update()
 
 void PlaybackSession::lendToRender (bool lent)
 {
-    if (std::exchange (lentToRender, lent) == lent || exists.get() == nullptr)
+    if (std::exchange (lentToRender, lent) == lent)
         return;
 
     if (lent)
@@ -256,77 +284,11 @@ void PlaybackSession::lendToRender (bool lent)
     update();
 }
 
-void PlaybackSession::holdTracktion (bool hold)
-{
-    // A node that plays silence, holding Tracktion's graph without preparing it (so its plug-ins aren't prepared or
-    // played by it), until Tracktion builds another.
-    struct Held final : te::graph::Node
-    {
-        explicit Held (std::unique_ptr<te::graph::Node> graph)
-            : held (std::move (graph))
-        {
-        }
-
-        te::graph::NodeProperties getNodeProperties() override
-        {
-            te::graph::NodeProperties properties;
-            properties.hasAudio = true;
-            properties.hasMidi = true;
-            properties.numberOfChannels = 2;
-            properties.nodeID = (size_t) reinterpret_cast<std::uintptr_t> (this);
-            return properties;
-        }
-
-        bool isReadyToProcess() override { return true; }
-
-        void process (ProcessContext& context) override
-        {
-            context.buffers.audio.clear();
-            context.buffers.midi.clear();
-        }
-
-        std::unique_ptr<te::graph::Node> held;
-    };
-
-    auto* context = exists.get() != nullptr ? edit.getTransport().getCurrentPlaybackContext() : nullptr;
-
-    if (context == nullptr || (context == heldContext) == hold)
-        return;
-
-    if (hold)
-        context->setInsertOptionalLastStageNodeForDeviceCallback (
-            [] (te::OutputDevice&, const te::CreateNodeParams&, std::unique_ptr<te::graph::Node> graph) -> std::unique_ptr<te::graph::Node>
-            { return std::make_unique<Held> (std::move (graph)); });
-    else
-        context->setInsertOptionalLastStageNodeForDeviceCallback ({});
-
-    heldContext = hold ? context : nullptr;
-    edit.restartPlayback();
-}
-
 //==============================================================================
-PlaybackSession* findSession (const te::Edit& edit)
-{
-    for (auto* session : getSessions())
-        if (session->hasEdit() && &session->getEdit() == &edit)
-            return session;
-
-    return nullptr;
-}
-
-PlaybackSession* findPlayingSession (const te::Edit& edit)
-{
-    for (auto* session : getSessions())
-        if (session->hasEdit() && &session->getEdit() == &edit && session->isPlayingProject())
-            return session;
-
-    return nullptr;
-}
-
 PlaybackSession* findSession (const Song& song)
 {
     for (auto* session : getSessions())
-        if (session->hasEdit() && &getSong (session->getEdit()) == &song)
+        if (&session->getSong() == &song)
             return session;
 
     return nullptr;
@@ -335,27 +297,16 @@ PlaybackSession* findSession (const Song& song)
 PlaybackSession* findPlayingSession (const Song& song)
 {
     for (auto* session : getSessions())
-        if (session->hasEdit() && &getSong (session->getEdit()) == &song && session->isPlayingProject())
+        if (&session->getSong() == &song && session->isPlayingProject())
             return session;
 
     return nullptr;
 }
 
-std::optional<float> getPlayedValue (const te::AutomatableParameter& parameter, bool withModulation)
+juce::AudioBuffer<float> renderWithOwnEngine (Song& song, int numSamples, double sampleRate, int blockSize, int numThreads)
 {
-    const auto* session = findPlayingSession (parameter.getEdit());
-    const auto ref = getParameterRef (parameter);
-
-    if (session != nullptr && session->getPlayer().isMoved (ref))
-        return session->getPlayer().getPlayedValue (ref, withModulation);
-
-    return {};
-}
-
-juce::AudioBuffer<float> renderWithOwnEngine (te::Edit& edit, int numSamples, double sampleRate, int blockSize, int numThreads)
-{
-    // With the project's plug-ins, which its engine plays none of meanwhile.
-    auto* session = findSession (edit);
+    // With the song's plug-ins, which its engine plays none of meanwhile.
+    auto* session = findSession (song);
 
     if (session != nullptr)
         session->lendToRender (true);
@@ -366,8 +317,8 @@ juce::AudioBuffer<float> renderWithOwnEngine (te::Edit& edit, int numSamples, do
         engine::Engine engine;
         engine.setNumThreads (numThreads);
         engine.prepare (sampleRate, blockSize);
-        SongPlayer player (edit);
-        engine.setPlan (player.compile (sampleRate, blockSize, true));
+        SongPlayer player (song, session != nullptr ? &session->getPlugins() : nullptr);
+        engine.setPlan (player.compile (sampleRate, blockSize, std::nullopt));
         engine.locate (0.0);
         audio = engine.render (numSamples);
     }

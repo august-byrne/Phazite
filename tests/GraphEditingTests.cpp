@@ -39,7 +39,7 @@ juce::String describeUndo (phazite::test::TestSong& song)
 
 void undo (phazite::test::TestSong& song)
 {
-    phazite::undo (*phazite::getEdit (song.context));
+    phazite::undo (*phazite::findSong (song.context));
 }
 } // namespace
 

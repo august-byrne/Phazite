@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's own playback engine (docs/tracktion-migration.md, T2): it plays the plan the model builds from the song
-// (Plan.h), handed to it whole, and the transport that the message thread asks for. Real-time safe on the audio thread:
-// what it plays comes through a handover (Handover.h), what it is asked to do through a lock-free queue, and where it is
-// goes out through values the message thread polls. Live, the model's playback host calls process() from the audio
-// device's callback; a render makes an engine of its own and calls it in a loop (render()).
+// Phazite's own playback engine: it plays the plan the model builds from the song (Plan.h), handed to it whole, and the
+// transport that the message thread asks for. Real-time safe on the audio thread: what it plays comes through a
+// handover (Handover.h), what it is asked to do through a lock-free queue, and where it is goes out through values the
+// message thread polls. Live, the model's playback host calls process() from the audio device's callback; a render
+// makes an engine of its own and calls it in a loop (render()).
 #pragma once
 
 #include "EventQueue.h"
@@ -107,7 +107,7 @@ public:
     const std::atomic<std::uint64_t>& getBlocksPlayed() const noexcept { return blocksPlayed; }
 
     // Message thread, while the engine is stopped or not yet given to the audio device: so many threads play each block,
-    // the audio thread one of them (docs/tracktion-migration.md, T2 step 8).
+    // the audio thread one of them (Workers.h).
     void setNumThreads (int count) { workers.setNumThreads (count); }
     int getNumThreads() const noexcept { return workers.getNumThreads(); }
 

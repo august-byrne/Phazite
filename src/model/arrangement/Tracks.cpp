@@ -409,7 +409,6 @@ void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
     if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && (bool) state[schema::trackMute] != muted)
     {
         state.setProperty (schema::trackMute, muted, undo);
-        song.reconcile (Song::Part::tracks);
     }
 }
 
@@ -418,7 +417,6 @@ void setTrackSoloed (Song& song, TrackID id, bool soloed)
     if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && (bool) state[schema::trackSolo] != soloed)
     {
         state.setProperty (schema::trackSolo, soloed, nullptr);
-        song.reconcile (Song::Part::tracks);
     }
 }
 
@@ -426,23 +424,18 @@ void setTrackName (Song& song, TrackID id, const juce::String& name)
 {
     if (auto state = findTrackState (song, id); state.hasType (schema::TRACK))
         state.setProperty (schema::trackName, name, &song.getUndoManager());
-
-    song.reconcile (Song::Part::tracks);
 }
 
 void setTrackColour (Song& song, TrackID id, juce::Colour colour)
 {
     if (auto state = findTrackState (song, id); state.hasType (schema::TRACK))
         state.setProperty (schema::trackColour, colour.toString(), &song.getUndoManager());
-
-    song.reconcile (Song::Part::tracks);
 }
 
 TrackID insertPlainTrack (Song& song, TrackID after)
 {
     const auto state = makeTrackState (song, schema::trackIsTrack, std::nullopt);
     insertTrackState (song, state, after);
-    song.reconcile (Song::Part::tracks);
     return getTrackID (state);
 }
 
@@ -520,7 +513,6 @@ void toggleSoloAlone (Song& song, TrackID id)
             other.setProperty (schema::trackSolo, false, nullptr);
 
     state.setProperty (schema::trackSolo, ! alone, nullptr);
-    song.reconcile (Song::Part::tracks);
 }
 
 bool isSilencedBySolo (const Song& song, TrackID id)
@@ -534,7 +526,6 @@ TrackID insertTrack (Song& song, TrackID after, Selection* selection)
 {
     const auto state = makeTrackState (song, schema::trackIsTrack, getNextColour (song, after));
     insertTrackState (song, state, after);
-    song.reconcile (Song::Part::tracks);
     const auto id = madeWithLastKey (song, getTrackID (state)); // the key chosen last in the song
 
     if (selection != nullptr)
@@ -548,7 +539,6 @@ TrackID insertReturnTrack (Song& song, const juce::String& name, Selection* sele
     auto state = makeTrackState (song, schema::trackIsReturn, getNextColour (song, {}));
     state.setProperty (schema::trackName, name, nullptr);
     insertTrackState (song, state, {});
-    song.reconcile (Song::Part::tracks);
     const auto id = madeWithLastKey (song, getTrackID (state)); // as any new track gets it
 
     if (selection != nullptr)
@@ -581,7 +571,6 @@ TrackID insertFolder (Song& song, TrackID after, Selection* selection)
     auto state = makeTrackState (song, schema::trackIsFolder, getNextColour (song, after));
     state.setProperty (schema::trackName, "Folder", nullptr);
     insertTrackState (song, state, after);
-    song.reconcile (Song::Part::tracks);
     const auto folder = getTrackID (state);
     mixAsBus (song, folder); // a bus from the start (design question 11)
 
@@ -605,7 +594,6 @@ TrackID groupIntoFolder (Song& song, const std::vector<TrackID>& tracks, Selecti
     state.setProperty (schema::trackName, "Folder", nullptr);
     auto parent = firstState.getParent();
     parent.addChild (state, parent.indexOf (firstState), &song.getUndoManager());
-    song.reconcile (Song::Part::tracks);
     const auto folder = getTrackID (state);
     mixAsBus (song, folder); // a bus from the start (design question 11)
 
@@ -628,7 +616,6 @@ void moveTrackIntoFolder (Song& song, TrackID track, TrackID folder)
         return;
 
     moveTrackState (song, state, folderState, folderState.getNumChildren());
-    song.reconcile (Song::Part::tracks);
 }
 
 void ungroupFolder (Song& song, TrackID folder)
@@ -651,7 +638,6 @@ void ungroupFolder (Song& song, TrackID folder)
     }
 
     parent.removeChild (folderState, &song.getUndoManager());
-    song.reconcile (Song::Part::tracks);
 }
 
 //==============================================================================
@@ -787,8 +773,6 @@ void moveSelectedTracks (Selection& selection, int direction)
         else
             moveTrackAfter (*song, track, neighbour);
     }
-
-    song->reconcile (Song::Part::tracks);
 }
 
 bool areAllTracksMuted (const Song& song, const std::vector<TrackID>& tracks)
@@ -901,9 +885,6 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         copies.push_back (getTrackID (copy));
     }
 
-    if (! copies.empty())
-        song.reconcile (Song::Part::everything);
-
     if (selection != nullptr)
     {
         selection->deselectAll();
@@ -925,7 +906,6 @@ void renameTrack (Song& song, TrackID track, const juce::String& name)
 
     const UndoStep step (song, "Rename Track");
     state.setProperty (schema::trackName, trimmed, &song.getUndoManager());
-    song.reconcile (Song::Part::tracks);
 }
 
 TrackID addTrackAtEnd (Song& song, bool folder, Selection* selection)
@@ -948,8 +928,6 @@ void setTrackColours (Song& song, const std::vector<TrackID>& tracks, juce::Colo
     for (const auto track : tracks)
         if (auto state = findTrackState (song, track); state.hasType (schema::TRACK))
             state.setProperty (schema::trackColour, colour.toString(), &song.getUndoManager());
-
-    song.reconcile (Song::Part::tracks);
 }
 
 void moveTracksAfter (Song& song, const std::vector<TrackID>& moving, TrackID previous)
@@ -964,8 +942,6 @@ void moveTracksAfter (Song& song, const std::vector<TrackID>& moving, TrackID pr
         moveTrackAfter (song, track, previous);
         previous = track;
     }
-
-    song.reconcile (Song::Part::tracks);
 }
 
 bool canMoveTracksTo (const Song& song, const std::vector<TrackID>& tracks, TrackID target, TrackDrop drop)
@@ -988,8 +964,6 @@ void moveTracksTo (Song& song, const std::vector<TrackID>& tracks, TrackID targe
     for (const auto& state : moving)
         moveTrackState (song, state, place->parent,
                         place->before.isValid() ? place->parent.indexOf (place->before) : place->parent.getNumChildren());
-
-    song.reconcile (Song::Part::tracks);
 }
 
 void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* selection)
@@ -1021,8 +995,6 @@ void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* se
     for (const auto track : outermost)
         if (const auto state = findTrackState (song, track); state.isValid())
             state.getParent().removeChild (state, &song.getUndoManager());
-
-    song.reconcile (Song::Part::tracks);
 
     if (selection != nullptr)
         if (const auto remaining = getTrackIDs (song); ! remaining.empty())

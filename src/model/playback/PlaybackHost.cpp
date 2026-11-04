@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PlaybackHost.h"
 #include "internal/PlaybackSession.h"
+#include "model/engine/AudioDevices.h"
+#include "model/engine/internal/AudioIO.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite
 {
-PlaybackHost::PlaybackHost (te::Engine& e, juce::AudioDeviceManager& d)
-    : tracktion (e),
-      devices (d),
+PlaybackHost::PlaybackHost (AudioIO& a, PluginHost& p, int threads)
+    : audio (a),
+      plugins (p),
+      devices (a.getDevices()),
+      numThreads (std::max (1, threads)),
       taking (512)
 {
-    // As many threads as Tracktion's (model/engine/internal/EngineSetup.h), which plays nothing of a project.
-    engine.setNumThreads (tracktion.getEngineBehaviour().getNumberOfCPUsToUseForAudio());
+    engine.setNumThreads (numThreads);
     devices.addAudioCallback (this); // which prepares the engines at once, if a device is open
     startTimerHz (4);
 }
@@ -26,6 +30,50 @@ PlaybackHost::~PlaybackHost()
     engine.dropPlans();
     previews.stop();
     previews.dropPlans();
+}
+
+void PlaybackHost::setLowLatency (bool on)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (std::exchange (lowLatency, on) == on)
+        return;
+
+    // Sets the output's buffer outside what is saved (JUCE saves setups chosen as such only): the engine is prepared again
+    // for it as the device starts again.
+    const auto setBufferSize = [this] (int bufferSize)
+    {
+        auto setup = devices.getAudioDeviceSetup();
+        setup.bufferSize = bufferSize;
+        devices.setAudioDeviceSetup (setup, false);
+    };
+
+    if (auto* device = devices.getCurrentAudioDevice())
+    {
+        if (on)
+        {
+            const auto current = device->getCurrentBufferSizeSamples();
+
+            if (const auto smaller = chooseLowLatencyBufferSize (device->getAvailableBufferSizes());
+                smaller.has_value() && *smaller < current)
+            {
+                bufferBeforeLowLatency = current;
+                lowLatencyBuffer = *smaller;
+                setBufferSize (*smaller);
+            }
+        }
+        else if (bufferBeforeLowLatency > 0)
+        {
+            // Back as it was, unless the settings changed it meanwhile.
+            if (device->getCurrentBufferSizeSamples() == lowLatencyBuffer)
+                setBufferSize (bufferBeforeLowLatency);
+
+            bufferBeforeLowLatency = lowLatencyBuffer = 0;
+        }
+    }
+
+    if (auto* session = getPlayingSession())
+        session->update();
 }
 
 void PlaybackHost::prepareEngines (double sampleRate, int maximumBlockSize)

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What a device is and what its parameters are, without any engine (docs/design.md, section 24). The DSP of each of
-// Phazite's devices describes itself with these: its thin Tracktion plug-in (src/model/devices/) turns the parameters
-// into automatable ones, editors show them, and the DSP reads their current values. Type and parameter IDs are saved
-// in projects (model/base/internal/Schema.h).
+// Phazite's devices describes itself with these: the model names its parameters by them (src/model/devices/), which
+// automation and modulators move, editors show them, and the DSP reads their current values from its runner
+// (engine/nodes/DeviceRunner.h). Type and parameter IDs are saved in projects (model/base/internal/Schema.h).
 #pragma once
 
 #include <juce_core/juce_core.h>
@@ -77,12 +77,12 @@ struct DeviceInfo
     std::span<const ParameterInfo> parameters {};
 
     // Whether the device listens to a sidechain: another track's sound, such as a kick that a compressor turns a bass
-    // down to. Its thin plug-in hands it the sound of the track picked as the source (ProcessContext::sidechain).
+    // down to. Its runner hands it the sound of the track picked as the source (ProcessContext::sidechain).
     bool hasSidechain = false;
 };
 
 // An effect's parameter with this ID is its mix: how much of what it puts out is its effect, from 0 (only what comes
-// in) to 1. Its thin plug-in applies it, so the DSP itself ignores it.
+// in) to 1. Its runner applies it (engine/nodes/DeviceRunner.h), so the DSP itself ignores it.
 inline constexpr std::string_view mixParameterID = "mix";
 
 // The index of the parameter with that ID among the device's parameters, or -1.

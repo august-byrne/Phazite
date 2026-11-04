@@ -5,17 +5,19 @@
 // piano roll's rows named after the pads.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/devices/internal/DeviceStates.h"
+#include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/DrumKit.h"
-#include "model/devices/internal/DrumSamplerPlugin.h"
-#include "model/engine/internal/EngineSetup.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 
 #include <cmath>
 #include <vector>
@@ -317,7 +319,7 @@ TEST_CASE ("A drum pad plays a sound of its own at its pitch, swapped in as the 
     CHECK (peakOf (played.left, 4800, 9600) > 0.1f);
     CHECK_FALSE (sampler.hasOwnSound (0));
 
-    // The editor plays a pad at the next block, which it waits for (its thin plug-in wakes for it).
+    // The editor plays a pad at the next block, which it waits for (the engine wakes for it).
     sampler.getPadMeter (2).take();
     CHECK_FALSE (sampler.isWaitingToPlay());
     sampler.audition (2, 0.8f);
@@ -337,69 +339,67 @@ TEST_CASE ("A drum pad plays a sound of its own at its pitch, swapped in as the 
 
 TEST_CASE ("A sound file put on a drum pad is one undo step, kept in the project's Audio folder, and plays when the project opens")
 {
-    auto& engine = phazite::test::getEngine();
-    phazite::test::TemporaryFolder project, elsewhere;
-    const auto projectFile = project.folder.getChildFile ("Song.phazite");
+    phazite::test::TestSong song;
+    phazite::test::TemporaryFolder elsewhere;
     const auto sample = elsewhere.folder.getChildFile ("My Kick.wav");
     writeWav (sample, 0.2);
 
+    // The sampler as Phazite's engine plays the open song's.
+    const auto playedSampler = [&song] (phazite::DeviceID id)
     {
-        auto edit = phazite::createSongEdit (engine, projectFile);
-        auto& song = phazite::getSong (*edit);
-        auto* track = te::getAudioTracks (*edit)[0];
-        const auto trackID = phazite::getTrackID (*track);
-        auto plugin = edit->getPluginCache().createNewPlugin (DrumSampler::typeID, {});
-        REQUIRE (phazite::setInstrument (*track, plugin) != nullptr);
-        REQUIRE (phazite::isDrumSampler (*plugin));
-        CHECK (phazite::getPadName (*plugin, 0) == juce::String ("Kick"));
+        phazite::getSession (song.context)->update();
+        return phazite::makeDeviceHandle (*phazite::findSong (song.context), id).getProcessor<DrumSampler>();
+    };
 
-        // The track's drum rows are the pads, named after what they play.
-        CHECK (phazite::isDrumTrack (song, trackID));
-        auto rows = phazite::getSamplerSounds (song, trackID);
-        REQUIRE (rows.has_value());
-        REQUIRE (rows->size() == 16);
-        CHECK ((*rows)[0].note == 36);
-        CHECK ((*rows)[2].name == juce::String ("Snare"));
+    const auto trackID = song.firstTrack;
+    const auto id = song.setInstrument (trackID, DrumSampler::typeID);
+    auto& s = *phazite::findSong (song.context);
+    REQUIRE (phazite::isDrumSampler (s, id));
+    CHECK (phazite::getPadName (s, id, 0) == juce::String ("Kick"));
 
-        // A file that isn't a sound changes nothing.
-        const auto text = elsewhere.folder.getChildFile ("Notes.txt");
-        REQUIRE (text.replaceWithText ("not a sound"));
-        CHECK_FALSE (phazite::setPadSound (*plugin, 0, text));
+    // The track's drum rows are the pads, named after what they play.
+    CHECK (phazite::isDrumTrack (s, trackID));
+    auto rows = phazite::getSamplerSounds (s, trackID);
+    REQUIRE (rows.has_value());
+    REQUIRE (rows->size() == 16);
+    CHECK ((*rows)[0].note == 36);
+    CHECK ((*rows)[2].name == juce::String ("Snare"));
 
-        REQUIRE (phazite::setPadSound (*plugin, 0, sample));
-        CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Put My Kick on Pad 1"));
-        CHECK (plugin->state[phazite::schema::getPadSoundFile (0)].toString() == juce::String ("Audio/My Kick.wav"));
-        CHECK (project.folder.getChildFile ("Audio/My Kick.wav").existsAsFile());
-        CHECK (phazite::getPadName (*plugin, 0) == juce::String ("My Kick"));
-        CHECK (phazite::getSamplerSounds (song, trackID)->front().name == juce::String ("My Kick"));
-        auto& sampler = dynamic_cast<phazite::DrumSamplerPlugin&> (*plugin).getSampler();
-        CHECK (sampler.hasOwnSound (0));
+    // A file that isn't a sound changes nothing.
+    const auto text = elsewhere.folder.getChildFile ("Notes.txt");
+    REQUIRE (text.replaceWithText ("not a sound"));
+    CHECK_FALSE (phazite::setPadSound (s, id, 0, text));
 
-        phazite::undo (*edit);
-        CHECK (phazite::getPadName (*plugin, 0) == juce::String ("Kick"));
-        CHECK_FALSE (sampler.hasOwnSound (0));
-        phazite::redo (*edit);
-        CHECK (sampler.hasOwnSound (0));
+    REQUIRE (phazite::setPadSound (s, id, 0, sample));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Put My Kick on Pad 1"));
+    const auto sounds = phazite::findDeviceState (s, id).getChildWithName (phazite::schema::SOUNDS);
+    CHECK (sounds[phazite::schema::getPadSoundFile (0)].toString() == juce::String ("Audio/My Kick.wav"));
+    CHECK (song.getProject().getFolder().getChildFile ("Audio/My Kick.wav").existsAsFile());
+    CHECK (phazite::hasPadSound (s, id, 0));
+    CHECK (phazite::getPadName (s, id, 0) == juce::String ("My Kick"));
+    CHECK (phazite::getSamplerSounds (s, trackID)->front().name == juce::String ("My Kick"));
+    REQUIRE (playedSampler (id) != nullptr);
+    CHECK (playedSampler (id)->hasOwnSound (0));
 
-        // Saved as a project saves it: the song alone.
-        phazite::storeDeviceStates (*edit);
-        REQUIRE (song.getState().createXml()->writeTo (projectFile));
-    }
+    phazite::undo (s);
+    CHECK (phazite::getPadName (s, id, 0) == juce::String ("Kick"));
+    CHECK_FALSE (playedSampler (id)->hasOwnSound (0));
+    phazite::redo (s);
+    CHECK (playedSampler (id)->hasOwnSound (0));
 
-    // Opened again from the file, the pad plays its file.
-    const auto saved = juce::XmlDocument::parse (projectFile);
-    REQUIRE (saved != nullptr);
-    auto edit = phazite::createEditFromSong (engine, juce::ValueTree::fromXml (*saved), projectFile);
-    REQUIRE (edit != nullptr);
-    auto* drums = dynamic_cast<phazite::DrumSamplerPlugin*> (phazite::getInstrument (*te::getAudioTracks (*edit)[0]));
-    REQUIRE (drums != nullptr);
-    CHECK (drums->getSampler().hasOwnSound (0));
-    CHECK (drums->getPadName (0) == juce::String ("My Kick"));
+    // Opened again from its file, the pad plays its file.
+    song.reopen();
+    auto& reopened = *phazite::findSong (song.context);
+    const auto drums = phazite::getInstrument (reopened, trackID);
+    REQUIRE (phazite::isDrumSampler (reopened, drums));
+    REQUIRE (playedSampler (drums) != nullptr);
+    CHECK (playedSampler (drums)->hasOwnSound (0));
+    CHECK (phazite::getPadName (reopened, drums, 0) == juce::String ("My Kick"));
 
     // Back to the kit's sound, as an undo step.
-    phazite::clearPadSound (*drums, 0);
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Reset Pad 1"));
-    CHECK_FALSE (drums->getSampler().hasOwnSound (0));
+    phazite::clearPadSound (reopened, drums, 0);
+    CHECK (phazite::describeUndo (&reopened) == juce::String ("Undo Reset Pad 1"));
+    CHECK_FALSE (playedSampler (drums)->hasOwnSound (0));
 }
 
 TEST_CASE ("Stopping playback cuts the hits that had only just begun, and lets the others ring")

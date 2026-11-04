@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What Phazite's engine plays (docs/tracktion-migration.md, T2): built on the message thread from the song
-// (model/playback/), at the engine's sample rate, never changed once built, and handed to the audio thread whole
-// (core/Handover.h). What sounds on from one plan to the next (a device's voices, a reverb's tail, a channel's fader) isn't
-// in it: a plan points at it, kept by the song's IDs, so that a new plan doesn't reset the sound. Pieces that don't
-// change (a track's notes) are shared between plans; each is freed with the last plan that points at it, on the message
-// thread.
+// What Phazite's engine plays: built on the message thread from the song (model/playback/), at the engine's sample
+// rate, never changed once built, and handed to the audio thread whole (core/Handover.h). What sounds on from one plan
+// to the next (a device's voices, a reverb's tail, a channel's fader) isn't in it: a plan points at it, kept by the
+// song's IDs, so that a new plan doesn't reset the sound. Pieces that don't change (a track's notes) are shared between
+// plans; each is freed with the last plan that points at it, on the message thread.
 #pragma once
 
 #include "TempoMap.h"

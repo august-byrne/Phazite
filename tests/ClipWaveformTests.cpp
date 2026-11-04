@@ -5,6 +5,7 @@
 #include "UiTestHelpers.h"
 #include "app/ClipWaveforms.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -39,14 +40,14 @@ TEST_CASE ("A clip's waveform loads in the background and draws where its file h
 {
     phazite::test::TemporaryFolder temp;
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Waves", error);
+    auto project = phazite::Project::create (temp.folder, "Waves", error);
     REQUIRE (project != nullptr);
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, &project->getEdit());
+    setSong (context, &project->getSong());
 
     // A second of sound at 120 BPM: two beats, from the song's start.
     const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Tone.wav"), 1.0);
-    const auto track = phazite::getTrackID (*te::getAudioTracks (project->getEdit())[0]);
+    const auto track = phazite::getTrackIDs (project->getSong()).front();
     const auto clips = phazite::importFiles (context, { file.getFullPathName() }, track, phazite::BeatPosition());
     REQUIRE (clips.size() == 1);
 
@@ -65,5 +66,5 @@ TEST_CASE ("A clip's waveform loads in the background and draws where its file h
     auto again = make (context, clips[0], shown);
     CHECK (countLit (paint (*again, span), 0, 190) > 190 * 10);
 
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }

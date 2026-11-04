@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The measurement step 0 of T3 asks for (docs/tracktion-migration.md; roadmap step 3.3): a plug-in played in a helper,
+// The cost of hosting a plug-in in a helper (roadmap step 3.3): a plug-in played in a helper,
 // a block at a time at 128 samples, one every block's length as an audio device asks, against the same plug-in in
 // Phazite's own process: each block's time from handing it over to having it back (median, 99th percentile, worst), the
 // CPU of the thread that waits (as Phazite's audio thread would) and of the helper, and the helper's memory. With the

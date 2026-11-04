@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Mixer.h"
-#include "MixerModel.h"
-#include "internal/Containers.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
@@ -9,11 +7,12 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/devices/internal/DeviceFiles.h"
-#include "model/devices/internal/DevicePlugin.h"
 #include "model/devices/internal/Devices.h"
-#include "model/modulation/internal/Modulation.h"
+#include "model/plugins/internal/PluginHost.h"
+#include "model/plugins/internal/PluginInstances.h"
 
+#include <algorithm>
+#include <cmath>
 #include <optional>
 
 namespace phazite
@@ -67,11 +66,11 @@ namespace
         {
             song.storeDeviceStates (getDeviceChannel (song, id).getRaw());
             state.getParent().removeChild (state, getUndo (song));
-            song.reconcile (Song::Part::devices);
         }
     }
 
-    // Sets a property without an undo step, only if its value is another (as a store does: DeviceStates.h).
+    // Sets a property without an undo step, only if its value is another (as a store of a plug-in's state does:
+    // model/plugins/internal/PluginInstances.h).
     void store (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value)
     {
         if (const auto* stored = state.getPropertyPointer (property); stored == nullptr || *stored != value)
@@ -100,68 +99,16 @@ namespace
         return trackState.hasType (schema::TRACK) && ! isFolderState (trackState) && ! isReturnState (trackState);
     }
 
-    //==============================================================================
-    // Tracktion's side (see the header).
-
-    // The dry and wet levels Tracktion gives a plug-in or a container, each passing its sound at full level at 1.
-    struct MixLevels
+    // One of Phazite's own device types, described as a plug-in is: in Phazite's own format, by its type ID.
+    DeviceType makeOwnType (const devices::DeviceInfo& info)
     {
-        te::AutomatableParameter::Ptr dry, wet;
-    };
-
-    std::optional<MixLevels> findMixLevels (te::Plugin& device)
-    {
-        if (isInstrument (device))
-            return {};
-
-        auto dry = device.getAutomatableParameterByID ("dry level");
-        auto wet = device.getAutomatableParameterByID ("wet level");
-
-        if (dry == nullptr || wet == nullptr)
-            return {};
-
-        return MixLevels { dry, wet };
-    }
-
-    bool isMixLevel (const te::AutomatableParameter& parameter)
-    {
-        return parameter.paramID == "dry level" || parameter.paramID == "wet level";
-    }
-
-    // The mix of one of Phazite's own effects: a parameter of its own, which its plug-in applies.
-    te::AutomatableParameter::Ptr findOwnMix (te::Plugin& device)
-    {
-        if (auto* own = dynamic_cast<DevicePlugin*> (&device); own != nullptr && ! own->isSynth())
-            return own->findParameter (devices::mixParameterID);
-
-        return {};
-    }
-
-    // A channel's volume or pan as its fader's parameter is set, in the song (Schema.h: channelVolume, channelPan): as
-    // Tracktion names them, a track's volume and pan, the master's, and a VCA's level. Nothing for another device.
-    void storeFaderValue (te::Plugin& device, const juce::String& parameterID, float value)
-    {
-        auto& song = getSong (device.edit);
-        auto state = findChannelOfFader (song, getDeviceID (device));
-
-        if (! state.isValid())
-            return;
-
-        if (parameterID == schema::faderVolume || parameterID == schema::masterVolume || parameterID == schema::vcaVolume)
-            setChannelValue (state, schema::channelVolume, faderPositionToDecibels (value),
-                             state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f, getUndo (song));
-        else if (parameterID == schema::faderPan || parameterID == schema::masterPan)
-            setChannelValue (state, schema::channelPan, value, 0.0f, getUndo (song));
-    }
-
-    DeviceType makeBuiltIn (const juce::String& name, const juce::String& xmlType, bool instrument, const juce::String& maker)
-    {
+        const auto instrument = info.kind == devices::DeviceKind::instrument;
         juce::PluginDescription description;
-        description.name = name;
-        description.pluginFormatName = te::PluginManager::builtInPluginFormatName;
+        description.name = getOwnName (info);
+        description.pluginFormatName = schema::ownDeviceFormat;
         description.category = instrument ? "Synth" : "Effect";
-        description.manufacturerName = maker;
-        description.fileOrIdentifier = xmlType;
+        description.manufacturerName = "Phazite";
+        description.fileOrIdentifier = juce::String (info.typeID.data(), info.typeID.size());
         description.isInstrument = instrument;
         return makeDeviceType (description);
     }
@@ -171,8 +118,12 @@ namespace
     {
         for (const auto* info : getOwnDevices())
             if (info->kind == kind)
-                types.push_back (makeBuiltIn (getOwnName (*info), juce::String (info->typeID.data(), info->typeID.size()),
-                                              kind == devices::DeviceKind::instrument, "Phazite"));
+                types.push_back (makeOwnType (*info));
+    }
+
+    juce::String getMixID()
+    {
+        return juce::String (devices::mixParameterID.data(), devices::mixParameterID.size());
     }
 } // namespace
 
@@ -365,7 +316,6 @@ DeviceID insertDeviceState (Song& song, TrackID channel, juce::ValueTree device,
         makeBus (song, channel);
 
     addDeviceState (song, chain, device, isInstrumentState (device) ? 0 : index); // instruments come first
-    song.reconcile (Song::Part::devices);
     return getDeviceID (device);
 }
 
@@ -411,7 +361,6 @@ void moveDevice (Song& song, DeviceID id, int newIndex)
     const auto devices = getDeviceStates (chain);
     const auto& target = devices[(size_t) juce::jlimit (0, (int) devices.size() - 1, newIndex)];
     chain.moveChild (chain.indexOf (state), chain.indexOf (target), getUndo (song));
-    song.reconcile (Song::Part::devices);
 }
 
 void setDeviceOn (Song& song, DeviceID id, bool on)
@@ -427,8 +376,6 @@ void setDeviceOn (Song& song, DeviceID id, bool on)
         state.removeProperty (schema::deviceOff, getUndo (song));
     else
         state.setProperty (schema::deviceOff, true, getUndo (song));
-
-    song.reconcile (Song::Part::device, id.getRaw());
 }
 
 bool isDeviceOn (const Song& song, DeviceID id)
@@ -444,8 +391,6 @@ void setDeviceSound (Song& song, DeviceID id, const juce::Identifier& property, 
             state.getOrCreateChildWithName (schema::SOUNDS, getUndo (song)).setProperty (property, value, getUndo (song));
         else if (auto sounds = state.getChildWithName (schema::SOUNDS); sounds.isValid())
             sounds.removeProperty (property, getUndo (song));
-
-        song.reconcile (Song::Part::device, id.getRaw());
     }
 }
 
@@ -486,9 +431,7 @@ float getMix (const Song& song, DeviceID id)
     if (const auto* own = findOwnInfo (state))
     {
         const auto& mix = own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)];
-        return (float) state.getChildWithName (schema::VALUES)
-            .getProperty (juce::Identifier (juce::String (devices::mixParameterID.data(), devices::mixParameterID.size())),
-                          mix.defaultValue);
+        return (float) state.getChildWithName (schema::VALUES).getProperty (juce::Identifier (getMixID()), mix.defaultValue);
     }
 
     return (float) state.getProperty (schema::deviceMix, 1.0f);
@@ -503,15 +446,11 @@ void setMix (Song& song, DeviceID id, float mix)
     const auto wet = juce::jlimit (0.0f, 1.0f, mix);
 
     if (findOwnInfo (state) != nullptr)
-        state.getOrCreateChildWithName (schema::VALUES, getUndo (song))
-            .setProperty (juce::Identifier (juce::String (devices::mixParameterID.data(), devices::mixParameterID.size())), wet,
-                          getUndo (song));
+        state.getOrCreateChildWithName (schema::VALUES, getUndo (song)).setProperty (juce::Identifier (getMixID()), wet, getUndo (song));
     else if (wet < 1.0f)
         state.setProperty (schema::deviceMix, wet, getUndo (song));
     else
         state.removeProperty (schema::deviceMix, getUndo (song));
-
-    song.reconcile (Song::Part::device, id.getRaw());
 }
 
 void setPluginIdentity (juce::ValueTree& device, const juce::PluginDescription& description)
@@ -660,20 +599,14 @@ juce::ValueTree findChannelOfFader (const Song& song, DeviceID fader)
 void setChannelVolume (Song& song, TrackID channel, float decibels)
 {
     if (auto state = findChainState (song, channel); state.isValid())
-    {
         setChannelValue (state, schema::channelVolume, decibels, state.hasType (schema::MASTER) ? defaultMasterVolume : 0.0f,
                          getUndo (song));
-        song.reconcile (Song::Part::device, getFader (song, channel).getRaw());
-    }
 }
 
 void setChannelPan (Song& song, TrackID channel, float pan)
 {
     if (auto state = findChainState (song, channel); state.isValid() && getPanParameterID (song, channel).isNotEmpty())
-    {
         setChannelValue (state, schema::channelPan, juce::jlimit (-1.0f, 1.0f, pan), 0.0f, getUndo (song));
-        song.reconcile (Song::Part::device, getFader (song, channel).getRaw());
-    }
 }
 
 float getChannelVolume (const Song& song, TrackID channel)
@@ -721,9 +654,7 @@ std::vector<TrackID> getReturnTracks (const Song& song)
 
 TrackID addReturnTrack (Song& song, const juce::String& name, Selection* selection)
 {
-    const auto track = insertReturnTrack (song, name, selection);
-    song.reconcile (Song::Part::devices); // its input, which takes in what is sent to it
-    return track;
+    return insertReturnTrack (song, name, selection);
 }
 
 TrackID addNewReturnTrack (Song& song, Selection* selection)
@@ -808,7 +739,6 @@ DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
         send.setProperty (schema::sendPreFader, true, nullptr);
 
     state.appendChild (send, getUndo (song));
-    song.reconcile (Song::Part::devices);
     return DeviceID::fromRaw (id);
 }
 
@@ -830,17 +760,12 @@ void setPreFader (Song& song, DeviceID send, bool preFader)
         state.setProperty (schema::sendPreFader, true, getUndo (song));
     else
         state.removeProperty (schema::sendPreFader, getUndo (song));
-
-    song.reconcile (Song::Part::devices);
 }
 
 void setSendLevel (Song& song, DeviceID send, float decibels)
 {
     if (auto state = findSendState (song, send); state.isValid())
-    {
         setChannelValue (state, schema::sendLevel, decibels, 0.0f, getUndo (song));
-        song.reconcile (Song::Part::device, send.getRaw());
-    }
 }
 
 float getSendLevel (const Song& song, DeviceID send)
@@ -867,7 +792,6 @@ void removeSend (Song& song, DeviceID send)
     {
         const UndoStep step (song, "Remove Send");
         state.getParent().removeChild (state, getUndo (song));
-        song.reconcile (Song::Part::devices);
     }
 }
 
@@ -888,27 +812,25 @@ void addMixerCommands (CommandRegistry& registry, Selection& selection)
 DeviceType makeDeviceType (const juce::PluginDescription& description)
 {
     return { description.name, description.isInstrument ? "Instrument" : "Effect", description, description.isInstrument,
-             te::PluginManager::isBuiltInPlugin (description) };
+             description.pluginFormatName == schema::ownDeviceFormat };
 }
 
-std::vector<DeviceType> getDeviceTypes (te::Engine& engine)
+std::vector<DeviceType> getDeviceTypes (const PluginHost& host)
 {
-    // Phazite's own devices (roadmap step 1.6), instruments first, then the plug-ins found by scanning. Tracktion's
-    // instruments and effects lock, allocate or read message-thread state on the audio thread, so Phazite doesn't use them
-    // (docs/realtime-audit.md, finding 16).
+    // Phazite's own devices (roadmap step 1.6), instruments first, then the plug-ins found by scanning.
     std::vector<DeviceType> types;
     addOwnDevices (types, devices::DeviceKind::instrument);
     addOwnDevices (types, devices::DeviceKind::effect);
 
-    for (const auto& description : engine.getPluginManager().knownPluginList.getTypes())
+    for (const auto& description : host.getKnownPlugins().getTypes())
         types.push_back (makeDeviceType (description));
 
     return types;
 }
 
-std::optional<juce::PluginDescription> findKnownPlugin (te::Engine& engine, const juce::PluginDescription& wanted)
+std::optional<juce::PluginDescription> findKnownPlugin (const PluginHost& host, const juce::PluginDescription& wanted)
 {
-    const auto types = engine.getPluginManager().knownPluginList.getTypes();
+    const auto types = host.getKnownPlugins().getTypes();
 
     for (const auto& type : types)
         if (wanted.fileOrIdentifier.isNotEmpty() && type.fileOrIdentifier == wanted.fileOrIdentifier && type.name == wanted.name)
@@ -922,191 +844,26 @@ std::optional<juce::PluginDescription> findKnownPlugin (te::Engine& engine, cons
     return {};
 }
 
-juce::PluginDescription getPluginDescription (te::Engine& engine, const juce::ValueTree& device)
+juce::PluginDescription getPluginDescription (const PluginHost& host, const juce::ValueTree& device)
 {
     const auto description = getPluginIdentity (device);
-    return findKnownPlugin (engine, description).value_or (description);
+    return findKnownPlugin (host, description).value_or (description);
 }
 
-void setDeviceValue (te::AutomatableParameter& parameter, float value)
-{
-    const auto stored = parameter.snapToState (parameter.getValueRange().clipValue (value));
-
-    if (auto* own = dynamic_cast<DevicePlugin*> (parameter.getPlugin()))
-    {
-        if (auto state = findDeviceState (own->edit, getDeviceID (*own)); state.isValid())
-        {
-            auto* undo = &getSong (own->edit).getUndoManager();
-            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (parameter.paramID), stored, undo);
-        }
-    }
-    else if (auto* send = dynamic_cast<te::AuxSendPlugin*> (parameter.getPlugin()))
-    {
-        if (auto state = findSendState (getSong (send->edit), getDeviceID (*send)); state.isValid())
-            setChannelValue (state, schema::sendLevel, faderPositionToDecibels (stored), 0.0f, &getSong (send->edit).getUndoManager());
-    }
-    else if (auto* modifier = dynamic_cast<te::Modifier*> (&parameter.automatableEditElement))
-    {
-        // A modulator's, but its switch (setModulatorOn() in model/modulation/internal/Modulation.h).
-        if (auto state = findModulatorState (modifier->edit, getModulatorID (*modifier)); state.isValid() && parameter.paramID != "enabled")
-        {
-            auto* undo = &getSong (modifier->edit).getUndoManager();
-            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (parameter.paramID), stored, undo);
-        }
-    }
-    else if (auto* macro = dynamic_cast<te::MacroParameter*> (&parameter))
-    {
-        if (auto state = findModulatorState (macro->getEdit(), getModulatorID (*macro)); state.isValid())
-        {
-            if (juce::exactlyEqual (stored, 0.0f))
-                state.removeProperty (schema::macroValue, &getSong (macro->getEdit()).getUndoManager());
-            else
-                state.setProperty (schema::macroValue, stored, &getSong (macro->getEdit()).getUndoManager());
-        }
-    }
-    else if (auto* fader = parameter.getPlugin())
-    {
-        storeFaderValue (*fader, parameter.paramID, stored);
-    }
-
-    parameter.setParameter (stored, juce::sendNotification);
-}
-
-juce::StringArray getKeyControls (te::Plugin& device, int maximum)
+juce::StringArray getKeyControls (const Song& song, DeviceID id, int maximum)
 {
     juce::StringArray ids;
 
-    // A container's own parameters are Tracktion's levels in and out, which Phazite doesn't show; Phazite's own devices show
-    // theirs in their editors.
-    if (isContainer (device) || dynamic_cast<DevicePlugin*> (&device) != nullptr)
+    // A plug-in's own parameters, as its instance has them; Phazite's own devices show theirs in their editors, and a
+    // container shows its macros. The ID a device's mix goes by names the mix, not a parameter of the plug-in's.
+    if (! isPluginState (findDeviceState (song, id)))
         return ids;
 
-    if (auto quick = device.getQuickControlParameter(); quick != nullptr && ! isMixLevel (*quick))
-        ids.add (quick->paramID);
-
-    for (auto* parameter : device.getAutomatableParameters())
-        if (ids.size() < maximum && ! isMixLevel (*parameter))
-            ids.addIfNotAlreadyThere (parameter->paramID);
+    if (auto* instance = findPluginInstance (song, id))
+        for (const auto& parameter : instance->getParameterInfos())
+            if (ids.size() < maximum && parameter.isAutomatable && parameter.id != getMixID())
+                ids.addIfNotAlreadyThere (parameter.id);
 
     return ids;
-}
-
-te::AutomatableParameter::Array getMixParameters (te::Plugin& device)
-{
-    te::AutomatableParameter::Array parameters;
-
-    if (const auto own = findOwnMix (device))
-        parameters.add (own);
-    else if (const auto levels = findMixLevels (device))
-    {
-        parameters.add (levels->dry);
-        parameters.add (levels->wet);
-    }
-
-    return parameters;
-}
-
-bool isWindowOpen (const te::Plugin& device)
-{
-    return device.windowState != nullptr && device.windowState->isWindowShowing();
-}
-
-te::LevelMeasurer* getLevelMeasurer (te::Track& track)
-{
-    if (auto* audio = dynamic_cast<te::AudioTrack*> (&track))
-        if (auto* meter = audio->getLevelMeterPlugin())
-            return &meter->measurer;
-
-    if (isBus (getSong (track.edit), getTrackID (track)))
-        if (auto* meter = track.pluginList.findFirstPluginOfType<te::LevelMeterPlugin>())
-            return &meter->measurer;
-
-    return nullptr;
-}
-
-juce::ValueTree makeDeviceState (te::Plugin& device)
-{
-    juce::ValueTree state (isContainer (device) ? schema::CONTAINER : schema::DEVICE);
-    state.setProperty (schema::deviceID, (juce::int64) device.itemID.getRawID(), nullptr);
-
-    // A plug-in is the one kind of device with a window of its own.
-    auto* plugin = dynamic_cast<te::ExternalPlugin*> (&device);
-
-    if (state.hasType (schema::DEVICE))
-        state.setProperty (schema::deviceType,
-                           plugin != nullptr ? juce::String (schema::deviceIsPlugin) : device.state[te::IDs::type].toString(), nullptr);
-
-    if (! device.isEnabled())
-        state.setProperty (schema::deviceOff, true, nullptr);
-
-    // A plug-in: which it is, and what it was made with (a preset's settings, its mix), as its state has them. A save stores
-    // what it holds then (DeviceStates.h).
-    const auto storeMix = [&device, &state]
-    {
-        if (const auto levels = findMixLevels (device))
-        {
-            const auto wet = levels->wet->getCurrentValue(), dry = levels->dry->getCurrentValue();
-
-            if (const auto mix = wet + dry > 0.0f ? juce::jlimit (0.0f, 1.0f, wet / (wet + dry)) : 1.0f; mix < 1.0f)
-                state.setProperty (schema::deviceMix, mix, nullptr);
-        }
-    };
-
-    if (plugin != nullptr)
-    {
-        setPluginIdentity (state, plugin->desc);
-
-        if (const auto settings = device.state[te::IDs::state].toString(); settings.isNotEmpty())
-            state.setProperty (schema::pluginState, settings, nullptr);
-
-        if (device.state.hasProperty (te::IDs::programNum))
-            state.setProperty (schema::pluginProgram, (int) device.state[te::IDs::programNum], nullptr);
-
-        storeMix();
-    }
-
-    // One of Phazite's own: its values set by hand and its files, as its state has them.
-    if (auto* own = dynamic_cast<const DevicePlugin*> (&device))
-    {
-        juce::ValueTree values (schema::VALUES), sounds (schema::SOUNDS);
-
-        for (const auto& description : own->getDeviceInfo().parameters)
-            if (const juce::Identifier id (juce::String (description.id.data(), description.id.size())); device.state.hasProperty (id))
-                values.setProperty (id, device.state[id], nullptr);
-
-        for (const auto& property : getSoundProperties (own->getDeviceInfo()))
-            if (device.state.hasProperty (property))
-                sounds.setProperty (property, device.state[property], nullptr);
-
-        if (values.getNumProperties() > 0)
-            state.appendChild (values, nullptr);
-
-        if (sounds.getNumProperties() > 0)
-            state.appendChild (sounds, nullptr);
-    }
-
-    // A container: its name, its mix, its macros and its devices in their order (a preset's, as it made them).
-    if (auto* rack = getContainerRack (device))
-    {
-        state.setProperty (schema::containerName, rack->rackName.get(), nullptr);
-        storeMix();
-
-        for (auto* macro : rack->getMacroParameters())
-        {
-            juce::ValueTree made (schema::MACRO);
-            made.setProperty (schema::modulatorID, (juce::int64) getModulatorID (*macro).getRaw(), nullptr);
-            made.setProperty (schema::macroName, macro->macroName.get(), nullptr);
-
-            if (const auto value = macro->getCurrentExplicitValue(); ! juce::exactlyEqual (value, 0.0f))
-                made.setProperty (schema::macroValue, value, nullptr);
-
-            state.appendChild (made, nullptr);
-        }
-
-        for (auto* inside : getRackDevices (*rack))
-            state.appendChild (makeDeviceState (*inside), nullptr);
-    }
-
-    return state;
 }
 } // namespace phazite

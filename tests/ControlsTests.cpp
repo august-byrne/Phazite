@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "UiTestHelpers.h"
+#include "engine/nodes/LevelMeter.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -20,74 +21,73 @@ TEST_CASE ("A slider linked to a track's volume sets it, one undo step per chang
     phazite::ui::ParameterAttachment attachment (slider);
     CHECK_FALSE (slider.isEnabled()); // nothing to control yet
 
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    setEdit (context, edit.get());
-    auto* track = te::getAudioTracks (*edit)[0];
-    auto* volume = track->getVolumePlugin();
-    REQUIRE (volume != nullptr);
+    phazite::setSong (context, song.get());
+    const auto track = phazite::getTrackIDs (*song)[0];
+    const auto volume = [&song, track] { return phazite::getChannelVolume (*song, track); };
 
-    attachment.setParameter (phazite::getVolume (context, phazite::getTrackID (*track)));
+    attachment.setParameter (phazite::getVolume (context, track));
     CHECK (slider.isEnabled());
-    CHECK (slider.getValue() == doctest::Approx (volume->volParam->getCurrentValue()));
+    CHECK (slider.getValue() == doctest::Approx (phazite::decibelsToFaderPosition (volume())));
 
     // Moving the slider sets the volume, as a named undo step.
-    const auto before = volume->getVolumeDb();
+    const auto before = volume();
     slider.setValue (phazite::decibelsToFaderPosition (-12.0f), juce::sendNotificationSync);
-    CHECK (volume->getVolumeDb() == doctest::Approx (-12.0f).epsilon (0.01));
-    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Volume"));
+    CHECK (volume() == doctest::Approx (-12.0f).epsilon (0.01));
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Volume"));
 
-    // Undo (as the app's commands do it) plays the old volume again, not just stores it.
-    phazite::undo (*edit);
-    CHECK (volume->getVolumeDb() == doctest::Approx (before).epsilon (0.01));
+    // Undo (as the app's commands do it) puts the old volume back.
+    phazite::undo (*song);
+    CHECK (volume() == doctest::Approx (before).epsilon (0.01));
 
-    phazite::redo (*edit);
-    CHECK (volume->getVolumeDb() == doctest::Approx (-12.0f).epsilon (0.01));
-    phazite::undo (*edit);
+    phazite::redo (*song);
+    CHECK (volume() == doctest::Approx (-12.0f).epsilon (0.01));
+    phazite::undo (*song);
 
     // A change made elsewhere shows on the slider.
-    phazite::setChannelVolume (*track, -3.0f);
+    phazite::setChannelVolume (*song, track, -3.0f);
     attachment.update();
     CHECK (phazite::faderPositionToDecibels ((float) slider.getValue()) == doctest::Approx (-3.0f).epsilon (0.01));
 
     // A drag is one step, even when the strip hands the slider a handle of the same parameter meanwhile.
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    song->getUndoManager().clearUndoHistory();
     slider.onDragStart();
     slider.setValue (phazite::decibelsToFaderPosition (-6.0f), juce::sendNotificationSync);
-    attachment.setParameter (phazite::getVolume (context, phazite::getTrackID (*track)));
+    attachment.setParameter (phazite::getVolume (context, track));
     slider.setValue (phazite::decibelsToFaderPosition (-9.0f), juce::sendNotificationSync);
     slider.onDragEnd();
-    CHECK (volume->getVolumeDb() == doctest::Approx (-9.0f).epsilon (0.01));
-    phazite::undo (*edit);
-    CHECK (volume->getVolumeDb() == doctest::Approx (-3.0f).epsilon (0.01));
-    CHECK_FALSE (phazite::getSong (*edit).getUndoManager().canUndo());
+    CHECK (volume() == doctest::Approx (-9.0f).epsilon (0.01));
+    phazite::undo (*song);
+    CHECK (volume() == doctest::Approx (-3.0f).epsilon (0.01));
+    CHECK_FALSE (song->getUndoManager().canUndo());
 
     // The master volume's parameter has its own ID.
     attachment.setParameter (phazite::getMasterVolume (context));
     CHECK (slider.isEnabled());
 
-    // When the project closes, the slider turns off instead of reaching for a deleted plug-in.
-    setEdit (context, nullptr);
-    edit = nullptr;
+    // When the project closes, the slider turns off instead of reaching for a deleted song.
+    phazite::setSong (context, nullptr);
+    song = nullptr;
     attachment.update();
     CHECK_FALSE (slider.isEnabled());
 }
 
 TEST_CASE ("A level source follows what it measures, and outlives it")
 {
-    auto measurer = std::make_unique<te::LevelMeasurer>();
-    te::LevelMeasurer* found = measurer.get();
+    auto measured = std::make_unique<phazite::engine::LevelMeter>();
+    phazite::engine::LevelMeter* found = measured.get();
     auto source = phazite::makeLevelSource ([&found] { return found; });
     CHECK (source.isMeasuring());
 
     // Deleted while the source still reads it. Mustn't be touched: AddressSanitizer (the linux-asan preset) would report it.
-    measurer = nullptr;
+    measured = nullptr;
     found = nullptr;
     CHECK_FALSE (source.isMeasuring());
     CHECK (source.getAndClearLevel (0) == doctest::Approx (phazite::LevelSource::silenceDb));
 
     // What it measures can come and go: a folder that becomes a bus, playback that is set up again.
-    te::LevelMeasurer another;
+    phazite::engine::LevelMeter another;
     found = &another;
     source.refresh();
     CHECK (source.isMeasuring());
@@ -105,9 +105,9 @@ TEST_CASE ("A level source follows what it measures, and outlives it")
 
 TEST_CASE ("A level meter repaints only while what it shows moves: a silent one never does")
 {
-    te::LevelMeasurer measurer;
+    phazite::engine::LevelMeter measured;
     phazite::ui::LevelMeter meter ("Level");
-    meter.setSource (phazite::makeLevelSource ([&measurer] { return &measurer; }));
+    meter.setSource (phazite::makeLevelSource ([&measured] { return &measured; }));
     phazite::test::TestWindow window (meter, 12, 120);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
     const auto tick = [&ticker] (int times)
@@ -127,7 +127,7 @@ TEST_CASE ("A level meter repaints only while what it shows moves: a silent one 
     for (int channel = 0; channel < 2; ++channel)
         juce::FloatVectorOperations::fill (sound.getWritePointer (channel), 0.5f, 480);
 
-    measurer.processBuffer (sound, 0, 480);
+    measured.measure (sound.getArrayOfReadPointers(), 2, 480);
     tick (1);
     CHECK (window.takeRepaintedArea().containsRectangle (meter.getBounds()));
     tick (5);
@@ -147,47 +147,48 @@ TEST_CASE ("A level meter repaints only while what it shows moves: a silent one 
 
 TEST_CASE ("A track's one switch mutes it with a click and solos it with a right-click, each leaving the other as it is")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::ensureTracks (*edit, 2);
-    const auto tracks = te::getAudioTracks (*edit);
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    setEdit (context, edit.get());
+    phazite::setSong (context, song.get());
+    const auto isMuted = [&song] (phazite::TrackID track) { return phazite::isTrackMuted (*song, track, false); };
+    const auto isSoloed = [&song] (phazite::TrackID track) { return phazite::isTrackSoloed (*song, track); };
 
     phazite::ui::TrackSwitch trackSwitch (context);
     phazite::test::TestWindow window (trackSwitch, 20, 20);
-    trackSwitch.setTrack (phazite::getTrackID (*tracks[0]));
+    trackSwitch.setTrack (tracks[0]);
     phazite::test::Mouse mouse (trackSwitch);
     const juce::Point<int> centre (10, 10);
     const auto rightButton = juce::ModifierKeys::rightButtonModifier;
     CHECK (trackSwitch.getStateText() == "Playing");
 
     mouse.click (centre);
-    CHECK (tracks[0]->isMuted (false));
+    CHECK (isMuted (tracks[0]));
     CHECK (trackSwitch.getStateText() == "Muted");
     mouse.click (centre);
-    CHECK_FALSE (tracks[0]->isMuted (false));
+    CHECK_FALSE (isMuted (tracks[0]));
 
     // A right-click solos the track alone, as in FL Studio, and again unsolos it; with Ctrl, along with the others soloed.
-    phazite::setTrackSoloed (*tracks[1], true);
+    phazite::setTrackSoloed (*song, tracks[1], true);
     trackSwitch.update();
     CHECK (trackSwitch.getStateText() == "Silent while other tracks are soloed");
 
     mouse.click (centre, rightButton);
-    CHECK (tracks[0]->isSolo (false));
-    CHECK_FALSE (tracks[1]->isSolo (false));
+    CHECK (isSoloed (tracks[0]));
+    CHECK_FALSE (isSoloed (tracks[1]));
     CHECK (trackSwitch.getStateText() == "Soloed");
     mouse.click (centre, rightButton);
-    CHECK_FALSE (tracks[0]->isSolo (false));
+    CHECK_FALSE (isSoloed (tracks[0]));
 
-    phazite::setTrackSoloed (*tracks[1], true);
+    phazite::setTrackSoloed (*song, tracks[1], true);
     mouse.click (centre, rightButton | juce::ModifierKeys::commandModifier);
-    CHECK (tracks[0]->isSolo (false));
-    CHECK (tracks[1]->isSolo (false));
+    CHECK (isSoloed (tracks[0]));
+    CHECK (isSoloed (tracks[1]));
 
     // Soloing never touched the mute switch, nor muting the solo.
-    CHECK_FALSE (tracks[0]->isMuted (false));
+    CHECK_FALSE (isMuted (tracks[0]));
     mouse.click (centre);
-    CHECK (tracks[0]->isSolo (false));
+    CHECK (isSoloed (tracks[0]));
     CHECK (trackSwitch.getStateText() == "Muted and soloed");
 }
 

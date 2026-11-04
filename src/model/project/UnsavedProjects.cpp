@@ -37,13 +37,10 @@ namespace
         return {};
     }
 
-    // Deletes a folder of these, letting go first of the audio files in it that Tracktion keeps open for a moment after
-    // reading them. What can't be deleted now (a file still open) goes at a later start (findProjectToRestore()).
-    void deleteFolder (te::Engine& engine, const juce::File& folder)
+    // Deletes a folder of these. What can't be deleted now (a file still open) goes at a later start
+    // (findProjectToRestore()).
+    void deleteFolder (const juce::File& folder)
     {
-        for (const auto& file : folder.findChildFiles (juce::File::findFiles, true))
-            engine.getAudioFileManager().releaseFile (te::AudioFile (engine, file));
-
         folder.deleteRecursively();
     }
 
@@ -77,7 +74,7 @@ juce::File getUnsavedProjectsFolder()
     return appData.getChildFile (appName).getChildFile ("Unsaved Projects");
 }
 
-std::unique_ptr<UnsavedFolder> UnsavedFolder::create (te::Engine& engine, const juce::File& parentFolder)
+std::unique_ptr<UnsavedFolder> UnsavedFolder::create (const juce::File& parentFolder)
 {
     // Named after when it was made, which is all that tells two apart.
     const auto folder = parentFolder.getNonexistentChildFile (juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"), {}, true);
@@ -86,10 +83,10 @@ std::unique_ptr<UnsavedFolder> UnsavedFolder::create (te::Engine& engine, const 
     if (lock == nullptr || folder.createDirectory().failed())
         return {};
 
-    return std::unique_ptr<UnsavedFolder> (new UnsavedFolder (engine, folder, std::move (lock)));
+    return std::unique_ptr<UnsavedFolder> (new UnsavedFolder (folder, std::move (lock)));
 }
 
-juce::File UnsavedFolder::findProjectToRestore (te::Engine& engine, const juce::File& parentFolder)
+juce::File UnsavedFolder::findProjectToRestore (const juce::File& parentFolder)
 {
     juce::File newest;
     juce::Time newestTime;
@@ -106,7 +103,7 @@ juce::File UnsavedFolder::findProjectToRestore (te::Engine& engine, const juce::
 
         if (! lastChange.has_value())
         {
-            deleteFolder (engine, folder); // nothing to restore
+            deleteFolder (folder); // nothing to restore
             continue;
         }
 
@@ -120,7 +117,7 @@ juce::File UnsavedFolder::findProjectToRestore (te::Engine& engine, const juce::
     return newest;
 }
 
-std::unique_ptr<UnsavedFolder> UnsavedFolder::takeOver (te::Engine& engine, const juce::File& projectFile)
+std::unique_ptr<UnsavedFolder> UnsavedFolder::takeOver (const juce::File& projectFile)
 {
     const auto folder = projectFile.getParentDirectory().getParentDirectory();
     auto lock = hold (folder);
@@ -128,26 +125,23 @@ std::unique_ptr<UnsavedFolder> UnsavedFolder::takeOver (te::Engine& engine, cons
     if (lock == nullptr || ! folder.isDirectory())
         return {};
 
-    return std::unique_ptr<UnsavedFolder> (new UnsavedFolder (engine, folder, std::move (lock)));
+    return std::unique_ptr<UnsavedFolder> (new UnsavedFolder (folder, std::move (lock)));
 }
 
-UnsavedFolder::UnsavedFolder (te::Engine& e, const juce::File& f, std::unique_ptr<juce::InterProcessLock> l)
-    : engine (e),
-      folder (f),
+UnsavedFolder::UnsavedFolder (const juce::File& f, std::unique_ptr<juce::InterProcessLock> l)
+    : folder (f),
       lock (std::move (l))
 {
 }
 
 UnsavedFolder::~UnsavedFolder()
 {
-    deleteFolder (engine, folder);
+    deleteFolder (folder);
 }
 
-int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
+int UnsavedFolder::recoverUnusedAudio (Song& song)
 {
     juce::Array<juce::File> played;
-
-    auto& song = getSong (edit);
 
     for (const auto& clipState : getClipStates (song))
         if (isAudioState (clipState))
@@ -169,7 +163,6 @@ int UnsavedFolder::recoverUnusedAudio (te::Edit& edit)
 
     const auto added = importFiles (song, paths, {}, BeatPosition());
     song.getUndoManager().clearUndoHistory(); // the project was just opened: restoring it is no undo step
-    edit.getUndoManager().clearUndoHistory();
     return (int) added.size();
 }
 } // namespace phazite

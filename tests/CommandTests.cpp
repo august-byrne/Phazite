@@ -20,20 +20,18 @@ phazite::Command makeCommand (const juce::String& id, const juce::String& name, 
 }
 
 // A change to the song that goes through its undo history, to its own element as the model's are.
-phazite::Command makeEditChange (const juce::String& id, const juce::String& name, te::Edit& edit, int value)
+phazite::Command makeSongChange (const juce::String& id, const juce::String& name, phazite::Song& song, int value)
 {
-    auto command =
-        makeCommand (id, name, [&edit, value]
-                     { phazite::getSong (edit).getState().setProperty ("testValue", value, &phazite::getSong (edit).getUndoManager()); });
-    command.undoTarget = [&edit] { return &phazite::getSong (edit).getUndoManager(); };
+    auto command = makeCommand (id, name, [&song, value] { song.getState().setProperty ("testValue", value, &song.getUndoManager()); });
+    command.undoTarget = [&song] { return &song.getUndoManager(); };
     return command;
 }
 
 // A model function that is a change of its own, so it begins its own undo step.
-void setValueInOwnStep (te::Edit& edit, int value)
+void setValueInOwnStep (phazite::Song& song, int value)
 {
-    const phazite::UndoStep step (edit, "Set Value");
-    phazite::getSong (edit).getState().setProperty ("testValue", value, &phazite::getSong (edit).getUndoManager());
+    const phazite::UndoStep step (song, "Set Value");
+    song.getState().setProperty ("testValue", value, &song.getUndoManager());
 }
 } // namespace
 
@@ -88,16 +86,16 @@ TEST_CASE ("The command palette's search ranks names, synonyms and categories")
     CHECK (phazite::getMatchScore ("abc", "cab") == 0); // the characters must come in order
 }
 
-TEST_CASE ("A command that changes an Edit is one named undo step")
+TEST_CASE ("A command that changes a song is one named undo step")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto& undo = phazite::getSong (*edit).getUndoManager();
+    auto song = phazite::createSong();
+    auto& undo = song->getUndoManager();
 
     // Before the registry, whose undo commands keep a reference to it.
-    phazite::Selection selection { phazite::test::getEngine() };
+    phazite::Selection selection;
     phazite::CommandRegistry registry;
-    registry.add (makeEditChange ("test.one", "Set to One", *edit, 1));
-    registry.add (makeEditChange ("test.two", "Set to Two", *edit, 2));
+    registry.add (makeSongChange ("test.one", "Set to One", *song, 1));
+    registry.add (makeSongChange ("test.two", "Set to Two", *song, 2));
 
     REQUIRE (registry.invoke ("test.one"));
     CHECK (undo.getUndoDescription() == juce::String ("Set to One"));
@@ -106,34 +104,34 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
     {
         REQUIRE (registry.addMacro ("test.both", "Set Twice", { "test.two", "test.one" }));
         REQUIRE (registry.invoke ("test.both"));
-        CHECK ((int) phazite::getSong (*edit).getState()["testValue"] == 1);
+        CHECK ((int) song->getState()["testValue"] == 1);
         CHECK (undo.getUndoDescription() == juce::String ("Set Twice"));
 
         REQUIRE (undo.undo());
-        CHECK ((int) phazite::getSong (*edit).getState()["testValue"] == 1); // back to before the macro: "Set to One"
+        CHECK ((int) song->getState()["testValue"] == 1); // back to before the macro: "Set to One"
         CHECK (undo.getUndoDescription() == juce::String ("Set to One"));
     }
 
     SUBCASE ("FL Studio's undo-or-redo toggles the last change")
     {
-        selection.setEdit (edit.get());
+        selection.setSong (song.get());
         phazite::addUndoCommands (registry, selection);
 
         REQUIRE (registry.invoke ("test.two"));
         REQUIRE (registry.invoke ("edit.undoOrRedo"));
-        CHECK ((int) phazite::getSong (*edit).getState()["testValue"] == 1); // undone
+        CHECK ((int) song->getState()["testValue"] == 1); // undone
         REQUIRE (registry.invoke ("edit.undoOrRedo"));
-        CHECK ((int) phazite::getSong (*edit).getState()["testValue"] == 2); // redone
+        CHECK ((int) song->getState()["testValue"] == 2); // redone
         REQUIRE (registry.invoke ("edit.undo"));
-        CHECK ((int) phazite::getSong (*edit).getState()["testValue"] == 1);
+        CHECK ((int) song->getState()["testValue"] == 1);
 
-        selection.setEdit (nullptr);
-        CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without an Edit
+        selection.setSong (nullptr);
+        CHECK_FALSE (registry.invoke ("edit.undo")); // nothing to undo without a song
     }
 
     SUBCASE ("Undo and redo show the name of the step")
     {
-        selection.setEdit (edit.get());
+        selection.setSong (song.get());
         phazite::addUndoCommands (registry, selection);
 
         const auto nameOf = [&registry] (const char* id) { return phazite::getCurrentName (*registry.find (id)); };
@@ -143,74 +141,74 @@ TEST_CASE ("A command that changes an Edit is one named undo step")
         CHECK (nameOf ("edit.redo") == juce::String ("Redo Set to One"));
         CHECK (nameOf ("edit.undoOrRedo") == juce::String ("Redo Set to One"));
 
-        selection.setEdit (nullptr);
+        selection.setSong (nullptr);
         CHECK (nameOf ("edit.undo") == juce::String ("Undo"));
     }
 }
 
 TEST_CASE ("A model function that begins its own undo step is part of the step of the command that runs it")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto& undo = phazite::getSong (*edit).getUndoManager();
+    auto song = phazite::createSong();
+    auto& undo = song->getUndoManager();
     undo.clearUndoHistory();
 
     phazite::CommandRegistry registry;
     auto command = makeCommand ("test.setTwice", "Set Twice",
-                                [&edit]
+                                [&song]
                                 {
-                                    setValueInOwnStep (*edit, 1);
-                                    setValueInOwnStep (*edit, 2);
+                                    setValueInOwnStep (*song, 1);
+                                    setValueInOwnStep (*song, 2);
                                 });
-    command.undoTarget = [&edit] { return &phazite::getSong (*edit).getUndoManager(); };
+    command.undoTarget = [&song] { return &song->getUndoManager(); };
     registry.add (std::move (command));
 
     // Run by the command, both changes are the command's one step.
     REQUIRE (registry.invoke ("test.setTwice"));
-    CHECK ((int) phazite::getSong (*edit).getState()["testValue"] == 2);
+    CHECK ((int) song->getState()["testValue"] == 2);
     CHECK (undo.getUndoDescription() == juce::String ("Set Twice"));
 
-    phazite::undo (*edit);
-    CHECK_FALSE (phazite::getSong (*edit).getState().hasProperty ("testValue"));
+    phazite::undo (*song);
+    CHECK_FALSE (song->getState().hasProperty ("testValue"));
     CHECK_FALSE (undo.canUndo());
 
     // Called on its own, the function is a step of its own.
-    setValueInOwnStep (*edit, 3);
+    setValueInOwnStep (*song, 3);
     CHECK (undo.getUndoDescription() == juce::String ("Set Value"));
-    phazite::undo (*edit);
-    CHECK_FALSE (phazite::getSong (*edit).getState().hasProperty ("testValue"));
+    phazite::undo (*song);
+    CHECK_FALSE (song->getState().hasProperty ("testValue"));
 }
 
-TEST_CASE ("withEdit and ifEdit act only with an Edit")
+TEST_CASE ("withSong and ifSong act only with a song")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::Selection selection { phazite::test::getEngine() };
+    auto song = phazite::createSong();
+    phazite::Selection selection;
 
     int runs = 0;
-    te::Edit* actedOn = nullptr;
-    const auto action = phazite::withEdit (selection,
-                                           [&runs, &actedOn] (te::Edit& e)
+    phazite::Song* actedOn = nullptr;
+    const auto action = phazite::withSong (selection,
+                                           [&runs, &actedOn] (phazite::Song& s)
                                            {
                                                ++runs;
-                                               actedOn = &e;
+                                               actedOn = &s;
                                            });
-    const auto isTrue = phazite::ifEdit (selection, [] (te::Edit&) { return true; });
-    const auto isFalse = phazite::ifEdit (selection, [] (te::Edit&) { return false; });
+    const auto isTrue = phazite::ifSong (selection, [] (const phazite::Song&) { return true; });
+    const auto isFalse = phazite::ifSong (selection, [] (const phazite::Song&) { return false; });
 
-    // Without an Edit, the action does nothing and every test is false.
+    // Without a song, the action does nothing and every test is false.
     action();
     CHECK (runs == 0);
     CHECK_FALSE (isTrue());
     CHECK_FALSE (isFalse());
 
     // With one, the action runs with it and the tests answer for it.
-    selection.setEdit (edit.get());
+    selection.setSong (song.get());
     action();
     CHECK (runs == 1);
-    CHECK (actedOn == edit.get());
+    CHECK (actedOn == song.get());
     CHECK (isTrue());
     CHECK_FALSE (isFalse());
 
-    selection.setEdit (nullptr);
+    selection.setSong (nullptr);
     action();
     CHECK (runs == 1);
     CHECK_FALSE (isTrue());

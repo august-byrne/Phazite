@@ -3,27 +3,42 @@
 // parameter, named within its part, and columns that show one part at a time under tabs in a short dock.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/project/internal/Project.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/SynthEditor.h"
 
+namespace
+{
 using phazite::devices::Synth;
+
+// A synth as the song's first track's instrument, which the song's session plays.
+phazite::DeviceID addSynth (phazite::test::TestSong& song)
+{
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::setInstrument (s, song.firstTrack, phazite::makeOwnDeviceState (s, Synth::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    return id;
+}
+} // namespace
 
 TEST_CASE ("The synth's editor has a control for each parameter, in groups, and each control changes its parameter")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
-    REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
-    phazite::test::settle();
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = addSynth (song);
 
-    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*plugin));
+    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (s, id));
     auto* panel = dynamic_cast<phazite::ui::SynthEditor*> (editor.get());
     REQUIRE (panel != nullptr);
     phazite::test::TestWindow window (*panel, panel->getWidth(), panel->getHeight());
@@ -53,29 +68,28 @@ TEST_CASE ("The synth's editor has a control for each parameter, in groups, and 
     auto* cutoff = dynamic_cast<phazite::ui::Knob*> (panel->findControl ("cutoff"));
     REQUIRE (cutoff != nullptr);
     cutoff->setValue (800.0, juce::sendNotificationSync);
-    CHECK (plugin->getAutomatableParameterByID ("cutoff")->getCurrentValue() == doctest::Approx (800.0f));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Cutoff"));
+    CHECK (phazite::getValueSetByHand (s, phazite::ParameterRef { id, "cutoff" }) == doctest::Approx (800.0f));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Cutoff"));
 
     auto* wave = dynamic_cast<juce::ComboBox*> (panel->findControl ("osc1Wave"));
     REQUIRE (wave != nullptr);
     CHECK (wave->getText() == juce::String ("Saw"));
     wave->setSelectedItemIndex (3, juce::sendNotificationSync); // Square
-    CHECK (plugin->getAutomatableParameterByID ("osc1Wave")->getCurrentValue() == doctest::Approx (3.0f));
+    CHECK (phazite::getValueSetByHand (s, phazite::ParameterRef { id, "osc1Wave" }) == doctest::Approx (3.0f));
 
     // Undo shows on the panel.
-    phazite::undo (*edit);
+    phazite::undo (s);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (wave->getText() == juce::String ("Saw"));
 }
 
 TEST_CASE ("Given less height, as a Devices view gives it, a column's groups show one at a time under tabs, as wide as before")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
-    REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
-    phazite::test::settle();
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = addSynth (song);
 
-    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*plugin));
+    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (s, id));
     auto* panel = dynamic_cast<phazite::ui::SynthEditor*> (editor.get());
     REQUIRE (panel != nullptr);
     const auto tall = panel->getHeight(), width = panel->getWidth();
@@ -119,16 +133,16 @@ TEST_CASE ("Given less height, as a Devices view gives it, a column's groups sho
 
 TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonance, and shows a note's envelope as it plays")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto plugin = edit->getPluginCache().createNewPlugin (Synth::typeID, {});
-    REQUIRE (phazite::setInstrument (*te::getAudioTracks (*edit)[0], plugin) != nullptr);
-    phazite::test::settle();
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = addSynth (song);
+    s.getUndoManager().clearUndoHistory();
 
-    const auto device = phazite::makeDeviceHandle (*plugin);
+    const auto device = phazite::makeDeviceHandle (s, id);
     phazite::ui::SynthEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    const auto valueOf = [&plugin] (const char* id) { return plugin->getAutomatableParameterByID (id)->getCurrentValue(); };
+    const auto valueOf = [&s, id] (const char* parameter)
+    { return phazite::getValueSetByHand (s, phazite::ParameterRef { id, parameter }); };
 
     // The dot dragged to the middle: a lower cutoff, the resonance half way, one undo step.
     auto& filter = editor.getFilter();
@@ -139,7 +153,7 @@ TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonan
     mouse.release();
     CHECK (valueOf ("cutoff") < cutoffBefore);
     CHECK (valueOf ("resonance") == doctest::Approx (0.5f).epsilon (0.1));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Cutoff"));
+    CHECK (phazite::describeUndo (&s) == juce::String ("Undo Change Cutoff"));
 
     // A note held: the amp envelope shows how far it has got, and the oscillators' wave is drawn.
     auto* synth = device.getProcessor<Synth>();

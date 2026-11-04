@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden renders of the metronome and the count-in (tests/golden/renders, RenderHarness.h; docs/tracktion-migration.md,
-// T0), which sound only as the song plays live, what played kept from its first click on, through Phazite's own engine,
-// driven a block at a time (EnginePlayback.h): the metronome (T2 step 1), and the count-in that recording plays (T2 step
-// 9). Both start between beats.
+// Golden renders of the metronome and the count-in (tests/golden/renders, RenderHarness.h), which sound only as the song
+// plays live, what played kept from its first click on, through Phazite's own engine, driven a block at a time
+// (EnginePlayback.h): the metronome, and the count-in that recording plays. Both start between beats.
 #include "EnginePlayback.h"
 #include "RenderHarness.h"
 #include "TestSong.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/TimelineModel.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Metronome.h"
@@ -65,7 +65,7 @@ TEST_SUITE ("golden")
         song.addMidiClip (song.firstTrack, 0.0, 12.0); // a silent song of four bars: playback stops at the song's end
         phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (2.5)); // the clicks: beat 3 (a bar's first), 4, 5, 6 (one)
 
-        // Phazite's engine plays the metronome (docs/tracktion-migration.md, T2 step 1), with a click of its own.
+        // Phazite's engine plays the metronome, with a click of its own.
         juce::AudioBuffer<float> played;
         {
             EnginePlayback playback;
@@ -91,15 +91,15 @@ TEST_SUITE ("golden")
         TestSong song;
         song.setTempo (120.0);
         song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
-        phazite::routeLiveMidiInput (*phazite::getEdit (song.context)); // live MIDI plays the track with an instrument
+        phazite::routeLiveMidiInput (*phazite::findSong (song.context)); // live MIDI plays the track with an instrument
         song.setSwitch ("transport.metronome", false);
         song.setSwitch ("transport.countIn", true);
         const juce::ScopeGuard countInOff {
-            [&song] { phazite::setCountInOn (*phazite::getEdit (song.context), false); }
+            [] { phazite::setCountInOn (phazite::getAudioIO (phazite::test::getEngineContext()), false); }
         }; // the app's setting, for every project
         phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (0.5));
 
-        // Phazite's engine plays the count-in (T2 step 9): on the song's beats in the bar before where it starts.
+        // Phazite's engine plays the count-in: on the song's beats in the bar before where it starts.
         juce::AudioBuffer<float> played;
         {
             EnginePlayback playback;

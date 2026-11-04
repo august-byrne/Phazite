@@ -5,11 +5,10 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
-#include "model/mirror/internal/Bridge.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/transport/internal/Playback.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
@@ -19,17 +18,6 @@ namespace phazite
 {
 namespace
 {
-    // Where a curve keeps a song beat: in seconds, as track automation is, or in beats. Never before the song's start.
-    te::EditPosition toCurvePosition (const te::AutomationCurve& curve, BeatPosition beat)
-    {
-        const auto position = te::BeatPosition::fromBeats (std::max (0.0, beat.inBeats()));
-
-        if (curve.timeBase == te::AutomationCurve::TimeBase::beats)
-            return position;
-
-        return curve.edit.tempoSequence.toTime (position);
-    }
-
     // A value within its parameter's range (model/devices/internal/Parameters.h).
     float limitValue (const Song& song, const ParameterRef& ref, float value)
     {
@@ -54,22 +42,15 @@ namespace
         return engine::Curve (std::move (points));
     }
 
-    // While the song plays, the engine follows the curve; while it doesn't, Tracktion's parameter's value at the playhead is
-    // set here, so that controls show it while no session plays the song (model/devices/internal/Parameters.h:
-    // getCurrentValue()).
-    void followCurve (te::AutomatableParameter& parameter)
+    // A device's ID as a lane or a curve keeps it, and the other way.
+    DeviceID readDeviceID (const juce::var& id)
     {
-        auto& edit = parameter.getEdit();
-
-        if (! isSongPlaying (edit))
-            parameter.updateToFollowCurve (getPlayheadTime (edit));
+        return DeviceID::fromRaw ((std::uint64_t) (juce::int64) id);
     }
 
-    void followCurve (const Song& song, const ParameterRef& ref)
+    juce::String writeDeviceID (DeviceID id)
     {
-        if (auto* edit = findEdit (song))
-            if (const auto parameter = findParameter (*edit, ref))
-                followCurve (*parameter);
+        return juce::String ((juce::int64) id.getRaw());
     }
 
     // A parameter's value at a beat as its curve has it, as Phazite's engine plays it; without points, its value set by hand.
@@ -86,7 +67,7 @@ namespace
 
     juce::ValueTree findCurveIn (const juce::ValueTree& automation, const ParameterRef& ref)
     {
-        const auto device = toTracktion (ref.device).toString();
+        const auto device = writeDeviceID (ref.device);
 
         for (const auto& curve : automation)
             if (curve[schema::curveDevice].toString() == device && curve[schema::curveParameter].toString() == ref.parameter)
@@ -96,9 +77,8 @@ namespace
     }
 
     // A parameter's curve in the song, edited point by point, in beats, each change with the song's undo manager. Points
-    // keep time order, one added at a beat that has points going after them. Tracktion's curve follows
-    // (mirror::reconcileCurve()) as the edit ends, so that what Tracktion's parameter shows is always the song's. One at a
-    // time for a parameter: each holds the curve's state as it found it.
+    // keep time order, one added at a beat that has points going after them. What plays the song hears each change. One at
+    // a time for a parameter: each holds the curve's state as it found it.
     class SongCurve
     {
     public:
@@ -109,8 +89,6 @@ namespace
         {
         }
 
-        ~SongCurve() { reconcile(); }
-
         int getNumPoints() const { return state.getNumChildren(); }
         BeatPosition getPointBeat (int index) const { return BeatPosition::fromBeats (state.getChild (index)[schema::pointBeat]); }
         float getPointValue (int index) const { return state.getChild (index)[schema::pointValue]; }
@@ -118,13 +96,6 @@ namespace
 
         // As Phazite's engine plays it; without points, the parameter's value set by hand.
         float getValueAt (BeatPosition beat) const { return getCurveValueAt (song, ref, state, beat); }
-
-        // The parameter's value at the playhead in step with the curve (followCurve()).
-        void follow() const
-        {
-            reconcile();
-            followCurve (song, ref);
-        }
 
         int addPoint (BeatPosition beat, float value, float curve)
         {
@@ -135,7 +106,7 @@ namespace
             {
                 auto automation = song.getState().getOrCreateChildWithName (schema::AUTOMATION, getUndo());
                 state = juce::ValueTree (schema::CURVE);
-                state.setProperty (schema::curveDevice, juce::String (ref.device.getRaw()), nullptr);
+                state.setProperty (schema::curveDevice, writeDeviceID (ref.device), nullptr);
                 state.setProperty (schema::curveParameter, ref.parameter, nullptr);
                 automation.appendChild (state, getUndo());
             }
@@ -153,7 +124,6 @@ namespace
                 point.setProperty (schema::pointCurve, curve, nullptr);
 
             state.addChild (point, index, getUndo());
-            changed = true;
             return index;
         }
 
@@ -167,8 +137,6 @@ namespace
                 state.getParent().removeChild (state, getUndo());
                 state = {};
             }
-
-            changed = true;
         }
 
         void setPoint (int index, BeatPosition beat, float value)
@@ -176,7 +144,6 @@ namespace
             auto point = state.getChild (index);
             point.setProperty (schema::pointBeat, std::max (0.0, beat.inBeats()), getUndo());
             point.setProperty (schema::pointValue, value, getUndo());
-            changed = true;
         }
 
         void setCurve (int index, float curve)
@@ -185,12 +152,10 @@ namespace
                 point.removeProperty (schema::pointCurve, getUndo());
             else
                 point.setProperty (schema::pointCurve, curve, getUndo());
-
-            changed = true;
         }
 
-        // The points in a range that change nothing, as Tracktion's removeRedundantPoints() finds them: those whose
-        // neighbours have the same value, or the next of which is the same point, or which lie at one time between two.
+        // The points in a range that change nothing: those whose neighbours have the same value, or the next of which is
+        // the same point, or which lie at one time between two.
         void removeRedundantPoints (BeatRange range)
         {
             constexpr auto threshold = 0.0001;
@@ -225,16 +190,8 @@ namespace
         Song& song;
         const ParameterRef ref;
         juce::ValueTree state;
-        mutable bool changed = false;
 
         juce::UndoManager* getUndo() const { return &song.getUndoManager(); }
-
-        void reconcile() const
-        {
-            if (std::exchange (changed, false))
-                if (auto* edit = findEdit (song))
-                    mirror::reconcileCurve (*edit, ref);
-        }
 
         JUCE_DECLARE_NON_COPYABLE (SongCurve)
     };
@@ -308,7 +265,7 @@ namespace
         curve.addPoint (beat, at, 0.0f);
     }
 
-    // Afterwards, the points at the edges that change nothing go, as Tracktion's removeRedundantPoints() finds them.
+    // Afterwards, the points at the edges that change nothing go (SongCurve::removeRedundantPoints()).
     void tidyEdges (SongCurve& curve, const std::vector<BeatPosition>& edges)
     {
         for (const auto beat : edges)
@@ -338,12 +295,6 @@ namespace
     }
 
     //==============================================================================
-    // A device's ID as a lane or a curve keeps it.
-    DeviceID readDeviceID (const juce::var& id)
-    {
-        return DeviceID::fromRaw (te::EditItemID::fromVar (id).getRawID());
-    }
-
     ParameterRef readLane (const juce::ValueTree& lane)
     {
         return { readDeviceID (lane[schema::laneDevice]), lane[schema::laneParameter].toString() };
@@ -351,7 +302,7 @@ namespace
 
     void writeLane (juce::ValueTree& lane, const ParameterRef& parameter)
     {
-        lane.setProperty (schema::laneDevice, toTracktion (parameter.device).toString(), nullptr);
+        lane.setProperty (schema::laneDevice, writeDeviceID (parameter.device), nullptr);
         lane.setProperty (schema::laneParameter, parameter.parameter, nullptr);
     }
 
@@ -430,7 +381,7 @@ namespace
         }
     }
 
-    // A track's write mode as the song keeps it (Schema.h: trackAutomationMode), and as Tracktion's track has it.
+    // A track's write mode as the song keeps it (Schema.h: trackAutomationMode).
     AutomationMode readAutomationMode (const juce::ValueTree& state)
     {
         const auto mode = state[schema::trackAutomationMode].toString();
@@ -467,71 +418,20 @@ namespace
         }
     }
 
-    // The IDs of the parameters whose values a property of a device's state holds: Tracktion's fader, folder's VCA and send
-    // name it after something else; Phazite's devices after the parameter.
-    juce::StringArray getParametersStoredIn (const juce::ValueTree& device, const juce::Identifier& property)
+    // A plug-in's value that it set itself moves the one point of its parameter's curve, as one set by a control does
+    // (model/devices/internal/Parameters.h), in the song's history: the step the change joins. Not while the automation
+    // writer writes the parameter, which writes its own points.
+    void moveOnePoint (Song& song, const ParameterRef& parameter, float value)
     {
-        const auto type = device[te::IDs::type].toString();
+        if (auto* session = findSession (song); session != nullptr && session->getWriter().isWriting (parameter))
+            return;
 
-        if (type == te::VolumeAndPanPlugin::xmlTypeName)
-        {
-            if (property == te::IDs::volume)
-                return { "volume", "master volume" };
-
-            if (property == te::IDs::pan)
-                return { "pan", "master pan" };
-
-            return {};
-        }
-
-        if (type == te::VCAPlugin::xmlTypeName)
-            return property == te::IDs::volume ? juce::StringArray { "vca" } : juce::StringArray();
-
-        if (type == te::AuxSendPlugin::xmlTypeName)
-            return property == te::IDs::auxSendSliderPos ? juce::StringArray { "send level" } : juce::StringArray();
-
-        return { property.toString() };
+        if (SongCurve curve (song, parameter); curve.getNumPoints() == 1 && ! juce::exactlyEqual (curve.getPointValue (0), value))
+            curve.setPoint (0, curve.getPointBeat (0), value);
     }
 } // namespace
 
 //==============================================================================
-te::AutomatableParameter::Ptr findParameter (const te::Edit& edit, const ParameterRef& parameter)
-{
-    if (! parameter.isValid())
-        return {};
-
-    // A device's, a modulator's or a track's macros' (ParameterRef.h), while it is in the song: Tracktion keeps a device
-    // that was removed, for undo.
-    const auto id = toTracktion (parameter.device);
-
-    if (const auto device = te::findPluginForID (edit, id))
-        return device->getAutomatableParameterByID (parameter.parameter);
-
-    if (const auto modulator = te::findModifierForID (edit, id))
-        return modulator->getAutomatableParameterByID (parameter.parameter);
-
-    // A macro by its list's ID, or by its own (as a handle names it: model/devices/internal/Parameters.h).
-    for (auto* macros : te::getAllMacroParameterLists (edit))
-    {
-        if (macros->itemID == id)
-            return macros->getAutomatableParameterByID (parameter.parameter);
-
-        if (auto macro = macros->getAutomatableParameterByID (parameter.parameter);
-            macro != nullptr && macro->paramID == juce::String (parameter.device.getRaw()))
-            return macro;
-    }
-
-    return {};
-}
-
-ParameterRef getParameterRef (const te::AutomatableParameter& parameter)
-{
-    if (auto* device = parameter.getPlugin())
-        return { getDeviceID (*device), parameter.paramID };
-
-    return {};
-}
-
 TrackID getParameterTrack (const Song& song, const ParameterRef& parameter)
 {
     const auto found = locateParameter (song, parameter);
@@ -577,9 +477,7 @@ std::vector<ParameterRef> getAutomatableParameters (const Song& song, TrackID tr
         parameters.push_back ({ send, schema::sendLevelParameter });
 
     // Each device's (those in its containers after each container). A device's mix (Mixer.h: getMix()) is its own knob, not
-    // one of these; a container's own levels Phazite doesn't show.
-    auto* edit = findEdit (song);
-
+    // one of these; a container has no parameters of its own.
     const auto addParametersOf = [&] (DeviceID device)
     {
         const auto state = findDeviceState (song, device);
@@ -587,28 +485,22 @@ std::vector<ParameterRef> getAutomatableParameters (const Song& song, TrackID tr
         if (isContainerState (state))
             return;
 
-        // One of Phazite's own devices', in its description's order.
-        if (const auto* own = findOwnDevice (state[schema::deviceType].toString().toStdString()))
+        // A plug-in's, as its instance lists them, by their own IDs: those it lets be automated.
+        if (isPluginState (state))
         {
-            for (const auto& info : own->parameters)
-                if (own->kind == devices::DeviceKind::instrument || info.id != devices::mixParameterID)
-                    parameters.push_back ({ device, juce::String (info.id.data(), info.id.size()) });
+            if (auto* instance = findPluginInstance (song, device))
+                for (const auto& info : instance->getParameterInfos())
+                    if (info.isAutomatable)
+                        parameters.push_back ({ device, info.id });
 
             return;
         }
 
-        // A plug-in's, as its instance has them; or a device's of a type only tests make, as Tracktion's plug-in for it has
-        // them (docs/tracktion-migration.md, T6 steps 5 and 9).
-        auto* plugin = edit != nullptr ? mirror::findDevice (*edit, device) : nullptr;
-
-        if (plugin == nullptr)
-            return;
-
-        const auto mix = getMixParameters (*plugin);
-
-        for (auto* parameter : plugin->getAutomatableParameters())
-            if (! mix.contains (parameter))
-                parameters.push_back ({ device, parameter->paramID });
+        // One of Phazite's own devices', in its description's order.
+        if (const auto* own = findOwnDevice (state[schema::deviceType].toString().toStdString()))
+            for (const auto& info : own->parameters)
+                if (own->kind == devices::DeviceKind::instrument || info.id != devices::mixParameterID)
+                    parameters.push_back ({ device, juce::String (info.id.data(), info.id.size()) });
     };
 
     for (const auto device : getDevices (song, track))
@@ -699,9 +591,7 @@ std::vector<float> getValues (const Song& song, const ParameterRef& parameter, B
 int addPoint (Song& song, const ParameterRef& parameter, AutomationPoint point)
 {
     SongCurve curve (song, parameter);
-    const auto index = curve.addPoint (point.beat, limitValue (song, parameter, point.value), limitCurve (point.curve));
-    curve.follow();
-    return index;
+    return curve.addPoint (point.beat, limitValue (song, parameter, point.value), limitCurve (point.curve));
 }
 
 BeatDuration movePoints (Song& song, const ParameterRef& parameter, const std::vector<int>& requested, BeatDuration distance,
@@ -770,17 +660,13 @@ BeatDuration movePoints (Song& song, const ParameterRef& parameter, const std::v
     else
         std::for_each (indices.begin(), indices.end(), move);
 
-    curve.follow();
     return BeatDuration::fromBeats (beats);
 }
 
 void setCurve (Song& song, const ParameterRef& parameter, int index, float curveValue)
 {
     if (SongCurve curve (song, parameter); juce::isPositiveAndBelow (index, curve.getNumPoints()))
-    {
         curve.setCurve (index, limitCurve (curveValue));
-        curve.follow();
-    }
 }
 
 void deletePoints (Song& song, const ParameterRef& parameter, const std::vector<int>& requested)
@@ -790,8 +676,6 @@ void deletePoints (Song& song, const ParameterRef& parameter, const std::vector<
 
     for (auto i = indices.rbegin(); i != indices.rend(); ++i)
         curve.removePoint (*i);
-
-    curve.follow();
 }
 
 void replacePoints (Song& song, const ParameterRef& parameter, BeatRange range, const std::vector<AutomationPoint>& points)
@@ -805,8 +689,6 @@ void replacePoints (Song& song, const ParameterRef& parameter, BeatRange range, 
     // Each after any at its beat already, so that two at one beat stay in the order given: a jump.
     for (const auto& point : points)
         curve.addPoint (point.beat, limitValue (song, parameter, point.value), limitCurve (point.curve));
-
-    curve.follow();
 }
 
 std::vector<int> duplicatePoints (Song& song, const ParameterRef& parameter, const std::vector<int>& requested, BeatDuration minimumSpan)
@@ -835,37 +717,7 @@ std::vector<int> duplicatePoints (Song& song, const ParameterRef& parameter, con
         copies.push_back (curve.addPoint (point.beat + span, point.value, point.curve));
     }
 
-    curve.follow();
     return copies;
-}
-
-//==============================================================================
-te::Track* getTrackOfParameter (const te::AutomatableParameter& parameter)
-{
-    auto& edit = parameter.getEdit();
-    return mirror::findTrack (edit, getParameterTrack (getSong (edit), getParameterRef (parameter)));
-}
-
-juce::String getParameterName (const te::AutomatableParameter& parameter)
-{
-    // A modulator's or a macro's has no reference, and Tracktion's name.
-    const auto ref = getParameterRef (parameter);
-    return ref.isValid() ? getParameterName (getSong (parameter.getEdit()), ref) : parameter.getParameterName();
-}
-
-std::vector<AutomationPoint> getPoints (const te::AutomatableParameter& parameter)
-{
-    return getPoints (getSong (parameter.getEdit()), getParameterRef (parameter));
-}
-
-bool hasPoints (const te::AutomatableParameter& parameter)
-{
-    return hasPoints (getSong (parameter.getEdit()), getParameterRef (parameter));
-}
-
-int addPoint (te::AutomatableParameter& parameter, AutomationPoint point)
-{
-    return addPoint (getSong (parameter.getEdit()), getParameterRef (parameter), point);
 }
 
 //==============================================================================
@@ -911,7 +763,6 @@ void moveAutomation (Song& song, const std::vector<AutomationStretch>& stretches
                 curve.addPoint (point.beat, point.value, point.curve);
 
             tidyEdges (curve, edges);
-            curve.follow();
         }
     }
 }
@@ -948,7 +799,6 @@ void deleteAutomation (Song& song, const std::vector<AutomationStretch>& stretch
             }
 
             tidyEdges (curve, edges);
-            curve.follow();
         }
     }
 }
@@ -1006,7 +856,6 @@ void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, Bea
                             limitCurve (point.curve));
 
         tidyEdges (curve, { landing.getStart(), landing.getEnd() });
-        curve.follow();
     }
 }
 
@@ -1019,11 +868,6 @@ juce::ValueTree findCurveState (const Song& song, const ParameterRef& parameter)
     return findCurveIn (song.getState().getChildWithName (schema::AUTOMATION), parameter);
 }
 
-juce::ValueTree findCurveState (const te::Edit& edit, const ParameterRef& parameter)
-{
-    return findCurveState (getSong (edit), parameter);
-}
-
 std::vector<juce::ValueTree> getCurveStates (const Song& song)
 {
     std::vector<juce::ValueTree> curves;
@@ -1032,11 +876,6 @@ std::vector<juce::ValueTree> getCurveStates (const Song& song)
         curves.push_back (curve);
 
     return curves;
-}
-
-std::vector<juce::ValueTree> getCurveStates (const te::Edit& edit)
-{
-    return getCurveStates (getSong (edit));
 }
 
 ParameterRef getCurveParameter (const juce::ValueTree& curve)
@@ -1148,22 +987,6 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
                     curve.addPoint (point.beat, point.value, point.curve);
         }
     }
-}
-
-void adoptMovedPoint (te::AutomatableParameter& parameter)
-{
-    // Tracktion moves a curve's one point to its parameter's value as the value changes through Tracktion's parameter (a
-    // plug-in's own window), in the step of the change (AutomatableParameter::setParameterValue()); but not as the mirror
-    // sets a value from the song (mirror::setValueSetByHand(): a value set by hand on the song moves the song's point itself,
-    // model/devices/internal/Parameters.h), which plays the song's curve again.
-    const auto& moved = parameter.getCurve();
-
-    if (moved.getNumPoints() != 1 || mirror::isSettingValues())
-        return;
-
-    if (SongCurve curve (getSong (parameter.getEdit()), getParameterRef (parameter));
-        curve.getNumPoints() == 1 && ! juce::exactlyEqual (curve.getPointValue (0), moved.getPointValue (0)))
-        curve.setPoint (0, curve.getPointBeat (0), moved.getPointValue (0));
 }
 
 void forgetCurvesOfGoneDevices (Song& song)
@@ -1315,22 +1138,7 @@ AutomationMode getAutomationMode (const Song& song, TrackID track)
 void setAutomationMode (Song& song, TrackID track, AutomationMode mode)
 {
     if (auto state = findTrackState (song, track); state.isValid())
-    {
         writeAutomationMode (state, mode);
-
-        if (auto* edit = findEdit (song))
-            mirror::reconcileTrackSwitches (*edit);
-    }
-}
-
-AutomationMode getAutomationMode (const te::Track& track)
-{
-    return getAutomationMode (getSong (track.edit), getTrackID (track));
-}
-
-void setAutomationMode (te::Track& track, AutomationMode mode)
-{
-    setAutomationMode (getSong (track.edit), getTrackID (track), mode);
 }
 
 bool isWritingAutomation (const Song& song)
@@ -1341,55 +1149,22 @@ bool isWritingAutomation (const Song& song)
                         [] (const juce::ValueTree& state) { return readAutomationMode (state) != AutomationMode::read; });
 }
 
-bool isWritingAutomation (const te::Edit& edit)
-{
-    return isWritingAutomation (getSong (edit));
-}
-
 bool isParameterValue (const juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if (! tree.hasType (te::IDs::PLUGIN))
-        return false;
+    // A device's and a modulator's values set by hand are their VALUES' properties, by the parameters' IDs.
+    if (tree.hasType (schema::VALUES))
+        return true;
 
-    const auto type = tree[te::IDs::type].toString();
+    if (tree.hasType (schema::VALUE))
+        return property == schema::valueSetByHand;
 
-    // Tracktion's fader, VCA and send keep theirs under names of their own; Phazite's devices under the parameters' IDs.
-    if (type == te::VolumeAndPanPlugin::xmlTypeName || type == te::VCAPlugin::xmlTypeName || type == te::AuxSendPlugin::xmlTypeName)
-        return ! getParametersStoredIn (tree, property).isEmpty();
+    if (tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
+        return property == schema::channelVolume || property == schema::channelPan;
 
-    for (const auto* info : getOwnDevices())
-        if (type == juce::String (info->typeID.data(), info->typeID.size()))
-            return devices::findParameter (*info, property.toString().toStdString()) >= 0;
+    if (tree.hasType (schema::SEND))
+        return property == schema::sendLevel;
 
-    return false;
-}
-
-void restoreValuesSetByHand (juce::ValueTree& state)
-{
-    for (auto child : state)
-        restoreValuesSetByHand (child);
-
-    // Plug-ins put theirs back themselves.
-    if (! state.hasType (te::IDs::PLUGIN) || state[te::IDs::type].toString() == te::ExternalPlugin::xmlTypeName)
-        return;
-
-    // Tracktion writes each parameter's ID and value one after the other (AutomatableEditItem::saveChangedParametersToState()).
-    const auto* saved = state[te::IDs::parameters].getBinaryData();
-
-    if (saved == nullptr)
-        return;
-
-    juce::MemoryInputStream stream (*saved, false);
-
-    while (! stream.isExhausted())
-    {
-        const auto parameterID = stream.readString();
-        const auto value = stream.readFloat();
-
-        for (int i = 0; i < state.getNumProperties(); ++i)
-            if (const auto property = state.getPropertyName (i); getParametersStoredIn (state, property).contains (parameterID))
-                state.setProperty (property, value, nullptr);
-    }
+    return tree.hasType (schema::MACRO) && property == schema::macroValue;
 }
 
 //==============================================================================
@@ -1416,33 +1191,35 @@ void selectPoints (Selection& selection, const ParameterRef& parameter, const st
 }
 
 //==============================================================================
-AutomationWatcher::AutomationWatcher (te::Edit& e)
-    : edit (e)
+AutomationWatcher::AutomationWatcher (Song& s)
+    : song (&s)
 {
-    e.getParameterChangeHandler().addListener (*this);
+    song->addParameterListener (this);
 }
 
 AutomationWatcher::~AutomationWatcher()
 {
-    // The Edit may have gone first: then so have its parameters' listeners.
-    if (auto* e = edit.get())
-        e->getParameterChangeHandler().removeListener (*this);
+    song->removeParameterListener (this);
+    cancelPendingUpdate();
 }
 
-void AutomationWatcher::pluginParameterChanged (te::AutomatableParameter& parameter, bool isFollowingAutomation)
+void AutomationWatcher::valueSetByHand (const ParameterRef& parameter, float value, bool byPlugin)
 {
-    if (isFollowingAutomation || edit == nullptr || edit->isLoading() || ! juce::MessageManager::existsAndIsCurrentThread())
+    // A modulator's parameters and a macro's value aren't automated: no touch of theirs is one to automate.
+    const auto found = locateParameter (*song, parameter);
+
+    if (! found.has_value() || found->source == ParameterSource::modulator || found->source == ParameterSource::macro)
         return;
 
-    adoptMovedPoint (parameter);
+    // A value set by a control has moved the one point already (setValueSetByHand()); one the plug-in set itself moves it
+    // here.
+    if (byPlugin)
+        moveOnePoint (*song, parameter, value);
 
-    if (const auto changed = getParameterRef (parameter); changed.isValid())
-    {
-        if (std::find (changedAtOnce.begin(), changedAtOnce.end(), changed) == changedAtOnce.end())
-            changedAtOnce.push_back (changed);
+    if (std::find (changedAtOnce.begin(), changedAtOnce.end(), parameter) == changedAtOnce.end())
+        changedAtOnce.push_back (parameter);
 
-        triggerAsyncUpdate();
-    }
+    triggerAsyncUpdate();
 }
 
 void AutomationWatcher::handleAsyncUpdate()

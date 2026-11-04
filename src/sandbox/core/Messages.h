@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The control channel between Phazite and a helper (docs/tracktion-migration.md, T3), over JUCE's child-process pipe:
-// each message is its type, the number of the request it asks or answers (0 for a notice), and its fields one after
-// another, which both sides read in the order they were written. Nothing on it is real-time: a block goes through its
-// instance's channel (BlockChannel.h).
+// The control channel between Phazite and a helper, over JUCE's child-process pipe: each message is its type, the
+// number of the request it asks or answers (0 for a notice), and its fields one after another, which both sides read in
+// the order they were written. Nothing on it is real-time: a block goes through its instance's channel
+// (BlockChannel.h).
 #pragma once
 
 #include <juce_core/juce_core.h>

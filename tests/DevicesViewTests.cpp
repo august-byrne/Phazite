@@ -3,13 +3,13 @@
 // devices in a row, each shown whole (an editor for Phazite's own, a container's macros and devices, a plug-in's key
 // knobs and a button for its window), which track it shows as the selection changes or a device's name is clicked in
 // the mixer, the master's devices, and the track's modulators with an editor beside them.
+#include "EnginePlayback.h"
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/ContainerModel.h"
@@ -31,6 +31,7 @@
 #include "ui/mixer/StripParts.h"
 
 #include <algorithm>
+#include <set>
 
 namespace
 {
@@ -77,14 +78,33 @@ juce::Component* findNameButton (juce::Component& panel, const juce::String& nam
     return nullptr;
 }
 
+// A project context's devices' windows as the app shows them, while this lives, without any on the screen: which ones show.
+struct ShownWindows final : phazite::DeviceWindowHost
+{
+    explicit ShownWindows (phazite::ProjectContext& c)
+        : context (c)
+    {
+        phazite::setDeviceWindows (context, this);
+    }
+
+    ~ShownWindows() override { phazite::setDeviceWindows (context, nullptr); }
+
+    void show (DeviceID id) override { open.insert (id); }
+    bool isOpen (DeviceID id) const override { return open.contains (id); }
+    void close (DeviceID id) override { open.erase (id); }
+
+    phazite::ProjectContext& context;
+    std::set<DeviceID> open;
+};
+
 // An open project with two tracks: A, with an EQ, a compressor and a plug-in, and B, with a reverb. "device.show" does
 // what the app's does: it shows the selected device in the view.
 struct Screen
 {
     Screen()
     {
-        phazite::ensureTracks (*edit, 2);
-        setEdit (context, edit.get());
+        phazite::ensureTracks (*song, 2);
+        setSong (context, song.get());
 
         for (const auto* type : { "phaziteEq", "phaziteCompressor", "PhaziteTestEffect" })
             phazite::addEffect (context, track (0), find (type));
@@ -100,13 +120,13 @@ struct Screen
                         } });
 
         context.getSongSelection().selectOnly (track (0));
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        song->getUndoManager().clearUndoHistory();
         phazite::test::dispatchPendingMessages();
     }
 
-    ~Screen() { setEdit (context, nullptr); }
+    ~Screen() { setSong (context, nullptr); }
 
-    TrackID track (int index) const { return phazite::getTrackID (*te::getAudioTracks (*edit)[index]); }
+    TrackID track (int index) const { return phazite::getTrackIDs (*song)[(size_t) index]; }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -128,8 +148,8 @@ struct Screen
         return ids;
     }
 
-    phazite::test::TestPlugin testPlugin; // before the Edit that holds one, and gone after it
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::test::TestPlugin testPlugin; // before the song that holds one, and gone after it
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
@@ -204,7 +224,7 @@ TEST_CASE ("The Effects page shows the selected track's effects in a row, as car
     phazite::test::Mouse powerMouse (*power);
     powerMouse.click (power->getLocalBounds().getCentre());
     CHECK_FALSE (phazite::getEffects (screen.context, screen.track (0))[1].isOn);
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)).isNotEmpty());
+    CHECK (phazite::describeUndo (screen.song.get()).isNotEmpty());
     phazite::test::checkChildrenApart (view);
 
     // Showing the plug-in opens its card, to its key knobs (the rest are in its window), and folds the one that was open.
@@ -352,7 +372,7 @@ TEST_CASE ("An effect dragged by its name moves among its neighbours, in the Dev
     phazite::test::Mouse mouse (*eqName);
     drag (mouse, eqName->getLocalBounds().getCentre(), eqName->getLocalPoint (plugin, juce::Point<int> (plugin->getWidth() - 4, 60)));
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return screen.effects (0) == std::vector { effects[1], effects[2], effects[0] }; }));
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Move Device"));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Move Device"));
     CHECK (screen.context.getSongSelection().getDevices().empty()); // a drag, not a click: nothing selected
 
     // A drop where it was moves nothing.
@@ -392,17 +412,11 @@ TEST_CASE ("While devices' windows show, one of Phazite's own folds with its but
     view.setOpen (effects[0], true);
     REQUIRE (countEditors<phazite::ui::EqEditor> (*view.findPanel (effects[0])) == 1);
 
-    // Windows as Tracktion holds them, showing (the app's would be real ones on the screen).
-    std::vector<te::Plugin::Ptr> shown;
-
-    for (const auto id : { effects[0], effects[2] })
-    {
-        auto device = te::findPluginForID (*screen.edit, phazite::toTracktion (id));
-        REQUIRE (device != nullptr);
-        device->windowState->pluginWindow = std::make_unique<juce::Component>();
-        device->windowState->pluginWindow->setVisible (true);
-        shown.push_back (device);
-    }
+    // The windows of the EQ and the plug-in, shown as the model asks for them (the app's would be real ones on the screen).
+    ShownWindows windows { screen.context };
+    phazite::showDeviceWindow (screen.context, effects[0]);
+    phazite::showDeviceWindow (screen.context, effects[2]);
+    REQUIRE (windows.open == std::set { effects[0], effects[2] });
 
     CHECK (phazite::isDeviceWindowOpen (screen.context, effects[2]));
     CHECK_FALSE (phazite::getEffects (screen.context, screen.track (0))[2].windowOpen); // a plug-in's says nothing of its card
@@ -422,9 +436,6 @@ TEST_CASE ("While devices' windows show, one of Phazite's own folds with its but
     auto* windowButton = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*eq, "Open in a window"));
     REQUIRE (windowButton != nullptr);
     CHECK (windowButton->getToggleState());
-
-    for (auto& device : shown)
-        device->windowState->pluginWindow = nullptr;
 }
 
 TEST_CASE ("The Instrument page shows the track's instrument alone, as wide as the page, or why it has none")
@@ -509,11 +520,11 @@ TEST_CASE ("The Devices view follows the selection, and a click on a device's na
     CHECK (std::any_of (labels.begin(), labels.end(), [] (juce::Label* label) { return label->getText() == juce::String ("Master"); }));
 
     // Without a project, nothing.
-    setEdit (screen.context, nullptr);
+    setSong (screen.context, nullptr);
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (view.getChannel().has_value());
     CHECK (view.findPanel (limiter) == nullptr);
-    setEdit (screen.context, screen.edit.get());
+    setSong (screen.context, screen.song.get());
 }
 
 TEST_CASE ("A container shows its macros and its devices in line, as cards; a macro dropped on a device's knob modulates it")
@@ -571,7 +582,7 @@ TEST_CASE ("A container shows its macros and its devices in line, as cards; a ma
 
     REQUIRE (name != nullptr);
     name->setText ("Glue", juce::sendNotification);
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Rename Container"));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Rename Container"));
     CHECK (phazite::getEffects (screen.context, screen.track (0))[0].name == juce::String ("Glue"));
 
     // A device added to it shows in it.
@@ -635,7 +646,7 @@ TEST_CASE ("The Devices view shows its track's modulators, a macro with its knob
     randomMouse.click (randomName->getLocalBounds().getCentre());
     REQUIRE (phazite::test::findAll<phazite::ui::ModulatorEditor> (view).size() == 1);
     CHECK (phazite::test::findAll<phazite::ui::ModulatorEditor> (view).getFirst()->getModulator() == random);
-    phazite::undo (*screen.edit);
+    phazite::undo (*screen.song);
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findAll<phazite::ui::ModulatorEditor> (view).isEmpty(); }));
 }
 
@@ -675,6 +686,10 @@ TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, al
     Screen screen;
     const auto effects = screen.effects (0);
     REQUIRE (effects.size() == 3);
+
+    // Played by Phazite's engine, which the devices' readings come from.
+    phazite::test::EnginePlayback playback;
+    playback.play (0.05);
     phazite::ui::ChannelStrip strip { screen.commands, screen.context };
     phazite::test::TestWindow stripWindow { strip, phazite::ui::ChannelStrip::width, 900 };
     strip.setTrack (screen.track (0));
@@ -765,8 +780,8 @@ TEST_CASE ("On a machine without a screen, as Linux CI is, a test mouse letting 
 {
     // The image of a drag let go fades out by a copy of itself, which JUCE's animator scales for the display it is on; with
     // no display (Linux CI's) it read nothing, and every drag in the tests crashed as it was let go (2026-11-01). A display
-    // kept for good crashed elsewhere: Tracktion then took the machine for one with a screen and turned its screen saver
-    // off as it recorded, which without a screen crashes (Desktop::isHeadless()).
+    // kept for good would make the machine look as if it had a screen (Desktop::isHeadless()) to what asks later, such as
+    // code that turns the screen saver off, which without a screen crashes.
     auto& displays = const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays());
     displays.displays.clear();
 

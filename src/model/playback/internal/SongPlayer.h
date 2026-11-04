@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song as Phazite's own engine plays it (docs/tracktion-migration.md, T2): compiled into plans (engine/core/Plan.h),
-// with what each plan points at and sounds on from one to the next (each track's strip and channel, each of Phazite's
-// devices) kept by the song's IDs, and made anew for another sample rate or block size. Values set by hand (a device's
-// parameter or switch, a channel's volume, pan, mute and solo, and a plug-in's parameter, by hand or by the plug-in
-// itself) reach what plays at once, without a new plan. A playback session has one for its project (PlaybackSession.h),
-// and a render one of its own. Message thread.
+// The song as Phazite's own engine plays it: compiled into plans (engine/core/Plan.h), with what each plan points at
+// and sounds on from one to the next (each track's strip and channel, each of Phazite's devices) kept by the song's
+// IDs, and made anew for another sample rate or block size. Values set by hand (a device's parameter or switch, a
+// channel's volume, pan, mute and solo, and a plug-in's parameter, by hand or by the plug-in itself) reach what plays
+// at once, without a new plan. A playback session has one for its project (PlaybackSession.h), and a render one of its
+// own. Message thread.
 #pragma once
 
 #include "engine/audio/FileReader.h"
 #include "engine/core/Plan.h"
-#include "model/base/internal/Tracktion.h"
+#include "model/base/IDs.h"
+#include "model/base/Song.h"
 #include "model/devices/ParameterRef.h"
 
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <map>
 #include <memory>
 #include <optional>
@@ -24,10 +26,13 @@
 
 namespace phazite
 {
+class PluginInstances;
+
 class SongPlayer
 {
 public:
-    explicit SongPlayer (te::Edit&);
+    // A song's, with its plug-ins' instances (those of its session: none play without).
+    explicit SongPlayer (Song&, PluginInstances* = nullptr);
 
     // What a render plays of the song, when not all of it through the master: one channel alone, by its ID, as it reaches
     // the master (an export's stem, model/project/Export.h); or before its fader, heard whatever its mute switch or a solo
@@ -41,10 +46,18 @@ public:
         std::optional<std::set<std::int64_t>> devices;
     };
 
-    // What the engine plays of the song now, at a rate and in blocks of up to so many samples: the tempo map; the loop and
-    // the metronome, live (a render plays the song once, from its start, without the metronome); and its channels, with
+    // What plays live, as the session sees it: whether Low Latency is on (PlaybackHost.h), and the tracks armed to record,
+    // which hear their inputs (model/transport/internal/AudioRecorder.h).
+    struct Live
+    {
+        bool lowLatency = false;
+        std::set<TrackID> armed {};
+    };
+
+    // What the engine plays of the song now, at a rate and in blocks of up to so many samples: the tempo map; live, the loop
+    // and the metronome (a render plays the song once, from its start, without the metronome); and its channels, with
     // their devices, plug-ins among them, their automation and the faders', into the master; or in a render, a part of it.
-    std::unique_ptr<engine::Plan> compile (double sampleRate, int maximumBlockSize, bool isRender,
+    std::unique_ptr<engine::Plan> compile (double sampleRate, int maximumBlockSize, const std::optional<Live>& live,
                                            const std::optional<RenderOf>& of = std::nullopt);
 
     // Live, the audio files it plays are read ahead of the audio thread by a reading thread, and what the engine played long
@@ -76,15 +89,11 @@ public:
     // (AutomationWriter.h). It stays so from plan to plan, until it is written no more.
     void setWriting (const ParameterRef&, bool);
 
-    // A plug-in's parameter set by hand, or by the plug-in itself (which Tracktion takes in as set by hand): the value its
-    // modulation moves from, and which it plays while it is written by hand.
+    // A plug-in's parameter set by hand, or by the plug-in itself: the value its modulation moves from, and which it plays
+    // while it is written by hand.
     void takeValueSetByHand (const ParameterRef&, float value);
 
-    // What a plug-in's own window grabs and lets go of (in a helper: SandboxedInstance.h), for the automation written by
-    // hand; told nothing once this has gone.
-    void setPluginGestureListener (std::function<void (const ParameterRef&, bool starting)>);
-
-    // The plug-ins it plays told that nothing of them moves now, before it goes while their Edit stays.
+    // The plug-ins it plays told that nothing of them moves now, before it goes while their instances stay.
     void letGoOfPlugins();
 
     // What plays its plug-ins made anew by the next plan, prepared again (a render prepared them for itself), while no plan
@@ -92,7 +101,8 @@ public:
     void makePluginsAnew();
 
 private:
-    te::Edit& edit;
+    Song& song;
+    PluginInstances* const plugins;
     double preparedRate = 0.0;
     int preparedBlockSize = 0;
 
@@ -112,7 +122,8 @@ private:
     std::set<std::int64_t> used; // the devices the plan being compiled plays
     bool lowLatency = false;     // as the plan being compiled sees it
 
-    // The audio files the plans play, by their paths, and each audio clip's place in its file, by its ID.
+    // The audio files the plans play, by their paths and versions (getAudioFile()), and each audio clip's place in its file,
+    // by its ID.
     std::map<juce::String, std::shared_ptr<engine::AudioFile>> files;
     std::map<std::int64_t, std::shared_ptr<engine::RegionState>> regions;
     std::set<juce::String> usedFiles;
@@ -141,11 +152,10 @@ private:
     static int findParameter (const engine::DeviceNode&, const juce::String& id); // its index, or -1
 
     // A plug-in in a helper: the parameters whose values the engine sends it with each block, which the plan's automation
-    // (but while written by hand) and modulation move; and where its window's gestures go, which its instance holds as
-    // long as it lives.
+    // (but while written by hand) and modulation move.
     void tellWhatMoves (const engine::Plan::Strip&);
-    std::vector<int> moved; // the plug-in's being told
-    std::shared_ptr<std::function<void (const ParameterRef&, bool)>> pluginGestures;
+    std::vector<int> moved;  // the plug-in's being told
+    std::set<TrackID> armed; // as the plan being compiled sees them
     // A track, a bus or a return: where its sound goes (a bus's ID, or 0 for the master), what it takes in (its tracks, what
     // sends to it, what its sidechains listen to), and what of that it refuses, which would feed itself round a loop.
     struct ChannelInfo

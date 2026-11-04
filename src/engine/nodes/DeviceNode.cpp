@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceNode.h"
 
+#include <cmath>
+
 namespace phazite::engine
 {
 DeviceNode::DeviceNode (const devices::DeviceInfo& info, std::unique_ptr<devices::Processor> processor)
@@ -95,16 +97,36 @@ bool DeviceNode::takeBlock (DeviceRunner::Block& block, std::span<const Paramete
 void DeviceNode::start (juce::AudioBuffer<float>& buffer, int start, int numSamples, DeviceRunner::Block block,
                         std::span<const ParameterCurve> automation) noexcept
 {
+    const auto began = juce::Time::getHighResolutionTicks();
     started = takeBlock (block, automation);
 
     if (started)
         runner.start (buffer, start, numSamples, block);
+
+    startTicks = juce::Time::getHighResolutionTicks() - began;
+}
+
+void DeviceNode::measure (std::int64_t ticks, int numSamples) noexcept
+{
+    const auto rate = runner.getSampleRate();
+
+    if (numSamples <= 0 || rate <= 0.0)
+        return;
+
+    // As long a time at any block size: the shorter the block, the less of the average it moves.
+    const auto blockSeconds = (double) numSamples / rate;
+    const auto now = juce::Time::highResolutionTicksToSeconds (ticks) / blockSeconds;
+    const auto kept = std::exp (-blockSeconds / loadSeconds);
+    load.store ((float) (now + ((double) load.load (std::memory_order_relaxed) - now) * kept), std::memory_order_relaxed);
 }
 
 void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSamples, DeviceRunner::Block block,
                           std::span<const ParameterCurve> automation) noexcept
 {
     // Started (start()), with the values and automation it took then; or as it is now.
+    const auto began = juce::Time::getHighResolutionTicks();
+    const auto ticksBefore = std::exchange (startTicks, 0);
+
     if (std::exchange (started, false))
     {
         block.values = blockValues;
@@ -112,10 +134,12 @@ void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSa
     }
     else if (! takeBlock (block, automation))
     {
+        measure (0, numSamples);
         return;
     }
 
     runner.process (buffer, start, numSamples, block);
+    measure (ticksBefore + juce::Time::getHighResolutionTicks() - began, numSamples);
 
     // What it played, for the controls.
     const auto playedValues = runner.getValues();

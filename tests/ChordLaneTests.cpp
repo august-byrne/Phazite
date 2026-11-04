@@ -43,10 +43,10 @@ struct ChordScreen
 {
     ChordScreen()
     {
-        phazite::ensureTracks (*edit, 2);
+        phazite::ensureTracks (*song, 2);
         phazite::ui::addTimelineCommands (registry, [this] { return &playlist; });
         playlist.addCommands (registry);
-        setEdit (context, edit.get());
+        setSong (context, song.get());
         phazite::test::dispatchPendingMessages();
 
         lane = dynamic_cast<phazite::ui::ChordLane*> (phazite::test::findComponentWithTitle (playlist, "Chords"));
@@ -55,7 +55,7 @@ struct ChordScreen
         REQUIRE (header != nullptr);
     }
 
-    ~ChordScreen() { setEdit (context, nullptr); }
+    ~ChordScreen() { setSong (context, nullptr); }
 
     juce::String names() const
     {
@@ -73,7 +73,7 @@ struct ChordScreen
         return { juce::roundToInt (playlist.getView().beatToX (beat (beats))), lane->getHeight() / 2 };
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine()); // 120 BPM, 4/4
+    phazite::Song::Ptr song = phazite::createSong(); // 120 BPM, 4/4
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
@@ -99,7 +99,7 @@ TEST_CASE ("The chord lane: a click on empty space offers the key's chords, and 
     REQUIRE (chords.size() == 1);
     CHECK (chords[0].range.getStart() == beat (4.0));
     CHECK (chords[0].range.getEnd() == beat (8.0));
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Add Chord"));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Chord"));
 
     // In the bar before, up to the chord after it; and one from outside the key.
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (1.0)), { "Outside the Key", "Bb    bVII" }));
@@ -123,7 +123,7 @@ TEST_CASE ("The chord lane: a chord's menu changes it, its kind and inversion, a
 
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (5.0)), { "Delete Chord" }));
     CHECK (screen.names() == juce::String ("Am7/C Am F"));
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Delete Chord"));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Delete Chord"));
 
     // The key from a chord on.
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (9.0)), { "Change Key from Here", "D", "Major" }));
@@ -149,7 +149,7 @@ TEST_CASE ("The chord lane: dragging a chord's right edge makes it longer, over 
     REQUIRE (chords.size() == 4);
     CHECK (chords[0].range.getEnd() == beat (6.0));
     CHECK (chords[1].range.getStart() == beat (6.0));
-    CHECK (phazite::describeUndo (&phazite::getSong (*screen.edit)) == juce::String ("Undo Change Chord Length"));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Change Chord Length"));
     CHECK_FALSE (screen.lane->getDragTarget().has_value());
 }
 
@@ -164,20 +164,21 @@ TEST_CASE ("The chord lane's header: the song's key, which the chords follow, an
     CHECK (screen.header->getKeyButton().getButtonText() == juce::String ("D major"));
     CHECK (screen.names() == juce::String ("D A Bm G"));
 
-    const auto tracksBefore = te::getAudioTracks (*screen.edit).size();
+    const auto tracksBefore = phazite::getTrackIDs (*screen.song).size();
     REQUIRE (runMenuItem (screen.header->getMoreMenu(), { "Make a Part from the Chords", "Bass", "Root and fifth" }));
-    const auto tracks = te::getAudioTracks (*screen.edit);
+    const auto tracks = phazite::getTrackIDs (*screen.song);
     REQUIRE (tracks.size() == tracksBefore + 1);
-    CHECK (tracks.getLast()->getName() == juce::String ("Bass"));
-    REQUIRE (tracks.getLast()->getClips().size() == 1);
-    CHECK (phazite::followsChords (screen.context, phazite::getClipID (*tracks.getLast()->getClips()[0])));
+    CHECK (phazite::getTrackName (*screen.song, tracks.back()) == juce::String ("Bass"));
+    const auto clips = phazite::getClips (*screen.song, tracks.back());
+    REQUIRE (clips.size() == 1);
+    CHECK (phazite::followsChords (screen.context, clips[0]));
 }
 
 TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, and put it on the chord lane")
 {
-    const auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    const auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     const auto previewer = phazite::createPreviewer (phazite::test::getEngineContext());
 
     {
@@ -207,7 +208,7 @@ TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, a
         CHECK (phazite::getLaneChords (context).back().range.getEnd() == beat (16.0));
 
         // A selected section is where it goes first.
-        const auto section = phazite::insertSection (phazite::getSong (*edit), phazite::BeatPosition::fromBeats (16.0),
+        const auto section = phazite::insertSection (*song, phazite::BeatPosition::fromBeats (16.0),
                                                      { .name = "Verse", .length = phazite::BeatDuration::fromBeats (8.0) });
         REQUIRE (section.isValid());
         getSelection (context).selectOnly (section);
@@ -229,14 +230,14 @@ TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, a
         panel.stop();
     }
 
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("The inspector shows whether a part made from the chords follows them, and turns it back on")
 {
-    const auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    const auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
 
@@ -257,12 +258,11 @@ TEST_CASE ("The inspector shows whether a part made from the chords follows them
         CHECK (toggle->getToggleState());
 
         // A note edited by hand: it stops following.
-        auto& song = phazite::getSong (*edit);
-        const auto notes = phazite::getClipNotes (song, *part);
+        const auto notes = phazite::getClipNotes (*song, *part);
         REQUIRE_FALSE (notes.empty());
         {
-            const phazite::UndoStep step (song, "Change Velocity");
-            phazite::setNoteVelocities (song, { notes.front().getRef() }, 50);
+            const phazite::UndoStep step (*song, "Change Velocity");
+            phazite::setNoteVelocities (*song, { notes.front().getRef() }, 50);
         }
         phazite::test::dispatchPendingMessages();
         CHECK_FALSE (toggle->getToggleState());
@@ -274,5 +274,5 @@ TEST_CASE ("The inspector shows whether a part made from the chords follows them
         CHECK (toggle->getToggleState());
     }
 
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }

@@ -65,6 +65,7 @@ DeviceRunner::DeviceRunner (const devices::DeviceInfo& deviceInfo, std::unique_p
 void DeviceRunner::prepare (double rate, int maximumBlockSize)
 {
     processor->prepare (rate, maximumBlockSize);
+    sampleRate = rate;
     const auto stretch = std::max (maximumBlockSize, 512);
     stereo.setSize (2, stretch);
     stretchMixes.reserve ((size_t) (stretch / smoothingStep + 2));
@@ -451,11 +452,9 @@ void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int 
     if (plan == nullptr)
         return;
 
-    // Then a modulated one is moved by its sources where the stretch is: by their values on its control point, in Phazite's
-    // engine; or an LFO by its wave at the stretch's middle, a modulator or a macro by its value gliding as far as the
-    // stretch's end.
+    // Then a modulated one is moved by its sources where the stretch is: by their values on its control point, or, for a
+    // source without them, by its value gliding as far as the stretch's end.
     forEach ([this] (size_t i) { offsets[i] = 0.0f; });
-    const auto middle = done + length / 2;
 
     for (const auto& route : plan->routes)
     {
@@ -465,9 +464,7 @@ void DeviceRunner::setStretchValues (const Block& in, bool automationMoves, int 
             continue;
 
         const auto value = ! source.points.empty() ? source.points[std::min ((size_t) stretch, source.points.size() - 1)]
-                           : source.followsWave
-                               ? devices::getLfoValue (source.shape, devices::movePhase (source.phase, middle * source.cyclesPerSample))
-                               : source.previous + (source.now - source.previous) * along;
+                                                   : source.previous + (source.now - source.previous) * along;
         offsets[(size_t) route.parameter] += route.amount * value;
     }
 

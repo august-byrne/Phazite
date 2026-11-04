@@ -6,13 +6,12 @@ function(phazite_require_submodules)
         if(NOT EXISTS "${CMAKE_SOURCE_DIR}/${_dir}/CMakeLists.txt")
             message(FATAL_ERROR
                 "${_dir} is empty because the git submodules are not checked out. Run:\n"
-                "  git submodule update --init --recursive --depth 1\n"
-                "On a new Windows machine run tools\\setup-windows.cmd first: it lets git fetch JUCE over HTTPS.")
+                "  git submodule update --init --recursive --depth 1")
         endif()
     endforeach()
 endfunction()
 
-# Limits parallel compiles by RAM, because Tracktion's and JUCE's large source files need a lot of memory
+# Limits parallel compiles by RAM, because JUCE's large source files need a lot of memory
 # each. Only Ninja supports job pools; other generators ignore this.
 function(phazite_limit_parallel_compiles mib_per_job)
     if(NOT CMAKE_GENERATOR MATCHES "Ninja")
@@ -31,7 +30,7 @@ function(phazite_limit_parallel_compiles mib_per_job)
     message(STATUS "Phazite: up to ${_jobs} parallel compiles (${_ram_mib} MiB RAM, ${_cpus} logical CPUs)")
 endfunction()
 
-# JUCE builds its juceaide helper in <build>/external/tracktion_engine/modules/juce/tools and reuses that
+# JUCE builds its juceaide helper in <build>/external/JUCE/tools and reuses that
 # folder on every configure, even after `cmake --preset <name> --fresh`. After a compiler update it would
 # keep using the old (deleted) compiler, so delete the folder whenever the compiler, the toolchain file or
 # the source location changes. The stamp file sits outside CMakeFiles/, so --fresh keeps it.

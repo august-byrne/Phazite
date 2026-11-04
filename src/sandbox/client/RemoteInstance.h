@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A plug-in instance in a helper, as Phazite holds it (docs/tracktion-migration.md, T3): the channel Phazite made for its
-// blocks, the helper's instance on it, opened from the plug-in's description and state and closed as it goes, what it
-// is (PluginInfo.h), and what Phazite asks of it besides blocks: its state, its program, a value set by hand, how it
-// writes a value, another channel for another sample rate, its editor. What the plug-in changes itself comes as the helper's notices
-// for it, which the helper's owner hands it by its ID (handleNotice()), and it to its listener, on the pipe's thread.
+// A plug-in instance in a helper, as Phazite holds it: the channel Phazite made for its blocks, the helper's instance
+// on it, opened from the plug-in's description and state and closed as it goes, what it is (PluginInfo.h), and what
+// Phazite asks of it besides blocks: its state, its program, a value set by hand, how it writes a value, another
+// channel for another sample rate, its editor. What the plug-in changes itself comes as the helper's notices for it,
+// which the helper's owner hands it by its ID (handleNotice()), and it to its listener, on the pipe's thread.
 #pragma once
 
 #include "Helper.h"

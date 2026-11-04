@@ -70,20 +70,9 @@ struct ParameterHandle::Impl
         return "Change " + (description.has_value() ? description->name : juce::String());
     }
 
-    // Tracktion's parameter, which records a gesture (and Phazite's automation writer, through it), while it mirrors the
-    // song's (docs/tracktion-migration.md, T6 step 4 moves the writer to references).
-    te::AutomatableParameter::Ptr findTracktionParameter (const ParameterRef& found) const
-    {
-        auto* edit = song.get() != nullptr ? findEdit (*song.get()) : nullptr;
-        return edit != nullptr && found.isValid() ? phazite::findParameter (*edit, found) : nullptr;
-    }
-
-    // A gesture begun: for Phazite's automation writer, and Tracktion's parameter while it mirrors the song's.
+    // A gesture begun: for Phazite's automation writer.
     void beginRecording (const ParameterRef& found) const
     {
-        if (const auto parameter = findTracktionParameter (found))
-            parameter->parameterChangeGestureBegin();
-
         if (auto* session = findPlayingSession (*song.get()))
             session->getWriter().gestureBegan (found);
     }
@@ -118,33 +107,9 @@ ParameterHandle makeCreatingHandle (Song& song, std::function<DeviceID (const So
     return ParameterHandle (std::move (impl));
 }
 
-ParameterHandle makeParameterHandle (te::Plugin* plugin, const juce::String& parameterID, const juce::String& undoName)
-{
-    return plugin != nullptr ? makeParameterHandle (getSong (plugin->edit), { getDeviceID (*plugin), parameterID }, undoName)
-                             : ParameterHandle();
-}
-
-ParameterHandle makeParameterHandle (te::Modifier& modifier, const juce::String& parameterID, const juce::String& undoName)
-{
-    const auto id = DeviceID::fromRaw (getModulatorID (modifier).getRaw());
-    return makeParameterHandle (getSong (modifier.edit), { id, parameterID }, undoName, false);
-}
-
-ParameterHandle makeMacroHandle (const te::MacroParameter& macro, const juce::String& undoName)
-{
-    const auto id = DeviceID::fromRaw (getModulatorID (macro).getRaw());
-    return makeParameterHandle (getSong (macro.getEdit()), { id, macro.paramID }, undoName, false);
-}
-
 Song* findSong (const ParameterHandle& handle)
 {
     return handle.getImpl() != nullptr ? handle.getImpl()->song.get() : nullptr;
-}
-
-te::AutomatableParameter::Ptr findParameter (const ParameterHandle& handle)
-{
-    const auto* impl = handle.getImpl();
-    return impl != nullptr ? impl->findTracktionParameter (impl->findRef()) : nullptr;
 }
 
 ParameterHandle::ParameterHandle() = default;
@@ -329,9 +294,6 @@ void ParameterHandle::endGesture()
 {
     if (! isInGesture())
         return;
-
-    if (const auto parameter = impl->findTracktionParameter (impl->findRef()))
-        parameter->parameterChangeGestureEnd();
 
     if (auto* song = impl->song.get())
         if (auto* session = findPlayingSession (*song)) // what it wrote joins the gesture's step

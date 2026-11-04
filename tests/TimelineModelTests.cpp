@@ -25,7 +25,7 @@ BeatPosition beat (double beats)
 
 TEST_CASE ("The time line's bars follow the time signature, and the grid snaps in beats")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     // With no project open, a new song's 4/4.
@@ -33,8 +33,8 @@ TEST_CASE ("The time line's bars follow the time signature, and the grid snaps i
     CHECK (phazite::getBarStart (context, 2).inBeats() == doctest::Approx (8.0));
     CHECK (phazite::snapToGrid (context, beat (2.7), { 9, false }).inBeats() == doctest::Approx (2.7)); // nothing to snap to
 
-    setEdit (context, edit.get());
-    phazite::setTimeSignature (phazite::getSong (*edit), { 3, 4 });
+    setSong (context, song.get());
+    phazite::setTimeSignature (*song, { 3, 4 });
     CHECK (phazite::getBeatsPerBar (context, beat (0.0)) == 3);
     CHECK (phazite::getBarAt (context, beat (7.0)) == 2);
     CHECK (phazite::getBarStart (context, 2).inBeats() == doctest::Approx (6.0));
@@ -66,22 +66,22 @@ TEST_CASE ("The time line's bars follow the time signature, and the grid snaps i
     grid.adaptive = false;
     grid.fixedLevel = 7;
     CHECK (phazite::getGridStep (context, grid, beat (0.0), 2.0, 20.0).level == 7);
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("The playhead and the loop by beats, through the project's context")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     CHECK (phazite::getPlayheadBeat (context).inBeats() == doctest::Approx (0.0));
     CHECK_FALSE (phazite::getLoop (context).has_value());
     phazite::loopRange (context, { beat (4.0), beat (8.0) }); // no project: nothing to loop
 
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     phazite::movePlayhead (context, beat (6.0));
     CHECK (phazite::getPlayheadBeat (context).inBeats() == doctest::Approx (6.0));
-    CHECK (phazite::getPlayStart (*edit) == edit->tempoSequence.toTime (te::BeatPosition::fromBeats (6.0)));
+    CHECK (phazite::getPlayStartBeat (*song).inBeats() == doctest::Approx (6.0));
 
     if (phazite::getLoop (context).has_value())
         phazite::toggleLoop (context); // off, to begin with
@@ -96,14 +96,14 @@ TEST_CASE ("The playhead and the loop by beats, through the project's context")
     CHECK_FALSE (phazite::getLoop (context).has_value());
     phazite::loopSong (context);
     CHECK (phazite::getLoop (context).has_value());
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("A song gesture is one undo step for the open project, and nothing without one")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto* track = te::getAudioTracks (*edit)[0];
-    const auto name = track->getName();
+    auto song = phazite::createSong();
+    const auto track = phazite::getTrackIDs (*song)[0];
+    const auto name = phazite::getTrackName (*song, track);
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     {
@@ -111,28 +111,28 @@ TEST_CASE ("A song gesture is one undo step for the open project, and nothing wi
         CHECK_FALSE (none.isOpen());
     }
 
-    setEdit (context, edit.get());
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    setSong (context, song.get());
+    song->getUndoManager().clearUndoHistory();
 
     {
         phazite::SongGesture gesture (context, "Rename Twice");
         CHECK (gesture.isOpen());
-        phazite::setTrackName (*track, "Once");
-        phazite::setTrackName (*track, "Twice");
+        phazite::setTrackName (*song, track, "Once");
+        phazite::setTrackName (*song, track, "Twice");
     }
 
-    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Rename Twice"));
-    phazite::undo (*edit);
-    CHECK (track->getName() == name);
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Rename Twice"));
+    phazite::undo (*song);
+    CHECK (phazite::getTrackName (*song, track) == name);
 
     // Rolled back, it leaves the song as it was, and nothing to redo.
     {
         phazite::SongGesture gesture (context, "Rename");
-        phazite::setTrackName (*track, "Gone");
+        phazite::setTrackName (*song, track, "Gone");
         gesture.rollBack();
         CHECK_FALSE (gesture.isOpen());
     }
 
-    CHECK (track->getName() == name);
-    setEdit (context, nullptr);
+    CHECK (phazite::getTrackName (*song, track) == name);
+    setSong (context, nullptr);
 }

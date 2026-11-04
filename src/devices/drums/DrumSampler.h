@@ -4,8 +4,8 @@
 // level, pan and tuning, with an attack that softens its start and a length that cuts it short. Pads in the same choke
 // group stop each other, as an open hat stops when the closed one plays. A new sampler plays the default kit of the
 // sounds Phazite synthesizes (FactoryDrums.h); a pad can play another of them, from the kits that come with Phazite, or a
-// sound file, which its thin plug-in loads, and which the sampler swaps in without the audio thread ever waiting or
-// freeing memory.
+// sound file, which the model loads (model/devices/internal/DrumKit.h), and which the sampler swaps in without the
+// audio thread ever waiting or freeing memory.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"

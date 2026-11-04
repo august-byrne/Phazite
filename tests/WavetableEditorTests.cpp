@@ -4,15 +4,17 @@
 // shorter Devices view.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/wavetable/WavetableSynth.h"
-#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
-#include "model/project/internal/Project.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/WavetableEditor.h"
 
@@ -26,17 +28,13 @@ struct Screen
 {
     Screen()
     {
-        juce::String error;
-        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Editor", error);
-        REQUIRE (project != nullptr);
-        phazite::ensureTracks (project->getEdit(), 1);
-        synth = phazite::setInstrument (*te::getAudioTracks (project->getEdit())[0],
-                                        project->getEdit().getPluginCache().createNewPlugin (WavetableSynth::typeID, {}));
-        REQUIRE (synth != nullptr);
-        phazite::test::settle();
-        phazite::getSong (project->getEdit()).getUndoManager().clearUndoHistory();
+        auto& s = getSong();
+        synth = phazite::setInstrument (s, song.firstTrack, phazite::makeOwnDeviceState (s, WavetableSynth::typeID));
+        REQUIRE (synth.isValid());
+        phazite::getSession (song.context)->update();
+        s.getUndoManager().clearUndoHistory();
 
-        editor = std::make_unique<WavetableEditor> (phazite::makeDeviceHandle (*synth));
+        editor = std::make_unique<WavetableEditor> (phazite::makeDeviceHandle (s, synth));
         window = std::make_unique<phazite::test::TestWindow> (*editor, editor->getWidth(), editor->getHeight());
     }
 
@@ -46,12 +44,13 @@ struct Screen
         editor = nullptr;
     }
 
-    float getValue (const char* id) const { return synth->getAutomatableParameterByID (id)->getCurrentValue(); }
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (project->getEdit())); }
+    phazite::Song& getSong() const { return *phazite::findSong (song.context); }
+    float getValue (const char* id) const { return phazite::getValueSetByHand (getSong(), phazite::ParameterRef { synth, id }); }
+    juce::String describeUndo() const { return phazite::describeUndo (&getSong()); }
 
-    phazite::test::TemporaryFolder temp;
-    std::unique_ptr<phazite::Project> project;
-    te::Plugin* synth = nullptr;
+    phazite::test::TemporaryFolder temp; // for sound files outside the project
+    phazite::test::TestSong song;
+    phazite::DeviceID synth;
     std::unique_ptr<WavetableEditor> editor;
     std::unique_ptr<phazite::test::TestWindow> window;
 };
@@ -61,7 +60,9 @@ TEST_CASE ("The wavetable synth's editor draws each oscillator's table and names
 {
     Screen screen;
     auto& editor = *screen.editor;
-    CHECK (dynamic_cast<WavetableEditor*> (phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*screen.synth)).get()) != nullptr);
+    CHECK (
+        dynamic_cast<WavetableEditor*> (phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (screen.getSong(), screen.synth)).get())
+        != nullptr);
     phazite::test::checkChildrenApart (editor);
 
     for (int osc = 0; osc < WavetableEditor::numOscillators; ++osc)
@@ -114,7 +115,7 @@ TEST_CASE ("The wavetable synth's table menu lists the factory tables and puts t
     CHECK (phazite::test::findMenuItem (editor.getTableMenu (0), { "Vowels" })->isTicked);
 
     // Undo shows on the editor.
-    phazite::undo (screen.project->getEdit());
+    phazite::undo (screen.getSong());
     editor.refresh();
     CHECK (editor.getTableButton (0).getButtonText() == juce::String ("Basic Shapes"));
 }
@@ -160,7 +161,7 @@ TEST_CASE ("Dragging across a wavetable oscillator's drawing moves its position,
     CHECK (screen.getValue ("osc1Position") == doctest::Approx (before - 0.25f).epsilon (0.02));
     CHECK (screen.describeUndo() == juce::String ("Undo Change Osc 1 Position"));
 
-    phazite::undo (screen.project->getEdit());
+    phazite::undo (screen.getSong());
     CHECK (screen.getValue ("osc1Position") == doctest::Approx (before));
 }
 

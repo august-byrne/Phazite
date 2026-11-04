@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What two processes share (docs/tracktion-migration.md, T3): memory made by one under a name and opened by the other by
-// it, mapped into both for as long as each keeps it; and a bell, a counter in that memory that one side moves on and the
-// other waits on, woken by the operating system only when it sleeps (Windows: an event of the same name; elsewhere a
-// futex on the counter itself). Real-time safe once made: ringing and waiting allocate nothing and take no lock.
+// What two processes share: memory made by one under a name and opened by the other by it, mapped into both for as long
+// as each keeps it; and a bell, a counter in that memory that one side moves on and the other waits on, woken by the
+// operating system only when it sleeps (Windows: an event of the same name; elsewhere a futex on the counter itself).
+// Real-time safe once made: ringing and waiting allocate nothing and take no lock.
 #pragma once
 
 #include <atomic>

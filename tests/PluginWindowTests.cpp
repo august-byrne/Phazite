@@ -3,19 +3,18 @@
 // for the plug-in, and Send All Keys to the Plug-in, which the settings keep for the plug-in in every project. Its "done
 // when": plug-in states save as presets, and a name can be typed into a plug-in that draws its own text fields.
 #include "TestPlugin.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "app/PluginWindow.h"
-#include "model/arrangement/internal/Tracks.h"
-#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
-#include "model/mixer/internal/Mixer.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/ProjectContext.h"
-#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "services/Library.h"
+#include "services/Settings.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/input/PluginKeys.h"
@@ -30,15 +29,9 @@ struct Studio
 {
     Studio()
     {
-        juce::String error;
-        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Levels", error);
-        REQUIRE (project != nullptr);
-        auto& edit = project->getEdit();
-        phazite::ensureTracks (edit, 1);
-        plugin = dynamic_cast<te::ExternalPlugin*> (phazite::insertDevice (*te::getAudioTracks (edit)[0], TestPlugin::create (edit)));
-        REQUIRE (plugin != nullptr);
-        setEdit (context, &edit);
-        phazite::getSong (edit).getUndoManager().clearUndoHistory();
+        plugin = TestPlugin::add (getSong(), song.firstTrack);
+        REQUIRE (phazite::findPluginInstance (getSong(), plugin) != nullptr);
+        getSong().getUndoManager().clearUndoHistory();
 
         phazite::ui::setPluginKeys (&keys);
         phazite::setPluginWindowServices (&services);
@@ -49,8 +42,9 @@ struct Studio
     {
         phazite::setPluginWindowServices (nullptr);
         phazite::ui::setPluginKeys (nullptr);
-        setEdit (context, nullptr);
     }
+
+    phazite::Song& getSong() const { return *phazite::findSong (song.context); }
 
     juce::File presetFile (const juce::String& path) const
     {
@@ -59,12 +53,11 @@ struct Studio
 
     TestPlugin testPlugin; // before the project that holds one, and gone after it
     phazite::test::TemporaryFolder temp;
-    std::unique_ptr<phazite::Project> project;
-    te::ExternalPlugin* plugin = nullptr;
-    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::test::TestSong song;
+    phazite::DeviceID plugin;
     phazite::Settings settings;
     phazite::Library library { phazite::test::getEngineContext(), settings, {}, temp.folder.getChildFile ("Presets") };
-    phazite::PluginWindowServices services { context, library, settings };
+    phazite::PluginWindowServices services { song.context, library, settings };
 
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
@@ -86,8 +79,9 @@ const juce::PopupMenu::Item& item (const juce::PopupMenu& menu, const std::vecto
 TEST_CASE ("A plug-in window's menu loads the presets saved for its plug-in into it, as one undo step")
 {
     Studio studio;
-    auto& edit = studio.project->getEdit();
-    const auto menuBar = phazite::createPluginMenu (*studio.plugin, studio.window);
+    auto& song = studio.getSong();
+    auto& context = studio.song.context;
+    const auto menuBar = phazite::createPluginMenu (context, studio.plugin, studio.window);
     CHECK (menuBar->getMenuBarNames() == juce::StringArray { "Plug-in" });
 
     // Nothing saved for it yet: Save Preset... only.
@@ -97,22 +91,15 @@ TEST_CASE ("A plug-in window's menu loads the presets saved for its plug-in into
 
     // Presets saved for it (as Save Preset... does, once its dialog has a file) in its folder and a folder in it; and one of
     // another device, put there by hand, which it doesn't offer.
-    CHECK (phazite::getPresetFolderName (studio.context, phazite::getDeviceID (*studio.plugin)) == juce::String ("Test Effect"));
-    TestPlugin::setGain (*studio.plugin, 0.9f);
-    REQUIRE (phazite::saveDevicePreset (studio.context, phazite::getDeviceID (*studio.plugin), studio.presetFile ("Test Effect/Loud")));
-    TestPlugin::setGain (*studio.plugin, 0.3f);
-    REQUIRE (
-        phazite::saveDevicePreset (studio.context, phazite::getDeviceID (*studio.plugin), studio.presetFile ("Test Effect/Soft/Quiet")));
-    const auto track = phazite::getTrackID (*te::getAudioTracks (edit)[0]);
-    const auto types = phazite::getDeviceTypes (studio.context);
-    const auto eq = std::find_if (types.begin(), types.end(),
-                                  [] (const phazite::DeviceType& type) { return type.description.fileOrIdentifier == "phaziteEq"; });
-    REQUIRE (eq != types.end());
-    phazite::addEffect (studio.context, track, *eq);
-    REQUIRE (phazite::saveDevicePreset (studio.context, phazite::getEffects (studio.context, track).back().id,
-                                        studio.presetFile ("Test Effect/Not This One")));
-    TestPlugin::setGain (*studio.plugin, 0.5f);
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
+    CHECK (phazite::getPresetFolderName (context, studio.plugin) == juce::String ("Test Effect"));
+    TestPlugin::setGain (song, studio.plugin, 0.9f);
+    REQUIRE (phazite::saveDevicePreset (context, studio.plugin, studio.presetFile ("Test Effect/Loud")));
+    TestPlugin::setGain (song, studio.plugin, 0.3f);
+    REQUIRE (phazite::saveDevicePreset (context, studio.plugin, studio.presetFile ("Test Effect/Soft/Quiet")));
+    const auto eq = studio.song.addEffect (studio.song.firstTrack, "phaziteEq");
+    REQUIRE (phazite::saveDevicePreset (context, eq, studio.presetFile ("Test Effect/Not This One")));
+    TestPlugin::setGain (song, studio.plugin, 0.5f);
+    song.getUndoManager().clearUndoHistory();
 
     menu = menuBar->getMenuForIndex (0, "Plug-in");
     CHECK (item (menu, { "Load Preset" }).isEnabled);
@@ -121,19 +108,19 @@ TEST_CASE ("A plug-in window's menu loads the presets saved for its plug-in into
 
     // One loaded: its settings, as one undo step named after it, which undo takes back.
     REQUIRE (phazite::test::runMenuItem (menu, { "Load Preset", "Loud" }));
-    CHECK (TestPlugin::getGain (*studio.plugin) == doctest::Approx (0.9f));
-    CHECK (phazite::describeUndo (&phazite::getSong (edit)) == juce::String ("Undo Load Preset Loud"));
-    phazite::undo (edit);
-    CHECK (TestPlugin::getGain (*studio.plugin) == doctest::Approx (0.5f));
+    CHECK (TestPlugin::getGain (song, studio.plugin) == doctest::Approx (0.9f));
+    CHECK (phazite::describeUndo (&song) == juce::String ("Undo Load Preset Loud"));
+    phazite::undo (song);
+    CHECK (TestPlugin::getGain (song, studio.plugin) == doctest::Approx (0.5f));
 
     REQUIRE (phazite::test::runMenuItem (menu, { "Load Preset", "Soft", "Quiet" }));
-    CHECK (TestPlugin::getGain (*studio.plugin) == doctest::Approx (0.3f));
+    CHECK (TestPlugin::getGain (song, studio.plugin) == doctest::Approx (0.3f));
 }
 
 TEST_CASE ("A plug-in window's Send All Keys to the Plug-in is kept for the plug-in in the settings, for every project")
 {
     Studio studio;
-    const auto menuBar = phazite::createPluginMenu (*studio.plugin, studio.window);
+    const auto menuBar = phazite::createPluginMenu (studio.song.context, studio.plugin, studio.window);
     auto menu = menuBar->getMenuForIndex (0, "Plug-in");
     CHECK (item (menu, { "Send All Keys to the Plug-in" }).isEnabled);
     CHECK_FALSE (item (menu, { "Send All Keys to the Plug-in" }).isTicked);
@@ -147,13 +134,12 @@ TEST_CASE ("A plug-in window's Send All Keys to the Plug-in is kept for the plug
 
     // The same plug-in in another project has it on too.
     {
-        auto other = phazite::createSongEdit (phazite::test::getEngine());
-        const auto plugin = TestPlugin::create (*other);
-        phazite::insertDevice (*te::getAudioTracks (*other)[0], plugin);
+        phazite::test::TestSong other;
+        const auto plugin = TestPlugin::add (*phazite::findSong (other.context), other.firstTrack);
         juce::Component otherEditor;
         phazite::test::TestWindow otherWindow { otherEditor, 300, 200 };
         studio.keys.watch (otherWindow);
-        const auto otherMenuBar = phazite::createPluginMenu (*plugin, otherWindow);
+        const auto otherMenuBar = phazite::createPluginMenu (other.context, plugin, otherWindow);
         const auto otherMenu = otherMenuBar->getMenuForIndex (0, "Plug-in");
         CHECK (item (otherMenu, { "Send All Keys to the Plug-in" }).isTicked);
 

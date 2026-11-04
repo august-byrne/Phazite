@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Golden files of saved projects (tests/golden/projects): a new project, the First Beat example song and a project with one of
 // each kind of track and every piece of Phazite's data are saved, reopened and saved again, and the second save is
-// compared with a committed file. The representative project also freezes the 0.1.0 project that MigrationTests.cpp
-// opens. GoldenFiles.h says what the comparison leaves out and how to regenerate the files.
+// compared with a committed file. GoldenFiles.h says what the comparison leaves out and how to regenerate the files.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/synth/Synth.h"
+#include "engine/nodes/Channel.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Grid.h"
@@ -26,9 +26,6 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/pianoroll/DrumRows.h"
-#include "ui/playlist/TrackHeights.h"
-
-using namespace tracktion::literals;
 
 namespace
 {
@@ -40,7 +37,7 @@ phazite::BeatPosition beats (double b)
 std::unique_ptr<phazite::Project> createProject (const juce::File& parentFolder, const juce::String& name)
 {
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), parentFolder, name, error);
+    auto project = phazite::Project::create (parentFolder, name, error);
     INFO (error.toStdString());
     REQUIRE (project != nullptr);
     return project;
@@ -49,7 +46,7 @@ std::unique_ptr<phazite::Project> createProject (const juce::File& parentFolder,
 std::unique_ptr<phazite::Project> openProject (const juce::File& file)
 {
     juce::String error;
-    auto project = phazite::Project::open (phazite::test::getEngine(), file, false, error);
+    auto project = phazite::Project::open (file, false, error);
     INFO (error.toStdString());
     REQUIRE (project != nullptr);
     phazite::test::settle();
@@ -80,33 +77,30 @@ juce::String getChildTags (const juce::XmlElement& element)
 // Every kind of track and every piece of Phazite's data that a project keeps, so that its golden file covers them all.
 void addRepresentativeContent (phazite::Project& project, const juce::File& scratch)
 {
-    using phazite::test::createBuiltInDevice;
+    using phazite::test::makeBuiltInDevice;
 
-    auto& edit = project.getEdit();
-    auto& song = phazite::getSong (edit);
+    auto& song = project.getSong();
     phazite::setTempo (song, 120.0);
-    phazite::setTimeSignature (phazite::getSong (edit), { 4, 4 });
+    phazite::setTimeSignature (song, { 4, 4 });
 
-    auto* drums = te::getAudioTracks (edit)[0];
-    REQUIRE (drums != nullptr);
-    phazite::setTrackName (*drums, "Drums");
+    const auto drums = phazite::getTrackIDs (song).front();
+    phazite::setTrackName (song, drums, "Drums");
 
     // Sections: two from an outline, and one of their own.
     const auto outline = phazite::Outline::fromJSON (R"({ "id": "golden", "name": "Golden", "sections": [
         { "name": "Intro", "role": "intro", "bars": 2, "energy": 0.25, "tip": "Set the mood." },
         { "name": "Drop", "role": "drop", "bars": 4, "energy": 0.9, "colour": "Yellow", "tip": "Everything at once." } ] })");
     REQUIRE (outline.has_value());
-    phazite::applyOutline (phazite::getSong (edit), *outline);
+    phazite::applyOutline (song, *outline);
     const phazite::SectionInfo outro { .name = "Outro",
                                        .length = phazite::BeatDuration::fromBeats (8.0),
                                        .role = "outro",
                                        .tip = "Let it fade.",
                                        .energy = 0.1f };
-    REQUIRE (phazite::insertSection (phazite::getSong (edit), phazite::BeatPosition::fromBeats (24.0), outro).isValid());
+    REQUIRE (phazite::insertSection (song, phazite::BeatPosition::fromBeats (24.0), outro).isValid());
 
     // Drums: a beat, shown in drum mode with the snare's row first and a row hidden; the track pinned and muted.
-    const auto drumsID = phazite::getTrackID (*drums);
-    const auto beat = phazite::insertMidiClip (song, drumsID, { beats (0.0), beats (4.0) }, nullptr);
+    const auto beat = phazite::insertMidiClip (song, drums, { beats (0.0), beats (4.0) }, nullptr);
     REQUIRE (beat.isValid());
 
     for (const auto start : { 0.0, 2.0 })
@@ -115,28 +109,26 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     for (const auto start : { 1.0, 3.0 })
         phazite::addNote (song, beat, 38, beats (start), phazite::BeatDuration::fromBeats (0.25), 110);
 
-    phazite::setDrumTrack (song, drumsID, true);
-    const auto drumRows =
-        phazite::ui::getDrumRows (phazite::getSamplerSounds (song, drumsID), phazite::getNoteNumbersPlayed (song, { beat }),
-                                  phazite::getDrumRowOrder (song, drumsID), phazite::getHiddenDrumRows (song, drumsID));
-    phazite::setDrumRowOrder (song, drumsID, phazite::ui::getDrumOrderAfterMove (drumRows, 38, 0)); // the snare's row dragged to the top
-    phazite::hideDrumRow (song, drumsID, 49);
-    phazite::setPinned (*drums, true);
-    phazite::setTrackMuted (*drums, true);
+    phazite::setDrumTrack (song, drums, true);
+    const auto drumRows = phazite::ui::getDrumRows (phazite::getSamplerSounds (song, drums), phazite::getNoteNumbersPlayed (song, { beat }),
+                                                    phazite::getDrumRowOrder (song, drums), phazite::getHiddenDrumRows (song, drums));
+    phazite::setDrumRowOrder (song, drums, phazite::ui::getDrumOrderAfterMove (drumRows, 38, 0)); // the snare's row dragged to the top
+    phazite::hideDrumRow (song, drums, 49);
+    phazite::setPinned (song, drums, true);
+    phazite::setTrackMuted (song, drums, true);
 
     // Keys: an instrument, and an effect with a mix of its own; a key; chords with a muted note, and an alias of them;
     // a height of its own, and a volume curve.
-    auto* keys = phazite::insertTrack (edit, drums, nullptr);
-    REQUIRE (keys != nullptr);
-    phazite::setTrackName (*keys, "Keys");
-    REQUIRE (phazite::setInstrument (*keys, createBuiltInDevice (edit, phazite::devices::Synth::typeID)) != nullptr);
-    auto* reverb = phazite::insertDevice (*keys, createBuiltInDevice (edit, phazite::devices::Reverb::typeID));
-    REQUIRE (reverb != nullptr);
-    phazite::setMix (*reverb, 0.25f);
-    phazite::setTrackKey (*keys, phazite::Key { 2, phazite::Scale::minor });
+    const auto keys = phazite::insertTrack (song, drums, nullptr);
+    REQUIRE (keys.isValid());
+    phazite::setTrackName (song, keys, "Keys");
+    REQUIRE (phazite::setInstrument (song, keys, makeBuiltInDevice (song, phazite::devices::Synth::typeID)).isValid());
+    const auto reverb = phazite::insertDeviceState (song, keys, makeBuiltInDevice (song, phazite::devices::Reverb::typeID));
+    REQUIRE (reverb.isValid());
+    phazite::setMix (song, reverb, 0.25f);
+    phazite::setTrackKey (song, keys, phazite::Key { 2, phazite::Scale::minor });
 
-    const auto keysID = phazite::getTrackID (*keys);
-    const auto chords = phazite::insertMidiClip (song, keysID, { beats (0.0), beats (8.0) }, nullptr);
+    const auto chords = phazite::insertMidiClip (song, keys, { beats (0.0), beats (8.0) }, nullptr);
     REQUIRE (chords.isValid());
     phazite::addNote (song, chords, 62, beats (0.0), phazite::BeatDuration::fromBeats (2.0), 90);
     const auto quiet = phazite::addNote (song, chords, 65, beats (2.0), phazite::BeatDuration::fromBeats (1.5), 70);
@@ -145,56 +137,56 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
 
     const auto alias = phazite::copyClips (song, { chords }, true);
     REQUIRE (alias.size() == 1);
-    phazite::moveClip (song, alias[0], beats (8.0), keysID);
-    phazite::setSavedTrackHeight (*keys, 96);
+    phazite::moveClip (song, alias[0], beats (8.0), keys);
+    phazite::setSavedTrackHeight (song, keys, 96);
 
-    auto* keysVolume = keys->getVolumePlugin();
-    REQUIRE (keysVolume != nullptr);
-    phazite::addPoint (*keysVolume->volParam, { phazite::BeatPosition(), te::decibelsToVolumeFaderPosition (0.0f), 0.0f });
-    phazite::addPoint (*keysVolume->volParam, { phazite::BeatPosition::fromBeats (8.0), te::decibelsToVolumeFaderPosition (-6.0f), 0.0f });
+    const phazite::ParameterRef keysVolume { phazite::getFader (song, keys), phazite::getVolumeParameterID (song, keys) };
+    REQUIRE (keysVolume.isValid());
+    phazite::addPoint (song, keysVolume, { phazite::BeatPosition(), phazite::engine::decibelsToFaderPosition (0.0f), 0.0f });
+    phazite::addPoint (song, keysVolume,
+                       { phazite::BeatPosition::fromBeats (8.0), phazite::engine::decibelsToFaderPosition (-6.0f), 0.0f });
 
     // Pad: a new track, which gets the key set last.
-    auto* pad = phazite::insertTrack (edit, keys, nullptr);
-    REQUIRE (pad != nullptr);
-    phazite::setTrackName (*pad, "Pad");
+    const auto pad = phazite::insertTrack (song, keys, nullptr);
+    REQUIRE (pad.isValid());
+    phazite::setTrackName (song, pad, "Pad");
 
     // Tone: imported audio with fades of a shape of their own, on a track panned left. (No digits in the
     // file's name: Phazite would read a tempo in them and stretch the clip.)
-    auto* tone = phazite::insertTrack (edit, pad, nullptr);
-    REQUIRE (tone != nullptr);
-    phazite::setTrackName (*tone, "Tone");
-    const auto audio = phazite::importFile (song, phazite::getTrackID (*tone),
-                                            phazite::test::writeSound (scratch.getChildFile ("Tone.wav"), 2.0), beats (4.0));
+    const auto tone = phazite::insertTrack (song, pad, nullptr);
+    REQUIRE (tone.isValid());
+    phazite::setTrackName (song, tone, "Tone");
+    const auto audio = phazite::importFile (song, tone, phazite::test::writeSound (scratch.getChildFile ("Tone.wav"), 2.0), beats (4.0));
     REQUIRE (phazite::hasAudioClips (song, { audio }));
     phazite::setClipFade (song, audio, true, 0.25);
     phazite::setClipFade (song, audio, false, 0.5);
     phazite::setFadeShape (song, { audio }, phazite::convexFade);
-    phazite::setChannelPan (*tone, -0.5f);
+    phazite::setChannelPan (song, tone, -0.5f);
 
     // Folders: Keys and Pad in a collapsed folder, and Tone in a bus at -3 dB.
-    auto* group = phazite::groupIntoFolder ({ keys, pad }, nullptr);
-    REQUIRE (group != nullptr);
-    phazite::setTrackName (*group, "Group");
-    phazite::setCollapsed (*group, true);
+    const auto group = phazite::groupIntoFolder (song, { keys, pad }, nullptr);
+    REQUIRE (group.isValid());
+    phazite::setTrackName (song, group, "Group");
+    phazite::setCollapsed (song, group, true);
 
-    auto* bus = phazite::groupIntoFolder ({ tone }, nullptr);
-    REQUIRE (bus != nullptr);
-    phazite::setTrackName (*bus, "Bus");
-    phazite::setMixedAsBus (*bus, true);
-    phazite::setChannelVolume (*bus, -3.0f);
+    const auto bus = phazite::groupIntoFolder (song, { tone }, nullptr);
+    REQUIRE (bus.isValid());
+    phazite::setTrackName (song, bus, "Bus");
+    phazite::setMixedAsBus (song, bus, true);
+    phazite::setChannelVolume (song, bus, -3.0f);
 
     // Returns: a reverb return that Tone sends to after its fader and Keys before its fader; and a reverb on the master.
-    auto* reverbReturn = phazite::addReturnWithEffect (*tone, createBuiltInDevice (edit, phazite::devices::Reverb::typeID));
-    REQUIRE (reverbReturn != nullptr);
-    REQUIRE (phazite::addSend (*keys, phazite::getReturnBus (*reverbReturn), true) != nullptr);
-    REQUIRE (phazite::insertMasterDevice (edit, createBuiltInDevice (edit, phazite::devices::Reverb::typeID)) != nullptr);
+    const auto reverbReturn = phazite::addReturnWithEffect (song, tone, makeBuiltInDevice (song, phazite::devices::Reverb::typeID));
+    REQUIRE (reverbReturn.isValid());
+    REQUIRE (phazite::addSend (song, keys, reverbReturn, true).isValid());
+    REQUIRE (phazite::insertDeviceState (song, phazite::getMasterID (song), makeBuiltInDevice (song, phazite::devices::Reverb::typeID))
+                 .isValid());
 
     // View settings: the playlist's grid and the piano roll's, and a range looped on purpose.
-    phazite::saveGridSettings (phazite::getSong (edit), phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 1 });
-    phazite::saveGridSettings (phazite::getSong (edit), phazite::GridOwner::pianoRoll,
-                               { .adaptive = false, .fixedLevel = 8, .triplets = true });
+    phazite::saveGridSettings (song, phazite::GridOwner::playlist, { .snap = false, .adaptiveOffset = 1 });
+    phazite::saveGridSettings (song, phazite::GridOwner::pianoRoll, { .adaptive = false, .fixedLevel = 8, .triplets = true });
 
-    phazite::loopRange (edit, { te::TimePosition::fromSeconds (2.0), te::TimePosition::fromSeconds (6.0) });
+    phazite::loopBeats (song, { beats (4.0), beats (12.0) });
 
     // The chord lane: a progression in D minor over the intro and the drop, with a borrowed chord in its second inversion,
     // a key change to F major for the outro, and a bass line made from the chords that follows them on a track of its own.
@@ -202,11 +194,11 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
         juce::JSON::parse (R"({ "id": "golden", "name": "Golden", "scale": "minor", "chords": "i*2 VI VII/1 iim7b5 V7" })"));
     REQUIRE (progression.has_value());
     const auto at = [] (double b) { return phazite::BeatPosition::fromBeats (b); };
-    phazite::setLaneKey (phazite::getSong (edit), at (0.0), { 2, phazite::Scale::minor });
-    phazite::putProgression (phazite::getSong (edit), *progression, { at (0.0), at (24.0) });
-    phazite::putLaneChord (phazite::getSong (edit), { at (20.0), at (24.0) }, { 2, -1, phazite::ChordType::majorSeventh, 2 });
-    phazite::setLaneKey (phazite::getSong (edit), at (24.0), { 5, phazite::Scale::major });
-    phazite::putLaneChord (phazite::getSong (edit), { at (24.0), at (32.0) }, { 1, 0, phazite::ChordType::suspendedFourth, 0 });
+    phazite::setLaneKey (song, at (0.0), { 2, phazite::Scale::minor });
+    phazite::putProgression (song, *progression, { at (0.0), at (24.0) });
+    phazite::putLaneChord (song, { at (20.0), at (24.0) }, { 2, -1, phazite::ChordType::majorSeventh, 2 });
+    phazite::setLaneKey (song, at (24.0), { 5, phazite::Scale::major });
+    phazite::putLaneChord (song, { at (24.0), at (32.0) }, { 1, 0, phazite::ChordType::suspendedFourth, 0 });
     REQUIRE (phazite::addChordPart (song, phazite::PartStyle::bassRootFifth, { at (0.0), at (32.0) }, nullptr).isValid());
 }
 
@@ -220,10 +212,10 @@ struct Saves
     std::unique_ptr<juce::XmlElement> rawSecond; // S2 as Phazite wrote it
 };
 
-// Saves a project (S1), reopens and saves it (S2), and does that again (S3). S2 holds everything S1 does (Tracktion may
-// add values it fills in on loading), S3 is S2, and S2 matches the golden file tests/golden/projects/<goldenName>.xml.
-// Each reopened project has no unsaved changes once Tracktion's updates after loading have arrived (openProject() lets
-// them): they change nothing.
+// Saves a project (S1), reopens and saves it (S2), and does that again (S3). S2 holds everything S1 does (opening it may
+// add what every song has), S3 is S2, and S2 matches the golden file tests/golden/projects/<goldenName>.xml. Each
+// reopened project has no unsaved changes once the message loop has run after it opened (openProject() lets it):
+// opening changes nothing.
 Saves saveReopenAndSaveAgain (std::unique_ptr<phazite::Project> project, const juce::String& goldenName, const juce::String& about)
 {
     const auto file = project->getFile();
@@ -259,51 +251,45 @@ TEST_SUITE ("golden")
 {
     TEST_CASE ("Golden files: the project normaliser removes what changes from run to run, and nothing else")
     {
-        // A save with all that the normaliser changes: the root's times and IDs, the machine's inputs, a clip and its
-        // alias (one with a Windows path), float noise, -0, unsorted attributes and children, and empty elements, one of
-        // them Phazite's.
+        // A save with all that the normaliser changes: a clip and its alias (one with a Windows path), float noise, -0,
+        // unsorted attributes and children, and empty elements, one of them Phazite's.
         auto saved = juce::parseXML (
-            R"(<EDIT projectID="0/5eed0b1" appVersion="0.1.0" modifiedBy="" creationTime="1791863965976" lastSignificantChange="19a8e5c0d58">
-  <TRACK name="Lead" id="1004">
-    <AUDIOCLIP source="Audio\Tone.wav" name="Tone" id="1010" linkID="{6f0c51e2-3b4a-4d7e-9c1f-2a8b7d6e5f40}" length="0.6000000238418579"/>
-    <MODIFIERS/>
-  </TRACK>
-  <INPUTDEVICES>
-    <INPUTDEVICE name="MIDI Keyboard" targetIndex="0"/>
-  </INPUTDEVICES>
-  <TRACK name="Bass" id="1003" pan="-0.0">
-    <AUDIOCLIP name="Tone" id="1011" linkID="{6f0c51e2-3b4a-4d7e-9c1f-2a8b7d6e5f40}" length="1.5"/>
-  </TRACK>
-  <PHAZITE>
-    <PIANOROLL/>
-  </PHAZITE>
-</EDIT>)");
+            R"(<PHAZITE outline="pop" nextID="1012">
+  <TRACKS>
+    <TRACK name="Lead" id="1004">
+      <CLIP source="Audio\Tone.wav" name="Tone" id="1010" linkID="{6f0c51e2-3b4a-4d7e-9c1f-2a8b7d6e5f40}" length="0.6000000238418579"/>
+      <SCRATCH/>
+    </TRACK>
+    <TRACK name="Bass" id="1003" pan="-0.0">
+      <CLIP name="Tone" id="1011" linkID="{6f0c51e2-3b4a-4d7e-9c1f-2a8b7d6e5f40}" length="1.5"/>
+    </TRACK>
+  </TRACKS>
+  <PIANOROLL/>
+</PHAZITE>)");
         REQUIRE (saved != nullptr);
 
         // The alias's audio, at an absolute path in the project's folder.
         const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Normalised Song");
-        auto* savedBass = saved->getChildByAttribute ("id", "1003");
+        auto* savedTracks = saved->getChildByName ("TRACKS");
+        REQUIRE (savedTracks != nullptr);
+        auto* savedBass = savedTracks->getChildByAttribute ("id", "1003");
         REQUIRE (savedBass != nullptr);
-        auto* savedAlias = savedBass->getChildByName ("AUDIOCLIP");
+        auto* savedAlias = savedBass->getChildByName ("CLIP");
         REQUIRE (savedAlias != nullptr);
         savedAlias->setAttribute ("source", folder.getChildFile ("Audio").getChildFile ("Tone.wav").getFullPathName());
 
-        const auto normalised = phazite::test::normaliseProject (*saved, folder, { "INPUTDEVICES", "MODIFIERS" });
+        const auto normalised = phazite::test::normaliseProject (*saved, folder, { "SCRATCH" });
         REQUIRE (normalised != nullptr);
 
-        // The root: what varies from run to run is marked, the time of the last change is gone, and the user's empty
-        // name stays. Attributes are sorted.
-        CHECK (getAttributeNames (*normalised) == juce::String ("appVersion creationTime modifiedBy projectID"));
-
-        for (const auto* varying : { "appVersion", "creationTime", "projectID" })
-            CHECK (normalised->getStringAttribute (varying) == juce::String ("(varies)"));
-
-        CHECK (normalised->getStringAttribute ("modifiedBy", "(missing)").isEmpty());
-
-        // Phazite's state comes before the tracks, which keep their order; the machine's inputs are gone.
-        CHECK (getChildTags (*normalised) == juce::String ("PHAZITE TRACK TRACK"));
-        auto* lead = normalised->getChildElement (1);
-        auto* bass = normalised->getChildElement (2);
+        // The root's attributes are sorted, and its children by their tags; the tracks keep their order.
+        CHECK (getAttributeNames (*normalised) == juce::String ("nextID outline"));
+        CHECK (normalised->getStringAttribute ("nextID") == juce::String ("1012"));
+        CHECK (getChildTags (*normalised) == juce::String ("PIANOROLL TRACKS"));
+        auto* tracks = normalised->getChildByName ("TRACKS");
+        REQUIRE (tracks != nullptr);
+        CHECK (getChildTags (*tracks) == juce::String ("TRACK TRACK"));
+        auto* lead = tracks->getChildElement (0);
+        auto* bass = tracks->getChildElement (1);
         REQUIRE (lead != nullptr);
         REQUIRE (bass != nullptr);
         CHECK (lead->getStringAttribute ("id") == juce::String ("1004"));
@@ -311,10 +297,10 @@ TEST_SUITE ("golden")
         CHECK (bass->getStringAttribute ("pan") == juce::String ("0"));
 
         // The clip and its alias share link-1; paths have '/' and no project folder; the float noise is gone, and so is
-        // the empty MODIFIERS.
-        CHECK (getChildTags (*lead) == juce::String ("AUDIOCLIP"));
-        auto* clip = lead->getChildByName ("AUDIOCLIP");
-        auto* alias = bass->getChildByName ("AUDIOCLIP");
+        // the empty SCRATCH.
+        CHECK (getChildTags (*lead) == juce::String ("CLIP"));
+        auto* clip = lead->getChildByName ("CLIP");
+        auto* alias = bass->getChildByName ("CLIP");
         REQUIRE (clip != nullptr);
         REQUIRE (alias != nullptr);
         CHECK (getAttributeNames (*clip) == juce::String ("id length linkID name source"));
@@ -326,19 +312,19 @@ TEST_SUITE ("golden")
         CHECK (alias->getStringAttribute ("length") == juce::String ("1.5"));
 
         // Phazite's empty PIANOROLL stays: if it vanished, a read that adds an empty one would go unnoticed.
-        auto* phaziteState = normalised->getChildByName ("PHAZITE");
-        REQUIRE (phaziteState != nullptr);
-        CHECK (getChildTags (*phaziteState) == juce::String ("PIANOROLL"));
+        auto* pianoRoll = normalised->getChildByName ("PIANOROLL");
+        REQUIRE (pianoRoll != nullptr);
+        CHECK (pianoRoll->getNumAttributes() == 0);
 
         for (const auto* tag : { "PHAZITE", "PIANOROLL", "LASTKEY" })
             CHECK_FALSE (phazite::test::getDroppableEmptyTags().contains (tag));
 
         // The comparison: float noise beyond 7 digits isn't a difference; a changed value is one, with its path; an
         // attribute only the actual one has is one unless it may add some.
-        const auto expected = juce::parseXML (R"(<EDIT><TRACK id="1003" height="64" volume="0.6376281"/></EDIT>)");
-        const auto noisy = juce::parseXML (R"(<EDIT><TRACK id="1003" height="64" volume="0.6376282"/></EDIT>)");
-        const auto taller = juce::parseXML (R"(<EDIT><TRACK id="1003" height="96" volume="0.6376281"/></EDIT>)");
-        const auto added = juce::parseXML (R"(<EDIT><TRACK id="1003" height="64" volume="0.6376281" mute="1"/></EDIT>)");
+        const auto expected = juce::parseXML (R"(<PHAZITE><TRACK id="1003" height="64" volume="0.6376281"/></PHAZITE>)");
+        const auto noisy = juce::parseXML (R"(<PHAZITE><TRACK id="1003" height="64" volume="0.6376282"/></PHAZITE>)");
+        const auto taller = juce::parseXML (R"(<PHAZITE><TRACK id="1003" height="96" volume="0.6376281"/></PHAZITE>)");
+        const auto added = juce::parseXML (R"(<PHAZITE><TRACK id="1003" height="64" volume="0.6376281" mute="1"/></PHAZITE>)");
         REQUIRE (expected != nullptr);
         REQUIRE (noisy != nullptr);
         REQUIRE (taller != nullptr);
@@ -348,7 +334,7 @@ TEST_SUITE ("golden")
 
         const auto heightChange = phazite::test::findDifferences (*expected, *taller);
         REQUIRE (heightChange.size() == 1);
-        CHECK (heightChange[0].startsWith ("EDIT/TRACK#1003@height: "));
+        CHECK (heightChange[0].startsWith ("PHAZITE/TRACK#1003@height: "));
 
         CHECK (phazite::test::findDifferences (*expected, *added).size() == 1);
         CHECK (phazite::test::findDifferences (*expected, *added, { .actualMayAdd = true }).isEmpty());
@@ -356,40 +342,41 @@ TEST_SUITE ("golden")
 
     TEST_CASE ("Golden files: a name counts in a save only as a whole word in a value, ignoring case")
     {
-        const auto save = juce::parseXML (R"(<EDIT appVersion="0.1.0" creationTime="1791863965976" modifiedBy="Tim Smith">
-  <TEMPOSEQUENCE>
-    <TIMESIG numerator="4" denominator="4" startBeat="0.0"/>
-  </TEMPOSEQUENCE>
-  <INPUTDEVICES/>
-  <TRACK id="1003" name="Timeline">
-    <AUDIOCLIP id="1010" name="Tim's take" source="C:\Users\tim\Music\Tone.wav"/>
-    <NOTES>written by TIM</NOTES>
-  </TRACK>
-  <TRACK id="1004" name="Jos&#233;"/>
-  <TRACK id="1005" name="/home/dev/Sounds"/>
-</EDIT>)");
+        const auto save = juce::parseXML (R"(<PHAZITE nextID="1011" savedTime="1791863965976" savedBy="Tim Smith">
+  <TEMPOMAP>
+    <TIMESIGNATURE numerator="4" denominator="4" beat="0"/>
+  </TEMPOMAP>
+  <TRACKS>
+    <TRACK id="1003" name="Timeline">
+      <CLIP id="1010" name="Tim's take" file="C:\Users\tim\Music\Tone.wav"/>
+      <NOTES>written by TIM</NOTES>
+    </TRACK>
+    <TRACK id="1004" name="Jos&#233;"/>
+    <TRACK id="1005" name="/home/dev/Sounds"/>
+  </TRACKS>
+</PHAZITE>)");
         REQUIRE (save != nullptr);
 
-        // In values, at every depth, as a whole word whatever its case; not in tags or attribute names (TIMESIG,
-        // creationTime), nor inside a longer word (Timeline).
+        // In values, at every depth, as a whole word whatever its case; not in tags or attribute names (TIMESIGNATURE,
+        // savedTime), nor inside a longer word (Timeline).
         const auto tim = phazite::test::findValuesNaming (*save, { "tim" });
         REQUIRE (tim.size() == 4);
-        CHECK (tim[0] == juce::String (R"(EDIT@modifiedBy: "Tim Smith")"));
-        CHECK (tim[1] == juce::String (R"(EDIT/TRACK#1003/AUDIOCLIP#1010@name: "Tim's take")"));
-        CHECK (tim[2] == juce::String (R"(EDIT/TRACK#1003/AUDIOCLIP#1010@source: "C:\Users\tim\Music\Tone.wav")"));
-        CHECK (tim[3] == juce::String (R"(EDIT/TRACK#1003/NOTES/#text: "written by TIM")"));
+        CHECK (tim[0] == juce::String (R"(PHAZITE@savedBy: "Tim Smith")"));
+        CHECK (tim[1] == juce::String (R"(PHAZITE/TRACKS/TRACK#1003/CLIP#1010@name: "Tim's take")"));
+        CHECK (tim[2] == juce::String (R"(PHAZITE/TRACKS/TRACK#1003/CLIP#1010@file: "C:\Users\tim\Music\Tone.wav")"));
+        CHECK (tim[3] == juce::String (R"(PHAZITE/TRACKS/TRACK#1003/NOTES/#text: "written by TIM")"));
 
         CHECK (phazite::test::findValuesNaming (*save, { "Tim Smith" }).joinIntoString ("\n")
-               == juce::String (R"(EDIT@modifiedBy: "Tim Smith")"));
+               == juce::String (R"(PHAZITE@savedBy: "Tim Smith")"));
         CHECK (phazite::test::findValuesNaming (*save, { "dev" }).joinIntoString ("\n")
-               == juce::String (R"(EDIT/TRACK#1005@name: "/home/dev/Sounds")"));
+               == juce::String (R"(PHAZITE/TRACKS/TRACK#1005@name: "/home/dev/Sounds")"));
 
         // A letter written as a character reference counts as itself.
         const auto jose = juce::String (juce::CharPointer_UTF8 ("Jos\xc3\xa9"));
         CHECK (phazite::test::findValuesNaming (*save, juce::StringArray { jose }).joinIntoString ("\n")
-               == "EDIT/TRACK#1004@name: \"" + jose + "\"");
+               == "PHAZITE/TRACKS/TRACK#1004@name: \"" + jose + "\"");
 
-        CHECK (phazite::test::findValuesNaming (*save, { "TIMESIG", "creationTime", "devices", "line", "Smit" }).isEmpty());
+        CHECK (phazite::test::findValuesNaming (*save, { "TIMESIGNATURE", "savedTime", "devices", "line", "Smit" }).isEmpty());
     }
 
     TEST_CASE ("Golden project: a new, empty project")
@@ -408,7 +395,7 @@ TEST_SUITE ("golden")
         phazite::test::TemporaryFolder temp;
         juce::String error;
         auto project = phazite::Project::create (
-            phazite::test::getEngine(), temp.folder, "First Beat", error,
+            temp.folder, "First Beat", error,
             phazite::getExampleSongContent (phazite::test::getEngineContext(), "firstBeat", phazite::test::getFactoryPresetsFolder()));
         INFO (error.toStdString());
         REQUIRE (project != nullptr);
@@ -416,7 +403,7 @@ TEST_SUITE ("golden")
 
         // The first start shows no unsaved changes, and nothing to undo.
         CHECK_FALSE (project->hasUnsavedChanges());
-        CHECK_FALSE (phazite::getSong (project->getEdit()).getUndoManager().canUndo());
+        CHECK_FALSE (project->getSong().getUndoManager().canUndo());
 
         saveReopenAndSaveAgain (std::move (project), "first-beat",
                                 "The First Beat example song (ExampleSongs.h), saved, reopened and saved again: "
@@ -444,7 +431,7 @@ TEST_SUITE ("golden")
                                                    "A project with one of each kind of track and every piece of Phazite's data, saved, "
                                                    "reopened and saved again: addRepresentativeContent in tests/GoldenProjectTests.cpp");
 
-        // Nothing in it names the person who made it (Tracktion would write their full name: EngineSetup.h).
+        // Nothing in it names the person who made it.
         phazite::test::checkNoUserName ("The first save", *saves.rawFirst);
 
         phazite::test::checkSameProject ("in the autosave", *saves.first, *autosave);

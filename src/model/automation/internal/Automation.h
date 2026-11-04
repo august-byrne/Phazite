@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Automation (model/automation/AutomationModel.h), for the model, the app and tests: parameters by their ParameterRefs
 // (model/devices/internal/Parameters.h), the points of a parameter's curve in beats, which the song holds (Schema.h:
-// AUTOMATION) and Tracktion's curves mirror, the lanes a track shows (Schema.h: LANE), the selected points as Phazite's selection holds
-// them, the watcher that remembers the parameter touched last and gives recorded automation an undo step of its own. Not
+// AUTOMATION) and Phazite's engine plays (model/playback/internal/SongPlayer.h), the lanes a track shows (Schema.h: LANE),
+// the selected points as Phazite's selection holds them, and the watcher that remembers the parameter touched last. Not
 // for the UI.
 #pragma once
 
 #include "model/automation/AutomationValues.h"
+#include "model/base/Song.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/Selection.h"
-#include "model/base/internal/Tracktion.h"
+
+#include <juce_events/juce_events.h>
 
 #include <optional>
 #include <vector>
@@ -23,7 +25,8 @@ TrackID getParameterTrack (const Song&, const ParameterRef&);
 
 // The parameters of a track's channel and devices that can be automated, in the mixer's order: its fader's volume and pan
 // (a plain folder's VCA's volume), its sends, then its devices', those of the devices in its containers after each
-// container (AutomationModel.h: getAutomationTargets()).
+// container (AutomationModel.h: getAutomationTargets()): one of Phazite's own devices' in its description's order, a
+// plug-in's as its instance lists those it lets be automated, by their own IDs (none while it doesn't load).
 std::vector<ParameterRef> getAutomatableParameters (const Song&, TrackID);
 
 // The track's own volume, pan and sends are the mixer's controls, not a device's.
@@ -35,8 +38,7 @@ juce::String getParameterName (const Song&, const ParameterRef&);
 
 //==============================================================================
 // A parameter's curve as points in song beats, and edits of it. They change the song through its undo manager without
-// beginning a step: they join the caller's. Each keeps Tracktion's parameter's value at the playhead in step with the
-// curve while the song isn't playing.
+// beginning a step: they join the caller's.
 std::vector<AutomationPoint> getPoints (const Song&, const ParameterRef&);
 bool hasPoints (const Song&, const ParameterRef&);
 std::vector<float> getValues (const Song&, const ParameterRef&, BeatRange, int numValues); // getAutomationValues()
@@ -100,8 +102,7 @@ void setLaneCollapsed (Song&, TrackID, const ParameterRef&, bool);
 // automation, in the caller's undo step.
 void copyCurves (Song&, const CopiedIDs&);
 
-// A track's write mode, the song's (Schema.h: trackAutomationMode), which Tracktion's track mirrors: set without an undo
-// step.
+// A track's write mode, the song's (Schema.h: trackAutomationMode): set without an undo step.
 AutomationMode getAutomationMode (const Song&, TrackID);
 void setAutomationMode (Song&, TrackID, AutomationMode);
 
@@ -120,17 +121,18 @@ std::optional<PointSelection> getSelectedPoints (const Selection&);
 void selectPoints (Selection&, const ParameterRef&, const std::vector<int>& indices);
 
 //==============================================================================
-// The song's curves (Schema.h: AUTOMATION; T1 step 4), which Tracktion's curves mirror (model/mirror/internal/Mirror.h):
-// a parameter's, invalid for one without; every one; and the parameter each is for.
+// The song's curves (Schema.h: AUTOMATION): a parameter's, invalid for one without; every one; and the parameter each is
+// for.
 juce::ValueTree findCurveState (const Song&, const ParameterRef&);
 std::vector<juce::ValueTree> getCurveStates (const Song&);
 ParameterRef getCurveParameter (const juce::ValueTree& curveState);
 
 // The time edits' automation (model/arrangement/internal/Arrangement.h), on every automated parameter of the song: room
-// made at a beat, as Tracktion's insertSpace() makes it; a range taken out, what comes after moving back, as its
-// removeRegionAndCloseGap() does; points where edges are (one just before each beat and one at it, at the value at the
-// beat, so that each part keeps its shape); the points in a range, from its start up to its end; those taken out; and
-// points added, each after any at its beat. They join the caller's undo step.
+// made at a beat, the points from there on moving later and the line holding its value at the beat across the room; a
+// range taken out, what comes after moving back, and the line jumping from its value at the range's start to its value at
+// the end; points where edges are (one just before each beat and one at it, at the value at the beat, so that each part
+// keeps its shape); the points in a range, from its start up to its end; those taken out; and points added, each after
+// any at its beat. They join the caller's undo step.
 struct ParameterPoint
 {
     ParameterRef parameter;
@@ -149,14 +151,16 @@ void addAutomationPoints (Song&, const std::vector<ParameterPoint>&);
 void forgetCurvesOfGoneDevices (Song&);
 
 //==============================================================================
-// Watches an open Edit's automation: remembers the parameter last changed by hand (not by its automation), and takes
-// into the song a curve's one point that Tracktion moved as a control turned. Touch, latch and write are Phazite's
-// engine's (model/playback/internal/AutomationWriter.h): Tracktion's transport plays no project, so it records nothing.
-class AutomationWatcher : private te::ParameterChangeHandler::Listener,
+// Watches the song's values set by hand (Song::ParameterListener): remembers the parameter changed last by hand (by a
+// control, or in a plug-in's own window), but not a modulator's or a macro's, which can't be automated; and as a plug-in
+// sets one of its values itself, moves the one point of the parameter's curve to it, as a value set by a control moves it
+// (model/devices/internal/Parameters.h: setValueSetByHand()), unless the automation writer writes the parameter
+// (model/playback/internal/AutomationWriter.h). The project context keeps one for the open song.
+class AutomationWatcher : private Song::ParameterListener,
                           private juce::AsyncUpdater
 {
 public:
-    explicit AutomationWatcher (te::Edit&);
+    explicit AutomationWatcher (Song&);
     ~AutomationWatcher() override;
 
     ParameterRef getLastTouched() const { return lastTouched; }
@@ -164,11 +168,11 @@ public:
 private:
     static constexpr size_t maxTouchedAtOnce = 2; // an EQ band's dot moves two parameters at once
 
-    te::SafeSelectable<te::Edit> edit; // the context can outlive it
+    Song::Ptr song;
     ParameterRef lastTouched;
     std::vector<ParameterRef> changedAtOnce; // in this round of messages
 
-    void pluginParameterChanged (te::AutomatableParameter&, bool isFollowingAutomation) override;
+    void valueSetByHand (const ParameterRef&, float value, bool byPlugin) override;
     void handleAsyncUpdate() override;
 
     JUCE_DECLARE_NON_COPYABLE (AutomationWatcher)
@@ -177,34 +181,9 @@ private:
 // Whether any of the song's tracks writes automation (a mode other than read).
 bool isWritingAutomation (const Song&);
 
-// Whether a property of a device's state is where one of its parameters keeps its value: a knob turned, a fader moved.
-// Controls read values as they show them, so views needn't hear of these (model/project/ProjectContext.h).
+// Whether a property of an element of the song is where a parameter keeps its value set by hand: a property of a device's
+// or a modulator's VALUES, a plug-in's VALUE's value, a channel's volume or pan, a send's level, or a macro's value. A knob
+// turned, a fader moved: controls read values as they show them, so views needn't hear of these
+// (model/project/ProjectContext.h).
 bool isParameterValue (const juce::ValueTree&, const juce::Identifier& property);
-
-// Puts back, in a saved project's state before its Edit is made, the values its parameters were set to by hand where they
-// were saved while something else set them to others (a modulator): Tracktion saves those in the device's state too, and
-// puts them back for plug-ins, but not for Phazite's devices, which would then start at the values played.
-void restoreValuesSetByHand (juce::ValueTree& editState);
-
-//==============================================================================
-// The same by Tracktion's parameters and tracks, for the code that still holds them (the automation writer, the mirror,
-// presets, modulation, tests) until it moves to references (docs/tracktion-migration.md, T6 step 4): the parameter a
-// reference names, or nullptr; a device's parameter's reference, an invalid one for one that isn't a device's (a
-// macro's, a modulator's); and the rest as above.
-te::AutomatableParameter::Ptr findParameter (const te::Edit&, const ParameterRef&);
-ParameterRef getParameterRef (const te::AutomatableParameter&);
-te::Track* getTrackOfParameter (const te::AutomatableParameter&);
-juce::String getParameterName (const te::AutomatableParameter&);
-std::vector<AutomationPoint> getPoints (const te::AutomatableParameter&);
-bool hasPoints (const te::AutomatableParameter&);
-int addPoint (te::AutomatableParameter&, AutomationPoint);
-juce::ValueTree findCurveState (const te::Edit&, const ParameterRef&);
-std::vector<juce::ValueTree> getCurveStates (const te::Edit&);
-AutomationMode getAutomationMode (const te::Track&);
-void setAutomationMode (te::Track&, AutomationMode);
-bool isWritingAutomation (const te::Edit&);
-
-// Takes what Tracktion writes into its curves itself into the song: the one point of a curve, which it moves to its
-// parameter's value as the value changes through its parameter (a plug-in's own window), in the change's step.
-void adoptMovedPoint (te::AutomatableParameter&);
 } // namespace phazite

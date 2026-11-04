@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// An audio clip's waveform as the playlist and the audio clip editor draw it. The app makes them (src/app/ClipWaveforms.h):
-// the levels of the clip's file load in the background and repaint a component as they go, which needs both a window
-// component and the open Edit's clips, so they belong to the app. Without a maker set, clips show no waveform (in tests,
-// say).
+// An audio clip's waveform as the playlist and the audio clip editor draw it. The app makes them
+// (src/app/ClipWaveforms.h): the levels of the clip's file load in the background and repaint a component as they go,
+// which needs both a window component and the open project's clips, so they belong to the app. Without a maker set,
+// clips show no waveform (in tests, say).
 #pragma once
 
 #include "model/base/Beats.h"

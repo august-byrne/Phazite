@@ -432,8 +432,8 @@ struct ModulatorEditor::Breakpoints : public juce::Component
         repaint();
     }
 
-    // Straight again: the line under the pointer, or whose handle it is on. A point has no place of its own to go back
-    // to (Tracktion's points are all at 0.5 as parameters), so a double-click on one does nothing.
+    // Straight again: the line under the pointer, or whose handle it is on. A double-click on a point itself does
+    // nothing.
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
         const auto target = findTarget (e.position);
@@ -494,7 +494,7 @@ ModulatorEditor::ModulatorEditor (ProjectContext& projectContext, ModulatorID id
         auto* knob = knobs.add (new Knob (parameter.name, 0.0));
         auto* attachment = attachments.add (new ParameterAttachment (*knob));
         attachment->setParameter (getModulatorParameter (context, modulator, parameter.id));
-        attachment->showDeviceText(); // Tracktion's own texts: "Sine", "1/4"
+        attachment->showDeviceText(); // the parameters' own texts: "Sine", "1/4"
         addAndMakeVisible (knob);
 
         auto* label = names.add (new juce::Label ({}, parameter.name));

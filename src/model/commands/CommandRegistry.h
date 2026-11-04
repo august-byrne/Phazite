@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's commands: every user action as a named command that menus, shortcuts, the command
 // palette and macros run (and, later, scripts and an assistant). The registry has no UI code: menus,
-// keys and the shortcuts editor reach it through ui::CommandBridge and ui::KeyDispatcher (src/ui/input). No Tracktion here
-// (architecture phase A3): a command that changes a project names the project's undo manager.
+// keys and the shortcuts editor reach it through ui::CommandBridge and ui::KeyDispatcher (src/ui/input). A command that
+// changes a project names the song's undo history (Command::undoTarget).
 #pragma once
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -75,7 +75,7 @@ public:
     const Command* getCommand (int index) const; // nullptr if there is none
     int indexOf (const juce::String& id) const;  // -1 if there is none
 
-    // Runs a command if it exists and is enabled, in one undo step named after it if it changes an Edit.
+    // Runs a command if it exists and is enabled, in one undo step named after it if it changes a project.
     bool invoke (const juce::String& id);
     static bool isEnabled (const Command&);
 

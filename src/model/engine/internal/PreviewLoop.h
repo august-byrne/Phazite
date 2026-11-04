@@ -8,9 +8,9 @@
 
 #include "devices/stretch/Stretch.h"
 #include "engine/audio/AudioFile.h"
-#include "model/base/internal/Tracktion.h"
 
 #include <atomic>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <memory>
 
 namespace phazite

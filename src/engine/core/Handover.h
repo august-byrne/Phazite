@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// How the message thread hands the audio thread something to play, whole, without either waiting for the other
-// (docs/tracktion-migration.md, T2): the message thread builds it, then gives it; the audio thread takes what was given
-// last as each of its blocks starts. What it replaces is freed on the message thread, never on the audio thread, once the
-// audio thread has finished a block since it was replaced: the next time something is given, or with the handover.
+// How the message thread hands the audio thread something to play, whole, without either waiting for the other: the
+// message thread builds it, then gives it; the audio thread takes what was given last as each of its blocks starts.
+// What it replaces is freed on the message thread, never on the audio thread, once the audio thread has finished a
+// block since it was replaced: the next time something is given, or with the handover.
 #pragma once
 
 #include <atomic>

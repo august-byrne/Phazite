@@ -4,7 +4,7 @@
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 [![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](#status)
 
-Phazite is a free, open-source digital audio workstation (DAW) for making beats and finishing songs. It is written in C++20 on [Tracktion Engine](https://github.com/Tracktion/tracktion_engine) and [JUCE](https://github.com/juce-framework/JUCE), Windows first.
+Phazite is a free, open-source digital audio workstation (DAW) for making beats and finishing songs. It is written in C++20 on [JUCE](https://github.com/juce-framework/JUCE), with its own playback engine, Windows first.
 
 ![Phazite with the House Groove example song: the browser on the left, the playlist with its sections and chord lane in the centre, the Drum Sampler under it, and the selected track's properties on the right](docs/images/phazite.png)
 
@@ -27,7 +27,7 @@ What works today, on Windows:
 - **Record:** MIDI from a keyboard or the computer keyboard, audio from an interface (ASIO®) with count-in and punch-in, and Capture, which turns what you just played into a clip.
 - **Finish:** export the song, or its stems, to WAV or FLAC, normalized to a loudness if you like.
 
-Since November 2026 the song plays and records through Phazite's own engine, and plug-ins run in Phazite's own helper processes; Tracktion Engine still renders exports while the [move off it](docs/tracktion-migration.md) goes on.
+The song plays, records, exports and freezes through Phazite's own engine, built on JUCE, and plug-ins run in Phazite's own helper processes.
 
 Next come chord suggestions, the sound generator, and passes on performance and accessibility; then an installer and version 1. The [roadmap](docs/roadmap.md) has the plan step by step.
 
@@ -80,6 +80,6 @@ Phazite is built in the open, and every kind of help counts:
 
 ## License
 
-Phazite is licensed under the [GNU Affero General Public License, version 3 or later](LICENSE). It builds on Tracktion Engine, JUCE, Rubber Band Library and other open-source code: [docs/third-party.md](docs/third-party.md) lists each with its license.
+Phazite is licensed under the [GNU Affero General Public License, version 3 or later](LICENSE). It builds on JUCE, Rubber Band Library and other open-source code: [docs/third-party.md](docs/third-party.md) lists each with its license.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH. ASIO is a registered trademark of Steinberg Media Technologies GmbH.

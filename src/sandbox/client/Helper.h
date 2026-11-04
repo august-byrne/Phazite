@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A helper process as Phazite holds it (docs/tracktion-migration.md, T3): the program started with the name of a pipe of
-// Phazite's (JUCE's InterprocessConnection), the requests sent to it, each answered within a time limit or not at all,
-// and what it tells unasked. A thread of its own watches the process, a fifth of a second at a time (JUCE's pipe, on
-// Windows, waits for another to connect when the helper goes, rather than saying so): a helper that crashes is lost
-// then. One that hangs is ended (kill()), so that nothing of Phazite's waits for it: by the watching thread, when its
-// message thread hasn't answered the heartbeat it sends each second for a while, but while a request waits for its own
-// answer (a plug-in loading, its state); or when an audio thread of its has kept a block too long, which the engine
-// tells it without waiting (reportHung()). The pipe's thread delivers the answers and the notices, the watching thread
-// the loss; requests may come from any other.
+// A helper process as Phazite holds it: the program started with the name of a pipe of Phazite's (JUCE's
+// InterprocessConnection), the requests sent to it, each answered within a time limit or not at all, and what it tells
+// unasked. A thread of its own watches the process, a fifth of a second at a time (JUCE's pipe, on Windows, waits for
+// another to connect when the helper goes, rather than saying so): a helper that crashes is lost then. One that hangs
+// is ended (kill()), so that nothing of Phazite's waits for it: by the watching thread, when its message thread hasn't
+// answered the heartbeat it sends each second for a while, but while a request waits for its own answer (a plug-in
+// loading, its state); or when an audio thread of its has kept a block too long, which the engine tells it without
+// waiting (reportHung()). The pipe's thread delivers the answers and the notices, the watching thread the loss;
+// requests may come from any other.
 #pragma once
 
 #include "sandbox/core/Messages.h"

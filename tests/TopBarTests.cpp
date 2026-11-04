@@ -8,6 +8,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -25,15 +26,15 @@ struct TopBarScreen
     explicit TopBarScreen (int height = 40)
         : windowHeight (height)
     {
-        setEdit (context, edit.get());
-        phazite::addMetronomeCommands (registry, getSelection (context));
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        setSong (context, song.get());
+        phazite::addMetronomeCommands (registry, getSelection (context), phazite::getAudioIO (phazite::test::getEngineContext()));
+        song->getUndoManager().clearUndoHistory();
 
         // The bar shows the project at its next update.
         REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return getTempoField().isEnabled(); }));
     }
 
-    ~TopBarScreen() { setEdit (context, nullptr); }
+    ~TopBarScreen() { setSong (context, nullptr); }
 
     phazite::ui::NumberField& getTempoField()
     {
@@ -42,7 +43,7 @@ struct TopBarScreen
         return *field;
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge bridge { registry };
@@ -60,8 +61,8 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
 
     // A loop that follows the tempo, a sound that doesn't, and a pattern on a track of its own.
     phazite::test::TemporaryFolder temp;
-    auto& song = phazite::getSong (*screen.edit);
-    const auto track = phazite::getTrackID (*te::getAudioTracks (*screen.edit)[0]);
+    auto& song = *screen.song;
+    const auto track = phazite::getTrackIDs (song).front();
     REQUIRE (phazite::importFile (song, track, phazite::test::writeSound (temp.folder.getChildFile ("Loop 120 BPM.wav"), 4.0),
                                   phazite::BeatPosition())
                  .isValid());
@@ -71,7 +72,7 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
     const auto other = phazite::insertTrack (song, track, nullptr);
     REQUIRE (other.isValid());
     REQUIRE (phazite::insertMidiClip (song, other, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) }, nullptr).isValid());
-    phazite::getSong (*screen.edit).getUndoManager().clearUndoHistory();
+    screen.song->getUndoManager().clearUndoHistory();
 
     // Nothing shows until the tempo is dragged.
     auto* window = screen.topBar.getTopLevelComponent();
@@ -104,14 +105,14 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
     samplesMouse.click (samples->getLocalBounds().getCentre());
     CHECK (samples->getToggleState());
     CHECK (samples->getDescription() == juce::String ("All 2 follow the tempo"));
-    CHECK (phazite::getSong (*screen.edit).getUndoManager().getUndoDescription() == juce::String ("Samples Follow Tempo"));
+    CHECK (screen.song->getUndoManager().getUndoDescription() == juce::String ("Samples Follow Tempo"));
 
     // Patterns: now they keep their speed.
     phazite::test::Mouse patternsMouse (*patterns);
     patternsMouse.click (patterns->getLocalBounds().getCentre());
     CHECK_FALSE (patterns->getToggleState());
     CHECK (patterns->getDescription() == juce::String ("It keeps its speed"));
-    CHECK_FALSE (phazite::doPatternsFollowTempo (phazite::getSong (*screen.edit)));
+    CHECK_FALSE (phazite::doPatternsFollowTempo (*screen.song));
 }
 
 TEST_CASE ("The top bar's tempo field shows the song's tempo, and a drag on it is one undo step")
@@ -128,15 +129,15 @@ TEST_CASE ("The top bar's tempo field shows the song's tempo, and a drag on it i
     mouse.dragTo (centre.translated (0, -10));
     mouse.dragTo (centre.translated (0, -20));
     mouse.release();
-    CHECK (phazite::getTempo (phazite::getSong (*screen.edit)) == doctest::Approx (130.0));
-    CHECK (phazite::getSong (*screen.edit).getUndoManager().getUndoDescription() == juce::String ("Change Tempo"));
+    CHECK (phazite::getTempo (*screen.song) == doctest::Approx (130.0));
+    CHECK (screen.song->getUndoManager().getUndoDescription() == juce::String ("Change Tempo"));
 
-    phazite::undo (*screen.edit);
-    CHECK (phazite::getTempo (phazite::getSong (*screen.edit)) == doctest::Approx (120.0)); // the whole drag
-    CHECK_FALSE (phazite::getSong (*screen.edit).getUndoManager().canUndo());
+    phazite::undo (*screen.song);
+    CHECK (phazite::getTempo (*screen.song) == doctest::Approx (120.0)); // the whole drag
+    CHECK_FALSE (screen.song->getUndoManager().canUndo());
 
     // A change made elsewhere shows there.
-    phazite::setTempo (phazite::getSong (*screen.edit), 95.5);
+    phazite::setTempo (*screen.song, 95.5);
     CHECK (phazite::test::dispatchMessagesUntil ([&field] { return juce::approximatelyEqual (field.getValue(), 95.5); }));
 }
 
@@ -147,6 +148,6 @@ TEST_CASE ("The top bar shows the song's time signature")
     REQUIRE (button != nullptr);
     CHECK (button->getButtonText() == juce::String ("4/4"));
 
-    phazite::setTimeSignature (phazite::getSong (*screen.edit), { 6, 8 });
+    phazite::setTimeSignature (*screen.song, { 6, 8 });
     CHECK (phazite::test::dispatchMessagesUntil ([button] { return button->getButtonText() == "6/8"; }));
 }

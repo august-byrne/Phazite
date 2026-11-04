@@ -20,10 +20,10 @@
 TEST_CASE ("The mixer's strips keep their parts apart, however short the window is")
 {
     // A short window used to squeeze the faders over the devices and the names.
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::ensureTracks (*edit, 2);
+    auto song = phazite::createSong();
+    phazite::ensureTracks (*song, 2);
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::MixerView mixer { commands, context };
@@ -51,20 +51,20 @@ TEST_CASE ("The mixer's strips keep their parts apart, however short the window 
         }
     }
 
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks for one when its notes make no sound")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto* track = te::getAudioTracks (*edit)[0];
+    auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1)[0];
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::ChannelStrip strip { commands, context };
     phazite::test::TestWindow window { strip, phazite::ui::ChannelStrip::width, 700 };
-    strip.setTrack (phazite::getTrackID (*track));
+    strip.setTrack (track);
 
     // The texts of the buttons that show in a group of slots, as the user sees them.
     const auto buttonsIn = [&strip] (const juce::String& title)
@@ -83,19 +83,20 @@ TEST_CASE ("A strip shows a track's instrument apart from its effects, and asks 
     CHECK (buttonsIn ("Effects") == juce::StringArray { "+ Effect" });
 
     // Notes, and nothing to play them: the strip asks for an instrument.
-    phazite::test::addMidiClip (phazite::getSong (*edit), phazite::getTrackID (*track),
-                                { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
+    phazite::test::addMidiClip (*song, track, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return buttonsIn ("Instrument") == juce::StringArray { "Choose instrument" }; }));
 
     // The instrument has its own slot, and effects go in theirs.
-    auto* synth = phazite::setInstrument (*track, edit->getPluginCache().createNewPlugin (phazite::devices::Synth::typeID, {}));
-    auto* reverb = phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {}));
-    REQUIRE (synth != nullptr);
-    REQUIRE (reverb != nullptr);
-    CHECK (phazite::test::dispatchMessagesUntil ([&] { return buttonsIn ("Instrument").contains (synth->getName()); }));
+    const auto synth = phazite::setInstrument (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Synth::typeID));
+    const auto reverb = phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Reverb::typeID));
+    REQUIRE (synth.isValid());
+    REQUIRE (reverb.isValid());
+    const auto synthName = phazite::getDeviceName (*song, synth);
+    const auto reverbName = phazite::getDeviceName (*song, reverb);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return buttonsIn ("Instrument").contains (synthName); }));
     CHECK_FALSE (buttonsIn ("Instrument").contains ("+ Instrument"));
-    CHECK_FALSE (buttonsIn ("Instrument").contains (reverb->getName()));
-    CHECK (buttonsIn ("Effects").contains (reverb->getName()));
+    CHECK_FALSE (buttonsIn ("Instrument").contains (reverbName));
+    CHECK (buttonsIn ("Effects").contains (reverbName));
     CHECK (buttonsIn ("Effects").contains ("+ Effect"));
     phazite::test::checkChildrenApart (strip);
 }
@@ -104,15 +105,14 @@ TEST_CASE ("A strip lists its devices a line each, with no knobs, over a fader a
 {
     // The owner (2026-10-30): the mixer showed knobs for effects' parameters, and a strip with many effects squeezed its
     // fader shorter than its neighbours'.
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::ensureTracks (*edit, 2);
-    auto* busy = te::getAudioTracks (*edit)[0];
+    auto song = phazite::createSong();
+    const auto busy = phazite::ensureTracks (*song, 2)[0];
 
     for (int i = 0; i < 6; ++i)
-        REQUIRE (phazite::insertDevice (*busy, edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {})) != nullptr);
+        REQUIRE (phazite::insertDeviceState (*song, busy, phazite::makeOwnDeviceState (*song, phazite::devices::Reverb::typeID)).isValid());
 
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::MixerView mixer { commands, context };
@@ -145,20 +145,19 @@ TEST_CASE ("A strip lists its devices a line each, with no knobs, over a fader a
         phazite::test::checkChildrenApart (*strips[0]);
     }
 
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("The mixer puts the returns next to the master, and outlines what the selected channel sends to")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::ensureTracks (*edit, 2);
-    const auto tracks = te::getAudioTracks (*edit);
-    auto* reverbReturn = phazite::addReturnTrack (*edit, "Reverb", nullptr);
-    REQUIRE (reverbReturn != nullptr);
-    phazite::moveTracksAfter ({ reverbReturn }, nullptr); // first in the playlist
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    const auto reverbReturn = phazite::addReturnTrack (*song, "Reverb", nullptr);
+    REQUIRE (reverbReturn.isValid());
+    phazite::moveTracksAfter (*song, { reverbReturn }, {}); // first in the playlist
 
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     auto& selection = getSelection (context);
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
@@ -169,32 +168,32 @@ TEST_CASE ("The mixer puts the returns next to the master, and outlines what the
     // The return's strip comes last, set apart from the tracks'.
     const auto strips = phazite::test::findAll<phazite::ui::ChannelStrip> (mixer);
     REQUIRE (strips.size() == 3);
-    CHECK (strips[0]->getTrack() == phazite::getTrackID (*tracks[0]));
-    CHECK (strips[2]->getTrack() == phazite::getTrackID (*reverbReturn));
+    CHECK (strips[0]->getTrack() == tracks[0]);
+    CHECK (strips[2]->getTrack() == reverbReturn);
     CHECK (strips[2]->getX() > strips[1]->getRight());
 
     // Selecting a track that sends to the return outlines the return's strip, and the other way round.
-    phazite::addSend (*tracks[0], phazite::getReturnBus (*reverbReturn), false);
-    selection.selectOnly (phazite::getTrackID (*tracks[0]));
+    REQUIRE (phazite::addSend (*song, tracks[0], reverbReturn, false).isValid());
+    selection.selectOnly (tracks[0]);
     phazite::test::dispatchPendingMessages();
     CHECK (strips[2]->isRelated());
     CHECK_FALSE (strips[1]->isRelated());
 
-    selection.selectOnly (phazite::getTrackID (*reverbReturn));
+    selection.selectOnly (reverbReturn);
     phazite::test::dispatchPendingMessages();
     CHECK (strips[0]->isRelated());
     CHECK_FALSE (strips[1]->isRelated());
 
     selection.deselectAll();
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("The mixer has no row of its own: a slim column after the returns adds one, and a sidechain outlines both its ends")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::ensureTracks (*edit, 2);
+    auto song = phazite::createSong();
+    phazite::ensureTracks (*song, 2);
     phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     const auto tracks = phazite::getAllPlaylistTracks (context);
     REQUIRE (tracks.size() == 2);
     phazite::CommandRegistry registry;
@@ -230,5 +229,5 @@ TEST_CASE ("The mixer has no row of its own: a slim column after the returns add
     CHECK (strips[0]->isRelated());
 
     selection.clear();
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }

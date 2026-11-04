@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Golden renders of the mixer (tests/golden/renders, RenderHarness.h; docs/tracktion-migration.md, T0): a sidechain, a
-// send before the fader, mute and solo, delay compensation across two paths, each of Phazite's effects, a frozen track and
-// an export's stems, in songs made through the model (TestSong.h). Most are renders of a change, whose check compares the
-// song before and after it.
+// Golden renders of the mixer (tests/golden/renders, RenderHarness.h): a sidechain, a send before the fader, mute and
+// solo, delay compensation across two paths, each of Phazite's effects, a frozen track and an export's stems, in songs
+// made through the model (TestSong.h). Most are renders of a change, whose check compares the song before and after it.
 #include "RenderHarness.h"
 #include "TestSong.h"
 #include "devices/delay/Delay.h"
@@ -350,8 +349,8 @@ TEST_SUITE ("golden")
             "frozen", "two chords on Phazite's synth through its reverb, frozen: the track plays the file of its sound.",
             [] (const Fingerprint& before, const Fingerprint& after)
             {
-                // Phazite's engine renders the frozen file as it plays the track (since T5: docs/tracktion-migration.md), its
-                // tail cut below -70 dB: as loud, a tenth of a second at a time, to within 0.5 dB, where it is above -60 dB.
+                // Phazite's engine renders the frozen file as it plays the track, its tail cut below -70 dB: as loud, a tenth
+                // of a second at a time, to within 0.5 dB, where it is above -60 dB.
                 auto same = before.size() == after.size();
 
                 for (size_t i = 0; i < std::min (before.size(), after.size()); ++i)
@@ -372,7 +371,7 @@ TEST_SUITE ("golden")
         song.addReturn (synth, phazite::devices::Reverb::typeID, -6.0f);
         phazite::test::settle();
 
-        // The song exported, and then its stems (both Phazite's engine's renders since T5: docs/tracktion-migration.md).
+        // The song exported, and then its stems (both Phazite's engine's renders).
         const auto exportSong = [&song] (bool stems, const char* name)
         {
             phazite::ExportSettings settings;
@@ -380,9 +379,9 @@ TEST_SUITE ("golden")
             settings.bitDepth = 32;
             settings.sampleRate = phazite::test::renderSampleRate;
             std::optional<phazite::ExportReport> report;
-            auto* edit = phazite::getEdit (song.context);
-            REQUIRE (edit != nullptr);
-            auto running = phazite::startExport (*edit, song.getSoundsFolder().getChildFile (name), settings,
+            auto* exported = phazite::findSong (song.context);
+            REQUIRE (exported != nullptr);
+            auto running = phazite::startExport (*exported, song.getSoundsFolder().getChildFile (name), settings,
                                                  [&report] (const phazite::ExportReport& finished) { report = finished; });
             REQUIRE (running != nullptr);
             REQUIRE (phazite::test::dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
@@ -414,8 +413,7 @@ TEST_SUITE ("golden")
                                                { return isBetween (fingerprint, 15, -60.0f, 6.0f, "the stem has its channel's sound"); } });
         }
 
-        // Stems leave out the master's devices, its fader too (at -3 dB in a new song, as Tracktion starts it): at its level, they
-        // add up to the song.
+        // Stems leave out the master's devices, its fader too (at -3 dB in a new song): at its level, they add up to the song.
         const auto master = phazite::getMasterVolume (song.context);
         sum.applyGain (juce::Decibels::decibelsToGain (phazite::faderPositionToDecibels (master.getValue())));
         const auto differences =

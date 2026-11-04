@@ -30,7 +30,12 @@
 #include "devices/wavetable/WavetableSynth.h"
 #include "host/ThreadCpu.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/internal/Schema.h"
+#include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/ParameterHandle.h"
+#include "model/engine/internal/AudioIO.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/PreviewLoop.h"
 #include "model/mixer/internal/Mixer.h"
@@ -65,6 +70,14 @@ double millisecondsOf (const std::function<void()>& f)
     const auto start = std::chrono::steady_clock::now();
     f();
     return std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - start).count();
+}
+
+// One of Phazite's devices at the end of a channel's devices (an instrument in place of a track's instrument); its ID.
+phazite::DeviceID addDevice (phazite::Song& song, phazite::TrackID channel, const char* typeID)
+{
+    const auto id = phazite::insertDeviceState (song, channel, phazite::makeOwnDeviceState (song, typeID));
+    REQUIRE (id.isValid());
+    return id;
 }
 
 //==============================================================================
@@ -284,19 +297,17 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
 
 TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::test_suite ("benchmark") * doctest::skip())
 {
-    auto& engine = phazite::test::getEngine();
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
     HostedDevice device;
 
     // A project, as the app plays it, through Phazite's engine.
-    auto edit = phazite::createSongEdit (engine);
+    auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, edit.get());
-    phazite::ensureTracks (*edit, 2);
-    auto* track = te::getAudioTracks (*edit)[0];
-    phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (dev::Synth::typeID, {}));
-    phazite::routeLiveMidiInput (*edit);
-    REQUIRE (phazite::getLiveMidiTrack (*edit) == track);
-    edit->getTransport().ensureContextAllocated();
+    phazite::setSong (context, song.get());
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    addDevice (*song, tracks[0], dev::Synth::typeID);
+    phazite::routeLiveMidiInput (*song);
+    REQUIRE (phazite::getLiveMidiTrack (*song) == tracks[0]);
     phazite::test::settle (500);
 
     // Silence first, then a note played between two blocks, as the computer keyboard plays one.
@@ -304,9 +315,9 @@ TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::te
     const auto playNote = [&] (const juce::String& what)
     {
         device.process (50);
-        phazite::playLiveMidi (engine, juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
+        audio.playLive (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100));
         const auto samples = device.samplesToFirstSound();
-        phazite::playLiveMidi (engine, juce::MidiMessage::noteOff (1, 60));
+        audio.playLive (juce::MidiMessage::noteOff (1, 60));
         device.process (200);
         report << what << ": heard "
                << (samples < 0 ? juce::String ("never")
@@ -317,67 +328,55 @@ TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::te
     playNote ("A synth on a track");
 
     // A limiter on another track: delay compensation holds back the track played too.
-    auto limiter = edit->getPluginCache().createNewPlugin (dev::Limiter::typeID, {});
-    phazite::insertDevice (*te::getAudioTracks (*edit)[1], limiter);
+    const auto limiter = addDevice (*song, tracks[1], dev::Limiter::typeID);
     phazite::test::settle (500);
     playNote ("With a limiter on another track");
 
     // Switched off, the limiter delays nothing.
-    phazite::setDeviceOn (*limiter, false);
+    phazite::setDeviceOn (*song, limiter, false);
     phazite::test::settle (500);
     playNote ("With that limiter switched off");
-    phazite::setDeviceOn (*limiter, true);
+    phazite::setDeviceOn (*song, limiter, true);
 
     // A limiter on the master too.
-    phazite::insertMasterDevice (*edit, edit->getPluginCache().createNewPlugin (dev::Limiter::typeID, {}));
+    addDevice (*song, phazite::getMasterID (*song), dev::Limiter::typeID);
     phazite::test::settle (500);
     playNote ("With a limiter on the master too");
 
     MESSAGE (report);
-    limiter = nullptr; // before its Edit
-    setEdit (context, nullptr);
-    edit = nullptr;
+    phazite::setSong (context, nullptr);
 }
 
 TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_suite ("benchmark") * doctest::skip())
 {
-    auto& engine = phazite::test::getEngine();
     HostedDevice device;
 
-    const auto makeEdit = [&engine] (int numTracks, bool withDevices)
+    const auto makeSong = [] (int numTracks, bool withDevices)
     {
-        auto edit = phazite::createSongEdit (engine);
-        phazite::ensureTracks (*edit, numTracks);
+        auto song = phazite::createSong();
 
-        for (auto* track : te::getAudioTracks (*edit))
+        for (const auto track : phazite::ensureTracks (*song, numTracks))
         {
             if (! withDevices)
                 continue;
 
-            auto& cache = edit->getPluginCache();
-            phazite::insertDevice (*track, cache.createNewPlugin (dev::Synth::typeID, {}));
-            phazite::insertDevice (*track, cache.createNewPlugin (dev::Equalizer::typeID, {}));
-            phazite::insertDevice (*track, cache.createNewPlugin (dev::Compressor::typeID, {}));
-            phazite::insertDevice (*track, cache.createNewPlugin (dev::Reverb::typeID, {}));
+            for (const auto* type : { dev::Synth::typeID, dev::Equalizer::typeID, dev::Compressor::typeID, dev::Reverb::typeID })
+                addDevice (*song, track, type);
 
             // A chord on every beat for 32 beats.
-            auto& song = phazite::getSong (*edit);
-            const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track),
-                                                          { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (32.0) }, "Chords");
+            const auto clip =
+                phazite::test::addMidiClip (*song, track, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (32.0) }, "Chords");
 
             for (int beat = 0; beat < 32; ++beat)
                 for (int note : { 48, 52, 55, 59 })
-                    phazite::test::addMidiNote (song, clip, note, phazite::BeatPosition::fromBeats (beat),
+                    phazite::test::addMidiNote (*song, clip, note, phazite::BeatPosition::fromBeats (beat),
                                                 phazite::BeatDuration::fromBeats (0.9), 100);
         }
 
-        phazite::routeLiveMidiInput (*edit);
-        edit->getTransport().ensureContextAllocated();
-        return edit;
+        return song;
     };
 
-    // Each a project, as the app plays it: Tracktion's callback plays nothing of it, Phazite's engine all, on one thread and
-    // then on four.
+    // Each a project, as the app plays it through Phazite's engine, on one thread and then on four.
     auto& playing = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
     const auto threads = playing.getNumThreads();
     juce::String report (
@@ -410,29 +409,30 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
         for (const auto numThreads : { 1, 4 })
         {
             playing.setNumThreads (numThreads); // while no block plays
-            auto edit = makeEdit (numTracks, withDevices);
+            auto song = makeSong (numTracks, withDevices);
             phazite::ProjectContext context { phazite::test::getEngineContext() };
-            setEdit (context, edit.get());
+            phazite::setSong (context, song.get());
+            phazite::routeLiveMidiInput (*song);
             phazite::test::settle (800);
             const auto stopped = device.percentOfRealTime (500);
-            phazite::playOrStop (*edit);
+            phazite::playOrStop (*song);
             phazite::test::settle (500);
             const auto played = device.percentOfRealTime (500);
             const auto processCpu = processCpuInRealTime (400);
-            phazite::stopAndReturn (*edit);
+            phazite::stopAndReturn (*song);
             phazite::test::settle (300);
             report << "| " << numTracks
                    << (withDevices ? " tracks, each a synth, an EQ, a compressor and a reverb, chords" : " empty tracks") << " | "
                    << numThreads << " | " << juce::String (stopped, 2) << " % | " << juce::String (played, 2) << " % | "
                    << juce::String (processCpu, 1) << " % |\n";
-            setEdit (context, nullptr);
-            edit = nullptr;
+            phazite::setSong (context, nullptr);
+            song = nullptr;
             phazite::test::settle (300);
         }
     }
 
     // 20 tracks, each a plug-in synth in a helper (the tests' stand-in, all its instances in one helper, each with an audio
-    // thread of its own), chords: what the round trips to helpers cost a project (docs/tracktion-migration.md, T3).
+    // thread of its own), chords: what the round trips to helpers cost a project.
     {
         phazite::test::SandboxedPlugins sandboxed;
 
@@ -474,21 +474,19 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
 {
     phazite::test::TemporaryFolder temp;
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Big", error);
+    auto project = phazite::Project::create (temp.folder, "Big", error);
     REQUIRE (project != nullptr);
-    auto& edit = project->getEdit();
-    phazite::ensureTracks (edit, 40);
+    auto& song = project->getSong();
+    const auto tracks = phazite::ensureTracks (song, 40);
 
     // 40 tracks, each a synth, an EQ and a compressor, and 16 bars of 16th notes: 10,240 notes.
-    for (auto* track : te::getAudioTracks (edit))
+    for (const auto track : tracks)
     {
-        auto& cache = edit.getPluginCache();
-        phazite::insertDevice (*track, cache.createNewPlugin (dev::Synth::typeID, {}));
-        phazite::insertDevice (*track, cache.createNewPlugin (dev::Equalizer::typeID, {}));
-        phazite::insertDevice (*track, cache.createNewPlugin (dev::Compressor::typeID, {}));
-        auto& song = phazite::getSong (edit);
-        const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track),
-                                                      { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (64.0) }, "Notes");
+        for (const auto* type : { dev::Synth::typeID, dev::Equalizer::typeID, dev::Compressor::typeID })
+            addDevice (song, track, type);
+
+        const auto clip =
+            phazite::test::addMidiClip (song, track, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (64.0) }, "Notes");
 
         for (int step = 0; step < 256; ++step)
             phazite::test::addMidiNote (song, clip, 48 + step % 24, phazite::BeatPosition::fromBeats (step * 0.25),
@@ -502,7 +500,7 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
     phazite::test::settle (300);
     report << "Save again: " << milliseconds (millisecondsOf ([&] { REQUIRE (project->save().wasOk()); }), 1) << "\n";
 
-    phazite::setTrackName (*te::getAudioTracks (edit)[0], "Changed");
+    phazite::renameTrack (song, tracks[0], "Changed");
     phazite::test::settle (100);
     report << "Autosave: " << milliseconds (millisecondsOf ([&] { REQUIRE (project->autosave().wasOk()); }), 1) << "\n";
 
@@ -511,9 +509,7 @@ TEST_CASE ("Benchmark: saving and opening a big project" * doctest::test_suite (
     project = nullptr;
     phazite::test::settle (300);
     std::unique_ptr<phazite::Project> reopened;
-    report << "Open: "
-           << milliseconds (millisecondsOf ([&] { reopened = phazite::Project::open (phazite::test::getEngine(), file, false, error); }), 1)
-           << "\n";
+    report << "Open: " << milliseconds (millisecondsOf ([&] { reopened = phazite::Project::open (file, false, error); }), 1) << "\n";
     REQUIRE (reopened != nullptr);
     MESSAGE (report);
 }
@@ -608,24 +604,29 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
 {
     phazite::test::AppScreen screen;
     screen.session.openAtStartup();
-    auto* edit = getEdit (screen.session.getContext());
-    REQUIRE (edit != nullptr);
+    auto* open = phazite::findSong (screen.session.getContext());
+    REQUIRE (open != nullptr);
+    auto& song = *open;
 
     // 16 tracks with a synth, each 16 clips of 4 bars with 64 notes: 256 clips and 16,384 notes.
-    phazite::ensureTracks (*edit, 16);
-    auto& song = phazite::getSong (*edit);
+    const auto tracks = phazite::ensureTracks (song, 16);
     phazite::ClipID firstClip;
+    phazite::DeviceID synth; // the first synth added
 
-    for (auto* track : te::getAudioTracks (*edit))
+    for (const auto track : tracks)
     {
-        if (phazite::getInstrument (*track) == nullptr)
-            phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (dev::Synth::typeID, {}));
+        if (! phazite::getInstrument (song, track).isValid())
+        {
+            const auto added = addDevice (song, track, dev::Synth::typeID);
+
+            if (! synth.isValid())
+                synth = added;
+        }
 
         for (int c = 0; c < 16; ++c)
         {
             const auto start = phazite::BeatPosition::fromBeats (c * 16.0);
-            const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track),
-                                                          { start, start + phazite::BeatDuration::fromBeats (16.0) }, "Part");
+            const auto clip = phazite::test::addMidiClip (song, track, { start, start + phazite::BeatDuration::fromBeats (16.0) }, "Part");
 
             for (int n = 0; n < 64; ++n)
                 phazite::test::addMidiNote (song, clip, 48 + (n * 7) % 24, phazite::BeatPosition::fromBeats (n * 0.25),
@@ -643,24 +644,21 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     juce::String report ("\n| The UI's work, 16 tracks, 256 clips, 16,384 notes | Time |\n|---|---|\n");
 
     // A parameter's change, as a knob's drag makes one at each mouse move, and what the views do with it.
-    te::AutomatableParameter::Ptr cutoff;
-
-    for (auto* track : te::getAudioTracks (*edit))
-        for (auto* plugin : track->pluginList.getPlugins())
-            if (cutoff == nullptr && plugin->getPluginType() == juce::String (dev::Synth::typeID))
-                cutoff = plugin->getAutomatableParameterByID ("cutoff");
-
-    REQUIRE (cutoff != nullptr);
+    REQUIRE (synth.isValid());
+    auto cutoff = phazite::makeParameterHandle (song, { synth, "cutoff" }, "Change Cutoff");
+    REQUIRE (cutoff.exists());
     double total = 0.0;
     const int changes = 20;
+    cutoff.beginGesture();
 
     for (int i = 0; i < changes; ++i)
     {
         phazite::test::dispatchPendingMessages();
-        phazite::setDeviceValue (*cutoff, 1000.0f + 100.0f * (float) i);
+        cutoff.setValue (1000.0f + 100.0f * (float) i);
         total += millisecondsOf ([] { phazite::test::dispatchPendingMessages(); });
     }
 
+    cutoff.endGesture();
     report << "| A parameter's change, as the views handle it | " << milliseconds (total / changes) << " |\n";
 
     const auto bounds = screen.shell.getLocalBounds();
@@ -704,19 +702,18 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
     REQUIRE (project != nullptr);
     REQUIRE (project->save().wasOk());
     phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
-    te::getAudioTracks (*edit)[5]->state.sendPropertyChangeMessage (te::IDs::name);
+    phazite::findTrackState (song, tracks[5]).sendPropertyChangeMessage (phazite::schema::trackName);
     report << "| The check for unsaved changes after a notification that changes nothing | "
            << milliseconds (millisecondsOf ([&] { project->hasUnsavedChanges(); })) << " |\n";
     report << "| Save | " << milliseconds (millisecondsOf ([&] { REQUIRE (project->save().wasOk()); }), 1) << " |\n";
 
     // Autosave: what the UI thread does (the devices' states and a copy of the song), the rest on a background thread.
-    phazite::setTrackName (*te::getAudioTracks (*edit)[3], "Changed");
+    phazite::renameTrack (song, tracks[3], "Changed");
     phazite::test::dispatchPendingMessages();
     report << "| Autosave, on the UI thread | " << milliseconds (millisecondsOf ([&] { project->autosaveInBackground(); }), 1) << " |\n";
     phazite::test::runTimersUntil ([project] { return ! project->isAutosaving(); }, 10000);
 
-    // A note moved, as a drag moves it a grid step at a time: the views and Tracktion's rebuild of the playback graph.
-    edit->getTransport().ensureContextAllocated();
+    // A note moved, as a drag moves it a grid step at a time: the views, and the engine given the song again.
     phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
     const auto notes = phazite::getClipNotes (song, firstClip);
     REQUIRE_FALSE (notes.empty());
@@ -729,10 +726,11 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
             [&]
             {
                 phazite::moveNote (song, note.getRef(), contentStart + phazite::BeatDuration::fromBeats (0.25 * step), note.pitch);
-                phazite::test::dispatchMessagesUntil ([] { return false; }, 30); // Tracktion rebuilds on a timer
+                phazite::test::dispatchMessagesUntil ([] { return false; }, 30); // the session gives the engine the song on the loop
             });
 
-    report << "| A note moved a step, with what follows (the views, the graph's rebuild) | " << milliseconds (moving / 10 - 30.0) << " |\n";
+    report << "| A note moved a step, with what follows (the views, the engine's new plan) | " << milliseconds (moving / 10 - 30.0)
+           << " |\n";
 
     MESSAGE (report);
 }
@@ -744,22 +742,21 @@ TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite (
     phazite::ui::LookAndFeel lookAndFeel;
     phazite::test::AppScreen screen;
     screen.session.openAtStartup();
-    auto* edit = getEdit (screen.session.getContext());
-    REQUIRE (edit != nullptr);
+    auto* open = phazite::findSong (screen.session.getContext());
+    REQUIRE (open != nullptr);
+    auto& song = *open;
 
     // 100 tracks, each with 24 clips of 4 bars and 16 notes: 2,400 clips and 38,400 notes.
-    phazite::ensureTracks (*edit, 100);
-    auto& song = phazite::getSong (*edit);
+    const auto tracks = phazite::ensureTracks (song, 100);
     phazite::ClipID lastClip;
     int numClips = 0;
 
-    for (auto* track : te::getAudioTracks (*edit))
+    for (const auto track : tracks)
     {
         for (int c = 0; c < 24; ++c)
         {
             const auto start = phazite::BeatPosition::fromBeats (c * 16.0);
-            const auto clip = phazite::test::addMidiClip (song, phazite::getTrackID (*track),
-                                                          { start, start + phazite::BeatDuration::fromBeats (16.0) }, "Part");
+            const auto clip = phazite::test::addMidiClip (song, track, { start, start + phazite::BeatDuration::fromBeats (16.0) }, "Part");
 
             for (int n = 0; n < 16; ++n)
                 phazite::test::addMidiNote (song, clip, 48 + (n * 5) % 24, phazite::BeatPosition::fromBeats (n),
@@ -776,7 +773,7 @@ TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite (
     REQUIRE (playlist != nullptr);
 
     juce::String report;
-    report << "\n| The playlist: " << te::getAudioTracks (*edit).size() << " tracks, " << numClips << " clips, " << numClips * 16
+    report << "\n| The playlist: " << (int) tracks.size() << " tracks, " << numClips << " clips, " << numClips * 16
            << " notes | The UI thread's work | The playlist painted |\n|---|---|---|\n";
 
     // Each step: the event, what it posts, and the playlist painted afterwards as the screen would.

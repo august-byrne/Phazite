@@ -10,8 +10,12 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/DeviceEditors.h"
 
@@ -22,26 +26,32 @@ namespace
 using phazite::devices::Compressor;
 namespace curves = phazite::devices::curves;
 
-// Three tracks, Kick, Bass and Keys, with a compressor on the bass.
+// Three tracks, Kick, Bass and Keys, with a compressor on the bass, open in a context of their own whose session plays
+// them.
 struct Song
 {
     Song()
     {
-        phazite::ensureTracks (*edit, 3);
-        const auto tracks = te::getAudioTracks (*edit);
-        phazite::setTrackName (*tracks[0], "Kick");
-        phazite::setTrackName (*tracks[1], "Bass");
-        phazite::setTrackName (*tracks[2], "Keys");
-        compressor = edit->getPluginCache().createNewPlugin (Compressor::typeID, {});
-        REQUIRE (phazite::insertDevice (*tracks[1], compressor) != nullptr);
-        phazite::test::settle();
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        phazite::setSong (context, song.get());
+        const auto tracks = phazite::ensureTracks (*song, 3);
+        phazite::setTrackName (*song, tracks[0], "Kick");
+        phazite::setTrackName (*song, tracks[1], "Bass");
+        phazite::setTrackName (*song, tracks[2], "Keys");
+        compressor = phazite::insertDeviceState (*song, tracks[1], phazite::makeOwnDeviceState (*song, Compressor::typeID));
+        REQUIRE (compressor.isValid());
+        phazite::getSession (context)->update();
+        song->getUndoManager().clearUndoHistory();
     }
 
-    float valueOf (const char* id) const { return compressor->getAutomatableParameterByID (id)->getCurrentValue(); }
+    ~Song() { phazite::setSong (context, nullptr); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::Plugin::Ptr compressor;
+    phazite::DeviceHandle getDevice() const { return phazite::makeDeviceHandle (*song, compressor); }
+    float valueOf (const char* id) const { return phazite::getValueSetByHand (*song, phazite::ParameterRef { compressor, id }); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
+
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::DeviceID compressor;
 };
 
 std::vector<float> getDefaults()
@@ -84,7 +94,7 @@ void play (Compressor& compressor, float decibels, int numSamples, std::vector<f
 TEST_CASE ("The compressor's editor shows its characters, its knobs and its curve, whose corner drags as one undo step")
 {
     Song song;
-    const auto device = phazite::makeDeviceHandle (*song.compressor);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::CompressorEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::CompressorEditor editor (device);
@@ -110,9 +120,9 @@ TEST_CASE ("The compressor's editor shows its characters, its knobs and its curv
     mouse.release();
     CHECK (song.valueOf ("point2X") < curves::axisForDecibels (-18.0f) - 0.02f);
     CHECK (song.valueOf ("point2Y") == doctest::Approx (curves::axisForDecibels (-18.0f)).epsilon (1.0e-4));
-    CHECK (phazite::describeUndo (&phazite::getSong (*song.edit)) == juce::String ("Undo Move Point"));
+    CHECK (song.describeUndo() == juce::String ("Undo Move Point"));
 
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     editor.refresh();
     CHECK (song.valueOf ("point2X") == doctest::Approx (curves::axisForDecibels (-18.0f)).epsilon (1.0e-4));
 }
@@ -120,13 +130,13 @@ TEST_CASE ("The compressor's editor shows its characters, its knobs and its curv
 TEST_CASE ("The compressor's editor has its key's cuts, and Listen plays the key while it shows")
 {
     Song song;
-    phazite::ui::CompressorEditor editor ((phazite::makeDeviceHandle (*song.compressor)));
+    phazite::ui::CompressorEditor editor ((song.getDevice()));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     CHECK (editor.findControl ("keyLowCut") != nullptr);
     CHECK (editor.findControl ("keyHighCut") != nullptr);
 
     // Off at first; on, the compressor plays its key, as long as the editor asks (each refresh).
-    auto* compressor = phazite::makeDeviceHandle (*song.compressor).getProcessor<Compressor>();
+    auto* compressor = song.getDevice().getProcessor<Compressor>();
     REQUIRE (compressor != nullptr);
     editor.refresh();
     CHECK_FALSE (compressor->isPlayingKey());
@@ -140,7 +150,7 @@ TEST_CASE ("The compressor's editor has its key's cuts, and Listen plays the key
 TEST_CASE ("The compressor's editor lights its curve up to the level it hears, and shows how far it turns the sound down or up")
 {
     Song song;
-    const auto device = phazite::makeDeviceHandle (*song.compressor);
+    const auto device = song.getDevice();
     auto* compressor = device.getProcessor<Compressor>();
     REQUIRE (compressor != nullptr);
     compressor->prepare (48000.0, 24000);
@@ -181,7 +191,7 @@ TEST_CASE ("The compressor's editor lights its curve up to the level it hears, a
 TEST_CASE ("The compressor's characters are a row of buttons: a click picks one as one undo step, and the one in use is lit")
 {
     Song song;
-    phazite::ui::CompressorEditor editor ((phazite::makeDeviceHandle (*song.compressor)));
+    phazite::ui::CompressorEditor editor ((song.getDevice()));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     editor.refresh();
     CHECK (editor.getCharacterButton (0).getToggleState()); // Clean at first
@@ -192,12 +202,12 @@ TEST_CASE ("The compressor's characters are a row of buttons: a click picks one 
     phazite::test::Mouse mouse (editor.getCharacterButton (3));
     mouse.click (editor.getCharacterButton (3).getLocalBounds().getCentre());
     CHECK (song.valueOf ("character") == doctest::Approx ((float) Compressor::Character::opto));
-    CHECK (phazite::describeUndo (&phazite::getSong (*song.edit)) == juce::String ("Undo Change Character"));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Character"));
     CHECK (editor.getCharacterButton (3).getToggleState());
     CHECK_FALSE (editor.getCharacterButton (0).getToggleState());
 
     // Undone, the editor shows Clean again at its next refresh.
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     editor.refresh();
     CHECK (editor.getCharacterButton (0).getToggleState());
     CHECK_FALSE (editor.getCharacterButton (3).getToggleState());
@@ -206,7 +216,7 @@ TEST_CASE ("The compressor's characters are a row of buttons: a click picks one 
 TEST_CASE ("How far the compressor turns the sound down reads the same for any number of displays, then falls back")
 {
     Song song;
-    auto* compressor = phazite::makeDeviceHandle (*song.compressor).getProcessor<Compressor>();
+    auto* compressor = song.getDevice().getProcessor<Compressor>();
     REQUIRE (compressor != nullptr);
     compressor->prepare (48000.0, 24000);
     const auto* reduction = compressor->getGainReduction();

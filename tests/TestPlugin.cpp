@@ -2,7 +2,11 @@
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
 #include "host/TestPlugins.h"
+#include "model/engine/internal/EngineContext.h"
+#include "model/mixer/DeviceType.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "model/plugins/internal/PluginInstances.h"
 
 namespace phazite::test
 {
@@ -10,10 +14,15 @@ namespace
 {
     constexpr int stateMilliseconds = 10000;
 
-    // The plug-in's instance in its helper.
-    SandboxedInstance& getInstance (const te::ExternalPlugin& plugin)
+    juce::KnownPluginList& getKnownPlugins()
     {
-        auto* instance = dynamic_cast<SandboxedInstance*> (plugin.getAudioPluginInstance());
+        return getPluginHost (getEngineContext()).getKnownPlugins();
+    }
+
+    // The plug-in's instance in its helper, through the song's session.
+    SandboxedInstance& getInstance (const Song& song, DeviceID id)
+    {
+        auto* instance = findPluginInstance (song, id);
         REQUIRE (instance != nullptr);
         return *instance;
     }
@@ -30,21 +39,20 @@ namespace
 
 TestPlugin::TestPlugin()
 {
-    getEngine().getPluginManager().knownPluginList.addType (describe (version));
+    getKnownPlugins().addType (describe (version));
 }
 
 TestPlugin::~TestPlugin()
 {
-    getEngine().getPluginManager().knownPluginList.removeType (describe (version));
+    getKnownPlugins().removeType (describe (version));
 }
 
 void TestPlugin::setVersion (int newVersion)
 {
     // Its description's version, which the helper makes it in (host/TestPlugins.h).
-    auto& known = getEngine().getPluginManager().knownPluginList;
-    known.removeType (describe (version));
+    getKnownPlugins().removeType (describe (version));
     version = newVersion;
-    known.addType (describe (version));
+    getKnownPlugins().addType (describe (version));
 }
 
 juce::PluginDescription TestPlugin::describe (int version)
@@ -59,38 +67,33 @@ juce::PluginDescription TestPlugin::getDescription()
     return describe (1);
 }
 
-float TestPlugin::getGain (const te::ExternalPlugin& plugin)
+DeviceID TestPlugin::add (Song& song, TrackID track)
 {
-    return juce::MemoryInputStream (getState (getInstance (plugin)), false).readFloat();
+    const auto id = insertDeviceState (song, track, makeDeviceState (song, makeDeviceType (getDescription())));
+    REQUIRE (id.isValid());
+    return id;
 }
 
-void TestPlugin::setGain (te::ExternalPlugin& plugin, float gain)
+float TestPlugin::getGain (const Song& song, DeviceID id)
+{
+    return juce::MemoryInputStream (getState (getInstance (song, id)), false).readFloat();
+}
+
+void TestPlugin::setGain (const Song& song, DeviceID id, float gain)
 {
     // Its state with another gain, which it takes as its own window would set it, telling its host.
-    juce::MemoryInputStream before (getState (getInstance (plugin)), true);
+    auto& instance = getInstance (song, id);
+    juce::MemoryInputStream before (getState (instance), true);
     before.readFloat();
     juce::MemoryOutputStream changed;
     changed.writeFloat (gain);
     changed.writeFloat (before.readFloat()); // its tone as it was
     changed.writeFloat (1.0f);
-    REQUIRE (getInstance (plugin).getRemote().setState (changed.getMemoryBlock(), stateMilliseconds));
+    REQUIRE (instance.getRemote().setState (changed.getMemoryBlock(), stateMilliseconds));
 
-    // Tracktion's parameter for it (by its place), once the helper has told.
-    const auto& parameters = getInstance (plugin).getRemote().getInfo().parameters;
-    const auto own = std::find_if (parameters.begin(), parameters.end(), [] (const auto& p) { return p.id == gainOwnID; });
-    REQUIRE (own != parameters.end());
-    const auto tracktions = plugin.getAutomatableParameterByID (juce::String ((int) (own - parameters.begin())));
-    REQUIRE (tracktions != nullptr);
-    REQUIRE (dispatchMessagesUntil ([&] { return juce::exactlyEqual (tracktions->getCurrentValue(), gain); }));
-}
-
-te::ExternalPlugin::Ptr TestPlugin::create (te::Edit& edit)
-{
-    te::ExternalPlugin::Ptr plugin =
-        dynamic_cast<te::ExternalPlugin*> (edit.getPluginCache().createNewPlugin (te::ExternalPlugin::xmlTypeName, getDescription()).get());
-    REQUIRE (plugin != nullptr);
-    plugin->initialiseFully();
-    REQUIRE (plugin->getAudioPluginInstance() != nullptr);
-    return plugin;
+    // Its instance's value for it, once the helper has told.
+    const auto index = instance.findParameter (gainID);
+    REQUIRE (index >= 0);
+    REQUIRE (dispatchMessagesUntil ([&] { return juce::exactlyEqual (instance.getParameterValue (index), gain); }));
 }
 } // namespace phazite::test

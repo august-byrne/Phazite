@@ -23,8 +23,6 @@ void makeBus (Song& song, TrackID folder)
     auto state = findTrackState (song, folder);
     state.removeProperty (schema::channelVCA, undo);
     state.setProperty (schema::channelFader, (juce::int64) song.makeID(), undo);
-    song.reconcile (Song::Part::tracks);
-    song.reconcile (Song::Part::devices);
 }
 
 void makePlainFolder (Song& song, TrackID folder)
@@ -41,8 +39,6 @@ void makePlainFolder (Song& song, TrackID folder)
 
     state.removeProperty (schema::channelFader, undo);
     state.setProperty (schema::channelVCA, (juce::int64) song.makeID(), undo);
-    song.reconcile (Song::Part::tracks);
-    song.reconcile (Song::Part::devices);
 }
 
 void mixAsBus (Song& song, TrackID folder)

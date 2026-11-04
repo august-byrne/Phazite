@@ -14,6 +14,8 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/AudioIO.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
@@ -58,10 +60,10 @@ std::vector<juce::int64> findClicks (const std::vector<float>& song, double rate
 TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is one undo step, and is heard while armed")
 {
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
+    auto song = phazite::createSong();
     const RealTimePlayback playback; // a device with two inputs
-    setEdit (context, edit.get());
-    const auto track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
+    setSong (context, song.get());
+    const auto track = phazite::getTrackIDs (*song).front();
 
     const auto inputs = phazite::getAudioInputs (context);
     REQUIRE (inputs.size() == 3);
@@ -79,30 +81,29 @@ TEST_CASE ("A track's input lists the device's inputs, alone and in pairs, is on
     phazite::setTrackInput (context, track, "1+2");
     CHECK (phazite::getTrackInput (context, track) == juce::String ("1+2"));
     CHECK (phazite::getLastInput (context) == juce::String ("1+2"));
-    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Input"));
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Input"));
     phazite::setArmed (context, track, true);
     CHECK (phazite::isArmed (context, track));
     CHECK (phazite::getArmedTracks (context) == std::vector { track });
     CHECK (phazite::getInputMonitoring (context, track) == phazite::InputMonitoring::whileArmed);
     phazite::setInputMonitoring (context, track, phazite::InputMonitoring::never);
     CHECK (phazite::getInputMonitoring (context, track) == phazite::InputMonitoring::never);
-    CHECK (phazite::getSong (*edit).getUndoManager().getUndoDescription() == juce::String ("Change Input Monitoring"));
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Input Monitoring"));
 
     // Undoing the input leaves the track without one, and disarmed; arming is no undo step and isn't saved.
-    phazite::undo (*edit);
-    phazite::undo (*edit);
+    phazite::undo (*song);
+    phazite::undo (*song);
     CHECK (phazite::getTrackInput (context, track).isEmpty());
     CHECK_FALSE (phazite::isArmed (context, track));
-    CHECK_FALSE (edit->state.toXmlString().contains ("armed"));
+    CHECK_FALSE (song->getState().toXmlString().contains ("armed"));
 
     // A track with an instrument plays what is played on MIDI instead.
     phazite::setTrackInput (context, track, "1");
-    auto* audioTrack = te::getAudioTracks (*edit)[0];
-    phazite::insertDevice (*audioTrack, edit->getPluginCache().createNewPlugin ("phaziteSynth", {}));
+    REQUIRE (phazite::setInstrument (*song, track, phazite::makeOwnDeviceState (*song, "phaziteSynth")).isValid());
     CHECK_FALSE (phazite::canRecordAudio (context, track));
     phazite::setArmed (context, track, true);
     CHECK_FALSE (phazite::isArmed (context, track));
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 //==============================================================================
@@ -144,7 +145,7 @@ struct EngineStudio
     // Where the clicks start in the song as Phazite's engine renders it, from its start.
     std::vector<juce::int64> renderClicks (double seconds)
     {
-        const auto audio = phazite::renderWithOwnEngine (*phazite::getEdit (song.context), (int) (seconds * EnginePlayback::sampleRate),
+        const auto audio = phazite::renderWithOwnEngine (*phazite::findSong (song.context), (int) (seconds * EnginePlayback::sampleRate),
                                                          EnginePlayback::sampleRate, EnginePlayback::blockSize);
         return findClicks ({ audio.getReadPointer (0), audio.getReadPointer (0) + audio.getNumSamples() }, EnginePlayback::sampleRate);
     }
@@ -185,7 +186,7 @@ TEST_CASE ("What comes into an armed track's input while recording becomes a cli
     }
 
     // Undone, it is gone.
-    phazite::undo (*phazite::getEdit (studio.song.context));
+    phazite::undo (*phazite::findSong (studio.song.context));
     CHECK (phazite::getClips (studio.song.context, studio.song.firstTrack).empty());
 }
 
@@ -209,8 +210,8 @@ TEST_CASE ("A take started while the song plays lands as one started from a stop
 TEST_CASE ("Recording round a looped range of any length makes takes of one clip, the last whole one playing")
 {
     EngineStudio studio;
-    phazite::loopBeatRange (*phazite::getEdit (studio.song.context), 0.0, 2.0); // a second, shorter than Tracktion could
-    studio.record (2.5);                                                        // twice round and a half
+    phazite::loopBeatRange (*phazite::findSong (studio.song.context), 0.0, 2.0); // a second: a loop of any length
+    studio.record (2.5);                                                         // twice round and a half
 
     const auto clips = phazite::getClips (studio.song.context, studio.song.firstTrack);
     REQUIRE (clips.size() == 1);
@@ -237,7 +238,7 @@ TEST_CASE ("Punched in, only what falls in the looped range is kept, in place of
     EngineStudio studio;
     phazite::test::TemporaryFolder sounds;
     studio.song.addAudioClip (studio.song.firstTrack, phazite::test::writeSound (sounds.folder.getChildFile ("Before.wav"), 6.0), 0.0);
-    phazite::loopBeatRange (*phazite::getEdit (studio.song.context), 4.0, 8.0); // from 2 s to 4 s
+    phazite::loopBeatRange (*phazite::findSong (studio.song.context), 4.0, 8.0); // from 2 s to 4 s
     phazite::setPunchOn (studio.song.context, true);
     REQUIRE (phazite::canPunch (studio.song.context));
     studio.song.context.getUndoManager()->clearUndoHistory();
@@ -256,7 +257,7 @@ TEST_CASE ("Punched in, only what falls in the looped range is kept, in place of
     CHECK (clips[2].range.getStart().inBeats() == doctest::Approx (7.99).epsilon (0.0001));
     CHECK (clips[2].range.getEnd().inBeats() == doctest::Approx (12.0));
 
-    phazite::undo (*phazite::getEdit (studio.song.context));
+    phazite::undo (*phazite::findSong (studio.song.context));
     clips = phazite::getClips (studio.song.context, studio.song.firstTrack);
     REQUIRE (clips.size() == 1);
     CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (12.0));
@@ -292,7 +293,7 @@ TEST_CASE ("A track hears its input while it is armed, or always, as its monitor
 
 TEST_CASE ("The audio settings' correction moves what an input records earlier")
 {
-    // On Tracktion's hosted device, in real time, which has the inputs that keep the correction: its output comes back a
+    // On the tests' audio device, in real time, which has the inputs that keep the correction: its output comes back a
     // block later, which it reports as its delay, so that the clicks would land on their beats, and the correction puts
     // them a block earlier.
     TestSong song;
@@ -305,14 +306,15 @@ TEST_CASE ("The audio settings' correction moves what an input records earlier")
     phazite::setArmed (song.context, song.firstTrack, true);
     RealTimePlayback::wait (300); // the inputs opened
     REQUIRE (phazite::isArmed (song.context, song.firstTrack));
-    phazite::setRecordingCorrection (phazite::test::getEngine(), 256.0 / 48.0); // a block, in milliseconds
+    auto& audioIO = phazite::getAudioIO (phazite::test::getEngineContext());
+    audioIO.setRecordingCorrection (256.0 / 48.0); // a block, in milliseconds
 
     song.run ("transport.record");
     RealTimePlayback::wait (1200);
     song.run ("transport.record");
-    phazite::setRecordingCorrection (phazite::test::getEngine(), 0.0);
+    audioIO.setRecordingCorrection (0.0);
 
-    const auto audio = phazite::renderWithOwnEngine (*phazite::getEdit (song.context), (int) (1.2 * RealTimePlayback::sampleRate),
+    const auto audio = phazite::renderWithOwnEngine (*phazite::findSong (song.context), (int) (1.2 * RealTimePlayback::sampleRate),
                                                      RealTimePlayback::sampleRate, 256);
     const auto clicks =
         findClicks ({ audio.getReadPointer (0), audio.getReadPointer (0) + audio.getNumSamples() }, RealTimePlayback::sampleRate);

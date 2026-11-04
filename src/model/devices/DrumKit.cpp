@@ -2,77 +2,128 @@
 #include "internal/DrumKit.h"
 #include "devices/drums/FactoryDrums.h"
 #include "internal/DeviceFiles.h"
-#include "internal/DrumSamplerPlugin.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
 
 namespace phazite
 {
 namespace
 {
-    DrumSamplerPlugin* asDrumSampler (te::Plugin& plugin, int pad)
+    using devices::DrumSampler;
+
+    constexpr double longestSound = 30.0; // seconds of a file a pad plays at most
+
+    // A sound file's first seconds, in mono or stereo, or nullptr if it can't be read.
+    std::unique_ptr<DrumSampler::Sound> readSound (const juce::File& file)
     {
-        return juce::isPositiveAndBelow (pad, devices::DrumSampler::numPads) ? dynamic_cast<DrumSamplerPlugin*> (&plugin) : nullptr;
+        const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file));
+
+        if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+            return {};
+
+        auto sound = std::make_unique<DrumSampler::Sound>();
+        const auto length = (int) std::min (reader->lengthInSamples, (juce::int64) (longestSound * reader->sampleRate));
+        sound->audio.setSize (juce::jlimit (1, 2, (int) reader->numChannels), length);
+        sound->sampleRate = reader->sampleRate;
+
+        if (! reader->read (&sound->audio, 0, length, 0, true, true))
+            return {};
+
+        return sound;
+    }
+
+    // The factory sound a pad's sounds name, or the pad's own in the default kit.
+    int getFactorySound (const juce::ValueTree& sounds, int pad)
+    {
+        const auto index = devices::findFactoryDrum (sounds[schema::getPadSound (pad)].toString().toStdString());
+        return index >= 0 ? index : pad;
+    }
+
+    // A drum sampler's sounds in the song, if the device is one and the pad is one of its pads.
+    juce::ValueTree findPadSounds (const Song& song, DeviceID id, int pad)
+    {
+        const auto device = findDeviceState (song, id);
+        return isDrumSampler (device) && juce::isPositiveAndBelow (pad, DrumSampler::numPads) ? device.getChildWithName (schema::SOUNDS)
+                                                                                              : juce::ValueTree();
+    }
+
+    juce::File getPadFile (const Song& song, const juce::ValueTree& sounds, int pad)
+    {
+        return findProjectFile (song, sounds[schema::getPadSoundFile (pad)].toString());
     }
 } // namespace
 
-bool isDrumSampler (const te::Plugin& plugin)
-{
-    return dynamic_cast<const DrumSamplerPlugin*> (&plugin) != nullptr;
-}
-
 bool isDrumSampler (const juce::ValueTree& deviceState)
 {
-    return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == devices::DrumSampler::typeID;
+    return deviceState.hasType (schema::DEVICE) && deviceState[schema::deviceType].toString() == DrumSampler::typeID;
+}
+
+bool isDrumSampler (const Song& song, DeviceID id)
+{
+    return isDrumSampler (findDeviceState (song, id));
 }
 
 juce::String getPadName (const Song& song, const juce::ValueTree& deviceState, int pad)
 {
     const auto sounds = deviceState.getChildWithName (schema::SOUNDS);
 
-    if (const auto file = findProjectFile (song, sounds[schema::getPadSoundFile (pad)].toString()); file != juce::File())
+    if (const auto file = getPadFile (song, sounds, pad); file != juce::File())
         return file.getFileNameWithoutExtension();
 
     // Its factory sound, or else the default kit's for the pad.
-    const auto index = devices::findFactoryDrum (sounds[schema::getPadSound (pad)].toString().toStdString());
-    const auto name = devices::getFactoryDrumNames()[(size_t) (index >= 0 ? index : pad)];
+    const auto name = devices::getFactoryDrumNames()[(size_t) getFactorySound (sounds, pad)];
     return juce::String (name.data(), name.size());
 }
 
-juce::String getPadName (te::Plugin& plugin, int pad)
+juce::String getPadName (const Song& song, DeviceID id, int pad)
 {
-    auto* drums = asDrumSampler (plugin, pad);
-    return drums != nullptr ? drums->getPadName (pad) : juce::String();
+    const auto device = findDeviceState (song, id);
+    return isDrumSampler (device) && juce::isPositiveAndBelow (pad, DrumSampler::numPads) ? getPadName (song, device, pad) : juce::String();
 }
 
-bool hasPadSound (te::Plugin& plugin, int pad)
+bool hasPadSound (const Song& song, DeviceID id, int pad)
 {
-    auto* drums = asDrumSampler (plugin, pad);
-    return drums != nullptr && drums->getPadFile (pad) != juce::File();
+    const auto sounds = findPadSounds (song, id, pad);
+    return sounds.isValid() && getPadFile (song, sounds, pad) != juce::File();
 }
 
-bool setPadSound (te::Plugin& plugin, int pad, const juce::File& file)
+bool setPadSound (Song& song, DeviceID id, int pad, const juce::File& file)
 {
-    auto* drums = asDrumSampler (plugin, pad);
-
-    if (drums == nullptr || ! file.existsAsFile() || getFileKind (file) != FileKind::audio)
+    if (! isDrumSampler (song, id) || ! juce::isPositiveAndBelow (pad, DrumSampler::numPads) || ! file.existsAsFile()
+        || getFileKind (file) != FileKind::audio)
         return false;
 
-    auto& edit = plugin.edit;
-    const auto copy = copyIntoProject (getSong (edit), file);
-    const UndoStep step (edit, "Put " + copy.getFileNameWithoutExtension() + " on Pad " + juce::String (pad + 1));
-    setDeviceSound (getSong (plugin.edit), getDeviceID (plugin), schema::getPadSoundFile (pad), getProjectPath (getSong (edit), copy));
+    const auto copy = copyIntoProject (song, file);
+    const UndoStep step (song, "Put " + copy.getFileNameWithoutExtension() + " on Pad " + juce::String (pad + 1));
+    setDeviceSound (song, id, schema::getPadSoundFile (pad), getProjectPath (song, copy));
     return true;
 }
 
-void clearPadSound (te::Plugin& plugin, int pad)
+void clearPadSound (Song& song, DeviceID id, int pad)
 {
-    if (! hasPadSound (plugin, pad))
+    if (! hasPadSound (song, id, pad))
         return;
 
-    const UndoStep step (plugin.edit, "Reset Pad " + juce::String (pad + 1));
-    setDeviceSound (getSong (plugin.edit), getDeviceID (plugin), schema::getPadSoundFile (pad), {});
+    const UndoStep step (song, "Reset Pad " + juce::String (pad + 1));
+    setDeviceSound (song, id, schema::getPadSoundFile (pad), {});
+}
+
+void loadPadSound (DrumSampler& sampler, const Song& song, const juce::ValueTree& sounds, int pad)
+{
+    // A file that is gone or can't be read leaves the pad with its factory sound.
+    if (const auto file = getPadFile (song, sounds, pad); file.existsAsFile())
+    {
+        if (auto sound = readSound (file))
+        {
+            sampler.setSound (pad, std::move (sound));
+            return;
+        }
+    }
+
+    const auto index = getFactorySound (sounds, pad);
+    sampler.setSound (pad, index != pad ? devices::getFactoryDrum (index) : nullptr);
 }
 } // namespace phazite

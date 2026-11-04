@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's parameters by their references (model/devices/ParameterRef.h), as controls (ParameterHandle.h), automation and
-// presets reach them (docs/tracktion-migration.md, T6 step 4): what each is, its value set by hand and the value it plays.
-// A reference names one of a device's parameters (one of Phazite's own devices', or a plug-in's), a channel's fader's
-// volume or pan, a send's level (Schema.h: faderVolume to sendLevelParameter), or, by the modulator's or the macro's ID, a
-// modulator's parameter or a macro's value (by the macro's ID as its parameter's). The song holds every value set by hand
-// but a plug-in's, which its instance holds. For the model, the app and tests. Message thread only.
+// presets reach them: what each is, its value set by hand and the value it plays.
+// A reference names one of a device's parameters (one of Phazite's own devices', by its ID in their description, or a
+// plug-in's, by the plug-in's own ID for it), a channel's fader's volume or pan, a send's level (Schema.h: faderVolume to
+// sendLevelParameter), or, by the modulator's or the macro's ID, a modulator's parameter or a macro's value (by the
+// macro's ID as its parameter's). The song holds every value set by hand, but a plug-in's that no control set, which its
+// instance holds (and the song stores as it saves). For the model, the app and tests. Message thread only.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -42,15 +43,15 @@ struct ParameterDescription
 std::optional<ParameterDescription> describeParameter (const Song&, const ParameterRef&);
 juce::String getParameterText (const Song&, const ParameterRef&, float value);
 
-// The value it is set to by hand, which automation and modulation move from: the song's, but a plug-in's; and setting it,
-// in the caller's undo step, clipped to its range. A parameter whose curve has one point (model/automation/) plays that
-// point's value everywhere, so its point moves to the value too, as the control's change.
+// The value it is set to by hand, which automation and modulation move from; and setting it, in the caller's undo step,
+// clipped to its range, which tells the song's listeners (Song::tellValueSetByHand()). A parameter whose curve has one
+// point (model/automation/) plays that point's value everywhere, so its point moves to the value too, as the control's
+// change.
 float getValueSetByHand (const Song&, const ParameterRef&);
 void setValueSetByHand (Song&, const ParameterRef&, float value);
 
 // The value it plays now, its automation and its modulation included (or without its modulation): while Phazite's engine
-// plays the song, the one it played last, or the one set by hand where nothing moves it; else the value Tracktion's
-// parameter has, while Tracktion's Edit mirrors the song (T6 step 9 replaces it); else the one set by hand.
+// plays the song, the one it played last, or the one set by hand where nothing moves it; else the one set by hand.
 float getCurrentValue (const Song&, const ParameterRef&, bool withModulation);
 
 //==============================================================================
@@ -60,6 +61,16 @@ float getCurrentValue (const Song&, const ParameterRef&, bool withModulation);
 // (isStillThere()).
 struct FoundParameter
 {
+    // Made by locateParameter() alone; a constructor of its own, so that a braced reference ({ device, "gain" }) is never
+    // taken for one.
+    FoundParameter (const ParameterRef& r, ParameterSource s, const juce::ValueTree& st, const devices::ParameterInfo* i)
+        : ref (r),
+          source (s),
+          state (st),
+          info (i)
+    {
+    }
+
     ParameterRef ref;
     ParameterSource source = ParameterSource::device;
     juce::ValueTree state;

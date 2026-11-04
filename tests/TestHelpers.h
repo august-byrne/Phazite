@@ -2,16 +2,14 @@
 // Shared includes and helpers for Phazite's tests.
 #pragma once
 
-#include "model/base/internal/Tracktion.h" // Tracktion as the model includes it, with one of GCC's warnings off for it
-#include "model/mirror/internal/Bridge.h"  // the forms of the song's functions that take Tracktion's objects, until the tests move off them
 #include "model/mixer/FreezeModel.h"
 
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 
-// doctest, through Tracktion's wrapper, which silences doctest's warnings under JUCE's warning flags.
-#include <tracktion_engine/../3rd_party/doctest/tracktion_doctest.hpp>
-
-namespace te = tracktion;
+// doctest (external/doctest), whose warnings are off as a system header.
+#include <doctest/doctest.h>
 
 namespace phazite
 {
@@ -20,10 +18,9 @@ class EngineContext;
 
 namespace phazite::test
 {
-// The Engine that all tests share, made by TestMain.cpp like the app's (no audio device, no plug-in
-// scanning). Its settings live in a temporary folder, so tests never touch Phazite's real settings.
-te::Engine& getEngine();
-EngineContext& getEngineContext(); // the Engine as the UI reaches it, as the app's services make it
+// The engine context that all tests share, made by TestMain.cpp like the app's (no audio device opened, no plug-in
+// scanning), with plug-ins hosted in the tests' helper.
+EngineContext& getEngineContext();
 
 // The system's temporary folder, which other programs share. The tests' temporary folder (juce::File::tempDirectory) is
 // a folder in it of this test program's own, made by TestMain.cpp: CTest runs a test program for each test file, several
@@ -95,8 +92,7 @@ inline juce::File writeSound (const juce::File& file, double seconds, double fre
 }
 
 // Writes a loop of clicks into a folder, one on each beat at a tempo, each a burst of noise of its own, named for its tempo
-// so that it follows the song's ("Clicks 120 BPM.wav"), and returns it. Tracktion is told it changed: a temporary folder's
-// name comes round again, and Tracktion keeps what it read of a file by its path.
+// so that it follows the song's ("Clicks 120 BPM.wav"), and returns it.
 inline juce::File writeClicks (const juce::File& folder, int beats, double bpm)
 {
     constexpr double sampleRate = 44100.0;
@@ -117,7 +113,6 @@ inline juce::File writeClicks (const juce::File& folder, int beats, double bpm)
     REQUIRE (writer != nullptr);
     writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
     writer.reset();
-    getEngine().getAudioFileManager().checkFileForChanges (te::AudioFile (getEngine(), file));
     return file;
 }
 } // namespace phazite::test

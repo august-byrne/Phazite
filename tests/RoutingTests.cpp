@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
@@ -22,48 +23,47 @@ struct Mix
 {
     Mix()
     {
-        phazite::ensureTracks (*edit, 3);
-        const auto tracks = te::getAudioTracks (*edit);
+        auto& s = *song;
+        const auto tracks = phazite::ensureTracks (s, 3);
         kick = tracks[0];
         bass = tracks[1];
         keys = tracks[2];
-        phazite::setTrackName (*kick, "Kick");
-        phazite::setTrackName (*bass, "Bass");
-        phazite::setTrackName (*keys, "Keys");
+        phazite::setTrackName (s, kick, "Kick");
+        phazite::setTrackName (s, bass, "Bass");
+        phazite::setTrackName (s, keys, "Keys");
 
-        drums = phazite::groupIntoFolder ({ kick }, nullptr);
-        REQUIRE (drums != nullptr);
-        phazite::setTrackName (*drums, "Drums");
+        drums = phazite::groupIntoFolder (s, { kick }, nullptr);
+        REQUIRE (drums.isValid());
+        phazite::setTrackName (s, drums, "Drums");
 
-        reverb = phazite::addReturnTrack (*edit, "Reverb", nullptr);
-        delay = phazite::addReturnTrack (*edit, "Delay", nullptr);
-        REQUIRE (reverb != nullptr);
-        REQUIRE (delay != nullptr);
+        reverb = phazite::addReturnTrack (s, "Reverb", nullptr);
+        delay = phazite::addReturnTrack (s, "Delay", nullptr);
+        REQUIRE (reverb.isValid());
+        REQUIRE (delay.isValid());
 
         // A compressor on the bass, which can listen to the kick.
-        compressor = phazite::insertDevice (*bass, edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
-        REQUIRE (compressor != nullptr);
+        compressor = addCompressor (bass);
 
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
-        setEdit (context, edit.get());
+        s.getUndoManager().clearUndoHistory();
+        setSong (context, song.get());
     }
 
-    ~Mix() { setEdit (context, nullptr); }
+    ~Mix() { setSong (context, nullptr); }
 
-    phazite::TrackID id (te::Track* track) const { return phazite::getTrackID (*track); }
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
-    // Undo puts a moved track back from its saved state, as a new object: the old pointer is gone, its ID stays.
-    te::AudioTrack* findAudioTrack (phazite::TrackID trackID) const
+    phazite::DeviceID addCompressor (phazite::TrackID track)
     {
-        return dynamic_cast<te::AudioTrack*> (te::findTrackForID (*edit, phazite::toTracktion (trackID)));
+        const auto added =
+            phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Compressor::typeID));
+        REQUIRE (added.isValid());
+        return added;
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::AudioTrack *kick = nullptr, *bass = nullptr, *keys = nullptr, *reverb = nullptr, *delay = nullptr;
-    te::FolderTrack* drums = nullptr;
-    te::Plugin* compressor = nullptr;
+    phazite::TrackID kick, bass, keys, reverb, delay, drums;
+    phazite::DeviceID compressor;
 };
 
 juce::StringArray namesOf (const std::vector<phazite::OutputChoice>& choices)
@@ -80,13 +80,13 @@ juce::StringArray namesOf (const std::vector<phazite::OutputChoice>& choices)
 TEST_CASE ("A send knob for every return: no send until its first turn, which makes one as one undo step")
 {
     Mix mix;
-    const auto targets = phazite::getSendTargets (mix.context, mix.id (mix.keys));
+    const auto targets = phazite::getSendTargets (mix.context, mix.keys);
     REQUIRE (targets.size() == 2);
     CHECK (targets[0].name == juce::String ("Reverb"));
     CHECK (targets[1].name == juce::String ("Delay"));
     CHECK_FALSE (targets[0].send.has_value());
 
-    auto level = phazite::getSendLevelTo (mix.context, mix.id (mix.keys), mix.id (mix.reverb));
+    auto level = phazite::getSendLevelTo (mix.context, mix.keys, mix.reverb);
     CHECK (level.isValid());
     CHECK_FALSE (level.exists());
     CHECK (level.getValue() == doctest::Approx (0.0f));
@@ -95,21 +95,21 @@ TEST_CASE ("A send knob for every return: no send until its first turn, which ma
     // A press without a drag makes nothing.
     level.beginGesture();
     level.endGesture();
-    CHECK (phazite::getSends (*mix.keys).isEmpty());
-    CHECK_FALSE (phazite::getSong (*mix.edit).getUndoManager().canUndo());
+    CHECK (phazite::getSends (*mix.song, mix.keys).empty());
+    CHECK_FALSE (phazite::canUndo (*mix.song));
 
     // The first turn makes the send, after the fader, at the level turned to: one step.
     level.beginGesture();
     level.setValue (0.3f);
     level.setValue (0.6f);
     level.endGesture();
-    REQUIRE (phazite::getSends (*mix.keys).size() == 1);
+    REQUIRE (phazite::getSends (*mix.song, mix.keys).size() == 1);
     CHECK (level.exists());
     CHECK (level.getValue() == doctest::Approx (0.6f));
-    CHECK_FALSE (phazite::isPreFader (*phazite::getSends (*mix.keys)[0]));
+    CHECK_FALSE (phazite::isPreFader (*mix.song, phazite::getSends (*mix.song, mix.keys)[0]));
     CHECK (mix.describeUndo() == juce::String ("Undo Send to Reverb"));
 
-    const auto withSend = phazite::getSendTargets (mix.context, mix.id (mix.keys));
+    const auto withSend = phazite::getSendTargets (mix.context, mix.keys);
     REQUIRE (withSend[0].send.has_value());
     CHECK (withSend[0].send->returnName == juce::String ("Reverb"));
 
@@ -117,77 +117,74 @@ TEST_CASE ("A send knob for every return: no send until its first turn, which ma
     level.setValue (0.4f);
     CHECK (mix.describeUndo() == juce::String ("Undo Change Send Level"));
 
-    phazite::undo (*mix.edit);
-    phazite::undo (*mix.edit);
-    CHECK (phazite::getSends (*mix.keys).isEmpty());
+    phazite::undo (*mix.song);
+    phazite::undo (*mix.song);
+    CHECK (phazite::getSends (*mix.song, mix.keys).empty());
     CHECK_FALSE (level.exists());
     CHECK (level.isValid()); // a turn makes it again
 
     // A value set outside a drag (a key press) makes it too.
     level.setValue (0.5f);
-    CHECK (phazite::getSends (*mix.keys).size() == 1);
+    CHECK (phazite::getSends (*mix.song, mix.keys).size() == 1);
     CHECK (mix.describeUndo() == juce::String ("Undo Send to Reverb"));
 
     // A return sends to the others, not to itself, nor to one whose sound comes back to it; folders don't send.
-    phazite::getSendLevelTo (mix.context, mix.id (mix.delay), mix.id (mix.reverb)).setValue (0.5f);
-    const auto fromReverb = phazite::getSendTargets (mix.context, mix.id (mix.reverb));
+    phazite::getSendLevelTo (mix.context, mix.delay, mix.reverb).setValue (0.5f);
+    const auto fromReverb = phazite::getSendTargets (mix.context, mix.reverb);
     CHECK (fromReverb.empty());
-    CHECK_FALSE (phazite::getSendLevelTo (mix.context, mix.id (mix.reverb), mix.id (mix.delay)).isValid());
-    CHECK (phazite::getSendTargets (mix.context, mix.id (mix.drums)).empty());
+    CHECK_FALSE (phazite::getSendLevelTo (mix.context, mix.reverb, mix.delay).isValid());
+    CHECK (phazite::getSendTargets (mix.context, mix.drums).empty());
 }
 
 TEST_CASE ("Where a channel's sound goes: the master, or a bus, which the track goes into as a folder")
 {
     Mix mix;
-    CHECK (namesOf (phazite::getOutputChoices (mix.context, mix.id (mix.bass))) == juce::StringArray { "Master*", "Drums" });
-    CHECK (namesOf (phazite::getOutputChoices (mix.context, mix.id (mix.kick))) == juce::StringArray { "Master", "Drums*" });
-    CHECK (namesOf (phazite::getOutputChoices (mix.context, mix.id (mix.drums))) == juce::StringArray { "Master*" });
-    CHECK (phazite::getOutputChoices (mix.context, mix.id (mix.reverb)).empty());
-    CHECK_FALSE (phazite::canChooseOutput (mix.context, mix.id (mix.reverb)));
-    CHECK (phazite::canChooseOutput (mix.context, mix.id (mix.bass)));
+    CHECK (namesOf (phazite::getOutputChoices (mix.context, mix.bass)) == juce::StringArray { "Master*", "Drums" });
+    CHECK (namesOf (phazite::getOutputChoices (mix.context, mix.kick)) == juce::StringArray { "Master", "Drums*" });
+    CHECK (namesOf (phazite::getOutputChoices (mix.context, mix.drums)) == juce::StringArray { "Master*" });
+    CHECK (phazite::getOutputChoices (mix.context, mix.reverb).empty());
+    CHECK_FALSE (phazite::canChooseOutput (mix.context, mix.reverb));
+    CHECK (phazite::canChooseOutput (mix.context, mix.bass));
 
-    phazite::setOutput (mix.context, mix.id (mix.bass), mix.id (mix.drums));
-    CHECK (mix.bass->getParentFolderTrack() == mix.drums);
+    phazite::setOutput (mix.context, mix.bass, mix.drums);
+    CHECK (phazite::getParentFolder (*mix.song, mix.bass) == mix.drums);
     CHECK (mix.describeUndo() == juce::String ("Undo Change Output"));
-    CHECK (phazite::getChannel (mix.context, mix.id (mix.bass))->outputBus == juce::String ("Drums"));
+    CHECK (phazite::getChannel (mix.context, mix.bass)->outputBus == juce::String ("Drums"));
 
-    phazite::setOutput (mix.context, mix.id (mix.bass), {});
-    CHECK (mix.bass->getParentFolderTrack() == nullptr);
-    CHECK (phazite::getChannel (mix.context, mix.id (mix.bass))->outputBus.isEmpty());
+    phazite::setOutput (mix.context, mix.bass, {});
+    CHECK_FALSE (phazite::getParentFolder (*mix.song, mix.bass).isValid());
+    CHECK (phazite::getChannel (mix.context, mix.bass)->outputBus.isEmpty());
 
     // Choosing what is chosen already, or a plain folder, changes nothing.
-    phazite::setOutput (mix.context, mix.id (mix.bass), {});
+    phazite::setOutput (mix.context, mix.bass, {});
     CHECK (mix.describeUndo() == juce::String ("Undo Change Output"));
-    const auto bass = mix.id (mix.bass);
-    phazite::undo (*mix.edit);
-    phazite::undo (*mix.edit);
-    mix.bass = mix.findAudioTrack (bass);
-    REQUIRE (mix.bass != nullptr);
-    CHECK (mix.bass->getParentFolderTrack() == nullptr);
+    phazite::undo (*mix.song);
+    phazite::undo (*mix.song);
+    CHECK_FALSE (phazite::getParentFolder (*mix.song, mix.bass).isValid());
 
-    phazite::setMixedAsBus (mix.context, mix.id (mix.drums), false);
-    CHECK (namesOf (phazite::getOutputChoices (mix.context, mix.id (mix.bass))) == juce::StringArray { "Master*" });
-    phazite::setOutput (mix.context, mix.id (mix.bass), mix.id (mix.drums));
-    CHECK (mix.bass->getParentFolderTrack() == nullptr);
+    phazite::setMixedAsBus (mix.context, mix.drums, false);
+    CHECK (namesOf (phazite::getOutputChoices (mix.context, mix.bass)) == juce::StringArray { "Master*" });
+    phazite::setOutput (mix.context, mix.bass, mix.drums);
+    CHECK_FALSE (phazite::getParentFolder (*mix.song, mix.bass).isValid());
 }
 
 TEST_CASE ("A device's sidechain by its ID, and what links the channels: outputs, sends and sidechains")
 {
     Mix mix;
-    const auto compressor = phazite::getDeviceID (*mix.compressor);
+    const auto compressor = mix.compressor;
     CHECK (phazite::hasSidechain (mix.context, compressor));
     CHECK_FALSE (phazite::getSidechainSource (mix.context, compressor).isValid());
 
     const auto choices = phazite::getSidechainChoices (mix.context, compressor);
-    CHECK (std::any_of (choices.begin(), choices.end(), [&mix] (const auto& c) { return c.track == mix.id (mix.kick); }));
-    CHECK (std::none_of (choices.begin(), choices.end(), [&mix] (const auto& c) { return c.track == mix.id (mix.bass); }));
+    CHECK (std::any_of (choices.begin(), choices.end(), [&mix] (const auto& c) { return c.track == mix.kick; }));
+    CHECK (std::none_of (choices.begin(), choices.end(), [&mix] (const auto& c) { return c.track == mix.bass; }));
 
-    phazite::setSidechainSource (mix.context, compressor, mix.id (mix.kick));
-    CHECK (phazite::getSidechainSource (mix.context, compressor) == mix.id (mix.kick));
+    phazite::setSidechainSource (mix.context, compressor, mix.kick);
+    CHECK (phazite::getSidechainSource (mix.context, compressor) == mix.kick);
     CHECK (mix.describeUndo() == juce::String ("Undo Sidechain from Kick"));
 
-    phazite::getSendLevelTo (mix.context, mix.id (mix.keys), mix.id (mix.reverb)).setValue (0.5f);
-    const auto send = phazite::getSendTargets (mix.context, mix.id (mix.keys))[0].send;
+    phazite::getSendLevelTo (mix.context, mix.keys, mix.reverb).setValue (0.5f);
+    const auto send = phazite::getSendTargets (mix.context, mix.keys)[0].send;
     REQUIRE (send.has_value());
 
     const auto connections = phazite::getConnections (mix.context);
@@ -195,21 +192,21 @@ TEST_CASE ("A device's sidechain by its ID, and what links the channels: outputs
     const auto has = [&connections] (const phazite::Connection& c)
     { return std::find (connections.begin(), connections.end(), c) != connections.end(); };
 
-    CHECK (has ({ Kind::output, mix.id (mix.kick), mix.id (mix.drums), {} }));
-    CHECK (has ({ Kind::output, mix.id (mix.drums), {}, {} }));
-    CHECK (has ({ Kind::output, mix.id (mix.bass), {}, {} }));
-    CHECK (has ({ Kind::output, mix.id (mix.reverb), {}, {} }));
-    CHECK (has ({ Kind::send, mix.id (mix.keys), mix.id (mix.reverb), send->id }));
-    CHECK (has ({ Kind::sidechain, mix.id (mix.kick), mix.id (mix.bass), compressor }));
+    CHECK (has ({ Kind::output, mix.kick, mix.drums, {} }));
+    CHECK (has ({ Kind::output, mix.drums, {}, {} }));
+    CHECK (has ({ Kind::output, mix.bass, {}, {} }));
+    CHECK (has ({ Kind::output, mix.reverb, {}, {} }));
+    CHECK (has ({ Kind::send, mix.keys, mix.reverb, send->id }));
+    CHECK (has ({ Kind::sidechain, mix.kick, mix.bass, compressor }));
 
     phazite::setSidechainSource (mix.context, compressor, {});
     CHECK_FALSE (phazite::getSidechainSource (mix.context, compressor).isValid());
     CHECK (mix.describeUndo() == juce::String ("Undo Turn Sidechain Off"));
 
     // How much CPU a channel's devices take: nothing while nothing plays, and never more than all of it.
-    for (auto* track : { (te::Track*) mix.kick, (te::Track*) mix.bass, (te::Track*) mix.drums })
+    for (const auto track : { mix.kick, mix.bass, mix.drums })
     {
-        const auto load = phazite::getCpuLoad (mix.context, mix.id (track));
+        const auto load = phazite::getCpuLoad (mix.context, track);
         CHECK (load >= 0.0f);
         CHECK (load <= 1.0f);
     }
@@ -224,7 +221,7 @@ TEST_CASE ("A strip has a send knob for every return, and one drag sends the tra
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::ChannelStrip strip { commands, mix.context };
     phazite::test::TestWindow window { strip, phazite::ui::ChannelStrip::width, 800 };
-    strip.setTrack (mix.id (mix.keys));
+    strip.setTrack (mix.keys);
     phazite::test::dispatchPendingMessages();
 
     auto* reverbKnob = dynamic_cast<juce::Slider*> (phazite::test::findComponentWithTitle (strip, "Send to Reverb"));
@@ -242,11 +239,12 @@ TEST_CASE ("A strip has a send knob for every return, and one drag sends the tra
     mouse.dragTo (centre - juce::Point<int> (0, 40));
     mouse.release();
 
-    REQUIRE (phazite::getSends (*mix.keys).size() == 1);
-    CHECK (phazite::getSends (*mix.keys)[0]->getBusNumber() == phazite::getReturnBus (*mix.reverb));
-    CHECK (phazite::getSends (*mix.keys)[0]->gain->getCurrentValue() > 0.1f);
+    REQUIRE (phazite::getSends (*mix.song, mix.keys).size() == 1);
+    const auto send = phazite::getSends (*mix.song, mix.keys)[0];
+    CHECK (phazite::getSendTarget (*mix.song, send) == mix.reverb);
+    CHECK (phazite::getSendLevel (mix.context, send).getValue() > 0.1f); // the knob's position
     CHECK (mix.describeUndo() == juce::String ("Undo Send to Reverb"));
-    CHECK (phazite::getSends (*mix.keys).size() == 1); // Delay's knob made nothing
+    CHECK (phazite::getSends (*mix.song, mix.keys).size() == 1); // Delay's knob made nothing
 
     // The output button says where the sound goes, and follows a change of it.
     auto* output = dynamic_cast<juce::TextButton*> (phazite::test::findComponentWithTitle (strip, "Output"));
@@ -254,7 +252,7 @@ TEST_CASE ("A strip has a send knob for every return, and one drag sends the tra
     CHECK (output->getButtonText() == juce::String ("Out: Master"));
     CHECK (output->isEnabled());
 
-    phazite::setOutput (mix.context, mix.id (mix.keys), mix.id (mix.drums));
+    phazite::setOutput (mix.context, mix.keys, mix.drums);
     CHECK (phazite::test::dispatchMessagesUntil ([output] { return output->getButtonText() == juce::String ("Out: Drums"); }));
 
     // A CPU bar along its bottom.
@@ -266,12 +264,11 @@ TEST_CASE ("A strip has a send knob for every return, and one drag sends the tra
 TEST_CASE ("The sidechain's menu lists Off and every other track, greys one that would make a loop with why, and picks one")
 {
     Mix mix;
-    const auto compressor = phazite::getDeviceID (*mix.compressor);
+    const auto compressor = mix.compressor;
 
     // The keys' sound comes from the bass, through a compressor on the keys that listens to it.
-    auto* onKeys = phazite::insertDevice (*mix.keys, mix.edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
-    REQUIRE (onKeys != nullptr);
-    phazite::setSidechainSource (mix.context, phazite::getDeviceID (*onKeys), mix.id (mix.bass));
+    const auto onKeys = mix.addCompressor (mix.keys);
+    phazite::setSidechainSource (mix.context, onKeys, mix.bass);
 
     const auto itemsOf = [] (juce::PopupMenu& menu)
     {
@@ -297,19 +294,19 @@ TEST_CASE ("The sidechain's menu lists Off and every other track, greys one that
     // Kick: one step, the compressor ducking, and its slot in the mixer shows where it listens.
     items[1].action();
     CHECK (mix.describeUndo() == juce::String ("Undo Sidechain from Kick"));
-    CHECK (mix.compressor->getAutomatableParameterByID ("point2X")->getCurrentValue()
+    CHECK (phazite::getValueSetByHand (*mix.song, { mix.compressor, "point2X" })
            == doctest::Approx (phazite::devices::curves::axisForDecibels (-30.0f))); // ducking, 8:1 over -30 dB
-    const auto slots = phazite::getEffects (mix.context, mix.id (mix.bass));
+    const auto slots = phazite::getEffects (mix.context, mix.bass);
     REQUIRE (slots.size() == 1);
     CHECK (slots[0].hasSidechain);
     CHECK (slots[0].sidechain.name == juce::String ("Kick"));
 
     // Duck Under, from the track's menu: the keys can't (their sound comes from the bass); Kick adds a second compressor.
-    auto duck = phazite::ui::makeDuckUnderMenu (mix.context, mix.id (mix.bass));
+    auto duck = phazite::ui::makeDuckUnderMenu (mix.context, mix.bass);
     auto ducks = itemsOf (duck);
     REQUIRE (ducks.size() == 4);
     CHECK_FALSE (ducks[1].isEnabled);
     ducks[0].action();
     CHECK (mix.describeUndo() == juce::String ("Undo Duck Bass Under Kick"));
-    CHECK (phazite::getEffects (mix.context, mix.id (mix.bass)).size() == 2);
+    CHECK (phazite::getEffects (mix.context, mix.bass).size() == 2);
 }

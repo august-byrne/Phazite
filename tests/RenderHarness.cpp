@@ -2,8 +2,6 @@
 #include "RenderHarness.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/base/internal/Schema.h"
-#include "model/devices/internal/DeviceStates.h"
-#include "model/engine/internal/EngineSetup.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -50,11 +48,11 @@ namespace
     }
 
     //==============================================================================
-    // Phazite's engine, playing an Edit's song.
-    juce::AudioBuffer<float> renderEdit (te::Edit& edit, double seconds)
+    // Phazite's engine, playing a song.
+    juce::AudioBuffer<float> renderSong (Song& song, double seconds)
     {
-        REQUIRE (renderMissingClipAudio (getSong (edit))); // as an export does: a clip whose render isn't ready would play nothing
-        return renderWithOwnEngine (edit, (int) std::lround (seconds * renderSampleRate), renderSampleRate, renderBlockSize);
+        REQUIRE (renderMissingClipAudio (song)); // as an export does: a clip whose render isn't ready would play nothing
+        return renderWithOwnEngine (song, (int) std::lround (seconds * renderSampleRate), renderSampleRate, renderBlockSize);
     }
 
     // The open project's.
@@ -65,9 +63,9 @@ namespace
 
         juce::AudioBuffer<float> render (ProjectContext& context, double seconds) override
         {
-            auto* edit = getEdit (context);
-            REQUIRE (edit != nullptr);
-            return renderEdit (*edit, seconds);
+            auto* song = findSong (context);
+            REQUIRE (song != nullptr);
+            return renderSong (*song, seconds);
         }
     };
 
@@ -81,18 +79,17 @@ namespace
 
         juce::AudioBuffer<float> render (ProjectContext& context, double seconds) override
         {
-            auto* edit = getEdit (context);
-            REQUIRE (edit != nullptr);
-            storeDeviceStates (*edit); // as a save does
-            const auto copy = createEditFromSong (edit->engine, getSong (*edit).getState().createCopy(), edit->editFileRetriever(),
-                                                  edit->getTempDirectory (false));
+            auto* song = findSong (context);
+            REQUIRE (song != nullptr);
+            song->storeDeviceStates(); // as a save does
+            const auto copy = makeSong (song->getState().createCopy(), song->getFile(), song->getCacheFolder());
             REQUIRE (copy != nullptr);
 
             ProjectContext opened (getEngineContext());
-            setEdit (opened, copy.get());
+            setSong (opened, copy.get());
             settle();
-            auto audio = renderEdit (*copy, seconds);
-            setEdit (opened, nullptr);
+            auto audio = renderSong (*copy, seconds);
+            setSong (opened, nullptr);
             return audio;
         }
     };

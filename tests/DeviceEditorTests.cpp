@@ -7,13 +7,18 @@
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
 #include "devices/eq/Equalizer.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceGraph.h"
@@ -22,20 +27,41 @@ namespace
 {
 using phazite::devices::Equalizer;
 
-te::Plugin::Ptr addDevice (te::Edit& edit, const char* type)
+// A device of a type at the end of a song's first track's devices (in place of its instrument, for an instrument).
+phazite::DeviceID addDevice (phazite::Song& song, const char* type)
 {
-    auto plugin = edit.getPluginCache().createNewPlugin (type, {});
-    phazite::insertDevice (*te::getAudioTracks (edit)[0], plugin);
-    return plugin;
+    const auto id = phazite::insertDeviceState (song, phazite::getTrackIDs (song)[0], phazite::makeOwnDeviceState (song, type));
+    REQUIRE (id.isValid());
+    return id;
 }
+
+// A song outside a project with a device of a type on its track, open in a context of its own, whose session plays it.
+struct SongWithDevice
+{
+    explicit SongWithDevice (const char* type)
+    {
+        phazite::setSong (context, song.get());
+        id = addDevice (*song, type);
+        phazite::getSession (context)->update();
+    }
+
+    ~SongWithDevice() { phazite::setSong (context, nullptr); }
+
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::DeviceID id;
+};
 } // namespace
 
 TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
 {
     phazite::test::TestPlugin testPlugin;
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto eq = addDevice (*edit, Equalizer::typeID);
-    const auto device = phazite::makeDeviceHandle (*eq);
+    auto song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::setSong (context, song.get());
+    const auto eq = addDevice (*song, Equalizer::typeID);
+    phazite::getSession (context)->update();
+    const auto device = phazite::makeDeviceHandle (*song, eq);
 
     REQUIRE (device.isValid());
     REQUIRE (device.getInfo() != nullptr);
@@ -46,17 +72,15 @@ TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
     CHECK (device.getProcessor<phazite::devices::Processor>() != nullptr);
 
     // A plug-in isn't one of Phazite's devices.
-    te::Plugin::Ptr plugin = phazite::test::TestPlugin::create (*edit);
-    phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
-    const auto notOurs = phazite::makeDeviceHandle (*plugin);
+    const auto plugin = phazite::test::TestPlugin::add (*song, phazite::getTrackIDs (*song)[0]);
+    const auto notOurs = phazite::makeDeviceHandle (*song, plugin);
     CHECK_FALSE (notOurs.isValid());
     CHECK (notOurs.getInfo() == nullptr);
     CHECK (notOurs.getProcessor<Equalizer>() == nullptr);
 
     // When the project closes, the handle has nothing.
-    eq = nullptr;
-    plugin = nullptr;
-    edit = nullptr;
+    phazite::setSong (context, nullptr);
+    song = nullptr;
     CHECK_FALSE (device.isValid());
     CHECK (device.getProcessor<Equalizer>() == nullptr);
     CHECK_FALSE (device.getParameter ("band3Gain").isValid());
@@ -64,11 +88,11 @@ TEST_CASE ("A device handle reaches one of Phazite's devices, and nothing else")
 
 TEST_CASE ("A device without an editor of its own gets a knob for each parameter, showing its unit")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto eq = addDevice (*edit, Equalizer::typeID);
-    phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+    auto song = phazite::createSong();
+    const auto eq = addDevice (*song, Equalizer::typeID);
+    song->getUndoManager().clearUndoHistory();
 
-    phazite::ui::DeviceKnobs knobs ((phazite::makeDeviceHandle (*eq)));
+    phazite::ui::DeviceKnobs knobs ((phazite::makeDeviceHandle (*song, eq)));
     REQUIRE (knobs.getNumKnobs() == 50);
 
     auto& frequency = knobs.getKnob (Equalizer::getParameterIndex (0, Equalizer::frequency));
@@ -79,10 +103,10 @@ TEST_CASE ("A device without an editor of its own gets a knob for each parameter
     // Turning a knob changes its parameter, as an undo step the model names.
     auto& gain = knobs.getKnob (Equalizer::getParameterIndex (2, Equalizer::gain));
     gain.setValue (6.0, juce::sendNotificationSync);
-    CHECK (eq->getAutomatableParameterByID ("band3Gain")->getCurrentValue() == doctest::Approx (6.0f));
-    CHECK (phazite::describeUndo (&phazite::getSong (*edit)) == juce::String ("Undo Change Band 3 Gain"));
+    CHECK (phazite::getValueSetByHand (*song, phazite::ParameterRef { eq, "band3Gain" }) == doctest::Approx (6.0f));
+    CHECK (phazite::describeUndo (song.get()) == juce::String ("Undo Change Band 3 Gain"));
 
-    CHECK (phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*eq)) != nullptr);
+    CHECK (phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*song, eq)) != nullptr);
     CHECK (phazite::ui::createDeviceEditor (phazite::DeviceHandle()) == nullptr);
 }
 
@@ -100,10 +124,8 @@ TEST_CASE ("Every device's editor rests while nothing it shows moves, and shows 
     for (const auto* info : phazite::getOwnDevices())
     {
         CAPTURE (std::string (info->name));
-        auto edit = phazite::createSongEdit (phazite::test::getEngine());
-        auto plugin = addDevice (*edit, std::string (info->typeID).c_str());
-        phazite::test::settle();
-        auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*plugin));
+        SongWithDevice song (std::string (info->typeID).c_str());
+        auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (*song.song, song.id));
         REQUIRE (editor != nullptr);
 
         {
@@ -120,16 +142,15 @@ TEST_CASE ("Every device's editor rests while nothing it shows moves, and shows 
             const auto shown = std::find_if (info->parameters.begin(), info->parameters.end(),
                                              [] (const auto& parameter) { return parameter.id != phazite::devices::mixParameterID; });
             REQUIRE (shown != info->parameters.end());
-            const auto parameter = plugin->getAutomatableParameterByID (juce::String (shown->id.data(), shown->id.size()));
-            REQUIRE (parameter != nullptr);
-            phazite::setDeviceValue (*parameter,
-                                     juce::approximatelyEqual (shown->defaultValue, shown->maximum) ? shown->minimum : shown->maximum);
+            const phazite::ParameterRef parameter { song.id, juce::String (shown->id.data(), shown->id.size()) };
+            REQUIRE (phazite::describeParameter (*song.song, parameter).has_value());
+            phazite::setValueSetByHand (*song.song, parameter,
+                                        juce::approximatelyEqual (shown->defaultValue, shown->maximum) ? shown->minimum : shown->maximum);
             tick (1);
             CHECK_FALSE (window.takeRepaintedArea().isEmpty());
         }
 
-        editor = nullptr;
-        plugin = nullptr; // before its Edit
+        editor = nullptr; // before its song
     }
 }
 

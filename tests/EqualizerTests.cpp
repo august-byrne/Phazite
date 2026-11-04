@@ -3,7 +3,10 @@
 // its slopes, its smoothing, and its tap for the analyzer.
 #include "TestHelpers.h"
 #include "devices/eq/Equalizer.h"
-#include "model/devices/internal/DevicePlugin.h"
+#include "model/arrangement/internal/Tracks.h"
+#include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 
 #include <cmath>
@@ -99,7 +102,7 @@ TEST_CASE ("The EQ's description holds together, and a new EQ changes nothing")
     CHECK (devices::findParameter (Eq::info, "band3Gain") == Eq::getParameterIndex (2, Eq::gain));
     CHECK (devices::findParameter (Eq::info, "band8Slope") == Eq::getParameterIndex (7, Eq::slope));
     CHECK (devices::findParameter (Eq::info, "output") == Eq::outputParameter);
-    CHECK (devices::findParameter (Eq::info, "mix") == Eq::mixParameter); // which its thin plug-in applies
+    CHECK (devices::findParameter (Eq::info, "mix") == Eq::mixParameter); // which its runner applies (engine/nodes/DeviceRunner.h)
 
     const auto values = getDefaults();
 
@@ -246,12 +249,15 @@ TEST_CASE ("The EQ taps what it plays while a display listens")
 
 TEST_CASE ("The EQ is one of the engine's devices")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    const auto plugin = edit->getPluginCache().createNewPlugin (Eq::typeID, {});
-    auto* device = dynamic_cast<phazite::DevicePlugin*> (plugin.get());
-    REQUIRE (device != nullptr);
-    CHECK (device->getName() == juce::String ("EQ"));
-    CHECK (device->getAutomatableParameters().size() == 50);
-    CHECK (device->findParameter ("band1Frequency")->getCurrentValue() == doctest::Approx (30.0f));
-    CHECK (dynamic_cast<Eq*> (&device->getProcessor()) != nullptr);
+    const auto* info = phazite::findOwnDevice (Eq::typeID);
+    REQUIRE (info != nullptr);
+    CHECK (info->parameters.size() == 50);
+    CHECK (dynamic_cast<Eq*> (phazite::createOwnDevice (Eq::typeID).get()) != nullptr);
+
+    // A song holds one by its type, named after it, with its parameters at their defaults.
+    auto song = phazite::createSong();
+    const auto id = phazite::insertDeviceState (*song, phazite::getTrackIDs (*song)[0], phazite::makeOwnDeviceState (*song, Eq::typeID));
+    REQUIRE (id.isValid());
+    CHECK (phazite::getDeviceName (*song, id) == juce::String ("EQ"));
+    CHECK (phazite::getValueSetByHand (*song, phazite::ParameterRef { id, "band1Frequency" }) == doctest::Approx (30.0f));
 }

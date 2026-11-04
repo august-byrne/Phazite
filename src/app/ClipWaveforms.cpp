@@ -7,6 +7,8 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <juce_audio_utils/juce_audio_utils.h>
+
 #include <cmath>
 #include <functional>
 

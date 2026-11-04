@@ -10,7 +10,7 @@
 #include "app/AppCommands.h"
 #include "app/AppServices.h"
 #include "app/ProjectSession.h"
-#include "model/engine/internal/EngineSetup.h"
+#include "model/engine/internal/EngineContext.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/KeyDispatcher.h"
@@ -39,9 +39,8 @@ struct AppScreen
         runTimersUntil ([this] { return ! services.library.isIndexing(); }, 10000);
     }
 
-    te::Engine& engine = getEngine();
     TemporaryFolder temp;
-    AppServices services { engine,
+    AppServices services { getEngineContext(),
                            { .settingsInMemory = true,
                              .packsFolder = temp.folder.getChildFile ("Packs"),
                              .presetsFolder = temp.folder.getChildFile ("Presets") } };
@@ -49,11 +48,11 @@ struct AppScreen
     CommandRegistry registry;
     ui::CommandBridge commands { registry };
     ui::KeyDispatcher shortcutKeys { commands };
-    ProjectSession session { engine, getUIBehaviour (engine), services.recentProjects, temp.folder.getChildFile ("Projects"),
+    ProjectSession session { getEngineContext(), services.recentProjects, temp.folder.getChildFile ("Projects"),
                              temp.folder.getChildFile ("Unsaved") };
     ui::ComputerKeyboard keyboard { [] (const juce::MidiMessage&) {} };
-    ui::AppShell shell { *services.engineContext, commands,           shortcutKeys,     keyboard,           session.getContext(),
-                         services.settings,       services.soundPack, services.library, *services.previewer };
+    ui::AppShell shell { services.engineContext, commands,           shortcutKeys,     keyboard,           session.getContext(),
+                         services.settings,      services.soundPack, services.library, *services.previewer };
     TestWindow window { shell, 1280, 800 };
 };
 } // namespace phazite::test

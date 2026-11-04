@@ -6,8 +6,9 @@
 #include "GoldenFiles.h"
 #include "HostedDevice.h"
 #include "model/arrangement/PlaylistModel.h"
-#include "model/engine/internal/EngineSetup.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/transport/TransportModel.h"
 #include "ui/shell/StatusBar.h"
 #include "ui/theme/DesignTokens.h"
@@ -121,7 +122,7 @@ TEST_CASE ("The status bar says what is selected, and where what is played on a 
     context.getSongRange().clear();
     phazite::test::dispatchPendingMessages();
 
-    // Where MIDI goes: the track live MIDI plays, by its name, or no track (as before Tracktion has found the MIDI inputs,
+    // Where MIDI goes: the track live MIDI plays, by its name, or no track (as before Phazite has found the MIDI inputs,
     // which on a computer without them, as in CI, it may not have yet).
     status.refreshNow();
     const auto arrow = juce::String::fromUTF8 ("MIDI \xe2\x86\x92 ");
@@ -154,7 +155,7 @@ TEST_CASE ("The status bar shows the song's delay compensation, while it has som
     phazite::test::dispatchPendingMessages();
     auto& status = screen.shell.getStatusBar();
     auto& context = screen.session.getContext();
-    phazite::setLowLatency (phazite::test::getEngine(), false);
+    phazite::getPlaybackHost (phazite::test::getEngineContext()).setLowLatency (false);
 
     // A limiter on the master looks ahead.
     phazite::DeviceType limiter;
@@ -171,10 +172,10 @@ TEST_CASE ("The status bar shows the song's delay compensation, while it has som
     CHECK (status.getDelayText().endsWith (" ms"));
 
     // Low latency turns it off.
-    phazite::setLowLatency (phazite::test::getEngine(), true);
+    phazite::getPlaybackHost (phazite::test::getEngineContext()).setLowLatency (true);
     status.refreshNow();
     CHECK (status.getDelayText().isEmpty());
-    phazite::setLowLatency (phazite::test::getEngine(), false);
+    phazite::getPlaybackHost (phazite::test::getEngineContext()).setLowLatency (false);
 }
 
 TEST_CASE ("While clips are stretched in the background after a tempo change, the status bar shows how far, as a bar")

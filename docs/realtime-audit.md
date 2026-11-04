@@ -1,44 +1,33 @@
 # Real-time audit
 
-*October 2026: Tracktion Engine `bb386171` (3.5.0) with JUCE 8.0.13.* This is [roadmap](roadmap.md) step 0.3. It records:
+*Phazite's own engine, with JUCE 8.0.13; measured on 2026-11-02.* This is [roadmap](roadmap.md) step 0.3. It records:
 - how Phazite checks that the audio thread follows the real-time rules in `CLAUDE.md`;
-- what Tracktion Engine's code does on the audio thread today;
+- what is known to break them, in JUCE's code, a plug-in's, or Phazite's own until it was fixed;
 - what Phazite does about each finding.
 
-The policy is decision 4 in the [design](design.md#25-open-questions):
-- try simple workarounds first;
-- keep a fork of Tracktion Engine if the workarounds get awkward, or if upstream issues block us;
-- report every problem upstream either way.
-
-Replacing a part of the engine outright is a separate decision, made one capability at a time ([design section 23](design.md#23-tracktion-engine-what-it-gives-and-what-we-build)).
+A problem in Phazite's own code is fixed; one in JUCE's is worked around, or accepted where it is harmless. The findings keep the numbers that code and other documents cite them by; the numbers of findings that no longer apply aren't used again.
 
 ## How it is measured
 
-- **The scenarios:** [tests/RealtimeAuditTests.cpp](../tests/RealtimeAuditTests.cpp) builds small projects and plays them in real time. Playback goes through the tests' own audio device (`tests/TestAudioDevice.h`), opened on Phazite's device manager as the app opens a device, on a separate thread that acts as the audio thread (through Tracktion's hosted audio device until T4, step 1).
+- **The scenarios:** [tests/RealtimeAuditTests.cpp](../tests/RealtimeAuditTests.cpp) builds small projects through the model (`tests/TestSong.h`) and plays them in real time through Phazite's engine, as the app plays them. Playback goes through the tests' own audio device (`tests/TestAudioDevice.h`), opened on Phazite's device manager as the app opens a device, on a separate thread that acts as the audio thread.
   - The settings are 48 kHz with 256-sample blocks.
-  - The engine's worker threads are off in the tests, so all audio processing happens on that one thread.
-  - Like the app, the device opens no audio inputs unless a scenario asks for them.
+  - The engine plays on that one thread, its workers off, so that the monitor counts all it does (the workers play the same strips' code).
+  - Like the app, the device opens no audio inputs unless a scenario asks for them; a tone comes into its two inputs.
 - **Allocations (Windows Debug):** [tests/AudioThreadMonitor.cpp](../tests/AudioThreadMonitor.cpp) hooks the debug C runtime and counts every `malloc`, `realloc` and `free` on the audio thread. That includes `operator new` and JUCE's `HeapBlock`. It also records each one's call stack, which DbgHelp turns into function names.
-- **Warm-up, then steady playback:** each scenario plays at least 0.25 s, and on until the audio thread has gone 0.25 s without allocating or freeing, 2 s at most; then it measures one second of steady playback. Tracktion swaps MIDI buffers between its graph's nodes and pools them, so a buffer can be used for the first time, and allocate, some way into playback, depending on when notes arrive: with a fixed 0.25 s warm-up the recording scenario failed now and then (2026-10-16). Something that keeps allocating still shows in the steady second. The recording scenario's warm-up starts once recording has begun and its first note was played, and it starts with a 12-note chord: notes played from another thread can bunch into one block on a busy machine, and the chord makes the arrays bigger than that first (also 2026-10-16).
-- **Memory errors and data races (Linux CI):** the same playback runs under AddressSanitizer and ThreadSanitizer (the `linux-asan` and `linux-tsan` presets).
-- **Locks, and posting to the message thread, are not measured yet.** Those findings come from reading the engine's source. Clang's RealtimeSanitizer could measure them on Linux later.
+- **Warm-up, then steady playback:** each scenario plays at least 0.25 s, and on until the audio thread has gone 0.25 s without allocating or freeing, 2 s at most; then it measures one second of steady playback. Something that keeps allocating still shows in the steady second.
+- **Memory errors and data races (Linux CI):** the same playback runs under AddressSanitizer and ThreadSanitizer (the `linux-asan` and `linux-tsan` presets). Their suppression files (`tools/lsan-suppressions.txt`, `tools/tsan-suppressions.txt`) are for leaks and races in code Phazite can't change, each explained there and here; they suppress nothing now.
+- **Locks, and posting to the message thread, are not measured yet.** Those findings come from reading the code. Clang's RealtimeSanitizer could measure them on Linux later.
 - **To run it:**
 
   ```
   build\windows-debug\phazite_tests_artefacts\Debug\phazite_tests.exe --test-suite=realtime-audit
   ```
 
-- **Guards:** 33 scenarios must allocate and free nothing on the audio thread once playback is running, or the tests fail; since T2 step 10 they play through Phazite's engine, as the app does. They read no files, but for the frozen track's, which Phazite made: the browser's preview of a loop, which plays from memory (step 2.18), one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), an audio input recorded onto an armed track that hears it (step 3.4), automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2, automation clips until 2026-10-17), every kind of modulator and a macro moving the EQ (step 2.3; since 2026-10-30 the EQ moves its bands itself, every 32 samples: `model/devices/internal/DeviceModulation.h`), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), a frozen track playing its file (step 2.11), and Phazite's own devices (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler; then the devices of step 2.10 in a row, the synth's unison, the wavetable synth, and the filter types of steps 2.14 and 2.15; then, in step 2.17, every effect with its editor's displays listening, and the vocoder at 40 bands with another track as its carrier through the sidechain), and plug-ins in their helpers (T3): an effect after Phazite's synth, and three synths, each handed its block as the engine's block starts. The other scenarios only report.
+- **Guards:** 32 of the 36 scenarios must allocate and free nothing on the audio thread once playback is running, or the tests fail: the browser's preview of a loop, which plays from memory (step 2.18), one empty track, the metronome and a recording of the computer keyboard's notes (step 1.7), an audio input recorded onto an armed track that hears it, with notes played live from another thread (step 3.4), audio clips read from their files as they play, automation with an LFO, lanes sweeping the EQ a cycle a beat and fading a volume (step 2.2), every kind of modulator and a macro moving the EQ (step 2.3; the engine moves what they modulate every 32 samples), a container of the EQ and the compressor at half mix with its macro and the track's LFO turning them (step 2.4), the mix of step 1.4 (a tone through a bus, a send to a reverb return, and the master's loudness meter, built with the functions the mixer uses), a frozen track playing its file (step 2.11), and Phazite's own devices (step 1.6: the EQ with every band on and its analyzer listening, the compressor ducked through its sidechain by a muted track, the limiter on the master, the reverb on a return, the synth playing more notes than it has voices, and a beat on the drum sampler; then the devices of step 2.10 in a row, the synth's unison, the wavetable synth, and the filter types of steps 2.14 and 2.15; then, in step 2.17, every effect with its editor's displays listening, and the vocoder at 40 bands with another track as its carrier through the sidechain), and plug-ins in their helpers (step 3.3): an effect after Phazite's synth, and three synths, each handed its block as the engine's block starts. The other scenarios (an audio clip, a loop stretched to the song's tempo, a clip pitched and reversed, and two tracks in a folder bus) only report.
 
 ## Results (Windows Debug)
 
-Since [T2 step 10](tracktion-migration.md) (2026-11-02) every scenario plays as the app plays: its song opened as a
-project, and since T4 step 1 the tests' own device calling Phazite's callback on the one audio thread (before, Tracktion's
-hosted device called Tracktion's too, which played nothing of a project), Phazite's engine on one thread, so that the
-monitor counts all it does (its workers play the same strips' code), with a tone coming into the device's two inputs; the
-preview (T5 step 1) plays beside an empty song. The first column covers the warm-up after playback
-starts (about 0.5 s); the second covers the next second. Measured on 2026-11-02; the counts before, through Tracktion's
-graph, were in this table's history.
+Every scenario plays as the app plays: its song opened as a project, the tests' device calling Phazite's callback on the one audio thread, and Phazite's engine on that thread, with a tone coming into the device's two inputs; the preview plays beside an empty song. The first column covers the warm-up after playback starts (about 0.5 s); the second covers the next second. Measured on 2026-11-02.
 
 | Scenario | Warm-up | Next 1 s |
 |---|---|---|
@@ -78,149 +67,46 @@ graph, were in this table's history.
 | Two tracks in a folder bus with Phazite's compressor | 0 | 0 |
 | A loop at 120 BPM stretched to 100 BPM, played from Phazite's render | 0 | 0 |
 | An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from Phazite's render | 0 | 0 |
-| A loop at 120 BPM previewed at 100 BPM, stretched by Phazite into memory as it starts (the browser's preview, still Tracktion's graph until T5) | 8 allocations (the meters' and the device's, findings 2 and 3) | 0 |
+| A loop at 120 BPM previewed at 100 BPM, stretched by Phazite into memory as it starts (the browser's preview) | JUCE's device manager's mixing buffer, once (finding 3) | 0 |
 
-Steady playback is clean everywhere, and the warm-up nearly so: what Tracktion's graph allocated in its first blocks
-(its MIDI message arrays, its meters, its inputs' buffers) is gone with the graph, held silent while Phazite's engine
-plays a project. Tracktion's own audio inputs stay off since step 10 (`AudioRecorder`): one that is on makes a buffer on
-the audio thread for each block it hands its consumers (`te::WaveInputDevice::consumeNextAudioBlock()`), 376 allocations
-and frees a second at 48 kHz with two inputs, which the audit found once its scenarios played through both callbacks.
+Steady playback is clean everywhere, and the warm-up nearly so: what is left is JUCE's device callback sizing its buffer on a device's first callback (finding 3).
 
 ## Findings and actions
 
-"Measured" means the audit saw it. "Source" means it was found by reading the engine's code (October 2026).
+"Measured" means the audit saw it. "Source" means it was found by reading the code.
 
 ### Allocations
 
-**1. Audio-input buffers** (measured).
-- **What:** when an audio input is enabled, its first blocks allocate on the audio thread:
-  - the retrospective-record buffer: about 11 MB per stereo input at 48 kHz, for the default 30 seconds;
-  - its per-project bookkeeping, a map insert under a spin lock;
-  - the input copy buffers;
-  - and, until the Edit's playback has the input, a buffer at every block for the input's meter.
-- **Action (step 3.4, 2026-10-29):** Phazite opens an input only while a track is armed or always hears its input. The audio inputs keep no retrospective buffer, with no fork: Phazite's engine settings give Tracktion's retrospective length as 0 (Capture is for MIDI; audio Capture comes after v1), and live MIDI's inputs keep Capture's 30 seconds, set on them directly (`model/engine/internal/EngineSetup.h`). What is left happens as an input opens (its copy buffers, the bookkeeping, the meter's buffer before playback has the input): the recording scenario allocates 6 times as it warms up, and nothing after.
-- Report upstream.
-
-**2. Level meters** (measured): every meter allocates a small buffer in its first block (`LevelMeasurer::Client::ensureNumChannels`). This happens once per meter, so accept it for now. Report upstream; fix it in the fork if one exists by then.
-
 **3. JUCE's device callback** (measured): `juce::AudioDeviceManager` sizes a temporary buffer on its first callback, once per device. Accept it.
-
-**4. MIDI message arrays** (measured).
-- **What:** the arrays that carry MIDI through the playback graph grow on the audio thread when a block carries more events than any block before. This happens in `PluginNode`, `SummingNode`, `CombiningNode`, `TrackMutingNode` and others. `PluginNode` also swaps its array with its output's, and the graph pools those buffers, so an array can carry MIDI for the first time, and allocate, well into playback, depending on when notes arrive (found 2026-10-16, when it made the recording scenario fail now and then; the audit's warm-up now waits for a quiet stretch, and the recording scenario plays a chord first). An app playing live MIDI meets the same: a block with more notes than any before it allocates once. A plug-in with automation, which `PluginNode` plays in pieces of a block, swaps and merges arrays once a piece, so after an instrument it moves them around more: a Filter swept by a lane after a synth playing chords allocated once a second into playback (found 2026-10-18, step 2.14; its scenario plays the Filter on a track of its own).
-- **Why it is mostly harmless:** it stops once every pooled array has been used and their capacity covers the busiest block.
-- **Action:** re-measure with MIDI-heavy projects when MIDI recording lands (step 1.7); reserving capacity up front needs the fork. Report upstream.
-
-**5. 4OSC** (measured and source): allocates for every note (a `juce::MidiBuffer` per block, the MPE note list) and locks on every block. Phazite doesn't use it: its own synth replaced it in the starter project and the device list (step 1.6, 2026-10-15), and since 2026-10-18 projects that held it aren't supported either (the owner's decision: pre-alpha keeps no backward compatibility), so its audit scenario went.
-
-**6. Audio file reading** (measured and source).
-- **What:**
-  - every read takes a `juce::ReadWriteLock`, and releasing it can free memory;
-  - in Debug builds, a cache miss also writes a log message from the audio thread.
-- **Action:**
-  - the log is Debug-only, so ignore it;
-  - the lock is uncontended unless the cache's own thread is updating its file list: report it upstream and measure in the performance pass (step 3.5).
 
 ### Locks and messages
 
-**7. Automation and modulation** (source; the audit saw one post).
-- **What:** every change of an automated or modulated parameter calls `triggerAsyncUpdate()` on the audio thread (`AutomatableParameter::setParameterValue`). Posting a message takes a lock and can allocate on Windows. In the app it repeats at the UI's refresh rate for each moving parameter.
-- **Action:** there is no simple workaround, because the call is unconditional. It is the first candidate for the fork: replace the post with an atomic flag that a timer polls. Measure its real cost in step 3.5 to decide. Report upstream.
-
-**8. Volume and pan on every track** (source).
-- **What:**
-  - `VolumeAndPanPlugin` locks a `std::mutex` on every block;
-  - tracks inside a folder also lock the folder's plug-in mutex.
-- **Why it is mostly harmless:** the locks are uncontended in normal use, because the message thread only takes them when a folder's VCA changes.
-- **Action:** report upstream, and fork if contention shows up.
-
 **9. Hosted plug-ins** (source).
-- **What:**
-  - each plug-in's processing holds a lock that the message thread also takes when it initialises, resets or bypasses the plug-in;
-  - every call also takes the crash tracer's global spin lock.
-- **Action:** this matches how JUCE itself hosts plug-ins. Since 2026-11-02 (T3, [tracktion-migration.md](tracktion-migration.md)) every plug-in plays in a helper process of Phazite's (`model/plugins/internal/SandboxedProcessor.h`): Phazite's audio thread takes no lock of a plug-in's and no crash tracer; it hands the block to the helper through shared memory and waits for the answer, asleep, until a deadline of the block's own length, and the helper's audio thread holds the plug-in's lock as it plays, as any host's does. The guarded scenarios with plug-ins play the tests' stand-ins through their helpers, an effect, and three synths each handed its block as the engine's block starts (`devices::Processor::startsEarly()`), and allocate nothing in steady playback. Tracktion's renders (exports, stems, freezing, bouncing, until T5) still call plug-ins through Tracktion's te::ExternalPlugin, with its lock and crash tracer, which hands each block to the plug-in's helper in turn; they run off the audio thread.
+- **What:** JUCE's plug-in hosting holds each plug-in's callback lock while it processes a block, which the message thread also takes when it prepares, resets or bypasses the plug-in.
+- **Action:** every plug-in plays in a helper process of Phazite's (`model/plugins/internal/SandboxedProcessor.h`, since 2026-11-02, step 3.3): Phazite's audio thread takes no lock of a plug-in's; it hands the block to the helper through shared memory and waits for the answer, asleep, until a deadline of the block's own length, and the helper's audio thread holds the plug-in's lock as it plays, as any host's does (`src/host/core/Instance.h`). A plug-in that misses the deadline makes its own block late, never the song's. The guarded scenarios with plug-ins play the tests' stand-ins through their helpers, an effect, and three synths each handed its block as the engine's block starts (`devices::Processor::startsEarly()`), and allocate nothing in steady playback. Renders (exports, stems, freezing, bouncing) hand each block to the plug-in's helper too, and wait for it as long as it takes, off the audio thread.
 
-**10. Modulator timing** (source): the Edit takes a lock once per block to update its modulators, and the MIDI tracker modulator takes a spin lock. Report upstream; measure in step 3.5.
+**11. Stretched, pitched and reversed clips** (measured, steps 1.5, 2.6 and 2.18).
+- **What:** stretching or pitching audio as it plays would grow the stretcher's buffers on the audio thread, and cost far more than reading a file.
+- **Action:** since step 2.18 (2026-10-28) Phazite renders those clips itself, with Rubber Band's R3 engine, on two background threads of its own (`model/arrangement/internal/ClipRenders.h`), and the engine plays each render as a plain clip: only a file read, ahead of where it plays, by the engine's reading thread (`engine/audio/FileReader.h`). The clip is silent until its render is ready, usually well under a second for a loop. The audit's two scenarios play from those renders.
 
-**11. Scratch buffers** (source): `AudioScratchBuffer` takes a shared mutex. It allocates when its 8 pooled buffers are busy or a buffer has more than 2 channels. It is used by time-stretching, multi-output plug-ins and sidechains; the guarded scenarios with a sidechain (the compressor ducked by a muted track, the vocoder with a track as its carrier) allocate nothing in steady playback.
-  - **Time-stretching, revisited in step 1.5 (2026-10-13):** a loop dropped from the browser follows the song's tempo, and Tracktion plays it from a stretched copy that it renders in the background (a "proxy"), so the audio thread only reads a file: its steady playback allocates nothing (measured). The render starts 600 ms after the clip changes, and the clip is silent until it is ready, usually well under a second for a loop. Since step 2.6 (2026-10-17), the audio clip editor's pitch, Reverse and Follow Tempo play the same way: from a reversed copy of the file, and a pitched or stretched proxy rendered from it (measured: steady playback allocates nothing). The browser's preview stretched as it played instead (finding 17), until step 2.18.
-  - **Since step 2.18 (2026-10-28)** Phazite renders those clips itself, with Rubber Band's R3 engine, on two background threads of its own (`model/arrangement/internal/ClipRenders.h`), and Tracktion plays each render as a plain clip: still only a file read on the audio thread, and no Tracktion proxy, stretcher or scratch buffer for them. The audit's two scenarios play from those renders.
+**13. Recording** (measured, step 3.4; through Phazite's engine since 2026-11-02).
+- **What:** a take must not lock, allocate or write files on the audio thread, and must not lose its first blocks while the message thread is slow to hear that recording started.
+- **Action:** Phazite's engine takes the audio device's inputs in its own callback, plays them through the tracks that hear them, and copies each armed track's input, from the first sample the song plays after the take is given to the engine (after the count-in), into a buffer of its own that one reading thread empties into a file (`engine/core/Recording.h`, `model/transport/internal/Take.h`). The take is made and freed on the message thread and handed to the engine whole; the engine knows the song's sample it started on, so nothing depends on when the message thread hears that recording started. The notes played live come out of the engine with the clock they came in at. The guarded scenario records a tone onto an armed track that hears it, with notes played live from another thread, and allocates nothing once recording runs.
 
-**12. Tempo changes** (source): the tempo map swaps its rebuilt sequence under the audio callback's lock. Report upstream; test with tempo automation later.
-
-**13. Recording** (source; Phazite's audio recording measured, step 3.4).
-- **What:** Tracktion's MIDI and audio recording paths lock, allocate and start timers on the audio thread. Its audio recording also writes each block under a lock, adds silence in buffers it allocates, and needs a Tracktion project for its takes.
-- **Action:** MIDI recording is Tracktion's (step 1.7), and its guarded scenario allocates nothing in steady playback. Audio recording is Phazite's own since step 3.4 (2026-10-29, `model/transport/internal/AudioRecorder.h`): Tracktion hands each armed track's input to a consumer of Phazite's, which copies it into a buffer of its own (a `juce::AbstractFifo`) with no lock or allocation, and a thread of Phazite's writes it into the file. The one lock left is the input's list of consumers, which the audio thread takes at each block and the message thread only as recording starts and stops. The consumers are in place before recording starts playback, because Tracktion says that recording started only once it plays: added then, they lost a take's first blocks whenever the message thread was slow to hear it, as in the slower `linux-tsan` build (2026-10-29). The guarded scenario records a tone onto an armed track that hears it, and allocates nothing once recording runs.
-
-**14. The click track** (source): reads message-thread values on the audio thread without synchronisation. That's a data race rather than a lock. ThreadSanitizer in CI should show it. Report upstream.
-
-**15. The clip launcher** (source): uses spin locks, and its follow actions have unbounded loops. The launcher waits until after v1 (decision 2), so revisit then. Since 2026-10-21 Phazite turns clip slots off (`EngineBehaviour::areClipSlotsEnabled()`), so tracks have none of its nodes.
+**17. Previews** (measured, step 1.5; fixed 2026-10-28): stretching a previewed loop as it played grew the stretcher's buffers in its first blocks, so a preview started while the song played could make it glitch.
+- **Action (step 2.18):** Phazite stretches a previewed loop itself, as its clip would be, with Rubber Band's R3 engine (`model/engine/internal/PreviewLoop.h`): on a thread of its own, into memory, at the output's rate, starting at once (R3 offline needs no study pass, which only counts frames), and the preview plays as soon as a quarter of a second is ready with the render running at least twice as fast as it plays: about 55 ms after it is chosen for four bars (`windows-profile`).
+- **Since 2026-11-02:** previews play on Phazite's engine for previews, beside the song's (`model/playback/internal/PlaybackHost.h`). The stretched loop is an audio region whose file the previews' own reading thread reads from memory, waiting there for the render, and a loop starts once the first 32768 frames are stretched (the part the engine reads of a file at once). The guarded scenario plays it beside an empty song and allocates nothing in steady playback; its warm-up allocates JUCE's device manager's mixing buffer once (finding 3).
 
 **22. Live MIDI** (source; found by the performance audit, 2026-10-21, finding R8).
-- **What:** a note played live goes through two locks the audio thread takes too: the MIDI input device's (`MidiInputDevice`, taken by the thread that delivers the note) and the live input node's (`MidiInputDeviceNode::incomingMessagesMutex` and `liveMessagesMutex`, taken on the audio thread each block). They are held briefly and contended only while a note arrives as a block is processed.
-- **Action:** report upstream, with a lock-free FIFO from the delivering thread to the node as the fix. Watch it in the benchmark of a live note (`tests/Benchmarks.cpp`).
-
-**23. Live notes dropped after a busy message thread** (measured, 2026-10-28; logged on 2026-10-21 as known bug 3, "two limiters in a song silence what is played live", which the limiters had nothing to do with).
-- **What:** Tracktion's live MIDI input (`MidiInputDeviceNode::processSection`) takes it for a glitch when JUCE's approximate millisecond clock (`juce::Time::getApproximateMillisecondCounter()`) moved by more than two blocks and 100 ms since the block before, and drops the notes waiting. That clock only moves when a thread reads the exact one: JUCE's timer thread does every 100 ms at most, and not at all for up to 300 ms while it waits for a busy message thread; and a note played on the computer keyboard reads it itself (`juce::MidiKeyboardState::noteOn()`), making it jump just before the block that should play the note. So the first note played after the clock fell more than about 120 ms behind was lost. In the tests, whose message thread waits while the audio thread processes blocks, 45 of 72 notes were lost, with or without limiters; in the app, a note played as the UI thread came back from a tenth of a second or more of work (opening a project or a plug-in window, say). Tracktion's level meters and its check whether automation is being played read the same clock.
-- **Action:** Phazite brings the clock up to date after every block, from the audio thread (`ClockKeeper` in `model/engine/EngineSetup.cpp`, Tracktion's global output processor): two blocks' readings are then never further apart than the blocks. `tests/LiveInputTests.cpp` plays 12 notes in a row, with nothing else in the song and with a limiter and a maximizer on the master, and checks that each sounds as soon as the first. Report upstream: the check could read `juce::Time::getMillisecondCounter()`.
+- **What:** a note played live comes from another thread (a MIDI input's, or the message thread for the computer keyboard) while the audio thread plays; a lock between them would make the audio thread wait whenever a note arrives as a block is processed.
+- **Action:** live notes reach the engine through a queue of a fixed size that any thread pushes into and the audio thread takes from, without locks or allocation (`engine/core/EventQueue.h`), and play in the next block. Watch it in the benchmark of a live note (`tests/Benchmarks.cpp`); `tests/LiveInputTests.cpp` checks that a live note sounds at once, and that every live note sounds however long the message thread was busy.
 
 **24. Yielding while another thread's task finishes** (measured, 2026-11-02, after the owner heard crackling "in different scenarios": the Fold Lead preset played live, House Groove's start).
 - **What:** Phazite's engine plays a block's strips as tasks on the audio thread and its workers (`engine/core/Workers.h`). A task waits for the inputs other tasks are playing, and the audio thread for the tasks the workers took, and both waited with `std::this_thread::yield()`. On Windows that is `SwitchToThread()`, which hands the core to any thread ready on it, a busy UI thread at the normal priority included, for the rest of its time slice. Measured on Windows 11 with a normal thread busy on the core of a thread in MMCSS's Pro Audio task, idle 2 ms between blocks as an audio thread is: a third of 30,000 yields took over 1 ms, and the worst 16.6 ms, several blocks. `Sleep (0)` was no better (a fifth over 1 ms, worst 15.8 ms). A spin with the processor's pause instruction never took a measurable time. A busy UI while the song plays (the playlist repainting, keys being played) therefore cost blocks whenever it shared a core with a waiting audio thread.
 - **Action:** the engine's threads spin for each other (`devices::spinUntil()` in `devices/core/AudioThreads.h`), never giving the core away: the tasks they wait for are real-time safe and end by the block's deadline (a plug-in's round trip has one), so a wait costs at most that long a spin.
 
-### Built-in effects
-
-**16. Tracktion's built-in effects** (measured and source).
-- **Measured** (until 2026-10-18, when its scenario went): the EQ, compressor, reverb and a send allocated nothing in steady playback.
-- **Source:** reading the code finds locks or reallocation on the audio thread in:
-  - the 4-band EQ;
-  - the sampler, which also allocates for every note;
-  - chorus and delay;
-  - the patch bays and the channel mapper;
-  - the Airwindows wrapper.
-- **Action:** Phazite ships its own devices (steps 1.6 and 2.10) and uses none of Tracktion's: its device list (`phazite::getDeviceTypes()`) offers Phazite's own and the plug-ins found by scanning. Tracktion's reverb, which reads its parameters atomically and allocates nothing (measured), was offered until Phazite's own reverb replaced it (2026-10-15), and projects that held it played it until 2026-10-18. The phaser, the filter and the compressor read `juce::CachedValue`s on the audio thread, so they stayed out from the start.
-
-**17. Previews** (measured, step 1.5; fixed 2026-10-28): the browser's preview plays a loop in an Edit of its own, mixed on the same audio thread as the song. Tracktion's preview Edit stretched the loop as it played, with SoundTouch: in its first blocks SoundTouch grew its buffers (`FIFOSampleBuffer::ensureCapacity`, 10 allocations), so a preview started while the song played could make it glitch, and it played drum hits twice as clips stretched by SoundTouch did.
-- **Action (step 2.18):** Phazite stretches a previewed loop itself, as its clip would be, with Rubber Band's R3 engine (`model/engine/internal/PreviewLoop.h`): on a thread of its own, into memory, at the output's rate, starting at once (R3 offline needs no study pass, which only counts frames), and the preview plays as soon as a quarter of a second is ready with the render running at least twice as fast as it plays: about 55 ms after it is chosen for four bars (`windows-profile`). No stretcher of Tracktion's is compiled in any more.
-- **Since T5, step 1 (2026-11-02):** previews play on Phazite's engine for previews, beside the song's ([tracktion-migration.md](tracktion-migration.md), T5), and the preview Edit is gone. The stretched loop is an audio region whose file the previews' own reading thread reads from memory, waiting there for the render, and a loop starts once the first 32768 frames are stretched (the part the engine reads of a file at once). The guarded scenario plays it beside an empty song and allocates nothing in steady playback; its warm-up allocates JUCE's device manager's mixing buffer once.
-
-### Data races
-
-**18. The audio file cache** (measured by ThreadSanitizer in CI, 2026-10-14).
-- **What:** each time Tracktion's cache maps an audio file again, its background thread (`CacheMapper`) replaces the file's whole `AudioFileInfo` under the file's lock (`AudioFileCache::CachedFile::createNewReader`). Preparing playback on the message thread reads the sample rate and channel count, and the audio thread reads the length, without that lock. The audit's scenario that plays a dropped loop from a file shows it.
-- **Why it is mostly harmless:** for a file that hasn't changed, the values written are the ones already there.
-- **Action:** `tools/tsan-suppressions.txt` suppresses it, so that the `linux-tsan` tests still catch new races. Report upstream.
-
-**19. The hosted MIDI input** (measured by ThreadSanitizer in CI, 2026-10-16).
-- **What:** Tracktion's hosted audio device, which the tests (and plug-ins built on Tracktion) play through, passes each block's MIDI to the input instances of the Edits playing (`HostedMidiInputDevice::processBlock`) without the lock under which an Edit's playback adds and removes its instances on the message thread (`MidiInputDevice::addInstance`, `removeInstance`). A test that starts or stops playback while the hosted device processes blocks on a thread of its own shows it.
-- **Why it is harmless to Phazite:** the app plays through the computer's own audio and MIDI devices, not the hosted one; only the tests use it.
-- **Action:** `tools/tsan-suppressions.txt` suppressed it. *Gone since T4, step 1 (2026-11-02):* the tests play through a device of their own, and Tracktion opens no MIDI input; the suppression went with it.
-
-**20. The transport's position while the song is stopped** (measured by ThreadSanitizer in CI, 2026-10-17).
-- **What:** while the transport is stopped, a plug-in with automation sets its parameters from where the playhead is, in each block (`Plugin::applyToBufferWithAutomation`). It reads that position with `TransportControl::getPosition()`, a `juce::CachedValue` that the message thread writes whenever the playhead moves, without synchronisation. The touch test in `tests/AutomationModelTests.cpp` shows it, now and then: it stops the song while the volume it automated keeps playing. The app does the same when the playhead moves while the song is stopped.
-- **Why it is mostly harmless:** the position is an aligned 8-byte value, which x86-64 and ARM64 read and write whole, so the audio thread sees the old position or the new one. At worst, one block applies the automation from where the playhead was.
-- **Action:** `tools/tsan-suppressions.txt` suppresses races in `TransportControl::getPosition()`, which Phazite's own code calls on the message thread only. Naming the plug-in function instead would hide every race inside any device's processing. A fork would read the playhead's own position, which the audio thread may read. Report upstream.
-
-**21. Render jobs deleted while their thread lets go of them** (measured by ThreadSanitizer in CI, 2026-10-17).
-- **What:** Tracktion makes some files in the background with `RenderManager` jobs on a JUCE thread pool, such as the reversed copy of an audio clip's file that Reverse plays (step 2.6). A finished job posts a message, and on the message thread `RenderManager::Job::handleMessage` drops its last reference as soon as `isRunning()` says the pool is done with it, so `RenderManager` deletes it. But JUCE's `ThreadPool::runNextJob` clears a job's running flag before it writes the job's `shouldStop` flag and `pool` pointer, so the pool's thread can still write to a job that has just been deleted. ThreadSanitizer saw the deletion race with the pool's thread four times in the tests that reverse clips. The race's other stack didn't fit in GitHub's annotation, which keeps 4096 characters: `tools/ci-sanitizer-reports.sh` now shortens reports so that both stacks fit.
-- **Why it is rare:** the message must be handled in the moment between those writes, on another thread; if the job still runs then, a timer tries again later. It happens once per render, not during playback.
-- **Action:** `tools/tsan-suppressions.txt` suppresses races in `RenderManager::handleAsyncUpdate()`, which only deletes finished jobs; Phazite's code runs on neither side. The fix belongs in Tracktion (delete a job once the pool has let go of it) or JUCE (clear the running flag last). Report upstream.
-
-**24. The hosted audio device opened again while a thread plays through it** (measured by ThreadSanitizer in CI, 2026-10-29).
-- **What:** Tracktion's hosted audio device keeps the callback it is started with in a plain pointer, which `HostedAudioDevice::start()` sets on the message thread whenever JUCE opens the device again, and which `processBlock()` reads on the thread that plays through the device, without synchronisation. The computer's own devices stop handing blocks to the callback before they change it. The audio recording tests (step 3.4) showed it five times: arming a track opened the device again while `RealTimePlayback`'s thread played through it.
-- **Why it is harmless to Phazite:** the app plays through the computer's own devices; only the tests use the hosted one.
-- **Action:** not suppressed. A suppression would have to name the reader, `HostedAudioDeviceType::processBlock`, which is on every stack of the tests' audio thread, so it would hide every race there. Instead the tests never open the device again while a thread plays through it (`tests/RealTimePlayback.h`): the device opens both its inputs, and arming a track opens it again only when an input that the track needs is closed. `AudioRecorder::update()` had also opened it again to name inputs that were open already, which the app never needs, as it opens no input by itself. The hosted device reports every input open whatever is asked of it, so opening and closing the inputs that armed tracks need is checked by hand, with an audio interface. Report upstream. *Gone since T4, step 1 (2026-11-02):* the tests' own device (`tests/TestAudioDevice.h`) starts, stops and plays blocks under one lock, as a driver does, and reports the inputs its setup opened.
-
-**25. A modulator's sample rate written while the graph plays** (measured by ThreadSanitizer in CI, 2026-10-29).
-- **What:** building a playback graph on the message thread initialises each modulator's node, which writes the modulator's sample rate, a plain `double` (`Modifier::baseClassInitialise`), while the audio thread reads it for the graph still playing, in the LFO's timer (`LFOModifier::LFOModifierTimer::updateStreamTime`, through `Modifier::getSampleRate()`), without synchronisation. It showed in one of four `linux-tsan` runs of the same code.
-- **Why it is harmless:** the value written is the device's rate, which hasn't changed (a new rate restarts the device first), and an aligned 8-byte value, which x86-64 and ARM64 read and write whole.
-- **Action:** `tools/tsan-suppressions.txt` suppresses races in `Modifier::getSampleRate()`, which Phazite's own code doesn't call. Report upstream.
-
-## Reporting upstream
-
-Tracktion takes bug reports in the [Tracktion Engine category of the JUCE forum](https://forum.juce.com/c/tracktion-engine), not as pull requests. These findings are worth reporting there: 1, 2, 4, 6, 7, 8, 9, 10, 11, 12, 14, 18, 19, 20, 21, 23, 24 and 25. Posting is the owner's call.
-
 ## Next
 
-- **CI:** the first ThreadSanitizer run with a clip playing from a file found finding 18 (2026-10-14); AddressSanitizer found nothing. Check both after every push that touches playback.
+- **CI:** check the AddressSanitizer and ThreadSanitizer runs after every push that touches playback.
 - **Locks:** a RealtimeSanitizer job (Clang 20 or newer, Linux) would measure locks and system calls, not just allocations.
-- **Re-run:** run this audit whenever a step touches playback, and after every Tracktion Engine update. The guards in the test suite catch regressions in the basic paths.
+- **Re-run:** run this audit whenever a step touches playback, and after every JUCE update. The guards in the test suite catch regressions in the basic paths.

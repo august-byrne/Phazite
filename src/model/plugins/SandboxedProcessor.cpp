@@ -53,24 +53,24 @@ namespace
     }
 } // namespace
 
-SandboxedProcessor::SandboxedProcessor (te::Plugin& p, SandboxedInstance& sandboxed)
-    : plugin (&p),
-      instance (sandboxed),
+SandboxedProcessor::SandboxedProcessor (std::shared_ptr<SandboxedInstance> sandboxed)
+    : kept (std::move (sandboxed)),
+      instance (*kept),
       typeID ("plugin"),
-      name (p.getName().toStdString())
+      name (instance.getDescription().name.toStdString())
 {
     info.typeID = typeID;
     info.name = name;
     info.kind =
         instance.acceptsMidi() && instance.getTotalNumInputChannels() == 0 ? devices::DeviceKind::instrument : devices::DeviceKind::effect;
 
-    // The plug-in's parameters by their places, then an effect's mix with what came in, which the engine applies (an
-    // instrument has none). The names and IDs are made first: the descriptions point into them.
+    // The plug-in's parameters, by their own IDs in their places, then an effect's mix with what came in, which the engine
+    // applies (an instrument has none). The names and IDs are made first: the descriptions point into them.
     const auto& own = instance.getRemote().getInfo().parameters;
 
     for (size_t i = 0; i < own.size(); ++i)
     {
-        ids.push_back (std::to_string (i));
+        ids.push_back (own[i].id.toStdString());
         names.push_back (own[i].name.toStdString());
     }
 
@@ -83,11 +83,9 @@ SandboxedProcessor::SandboxedProcessor (te::Plugin& p, SandboxedInstance& sandbo
     info.parameters = parameters;
 }
 
-int SandboxedProcessor::findParameter (const juce::String& tracktionID) const noexcept
+int SandboxedProcessor::findParameter (const juce::String& ownID) const
 {
-    // Tracktion names each by its place: "0", "1"...
-    const auto index = tracktionID.getIntValue();
-    return juce::isPositiveAndBelow (index, (int) ids.size()) && tracktionID == juce::String (index) ? index : -1;
+    return instance.findParameter (ownID);
 }
 
 void SandboxedProcessor::prepare (double sampleRate, int maximumBlockSize)

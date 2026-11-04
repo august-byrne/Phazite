@@ -42,16 +42,16 @@ phazite::NoteData noteOf (const phazite::Song& song, const phazite::NoteRef& not
     return *data;
 }
 
-// An Edit with a MIDI clip from beat 4 to 8 (one bar, 4/4), the note selection for it, and the selection
+// A song with a MIDI clip from beat 4 to 8 (one bar, 4/4), the note selection for it, and the selection
 // and note commands, with a grid of a quarter beat.
 struct Notes
 {
     Notes()
     {
-        track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
+        track = phazite::ensureTracks (song, 1).front();
         clip = phazite::insertMidiClip (song, track, { beats (4), beats (8) }, nullptr);
         REQUIRE (clip.isValid());
-        selection.setEdit (edit.get());
+        selection.setSong (&song);
         selection.setNoteClips ({ clip });
         phazite::addSelectionCommands (registry, selection, range);
         phazite::addNoteCommands (registry, selection, [] { return 0.25; });
@@ -74,11 +74,11 @@ struct Notes
     phazite::BeatRange rangeOf (phazite::ClipID id) const { return phazite::getClipRange (song, id); }
     size_t numNotesIn (phazite::ClipID id) const { return phazite::getClipNotes (song, id).size(); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::Song& song = phazite::getSong (*edit);
+    phazite::Song::Ptr songPtr = phazite::createSong();
+    phazite::Song& song = *songPtr;
     phazite::TrackID track;
     phazite::ClipID clip;
-    phazite::Selection selection { phazite::test::getEngine() };
+    phazite::Selection selection;
     phazite::RangeSelection range { selection };
     phazite::CommandRegistry registry;
 };
@@ -153,7 +153,7 @@ TEST_CASE ("Duplicated notes go right after the selection")
 
 TEST_CASE ("A clip grows into the empty space after it only: never over the next clip on its track")
 {
-    Notes n; // its clip is beats 4 to 8, on the Edit's only track
+    Notes n; // its clip is beats 4 to 8, on the song's only track
     const auto track = phazite::getClipTrack (n.song, n.clip);
     const auto addClip = [&n, track] (double start, double end)
     {
@@ -225,7 +225,7 @@ TEST_CASE ("Duplicating notes past their clip grows it only up to the next clip,
     CHECK (n.rangeOf (next).getStart().inBeats() == doctest::Approx (10.0));
 
     n.selection.deselectAll(); // the copies go with the undo
-    phazite::undo (*n.edit);
+    phazite::undo (n.song);
     CHECK (n.numNotesIn (n.clip) == 2);
     CHECK (n.rangeOf (n.clip).getEnd().inBeats() == doctest::Approx (8.0));
 }
@@ -306,31 +306,30 @@ TEST_CASE ("Keys: shading, snapping and transposing in the key")
 
 TEST_CASE ("A track has no key until one is chosen, and new tracks get the key chosen last")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto* track = te::getAudioTracks (*edit).getFirst();
-    REQUIRE (track != nullptr);
-    CHECK_FALSE (phazite::getTrackKey (*track).has_value());
+    auto song = phazite::createSong();
+    const auto track = phazite::ensureTracks (*song, 1).front();
+    CHECK_FALSE (phazite::getTrackKey (*song, track).has_value());
 
-    phazite::getSong (*edit).getUndoManager().beginNewTransaction();
-    phazite::setTrackKey (*track, phazite::Key { 9, phazite::Scale::minor });
-    const auto key = phazite::getTrackKey (*track);
+    song->getUndoManager().beginNewTransaction();
+    phazite::setTrackKey (*song, track, phazite::Key { 9, phazite::Scale::minor });
+    const auto key = phazite::getTrackKey (*song, track);
     REQUIRE (key.has_value());
     CHECK (phazite::describeKey (*key) == juce::String ("A minor"));
-    CHECK (phazite::findTrackState (*track)[phazite::schema::keyScale].toString() == juce::String ("minor")); // saved by name
+    CHECK (phazite::findTrackState (*song, track)[phazite::schema::keyScale].toString() == juce::String ("minor")); // by name
 
     // A new track gets it.
-    auto* added = phazite::insertTrack (*edit, track, nullptr);
-    REQUIRE (added != nullptr);
-    REQUIRE (phazite::getTrackKey (*added).has_value());
-    CHECK (phazite::getTrackKey (*added)->root == 9);
-    CHECK (phazite::getTrackKey (*added)->scale == phazite::Scale::minor);
+    const auto added = phazite::insertTrack (*song, track, nullptr);
+    REQUIRE (added.isValid());
+    REQUIRE (phazite::getTrackKey (*song, added).has_value());
+    CHECK (phazite::getTrackKey (*song, added)->root == 9);
+    CHECK (phazite::getTrackKey (*song, added)->scale == phazite::Scale::minor);
 
     // Turning it off is an undo step.
-    phazite::getSong (*edit).getUndoManager().beginNewTransaction();
-    phazite::setTrackKey (*track, std::nullopt);
-    CHECK_FALSE (phazite::getTrackKey (*track).has_value());
-    phazite::undo (*edit);
-    CHECK (phazite::getTrackKey (*track).has_value());
+    song->getUndoManager().beginNewTransaction();
+    phazite::setTrackKey (*song, track, std::nullopt);
+    CHECK_FALSE (phazite::getTrackKey (*song, track).has_value());
+    phazite::undo (*song);
+    CHECK (phazite::getTrackKey (*song, track).has_value());
 }
 
 TEST_CASE ("Chord stamps and drum rows")
@@ -446,22 +445,22 @@ TEST_CASE ("Replacing the selected notes selects the new ones")
 
 TEST_CASE ("Every track can get the same key")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::ensureTracks (*edit, 3);
-    const auto tracks = phazite::getPlaylistTracks (*edit);
+    auto song = phazite::createSong();
+    const auto tracks = phazite::ensureTracks (*song, 3);
     REQUIRE (tracks.size() == 3);
 
-    phazite::setTrackKeys (tracks, phazite::Key { 2, phazite::Scale::minor });
+    phazite::setTrackKeys (*song, tracks, phazite::Key { 2, phazite::Scale::minor });
 
-    for (auto* track : tracks)
+    for (const auto track : tracks)
     {
-        const auto key = phazite::getTrackKey (*track);
+        const auto key = phazite::getTrackKey (*song, track);
         REQUIRE (key.has_value());
         CHECK (phazite::describeKey (*key) == juce::String ("D minor"));
     }
 
-    phazite::setTrackKeys (tracks, std::nullopt);
-    CHECK (std::none_of (tracks.begin(), tracks.end(), [] (te::Track* track) { return phazite::getTrackKey (*track).has_value(); }));
+    phazite::setTrackKeys (*song, tracks, std::nullopt);
+    CHECK (std::none_of (tracks.begin(), tracks.end(),
+                         [&song] (phazite::TrackID track) { return phazite::getTrackKey (*song, track).has_value(); }));
 }
 
 TEST_CASE ("Scales are saved by name")
@@ -495,9 +494,9 @@ TEST_CASE ("Scales are saved by name")
 
 TEST_CASE ("The piano roll's key menu, Alt and the wheel, and an applied transform are undo steps of their own")
 {
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto& song = phazite::getSong (*edit);
-    const auto track = phazite::getTrackID (*te::getAudioTracks (*edit)[0]);
+    auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    const auto track = phazite::ensureTracks (song, 1).front();
     const auto clip = phazite::insertMidiClip (song, track, { phazite::BeatPosition(), beats (4.0) }, nullptr);
     REQUIRE (clip.isValid());
     const auto note = phazite::addNote (song, clip, 60, phazite::BeatPosition(), length (1.0), 100);
@@ -536,7 +535,7 @@ TEST_CASE ("Slide and portamento notes are switched by their commands, each one 
     CHECK (n.get (e).slide);
     CHECK_FALSE (n.get (e).portamento);
     CHECK_FALSE (n.get (c).slide);
-    CHECK (phazite::describeUndo (&phazite::getSong (*n.edit)) == juce::String ("Undo Slide Note"));
+    CHECK (phazite::describeUndo (&n.song) == juce::String ("Undo Slide Note"));
 
     // Portamento on both; with one of them already, it goes on for the other.
     n.select ({ c, e });
@@ -557,9 +556,9 @@ TEST_CASE ("Slide and portamento notes are switched by their commands, each one 
     CHECK (copies == 2);
 
     // Undone, step by step.
-    phazite::undo (*n.edit);
-    phazite::undo (*n.edit);
+    phazite::undo (n.song);
+    phazite::undo (n.song);
     CHECK_FALSE (n.get (c).portamento);
-    phazite::undo (*n.edit);
+    phazite::undo (n.song);
     CHECK_FALSE (n.get (e).slide);
 }

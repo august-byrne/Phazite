@@ -2,8 +2,8 @@
 // A channel's level as a meter reads it: polled from a timer on the message thread, never sent as change messages
 // (docs/design.md, section 24, rule 6). It follows what it measures, which can come and go (a plain folder that
 // becomes a bus, playback that starts again): refresh() before reading. Each read gives the loudest level a channel
-// reached since the last read, in decibels. The model hands sources out (MixerModel.h; its Tracktion side is
-// internal/LevelSource.h).
+// reached since the last read, in decibels. The model hands sources out (MixerModel.h; it makes them of Phazite's engine's
+// meters with internal/LevelSource.h).
 #pragma once
 
 #include <memory>

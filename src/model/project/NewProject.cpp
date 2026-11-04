@@ -5,7 +5,6 @@
 #include "model/arrangement/internal/Outlines.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Tempo.h"
 
@@ -21,20 +20,20 @@ bool isValid (const NewProjectSettings& settings)
     return tempoIsValid && isValid (settings.timeSignature) && keyIsValid && outlineIsValid;
 }
 
-void addNewProjectContent (te::Edit& edit, const NewProjectSettings& settings)
+void addNewProjectContent (Song& song, const NewProjectSettings& settings)
 {
-    // Not undo steps that matter: the project opens from its first save, without them. It starts with no tracks (the owner,
-    // 2026-11-01), so the one a new song has goes.
-    deleteTracks (getSong (edit), getTrackIDs (getSong (edit)), nullptr);
-    setTempo (getSong (edit), settings.tempo);
-    setTimeSignature (getSong (edit), settings.timeSignature);
+    // Not undo steps that matter: the project starts from its first save, without them. It starts with no tracks (the
+    // owner, 2026-11-01), so the one a new song has goes.
+    deleteTracks (song, getTrackIDs (song), nullptr);
+    setTempo (song, settings.tempo);
+    setTimeSignature (song, settings.timeSignature);
 
     // The key goes on the tracks added later.
     if (settings.keyRoot.has_value())
         if (const auto scale = findScale (settings.scale))
-            setLastKey (edit, { *settings.keyRoot, *scale });
+            setLastKey (song, { *settings.keyRoot, *scale });
 
     if (settings.outline.isNotEmpty())
-        applyOutline (getSong (edit), settings.outline);
+        applyOutline (song, settings.outline);
 }
 } // namespace phazite

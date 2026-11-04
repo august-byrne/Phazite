@@ -1,10 +1,12 @@
 #!/bin/sh
 # Checks that Phazite's code keeps to its architecture rules (CLAUDE.md, "Architecture rules"; docs/design.md,
-# section 24). It counts what the rules forbid in src/, plus includes and CMake source paths that Linux wouldn't
-# find, and compares each count with its budget in tools/architecture-budget.txt. Every count must equal its
-# budget, and budgets only go down: a commit that removes matches lowers the budget (--update), and a commit
-# that raises one on purpose says why in its message, with a line
+# section 24). It counts what the rules forbid in src/, and Tracktion Engine in src/, tests/ and tools/, plus
+# includes and CMake source paths that Linux wouldn't find, and compares each count with its budget in
+# tools/architecture-budget.txt. Every count must equal its budget, and budgets only go down: a commit that
+# removes matches lowers the budget (--update), and a commit that raises one on purpose says why in its message,
+# with a line
 #     Architecture-Budget-Raise: <rule> <old> -> <new>: <reason>
+# A rule that a commit adds to the budget file, or drops from it, raises nothing.
 #
 #   sh tools/check-architecture.sh [--base REV]  check the working tree: print each count with its budget and,
 #                                                for a count over its budget, the files whose count grew since
@@ -35,18 +37,10 @@
 #                             included in model, services, engine, sandbox or devices
 #   model-window-references   JUCE window classes (juce::Component, juce::KeyPress...) named in model,
 #                             services, engine, sandbox or devices
-#   model-tracktion-includes  Tracktion included in model or services outside the prelude
 #   model-undo-steps          beginNewTransaction in model or services outside the undo code
 #   model-include-loops       model and services files whose includes lead back to themselves
-#   devices-tracktion         Tracktion, or the model's prelude, included in devices, and te:: and
-#                             tracktion:: names there
-#   engine-tracktion          the same in engine
-#   sandbox-tracktion         the same in sandbox
-#   host-tracktion            the same in host
-#   ui-tracktion-includes     Tracktion, the model's prelude or its internal/ headers (each area's Tracktion
-#                             side), included in ui
-#   ui-tracktion-references   te:: and tracktion:: names in ui
-#   ui-tracktion-aliases      using-declarations, aliases and typedefs in ui that would hide Tracktion names
+#   ui-internal-includes      the model's internal/ headers (each area's own, for the model, the app and the
+#                             tests) included in ui
 #   ui-undo-steps             calls that begin an undo step, in ui and app
 #   flat-files                C/C++ files directly in src/model, src/ui, src/engine, src/sandbox, src/host or
 #                             src/devices instead of an area's folder
@@ -54,11 +48,11 @@
 #                             case (next to the including file, else from src/)
 #   cmake-sources             source paths in CMakeLists.txt that name no file exactly, and C/C++ files in src/
 #                             or tests/ that it doesn't list
-#   tracktion-AREA            te:: and tracktion:: names in each area of the model (src/model/AREA, one rule
-#                             for each of tracktion_areas), which the migration off Tracktion only lowers
-#                             (docs/tracktion-migration.md); tracktion-other counts them in a model area that
-#                             isn't listed yet, and tracktion-services, tracktion-app and tracktion-tests in
-#                             src/services, src/app and tests/
+#   tracktion                 Tracktion Engine anywhere in src/, tests/ or tools/: an include of one of its
+#                             headers (tracktion_engine/, tracktion_graph/, tracktion_core/ or any other
+#                             tracktion_* module), a te:: or tracktion:: name, or a namespace that names it
+#                             (namespace te = ..., namespace x = tracktion..., using namespace tracktion).
+#                             Phazite has no Tracktion Engine; nothing may name or include it.
 # Comments and the text of string and character literals don't count. A C/C++ file in src/ outside the eight
 # layers fails the check whatever the budgets.
 # Exit codes: 0 = every count equals its budget (and every raise checked says why); 1 = a count differs from
@@ -70,15 +64,10 @@
 cd "$(git rev-parse --show-toplevel)" || exit 2
 
 # Settings. Lists of paths are separated by spaces.
-# The model's prelude headers: the only model files that may include Tracktion, and model headers that src/ui
-# may not include.
-tracktion_preludes='src/model/base/internal/Tracktion.h'
 # The calls that begin an undo step (an extended regular expression), counted in src/ui and src/app.
 undo_functions='beginNewTransaction|UndoStep'
 # The undo code: the model files that may call beginNewTransaction.
 undo_implementation='src/model/commands/Undo.cpp'
-# The model's areas whose Tracktion names are counted, each as a rule of its own (tracktion-AREA).
-tracktion_areas='arrangement automation base chords commands devices engine mirror mixer modulation notes playback plugins presets project transport'
 
 budget_file=tools/architecture-budget.txt
 awk=${AWK:-awk}
@@ -137,17 +126,9 @@ function setup(    i, n, s, parts) {
     CXX = "[.](c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|mm)$"
     BUDGETS = "tools/architecture-budget.txt"
 
-    ruleNames = "upward-includes model-window-includes model-window-references model-tracktion-includes"
-    ruleNames = ruleNames " model-undo-steps model-include-loops devices-tracktion engine-tracktion sandbox-tracktion host-tracktion"
-    ruleNames = ruleNames " ui-tracktion-includes"
-    ruleNames = ruleNames " ui-tracktion-references"
-    ruleNames = ruleNames " ui-tracktion-aliases ui-undo-steps flat-files unresolved-includes cmake-sources"
-    n = split(areas, parts, " ")
-    for (i = 1; i <= n; i++) {
-        ruleNames = ruleNames " tracktion-" parts[i]
-        what["tracktion-" parts[i]] = "te:: and tracktion:: names in src/model/" parts[i]
-    }
-    ruleNames = ruleNames " tracktion-other tracktion-services tracktion-app tracktion-tests"
+    ruleNames = "upward-includes model-window-includes model-window-references model-undo-steps"
+    ruleNames = ruleNames " model-include-loops ui-internal-includes ui-undo-steps flat-files unresolved-includes"
+    ruleNames = ruleNames " cmake-sources tracktion"
     nrules = split(ruleNames, rules, " ")
     for (i = 1; i <= nrules; i++) known[rules[i]] = 1
 
@@ -164,21 +145,18 @@ function setup(    i, n, s, parts) {
     s = s "|ColourSelector|SystemTrayIconComponent|WebBrowserComponent"
     reWindowClass = W "juce::(" s ")" W
     reWindowModule = "^(juce_gui_basics|juce_gui_extra|juce_opengl|juce_video)/"
-    reTracktionModule = "^(tracktion_engine|tracktion_graph|tracktion_core)/"
+    # A header of one of Tracktion's modules (tracktion_engine/..., tracktion_graph/...), by any path to it.
+    reTracktionInclude = "(^|/)tracktion_[A-Za-z0-9_]+(/|[.])"
     reModelInternal = "^src/model/[^/]+/internal/"
     reInclude = "^[[:blank:]]*#[[:blank:]]*(include|import)[[:blank:]]*[<" DQ "]"
     reModelUndo = W "beginNewTransaction" W
     reUiUndo = W "(" undo_functions ")" W
     reTracktionName = W "(te|tracktion|tracktion_engine|tracktion_graph|tracktion_core)::"
-    tn = "(te|tracktion[a-z_]*)"
-    reAlias = W "(using[[:blank:]]+namespace[[:blank:]]+(::)?" tn W
-    reAlias = reAlias "|using[[:blank:]]+(::)?" tn "::"
-    reAlias = reAlias "|using[[:blank:]]+[A-Za-z_][A-Za-z0-9_]*[[:blank:]]*=[^;]*" W tn "::"
-    reAlias = reAlias "|typedef[^;]*" W tn "::)"
-    reNamespaceAlias = W "namespace[[:blank:]]+[A-Za-z_][A-Za-z0-9_]*[[:blank:]]*=[[:blank:]]*(::)?tracktion"
+    # A namespace that names Tracktion: namespace te = ..., namespace x = tracktion..., using namespace
+    # tracktion, namespace tracktion_engine {... (using namespace tracktion::x counts as a name only).
+    reTracktionNamespace = W "namespace[[:blank:]]+((::)?(te|tracktion[A-Za-z0-9_]*)[^A-Za-z0-9_:]"
+    reTracktionNamespace = reTracktionNamespace "|[A-Za-z_][A-Za-z0-9_]*[[:blank:]]*=[[:blank:]]*(::)?tracktion)"
 
-    n = split(preludes, parts, " ")
-    for (i = 1; i <= n; i++) isPrelude[parts[i]] = 1
     n = split(undo_implementation, parts, " ")
     for (i = 1; i <= n; i++) isUndoCode[parts[i]] = 1
     # Arrays that are only passed to functions, declared as arrays for every awk.
@@ -188,30 +166,16 @@ function setup(    i, n, s, parts) {
     # What each rule counts, and what to do instead.
     what["upward-includes"] = "includes from model or services into ui or app, from model into services, from ui into app, from engine into model, services, ui, app or sandbox, from sandbox into engine, model, services, ui or app, from host into engine, model, services, ui or app, from any other layer into host, or from devices into any other"
     instead["upward-includes"] = "dependencies point down (app -> ui -> services -> model -> engine and sandbox -> devices; host -> sandbox): move what both need down a layer, or have the upper layer pass it in."
-    what["model-window-includes"] = "JUCE window modules or classes in src/model, src/services, src/engine, src/sandbox or src/devices (Tracktion" q "s headers bring them in without an include)"
+    what["model-window-includes"] = "JUCE window modules or classes in src/model, src/services, src/engine, src/sandbox or src/devices (a header included on the way can bring them in without an include)"
     instead["model-window-includes"] = "move window and key code to src/ui or src/app; the model uses juce_core, juce_events, juce_data_structures, juce_audio_basics, and juce_graphics for colours, and the engine and devices use juce_core, juce_audio_basics and juce_dsp."
     what["model-window-references"] = what["model-window-includes"]
     instead["model-window-references"] = instead["model-window-includes"]
-    what["model-tracktion-includes"] = "Tracktion includes in model or services outside the prelude"
-    instead["model-tracktion-includes"] = "include the prelude or the model header you need."
     what["model-undo-steps"] = "beginNewTransaction in model or services outside the undo code"
     instead["model-undo-steps"] = "a command" q "s undoTarget, or phazite::UndoStep in a model function that is a change of its own."
     what["model-include-loops"] = "model and services files whose includes lead back to themselves"
     instead["model-include-loops"] = "move what both need into a lower header, or split the file."
-    what["devices-tracktion"] = "Tracktion or the prelude included in src/devices, and te:: and tracktion:: names there"
-    instead["devices-tracktion"] = "keep a device" q "s DSP engine-neutral: its thin Tracktion plug-in in src/model/devices passes it what the engine gives."
-    what["engine-tracktion"] = "Tracktion or the prelude included in src/engine, and te:: and tracktion:: names there"
-    instead["engine-tracktion"] = "keep Phazite" q "s engine engine-neutral: the model (src/model/playback) compiles what it plays and hands Tracktion" q "s objects to it behind an interface of the engine" q "s own."
-    what["sandbox-tracktion"] = "Tracktion or the prelude included in src/sandbox, and te:: and tracktion:: names there"
-    instead["sandbox-tracktion"] = "keep what Phazite shares with its helpers engine-neutral: the model (src/model/plugins) hands it what it needs."
-    what["host-tracktion"] = "Tracktion or the prelude included in src/host, and te:: and tracktion:: names there"
-    instead["host-tracktion"] = "the helper program hosts plug-ins with JUCE alone: what it needs of Phazite" q "s comes through src/sandbox."
-    what["ui-tracktion-includes"] = "Tracktion, the prelude or the model" q "s internal/ headers included in src/ui"
-    instead["ui-tracktion-includes"] = "include the model header outside internal/ that offers what the UI needs, or add a model function that takes and returns Phazite" q "s own types."
-    what["ui-tracktion-references"] = "te:: and tracktion:: in src/ui"
-    instead["ui-tracktion-references"] = "call a model function, pass IDs and plain values."
-    what["ui-tracktion-aliases"] = "aliases that would hide Tracktion names"
-    instead["ui-tracktion-aliases"] = "write them out with te::."
+    what["ui-internal-includes"] = "the model" q "s internal/ headers included in src/ui"
+    instead["ui-internal-includes"] = "include the model header outside internal/ that offers what the UI needs, or add a model function that takes and returns Phazite" q "s own types."
     what["ui-undo-steps"] = "calls starting an undo step in src/ui and src/app"
     instead["ui-undo-steps"] = "a command with an undoTarget, or a model function that starts its own step."
     what["flat-files"] = "C/C++ files directly in src/model, src/ui, src/engine, src/sandbox, src/host or src/devices"
@@ -220,15 +184,8 @@ function setup(    i, n, s, parts) {
     instead["unresolved-includes"] = "give the path from src/ (or a same-folder bare name) with its exact case."
     what["cmake-sources"] = "CMakeLists.txt paths naming no file exactly, and C/C++ files under src/ or tests/ it doesn" q "t list"
     instead["cmake-sources"] = "list the file in its target" q "s target_sources, spelled as git ls-files prints it."
-    for (i = 1; i <= nrules; i++)
-        if (index(rules[i], "tracktion-") == 1)
-            instead[rules[i]] = "the migration off Tracktion (docs/tracktion-migration.md) only takes these away: use the model" q "s functions by IDs, beats and plain values; a phase that moves code to Tracktion" q "s side on purpose raises the budget, saying why."
-    what["tracktion-other"] = "te:: and tracktion:: names in a model area that tools/check-architecture.sh doesn" q "t list in tracktion_areas"
-    instead["tracktion-other"] = "add the area to tracktion_areas in tools/check-architecture.sh, and its budget to " BUDGETS "."
-    what["tracktion-services"] = "te:: and tracktion:: names in src/services"
-    what["tracktion-app"] = "te:: and tracktion:: names in src/app"
-    what["tracktion-tests"] = "te:: and tracktion:: names in tests/"
-    instead["tracktion-tests"] = "build the song through the model (tests/TestSong.h), by IDs, beats and plain values, rather than with Tracktion" q "s objects."
+    what["tracktion"] = "Tracktion Engine in src/, tests/ or tools/: includes of its headers (tracktion_engine/, tracktion_graph/, tracktion_core/...), te:: and tracktion:: names, and namespaces that name it"
+    instead["tracktion"] = "Phazite has no Tracktion Engine; nothing may name or include it. Use Phazite" q "s own engine (src/engine), devices (src/devices) and model, by IDs, beats and plain values."
 }
 
 { sub(CR "$", "") }
@@ -354,20 +311,6 @@ function addFile(path) {
 
 # ---- Counting ----
 
-# The rule that counts a file's Tracktion names (tracktion-AREA), if one does.
-function tracktionRuleOf(path,    area) {
-    if (index(path, "src/model/") == 1) {
-        area = substr(path, 11)
-        if (index(area, "/") == 0) return "tracktion-other"
-        sub("/.*$", "", area)
-        return (("tracktion-" area) in known) ? "tracktion-" area : "tracktion-other"
-    }
-    if (index(path, "src/services/") == 1) return "tracktion-services"
-    if (index(path, "src/app/") == 1) return "tracktion-app"
-    if (index(path, "tests/") == 1) return "tracktion-tests"
-    return ""
-}
-
 function layerOf(path) {
     if (index(path, "src/model/") == 1) return "model"
     if (index(path, "src/services/") == 1) return "services"
@@ -380,7 +323,7 @@ function layerOf(path) {
     return ""
 }
 
-function treeLine(line,    path, lineno, text, s) {
+function treeLine(line,    path, lineno, text, s, n) {
     if (prefix != "" && index(line, prefix ":") == 1) line = substr(line, length(prefix) + 2)
     if (!match(line, ":[0-9]+:")) return
     path = substr(line, 1, RSTART - 1)
@@ -392,30 +335,20 @@ function treeLine(line,    path, lineno, text, s) {
         rawend = ""
         curLayer = layerOf(path)
         curCxx = (path ~ CXX)
-        curTracktion = tracktionRuleOf(path)
     }
     if (!curCxx) return
     s = strip(text)
     if (s ~ reInclude) takeInclude(path, lineno, text, s)
-    if (curTracktion != "" && index(s, "::")) hitLine(curTracktion, path, lineno, text, count(s, reTracktionName))
-    if (curLayer == "host") {
-        if (index(s, "::")) hitLine("host-tracktion", path, lineno, text, count(s, reTracktionName))
-    }
-    else if (curLayer == "model" || curLayer == "services" || curLayer == "engine" || curLayer == "sandbox" || curLayer == "devices") {
+    n = 0
+    if (index(s, "::")) n += count(s, reTracktionName)
+    if (index(s, "namespace")) n += count(s, reTracktionNamespace)
+    hitLine("tracktion", path, lineno, text, n)
+    if (curLayer == "model" || curLayer == "services" || curLayer == "engine" || curLayer == "sandbox" || curLayer == "devices") {
         if (index(s, "juce::")) hitLine("model-window-references", path, lineno, text, count(s, reWindowClass))
-        if (curLayer == "engine" || curLayer == "sandbox" || curLayer == "devices") {
-            if (index(s, "::")) hitLine(curLayer "-tracktion", path, lineno, text, count(s, reTracktionName))
-        }
-        else if (index(s, "beginNewTransaction") && !(path in isUndoCode))
+        if ((curLayer == "model" || curLayer == "services") && index(s, "beginNewTransaction") && !(path in isUndoCode))
             hitLine("model-undo-steps", path, lineno, text, count(s, reModelUndo))
     }
-    else if (curLayer == "ui") {
-        if (index(s, "::")) hitLine("ui-tracktion-references", path, lineno, text, count(s, reTracktionName))
-        if (s ~ /using|typedef|namespace/)
-            hitLine("ui-tracktion-aliases", path, lineno, text, count(s, reAlias) + namespaceAliases(s))
-        hitLine("ui-undo-steps", path, lineno, text, count(s, reUiUndo))
-    }
-    else if (curLayer == "app") hitLine("ui-undo-steps", path, lineno, text, count(s, reUiUndo))
+    else if (curLayer == "ui" || curLayer == "app") hitLine("ui-undo-steps", path, lineno, text, count(s, reUiUndo))
 }
 
 function takeInclude(path, lineno, text, s,    delim, rest, k, target, res) {
@@ -426,28 +359,25 @@ function takeInclude(path, lineno, text, s,    delim, rest, k, target, res) {
     if (k <= 1) return
     target = substr(rest, 1, k - 1)
     res = resolve(path, target, delim)
+    if (target ~ reTracktionInclude) hitLine("tracktion", path, lineno, text, 1)
     if (curLayer == "model" || curLayer == "services") {
         if (target ~ reWindowModule) hitLine("model-window-includes", path, lineno, text, 1)
-        if (target ~ reTracktionModule && !(path in isPrelude)) hitLine("model-tracktion-includes", path, lineno, text, 1)
         if (index(res, "src/ui/") == 1 || index(res, "src/app/") == 1 || index(res, "src/host/") == 1 || (curLayer == "model" && index(res, "src/services/") == 1))
             hitLine("upward-includes", path, lineno, text, 1)
         if (delim == DQ && (index(res, "src/model/") == 1 || index(res, "src/services/") == 1))
             addEdge(component(path), component(res))
     }
     else if (curLayer == "engine" || curLayer == "sandbox" || curLayer == "devices") {
-        # The prelude counts as Tracktion only, though it is in the model too.
         if (target ~ reWindowModule) hitLine("model-window-includes", path, lineno, text, 1)
-        if (target ~ reTracktionModule || (res in isPrelude)) hitLine(curLayer "-tracktion", path, lineno, text, 1)
-        else if (index(res, "src/model/") == 1 || index(res, "src/services/") == 1 || index(res, "src/ui/") == 1 || index(res, "src/app/") == 1 || index(res, "src/host/") == 1 || (curLayer != "engine" && index(res, "src/engine/") == 1) || (curLayer != "sandbox" && index(res, "src/sandbox/") == 1))
+        if (index(res, "src/model/") == 1 || index(res, "src/services/") == 1 || index(res, "src/ui/") == 1 || index(res, "src/app/") == 1 || index(res, "src/host/") == 1 || (curLayer != "engine" && index(res, "src/engine/") == 1) || (curLayer != "sandbox" && index(res, "src/sandbox/") == 1))
             hitLine("upward-includes", path, lineno, text, 1)
     }
     else if (curLayer == "host") {
-        if (target ~ reTracktionModule || (res in isPrelude)) hitLine("host-tracktion", path, lineno, text, 1)
-        else if (index(res, "src/model/") == 1 || index(res, "src/services/") == 1 || index(res, "src/ui/") == 1 || index(res, "src/app/") == 1 || index(res, "src/engine/") == 1)
+        if (index(res, "src/model/") == 1 || index(res, "src/services/") == 1 || index(res, "src/ui/") == 1 || index(res, "src/app/") == 1 || index(res, "src/engine/") == 1)
             hitLine("upward-includes", path, lineno, text, 1)
     }
     else if (curLayer == "ui") {
-        if (target ~ reTracktionModule || (res in isPrelude) || res ~ reModelInternal) hitLine("ui-tracktion-includes", path, lineno, text, 1)
+        if (res ~ reModelInternal) hitLine("ui-internal-includes", path, lineno, text, 1)
         if (index(res, "src/app/") == 1 || index(res, "src/host/") == 1) hitLine("upward-includes", path, lineno, text, 1)
     }
     else if (curLayer == "app" && index(res, "src/host/") == 1) hitLine("upward-includes", path, lineno, text, 1)
@@ -469,20 +399,6 @@ function hitLine(rule, path, lineno, text, n) {
 function count(s, re,    n) {
     n = 0; s = " " s " "
     while (match(s, re)) { n++; s = substr(s, RSTART + RLENGTH - 1) }
-    return n
-}
-
-# Aliases such as "namespace tr = tracktion;": every name but te.
-function namespaceAliases(s,    n, m, name) {
-    n = 0; s = " " s " "
-    while (match(s, reNamespaceAlias)) {
-        m = substr(s, RSTART + 1, RLENGTH - 1)
-        s = substr(s, RSTART + RLENGTH)
-        sub("^namespace[[:blank:]]+", "", m)
-        name = m
-        sub("[^A-Za-z0-9_].*$", "", name)
-        if (name != "te") n++
-    }
     return n
 }
 
@@ -790,7 +706,7 @@ function report(    i, r, ndiff, nover, nraise, nlow, over, under, raised, lower
 }
 
 function table(over, under, ndiff,    i, r, line) {
-    say("Architecture budgets (" BUDGETS ") for src/:")
+    say("Architecture budgets (" BUDGETS "):")
     for (i = 1; i <= nrules; i++) {
         r = rules[i]
         line = padTo("    " r " ", 36 - length(cnt[r] "")) cnt[r] " of " bud[r]
@@ -847,6 +763,12 @@ function noLayerBlock(    i) {
     say("Move them into one of those folders, or add the new layer and its rules to tools/check-architecture.sh.")
 }
 
+# Mode range: whether the commit read last has rule r above every parent's budget, and its message doesn't say
+# why. A rule that no parent has (one the commit adds), or that the commit drops, raises nothing.
+function unexplainedRaise(r) {
+    return (r in commitBud) && (r in parentMax) && commitBud[r] + 0 > parentMax[r] + 0 && !explained(message, nmessage, r)
+}
+
 # Mode range: a commit is done; report each raise that its message does not explain.
 function finishCommit(    i, r) {
     if (!inCommit) return
@@ -854,7 +776,7 @@ function finishCommit(    i, r) {
     ncommits++
     for (i = 1; i <= ncommitRules; i++) {
         r = commitRules[i]
-        if (!(r in parentMax) || commitBud[r] <= parentMax[r] || explained(message, nmessage, r)) continue
+        if (!unexplainedRaise(r)) continue
         nunexplained++
         say(commitHash " " DQ commitSubject DQ ": " r " " parentMax[r] " -> " commitBud[r] ", and the message has no Architecture-Budget-Raise line for it.")
         if (gha) say("::error title=Architecture budget raised::" commitHash " raises " r " " parentMax[r] " -> " commitBud[r] " without an Architecture-Budget-Raise line")
@@ -911,6 +833,22 @@ function selfTest(    i, r, got, names, counts, budgets, over, under, now, befor
     keepMax(before, from, "a", 1, "HEAD")
     keepMax(before, from, "a", 2, "MERGE_HEAD")
     check(raises(names, 1, now, before, raised) == 0 && from["a"] == "MERGE_HEAD", "a raise is reported although MERGE_HEAD has a=2")
+    # A budget file that drops a rule (gone) and adds one at 0 (new) raises nothing, staged or in a range.
+    split("a new", names, " ")
+    split("", now); split("", before); split("", from); split("", raised)
+    now["a"] = 1; now["new"] = 0
+    keepMax(before, from, "a", 1, "HEAD")
+    keepMax(before, from, "gone", 4, "HEAD")
+    check(raises(names, 2, now, before, raised) == 0, "a staged budget file that drops a rule and adds one at 0 raises a budget")
+    split("", commitBud); split("", parentMax); split("", parentFrom); split("", message); nmessage = 0
+    commitBud["a"] = 1; commitBud["new"] = 0
+    keepMax(parentMax, parentFrom, "a", 1, "")
+    keepMax(parentMax, parentFrom, "gone", 4, "")
+    check(!unexplainedRaise("a") && !unexplainedRaise("new") && !unexplainedRaise("gone"), "--range takes a commit that drops a rule and adds one at 0 for a raise")
+    commitBud["a"] = 2
+    check(unexplainedRaise("a"), "--range misses a commit that raises a from 1 to 2")
+    message[++nmessage] = "Architecture-Budget-Raise: a 1 -> 2: why"
+    check(!unexplainedRaise("a"), "--range takes an explained raise of a for an unexplained one")
 
     split("", lines); split("", counts); split("", lowered)
     lines[1] = "a    10"; lines[2] = "b     3"
@@ -927,8 +865,10 @@ function selfTest(    i, r, got, names, counts, budgets, over, under, now, befor
 AWK
 }
 
-# The built-in examples of the self-test: lines as git grep prints them. The self-test treats
-# src/model/Tracktion.h as the prelude and src/model/Undo.cpp as the undo code.
+# The built-in examples of the self-test: lines as git grep prints them. The self-test treats src/model/Undo.cpp
+# as the undo code. tracktion counts 32 in them: in every layer, in src/Fixture.cpp (in no layer), in tests/ and
+# in tools/, but none in comments, in strings (src/model/Flat.h) or in src/ui/Fixture.txt; ui-internal-includes
+# counts 2, both in src/ui (src/services, src/app and src/devices include the same header).
 fixture() {
     cat <<'FIXTURE'
 src/model/a/Fixture.h:1:#include "../../ui/Panels.h"
@@ -941,8 +881,9 @@ src/model/a/Fixture.h:7:   juce::KeyPress k; */ juce::Component* c; juce::Colour
 src/model/a/Fixture.h:8:auto s = "juce::KeyPress"; auto e = juce::KeyPress::escapeKey;
 src/model/a/Fixture.h:9:edit.getUndoManager().beginNewTransaction ("Add");
 src/model/a/Fixture.h:10:te::Edit* e; tracktion::engine::Clip* c; // te::Track
-src/model/a/internal/Side.h:1:#include "model/Tracktion.h"
-src/model/Tracktion.h:1:#include <tracktion_engine/tracktion_engine.h>
+src/model/a/internal/Side.h:1:#include <tracktion_engine/tracktion_engine.h>
+src/model/Flat.h:1:/* #include <tracktion_engine/tracktion_engine.h>
+src/model/Flat.h:2:   namespace te = tracktion; */ auto s = "namespace te = tracktion;";
 src/model/Undo.cpp:1:um.beginNewTransaction (name);
 src/model/b/One.h:1:#include "Two.h"
 src/model/b/Two.h:1:#include "One.h"
@@ -953,26 +894,28 @@ src/services/Fixture.cpp:1:#include <juce_gui_extra/juce_gui_extra.h>
 src/services/Fixture.cpp:2:#include "app/MainWindow.h"
 src/services/Fixture.cpp:3:#include <tracktion_graph/tracktion_graph.h>
 src/services/Fixture.cpp:4:te::Engine* engine;
+src/services/Fixture.cpp:5:#include "model/a/internal/Side.h"
 src/ui/Fixture.cpp:1:#include <tracktion_engine/tracktion_engine.h> // te::Edit
 src/ui/Fixture.cpp:2:#include "app/MainWindow.h"
-src/ui/Fixture.cpp:3:#include "model/Tracktion.h"
+src/ui/Fixture.cpp:3:#include "model/a/Fixture.h"
 src/ui/Fixture.cpp:4:te::Edit* e; // te::Track
 src/ui/Fixture.cpp:5:auto s = "te::x // y"; phazite::te::Clip* c; Note::Kind k; byte::x;
 src/ui/Fixture.cpp:6:char q = '"'; auto n = 1'000; tracktion::engine::Edit* t;
 src/ui/Fixture.cpp:7:auto r = R"x(te::A ")" )x"; std::vector<te::B*, te::C> v;
 src/ui/Fixture.cpp:8:using namespace tracktion; namespace tr = tracktion; namespace te = tracktion;
-src/ui/Fixture.cpp:9:using Edits = juce::Array<te::Edit*>;
+src/ui/Fixture.cpp:9:using Edits = juce::Array<te::Edit*>; namespace tempo = phazite::tempo; namespace tracks {}
 src/ui/Fixture.cpp:10:undo.beginNewTransaction ("Add"); // beginNewTransaction
 src/ui/Fixture.cpp:11:auto m = R"(te::E
 src/ui/Fixture.cpp:12:te::F)"; te::G g; auto c = L'x'; auto u = u8'y';
 src/ui/Fixture.cpp:13:#include "model/a/internal/Side.h"
-src/ui/views/Fixture3.cpp:1:#include "../../model/Tracktion.h"
+src/ui/views/Fixture3.cpp:1:#include "../../model/a/internal/Side.h"
 src/ui/views/Fixture3.cpp:2:#include "../../app/MainWindow.h"
 src/app/Fixture.cpp:1:e->getUndoManager().beginNewTransaction ("Rename"); te::Edit* e2;
+src/app/Fixture.cpp:2:#include "model/a/internal/Side.h"
 src/app/MainWindow.h:1:// the main window
 src/devices/x/Dsp.h:1:#include <juce_dsp/juce_dsp.h>
 src/devices/x/Dsp.h:2:#include <tracktion_engine/tracktion_engine.h>
-src/devices/x/Dsp.h:3:#include "model/Tracktion.h"
+src/devices/x/Dsp.h:3:#include "model/a/internal/Side.h"
 src/devices/x/Dsp.h:4:#include "model/b/One.h"
 src/devices/x/Dsp.h:5:#  include <juce_gui_basics/juce_gui_basics.h>
 src/devices/x/Dsp.cpp:1:#include "Dsp.h"
@@ -986,14 +929,22 @@ src/engine/x/Eng.h:3:#include "model/b/One.h"
 src/engine/x/Eng.cpp:1:#include "Eng.h"
 src/engine/x/Eng.cpp:2:te::Edit* e; juce::KeyPress k; juce::AudioBuffer<float> b; // tracktion::Edit
 src/engine/Flat.cpp:1:int y;
-src/Fixture.cpp:1:int x;
+src/sandbox/x/Shm.h:1:#include "engine/x/Eng.h"
+src/host/x/Host.cpp:1:#include "sandbox/x/Shm.h"
+src/host/x/Host.cpp:2:#include "model/b/One.h"
+src/host/x/Host.cpp:3:te::Engine* e; juce::Component* c;
+src/Fixture.cpp:1:int x; te::Edit* e;
 src/ui/Fixture.txt:1:te::NotCxx
 tests/Fixture.cpp:1:#include "TestHelpers.h"
 tests/Fixture.cpp:2:#include "model/b/one.h"
 tests/Fixture.cpp:3:#include "model/b/One.h"
 tests/Fixture.cpp:4:std::unique_ptr<te::Edit> edit; // te::Track
+tests/Fixture.cpp:5:namespace tr = tracktion::engine; using namespace te; auto p = "#include <tracktion_engine/tracktion_engine.h>";
 tests/TestHelpers.h:1:// test helpers
 tools/x/Tool.cpp:1:#include "Missing.h"
+tools/x/Tool.cpp:2:#include <tracktion_core/tracktion_core.h>
+tools/x/Tool.cpp:3:tracktion::engine::Engine* e; auto s = "tracktion::x"; /* te::y */ char c = 't';
+tools/x/Tool.cpp:4:using namespace tracktion::literals;
 FIXTURE
 }
 
@@ -1002,12 +953,12 @@ FIXTURE
 fixture_cmake() {
     cat <<'CMAKE'
 target_sources(fixture PRIVATE
-    src/model/a/Fixture.h src/model/a/internal/Side.h src/model/Tracktion.h src/model/Undo.cpp
+    src/model/a/Fixture.h src/model/a/internal/Side.h src/model/Flat.h src/model/Undo.cpp
     src/model/b/One.h src/model/b/Two.h src/model/b/Two.cpp
     src/services/Fixture.cpp "src/ui/Fixture.cpp" src/ui/Fixture2.cpp src/ui/views/Fixture3.cpp
     src/app/Fixture.cpp src/app/MainWindow.h src/Fixture.cpp
     src/devices/x/Dsp.h src/devices/x/Dsp.cpp src/devices/Flat.h
-    src/engine/x/Eng.h src/engine/x/Eng.cpp src/engine/Flat.cpp
+    src/engine/x/Eng.h src/engine/x/Eng.cpp src/engine/Flat.cpp src/sandbox/x/Shm.h src/host/x/Host.cpp
     src/ui/fixture.cpp # src/ui/Commented.cpp
     "a # inside quotes" src/ui/Gone.cpp)
 target_sources(fixture_tests PRIVATE tests/Fixture.cpp tests/TestHelpers.h) # tools/ needs no listing
@@ -1016,26 +967,17 @@ CMAKE
 
 fixture_expectations() {
     cat <<'EXPECT'
-@expect upward-includes 8
+@expect upward-includes 11
 @expect model-window-includes 3
 @expect model-window-references 5
-@expect model-tracktion-includes 1
 @expect model-undo-steps 1
 @expect model-include-loops 2
-@expect devices-tracktion 3
-@expect engine-tracktion 2
-@expect ui-tracktion-includes 4
-@expect ui-tracktion-references 8
-@expect ui-tracktion-aliases 3
+@expect ui-internal-includes 2
 @expect ui-undo-steps 2
 @expect flat-files 6
 @expect unresolved-includes 5
 @expect cmake-sources 3
-@expect tracktion-a 2
-@expect tracktion-other 1
-@expect tracktion-services 1
-@expect tracktion-app 1
-@expect tracktion-tests 1
+@expect tracktion 32
 @expect no-layer 1
 EXPECT
 }
@@ -1044,9 +986,8 @@ EXPECT
 run_awk() {
     run_mode=$1
     shift
-    LC_ALL=C "$awk" -v mode="$run_mode" -v q="'" -v preludes="$tracktion_preludes" \
-        -v undo_functions="$undo_functions" -v undo_implementation="$undo_implementation" -v gha="$gha" \
-        -v areas="$tracktion_areas" "$@" "$prog"
+    LC_ALL=C "$awk" -v mode="$run_mode" -v q="'" -v undo_functions="$undo_functions" \
+        -v undo_implementation="$undo_implementation" -v gha="$gha" "$@" "$prog"
 }
 
 # Exits with 2 if the awk program counts the examples wrong or gets the budget logic wrong. src/ui/Absent.cpp is
@@ -1062,8 +1003,7 @@ self_test() {
         fixture_cmake | sed 's/^/=/'
         printf '\n'
         fixture_expectations
-    } | run_awk self-test -v preludes=src/model/Tracktion.h -v undo_implementation=src/model/Undo.cpp \
-        -v undo_functions=beginNewTransaction -v areas=a)
+    } | run_awk self-test -v undo_implementation=src/model/Undo.cpp -v undo_functions=beginNewTransaction)
     [ $? -eq 0 ] && return 0
     printf '%s\n' "tools/check-architecture.sh: this awk ($awk) counts the built-in examples wrong:" "$st_report" >&2
     exit 2
@@ -1134,18 +1074,6 @@ merge_heads() {
     fi
 }
 
-# Exits with 2 if a prelude is missing from $1 (worktree or index).
-check_preludes() {
-    for cp_prelude in $tracktion_preludes; do
-        case $1 in
-            index) git cat-file -e ":$cp_prelude" 2>/dev/null ;;
-            *) [ -f "$cp_prelude" ] ;;
-        esac && continue
-        echo "tools/check-architecture.sh lists $cp_prelude as a Tracktion prelude, but there is no such file." >&2
-        exit 2
-    done
-}
-
 # Counts the code in $1 (worktree or index) and reports in mode $2 (check, update or staged), comparing with
 # the commit $3 (none if empty), shown as $4. Returns the exit code.
 check_code() {
@@ -1158,7 +1086,6 @@ check_code() {
         fi
         return 2
     fi
-    check_preludes "$cc_source"
     cc_counts=$(code_sections "$cc_source" | run_awk count) || {
         printf '%s\n' "$cc_counts" >&2
         return 2
@@ -1208,7 +1135,6 @@ check_code() {
 
 # Mode --list: every match of rule $1 in the working tree.
 list_rule() {
-    check_preludes worktree
     lr_report=$(code_sections worktree | run_awk list -v listing="$1") || {
         printf '%s\n' "$lr_report" >&2
         return 2

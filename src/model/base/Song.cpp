@@ -35,20 +35,19 @@ juce::File Song::getCacheFolder() const
     return ownCacheFolder;
 }
 
-void Song::setTracktionIDs (std::function<std::uint64_t()> takeNext)
+void Song::addParameterListener (ParameterListener* listener)
 {
-    takeTracktionID = std::move (takeNext);
+    parameterListeners.add (listener);
 }
 
-void Song::setMirror (std::function<void (Part, std::uint64_t)> reconcile)
+void Song::removeParameterListener (ParameterListener* listener)
 {
-    mirror = std::move (reconcile);
+    parameterListeners.remove (listener);
 }
 
-void Song::reconcile (Part part, std::uint64_t id)
+void Song::tellValueSetByHand (const ParameterRef& parameter, float value, bool byPlugin)
 {
-    if (mirror != nullptr)
-        mirror (part, id);
+    parameterListeners.call ([&] (ParameterListener& l) { l.valueSetByHand (parameter, value, byPlugin); });
 }
 
 void Song::setDeviceStateStore (std::function<void (std::uint64_t)> store)

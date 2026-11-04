@@ -2,7 +2,7 @@
 // Chord progressions to try (docs/design.md, section 14; roadmap step 2.7): common progressions, each with a name, its
 // numerals, a feel, and the moods and genres it suits, written for a major or a minor key. They are a data file
 // (resources/progressions/progressions.json), so that a new one needs no code. The chord lane plays one in the song's
-// key (ChordModel.h). No Tracktion here.
+// key (ChordModel.h).
 #pragma once
 
 #include "model/chords/ChordValues.h"

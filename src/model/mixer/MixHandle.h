@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // An effect's mix (Mixer.h: hasMix(), getMix(), setMix()) as a knob changes it: a drag is one undo step, "Change Mix",
 // from its first move to its last (a Gesture, model/commands/internal/Undo.h), and a change outside a drag, such as a key
-// press, is one of its own. It forgets a device that is deleted. The model hands handles out (MixerModel.h; its
-// Tracktion side is internal/MixHandle.h).
+// press, is one of its own. It forgets a device that is deleted. The model hands handles out (MixerModel.h, made with
+// internal/MixHandle.h).
 #pragma once
 
 #include <memory>

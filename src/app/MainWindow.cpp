@@ -2,10 +2,12 @@
 #include "MainWindow.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Tracks.h"
-#include "model/engine/internal/LiveInput.h"
-#include "model/mirror/internal/Bridge.h"
+#include "model/engine/internal/AudioIO.h"
+#include "model/engine/internal/EngineContext.h"
+#include "model/plugins/internal/PluginHost.h"
 #include "model/project/ExampleSongs.h"
 #include "model/project/internal/Export.h"
+#include "model/transport/internal/Tempo.h"
 #include "ui/input/KeymapStore.h"
 #include "ui/shell/ExportPanel.h"
 #include "ui/shell/ProgressionsPanel.h"
@@ -47,16 +49,42 @@ namespace
 
         return ui::ThemeName::dark;
     }
+
+    // The plug-ins scanning found, in the plug-in list's window (JUCE's), which keeps the folders it scans in Phazite's
+    // settings file (none for services with their settings in memory); the services keep the list there (AppServices.h).
+    // A scan under way stops as the window closes.
+    class PluginList final : public juce::PluginListComponent
+    {
+    public:
+        PluginList (PluginHost& h, juce::PropertiesFile* settingsFile)
+            : juce::PluginListComponent (h.getFormats(), h.getKnownPlugins(),
+                                         Settings::getFolder().getChildFile ("PluginScanDeadMansPedal"), settingsFile,
+                                         true), // allow plug-ins that load asynchronously (AUv3)
+              host (h)
+        {
+        }
+
+        // Before JUCE's list waits for its scanning thread to finish.
+        ~PluginList() override
+        {
+            if (isScanning())
+                host.cancelScan();
+        }
+
+    private:
+        PluginHost& host;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PluginList)
+    };
 } // namespace
 
-MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices)
+MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices)
     : juce::DocumentWindow ("Phazite", lf.getPalette().background, juce::DocumentWindow::allButtons),
-      engine (e),
       commands (bridge),
       session (s),
       lookAndFeel (lf),
       services (appServices),
-      computerKeyboard ([&e] (const juce::MidiMessage& m) { playLiveMidi (e, m); }),
+      computerKeyboard ([&audio = getAudioIO (appServices.engineContext)] (const juce::MidiMessage& m) { audio.playLive (m); }),
       shortcutKeys (bridge),
       pluginWindowServices { s.getContext(), appServices.library, appServices.settings }
 {
@@ -72,7 +100,7 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
 #endif
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
-    auto content = std::make_unique<ui::AppShell> (*services.engineContext, commands, shortcutKeys, computerKeyboard, s.getContext(),
+    auto content = std::make_unique<ui::AppShell> (services.engineContext, commands, shortcutKeys, computerKeyboard, s.getContext(),
                                                    services.settings, services.soundPack, services.library, *services.previewer);
     shell = content.get();
     setContentOwned (content.release(), false);
@@ -111,8 +139,10 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     pluginKeys = std::make_unique<ui::PluginKeys> (shortcutKeys, computerKeyboard);
     ui::setPluginKeys (pluginKeys.get());
 
-    // Plug-in windows' menus save and load presets, and keep their key switches in the settings.
+    // Plug-in windows' menus save and load presets, and keep their key switches in the settings. The devices' windows
+    // open over this one, for the project open.
     setPluginWindowServices (&pluginWindowServices);
+    deviceWindows = std::make_unique<DeviceWindows> (s.getContext(), this);
 
     // The playlist's clips draw their waveforms from Phazite's own cache of their files' levels (ClipWaveforms.h).
     ui::setClipWaveformMaker (getClipWaveformMaker());
@@ -121,9 +151,10 @@ MainWindow::MainWindow (te::Engine& e, ui::CommandBridge& bridge, ProjectSession
     session.onExport = [this] { showExport(); };
     session.onProjectClosing = [this]
     {
-        delete exportWindow.getComponent();       // its export holds the Edit
+        delete exportWindow.getComponent();       // its export holds the song
         delete renderWindow.getComponent();       // its freeze or bounce too
         delete progressionsWindow.getComponent(); // it plays and changes that project's chords
+        deviceWindows->closeAll();                // storing what their plug-ins changed into the song
     };
     session.onProjectChanged = [this]
     {
@@ -145,14 +176,16 @@ MainWindow::~MainWindow()
     session.onExport = nullptr;
     session.dialogParent = nullptr;
 
-    // Close the dialogs: they point into the Engine and the commands, which are destroyed after
-    // this window, and an export, a freeze or a bounce into the project's Edit.
+    // Close the dialogs: they point into the engine context and the commands, which are destroyed after this window, and
+    // an export, a freeze or a bounce into the project's song. And the devices' windows, which use the keys and services
+    // that go next.
     delete exportWindow.getComponent();
     delete renderWindow.getComponent();
     delete progressionsWindow.getComponent();
     delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
     delete welcomeWindow.getComponent();
+    deviceWindows = nullptr;
 
     setPluginWindowServices (nullptr);
     ui::setPluginKeys (nullptr);
@@ -419,7 +452,7 @@ void MainWindow::showSettings (std::optional<ui::SettingsPanel::Tab> tab)
         return;
     }
 
-    auto* panel = new ui::SettingsPanel (*services.engineContext, commands, computerKeyboard, session.getContext(),
+    auto* panel = new ui::SettingsPanel (services.engineContext, commands, computerKeyboard, session.getContext(),
                                          [this] (const juce::String& name) { setKeymap (name); });
     panel->setSize (640, 600);
     panel->showTab (tab.value_or (ui::SettingsPanel::audio));
@@ -449,14 +482,14 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
     }
 
     auto* panel = new ui::WelcomePanel (
-        services.soundPack, services.engineContext->getAudioDeviceManager(), commands.getKeymap().name,
+        services.soundPack, services.engineContext.getAudioDeviceManager(), commands.getKeymap().name,
         [this] (const juce::String& name) { setKeymap (name); },
         [safeThis = juce::Component::SafePointer<MainWindow> (this)] (const juce::String& commandID)
         {
             if (safeThis != nullptr)
                 safeThis->commands.invoke (commandID);
         },
-        [this] { return services.engineContext->getAudioOutput().isBluetooth; });
+        [this] { return services.engineContext.getAudioOutput().isBluetooth; });
     panel->setSize (600, 560);
     panel->showPage (page);
     welcomePanel = panel;
@@ -488,17 +521,20 @@ void MainWindow::showExport()
 
     // The song goes into the project's Renders folder (or, while it is untitled, Documents/Phazite/Exports), named after
     // the project, unless the user chooses another file; its stems into a folder next to it.
-    auto& edit = project->getEdit();
+    auto& song = project->getSong();
     const auto defaultFile = session.getExportFolder().getChildFile (project->getFile().getFileNameWithoutExtension() + ".wav");
     juce::StringArray stemNames;
 
-    for (auto* track : getStemTracks (edit))
-        stemNames.add (getTrackName (*track));
+    for (const auto channel : getStemChannels (song))
+        stemNames.add (getTrackName (song, channel));
+
+    const auto range = getExportRange (song);
+    const auto seconds = toSeconds (song, range.getEnd()) - toSeconds (song, range.getStart());
 
     auto* panel = new ui::ExportPanel (
-        services.settings, defaultFile, getExportRange (edit).getLength().inSeconds(), stemNames,
-        [&edit] (const ExportSettings& settings, const juce::File& file, std::function<void (const ExportReport&)> onFinished)
-        { return startExport (edit, file, settings, std::move (onFinished)); });
+        services.settings, defaultFile, seconds, stemNames,
+        [&song] (const ExportSettings& settings, const juce::File& file, std::function<void (const ExportReport&)> onFinished)
+        { return startExport (song, file, settings, std::move (onFinished)); });
     panel->setSize (560, 660);
 
     juce::DialogWindow::LaunchOptions o;
@@ -597,12 +633,8 @@ void MainWindow::showPluginList()
         return;
     }
 
-    auto& pm = engine.getPluginManager();
-
-    auto* list = new juce::PluginListComponent (pm.pluginFormatManager, pm.knownPluginList,
-                                                engine.getTemporaryFileManager().getTempFile ("PluginScanDeadMansPedal"),
-                                                &engine.getPropertyStorage().getPropertiesFile(),
-                                                true); // allow plug-ins that load asynchronously (AUv3)
+    auto& host = getPluginHost (services.engineContext);
+    auto* list = new PluginList (host, services.settingsFile.get());
 
     // One scanning thread (JUCE's default here): the scanner has one helper, which scans a file at a time.
     list->setNumberOfThreadsForScanning (1);
@@ -621,7 +653,7 @@ void MainWindow::showPluginList()
     pluginListWindow = o.launchAsync();
 
     // Start a VST3 scan, as "Options... > Scan for new or updated VST3 plug-ins" would.
-    for (auto* format : pm.pluginFormatManager.getFormats())
+    for (auto* format : host.getFormats().getFormats())
         if (format->getName() == "VST3")
             list->scanFor (*format);
 }

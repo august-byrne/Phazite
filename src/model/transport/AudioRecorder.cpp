@@ -4,13 +4,13 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/engine/AppInfo.h"
 #include "model/engine/internal/AudioIO.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/transport/internal/Tempo.h"
 
-#include <map>
+#include <algorithm>
 
 namespace phazite
 {
@@ -22,12 +22,6 @@ namespace
     // A recording shorter than this keeps no clip, in seconds.
     constexpr double shortestRecording = 0.01;
 
-    std::map<const te::Edit*, AudioRecorder*>& getRecorders()
-    {
-        static std::map<const te::Edit*, AudioRecorder*> recorders; // message thread only
-        return recorders;
-    }
-
     juce::String getInputOf (const juce::ValueTree& trackState)
     {
         return trackState.getProperty (schema::trackInput).toString();
@@ -38,14 +32,34 @@ namespace
     {
         return trackState.getProperty (schema::trackMonitoring).toString() == schema::monitorAlways;
     }
+
+    // A track that can have an input: a track, not a folder (nor the master).
+    bool hasInputs (const juce::ValueTree& trackState)
+    {
+        return trackState.hasType (schema::TRACK) && ! isFolderState (trackState);
+    }
 } // namespace
+
+juce::File getRecordingsFolder (const Song& song)
+{
+    if (const auto& file = song.getFile(); file != juce::File())
+        return file.getSiblingFile ("Audio");
+
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (appName).getChildFile ("Recordings");
+}
+
+bool canRecordAudio (const Song& song, TrackID track)
+{
+    const auto state = findTrackState (song, track);
+    return hasInputs (state) && ! isReturnState (state) && ! hasInstrument (song, track);
+}
 
 int AudioRecorder::getNumInputs() const
 {
-    if (auto* session = findPlayingSession (edit))
-        return session->getNumInputs();
+    if (session.isPlayingProject())
+        return session.getNumInputs();
 
-    auto* device = audio->getDevices().getCurrentAudioDevice();
+    auto* device = audio.getDevices().getCurrentAudioDevice();
     return device != nullptr ? device->getInputChannelNames().size() : 0;
 }
 
@@ -68,53 +82,25 @@ std::vector<int> getInputChannels (const juce::String& inputID)
     return channels;
 }
 
-double getRecordingCorrection (te::Engine& engine)
-{
-    const auto* io = AudioIO::findFor (engine);
-    return io != nullptr ? io->getRecordingCorrection() : 0.0;
-}
-
-void setRecordingCorrection (te::Engine& engine, double milliseconds)
-{
-    if (auto* io = AudioIO::findFor (engine))
-        io->setRecordingCorrection (milliseconds);
-}
-
 //==============================================================================
-AudioRecorder::AudioRecorder (te::Edit& e)
-    : edit (e),
-      engine (e.engine),
-      audio (AudioIO::getFor (e.engine)),
-      alive (e),
-      key (&e),
-      editState (e.state)
+AudioRecorder::AudioRecorder (PlaybackSession& s)
+    : session (s),
+      song (s.getSong()),
+      audio (s.getAudioIO()),
+      songState (song.getState())
 {
-    getRecorders()[key] = this;
-    editState.addListener (this);
-    audio->addChangeListener (this);
+    songState.addListener (this);
+    audio.addChangeListener (this);
     update();
 }
 
 AudioRecorder::~AudioRecorder()
 {
-    audio->removeChangeListener (this);
-    editState.removeListener (this);
+    audio.removeChangeListener (this);
+    songState.removeListener (this);
     armed.clear();
+    closing = true;
     update(); // what was opened for its tracks closes
-
-    if (const auto found = getRecorders().find (key); found != getRecorders().end() && found->second == this)
-        getRecorders().erase (found);
-}
-
-AudioRecorder* AudioRecorder::findFor (const te::Edit& edit)
-{
-    const auto found = getRecorders().find (&edit);
-    return found != getRecorders().end() && found->second->alive.get() == &edit ? found->second : nullptr;
-}
-
-bool AudioRecorder::isArmed (const te::AudioTrack& track) const
-{
-    return isArmed (getTrackID (findTrackState (track)));
 }
 
 bool AudioRecorder::isArmed (TrackID track) const
@@ -122,27 +108,26 @@ bool AudioRecorder::isArmed (TrackID track) const
     return armed.count (track) > 0;
 }
 
-void AudioRecorder::setArmed (te::AudioTrack& track, bool shouldArm)
+void AudioRecorder::setArmed (TrackID track, bool shouldArm)
 {
-    if (shouldArm && getInputChannels (getInputOf (findTrackState (track))).empty())
+    if (const auto state = findTrackState (song, track);
+        shouldArm && (! hasInputs (state) || getInputChannels (getInputOf (state)).empty()))
         return;
 
-    if (const auto id = getTrackID (findTrackState (track)); shouldArm ? armed.insert (id).second : armed.erase (id) > 0)
+    if (shouldArm ? armed.insert (track).second : armed.erase (track) > 0)
     {
         update();
-
-        if (auto* session = findSession (edit))
-            session->update(); // the track hears its input while armed
+        session.update(); // the track hears its input while armed
     }
 }
 
-juce::Array<te::AudioTrack*> AudioRecorder::getArmedTracks() const
+std::vector<TrackID> AudioRecorder::getArmedTracks() const
 {
-    juce::Array<te::AudioTrack*> tracks;
+    std::vector<TrackID> tracks;
 
-    for (auto* track : te::getAudioTracks (edit))
-        if (isArmed (*track))
-            tracks.add (track);
+    for (const auto& trackState : getTrackStates (song))
+        if (const auto id = getTrackID (trackState); hasInputs (trackState) && isArmed (id))
+            tracks.push_back (id);
 
     return tracks;
 }
@@ -151,8 +136,8 @@ bool AudioRecorder::canRecord() const
 {
     const auto numInputs = getNumInputs();
 
-    for (auto* track : getArmedTracks())
-        if (const auto channels = getInputChannels (getInputOf (findTrackState (*track)));
+    for (const auto track : getArmedTracks())
+        if (const auto channels = getInputChannels (getInputOf (findTrackState (song, track)));
             ! channels.empty() && channels.back() < numInputs)
             return true;
 
@@ -163,28 +148,26 @@ bool AudioRecorder::canRecord() const
 void AudioRecorder::update()
 {
     // While a take records, the inputs stay as they are: changing them opens the device again (Take.h updates them after).
-    if (const auto* session = alive.get() != nullptr ? findSession (edit) : nullptr;
-        updating || (session != nullptr && session->isRecording()))
+    if (updating || session.isRecording())
         return;
 
     const juce::ScopedValueSetter<bool> svs (updating, true);
-    auto& devices = audio->getDevices();
+    auto& devices = audio.getDevices();
     auto* device = devices.getCurrentAudioDevice();
     const auto numInputs = device != nullptr ? device->getInputChannelNames().size() : 0;
-    auto* liveEdit = alive.get(); // once the Edit is gone, its tracks need nothing
 
-    // The channels the tracks need now: those of a track that is armed or always hears its input.
+    // The channels the tracks need now: those of a track that is armed or always hears its input (none as the recorder
+    // goes).
     juce::BigInteger wanted;
 
-    for (auto* track : liveEdit != nullptr ? te::getAudioTracks (*liveEdit) : juce::Array<te::AudioTrack*>())
+    for (const auto& trackState : closing ? std::vector<juce::ValueTree>() : getTrackStates (song))
     {
-        const auto trackState = findTrackState (*track);
-        const auto channels = getInputChannels (getInputOf (trackState));
+        const auto channels = hasInputs (trackState) ? getInputChannels (getInputOf (trackState)) : std::vector<int>();
 
         if (channels.empty() || channels.back() >= numInputs)
             continue;
 
-        if (isArmed (*track) || alwaysHears (trackState))
+        if (isArmed (getTrackID (trackState)) || alwaysHears (trackState))
             for (auto channel : channels)
                 wanted.setBit (channel);
     }
@@ -218,11 +201,11 @@ void AudioRecorder::update()
     }
 }
 
-juce::File AudioRecorder::getTakeFile (const te::AudioTrack& track) const
+juce::File AudioRecorder::getTakeFile (TrackID track) const
 {
-    const auto folder = edit.engine.getEngineBehaviour().getDefaultFolderForAudioRecordings (edit);
-    const auto name =
-        juce::File::createLegalFileName (getTrackName (track).isNotEmpty() ? getTrackName (track) : juce::String ("Recording"));
+    const auto folder = getRecordingsFolder (song);
+    const auto trackName = getTrackName (song, track);
+    const auto name = juce::File::createLegalFileName (trackName.isNotEmpty() ? trackName : juce::String ("Recording"));
 
     for (int take = 1;; ++take)
         if (const auto file = folder.getChildFile (name + " Take " + juce::String (take) + ".wav"); ! file.exists())
@@ -360,7 +343,7 @@ void AudioRecorder::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void AudioRecorder::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    if ((property == schema::trackInput || property == schema::trackMonitoring) && tree.hasType (schema::TRACK) && alive.get() != nullptr)
+    if ((property == schema::trackInput || property == schema::trackMonitoring) && tree.hasType (schema::TRACK))
     {
         // A track left without an input can't stay armed.
         if (getInputChannels (tree[schema::trackInput].toString()).empty())
@@ -374,7 +357,8 @@ void AudioRecorder::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& ch
 {
     if (child.hasType (schema::TRACK))
     {
-        armed.erase (getTrackID (child));
+        // The track, and those in it if it was a folder.
+        std::erase_if (armed, [this] (TrackID track) { return ! findTrackState (song, track).isValid(); });
         update();
     }
 }

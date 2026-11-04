@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The tests' stand-ins for plug-ins (VST3s or the like), as the tests' helper hosts them (docs/tracktion-migration.md,
-// T3): made in the helper's process by a format of their own, "Test", so that tests reach what Phazite does with
-// plug-ins through its host without one installed. Their parameters have IDs of the plug-in's own, as a VST3's have.
+// The tests' stand-ins for plug-ins (VST3s or the like), as the tests' helper hosts them: made in the helper's process by
+// a format of their own, "Test", so that tests reach what Phazite does with plug-ins through its host without one
+// installed. Their parameters have IDs of the plug-in's own, as a VST3's have.
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>

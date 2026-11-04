@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A channel's own controls as Phazite's engine plays them (docs/tracktion-migration.md, T2): its fader's volume and pan,
-// whether it is heard (its mute, and the solos, which the model works out), and its meter. The message thread sets each,
-// one at a time, without building anything; the audio thread eases to them, or follows the volume's and pan's automation.
-// Kept by the track's ID from one plan to the next.
+// A channel's own controls as Phazite's engine plays them: its fader's volume and pan, whether it is heard (its mute,
+// and the solos, which the model works out), and its meter. The message thread sets each, one at a time, without
+// building anything; the audio thread eases to them, or follows the volume's and pan's automation. Kept by the track's
+// ID from one plan to the next.
 #pragma once
 
 #include "LevelMeter.h"
@@ -27,8 +27,7 @@ struct PanGains
 PanGains getPanGains (float pan) noexcept;
 
 // The fader's travel, as automation draws it and modulation moves it: a position from 0 to 1 is 20 ln (position) + 6
-// decibels, 0 dB at about 0.74 and +6 dB at the top, as Tracktion's faders go (Tracktion's volumeFaderPositionToDB()); 0 is
-// silence. And back.
+// decibels, 0 dB at about 0.74 and +6 dB at the top; 0 is silence. And back.
 float faderPositionToDecibels (float position) noexcept;
 float decibelsToFaderPosition (float decibels) noexcept;
 

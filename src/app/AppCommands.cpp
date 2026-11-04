@@ -8,6 +8,7 @@
 #include "model/chords/ChordModel.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/UndoCommands.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -26,9 +27,10 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context, TrackR
 {
     auto& selection = getSelection (context);
     auto& range = getRangeSelection (context);
+    auto& engine = getEngineContext (context);
 
     addUndoCommands (registry, selection);
-    addTransportCommands (registry, selection);
+    addTransportCommands (registry, selection, getPlaybackHost (engine));
     addSelectionCommands (registry, selection, range);
     addClipboardCommands (registry, context);
     addTrackCommands (registry, selection);
@@ -41,9 +43,9 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context, TrackR
     addContainerCommands (registry, selection);
     addAutomationCommands (registry, context);
     addLoopCommands (registry, selection, range);
-    addMetronomeCommands (registry, selection);
+    addMetronomeCommands (registry, selection, getAudioIO (engine));
     addTempoCommands (registry, selection);
-    addRecordingCommands (registry, selection);
+    addRecordingCommands (registry, selection, getAudioIO (engine));
     addCaptureCommands (registry, selection);
 }
 } // namespace phazite

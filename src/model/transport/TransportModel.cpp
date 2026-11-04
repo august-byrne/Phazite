@@ -2,64 +2,61 @@
 #include "TransportModel.h"
 #include "internal/Playback.h"
 #include "internal/Tempo.h"
-#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
-#include "model/transport/internal/Playback.h"
 
 namespace phazite
 {
 bool isPlaying (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr && isSongPlaying (*edit);
+    auto* song = findSong (context);
+    return song != nullptr && isSongPlaying (*song);
 }
 
 bool isLoopOn (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    return edit != nullptr && isLoopOn (*edit);
+    auto* song = findSong (context);
+    return song != nullptr && isLoopOn (*song);
 }
 
 std::optional<TimeSignature> getTimeSignature (const ProjectContext& context)
 {
-    if (auto* edit = getEdit (context))
-        return getTimeSignature (getSong (*edit));
+    if (auto* song = findSong (context))
+        return getTimeSignature (*song);
 
     return {};
 }
 
 void setTimeSignature (ProjectContext& context, TimeSignature timeSignature)
 {
-    if (auto* edit = getEdit (context))
-        setTimeSignature (getSong (*edit), timeSignature);
+    if (auto* song = findSong (context))
+        setTimeSignature (*song, timeSignature);
 }
 
 TrackID getLiveMidiTrack (const ProjectContext& context)
 {
-    auto* edit = getEdit (context);
-    auto* track = edit != nullptr ? getLiveMidiTrack (*edit) : nullptr;
-    return track != nullptr ? getTrackID (*track) : TrackID();
+    auto* song = findSong (context);
+    return song != nullptr ? getLiveMidiTrack (*song) : TrackID();
 }
 
 //==============================================================================
 struct TempoHandle::Impl
 {
-    te::SafeSelectable<te::Edit> edit;
+    juce::WeakReference<Song> song;
     std::unique_ptr<Gesture> gesture;
 };
 
 TempoHandle getTempoHandle (ProjectContext& context)
 {
-    auto* edit = getEdit (context);
+    auto* song = findSong (context);
 
-    if (edit == nullptr)
+    if (song == nullptr)
         return {};
 
     auto impl = std::make_unique<TempoHandle::Impl>();
-    impl->edit = edit;
+    impl->song = song;
     return TempoHandle (std::move (impl));
 }
 
@@ -96,27 +93,27 @@ TempoHandle::~TempoHandle()
 
 bool TempoHandle::isValid() const
 {
-    return impl != nullptr && impl->edit.get() != nullptr;
+    return impl != nullptr && impl->song.get() != nullptr;
 }
 
 double TempoHandle::getValue() const
 {
-    auto* edit = impl != nullptr ? impl->edit.get() : nullptr;
-    return edit != nullptr ? getTempo (getSong (*edit)) : 120.0;
+    auto* song = impl != nullptr ? impl->song.get() : nullptr;
+    return song != nullptr ? getTempo (*song) : 120.0;
 }
 
 void TempoHandle::beginGesture()
 {
-    auto* edit = impl != nullptr ? impl->edit.get() : nullptr;
+    auto* song = impl != nullptr ? impl->song.get() : nullptr;
 
-    if (edit != nullptr && impl->gesture == nullptr)
-        impl->gesture = std::make_unique<Gesture> (*edit, "Change Tempo");
+    if (song != nullptr && impl->gesture == nullptr)
+        impl->gesture = std::make_unique<Gesture> (*song, "Change Tempo");
 }
 
 void TempoHandle::setValue (double bpm)
 {
-    if (auto* edit = impl != nullptr ? impl->edit.get() : nullptr)
-        setTempo (getSong (*edit), bpm); // joins the drag's step, if one is in progress
+    if (auto* song = impl != nullptr ? impl->song.get() : nullptr)
+        setTempo (*song, bpm); // joins the drag's step, if one is in progress
 }
 
 void TempoHandle::endGesture()

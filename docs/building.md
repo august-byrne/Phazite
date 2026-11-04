@@ -32,7 +32,7 @@ If `git --version` prints a version, skip the install. Otherwise install Git wit
 winget install --id Git.Git --exact --source winget --scope machine
 ```
 
-Then close PowerShell and open a new window, so that it finds `git`. Clone the repository into a short folder (git creates any missing parent folders), and run every later command from that folder, the repository root. Don't add `--recurse-submodules`: the submodules need a git setting from step 2.
+Then close PowerShell and open a new window, so that it finds `git`. Clone the repository into a short folder (git creates any missing parent folders), and run every later command from that folder, the repository root. Don't add `--recurse-submodules`: step 3 fetches the submodules once the setup script has turned on git's long paths.
 
 ```powershell
 git clone https://github.com/august-byrne/Phazite.git C:\src\Phazite
@@ -48,7 +48,7 @@ tools\setup-windows.cmd
 It runs [tools/setup-windows.ps1](../tools/setup-windows.ps1) without changing PowerShell's execution policy (you can also double-click it in File Explorer), and:
 
 - installs or updates Git; CMake and Ninja, which generate and run the build; gitleaks, the secret scanner the git hooks run; and Visual Studio 2026 Build Tools (the MSVC C++ compiler and the Windows 11 SDK, without the Visual Studio IDE);
-- sets two global git options for your user account: `core.longpaths true`, which lets git handle paths over 260 characters, and a rule that fetches JUCE over HTTPS (see step 3);
+- sets a global git option for your user account: `core.longpaths true`, which lets git handle paths over 260 characters;
 - turns on this clone's git hooks, which stop a commit or push that would publish a secret or a private email address ([CONTRIBUTING.md](../CONTRIBUTING.md#the-git-hooks));
 - turns on crash dumps for `Phazite.exe` (Windows keeps the last 3);
 - installs or updates VS Code's C/C++ and CMake Tools extensions, if VS Code is installed (it never installs VS Code itself).
@@ -76,13 +76,13 @@ The last line states the result, such as `Result: exit code 0 (done)`:
 
 ### 3. Fetch the submodules
 
-The submodules are the other git repositories Phazite builds with, pinned at exact commits: Tracktion Engine (with the JUCE commit it pins), Rubber Band Library and WindowsToolchain, about 0.2 GB. `--depth 1` skips their history:
+The submodules are the other git repositories Phazite builds with, pinned at exact commits: JUCE, Rubber Band Library, doctest and WindowsToolchain, about 0.1 GB. `--depth 1` skips their history:
 
 ```powershell
 git submodule update --init --recursive --depth 1
 ```
 
-Run the same command after every pull or branch switch. Step 2 must come first: Tracktion lists JUCE with an SSH address, which only works with an SSH key registered on GitHub; the setup script's git rule fetches it over HTTPS instead.
+Run the same command after every pull or branch switch.
 
 ### 4. Configure and build
 
@@ -112,7 +112,7 @@ Configure has worked when its last line is `-- Build files have been written to:
 Start it from File Explorer or PowerShell, or with F5 in [VS Code](../CONTRIBUTING.md#vs-code). The Welcome window opens at the first start, and the README's [First steps](../README.md#first-steps) say what to try. Your settings (audio and MIDI devices, the plug-in list, the theme and the shortcuts) are kept in `%APPDATA%\Phazite\Phazite.settings`.
 
 - **Sound:** Phazite opens your default audio output. With an audio interface, choose **ASIO**® under **Options > Audio Settings** for the lowest delay; without an ASIO driver, [FlexASIO](https://github.com/dechamps/FlexASIO) (MIT) gives you one that plays through Windows' normal audio. Audio inputs are off until you turn them on there.
-- **Plug-ins:** **Options > Scan for Plug-ins** scans the standard VST3 folders. The scan runs in a separate copy of Phazite, so a plug-in that crashes while being scanned doesn't take Phazite down. With no plug-ins installed, `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT to try it with.
+- **Plug-ins:** **Options > Scan for Plug-ins** scans the standard VST3 folders. The scan runs in Phazite's helper program (`PhaziteHost`, next to the app), a file at a time with a time limit for each, so a plug-in that crashes or hangs while being scanned doesn't take Phazite down; plug-ins play in helpers too. With no plug-ins installed, `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT to try it with.
 - **Crashes:** a crash leaves `Phazite.exe.<number>.dmp` in `%LOCALAPPDATA%\CrashDumps`. Only `windows-profile` and `windows-debug` builds have the symbols that make one readable. A dump holds Phazite's whole memory, so never attach one to a public issue: describe what you did instead.
 
 ## Troubleshooting
@@ -124,9 +124,8 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](../CONTRIBUTI
 | `git`, `cmake` or `ninja` "is not recognized" | The window is older than the install. Open a new one; for VS Code, quit it completely (File > Exit) and start it from the Start menu. Then run `tools\setup-windows.cmd -CheckOnly`: if it reports `MISSING`, run the full setup again; if a new window still can't find the tools, sign out of Windows and back in. |
 | Configure finds no complete Visual Studio installation | Run `tools\setup-windows.cmd`, and restart Windows first if it said a restart is required. |
 | Configure says a folder under `external` is empty or missing | The submodules aren't there: run [step 3](#3-fetch-the-submodules) (after step 2 on a new machine). |
-| Fetching JUCE asks whether to trust `github.com`, or fails with `Permission denied (publickey)` or `Host key verification failed` | The HTTPS rule for JUCE is missing (answer `no` if asked). Run `tools\setup-windows.cmd`, then step 3 again. |
 | `fatal error C1081` (file name too long) | The repository path is too long: clone again into a short one such as `C:\src\Phazite`. |
-| `LNK1104` on `Phazite.exe` | Phazite, its plug-in scan or a debug session is still running. Close it and build again. |
+| `LNK1104` on `Phazite.exe` | Phazite or a debug session is still running. Close it and build again. |
 | Errors after a Build Tools update (new MSVC) or a toolchain change | Run `cmake --preset <preset> --fresh` (the setup script prints this when MSVC changes). If it still fails, delete `build\<preset>` and configure again. |
 | No sound | Choose an output in **Options > Audio Settings**. |
 | A message from `pre-commit` or `pre-push` | See [the git hooks](../CONTRIBUTING.md#when-a-hook-stops-you) in CONTRIBUTING.md. |
@@ -150,7 +149,6 @@ sudo apt install -y build-essential git cmake ninja-build pkg-config \
     libasound2-dev libfreetype-dev libfontconfig-dev \
     libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev
 sudo apt install -y gdb libasound2-plugins   # optional: VS Code debugging, sound under WSL2
-git config --global url.https://github.com/juce-framework/.insteadOf git@github.com:juce-framework/
 git clone https://github.com/august-byrne/Phazite.git ~/src/Phazite
 cd ~/src/Phazite
 git submodule update --init --recursive --depth 1
@@ -159,7 +157,7 @@ cmake --build --preset linux-release
 build/linux-release/Phazite_artefacts/Release/Phazite
 ```
 
-The `git config` line is the Linux version of the setup script's HTTPS rule for JUCE; run it once per machine (WSL keeps its own git settings). The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or newer. The Linux build finds Linux VST3 plug-ins only (in `~/.vst3`, `/usr/local/lib/vst3` and `/usr/lib/vst3`, plus any folder listed in `VST3_PATH`). To commit, also set up the git hooks as [CONTRIBUTING.md](../CONTRIBUTING.md#the-git-hooks) describes.
+The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or newer. The Linux build finds Linux VST3 plug-ins only (in `~/.vst3`, `/usr/local/lib/vst3` and `/usr/lib/vst3`, plus any folder listed in `VST3_PATH`). To commit, also set up the git hooks as [CONTRIBUTING.md](../CONTRIBUTING.md#the-git-hooks) describes.
 
 | Preset | Build type | The app |
 |---|---|---|
@@ -168,7 +166,7 @@ The `git config` line is the Linux version of the setup script's HTTPS rule for 
 | `linux-asan` | Debug with AddressSanitizer and UndefinedBehaviorSanitizer (memory errors, undefined behavior) | `build/linux-asan/Phazite_artefacts/Debug/Phazite` |
 | `linux-tsan` | RelWithDebInfo with ThreadSanitizer (data races) | `build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite` |
 
-Run the ThreadSanitizer build under `setarch -R`, which turns off address-space randomization for that one process (Ubuntu 24.04 and WSL2 kernels randomize more than the ThreadSanitizer in GCC 13 and 14 can start with). `TSAN_OPTIONS` passes it the known races in Tracktion Engine to leave out ([tools/tsan-suppressions.txt](../tools/tsan-suppressions.txt)), as the `linux-tsan` tests do:
+Run the ThreadSanitizer build under `setarch -R`, which turns off address-space randomization for that one process (Ubuntu 24.04 and WSL2 kernels randomize more than the ThreadSanitizer in GCC 13 and 14 can start with). `TSAN_OPTIONS` passes it the suppressions the `linux-tsan` tests use ([tools/tsan-suppressions.txt](../tools/tsan-suppressions.txt), for known races in code Phazite can't change; none now):
 
 ```bash
 TSAN_OPTIONS=suppressions=tools/tsan-suppressions.txt setarch $(uname -m) -R build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite

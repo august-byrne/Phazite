@@ -9,52 +9,44 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/engine/internal/EngineSetup.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 
-TEST_CASE ("The open project's Edit, selection and Tracktion's focus move together")
+TEST_CASE ("The open project's song and selection move together")
 {
-    auto& engine = phazite::test::getEngine();
-    auto& focus = phazite::getUIBehaviour (engine);
-    auto edit = phazite::createSongEdit (engine);
-    auto* track = te::getAudioTracks (*edit)[0];
+    auto song = phazite::createSong();
+    const auto track = phazite::getTrackIDs (*song).front();
 
-    {
-        phazite::ProjectContext context (phazite::test::getEngineContext(), &focus);
-        CHECK (getEdit (context) == nullptr);
-        CHECK (focus.getCurrentlyFocusedSelectionManager() == nullptr); // Phazite keeps what is selected itself
+    phazite::ProjectContext context (phazite::test::getEngineContext());
+    CHECK (findSong (context) == nullptr);
 
-        setEdit (context, edit.get());
-        CHECK (getEdit (context) == edit.get());
-        CHECK (getSelection (context).getEdit() == edit.get()); // the model's commands find it there
-        CHECK (focus.getLastFocusedEdit() == edit.get());
+    setSong (context, song.get());
+    CHECK (findSong (context) == song.get());
+    CHECK (getSelection (context).getSong() == song.get()); // the model's commands find it there
 
-        // Closing the project leaves nothing of it selected, and Tracktion's focus with it.
-        getSelection (context).selectOnly (phazite::getTrackID (*track));
-        getRangeSelection (context).set ({ phazite::BeatPosition::fromBeats (0.0), phazite::BeatPosition::fromBeats (4.0) },
-                                         { phazite::getTrackID (*track) });
-        REQUIRE (getSelection (context).isSelected (phazite::getTrackID (*track)));
-        REQUIRE_FALSE (getRangeSelection (context).isEmpty());
+    // Closing the project leaves nothing of it selected.
+    getSelection (context).selectOnly (track);
+    getRangeSelection (context).set ({ phazite::BeatPosition::fromBeats (0.0), phazite::BeatPosition::fromBeats (4.0) }, { track });
+    REQUIRE (getSelection (context).isSelected (track));
+    REQUIRE_FALSE (getRangeSelection (context).isEmpty());
 
-        setEdit (context, nullptr);
-        CHECK (getEdit (context) == nullptr);
-        CHECK_FALSE (getSelection (context).isSelected (phazite::getTrackID (*track)));
-        CHECK (getRangeSelection (context).isEmpty());
-        CHECK (focus.getLastFocusedEdit() == nullptr);
+    setSong (context, nullptr);
+    CHECK (findSong (context) == nullptr);
+    CHECK_FALSE (getSelection (context).isSelected (track));
+    CHECK (getRangeSelection (context).isEmpty());
 
-        // Opening it again selects nothing; an Edit that is deleted is gone from the context too.
-        setEdit (context, edit.get());
-        CHECK_FALSE (getSelection (context).isSelected (phazite::getTrackID (*track)));
-        edit = nullptr;
-        CHECK (getEdit (context) == nullptr);
-    }
-
-    // Gone with the context.
-    CHECK (focus.getLastFocusedEdit() == nullptr);
+    // Opening it again selects nothing; the context keeps the song it holds open.
+    setSong (context, song.get());
+    CHECK_FALSE (getSelection (context).isSelected (track));
+    auto* const held = song.get();
+    song = nullptr;
+    CHECK (findSong (context) == held);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("Views hear when another project opens, or none, before the one that closes goes")
@@ -66,53 +58,49 @@ TEST_CASE ("Views hear when another project opens, or none, before the one that 
         {
         }
 
-        void projectChanged() override { seen.push_back (getEdit (context)); }
+        void projectChanged() override { seen.push_back (findSong (context)); }
 
         phazite::ProjectContext& context;
-        std::vector<te::Edit*> seen;
+        std::vector<phazite::Song*> seen;
     };
 
-    auto& engine = phazite::test::getEngine();
-    auto edit = phazite::createSongEdit (engine);
+    auto song = phazite::createSong();
     phazite::ProjectContext context (phazite::test::getEngineContext());
     View view (context);
     context.addListener (&view);
 
-    setEdit (context, edit.get());
-    setEdit (context, nullptr); // while the Edit is still there to let go of
-    CHECK (view.seen == std::vector<te::Edit*> { edit.get(), nullptr });
+    setSong (context, song.get());
+    setSong (context, nullptr); // while the song is still there to let go of
+    CHECK (view.seen == std::vector<phazite::Song*> { song.get(), nullptr });
 
     context.removeListener (&view);
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     CHECK (view.seen.size() == 2);
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
 {
-    auto& engine = phazite::test::getEngine();
-    auto edit = phazite::createSongEdit (engine); // 120 BPM, 4/4
-    phazite::ensureTracks (*edit, 2);
-    const auto tracks = te::getAudioTracks (*edit);
+    auto song = phazite::createSong(); // 120 BPM, 4/4
+    const auto tracks = phazite::ensureTracks (*song, 2);
     phazite::ProjectContext context (phazite::test::getEngineContext());
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     auto& selection = context.getSongSelection();
 
-    const auto first = phazite::getTrackID (*tracks[0]), second = phazite::getTrackID (*tracks[1]);
+    const auto first = tracks[0], second = tracks[1];
     selection.selectOnly (second);
     selection.add (first);
     CHECK (selection.getTracks() == std::vector<phazite::TrackID> { first, second }); // in the playlist's order
-    CHECK (getSelection (context).isSelected (phazite::getTrackID (*tracks[0])));     // what the commands act on
+    CHECK (getSelection (context).isSelected (first));                                // what the commands act on
     selection.remove (first);
     CHECK (selection.getTracks() == std::vector<phazite::TrackID> { second });
 
     // Clips by theirs, left to right; a section is no clip.
     const auto later = phazite::insertMidiClip (
-        phazite::getSong (*edit), first, { phazite::BeatPosition::fromBeats (8.0), phazite::BeatPosition::fromBeats (12.0) }, nullptr);
-    const auto earlier = phazite::insertMidiClip (
-        phazite::getSong (*edit), first, { phazite::BeatPosition::fromBeats (0.0), phazite::BeatPosition::fromBeats (4.0) }, nullptr);
-    const auto section =
-        phazite::insertSection (phazite::getSong (*edit), {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
+        *song, first, { phazite::BeatPosition::fromBeats (8.0), phazite::BeatPosition::fromBeats (12.0) }, nullptr);
+    const auto earlier =
+        phazite::insertMidiClip (*song, first, { phazite::BeatPosition::fromBeats (0.0), phazite::BeatPosition::fromBeats (4.0) }, nullptr);
+    const auto section = phazite::insertSection (*song, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) });
     REQUIRE (later.isValid());
     REQUIRE (earlier.isValid());
     REQUIRE (section.isValid());
@@ -132,7 +120,7 @@ TEST_CASE ("The song's selection names tracks, clips and sections by their IDs")
     CHECK (selection.isSelected (section));
     selection.clear();
     CHECK (selection.getSections().empty());
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("Views hear what changed in the song, in groups, once for the changes made at once")
@@ -145,15 +133,14 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
         std::vector<phazite::SongChanges> heard;
     };
 
-    auto& engine = phazite::test::getEngine();
-    auto edit = phazite::createSongEdit (engine);
-    auto* track = te::getAudioTracks (*edit)[0];
+    auto song = phazite::createSong();
+    const auto track = phazite::getTrackIDs (*song).front();
     phazite::ProjectContext context (phazite::test::getEngineContext());
-    setEdit (context, edit.get());
+    setSong (context, song.get());
     View view;
     context.addListener (&view);
 
-    // The groups of what the view hears, a word each. (Tracktion follows some changes up with its own, a moment later.)
+    // The groups of what the view hears, a word each.
     const auto hear = [&view]
     {
         phazite::test::dispatchPendingMessages();
@@ -181,58 +168,55 @@ TEST_CASE ("Views hear what changed in the song, in groups, once for the changes
     };
 
     // A track renamed and a device put on it at once: one notification of both.
-    phazite::setTrackName (*track, "Bass");
-    phazite::insertDevice (*track, edit->getPluginCache().createNewPlugin (phazite::devices::Reverb::typeID, {}));
+    phazite::setTrackName (*song, track, "Bass");
+    REQUIRE (phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Reverb::typeID)).isValid());
     phazite::test::dispatchPendingMessages();
     CHECK (view.heard.size() == 1);
     CHECK (hear() == "tracks devices");
 
     // Devices and tracks that change places.
-    const auto delay = edit->getPluginCache().createNewPlugin (phazite::devices::Delay::typeID, {});
-    REQUIRE (delay != nullptr);
-    phazite::insertDevice (*track, delay);
+    const auto delay = phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Delay::typeID));
+    REQUIRE (delay.isValid());
     CHECK (hear() == "devices");
-    phazite::moveDevice (*delay, 0);
+    phazite::moveDevice (*song, delay, 0);
     CHECK (hear() == "devices");
-    phazite::ensureTracks (*edit, 2);
-    CHECK (hear() == "tracks devices"); // a new track comes with its fader and meter
-    edit->state.moveChild (edit->state.indexOf (track->state), edit->state.indexOf (te::getAudioTracks (*edit)[1]->state), nullptr);
+    const auto tracks = phazite::ensureTracks (*song, 2);
+    CHECK (hear() == "tracks"); // a new track, with its fader on its element
+    phazite::moveTracksAfter (*song, { track }, tracks[1]);
     CHECK (hear() == "tracks");
 
-    // A clip, and its notes: no change to the track (Tracktion sorts the track's clips and parts after a clip is added).
-    const auto clip = phazite::test::addMidiClip (phazite::getSong (*edit), phazite::getTrackID (*track),
-                                                  { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
+    // A clip, and its notes: no change to the track.
+    const auto clip = phazite::test::addMidiClip (*song, track, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) });
     REQUIRE (clip.isValid());
     CHECK (hear() == "clips");
-    phazite::test::addMidiNote (phazite::getSong (*edit), clip, 60, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (1.0), 100);
+    phazite::test::addMidiNote (*song, clip, 60, phazite::BeatPosition(), phazite::BeatDuration::fromBeats (1.0), 100);
     CHECK (hear() == "clips");
 
-    // A section; and the tempo, which moves the clips in time (Tracktion keeps them in seconds; sections are in beats).
-    REQUIRE (phazite::insertSection (phazite::getSong (*edit), {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) })
-                 .isValid());
+    // A section; and the tempo, which leaves the clips on their beats.
+    REQUIRE (phazite::insertSection (*song, {}, { .name = "Verse", .length = phazite::BeatDuration::fromBeats (16.0) }).isValid());
     CHECK (juce::String (hear()).contains ("sections"));
-    phazite::setTempo (phazite::getSong (*edit), 100.0);
-    CHECK (hear() == "clips tempo");
+    phazite::setTempo (*song, 100.0);
+    CHECK (hear() == "tempo");
 
-    // What Tracktion writes as it plays is no change to the song; view state, such as how tall a track shows, is a group of
-    // its own. Where a device's window was shows in no view: a window moved doesn't make the mixer show its devices again.
-    edit->getTransport().setPosition (te::TimePosition::fromSeconds (1.0));
-    phazite::setSavedTrackHeight (*track, 120);
+    // Where the playhead is put is no change to the song; view state, such as how tall a track shows, is a group of its own.
+    // Where a device's window was shows in no view: a window moved doesn't make the mixer show its devices again.
+    phazite::movePlayhead (*song, phazite::BeatPosition::fromBeats (2.0));
+    phazite::setSavedTrackHeight (*song, track, 120);
     CHECK (hear() == "view");
-    phazite::rememberWindowPosition (*delay, { 200, 120 });
+    phazite::rememberWindowPosition (*song, delay, { 200, 120 });
     CHECK (hear().empty());
 
     // Nor is a parameter's value, which a knob's drag sets at each move: controls read it as they show it. A device
     // switched off is a change.
-    phazite::setDeviceValue (*delay->getAutomatableParameterByID ("feedback"), 0.7f);
-    phazite::setChannelVolume (*track, -6.0f);
+    phazite::setValueSetByHand (*song, { delay, "feedback" }, 0.7f);
+    phazite::setChannelVolume (*song, track, -6.0f);
     CHECK (hear().empty());
-    phazite::setDeviceOn (*delay, false);
+    phazite::setDeviceOn (*song, delay, false);
     CHECK (hear() == "devices");
 
     // Changes not yet told are the closing project's: none come after another opens.
-    phazite::setTrackName (*track, "Lead");
-    setEdit (context, nullptr);
+    phazite::setTrackName (*song, track, "Lead");
+    setSong (context, nullptr);
     CHECK (hear().empty());
     context.removeListener (&view);
 }

@@ -81,7 +81,6 @@ namespace
     {
         const auto id = getClipID (clipState);
         clipState.getParent().removeChild (clipState, &song.getUndoManager());
-        song.reconcile (Song::Part::clip, id.getRaw());
     }
 
     // How far a move of an audio clip's start or end, from where it plays now (in the song's seconds) to a beat, takes it
@@ -179,7 +178,6 @@ namespace
             trimEndTo (song, clipState, beat);
         }
 
-        song.reconcile (Song::Part::clip, getClipID (right).getRaw());
         return right;
     }
 
@@ -401,7 +399,6 @@ ClipID placeClipState (Song& song, juce::ValueTree clipState, TrackID track)
         trackState.appendChild (clipState, &song.getUndoManager());
     }
 
-    song.reconcile (Song::Part::clip, getClipID (clipState).getRaw());
     return getClipID (clipState);
 }
 
@@ -415,8 +412,6 @@ void setClipPlace (Song& song, juce::ValueTree clipState, BeatPosition start, Be
         clipState.setProperty (schema::clipOffset, offset.inBeats(), undo);
     else
         clipState.removeProperty (schema::clipOffset, undo);
-
-    song.reconcile (Song::Part::clip, getClipID (clipState).getRaw());
 }
 
 //==============================================================================
@@ -812,7 +807,6 @@ void toggleClipsMuted (Song& song, const std::vector<ClipID>& clips)
             if (auto clipState = findClipState (song, id); clipState.isValid())
             {
                 clipState.setProperty (schema::clipMute, on, &song.getUndoManager());
-                song.reconcile (Song::Part::clip, id.getRaw());
             }
         });
 }

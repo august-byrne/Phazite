@@ -4,7 +4,7 @@
 // write mode, and the parameter changed by hand last. Positions are song beats, and values are in the parameter's own
 // range (ParameterHandle::getRange()). Each function takes the open project's context and gives nothing, or does
 // nothing, for an ID of something that is gone. Edits are undo steps of their own, named as each says, unless a gesture is
-// open (SongGesture.h): then they join its one step. The Tracktion side is internal/Automation.h.
+// open (SongGesture.h): then they join its one step. The song's side is internal/Automation.h.
 #pragma once
 
 #include "AutomationValues.h"

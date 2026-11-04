@@ -343,12 +343,9 @@ function Set-GitSettings {
     # Per user (runs without elevation, so it lands in this user's ~/.gitconfig).
     $git = Get-Command git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $git) { throw 'git was not found, so the git settings could not be applied.' }
-    Write-Log '==> git: long paths on; fetch JUCE over HTTPS (Tracktion lists it with an SSH URL)' Cyan
-    foreach ($setting in @(@('core.longpaths', 'true'),
-                           @('url.https://github.com/juce-framework/.insteadOf', 'git@github.com:juce-framework/'))) {
-        $rc = Invoke-Native $git.Source (@('config', '--global', '--replace-all') + $setting)
-        if ($rc -ne 0) { throw ('git config --global {0} failed (exit code {1})' -f $setting[0], $rc) }
-    }
+    Write-Log '==> git: long paths on' Cyan
+    $rc = Invoke-Native $git.Source @('config', '--global', '--replace-all', 'core.longpaths', 'true')
+    if ($rc -ne 0) { throw ('git config --global core.longpaths failed (exit code {0})' -f $rc) }
 }
 
 function Get-RepoRoot {
@@ -482,9 +479,8 @@ function Write-Report {
     $git = Get-Command git.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($git) {
         $longPaths = & $git.Source config --global --get core.longpaths 2>$null
-        $jucePaths = & $git.Source config --global --get 'url.https://github.com/juce-framework/.insteadOf' 2>$null
-        Write-Log ('gitcfg  core.longpaths={0}  JUCE over HTTPS={1}' -f $longPaths, [bool]$jucePaths)
-        if ($longPaths -ne 'true' -or -not $jucePaths) { $script:Missing = $true }
+        Write-Log ('gitcfg  core.longpaths={0}' -f $longPaths)
+        if ($longPaths -ne 'true') { $script:Missing = $true }
         $repo = Get-RepoRoot
         if ($repo) {
             $hooksPath = & $git.Source -C $repo config --get core.hooksPath 2>$null

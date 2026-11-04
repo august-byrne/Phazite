@@ -3,66 +3,64 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/engine/internal/AudioIO.h"
 
 namespace phazite
 {
-bool isMetronomeOn (const te::Edit& edit)
+bool isMetronomeOn (const Song& song)
 {
-    return findPhaziteState (edit).getProperty (schema::metronome, false);
+    return song.getState().getProperty (schema::metronome, false);
 }
 
-void setMetronomeOn (te::Edit& edit, bool on)
+void setMetronomeOn (Song& song, bool on)
 {
-    // Written only while it is on, without an undo manager; Tracktion's click track follows.
+    // Written only while it is on, without an undo manager.
     if (on)
-        getSong (edit).getState().setProperty (schema::metronome, true, nullptr);
-    else if (auto state = findPhaziteState (edit); state.isValid())
-        state.removeProperty (schema::metronome, nullptr);
-
-    mirror::reconcileTransport (edit);
+        song.getState().setProperty (schema::metronome, true, nullptr);
+    else
+        song.getState().removeProperty (schema::metronome, nullptr);
 }
 
-void toggleMetronome (te::Edit& edit)
+void toggleMetronome (Song& song)
 {
-    setMetronomeOn (edit, ! isMetronomeOn (edit));
+    setMetronomeOn (song, ! isMetronomeOn (song));
 }
 
-bool isCountInOn (const te::Edit& edit)
+bool isCountInOn (const AudioIO& audio)
 {
-    return edit.getCountInMode() != te::Edit::CountIn::none;
+    return audio.isCountInOn();
 }
 
-void setCountInOn (te::Edit& edit, bool on)
+void setCountInOn (AudioIO& audio, bool on)
 {
-    edit.setCountInMode (on ? te::Edit::CountIn::oneBar : te::Edit::CountIn::none);
+    audio.setCountInOn (on);
 }
 
-void toggleCountIn (te::Edit& edit)
+void toggleCountIn (AudioIO& audio)
 {
-    setCountInOn (edit, ! isCountInOn (edit));
+    setCountInOn (audio, ! isCountInOn (audio));
 }
 
-void addMetronomeCommands (CommandRegistry& registry, Selection& selection)
+void addMetronomeCommands (CommandRegistry& registry, Selection& selection, AudioIO& audio)
 {
-    const auto hasEdit = [&selection] { return selection.getEdit() != nullptr; };
+    const auto hasSong = [&selection] { return selection.getSong() != nullptr; };
 
     registry.add ({ .id = "transport.metronome",
                     .name = "Metronome",
                     .category = "Transport",
                     .description = "Clicks on every beat while the song plays, louder on each bar's first.",
                     .synonyms = { "click", "click track", "beat", "tick", "tempo" },
-                    .perform = withEdit (selection, toggleMetronome),
-                    .isEnabled = hasEdit,
-                    .isTicked = ifEdit (selection, isMetronomeOn) });
+                    .perform = withSong (selection, toggleMetronome),
+                    .isEnabled = hasSong,
+                    .isTicked = ifSong (selection, isMetronomeOn) });
 
     registry.add ({ .id = "transport.countIn",
                     .name = "Count-In",
                     .category = "Transport",
                     .description = "Plays a bar of clicks before recording starts from a stop, even with the metronome off.",
                     .synonyms = { "precount", "pre-roll", "count in", "lead-in" },
-                    .perform = withEdit (selection, toggleCountIn),
-                    .isEnabled = hasEdit,
-                    .isTicked = ifEdit (selection, isCountInOn) });
+                    .perform = [&audio] { toggleCountIn (audio); },
+                    .isEnabled = hasSong,
+                    .isTicked = [&audio] { return isCountInOn (audio); } });
 }
 } // namespace phazite

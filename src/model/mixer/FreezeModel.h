@@ -3,7 +3,7 @@
 // commands. Both render the track's sound to a file on a thread of their own, which the app shows in a progress window
 // with Cancel (TrackRenderHost):
 // - Freeze plays a track from a file in the project's Cache folder instead of its clips and its devices up to its fader,
-//   stopping before a device that must hear its sound live (a sidechain, a send before the fader), so that its devices
+//   stopping before a device that must hear another track's sound live (one that listens to a sidechain), so that its devices
 //   take no CPU. While it is frozen, those devices' controls are off, and changing what it froze (its clips or notes, or
 //   a frozen device, by undo too) unfreezes it, so that what plays is always what is shown. Freezing and unfreezing
 //   aren't undo steps (a track keeps one frozen file, which a later freeze replaces), as mute and solo aren't.

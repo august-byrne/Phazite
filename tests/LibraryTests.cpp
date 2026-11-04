@@ -92,10 +92,10 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
 TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")
 {
     TemporaryFolder temp;
-    auto project = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::setTempo (phazite::getSong (*project), 100.0);
+    const auto song = phazite::createSong();
+    phazite::setTempo (*song, 100.0);
     phazite::ProjectContext context (phazite::test::getEngineContext()); // with the project open
-    setEdit (context, project.get());
+    setSong (context, song.get());
 
     // Two bars at the tempo in its name.
     const auto loop = writeSound (temp.folder.getChildFile ("Break 120 BPM.wav"), 4.0);
@@ -113,7 +113,7 @@ TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")
     previewer.stop();
     CHECK (previewer.getFile() == juce::File());
     CHECK_FALSE (previewer.play (temp.folder.getChildFile ("Missing.wav"), context));
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }
 
 TEST_CASE ("Sounds named as Phazite Sounds names them get their folders' tags, and those with a tempo play in time")
@@ -141,7 +141,7 @@ TEST_CASE ("Sounds named as Phazite Sounds names them get their folders' tags, a
     for (const auto& file : { riser, loop })
     {
         INFO (file.getFileName());
-        CHECK (te::AudioFile (phazite::test::getEngine(), file).getInfo().loopInfo.getNumBeats() > 0.0);
+        CHECK (phazite::getAudioFileInfo (file).loopBeats > 0.0);
     }
 }
 

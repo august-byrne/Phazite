@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist's tracks: which ones it shows, their colors, and the track commands. The song holds them (schema::TRACKS):
-// what each is, its name and color, mute and solo, and how it shows, by their IDs (docs/tracktion-migration.md, T6 step
-// 3). What plays them is made from the song.
+// what each is, its name and color, mute and solo, and how it shows, by their IDs. What plays them is made from the
+// song.
 #pragma once
 
 #include "model/arrangement/PlaylistValues.h"

@@ -7,7 +7,6 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -34,27 +33,6 @@ std::vector<std::uint64_t> idsOf (const phazite::Song& song, phazite::ClipID cli
     return ids;
 }
 
-// The IDs Tracktion's notes of a clip carry: those of the song's notes they play (schema::phaziteNoteID), 0 for none.
-std::vector<std::uint64_t> playedIDsOf (const te::MidiClip& clip)
-{
-    std::vector<std::uint64_t> ids;
-
-    for (auto* note : clip.getSequence().getNotes())
-        ids.push_back ((std::uint64_t) (juce::int64) note->state[phazite::schema::phaziteNoteID]);
-
-    return ids;
-}
-
-// Tracktion's note that plays one of the song's, by its ID, or nullptr.
-te::MidiNote* findPlayedNote (const te::MidiClip& clip, phazite::NoteID id)
-{
-    for (auto* note : clip.getSequence().getNotes())
-        if ((juce::int64) note->state[phazite::schema::phaziteNoteID] == (juce::int64) id.getRaw())
-            return note;
-
-    return nullptr;
-}
-
 bool allDifferent (std::vector<std::uint64_t> ids)
 {
     std::sort (ids.begin(), ids.end());
@@ -76,21 +54,21 @@ phazite::NoteData noteOf (const phazite::Song& song, const phazite::NoteRef& not
     return *data;
 }
 
-// The open project: an Edit in the project context, with a MIDI clip a bar long on its first track.
+// The open project: a song in the project context, with a MIDI clip a bar long on its first track.
 struct OpenProject
 {
     OpenProject()
     {
-        setEdit (context, edit.get());
-        clip = phazite::insertMidiClip (song, phazite::getTrackID (*te::getAudioTracks (*edit)[0]), { beats (0.0), beats (4.0) }, nullptr);
+        setSong (context, &song);
+        clip = phazite::insertMidiClip (song, phazite::ensureTracks (song, 1).front(), { beats (0.0), beats (4.0) }, nullptr);
         REQUIRE (clip.isValid());
         song.getUndoManager().clearUndoHistory();
     }
 
-    ~OpenProject() { setEdit (context, nullptr); }
+    ~OpenProject() { setSong (context, nullptr); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    phazite::Song& song = phazite::getSong (*edit);
+    phazite::Song::Ptr songPtr = phazite::createSong();
+    phazite::Song& song = *songPtr;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::ClipID clip;
 };
@@ -105,7 +83,7 @@ TEST_CASE ("Each note added to the open project gets an ID of its own, which it 
     phazite::NoteID firstID, secondID;
 
     {
-        const phazite::UndoStep step (*project.edit, "Add Notes");
+        const phazite::UndoStep step (song, "Add Notes");
         firstID = addNote (song, clip, 60, 0.0).note;
         secondID = addNote (song, clip, 64, 1.0).note;
     }
@@ -121,30 +99,30 @@ TEST_CASE ("Each note added to the open project gets an ID of its own, which it 
 
     // Moved, it is the same note; deleted and put back by an undo, too.
     {
-        const phazite::UndoStep step (*project.edit, "Move Note");
+        const phazite::UndoStep step (song, "Move Note");
         phazite::moveNote (song, second, beats (2.0), 65);
     }
 
     {
-        const phazite::UndoStep step (*project.edit, "Delete Note");
+        const phazite::UndoStep step (song, "Delete Note");
         phazite::deleteNotes (song, { second });
     }
 
     CHECK_FALSE (phazite::findNoteState (song, second).isValid());
-    phazite::undo (*project.edit);
+    phazite::undo (song);
     REQUIRE (phazite::findNoteState (song, second).isValid());
     CHECK (noteOf (song, second).pitch == 65);
 
     // Undoing the move and the adding takes them away; redoing them brings back the same notes.
-    phazite::undo (*project.edit);
-    phazite::undo (*project.edit);
+    phazite::undo (song);
+    phazite::undo (song);
     CHECK (phazite::getClipNotes (song, clip).empty());
-    phazite::redo (*project.edit);
+    phazite::redo (song);
     CHECK (idsOf (song, clip) == std::vector { firstID.getRaw(), secondID.getRaw() });
 
     // A note added later never gets an ID a note had before, even one deleted since.
     {
-        const phazite::UndoStep step (*project.edit, "Delete Note");
+        const phazite::UndoStep step (song, "Delete Note");
         phazite::deleteNotes (song, { second });
     }
 
@@ -190,48 +168,27 @@ TEST_CASE ("A copy of a clip keeps its notes' IDs, an alias, a duplicate and the
     CHECK (phazite::findNoteState (song, { right, phazite::NoteID::fromRaw (ids[3]) }).isValid());
 }
 
-TEST_CASE ("Each note of the song has an ID from the start, which Tracktion's note that plays it carries")
+TEST_CASE ("Each note of the song has an ID from the start, in a song no project context holds too")
 {
-    // An Edit no project context holds too: the song gives its notes their IDs.
-    auto edit = phazite::createSongEdit (phazite::test::getEngine());
-    auto& song = phazite::getSong (*edit);
-    const auto clip = phazite::insertMidiClip (song, phazite::ensureTracks (song, 1).front(), { beats (0.0), beats (4.0) }, nullptr);
+    auto song = phazite::createSong();
+    const auto clip = phazite::insertMidiClip (*song, phazite::ensureTracks (*song, 1).front(), { beats (0.0), beats (4.0) }, nullptr);
     REQUIRE (clip.isValid());
-    const auto first = addNote (song, clip, 60, 0.0);
-    addNote (song, clip, 62, 1.0);
+    const auto first = addNote (*song, clip, 60, 0.0);
+    addNote (*song, clip, 62, 1.0);
     CHECK (first.note.isValid());
-    CHECK (allDifferent (idsOf (song, clip)));
-
-    auto* played = dynamic_cast<te::MidiClip*> (te::findClipForID (*edit, phazite::toTracktion (clip)));
-    REQUIRE (played != nullptr);
-    auto* firstPlayed = findPlayedNote (*played, first.note);
-    REQUIRE (firstPlayed != nullptr);
-    CHECK (allDifferent (playedIDsOf (*played)));
-
-    // Tracktion's notes that play none of the song's (written into its clip from outside), or that carry another's ID, go
-    // as the clip is placed again.
-    auto& sequence = played->getSequence();
-    sequence.state.appendChild (firstPlayed->state.createCopy(), nullptr);
-    sequence.state.appendChild (juce::ValueTree (te::IDs::NOTE, { { "p", 70 }, { "b", 2.0 }, { "l", 1.0 }, { "v", 100 } }), nullptr);
-    REQUIRE (playedIDsOf (*played).size() == 4);
-    phazite::mirror::reconcileClip (*edit, clip);
-    CHECK (playedIDsOf (*played).size() == 2);
-    CHECK (allDifferent (playedIDsOf (*played)));
-    CHECK (findPlayedNote (*played, first.note) == firstPlayed);
+    CHECK (allDifferent (idsOf (*song, clip)));
 }
 
 TEST_CASE ("Notes' IDs are saved with the project and the same when it opens again, with nothing to save")
 {
-    auto& engine = phazite::test::getEngine();
     phazite::test::TemporaryFolder temp;
     juce::String error;
     std::vector<std::uint64_t> saved;
 
     // A new project whose content adds notes before it is open: the first save gives them their IDs.
-    auto project = phazite::Project::create (engine, temp.folder, "Notes", error,
-                                             [] (te::Edit& edit)
+    auto project = phazite::Project::create (temp.folder, "Notes", error,
+                                             [] (phazite::Song& song)
                                              {
-                                                 auto& song = phazite::getSong (edit);
                                                  const auto track = phazite::insertTrack (song, {}, nullptr);
                                                  const auto clip =
                                                      phazite::insertMidiClip (song, track, { beats (0.0), beats (4.0) }, nullptr);
@@ -244,7 +201,7 @@ TEST_CASE ("Notes' IDs are saved with the project and the same when it opens aga
 
     const auto clipOf = [] (phazite::Project& p)
     {
-        for (const auto& clipState : phazite::getClipStates (phazite::getSong (p.getEdit())))
+        for (const auto& clipState : phazite::getClipStates (p.getSong()))
             if (phazite::isMidiState (clipState))
                 return phazite::getClipID (clipState);
 
@@ -252,7 +209,7 @@ TEST_CASE ("Notes' IDs are saved with the project and the same when it opens aga
     };
 
     REQUIRE (clipOf (*project).isValid());
-    saved = idsOf (phazite::getSong (project->getEdit()), clipOf (*project));
+    saved = idsOf (project->getSong(), clipOf (*project));
     CHECK (allDifferent (saved));
     CHECK_FALSE (project->hasUnsavedChanges());
 
@@ -277,11 +234,11 @@ TEST_CASE ("Notes' IDs are saved with the project and the same when it opens aga
     const auto file = project->getFile();
     project = nullptr;
 
-    project = phazite::Project::open (engine, file, false, error);
+    project = phazite::Project::open (file, false, error);
     REQUIRE (project != nullptr);
     phazite::test::settle();
     REQUIRE (clipOf (*project).isValid());
-    CHECK (idsOf (phazite::getSong (project->getEdit()), clipOf (*project)) == saved);
+    CHECK (idsOf (project->getSong(), clipOf (*project)) == saved);
     CHECK_FALSE (project->hasUnsavedChanges());
 }
 

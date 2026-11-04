@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Freezing a track and bouncing it in place (roadmap step 2.11; src/model/mixer/FreezeModel.h): rendered in the
-// background up to the fader (stopping before a sidechained device or a send before the fader), played from a file in the
-// project's Cache folder, kept frozen while only its mixer changes and unfrozen when what it froze changes, opened frozen,
-// and cancelled without a trace; and a bounce onto a new audio track under the original, as one undo step.
+// background up to the fader (stopping before a sidechained device), played from a file in the project's Cache folder,
+// kept frozen while only its mixer changes and unfrozen when what it froze changes, opened frozen, and cancelled without
+// a trace; and a bounce onto a new audio track under the original, as one undo step.
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -11,10 +11,11 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/devices/internal/DevicePlugin.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/mixer/internal/Sidechain.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -28,6 +29,9 @@
 
 namespace
 {
+using phazite::DeviceID;
+using phazite::TrackID;
+
 // A saved project with Bass, a sine from the start to 1.5 s through a stereo expander that turns it up 6 dB, its fader at -6 dB
 // and a send after it to the return Reverb; Bass is selected.
 struct Song
@@ -35,30 +39,27 @@ struct Song
     Song()
     {
         juce::String error;
-        project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Song", error);
+        project = phazite::Project::create (temp.folder, "Song", error);
         REQUIRE (project != nullptr);
-        auto& edit = project->getEdit();
-        phazite::ensureTracks (edit, 1);
-        bass = te::getAudioTracks (edit)[0];
-        phazite::setTrackName (*bass, "Bass");
+        auto& song = getSong();
+        bass = phazite::ensureTracks (song, 1)[0];
+        phazite::setTrackName (song, bass, "Bass");
 
         const auto sound = phazite::test::writeSound (temp.folder.getChildFile ("Sine.wav"), 2.0);
-        clip = phazite::test::addAudioClip (phazite::getSong (edit), phazite::getTrackID (*bass), "Sine", sound, 0.0, 1.5);
+        clip = phazite::test::addAudioClip (song, bass, "Sine", sound, 0.0, 1.5);
         REQUIRE (clip.isValid());
 
-        expander = phazite::insertDevice (*bass, edit.getPluginCache().createNewPlugin (phazite::devices::StereoExpander::typeID, {}));
-        REQUIRE (expander != nullptr);
-        setParameter (*expander, "gain", 6.0f);
-        phazite::setChannelVolume (*bass, -6.0f);
+        expander = phazite::insertDeviceState (
+            song, bass, phazite::makeOwnDeviceState (song, phazite::devices::StereoExpander::typeID, { { "gain", 6.0f } }));
+        REQUIRE (expander.isValid());
+        phazite::setChannelVolume (song, bass, -6.0f);
 
-        reverb = phazite::addReturnTrack (edit, "Reverb", nullptr);
-        REQUIRE (reverb != nullptr);
-        REQUIRE (phazite::addSend (*bass, phazite::getReturnBus (*reverb), false) != nullptr);
+        reverb = phazite::addReturnTrack (song, "Reverb", nullptr);
+        REQUIRE (reverb.isValid());
+        REQUIRE (phazite::addSend (song, bass, reverb, false).isValid());
 
-        // Tracktion puts clips added in code in order a moment later, as an undo step of its own.
-        phazite::test::dispatchPendingMessages();
         REQUIRE (project->save().wasOk());
-        phazite::getSong (edit).getUndoManager().clearUndoHistory();
+        song.getUndoManager().clearUndoHistory();
         open();
     }
 
@@ -66,45 +67,30 @@ struct Song
 
     void open()
     {
-        setEdit (context, &project->getEdit());
-        getSelection (context).selectOnly (phazite::getTrackID (*bass));
+        setSong (context, &getSong());
+        getSelection (context).selectOnly (bass);
     }
 
     void close()
     {
         host.render = nullptr;
-        clip = {}; // the clip goes with its Edit
-        setEdit (context, nullptr);
+        setSong (context, nullptr);
     }
 
-    // Closes the project, and opens it again from its file.
+    // Closes the project, and opens it again from its file: its tracks, clips and devices keep their IDs.
     void reopen()
     {
         close();
         const auto file = project->getFile();
         project = nullptr;
         juce::String error;
-        project = phazite::Project::open (phazite::test::getEngine(), file, false, error);
+        project = phazite::Project::open (file, false, error);
         REQUIRE (project != nullptr);
-        bass = te::getAudioTracks (project->getEdit())[0];
-        expander = phazite::getDevices (*bass)[0];
-        clip = {};
         open();
     }
 
-    static void setParameter (te::Plugin& plugin, std::string_view id, float value)
-    {
-        auto* parameter = dynamic_cast<phazite::DevicePlugin&> (plugin).findParameter (id);
-        REQUIRE (parameter != nullptr);
-        phazite::setDeviceValue (*parameter, value);
-    }
-
-    phazite::TrackID id() const { return phazite::getTrackID (*bass); }
-    te::Edit& edit() const { return project->getEdit(); }
-    juce::File frozenFile() const
-    {
-        return project->getCacheFolder().getChildFile ("trackFreeze_0_" + bass->itemID.toString() + ".freeze");
-    }
+    phazite::Song& getSong() const { return project->getSong(); }
+    juce::File frozenFile() const { return phazite::getFrozenFile (getSong(), bass); }
 
     // Freezes Bass with its command's function, as the app does, and waits for it.
     void freeze()
@@ -114,73 +100,96 @@ struct Song
         REQUIRE (host.render != nullptr);
         REQUIRE (phazite::test::dispatchMessagesUntil ([this] { return ! host.finished.isEmpty(); }, 60000));
         REQUIRE (host.finished == juce::StringArray { "Freezing Bass: ok" });
-        REQUIRE (bass->isFrozen (te::Track::individualFreeze));
+        REQUIRE (phazite::isFrozen (context, bass));
     }
 
-    bool hasFreezePoint() const { return bass->pluginList.findFirstPluginOfType<te::FreezePointPlugin>() != nullptr; }
+    // The expander's gain, set by hand as its control sets it.
+    void setExpanderGain (float decibels)
+    {
+        const phazite::UndoStep step (getSong(), "Change Gain");
+        phazite::setValueSetByHand (getSong(), phazite::ParameterRef { expander, "gain" }, decibels);
+    }
 
     phazite::test::TemporaryFolder temp;
     std::unique_ptr<phazite::Project> project;
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     phazite::test::RenderHost host;
-    te::AudioTrack *bass = nullptr, *reverb = nullptr;
+    TrackID bass, reverb;
     phazite::ClipID clip;
-    te::Plugin* expander = nullptr;
+    DeviceID expander;
 };
+
+// A file's audio, which must be one.
+juce::AudioBuffer<float> readAudio (const juce::File& file, double& sampleRate)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    REQUIRE (reader != nullptr);
+    juce::AudioBuffer<float> audio ((int) reader->numChannels, (int) reader->lengthInSamples);
+    REQUIRE (reader->read (&audio, 0, audio.getNumSamples(), 0, true, true));
+    sampleRate = reader->sampleRate;
+    return audio;
+}
+
+// How long a file lasts, in seconds.
+double getLength (const juce::File& file)
+{
+    double sampleRate = 0.0;
+    const auto audio = readAudio (file, sampleRate);
+    return audio.getNumSamples() / sampleRate;
+}
 
 // The RMS level of a stretch of a file's left channel, in seconds.
 double getLevel (const juce::File& file, double start, double end)
 {
-    const std::unique_ptr<juce::AudioFormatReader> reader (
-        phazite::test::getEngine().getAudioFileFormatManager().readFormatManager.createReaderFor (file));
-    REQUIRE (reader != nullptr);
-    juce::AudioBuffer<float> audio ((int) reader->numChannels, (int) reader->lengthInSamples);
-    REQUIRE (reader->read (&audio, 0, audio.getNumSamples(), 0, true, true));
-    const auto first = juce::roundToInt (start * reader->sampleRate);
-    return audio.getRMSLevel (0, first, juce::roundToInt (end * reader->sampleRate) - first);
+    double sampleRate = 0.0;
+    const auto audio = readAudio (file, sampleRate);
+    const auto first = juce::roundToInt (start * sampleRate);
+    return audio.getRMSLevel (0, first, juce::roundToInt (end * sampleRate) - first);
 }
 } // namespace
 
 TEST_CASE ("Freezing renders a track up to its fader in the background, and plays that file until it is unfrozen")
 {
     Song song;
-    CHECK (phazite::getWhyNotFreeze (song.context, song.id()).isEmpty());
-    CHECK (phazite::getFreezePointIndex (*song.bass) == song.bass->pluginList.indexOf (song.bass->getVolumePlugin()));
+    auto& model = song.getSong();
+    CHECK (phazite::getWhyNotFreeze (song.context, song.bass).isEmpty());
+    CHECK (phazite::getFrozenDevices (model, song.bass) == std::vector { song.expander });
     CHECK (phazite::getFreezeCommandName (song.context) == "Freeze Track");
     CHECK (phazite::canToggleFreeze (song.context));
 
     song.freeze();
-    CHECK (phazite::isFrozen (song.context, song.id()));
+    CHECK (phazite::isFrozen (song.context, song.bass));
     CHECK (phazite::isSelectedTrackFrozen (song.context));
     CHECK (phazite::getFreezeCommandName (song.context) == "Unfreeze Track");
-    CHECK (phazite::getWhyNotFreeze (song.context, song.id()) == "Bass is frozen already.");
+    CHECK (phazite::getWhyNotFreeze (song.context, song.bass) == "Bass is frozen already.");
+    CHECK (phazite::getFrozenTracks (model) == std::vector { song.bass });
 
     // The expander is in the file, and stops playing; the fader and the send after it stay live.
-    CHECK (phazite::isFrozenDevice (song.context, phazite::getDeviceID (*song.expander)));
-    CHECK (song.expander->isFrozen());
-    CHECK_FALSE (song.bass->getVolumePlugin()->isFrozen());
-    CHECK_FALSE (phazite::getSends (*song.bass)[0]->isFrozen());
-    CHECK (song.hasFreezePoint());
-    CHECK (phazite::getDevices (*song.bass).size() == 1); // the freeze point isn't a device
+    CHECK (phazite::isFrozenDevice (song.context, song.expander));
+    CHECK (phazite::isFrozenDevice (model, song.expander));
+    CHECK_FALSE (phazite::isFrozenDevice (model, phazite::getFader (model, song.bass)));
+    CHECK_FALSE (phazite::isFrozenDevice (model, phazite::getSends (model, song.bass)[0]));
+    CHECK (phazite::getDevices (model, song.bass).size() == 1);
 
     // The file is in the project's Cache folder: the clip and its tail.
     REQUIRE (song.frozenFile().existsAsFile());
-    CHECK (te::AudioFile (song.edit().engine, song.frozenFile()).getLength() >= 1.5);
+    CHECK (song.frozenFile().getParentDirectory() == song.project->getCacheFolder());
+    CHECK (getLength (song.frozenFile()) >= 1.5);
 
     // Not an undo step, but a change to save; the render's switches are as they were.
-    CHECK_FALSE (phazite::getSong (song.edit()).getUndoManager().canUndo());
+    CHECK_FALSE (phazite::canUndo (model));
     CHECK (song.project->hasUnsavedChanges());
-    CHECK (song.expander->isEnabled());
-    CHECK (song.bass->getVolumePlugin()->isEnabled());
-    CHECK_FALSE (song.bass->isMuted (false));
+    CHECK (phazite::isDeviceOn (model, song.expander));
+    CHECK_FALSE (phazite::isTrackMuted (model, song.bass, false));
 
     // Unfreezing plays it live again, and leaves the file until the project closes.
     phazite::toggleFreeze (song.context, song.host);
-    CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
-    CHECK_FALSE (phazite::findTrackState (*song.bass).hasProperty (phazite::schema::trackFrozen));
-    CHECK_FALSE (song.expander->isFrozen());
-    CHECK_FALSE (song.hasFreezePoint());
-    CHECK_FALSE (phazite::getSong (song.edit()).getUndoManager().canUndo());
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK_FALSE (phazite::findTrackState (model, song.bass).hasProperty (phazite::schema::trackFrozen));
+    CHECK_FALSE (phazite::isFrozenDevice (model, song.expander));
+    CHECK_FALSE (phazite::canUndo (model));
     const auto frozenFile = song.frozenFile();
     CHECK (frozenFile.existsAsFile());
 
@@ -192,49 +201,49 @@ TEST_CASE ("Freezing renders a track up to its fader in the background, and play
 TEST_CASE ("A frozen track stays frozen while only its mixer changes, and unfreezes when what it froze does")
 {
     Song song;
+    auto& model = song.getSong();
     song.freeze();
 
     // Its fader, name, mute switch and send: still frozen.
-    phazite::setChannelVolume (*song.bass, -3.0f);
-    phazite::renameTrack (*song.bass, "Bass Line");
-    phazite::setTrackMuted (*song.bass, true);
-    phazite::setTrackMuted (*song.bass, false);
-    phazite::setSendLevel (*phazite::getSends (*song.bass)[0], -12.0f);
+    phazite::setChannelVolume (model, song.bass, -3.0f);
+    phazite::renameTrack (model, song.bass, "Bass Line");
+    phazite::setTrackMuted (model, song.bass, true);
+    phazite::setTrackMuted (model, song.bass, false);
+    phazite::setSendLevel (model, phazite::getSends (model, song.bass)[0], -12.0f);
     phazite::test::dispatchPendingMessages();
-    CHECK (phazite::isFrozen (song.context, song.id()));
+    CHECK (phazite::isFrozen (song.context, song.bass));
 
     // Its clip: unfrozen, in the clip's own undo step.
     {
-        const phazite::UndoStep step (song.edit(), "Move Clip");
+        const phazite::UndoStep step (model, "Move Clip");
         const auto halfASecond = phazite::BeatPosition::fromBeats (1.0); // at 120 BPM
-        phazite::trimClipStart (phazite::getSong (song.edit()), song.clip, halfASecond);
+        phazite::trimClipStart (model, song.clip, halfASecond);
     }
 
-    CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
-    CHECK_FALSE (song.hasFreezePoint());
-    CHECK_FALSE (song.expander->isFrozen());
-    CHECK (phazite::describeUndo (&phazite::getSong (song.edit())) == juce::String ("Undo Move Clip"));
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK_FALSE (phazite::isFrozenDevice (model, song.expander));
+    CHECK (phazite::describeUndo (&model) == juce::String ("Undo Move Clip"));
 
     // Undo puts the clip back, and leaves it unfrozen: the file may not hold what plays.
-    phazite::undo (song.edit());
-    CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
+    phazite::undo (model);
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
 
     // A frozen device: unfrozen too.
-    phazite::setTrackName (*song.bass, "Bass"); // the render's title
+    phazite::setTrackName (model, song.bass, "Bass"); // the render's title
     song.freeze();
-    Song::setParameter (*song.expander, "gain", 3.0f);
-    phazite::test::dispatchPendingMessages(); // the value reaches the device's state
-    CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
+    song.setExpanderGain (3.0f);
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
 
     // Undo of a change made before the freeze: unfrozen.
     {
-        const phazite::UndoStep step (song.edit(), "Clip Gain");
-        phazite::setClipGain (phazite::getSong (song.edit()), song.clip, -3.0f);
+        const phazite::UndoStep step (model, "Clip Gain");
+        phazite::setClipGain (model, song.clip, -3.0f);
     }
 
     song.freeze();
-    phazite::undo (song.edit());
-    CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
+    phazite::undo (model);
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
 }
 
 TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unfrozen without its file")
@@ -243,23 +252,21 @@ TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unf
     song.freeze();
     REQUIRE (song.project->save().wasOk());
 
-    // Frozen in the song (Schema.h: trackFrozen): an Edit built from the song alone plays the file too.
-    CHECK ((bool) phazite::findTrackState (*song.bass)[phazite::schema::trackFrozen]);
+    // Frozen in the song (Schema.h: trackFrozen): a song made from its state alone plays the file too.
+    CHECK ((bool) phazite::findTrackState (song.getSong(), song.bass)[phazite::schema::trackFrozen]);
 
     {
-        const auto rebuilt = phazite::createEditFromSong (song.edit().engine, phazite::getSong (song.edit()).getState().createCopy(),
-                                                          song.project->getFile(), song.project->getCacheFolder());
-        REQUIRE (rebuilt != nullptr);
-        auto* bass = dynamic_cast<te::AudioTrack*> (te::findTrackForID (*rebuilt, song.bass->itemID));
-        REQUIRE (bass != nullptr);
-        CHECK (bass->isFrozen (te::Track::individualFreeze));
-        CHECK (bass->pluginList.findFirstPluginOfType<te::FreezePointPlugin>() != nullptr);
+        const auto copy =
+            phazite::makeSong (song.getSong().getState().createCopy(), song.project->getFile(), song.project->getCacheFolder());
+        REQUIRE (copy != nullptr);
+        CHECK (phazite::getFrozenTracks (*copy) == std::vector { song.bass });
+        CHECK (phazite::isFrozenDevice (*copy, song.expander));
+        CHECK (phazite::getFrozenFile (*copy, song.bass) == song.frozenFile());
     }
 
     song.reopen();
-    CHECK (phazite::isFrozen (song.context, song.id()));
-    CHECK (song.hasFreezePoint());
-    CHECK (song.expander->isFrozen());
+    CHECK (phazite::isFrozen (song.context, song.bass));
+    CHECK (phazite::isFrozenDevice (song.getSong(), song.expander));
     CHECK_FALSE (song.project->hasUnsavedChanges());
     CHECK (song.frozenFile().existsAsFile());
     CHECK (phazite::getFreezeCommandName (song.context) == "Unfreeze Track");
@@ -267,65 +274,63 @@ TEST_CASE ("A frozen track opens frozen from the project's Cache folder, and unf
     // Without the Cache folder, it opens unfrozen, as it would play.
     song.close();
     song.project = nullptr;
-    REQUIRE (phazite::Project::getCacheFolder (song.temp.folder.getChildFile ("Song").getChildFile ("Song.phazite")).deleteRecursively());
+    const auto file = song.temp.folder.getChildFile ("Song").getChildFile ("Song.phazite");
+    REQUIRE (phazite::Project::getCacheFolder (file).deleteRecursively());
 
     juce::String error;
-    song.project = phazite::Project::open (phazite::test::getEngine(), song.temp.folder.getChildFile ("Song").getChildFile ("Song.phazite"),
-                                           false, error);
+    song.project = phazite::Project::open (file, false, error);
     REQUIRE (song.project != nullptr);
-    song.bass = te::getAudioTracks (song.project->getEdit())[0];
-    song.expander = phazite::getDevices (*song.bass)[0];
     song.open();
-    CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
-    CHECK_FALSE (song.hasFreezePoint());
-    CHECK_FALSE (song.expander->isFrozen());
-    CHECK_FALSE (phazite::findTrackState (*song.bass).hasProperty (phazite::schema::trackFrozen));
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK_FALSE (phazite::isFrozenDevice (song.getSong(), song.expander));
+    CHECK_FALSE (phazite::findTrackState (song.getSong(), song.bass).hasProperty (phazite::schema::trackFrozen));
 }
 
-TEST_CASE ("Freezing stops before a device that listens to a sidechain or a send before the fader")
+TEST_CASE ("Freezing stops before a device that listens to a sidechain; a send before the fader sends what the file plays")
 {
     Song song;
-    auto& edit = song.edit();
-    auto* kick = phazite::insertPlainTrack (edit, nullptr);
-    REQUIRE (kick != nullptr);
+    auto& model = song.getSong();
+    const auto kick = phazite::insertPlainTrack (model, TrackID());
+    REQUIRE (kick.isValid());
 
-    auto* compressor = phazite::insertDevice (*song.bass, edit.getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
-    REQUIRE (compressor != nullptr);
-    compressor->setSidechainSourceID (kick->itemID);
-    CHECK (phazite::getFreezePointIndex (*song.bass) == song.bass->pluginList.indexOf (compressor));
+    const auto compressor =
+        phazite::insertDeviceState (model, song.bass, phazite::makeOwnDeviceState (model, phazite::devices::Compressor::typeID));
+    REQUIRE (compressor.isValid());
+    phazite::setSidechainSource (model, compressor, kick);
+    CHECK (phazite::getFrozenDevices (model, song.bass) == std::vector { song.expander });
 
-    compressor->setSidechainSourceID ({});
-    auto* preFader = phazite::addSend (*song.bass, phazite::getReturnBus (*song.reverb), true);
-    REQUIRE (preFader != nullptr);
-    CHECK (phazite::getFreezePointIndex (*song.bass) == song.bass->pluginList.indexOf (preFader));
+    // A send before the fader doesn't stop it: frozen up to the fader, the send goes on sending what the file plays.
+    phazite::setSidechainSource (model, compressor, TrackID());
+    const auto preFader = phazite::addSend (model, song.bass, song.reverb, true);
+    REQUIRE (preFader.isValid());
+    CHECK (phazite::getFrozenDevices (model, song.bass) == std::vector { song.expander, compressor });
 
-    // Frozen up to the send, which goes on sending what the file plays.
     song.freeze();
-    CHECK (song.expander->isFrozen());
-    CHECK (compressor->isFrozen());
-    CHECK_FALSE (preFader->isFrozen());
+    CHECK (phazite::isFrozenDevice (model, song.expander));
+    CHECK (phazite::isFrozenDevice (model, compressor));
+    CHECK_FALSE (phazite::isFrozenDevice (model, preFader));
 }
 
 TEST_CASE ("Returns, buses and empty tracks aren't frozen or bounced, and say why")
 {
     Song song;
-    CHECK (phazite::getWhyNotFreeze (song.context, phazite::getTrackID (*song.reverb))
+    auto& model = song.getSong();
+    CHECK (phazite::getWhyNotFreeze (song.context, song.reverb)
            == "Returns can't be frozen: their sound comes from the tracks that send to them.");
-    CHECK (phazite::getWhyNotBounce (song.context, phazite::getTrackID (*song.reverb))
+    CHECK (phazite::getWhyNotBounce (song.context, song.reverb)
            == "Returns can't be bounced: their sound comes from the tracks that send to them.");
 
-    auto* bus = phazite::groupIntoFolder ({ song.bass }, nullptr);
-    REQUIRE (bus != nullptr);
-    CHECK (phazite::getWhyNotFreeze (song.context, phazite::getTrackID (*bus))
-           == "Folders and buses can't be frozen: their sound is their tracks'.");
+    const auto bus = phazite::groupIntoFolder (model, { song.bass }, nullptr);
+    REQUIRE (bus.isValid());
+    CHECK (phazite::getWhyNotFreeze (song.context, bus) == "Folders and buses can't be frozen: their sound is their tracks'.");
 
-    auto* empty = phazite::insertPlainTrack (song.edit(), nullptr);
-    REQUIRE (empty != nullptr);
-    phazite::setTrackName (*empty, "Empty");
-    CHECK (phazite::getWhyNotBounce (song.context, phazite::getTrackID (*empty)) == "Empty has nothing to bounce: it has no clips.");
+    const auto empty = phazite::insertPlainTrack (model, TrackID());
+    REQUIRE (empty.isValid());
+    phazite::setTrackName (model, empty, "Empty");
+    CHECK (phazite::getWhyNotBounce (song.context, empty) == "Empty has nothing to bounce: it has no clips.");
 
     // The command tells the host why.
-    getSelection (song.context).selectOnly (phazite::getTrackID (*empty));
+    getSelection (song.context).selectOnly (empty);
     CHECK_FALSE (phazite::canToggleFreeze (song.context));
     phazite::toggleFreeze (song.context, song.host);
     CHECK (song.host.finished == juce::StringArray { "Freezing Empty: Empty has nothing to freeze: it has no clips." });
@@ -335,28 +340,29 @@ TEST_CASE ("Returns, buses and empty tracks aren't frozen or bounced, and say wh
 TEST_CASE ("A freeze cancelled leaves the track as it was")
 {
     Song song;
-    phazite::setTrackMuted (*song.bass, true);
+    auto& model = song.getSong();
+    phazite::setTrackMuted (model, song.bass, true);
     phazite::toggleFreeze (song.context, song.host);
     REQUIRE (song.host.render != nullptr);
-    CHECK (song.bass->isMuted (false)); // nothing of the song changes while Phazite's engine renders it
-    CHECK (song.bass->getVolumePlugin()->isEnabled());
+    CHECK (phazite::isTrackMuted (model, song.bass, false)); // nothing of the song changes while Phazite's engine renders it
 
     song.host.render = nullptr;
     phazite::test::dispatchPendingMessages();
     CHECK (song.host.finished.isEmpty());
-    CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
-    CHECK_FALSE (song.hasFreezePoint());
-    CHECK (song.bass->isMuted (false));
-    CHECK (song.bass->getVolumePlugin()->isEnabled());
-    CHECK (song.expander->isEnabled());
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
+    CHECK_FALSE (phazite::isFrozenDevice (model, song.expander));
+    CHECK (phazite::isTrackMuted (model, song.bass, false));
+    CHECK (phazite::isDeviceOn (model, song.expander));
+    CHECK_FALSE (song.frozenFile().existsAsFile());
 
     for (const auto& file : song.project->getCacheFolder().findChildFiles (juce::File::findFiles, false))
-        CHECK_FALSE (file.getFileName().startsWith ("trackFreeze"));
+        CHECK_FALSE (file.getFileName().startsWith ("Frozen"));
 }
 
 TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio track under it, and mutes the original")
 {
     Song song;
+    auto& model = song.getSong();
     CHECK (phazite::canBounceSelectedTrack (song.context));
     phazite::bounceSelectedTrack (song.context, song.host);
     REQUIRE (song.host.render != nullptr);
@@ -365,16 +371,17 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     REQUIRE (song.host.finished == juce::StringArray { "Bouncing Bass: ok" });
 
     // A new track right under Bass, playing the file from the song's start, selected.
-    const auto tracks = te::getAudioTracks (song.edit());
+    const auto tracks = phazite::getTrackIDs (model);
     REQUIRE (tracks.size() == 3);
-    auto* bounced = tracks[1];
-    CHECK (bounced->getName() == "Bass (Bounce)");
-    CHECK (getSelection (song.context).isSelected (phazite::getTrackID (*bounced)));
-    REQUIRE (bounced->getClips().size() == 1);
-    auto* wave = dynamic_cast<te::WaveAudioClip*> (bounced->getClips()[0]);
-    REQUIRE (wave != nullptr);
-    CHECK (wave->getPosition().getStart() == te::TimePosition());
-    const auto file = wave->getSourceFileReference().getFile();
+    const auto bounced = tracks[1];
+    CHECK (phazite::getTrackName (model, bounced) == "Bass (Bounce)");
+    CHECK (getSelection (song.context).isSelected (bounced));
+    const auto clips = phazite::getClips (model, bounced);
+    REQUIRE (clips.size() == 1);
+    const auto clipState = phazite::findClipState (model, clips[0]);
+    REQUIRE (phazite::isAudioState (clipState));
+    CHECK (phazite::getClipRange (model, clipState).getStart() == phazite::BeatPosition());
+    const auto file = phazite::getClipFile (model, clipState);
     CHECK (file.getParentDirectory() == song.project->getAudioFolder());
     CHECK (file.getFileName() == "Bass (Bounce).wav");
 
@@ -382,26 +389,24 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     // fader's -6 dB (or its pan law). The fader and the send come along, on the new track.
     const auto sineDecibels = juce::Decibels::gainToDecibels (0.25 / std::sqrt (2.0));
     CHECK (juce::Decibels::gainToDecibels (getLevel (file, 0.1, 1.4)) == doctest::Approx (sineDecibels + 6.0).epsilon (0.05));
-    CHECK (bounced->getVolumePlugin()->getVolumeDb() == doctest::Approx (-6.0f).epsilon (0.01));
-    REQUIRE (phazite::getSends (*bounced).size() == 1);
-    CHECK (phazite::getSends (*bounced)[0]->getBusNumber() == phazite::getReturnBus (*song.reverb));
-    CHECK (phazite::getDevices (*bounced).isEmpty());
+    CHECK (phazite::getChannelVolume (model, bounced) == doctest::Approx (-6.0f).epsilon (0.01));
+    const auto sends = phazite::getSends (model, bounced);
+    REQUIRE (sends.size() == 1);
+    CHECK (phazite::getSendTarget (model, sends[0]) == song.reverb);
+    CHECK (phazite::getDevices (model, bounced).empty());
 
     // The original, muted and collapsed; one undo step, which takes it all back, mute included, though a mute alone is no
-    // undo step (and Tracktion, which plays it, keeps it outside its undo history); Redo brings it back.
-    CHECK (phazite::isTrackMuted (*song.bass, false));
-    CHECK (song.bass->isMuted (false));
-    CHECK (phazite::isCollapsed (*song.bass));
-    CHECK (phazite::describeUndo (&phazite::getSong (song.edit())) == juce::String ("Undo Bounce in Place"));
-    phazite::undo (song.edit());
-    CHECK (te::getAudioTracks (song.edit()).size() == 2);
-    CHECK_FALSE (phazite::isTrackMuted (*song.bass, false));
-    CHECK_FALSE (song.bass->isMuted (false));
-    REQUIRE (phazite::canRedo (song.edit()));
-    phazite::redo (song.edit());
-    CHECK (phazite::getPlaylistTracks (song.edit()).size() == 3);
-    CHECK (phazite::isTrackMuted (*song.bass, false));
-    CHECK (song.bass->isMuted (false));
+    // undo step; Redo brings it back.
+    CHECK (phazite::isTrackMuted (model, song.bass, false));
+    CHECK (phazite::isCollapsed (model, song.bass));
+    CHECK (phazite::describeUndo (&model) == juce::String ("Undo Bounce in Place"));
+    phazite::undo (model);
+    CHECK (phazite::getTrackIDs (model).size() == 2);
+    CHECK_FALSE (phazite::isTrackMuted (model, song.bass, false));
+    REQUIRE (phazite::canRedo (model));
+    phazite::redo (model);
+    CHECK (phazite::getTrackIDs (model).size() == 3);
+    CHECK (phazite::isTrackMuted (model, song.bass, false));
 }
 
 namespace
@@ -437,7 +442,7 @@ TEST_CASE ("A frozen track shows a snowflake that unfreezes it, frosted clips, a
     const auto findHeader = [&playlist, &song]() -> phazite::ui::TrackHeader*
     {
         for (auto* header : findAll<phazite::ui::TrackHeader> (playlist))
-            if (header->getTrack() == song.id())
+            if (header->getTrack() == song.bass)
                 return header;
 
         return nullptr;
@@ -464,9 +469,9 @@ TEST_CASE ("A frozen track shows a snowflake that unfreezes it, frosted clips, a
     CHECK (clipsAreFrosted());
 
     // The expander's controls are off, in the Devices view.
-    devices.showDevice (phazite::getDeviceID (*song.expander));
+    devices.showDevice (song.expander);
     phazite::test::dispatchPendingMessages();
-    auto* panel = devices.findPanel (phazite::getDeviceID (*song.expander));
+    auto* panel = devices.findPanel (song.expander);
     REQUIRE (panel != nullptr);
     auto* power = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "On"));
     REQUIRE (power != nullptr);
@@ -479,9 +484,9 @@ TEST_CASE ("A frozen track shows a snowflake that unfreezes it, frosted clips, a
     }
 
     phazite::test::dispatchPendingMessages();
-    CHECK_FALSE (phazite::isFrozen (song.context, song.id()));
+    CHECK_FALSE (phazite::isFrozen (song.context, song.bass));
     CHECK_FALSE (clipsAreFrosted());
-    panel = devices.findPanel (phazite::getDeviceID (*song.expander));
+    panel = devices.findPanel (song.expander);
     REQUIRE (panel != nullptr);
     power = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "On"));
     REQUIRE (power != nullptr);

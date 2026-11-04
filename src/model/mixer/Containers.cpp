@@ -5,7 +5,6 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/devices/internal/Devices.h"
 
 #include <algorithm>
 
@@ -102,7 +101,6 @@ DeviceID groupIntoContainer (Song& song, const std::vector<DeviceID>& effects)
         container.appendChild (state, undo);
     }
 
-    song.reconcile (Song::Part::devices);
     return id;
 }
 
@@ -125,16 +123,12 @@ void ungroupContainer (Song& song, DeviceID id)
     }
 
     chain.removeChild (state, undo);
-    song.reconcile (Song::Part::devices);
 }
 
 void setContainerName (Song& song, DeviceID id, const juce::String& name)
 {
     if (auto state = findDeviceState (song, id); isContainerState (state))
-    {
         state.setProperty (schema::containerName, name, &song.getUndoManager());
-        song.reconcile (Song::Part::devices);
-    }
 }
 
 DeviceID insertIntoContainer (Song& song, DeviceID container, juce::ValueTree device, int index)
@@ -147,7 +141,6 @@ DeviceID insertIntoContainer (Song& song, DeviceID container, juce::ValueTree de
     const auto devices = getDeviceStates (state);
     const auto at = juce::isPositiveAndBelow (index, (int) devices.size()) ? state.indexOf (devices[(size_t) index]) : -1;
     state.addChild (device, at, &song.getUndoManager());
-    song.reconcile (Song::Part::devices);
     return getDeviceID (device);
 }
 
@@ -163,7 +156,6 @@ void moveInContainer (Song& song, DeviceID device, int newIndex)
     const auto devices = getDeviceStates (container);
     const auto& target = devices[(size_t) juce::jlimit (0, (int) devices.size() - 1, newIndex)];
     container.moveChild (container.indexOf (state), container.indexOf (target), &song.getUndoManager());
-    song.reconcile (Song::Part::devices);
 }
 
 juce::String makeContainerName (const Song& song)
@@ -244,190 +236,5 @@ void addContainerCommands (CommandRegistry& registry, Selection& selection)
                     .isEnabled = [&selection] { return canUngroupSelectedContainer (selection); },
                     .undoTarget = undoTargetOf (selection),
                     .keyPriority = Command::notePriority });
-}
-
-//==============================================================================
-bool isContainer (const te::Plugin& device)
-{
-    return dynamic_cast<const te::RackInstance*> (&device) != nullptr;
-}
-
-te::RackType* getContainerRack (const te::Plugin& device)
-{
-    auto* container = dynamic_cast<const te::RackInstance*> (&device);
-    return container != nullptr ? container->type.get() : nullptr;
-}
-
-te::RackInstance* findContainerOf (const te::RackType& rack)
-{
-    return te::getRackInstancesInEditForType (rack).getFirst(); // each container plays a rack type of its own
-}
-
-juce::Array<te::Plugin*> getRackDevices (const te::RackType& rack)
-{
-    juce::Array<te::Plugin*> devices;
-    const auto plugins = rack.getPlugins();
-
-    for (const auto& place : rack.state)
-        if (place.hasType (te::IDs::PLUGININSTANCE))
-            for (auto* plugin : plugins)
-                if (plugin->state.getParent() == place)
-                    devices.add (plugin);
-
-    return devices;
-}
-
-namespace
-{
-    // A container's macros as a new container gets them (groupIntoContainer() says how), here for a preset's container,
-    // made on no channel yet, with their values in their states, so that redoing their container's step puts them back at
-    // 0 too.
-    void addContainerMacros (te::RackType& rack)
-    {
-        auto& macros = rack.getMacroParameterListForWriting();
-        auto& edit = rack.edit;
-
-        for (auto number = macros.getMacroParameters().size() + 1; number <= macrosPerContainer; ++number)
-        {
-            juce::ValueTree macro (te::IDs::MACROPARAMETER);
-            te::EditItemID::fromRawID (getSong (edit).makeID()).writeID (macro, nullptr); // the song's once it takes the container in
-            macro.setProperty (te::IDs::name, "Macro " + juce::String (number), nullptr);
-            macro.setProperty (te::IDs::value, 0.0f, nullptr);
-            macros.state.addChild (macro, -1, &edit.getUndoManager());
-        }
-    }
-} // namespace
-
-te::Plugin::Ptr createContainer (te::Edit& edit, const te::Plugin::Array& devices, const juce::String& name)
-{
-    const auto rack = addContainerRack (edit);
-
-    if (rack == nullptr)
-        return {};
-
-    rack->rackName = name.isNotEmpty() ? name : makeContainerName (getSong (edit));
-
-    for (const auto& device : devices)
-        if (device != nullptr && ! isInstrument (*device))
-            rack->addPlugin (device, { 0.5f, 0.5f }, false);
-
-    wireContainer (*rack);
-    addContainerMacros (*rack);
-    return edit.getPluginCache().createNewPlugin (te::RackInstance::create (*rack));
-}
-
-void deleteContainer (te::RackInstance& container)
-{
-    // The windows of the devices it holds close with it; its rack type stays for the session.
-    if (container.type != nullptr)
-        for (auto* device : getRackDevices (*container.type))
-            device->hideWindowForShutdown();
-
-    container.deleteFromParent();
-}
-
-te::RackType::Ptr addContainerRack (te::Edit& edit)
-{
-    juce::ValueTree rack (te::IDs::RACK);
-    edit.createNewItemID().writeID (rack, nullptr);
-    return addContainerRack (edit, rack);
-}
-
-te::RackType::Ptr addContainerRack (te::Edit& edit, const juce::ValueTree& rackState)
-{
-    // As Tracktion's rack list adds one, but without an undo step.
-    edit.state.getOrCreateChildWithName (te::IDs::RACKS, nullptr).appendChild (rackState.createCopy(), nullptr);
-    auto rack = edit.getRackList().getRackTypeForID (te::EditItemID::fromID (rackState));
-
-    if (rack != nullptr && edit.engine.getEngineBehaviour().arePluginsRemappedWhenTempoChanges())
-        rack->getMacroParameterListForWriting().remapOnTempoChange = true;
-
-    return rack;
-}
-
-namespace
-{
-    struct Wire
-    {
-        te::EditItemID source;
-        int sourcePin;
-        te::EditItemID destination;
-        int destinationPin;
-
-        bool operator== (const Wire&) const = default;
-    };
-
-    std::vector<Wire> getWires (const te::RackType& rack)
-    {
-        std::vector<Wire> wires;
-
-        for (const auto* connection : rack.getConnections())
-            wires.push_back (
-                { connection->sourceID.get(), connection->sourcePin.get(), connection->destID.get(), connection->destPin.get() });
-
-        return wires;
-    }
-
-    // Each device takes the one before it (or the container's input), MIDI and its own two channels (not a sidechain's),
-    // and the last one goes to the output.
-    std::vector<Wire> getWiresInOrder (const te::RackType& rack)
-    {
-        std::vector<Wire> wires;
-        te::EditItemID previous;                                 // the container's input,
-        auto previousChannels = rack.getInputNames().size() - 1; // past its MIDI pin
-
-        for (auto* device : getRackDevices (rack))
-        {
-            juce::StringArray ins, outs;
-            device->getChannelNames (&ins, &outs);
-            wires.push_back ({ previous, 0, device->itemID, 0 });
-
-            for (int pin = 1; pin <= std::min ({ previousChannels, (int) ins.size(), 2 }); ++pin)
-                wires.push_back ({ previous, pin, device->itemID, pin });
-
-            previous = device->itemID;
-            previousChannels = outs.size();
-        }
-
-        wires.push_back ({ previous, 0, {}, 0 });
-
-        for (int pin = 1; pin <= std::min (previousChannels, rack.getOutputNames().size() - 1); ++pin)
-            wires.push_back ({ previous, pin, {}, pin });
-
-        return wires;
-    }
-
-    // The MIDI wires, which go through every device in its order.
-    std::vector<Wire> getMidiWires (std::vector<Wire> wires)
-    {
-        wires.erase (std::remove_if (wires.begin(), wires.end(), [] (const Wire& wire) { return wire.sourcePin != 0; }), wires.end());
-        return wires;
-    }
-} // namespace
-
-void wireContainer (te::RackType& rack)
-{
-    // Not again while its devices are wired in their order, by the MIDI wires: how many channels a plug-in passes on is
-    // unknown while it isn't loaded (a project opened with its plug-ins off), and wiring it again then would lose its audio.
-    const auto wired = getMidiWires (getWires (rack)), wanted = getMidiWires (getWiresInOrder (rack));
-
-    if (wired.size() == wanted.size()
-        && std::all_of (wanted.begin(), wanted.end(),
-                        [&wired] (const Wire& wire) { return std::find (wired.begin(), wired.end(), wire) != wired.end(); }))
-        return;
-
-    auto* undoManager = &rack.edit.getUndoManager();
-
-    for (const auto& wire : getWires (rack))
-        rack.removeConnection (wire.source, wire.sourcePin, wire.destination, wire.destinationPin);
-
-    for (const auto& wire : getWiresInOrder (rack))
-        rack.addConnection (wire.source, wire.sourcePin, wire.destination, wire.destinationPin);
-
-    // Left to right in their order, where Tracktion's own view of a rack would show them.
-    const auto devices = getRackDevices (rack);
-
-    for (int i = 0; i < devices.size(); ++i)
-        devices[i]->state.getParent().setProperty (te::IDs::x, (float) (i + 1) / (float) (devices.size() + 1), undoManager);
 }
 } // namespace phazite

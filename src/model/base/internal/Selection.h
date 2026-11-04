@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What is selected in the open project, held by Phazite as IDs (roadmap A5, 2026-10-30), in place of Tracktion's selection
-// manager: tracks, clips, sections and devices, in the order they were selected; or notes of the clips an editor shows; or
-// automation points of one parameter. One kind of thing at a time, as the commands act on one: selecting devices deselects
-// anything else and the other way round, and notes and points are each all that is selected while they are. An ID of an
-// item that is gone names nothing and is left out. The model's commands act on what it names in its song (the project
-// context's), and the UI reaches it by IDs (model/arrangement/SongSelection.h). It tells its listeners after each change, on
-// the message thread. Message thread only.
+// What is selected in the open project, held as IDs (roadmap A5, 2026-10-30): tracks, clips, sections and devices, in
+// the order they were selected; or notes of the clips an editor shows; or automation points of one parameter. One kind
+// of thing at a time, as the commands act on one: selecting devices deselects anything else and the other way round,
+// and notes and points are each all that is selected while they are. An ID of an item that is gone names nothing and is
+// left out. The model's commands act on what it names in its song (the project context's), and the UI reaches it by IDs
+// (model/arrangement/SongSelection.h). It tells its listeners after each change, on the message thread. Message thread
+// only.
 #pragma once
 
 #include "model/base/Song.h"
-#include "model/base/internal/Tracktion.h"
 #include "model/devices/ParameterRef.h"
 
 #include <vector>
@@ -19,22 +18,15 @@ namespace phazite
 class Selection : public juce::ChangeBroadcaster
 {
 public:
-    explicit Selection (te::Engine& e)
-        : engine (e)
-    {
-    }
+    Selection() = default;
 
-    te::Engine& engine; // whose Edits it selects in, for the commands that need it while no project is open
-
-    // The Edit whose items it names, or none: another forgets what was selected. And its song (model/base/Song.h).
-    void setEdit (te::Edit*);
-    te::Edit* getEdit() const noexcept { return edit.get(); } // none once it is deleted
-    Song* getSong() const;
+    // The song whose items it names (model/base/Song.h), or none: another forgets what was selected.
+    void setSong (Song*);
+    Song* getSong() const noexcept { return heldSong.get(); } // none once it is deleted
 
     //==============================================================================
-    // Tracks (folders, returns and the master too), clips and devices (plug-ins, containers), by their IDs, in the order
-    // they were selected: what the model's commands act on (docs/tracktion-migration.md, T6 step 3). An item the song no
-    // longer holds is left out.
+    // Tracks (folders, returns and the master too), clips and devices (plug-ins, containers), by their IDs, in the
+    // order they were selected: what the model's commands act on. An item the song no longer holds is left out.
     enum class Kind
     {
         track,
@@ -94,7 +86,7 @@ private:
         bool operator== (const Item&) const = default;
     };
 
-    te::SafeSelectable<te::Edit> edit;
+    juce::WeakReference<Song> heldSong;
     std::vector<Item> items;
     std::vector<SectionID> sections;
     std::vector<ClipID> noteClips;

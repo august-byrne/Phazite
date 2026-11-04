@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's own playback engine (src/engine/; docs/tracktion-migration.md, T2), tested on its own, without a project or
-// Tracktion: how the audio thread is handed what it plays, Phazite's devices as the engine plays them, the tempo map, the
-// transport and its metronome, to the sample, and audio files and the clips that play them.
+// Phazite's own playback engine (src/engine/; docs/design.md, section 23), tested on its own, without a project: how the
+// audio thread is handed what it plays, Phazite's devices as the engine plays them (their runners and nodes), the tempo
+// map, the transport and its metronome, to the sample, and audio files and the clips that play them.
+#include "TestDevices.h"
 #include "TestHelpers.h"
 #include "devices/modulation/Modulators.h"
 #include "devices/motion/Phaser.h"
@@ -13,6 +14,7 @@
 #include "engine/core/TempoMap.h"
 #include "engine/core/Workers.h"
 #include "engine/nodes/Channel.h"
+#include "engine/nodes/DeviceNode.h"
 #include "engine/nodes/DeviceRunner.h"
 #include "engine/nodes/LoudnessMeter.h"
 #include "engine/transport/Click.h"
@@ -259,6 +261,279 @@ TEST_CASE ("A device's runner sleeps after a quarter of a second of silence, and
         runner.process (buffer, 0, blockSize, block);
 
     CHECK (counting.blocksPlayed == played + 2 + quarter + 10);
+}
+
+//==============================================================================
+// Devices through their runners and nodes, with the devices made for tests (TestDevices.h): an effect (a gain), an
+// instrument that plays the velocity of the note it holds, and an effect with latency and a mix (a delay).
+namespace
+{
+using phazite::test::TestDelay;
+using phazite::test::TestGain;
+using phazite::test::TestTone;
+
+constexpr int deviceBlock = 512;
+
+// A buffer of so many samples on so many channels, each at a level.
+juce::AudioBuffer<float> makeLevel (int numChannels, int numSamples, float level)
+{
+    juce::AudioBuffer<float> buffer (numChannels, numSamples);
+
+    for (int channel = 0; channel < numChannels; ++channel)
+        juce::FloatVectorOperations::fill (buffer.getWritePointer (channel), level, numSamples);
+
+    return buffer;
+}
+} // namespace
+
+TEST_CASE ("An effect's runner gets its parameters' values and stereo audio, and reports its latency and tail")
+{
+    auto device = std::make_unique<TestGain>();
+    auto& gain = *device;
+    engine::DeviceRunner runner (TestGain::info, std::move (device));
+    runner.prepare (rate, deviceBlock);
+    CHECK (gain.prepared);
+    CHECK_FALSE (runner.isInstrument());
+    CHECK (runner.getLatencySamples() == 64);
+    CHECK (runner.getTailSeconds() == doctest::Approx (1.5));
+
+    std::vector<float> values { -6.0206f, 0.0f };
+    engine::DeviceRunner::Block block;
+    block.values = values;
+    auto buffer = makeLevel (2, 256, 1.0f);
+    runner.process (buffer, 0, 256, block);
+    CHECK (buffer.getSample (0, 10) == doctest::Approx (0.5f).epsilon (0.001));
+    CHECK (buffer.getSample (1, 255) == doctest::Approx (0.5f).epsilon (0.001));
+    REQUIRE (gain.lastValues.size() == 2);
+    CHECK (gain.lastValues[0] == doctest::Approx (-6.0206f));
+
+    // A choice reaches the DSP as a whole number, however it was set.
+    values[1] = 0.7f;
+
+    // A mono channel is played in stereo, a stretch at a time, and gets the average back.
+    auto mono = makeLevel (1, 1300, 1.0f);
+    runner.process (mono, 0, 1300, block);
+    CHECK (gain.lastValues[1] == doctest::Approx (1.0f));
+    CHECK (gain.lastNumChannels == 2);
+    CHECK (mono.getSample (0, 0) == doctest::Approx (-0.5f).epsilon (0.001));
+    CHECK (mono.getSample (0, 1299) == doctest::Approx (-0.5f).epsilon (0.001));
+}
+
+TEST_CASE ("MIDI reaches a device as events at their samples, and an instrument plays them into silence")
+{
+    using Type = dev::NoteEvent::Type;
+
+    // What devices use of MIDI: notes (a note-on of velocity 0 is an off), all notes off, the pitch wheel and controllers.
+    const auto bend = engine::toNoteEvent (juce::MidiMessage::pitchWheel (1, 16383), 96);
+    const auto on = engine::toNoteEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 64), 240);
+    const auto off = engine::toNoteEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 0), 475);
+    const auto controller = engine::toNoteEvent (juce::MidiMessage::controllerEvent (1, 74, 127), 504);
+    const auto allOff = engine::toNoteEvent (juce::MidiMessage::allNotesOff (1), 0);
+    REQUIRE (bend.has_value());
+    REQUIRE (on.has_value());
+    REQUIRE (off.has_value());
+    REQUIRE (controller.has_value());
+    REQUIRE (allOff.has_value());
+
+    CHECK (bend->type == Type::pitchBend);
+    CHECK (bend->sample == 96);
+    CHECK (bend->value == doctest::Approx (8191.0f / 8192.0f));
+    CHECK (on->type == Type::noteOn);
+    CHECK (on->sample == 240);
+    CHECK (on->number == 60);
+    CHECK (on->value == doctest::Approx (64.0f / 127.0f));
+    CHECK (off->type == Type::noteOff);
+    CHECK (controller->type == Type::controller);
+    CHECK (controller->number == 74);
+    CHECK (controller->value == doctest::Approx (1.0f));
+    CHECK (allOff->type == Type::allNotesOff);
+    CHECK_FALSE (engine::toNoteEvent (juce::MidiMessage::programChange (1, 3), 505).has_value());
+
+    // An instrument gets them at their samples, and plays into silence: the track's audio isn't heard.
+    auto device = std::make_unique<TestTone>();
+    auto& tone = *device;
+    engine::DeviceRunner runner (TestTone::info, std::move (device));
+    runner.prepare (rate, deviceBlock);
+    REQUIRE (runner.isInstrument());
+
+    std::vector<dev::NoteEvent> events { *allOff, *bend, *on, *off, *controller };
+    const auto values = getDefaults (TestTone::info);
+    engine::DeviceRunner::Block block;
+    block.values = values;
+    block.events = events;
+    auto buffer = makeLevel (2, deviceBlock, 0.3f);
+    runner.process (buffer, 0, deviceBlock, block);
+
+    REQUIRE (tone.received.size() == 5);
+    CHECK (tone.received[0].type == Type::allNotesOff);
+    CHECK (tone.received[1].sample == 96);
+    CHECK (tone.received[2].sample == 240);
+    CHECK (tone.received[3].sample == 475);
+    CHECK (tone.received[4].sample == 504);
+
+    CHECK (buffer.getSample (0, 239) == doctest::Approx (0.0f));
+    CHECK (buffer.getSample (0, 300) == doctest::Approx (64.0f / 127.0f));
+    CHECK (buffer.getSample (1, 300) == doctest::Approx (64.0f / 127.0f));
+    CHECK (buffer.getSample (1, 480) == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("An effect's runner blends its sound with what came in at its mix, lined up with its latency")
+{
+    engine::DeviceRunner runner (TestDelay::info, std::make_unique<TestDelay>());
+    runner.prepare (rate, deviceBlock);
+    std::vector<float> values { 1.0f };
+    engine::DeviceRunner::Block block;
+    block.values = values;
+
+    const auto play = [&] (float level, float mix, int length)
+    {
+        values[0] = mix;
+        auto buffer = makeLevel (2, length, level);
+        runner.process (buffer, 0, length, block);
+        return buffer;
+    };
+
+    // At 100 %, only the effect: what came in, upside down.
+    CHECK (play (1.0f, 1.0f, 512).getSample (0, 511) == doctest::Approx (-1.0f));
+
+    // At 0 %, only what came in; half way, the two cancel. (Each first block ramps from the last mix.)
+    play (1.0f, 0.0f, 512);
+    CHECK (play (1.0f, 0.0f, 512).getSample (1, 300) == doctest::Approx (1.0f));
+    play (1.0f, 0.5f, 512);
+    CHECK (std::abs (play (1.0f, 0.5f, 512).getSample (0, 300)) < 1.0e-6f);
+
+    // The sound that came in is delayed as much as the effect's, so a click and its echo come out together.
+    runner.reset();
+    play (0.0f, 0.5f, 512);
+    auto click = makeLevel (2, 256, 0.0f);
+    click.setSample (0, 0, 1.0f);
+    click.setSample (1, 0, 1.0f);
+    runner.process (click, 0, 256, block);
+    CHECK (click.getSample (0, 0) == doctest::Approx (0.0f));
+    CHECK (click.getSample (0, TestDelay::latency) == doctest::Approx (0.0f)); // half the click and half of it upside down
+}
+
+TEST_CASE ("Runners sleep once what comes in and what they play have been silent a while, and wake at the first sound")
+{
+    auto effectDevice = std::make_unique<TestGain>();
+    auto& gain = *effectDevice;
+    engine::DeviceRunner effect (TestGain::info, std::move (effectDevice));
+    auto instrumentDevice = std::make_unique<TestTone>();
+    auto& tone = *instrumentDevice;
+    engine::DeviceRunner instrument (TestTone::info, std::move (instrumentDevice));
+    effect.prepare (rate, deviceBlock);
+    instrument.prepare (rate, deviceBlock);
+
+    const std::vector<float> gainValues { -6.0206f, 0.0f };
+    const auto toneValues = getDefaults (TestTone::info);
+    engine::DeviceRunner::Block effectBlock, instrumentBlock;
+    effectBlock.values = gainValues;
+    instrumentBlock.values = toneValues;
+    juce::AudioBuffer<float> buffer (2, deviceBlock);
+
+    // A quarter of a second of silence (24 blocks), then each sleeps.
+    for (int b = 0; b < 30; ++b)
+    {
+        buffer.clear();
+        effect.process (buffer, 0, deviceBlock, effectBlock);
+        instrument.process (buffer, 0, deviceBlock, instrumentBlock);
+    }
+
+    CHECK (gain.processed == 24);
+    CHECK (tone.processed == 24);
+
+    // The first sound wakes the effect, which treats it whole.
+    buffer = makeLevel (2, deviceBlock, 1.0f);
+    effect.process (buffer, 0, deviceBlock, effectBlock);
+    CHECK (gain.processed == 25);
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (0.5f).epsilon (0.001));
+
+    // A note wakes the instrument, which plays it from its sample.
+    std::array<dev::NoteEvent, 1> note { dev::NoteEvent { dev::NoteEvent::Type::noteOn, 48, 60, 1.0f } };
+    instrumentBlock.events = note;
+    buffer.clear();
+    instrument.process (buffer, 0, deviceBlock, instrumentBlock);
+    CHECK (tone.processed == 25);
+    CHECK (buffer.getSample (0, 47) == doctest::Approx (0.0f));
+    CHECK (buffer.getSample (0, 48) == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("A continuous parameter that moves between blocks glides there over the next, while choices jump")
+{
+    auto device = std::make_unique<TestGain>();
+    auto& gain = *device;
+    engine::DeviceRunner runner (TestGain::info, std::move (device));
+    runner.prepare (rate, deviceBlock);
+    constexpr auto step = engine::DeviceRunner::smoothingStep;
+    std::vector<float> values { 0.0f, 0.0f };
+    engine::DeviceRunner::Block block;
+    block.values = values;
+    juce::AudioBuffer<float> buffer;
+
+    const auto play = [&]
+    {
+        buffer = makeLevel (2, deviceBlock, 1.0f);
+        runner.process (buffer, 0, deviceBlock, block);
+    };
+
+    play();
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (1.0f));
+    CHECK (gain.processed == 1); // a block that changes nothing plays whole
+
+    // From 0 dB to -6 dB: a step of the way each stretch, there by the block's end.
+    values[0] = -6.0206f;
+    play();
+    CHECK (gain.processed == 1 + deviceBlock / step);
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (juce::Decibels::decibelsToGain (-6.0206f * step / deviceBlock)).epsilon (0.001));
+    CHECK (buffer.getSample (0, deviceBlock - 1) == doctest::Approx (0.5f).epsilon (0.001));
+
+    for (int i = step; i < deviceBlock; i += step)
+        CHECK (buffer.getSample (0, i) < buffer.getSample (0, i - step));
+
+    // Settled: the next block plays whole again. A choice that changes jumps, with no glide.
+    play();
+    CHECK (gain.processed == 2 + deviceBlock / step);
+    values[1] = 1.0f;
+    play();
+    CHECK (gain.processed == 3 + deviceBlock / step);
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (-0.5f).epsilon (0.001));
+}
+
+TEST_CASE ("A device's node keeps its values set by hand in their ranges, plays them, and nothing while it is off")
+{
+    engine::DeviceNode node (TestGain::info, std::make_unique<TestGain>());
+    auto& gain = dynamic_cast<TestGain&> (node.getRunner().getProcessor());
+    node.getRunner().prepare (rate, deviceBlock);
+
+    // Its parameters start at their defaults; a value is kept to its parameter's range, a choice's to a whole number.
+    CHECK (node.getValue (0) == doctest::Approx (0.0f));
+    CHECK (node.getValue (1) == doctest::Approx (0.0f));
+    node.setValue (0, -100.0f);
+    CHECK (node.getValue (0) == doctest::Approx (-60.0f));
+    node.setValue (0, -6.0206f);
+    node.setValue (1, 0.7f);
+    CHECK (node.getValue (1) == doctest::Approx (1.0f));
+
+    // It plays them, and keeps what it played for the controls.
+    auto buffer = makeLevel (2, deviceBlock, 1.0f);
+    node.process (buffer, 0, deviceBlock, {});
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (-0.5f).epsilon (0.001));
+    CHECK (node.getPlayedValue (0) == doctest::Approx (-6.0206f));
+    CHECK (node.getPlayedValue (1) == doctest::Approx (1.0f));
+
+    // Off, it lets the sound through untouched, without playing.
+    const auto played = gain.processed;
+    node.setOn (false);
+    buffer = makeLevel (2, deviceBlock, 1.0f);
+    node.process (buffer, 0, deviceBlock, {});
+    CHECK (gain.processed == played);
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (1.0f));
+
+    node.setOn (true);
+    buffer = makeLevel (2, deviceBlock, 1.0f);
+    node.process (buffer, 0, deviceBlock, {});
+    CHECK (gain.processed > played);
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (-0.5f).epsilon (0.001));
 }
 
 //==============================================================================

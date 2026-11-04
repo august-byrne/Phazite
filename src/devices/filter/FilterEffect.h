@@ -27,7 +27,7 @@ public:
         resonance,
         filterSlope,
         drive,
-        mix // applied by its thin plug-in (DeviceInfo.h, mixParameterID)
+        mix // applied by its runner (DeviceInfo.h, mixParameterID)
     };
 
     static const DeviceInfo info;

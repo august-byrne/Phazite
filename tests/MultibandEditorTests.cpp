@@ -7,12 +7,17 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Multiband.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
+#include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/MultibandEditor.h"
 #include "ui/theme/DesignTokens.h"
@@ -22,22 +27,26 @@ namespace
 using phazite::devices::Multiband;
 namespace curves = phazite::devices::curves;
 
-// A multiband on a track of its own Edit.
+// A multiband on a track of its own song, open in a context of its own whose session plays it.
 struct Song
 {
     Song()
     {
-        plugin = edit->getPluginCache().createNewPlugin (Multiband::typeID, {});
-        phazite::insertDevice (*te::getAudioTracks (*edit)[0], plugin);
-        phazite::test::settle();
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        phazite::setSong (context, song.get());
+        multiband =
+            phazite::insertDeviceState (*song, phazite::getTrackIDs (*song)[0], phazite::makeOwnDeviceState (*song, Multiband::typeID));
+        REQUIRE (multiband.isValid());
+        phazite::getSession (context)->update();
+        song->getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { plugin = nullptr; }
+    ~Song() { phazite::setSong (context, nullptr); }
+
+    phazite::DeviceHandle getDevice() const { return phazite::makeDeviceHandle (*song, multiband); }
 
     float valueOf (std::string_view id) const
     {
-        return plugin->getAutomatableParameterByID (juce::String (id.data(), id.size()))->getCurrentValue();
+        return phazite::getValueSetByHand (*song, phazite::ParameterRef { multiband, juce::String (id.data(), id.size()) });
     }
 
     float pointValue (int band, int point, curves::PointField field) const
@@ -50,10 +59,11 @@ struct Song
         return valueOf (Multiband::info.parameters[(size_t) Multiband::getBandParameter (band, Multiband::points)].id);
     }
 
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::Plugin::Ptr plugin;
+    phazite::Song::Ptr song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::DeviceID multiband;
 };
 
 bool isPoint (std::string_view id)
@@ -85,7 +95,7 @@ void checkShownWhole (phazite::ui::MultibandEditor& editor, int band)
 TEST_CASE ("The multiband's editor has a control for every parameter but its curves' points, the selected band's showing")
 {
     Song song;
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::MultibandEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
 
     phazite::ui::MultibandEditor editor (device);
@@ -130,7 +140,7 @@ TEST_CASE ("The multiband's editor has a control for every parameter but its cur
 TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and deleted, each one undo step")
 {
     Song song;
-    phazite::ui::MultibandEditor editor ((phazite::makeDeviceHandle (*song.plugin)));
+    phazite::ui::MultibandEditor editor ((song.getDevice()));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     editor.selectBand (Multiband::low);
     auto& curve = editor.getCurve();
@@ -144,7 +154,7 @@ TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and
     CHECK (song.pointValue (Multiband::low, 1, curves::pointY) < 0.45f);
     CHECK (song.pointValue (Multiband::low, 1, curves::pointX) == doctest::Approx (0.5f)); // Ctrl: across, it stayed
     CHECK (song.describeUndo() == juce::String ("Undo Move Point"));
-    phazite::undo (*song.edit);
+    phazite::undo (*song.song);
     editor.refresh();
     CHECK (song.pointValue (Multiband::low, 1, curves::pointY) == doctest::Approx (0.5f));
 
@@ -184,7 +194,7 @@ TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and
 TEST_CASE ("The multiband's Bands view: a band's edge moves its crossover, a band up or down its pre gain")
 {
     Song song;
-    phazite::ui::MultibandEditor editor ((phazite::makeDeviceHandle (*song.plugin)));
+    phazite::ui::MultibandEditor editor ((song.getDevice()));
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     editor.showBands (true);
     CHECK (editor.isShowingBands());
@@ -208,7 +218,7 @@ TEST_CASE ("The multiband's Bands view: a band's edge moves its crossover, a ban
     // Under Monitor, a crossover moved elsewhere brings Bands up for a moment.
     editor.showBands (false);
     CHECK_FALSE (editor.isShowingBands());
-    phazite::makeDeviceHandle (*song.plugin).getParameter ("highFrequency").setValue (8000.0f);
+    song.getDevice().getParameter ("highFrequency").setValue (8000.0f);
     editor.refresh();
     CHECK (editor.isShowingBands());
 
@@ -223,7 +233,7 @@ TEST_CASE ("The multiband's Bands view: a band's edge moves its crossover, a ban
 TEST_CASE ("The multiband's curve draws its line, and lights the area under it up to the level the band's compressor hears")
 {
     Song song;
-    const auto device = phazite::makeDeviceHandle (*song.plugin);
+    const auto device = song.getDevice();
     phazite::ui::MultibandEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     editor.selectBand (Multiband::low);

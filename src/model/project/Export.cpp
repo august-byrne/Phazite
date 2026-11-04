@@ -3,13 +3,17 @@
 #include "engine/nodes/LoudnessMeter.h"
 #include "internal/Export.h"
 #include "model/arrangement/internal/ClipRenders.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
-#include "model/mirror/internal/Bridge.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/OfflineRender.h"
+#include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
+#include "model/transport/internal/Tempo.h"
+
+#include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
 #include <atomic>
@@ -86,47 +90,46 @@ namespace
     }
 
     // Why an export can't start, if it can't.
-    juce::Result checkExport (const te::Edit& edit, const ExportSettings& settings)
+    juce::Result checkExport (const Song& song, const ExportSettings& settings)
     {
         if (! isValid (settings))
             return juce::Result::fail ("Phazite can't export with these settings.");
 
-        if (! canExport (edit))
-            return juce::Result::fail (isRecording (edit) ? "Stop recording first."
+        if (! canExport (song))
+            return juce::Result::fail (isRecording (song) ? "Stop recording first."
                                                           : "The song has no clips yet, so there is nothing to export.");
 
-        if (settings.stems && getStemTracks (edit).isEmpty())
+        if (settings.stems && getStemChannels (song).empty())
             return juce::Result::fail ("No channel plays anything, so there are no stems to export.");
 
         return juce::Result::ok();
     }
 
     // Whether a channel has something to play: clips, a track with clips in its bus, or a send to its return.
-    bool hasSomethingToPlay (const te::Track& track)
+    bool hasSomethingToPlay (const Song& song, TrackID channel)
     {
-        if (const auto bus = getReturnBus (track); bus >= 0)
+        const auto state = findTrackState (song, channel);
+
+        if (isReturnState (state))
         {
-            for (auto* sender : te::getAudioTracks (track.edit))
-                for (auto* send : getSends (*sender))
-                    if (send->getBusNumber() == bus)
+            for (const auto sender : getTrackIDs (song))
+                for (const auto send : getSends (song, sender))
+                    if (getSendTarget (song, send) == channel)
                         return true;
 
             return false;
         }
 
-        if (auto* folder = dynamic_cast<const te::FolderTrack*> (&track))
+        if (isFolderState (state))
         {
-            for (auto* inside : folder->getAllAudioSubTracks (true))
-                if (! inside->getClips().isEmpty())
+            for (const auto inside : getTracksInFolder (song, channel))
+                if (! getClipStates (findTrackState (song, inside)).empty())
                     return true;
 
             return false;
         }
 
-        if (auto* clipTrack = dynamic_cast<const te::ClipTrack*> (&track))
-            return ! clipTrack->getClips().isEmpty();
-
-        return false;
+        return ! getClipStates (state).empty();
     }
 
     // Reports on the message thread, unless the export that asked has gone by then: its owner, alive while this is
@@ -142,21 +145,24 @@ namespace
             });
     }
 
-    // How an export renders: on Phazite's engine, on the app's threads, with the project's plug-ins, which it lends.
-    OfflineRender::Setup getRenderSetup (te::Edit& edit, double sampleRate)
+    // How an export renders: on Phazite's engine, on as many threads as it plays on, with the plug-ins of the song's
+    // session, which it lends (none play without one).
+    OfflineRender::Setup getRenderSetup (Song& song, double sampleRate)
     {
-        return { findSession (edit),
-                 [&edit] { return std::make_unique<SongPlayer> (edit); },
-                 edit.engine.getEngineBehaviour().getNumberOfCPUsToUseForAudio(),
-                 sampleRate,
-                 renderBlockSize,
-                 renderedShare };
+        auto* session = findSession (song);
+        return { .session = session,
+                 .makePlayer = [&song, session]
+                 { return std::make_unique<SongPlayer> (song, session != nullptr ? &session->getPlugins() : nullptr); },
+                 .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
+                 .sampleRate = sampleRate,
+                 .blockSize = renderBlockSize,
+                 .playedShare = renderedShare };
     }
 
     //==============================================================================
     // What an export writes of a render (model/playback/internal/OfflineRender.h), on its thread: the floats played into
-    // its file's format, at one gain, the loudness target's (as Tracktion normalized: unless that would push the true peak
-    // over the ceiling, which never limits; none for silence, which nothing passes the gates of), dithered when 16 bits
+    // its file's format, at one gain, the loudness target's (unless that would push the true peak over the ceiling, which
+    // never limits; none for silence, which nothing passes the gates of), dithered when 16 bits
     // (triangular, the same every time). The floats go once written.
     juce::Result writeExport (OfflineRender& render, int job, const juce::File& floats, const juce::File& file,
                               const ExportSettings& settings, const engine::LoudnessMeter::Readings& readings)
@@ -246,34 +252,35 @@ double getLoudnessShortfall (const ExportSettings& settings, const ExportReport&
     return shortfall > loudnessTolerance ? shortfall : 0.0;
 }
 
-te::TimeRange getExportRange (const te::Edit& edit)
+BeatRange getExportRange (const Song& song)
 {
-    return { te::TimePosition(), getSongEnd (edit) };
+    return { BeatPosition(), getSongEnd (song) };
 }
 
-bool canExport (const te::Edit& edit)
+bool canExport (const Song& song)
 {
-    return getSongEnd (edit) > te::TimePosition() && ! isRecording (edit);
+    return getSongEnd (song) > BeatPosition() && ! isRecording (song);
 }
 
-juce::Array<te::Track*> getStemTracks (const te::Edit& edit)
+std::vector<TrackID> getStemChannels (const Song& song)
 {
-    juce::Array<te::Track*> stems;
+    std::vector<TrackID> stems;
 
-    for (auto* track : getChannelTracks (edit))
+    for (const auto track : getChannelTracks (song))
     {
-        const auto isPlainFolder = track->isFolderTrack() && ! isBus (*track);
+        const auto isPlainFolder = isFolder (song, track) && ! isBus (song, track);
+        const auto isPlayed = ! isTrackMuted (song, track, true) && ! isSilencedBySolo (song, track);
 
-        if (getOutputBus (*track) == nullptr && ! isPlainFolder && track->shouldBePlayed() && hasSomethingToPlay (*track))
-            stems.add (track);
+        if (! getOutputBus (song, track).isValid() && ! isPlainFolder && isPlayed && hasSomethingToPlay (song, track))
+            stems.push_back (track);
     }
 
     return stems;
 }
 
-juce::String getStemFileName (int index, const te::Track& track, const juce::String& suffix)
+juce::String getStemFileName (int index, const juce::String& channelName, const juce::String& suffix)
 {
-    const auto name = juce::File::createLegalFileName (getTrackName (track).trim());
+    const auto name = juce::File::createLegalFileName (channelName.trim());
     return juce::String (index + 1).paddedLeft ('0', 2) + " " + (name.isNotEmpty() ? name : juce::String ("Track")) + suffix;
 }
 
@@ -291,30 +298,29 @@ namespace
     // measured again.
     struct SongRender final : SongExport::Impl
     {
-        SongRender (te::Edit& edit, const juce::File& file, const ExportSettings& settings,
-                    std::function<void (const ExportReport&)> callback)
+        SongRender (Song& song, const juce::File& file, const ExportSettings& settings, std::function<void (const ExportReport&)> callback)
             : temporary (file),
               onFinished (std::move (callback)),
               alive (std::make_shared<SongRender*> (this))
         {
             JUCE_ASSERT_MESSAGE_THREAD
 
-            if (const auto check = checkExport (edit, settings); check.failed())
+            if (const auto check = checkExport (song, settings); check.failed())
             {
                 deliverTo (std::weak_ptr<SongRender*> (alive), { check, file });
                 return;
             }
 
-            if (isSongPlaying (edit))
-                stopAndReturn (edit);
+            if (isSongPlaying (song))
+                stopAndReturn (song);
 
             file.getParentDirectory().createDirectory();
-            renderMissingClipAudio (getSong (edit)); // the engine plays a clip whose render isn't there silent
+            renderMissingClipAudio (song); // the engine plays a clip whose render isn't there silent
 
             // Played into floats, written into the file, and measured on the render thread before the message thread hears.
-            const OfflineRender::Job job { floats.getFile(), getExportRange (edit).getEnd().inSeconds(), tailSeconds, std::nullopt };
+            const OfflineRender::Job job { floats.getFile(), toSeconds (song, getExportRange (song).getEnd()), tailSeconds, std::nullopt };
             renderer = std::make_unique<OfflineRender> (
-                getRenderSetup (edit, settings.sampleRate), std::vector { job },
+                getRenderSetup (song, settings.sampleRate), std::vector { job },
                 [settings, floatsFile = floats.getFile(), file = temporary.getFile()] (OfflineRender& render, int index,
                                                                                        const auto& readings)
                 { return writeExport (render, index, floatsFile, file, settings, readings); },
@@ -359,23 +365,22 @@ namespace
     // and takes its place only when every stem is complete.
     struct StemsRender final : SongExport::Impl
     {
-        StemsRender (te::Edit& edit, const juce::File& f, const ExportSettings& settings,
-                     std::function<void (const ExportReport&)> callback)
+        StemsRender (Song& song, const juce::File& f, const ExportSettings& settings, std::function<void (const ExportReport&)> callback)
             : folder (f),
-              seconds (getExportRange (edit).getLength().inSeconds()),
+              seconds (toSeconds (song, getExportRange (song).getEnd())),
               onFinished (std::move (callback)),
               alive (std::make_shared<StemsRender*> (this))
         {
             JUCE_ASSERT_MESSAGE_THREAD
 
-            if (const auto check = checkExport (edit, settings); check.failed())
+            if (const auto check = checkExport (song, settings); check.failed())
             {
                 deliverTo (std::weak_ptr<StemsRender*> (alive), { check, folder });
                 return;
             }
 
-            if (isSongPlaying (edit))
-                stopAndReturn (edit);
+            if (isSongPlaying (song))
+                stopAndReturn (song);
 
             temporaryFolder = folder.getSiblingFile (folder.getFileName() + " (exporting)").getNonexistentSibling (false);
 
@@ -388,16 +393,16 @@ namespace
                 return;
             }
 
-            renderMissingClipAudio (getSong (edit)); // the engine plays a clip whose render isn't there silent
-            const auto tracks = getStemTracks (edit);
-            const auto end = getExportRange (edit).getEnd().inSeconds();
+            renderMissingClipAudio (song); // the engine plays a clip whose render isn't there silent
+            const auto channels = getStemChannels (song);
+            const auto end = toSeconds (song, getExportRange (song).getEnd());
             std::vector<OfflineRender::Job> jobs;
             std::vector<juce::File> files;
 
-            for (int i = 0; i < tracks.size(); ++i)
+            for (int i = 0; i < (int) channels.size(); ++i)
             {
-                const auto fileName = getStemFileName (i, *tracks[i], getFileSuffix (settings.format));
-                const auto channel = (std::int64_t) getTrackID (findTrackState (*tracks[i])).getRaw();
+                const auto fileName = getStemFileName (i, getTrackName (song, channels[(size_t) i]), getFileSuffix (settings.format));
+                const auto channel = (std::int64_t) channels[(size_t) i].getRaw();
                 jobs.push_back (
                     { temporaryFolder.getChildFile (fileName + ".floats.wav"), end, tailSeconds, SongPlayer::RenderOf { channel } });
                 files.push_back (temporaryFolder.getChildFile (fileName));
@@ -405,7 +410,7 @@ namespace
             }
 
             renderer = std::make_unique<OfflineRender> (
-                getRenderSetup (edit, settings.sampleRate), jobs,
+                getRenderSetup (song, settings.sampleRate), jobs,
                 [settings, jobs, files] (OfflineRender& render, int index, const auto& readings)
                 { return writeExport (render, index, jobs[(size_t) index].file, files[(size_t) index], settings, readings); },
                 [weakAlive = std::weak_ptr<StemsRender*> (alive),
@@ -463,13 +468,13 @@ namespace
     };
 } // namespace
 
-std::unique_ptr<SongExport> startExport (te::Edit& edit, const juce::File& file, const ExportSettings& settings,
+std::unique_ptr<SongExport> startExport (Song& song, const juce::File& file, const ExportSettings& settings,
                                          std::function<void (const ExportReport&)> onFinished)
 {
     if (settings.stems)
-        return std::make_unique<SongExport> (std::make_unique<StemsRender> (edit, file, settings, std::move (onFinished)));
+        return std::make_unique<SongExport> (std::make_unique<StemsRender> (song, file, settings, std::move (onFinished)));
 
-    return std::make_unique<SongExport> (std::make_unique<SongRender> (edit, file, settings, std::move (onFinished)));
+    return std::make_unique<SongExport> (std::make_unique<SongRender> (song, file, settings, std::move (onFinished)));
 }
 
 SongExport::SongExport (std::unique_ptr<Impl> i)

@@ -178,8 +178,6 @@ void insertTempoMapTime (Song& song, BeatPosition at, BeatDuration length)
     for (auto entry : findTempoMap (song))
         if (const auto beat = (double) entry[schema::mapBeat]; beat > 0.0 && beat >= at.inBeats())
             entry.setProperty (schema::mapBeat, beat + length.inBeats(), &song.getUndoManager());
-
-    song.reconcile (Song::Part::tempoMap);
 }
 
 void removeTempoMapTime (Song& song, BeatRange range)
@@ -199,8 +197,6 @@ void removeTempoMapTime (Song& song, BeatRange range)
         else
             entry.setProperty (schema::mapBeat, beat - range.getLength().inBeats(), &song.getUndoManager());
     }
-
-    song.reconcile (Song::Part::tempoMap);
 }
 
 //==============================================================================
@@ -219,7 +215,6 @@ void setTempo (Song& song, double bpm)
     const UndoStep step (song, "Change Tempo");
     const PatternsKeepTheirSpeed keepPatterns (song); // unless they follow it
     getFirstOfMap (song, schema::TEMPO).setProperty (schema::bpm, rounded, &song.getUndoManager());
-    song.reconcile (Song::Part::tempoMap); // which places the clips and the automation again, a clip that follows it stretched again
 }
 
 TempoStretch getTempoStretch (const Song& song)
@@ -285,7 +280,6 @@ void setTimeSignature (Song& song, TimeSignature timeSignature)
     auto first = getFirstOfMap (song, schema::TIMESIGNATURE);
     first.setProperty (schema::numerator, timeSignature.numerator, &song.getUndoManager());
     first.setProperty (schema::denominator, timeSignature.denominator, &song.getUndoManager());
-    song.reconcile (Song::Part::tempoMap);
 }
 
 void addTempoCommands (CommandRegistry& registry, Selection& selection)

@@ -41,7 +41,7 @@ std::vector<DeviceSlot> getContainerDevices (const ProjectContext& context, Devi
 
     if (auto* song = findSong (context))
         for (const auto device : getContainerDevices (*song, id))
-            slots.push_back (makeDeviceSlot (*song, device));
+            slots.push_back (makeDeviceSlot (context, device));
 
     return slots;
 }

@@ -73,7 +73,7 @@ public:
     void addChangeListener (juce::ChangeListener*);
     void removeChangeListener (juce::ChangeListener*);
 
-    struct Impl; // the selection manager behind it (internal/SongSelection.h)
+    struct Impl; // the selection behind it (internal/SongSelection.h)
     explicit SongSelection (std::unique_ptr<Impl>);
 
 private:

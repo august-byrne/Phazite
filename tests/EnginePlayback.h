@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's own engine playing the open project as the app plays it (model/playback/; docs/tracktion-migration.md, T2),
+// Phazite's own engine playing the open project as the app plays it (model/playback/),
 // driven by a test a block at a time, as an audio device would drive it, but not in real time: what it plays is the same
 // every time. For as long as it lasts, the app's engine plays on a device with two inputs.
 #pragma once
@@ -7,6 +7,7 @@
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "model/engine/EngineContext.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/playback/internal/PlaybackHost.h"
 
 #include <cmath>

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The time line as the playlist and the piano roll show it (docs/design.md, sections 6 and 7), in beats from the song's
-// start (architecture phase A3: no Tracktion here): its bars, the grid that positions snap to, the playhead and the
-// loop. Each function takes the open project's context, and gives what a new song in 4/4 would, or does nothing, while
-// no project is open.
+// start: its bars, the grid that positions snap to, the playhead and the loop. Each function takes the open project's
+// context, and gives what a new song in 4/4 would, or does nothing, while no project is open.
 #pragma once
 
 #include "GridSettings.h"

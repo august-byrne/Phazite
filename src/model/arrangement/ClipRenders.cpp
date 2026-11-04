@@ -4,7 +4,6 @@
 #include "internal/Clips.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AudioFiles.h"
-#include "model/mirror/internal/Mirror.h"
 #include "model/playback/internal/PlaybackSession.h"
 
 namespace phazite
@@ -34,21 +33,14 @@ namespace
         return needed;
     }
 
-    // Renders newly made play: Phazite's engine plays them from its next plan (docs/tracktion-migration.md, T2), and what
-    // Tracktion read of their files it reads again.
+    // Renders newly made play: Phazite's engine plays them from its next plan.
     void announce (const Song& song, const juce::Array<juce::File>& renders)
     {
         if (renders.isEmpty() || ! juce::MessageManager::existsAndIsCurrentThread())
             return;
 
-        if (auto* edit = findEdit (song))
-        {
-            for (const auto& render : renders)
-                mirror::reconcileFile (*edit, render);
-
-            if (auto* session = findSession (*edit))
-                session->update();
-        }
+        if (auto* session = findSession (song))
+            session->update();
     }
 } // namespace
 
@@ -136,10 +128,6 @@ void purgeClipRenders (const Song& song)
     {
         if (played.contains (entry.getFile()))
             continue;
-
-        // What Tracktion still holds open of it, let go of first.
-        if (auto* edit = findEdit (song))
-            mirror::releaseFile (*edit, entry.getFile());
 
         entry.getFile().deleteFile();
     }

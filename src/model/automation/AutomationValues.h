@@ -53,7 +53,8 @@ enum class AutomationShape
 std::vector<AutomationPoint> makeAutomationShape (AutomationShape, BeatRange, BeatDuration cycle, float from, float to);
 
 //==============================================================================
-// Write modes: how moving a track's controls while the song plays writes their automation, as Tracktion writes it.
+// Write modes: how moving a track's controls while the song plays writes their automation
+// (model/playback/internal/AutomationWriter.h).
 enum class AutomationMode
 {
     read,  // the lanes play; a control moved by hand goes back to its lane at the lane's next change

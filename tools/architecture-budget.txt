@@ -11,41 +11,13 @@
 upward-includes                0
 model-window-includes          0
 model-window-references        0
-model-tracktion-includes       0
 model-undo-steps               0
 model-include-loops            0
-devices-tracktion              0
-engine-tracktion               0
-sandbox-tracktion              0
-host-tracktion                 0
-ui-tracktion-includes          0
-ui-tracktion-references        0
-ui-tracktion-aliases           0
+ui-internal-includes           0
 ui-undo-steps                  0
 flat-files                     0
 unresolved-includes            0
 cmake-sources                  0
 
-# Tracktion's names (te:: and tracktion::) in each area of the model, in src/services, src/app and tests/: the migration
-# off Tracktion (docs/tracktion-migration.md) lowers them, area by area, and new code adds none. A phase that moves code to
-# Tracktion's side on purpose (T1's mirror) raises one, saying why.
-tracktion-arrangement          0
-tracktion-automation          63
-tracktion-base                37
-tracktion-chords               0
-tracktion-commands            22
-tracktion-devices            135
-tracktion-engine             116
-tracktion-mirror             773
-tracktion-mixer              223
-tracktion-modulation         108
-tracktion-notes                3
-tracktion-playback            42
-tracktion-plugins             21
-tracktion-presets             83
-tracktion-project             90
-tracktion-transport          177
-tracktion-other                0
-tracktion-services             0
-tracktion-app                 36
-tracktion-tests              599
+# Phazite has no Tracktion Engine: nothing in src/, tests/ or tools/ may include or name it, and this stays 0.
+tracktion                      0

@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Containers by IDs (src/model/mixer/ContainerModel.h; roadmap step 2.4): effects grouped into a container and back as
 // named undo steps, the container's row of devices and its eight macros, which modulate its devices only, its devices
-// reached by the mixer's functions, its own rack type for each container (a duplicated track's too), and the commands
-// that group and ungroup the selected devices.
-#include "GoldenFiles.h"
+// reached by the mixer's functions, a duplicated track's containers with devices and macros of their own, and the
+// commands that group and ungroup the selected devices.
+#include "EnginePlayback.h"
 #include "TestHelpers.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
-#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Containers.h"
@@ -27,31 +26,27 @@ namespace
 using phazite::DeviceID;
 using phazite::ModulatorType;
 using phazite::ParameterRef;
-
-phazite::TrackID idOf (const te::Track& track)
-{
-    return phazite::getTrackID (track);
-}
+using phazite::TrackID;
 
 // An open project with two tracks: A, with a synth, then an EQ, a compressor and a reverb; and B, with an EQ.
-struct Song
+struct TwoTracks
 {
-    Song()
+    TwoTracks()
     {
-        phazite::ensureTracks (*edit, 2);
-        a = te::getAudioTracks (*edit)[0];
-        b = te::getAudioTracks (*edit)[1];
-        setEdit (context, edit.get());
-        phazite::chooseInstrument (context, idOf (*a), find ("phaziteSynth"));
+        const auto tracks = phazite::ensureTracks (*song, 2);
+        a = tracks[0];
+        b = tracks[1];
+        setSong (context, song.get());
+        phazite::chooseInstrument (context, a, find ("phaziteSynth"));
 
         for (const auto* effect : { "phaziteEq", "phaziteCompressor", "phaziteReverb" })
-            phazite::addEffect (context, idOf (*a), find (effect));
+            phazite::addEffect (context, a, find (effect));
 
-        phazite::addEffect (context, idOf (*b), find ("phaziteEq"));
-        phazite::getSong (*edit).getUndoManager().clearUndoHistory();
+        phazite::addEffect (context, b, find ("phaziteEq"));
+        song->getUndoManager().clearUndoHistory();
     }
 
-    ~Song() { setEdit (context, nullptr); }
+    ~TwoTracks() { setSong (context, nullptr); }
 
     phazite::DeviceType find (const char* type) const
     {
@@ -63,11 +58,11 @@ struct Song
         return {};
     }
 
-    std::vector<DeviceID> effectsOf (const te::Track& track) const
+    std::vector<DeviceID> effectsOf (TrackID track) const
     {
         std::vector<DeviceID> ids;
 
-        for (const auto& effect : phazite::getEffects (context, idOf (track)))
+        for (const auto& effect : phazite::getEffects (context, track))
             ids.push_back (effect.id);
 
         return ids;
@@ -83,79 +78,77 @@ struct Song
         return names;
     }
 
-    std::vector<juce::String> effectNamesOf (const te::Track& track) const { return namesOf (phazite::getEffects (context, idOf (track))); }
+    std::vector<juce::String> effectNamesOf (TrackID track) const { return namesOf (phazite::getEffects (context, track)); }
 
-    te::AutomatableParameter::Ptr find (const ParameterRef& ref) const { return phazite::findParameter (*edit, ref); }
-    juce::String describeUndo() const { return phazite::describeUndo (&phazite::getSong (*edit)); }
+    juce::String describeUndo() const { return phazite::describeUndo (song.get()); }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
+    phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    te::AudioTrack* a = nullptr;
-    te::AudioTrack* b = nullptr;
+    TrackID a, b;
 };
 
 // A's EQ and reverb grouped into a container.
-DeviceID groupEqAndReverb (Song& song)
+DeviceID groupEqAndReverb (TwoTracks& tracks)
 {
-    const auto effects = song.effectsOf (*song.a);
-    return phazite::groupIntoContainer (song.context, { effects[0], effects[2] });
+    const auto effects = tracks.effectsOf (tracks.a);
+    return phazite::groupIntoContainer (tracks.context, { effects[0], effects[2] });
 }
 } // namespace
 
 TEST_CASE ("An effect is replaced by another in its place, on its channel or in its container, as one undo step")
 {
-    Song song;
-    auto& context = song.context;
-    const auto effects = song.effectsOf (*song.a);
-    const auto names = song.effectNamesOf (*song.a);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    const auto effects = tracks.effectsOf (tracks.a);
+    const auto names = tracks.effectNamesOf (tracks.a);
     REQUIRE (names.size() == 3);
 
     // The compressor's place, between the EQ and the reverb, the delay's.
-    phazite::replaceEffect (context, effects[1], song.find ("phaziteDelay"));
-    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { names[0], "Delay", names[2] });
-    CHECK (song.effectsOf (*song.a)[0] == effects[0]);
-    CHECK (song.describeUndo() == juce::String ("Undo Replace Compressor with Delay"));
-    phazite::undo (*song.edit);
-    CHECK (song.effectNamesOf (*song.a) == names);
-    CHECK (song.effectsOf (*song.a) == effects);
+    phazite::replaceEffect (context, effects[1], tracks.find ("phaziteDelay"));
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { names[0], "Delay", names[2] });
+    CHECK (tracks.effectsOf (tracks.a)[0] == effects[0]);
+    CHECK (tracks.describeUndo() == juce::String ("Undo Replace Compressor with Delay"));
+    phazite::undo (*tracks.song);
+    CHECK (tracks.effectNamesOf (tracks.a) == names);
+    CHECK (tracks.effectsOf (tracks.a) == effects);
 
     // In a container, its place among the container's devices.
-    const auto container = groupEqAndReverb (song);
+    const auto container = groupEqAndReverb (tracks);
     const auto inside = phazite::getContainerDevices (context, container);
     REQUIRE (inside.size() == 2);
-    phazite::replaceEffect (context, inside[0].id, song.find ("phazitePhaser"));
-    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Phaser", inside[1].name });
+    phazite::replaceEffect (context, inside[0].id, tracks.find ("phazitePhaser"));
+    CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Phaser", inside[1].name });
 
     // Never an instrument, nor by one.
-    const auto instrument = phazite::getInstrument (context, idOf (*song.a))->id;
-    phazite::replaceEffect (context, instrument, song.find ("phaziteDelay"));
-    phazite::replaceEffect (context, song.effectsOf (*song.b)[0], song.find ("phaziteSynth"));
-    CHECK (phazite::getInstrument (context, idOf (*song.a))->id == instrument);
-    CHECK (song.effectNamesOf (*song.b) == std::vector<juce::String> { names[0] });
+    const auto instrument = phazite::getInstrument (context, tracks.a)->id;
+    phazite::replaceEffect (context, instrument, tracks.find ("phaziteDelay"));
+    phazite::replaceEffect (context, tracks.effectsOf (tracks.b)[0], tracks.find ("phaziteSynth"));
+    CHECK (phazite::getInstrument (context, tracks.a)->id == instrument);
+    CHECK (tracks.effectNamesOf (tracks.b) == std::vector<juce::String> { names[0] });
 }
 
 TEST_CASE ("Effects of one channel group into a container in the first one's place, as one undo step, and ungroup again")
 {
-    Song song;
-    auto& context = song.context;
-    const auto effects = song.effectsOf (*song.a);
-    const auto instrument = phazite::getInstrument (context, idOf (*song.a))->id;
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    const auto effects = tracks.effectsOf (tracks.a);
+    const auto instrument = phazite::getInstrument (context, tracks.a)->id;
     const auto eq = effects[0], compressor = effects[1], reverb = effects[2];
 
     // Not an instrument, nor effects of two channels.
     CHECK (phazite::canGroupIntoContainer (context, { eq, reverb }));
     CHECK_FALSE (phazite::canGroupIntoContainer (context, { instrument, eq }));
-    CHECK_FALSE (phazite::canGroupIntoContainer (context, { eq, song.effectsOf (*song.b)[0] }));
+    CHECK_FALSE (phazite::canGroupIntoContainer (context, { eq, tracks.effectsOf (tracks.b)[0] }));
     CHECK_FALSE (phazite::canGroupIntoContainer (context, {}));
 
     // In the EQ's place, holding the EQ and the reverb in their order, which keep their IDs.
     const auto container = phazite::groupIntoContainer (context, { reverb, eq });
     REQUIRE (container.isValid());
-    CHECK (song.describeUndo() == juce::String ("Undo Group into Container"));
-    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { "Container", "Compressor" });
-    CHECK (song.effectsOf (*song.a)[1] == compressor);
-    CHECK (phazite::getEffects (context, idOf (*song.a))[0].isContainer);
-    CHECK (phazite::getInstrument (context, idOf (*song.a))->id == instrument); // a container isn't an instrument
+    CHECK (tracks.describeUndo() == juce::String ("Undo Group into Container"));
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "Container", "Compressor" });
+    CHECK (tracks.effectsOf (tracks.a)[1] == compressor);
+    CHECK (phazite::getEffects (context, tracks.a)[0].isContainer);
+    CHECK (phazite::getInstrument (context, tracks.a)->id == instrument); // a container isn't an instrument
 
     const auto inside = phazite::getContainerDevices (context, container);
     REQUIRE (inside.size() == 2);
@@ -170,121 +163,89 @@ TEST_CASE ("Effects of one channel group into a container in the first one's pla
     CHECK (macros[0].name == juce::String ("Macro 1"));
     CHECK (macros[7].name == juce::String ("Macro 8"));
     CHECK (macros[0].container == container);
-    CHECK (macros[0].track == idOf (*song.a));
+    CHECK (macros[0].track == tracks.a);
     CHECK (phazite::getModulatorValue (context, macros[0].id) == doctest::Approx (0.0f));
 
     // A second one is named apart; a container can't go in a container.
     const auto other = phazite::groupIntoContainer (context, { compressor });
-    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { "Container", "Container 2" });
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "Container", "Container 2" });
     CHECK_FALSE (phazite::canGroupIntoContainer (context, { container, other }));
 
     // Undo puts the effects back where they were; redo groups them again.
-    phazite::undo (*song.edit);
-    phazite::undo (*song.edit);
-    CHECK (song.effectsOf (*song.a) == std::vector<DeviceID> { eq, compressor, reverb });
+    phazite::undo (*tracks.song);
+    phazite::undo (*tracks.song);
+    CHECK (tracks.effectsOf (tracks.a) == std::vector<DeviceID> { eq, compressor, reverb });
     CHECK_FALSE (phazite::getContainerOf (context, eq).isValid());
-    phazite::redo (*song.edit);
-    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { "Container", "Compressor" });
+    phazite::redo (*tracks.song);
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "Container", "Compressor" });
     CHECK (phazite::getContainerDevices (context, container).size() == 2);
 
     // Ungrouping puts them in its place, in their order, and the container goes.
     phazite::ungroupContainer (context, container);
-    CHECK (song.describeUndo() == juce::String ("Undo Ungroup Container"));
-    CHECK (song.effectsOf (*song.a) == std::vector<DeviceID> { eq, reverb, compressor });
+    CHECK (tracks.describeUndo() == juce::String ("Undo Ungroup Container"));
+    CHECK (tracks.effectsOf (tracks.a) == std::vector<DeviceID> { eq, reverb, compressor });
     CHECK (phazite::getContainerDevices (context, container).empty());
-    phazite::undo (*song.edit);
-    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { "Container", "Compressor" });
+    phazite::undo (*tracks.song);
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "Container", "Compressor" });
 }
 
-TEST_CASE ("A container's devices are wired one after the other, and move, come and go as the mixer's devices do")
+TEST_CASE ("A container's devices move, come and go as the mixer's devices do")
 {
-    Song song;
-    auto& context = song.context;
-    const auto container = groupEqAndReverb (song);
-    auto* rack = phazite::getContainerRack (*te::findPluginForID (*song.edit, phazite::toTracktion (container)));
-    REQUIRE (rack != nullptr);
-
-    // From the input through each device to the output: MIDI and two channels at each step.
-    const auto wiredInOrder = [rack]
-    {
-        const auto devices = phazite::getContainerDevices (*phazite::findContainerOf (*rack));
-        auto from = te::EditItemID();
-        auto ok = true;
-
-        for (auto* device : devices)
-        {
-            for (int pin = 0; pin <= 2; ++pin)
-            {
-                const auto connections = rack->getConnections();
-                ok = ok
-                     && std::any_of (
-                         connections.begin(), connections.end(), [&] (const te::RackConnection* c)
-                         { return c->sourceID.get() == from && c->destID.get() == device->itemID && c->sourcePin.get() == pin; });
-            }
-
-            from = device->itemID;
-        }
-
-        const auto connections = rack->getConnections();
-        return ok && connections.size() == 3 * (devices.size() + 1)
-               && std::any_of (connections.begin(), connections.end(),
-                               [&] (const te::RackConnection* c) { return c->sourceID.get() == from && ! c->destID.get().isValid(); });
-    };
-
-    CHECK (wiredInOrder());
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    const auto container = groupEqAndReverb (tracks);
 
     // An effect added at its end.
-    phazite::addEffectToContainer (context, container, song.find ("phaziteCompressor"));
-    CHECK (song.describeUndo() == juce::String ("Undo Add Compressor"));
-    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb", "Compressor" });
-    CHECK (wiredInOrder());
+    phazite::addEffectToContainer (context, container, tracks.find ("phaziteCompressor"));
+    CHECK (tracks.describeUndo() == juce::String ("Undo Add Compressor"));
+    CHECK (tracks.namesOf (phazite::getContainerDevices (context, container))
+           == std::vector<juce::String> { "EQ", "Reverb", "Compressor" });
 
     // Moved earlier, among its container's devices only.
     const auto added = phazite::getContainerDevices (context, container)[2].id;
     phazite::moveEffect (context, added, -2);
-    CHECK (song.describeUndo() == juce::String ("Undo Move Device"));
-    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Compressor", "EQ", "Reverb" });
-    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { "Container", "Compressor" });
-    CHECK (wiredInOrder());
+    CHECK (tracks.describeUndo() == juce::String ("Undo Move Device"));
+    CHECK (tracks.namesOf (phazite::getContainerDevices (context, container))
+           == std::vector<juce::String> { "Compressor", "EQ", "Reverb" });
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "Container", "Compressor" });
 
     // Turned off, and removed from it.
     phazite::setDeviceOn (context, added, false);
     CHECK_FALSE (phazite::getContainerDevices (context, container)[0].isOn);
     phazite::removeDevice (context, added);
-    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
-    CHECK (wiredInOrder());
+    CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
 
     // A container has a mix of its own.
-    CHECK (phazite::getEffects (context, idOf (*song.a))[0].hasMix);
+    CHECK (phazite::getEffects (context, tracks.a)[0].hasMix);
     CHECK (phazite::getMix (context, container).getValue() == doctest::Approx (1.0f));
 
     // Renamed, and removed, which undo brings back.
     phazite::renameContainer (context, container, "  Space  ");
-    CHECK (song.describeUndo() == juce::String ("Undo Rename Container"));
-    CHECK (phazite::getEffects (context, idOf (*song.a))[0].name == juce::String ("Space"));
+    CHECK (tracks.describeUndo() == juce::String ("Undo Rename Container"));
+    CHECK (phazite::getEffects (context, tracks.a)[0].name == juce::String ("Space"));
     phazite::removeDevice (context, container);
-    CHECK (song.describeUndo() == juce::String ("Undo Remove Space"));
-    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { "Compressor" });
-    phazite::undo (*song.edit);
-    CHECK (song.effectNamesOf (*song.a) == std::vector<juce::String> { "Space", "Compressor" });
+    CHECK (tracks.describeUndo() == juce::String ("Undo Remove Space"));
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "Compressor" });
+    phazite::undo (*tracks.song);
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "Space", "Compressor" });
     CHECK (phazite::getContainerDevices (context, container).size() == 2);
 }
 
-TEST_CASE ("A container is the song's, with its name, mix and devices, which Tracktion's mirror one way")
+TEST_CASE ("A container is the song's, with its name, mix, devices and macros")
 {
     namespace schema = phazite::schema;
-    Song song;
-    auto& context = song.context;
-    auto& edit = *song.edit;
-    const auto effects = song.effectsOf (*song.a);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto effects = tracks.effectsOf (tracks.a);
     const auto eq = effects[0], reverb = effects[2];
-    const auto container = groupEqAndReverb (song);
-    const auto element = phazite::findDeviceState (edit, container);
+    const auto container = groupEqAndReverb (tracks);
+    const auto element = phazite::findDeviceState (song, container);
 
     // The song's container, in the EQ's place, with its name and its devices' elements in their order.
     REQUIRE (element.hasType (schema::CONTAINER));
     CHECK (element[schema::containerName].toString() == juce::String ("Container"));
-    CHECK (phazite::getDeviceStates (phazite::findTrackState (*song.a)).size() == 3); // the synth, the container, the compressor
+    CHECK (phazite::getDeviceStates (phazite::findTrackState (song, tracks.a)).size() == 3); // the synth, the container, the compressor
     const auto devicesIn = [&element]
     {
         std::vector<DeviceID> ids;
@@ -297,85 +258,82 @@ TEST_CASE ("A container is the song's, with its name, mix and devices, which Tra
 
     CHECK (devicesIn() == std::vector<DeviceID> { eq, reverb });
 
-    // Its name, its mix, and its devices' switches and values are the song's, which Tracktion plays.
+    // Its name, its mix, and its devices' switches and values are the song's.
     phazite::renameContainer (context, container, "Space");
     CHECK (element[schema::containerName].toString() == juce::String ("Space"));
     phazite::getMix (context, container).setValue (0.5f);
     CHECK ((float) element[schema::deviceMix] == doctest::Approx (0.5f));
     phazite::setDeviceOn (context, reverb, false);
-    CHECK ((bool) phazite::findDeviceState (edit, reverb)[schema::deviceOff]);
+    CHECK ((bool) phazite::findDeviceState (song, reverb)[schema::deviceOff]);
     CHECK_FALSE (phazite::getContainerDevices (context, container)[1].isOn);
     phazite::getParameter (context, { eq, "band4Gain" }).setValue (6.0f);
-    CHECK ((float) phazite::findDeviceState (edit, eq).getChildWithName (schema::VALUES)["band4Gain"] == doctest::Approx (6.0f));
-    CHECK (song.find ({ eq, "band4Gain" })->getCurrentValue() == doctest::Approx (6.0f));
+    CHECK ((float) phazite::findDeviceState (song, eq).getChildWithName (schema::VALUES)["band4Gain"] == doctest::Approx (6.0f));
+    CHECK (phazite::getValueSetByHand (song, ParameterRef { eq, "band4Gain" }) == doctest::Approx (6.0f));
 
-    // Moved in the song, which Tracktion's rack type follows; an undo puts both back.
+    // Moved in the song; an undo puts it back.
     phazite::moveEffect (context, reverb, -1);
     CHECK (devicesIn() == std::vector<DeviceID> { reverb, eq });
-    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Reverb", "EQ" });
-    phazite::undo (edit);
+    CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "Reverb", "EQ" });
+    phazite::undo (song);
     CHECK (devicesIn() == std::vector<DeviceID> { eq, reverb });
-    CHECK (song.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
+    CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
 
-    // One way: a device put in Tracktion's container alone goes; a container the song gains is made, with its devices.
-    auto* rack = phazite::getContainerRack (*te::findPluginForID (edit, phazite::toTracktion (container)));
-    REQUIRE (rack != nullptr);
-    rack->addPlugin (edit.getPluginCache().createNewPlugin ("phaziteDelay", {}), { 0.5f, 0.5f }, false);
-    CHECK (phazite::getRackDevices (*rack).size() == 3);
-    phazite::mirror::reconcileDevices (edit);
-    CHECK (phazite::getRackDevices (*rack).size() == 2);
-
+    // A container the song gains shows on its channel, with its devices and its macros.
     juce::ValueTree made (schema::CONTAINER), delay (schema::DEVICE), macro (schema::MACRO);
-    const auto madeID = DeviceID::fromRaw (edit.createNewItemID().getRawID());
+    const auto madeID = DeviceID::fromRaw (song.makeID());
     made.setProperty (schema::deviceID, (juce::int64) madeID.getRaw(), nullptr);
     made.setProperty (schema::containerName, "Echoes", nullptr);
-    delay.setProperty (schema::deviceID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    delay.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
     delay.setProperty (schema::deviceType, "phaziteDelay", nullptr);
     made.appendChild (delay, nullptr);
-    macro.setProperty (schema::modulatorID, (juce::int64) edit.createNewItemID().getRawID(), nullptr);
+    macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
     macro.setProperty (schema::macroName, "Space", nullptr);
     made.appendChild (macro, nullptr);
-    phazite::findTrackState (*song.b).appendChild (made, nullptr);
-    phazite::mirror::reconcileDevices (edit);
-    CHECK (song.effectNamesOf (*song.b) == std::vector<juce::String> { "EQ", "Echoes" });
-    CHECK (song.namesOf (phazite::getContainerDevices (context, madeID)) == std::vector<juce::String> { "Delay" });
+    phazite::findTrackState (song, tracks.b).appendChild (made, nullptr);
+    CHECK (tracks.effectNamesOf (tracks.b) == std::vector<juce::String> { "EQ", "Echoes" });
+    CHECK (tracks.namesOf (phazite::getContainerDevices (context, madeID)) == std::vector<juce::String> { "Delay" });
     const auto macros = phazite::getContainerMacros (context, madeID);
     REQUIRE (macros.size() == 1);
     CHECK (macros[0].name == juce::String ("Space"));
-
-    phazite::getSong (edit).getUndoManager().clearUndoHistory();
-    phazite::mirror::reconcileDevices (edit);
-    CHECK_FALSE (phazite::getSong (edit).getUndoManager().canUndo());
 }
 
 TEST_CASE ("A container's macros modulate its devices; its track's modulators reach them too")
 {
-    Song song;
-    auto& context = song.context;
-    const auto container = groupEqAndReverb (song);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto container = groupEqAndReverb (tracks);
     const auto inside = phazite::getContainerDevices (context, container);
-    const ParameterRef gain { inside[0].id, "band4Gain" };               // the EQ's, inside
-    const ParameterRef makeup { song.effectsOf (*song.a)[1], "makeup" }; // the compressor's, outside
+    const ParameterRef gain { inside[0].id, "band4Gain" };                  // the EQ's, inside
+    const ParameterRef makeup { tracks.effectsOf (tracks.a)[1], "makeup" }; // the compressor's, outside
     const auto macro = phazite::getContainerMacros (context, container)[0].id;
 
     CHECK (phazite::canModulate (context, macro, gain));
     CHECK_FALSE (phazite::canModulate (context, macro, makeup));
 
-    // Turning the macro moves the EQ's gain by the amount, from where it is: at 0, not at all.
+    // Turning the macro moves the EQ's gain by the amount, from where it is, as Phazite's engine plays it: at 0, not at all.
+    phazite::test::EnginePlayback playback;
+    const auto played = [&]
+    {
+        playback.play (0.05);
+        return phazite::getCurrentValue (song, gain, true);
+    };
+
     phazite::modulate (context, macro, gain, 0.5f);
-    CHECK (song.describeUndo() == juce::String ("Undo Modulate Band 4 Gain"));
-    const auto range = song.find (gain)->valueRange;
-    CHECK (song.find (gain)->getCurrentValue() == doctest::Approx (0.0f).epsilon (0.001));
+    CHECK (tracks.describeUndo() == juce::String ("Undo Modulate Band 4 Gain"));
+    const auto description = phazite::describeParameter (song, gain);
+    REQUIRE (description.has_value());
+    const auto range = description->range;
+    CHECK (played() == doctest::Approx (0.0f).epsilon (0.001));
     auto knob = phazite::getModulatorParameter (context, macro, phazite::getModulatorParameters (context, macro)[0].id);
     REQUIRE (knob.isValid());
     knob.setValue (1.0f);
-    CHECK (song.describeUndo() == juce::String ("Undo Change Macro 1"));
-    CHECK (song.find (gain)->getCurrentValue()
-           == doctest::Approx (range.convertFrom0to1 (range.convertTo0to1 (0.0f) + 0.5f)).epsilon (0.01));
+    CHECK (tracks.describeUndo() == juce::String ("Undo Change Macro 1"));
+    CHECK (played() == doctest::Approx (range.convertFrom0to1 (range.convertTo0to1 (0.0f) + 0.5f)).epsilon (0.01));
 
     // The track's LFO reaches the devices in its containers, and a control in the container offers the container's
     // macros first.
-    const auto lfo = phazite::addModulator (context, idOf (*song.a), ModulatorType::lfo);
+    const auto lfo = phazite::addModulator (context, tracks.a, ModulatorType::lfo);
     CHECK (phazite::canModulate (context, lfo, gain));
     const auto handle = phazite::getParameter (context, gain);
     const auto offered = phazite::getModulatorsFor (handle);
@@ -386,7 +344,7 @@ TEST_CASE ("A container's macros modulate its devices; its track's modulators re
 
     // A macro is renamed, but stays: the container keeps all eight.
     phazite::renameMacro (context, macro, "Air");
-    CHECK (song.describeUndo() == juce::String ("Undo Rename Macro"));
+    CHECK (tracks.describeUndo() == juce::String ("Undo Rename Macro"));
     CHECK (phazite::getContainerMacros (context, container)[0].name == juce::String ("Air"));
     phazite::removeModulator (context, macro);
     CHECK (phazite::getContainerMacros (context, container).size() == 8);
@@ -401,9 +359,9 @@ TEST_CASE ("A container's macros modulate its devices; its track's modulators re
 
 TEST_CASE ("A container's devices' parameters can be automated on its track")
 {
-    Song song;
-    auto& context = song.context;
-    const auto container = groupEqAndReverb (song);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    const auto container = groupEqAndReverb (tracks);
     const auto inside = phazite::getContainerDevices (context, container);
 
     const auto targets = phazite::getAutomationTargets (context, inside[0].id);
@@ -412,30 +370,30 @@ TEST_CASE ("A container's devices' parameters can be automated on its track")
 
     // Its lane shows under the track, and its points play.
     phazite::showAutomationLane (context, targets[0].parameter);
-    const auto lanes = phazite::getAutomationLanes (context, idOf (*song.a));
+    const auto lanes = phazite::getAutomationLanes (context, tracks.a);
     CHECK (std::any_of (lanes.begin(), lanes.end(), [&] (const auto& lane) { return lane.parameter == targets[0].parameter; }));
 }
 
-TEST_CASE ("A duplicated track's containers play rack types of their own, which its own modulators modulate")
+TEST_CASE ("A duplicated track's containers have devices and macros of their own, which its own modulators modulate")
 {
-    Song song;
-    auto& context = song.context;
-    const auto container = groupEqAndReverb (song);
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto container = groupEqAndReverb (tracks);
     const auto inside = phazite::getContainerDevices (context, container);
     const ParameterRef gain { inside[0].id, "band4Gain" };
     const auto macro = phazite::getContainerMacros (context, container)[0].id;
-    const auto lfo = phazite::addModulator (context, idOf (*song.a), ModulatorType::lfo);
+    const auto lfo = phazite::addModulator (context, tracks.a, ModulatorType::lfo);
     phazite::modulate (context, macro, gain, 0.5f);
     phazite::modulate (context, lfo, gain, 0.25f);
     phazite::showAutomationLane (context, gain);
 
-    const auto copies = phazite::duplicateTracks ({ song.a }, nullptr);
+    const auto copies = phazite::duplicateTracks (song, { tracks.a }, nullptr);
     REQUIRE (copies.size() == 1);
-    auto* copy = copies.getFirst();
-    const auto copiedContainer = phazite::getEffects (context, idOf (*copy))[0];
+    const auto copy = copies.front();
+    const auto copiedContainer = phazite::getEffects (context, copy)[0];
     REQUIRE (copiedContainer.isContainer);
     CHECK (copiedContainer.id != container);
-    CHECK (song.edit->getRackList().size() == 2);
 
     // Its own devices, which its own macro and LFO modulate.
     const auto copiedInside = phazite::getContainerDevices (context, copiedContainer.id);
@@ -443,7 +401,7 @@ TEST_CASE ("A duplicated track's containers play rack types of their own, which 
     CHECK (copiedInside[0].id != inside[0].id);
     const ParameterRef copiedGain { copiedInside[0].id, "band4Gain" };
     const auto copiedMacro = phazite::getContainerMacros (context, copiedContainer.id)[0].id;
-    const auto copiedLfo = phazite::getModulators (context, idOf (*copy))[0].id;
+    const auto copiedLfo = phazite::getModulators (context, copy)[0].id;
     CHECK (copiedMacro != macro);
     CHECK (copiedLfo != lfo);
 
@@ -459,28 +417,28 @@ TEST_CASE ("A duplicated track's containers play rack types of their own, which 
     CHECK (phazite::getModulations (context, gain).size() == 2); // the original's are as they were
 
     // Its lane shows its own device's parameter.
-    const auto lanes = phazite::getAutomationLanes (context, idOf (*copy));
+    const auto lanes = phazite::getAutomationLanes (context, copy);
     CHECK (std::any_of (lanes.begin(), lanes.end(), [&] (const auto& lane) { return lane.parameter == copiedGain; }));
 
     // A change to one container's device leaves the other's alone.
     phazite::getParameter (context, gain).setValue (6.0f);
-    CHECK (song.find (copiedGain)->getCurrentBaseValue() == doctest::Approx (0.0f));
+    CHECK (phazite::getValueSetByHand (song, copiedGain) == doctest::Approx (0.0f));
 
-    // Deleted, the copy and its container go; undone, they come back, playing the copy's rack type still.
-    phazite::deleteTracks ({ copy }, nullptr);
-    CHECK (te::getAudioTracks (*song.edit).size() == 2);
-    phazite::undo (*song.edit);
+    // Deleted, the copy and its container go; undone, they come back, with the copy's devices and modulation still.
+    phazite::deleteTracks (song, { copy }, nullptr);
+    CHECK (phazite::getTrackIDs (song).size() == 2);
+    phazite::undo (song);
     CHECK (phazite::getContainerDevices (context, copiedContainer.id).size() == 2);
     CHECK (phazite::getModulations (context, copiedGain).size() == 2);
 }
 
 TEST_CASE ("The master's effects group into a container too, whose macros' track is the master's")
 {
-    Song song;
-    auto& context = song.context;
+    TwoTracks tracks;
+    auto& context = tracks.context;
 
     for (const auto* effect : { "phaziteEq", "phaziteLimiter" })
-        phazite::addEffect (context, {}, song.find (effect));
+        phazite::addEffect (context, {}, tracks.find (effect));
 
     const auto master = phazite::getEffects (context, {});
     REQUIRE (master.size() >= 2);
@@ -505,8 +463,8 @@ TEST_CASE ("The master's effects group into a container too, whose macros' track
 
 TEST_CASE ("Group into Container and Ungroup Container act on the selected devices, which are selected on their own")
 {
-    Song song;
-    auto& context = song.context;
+    TwoTracks tracks;
+    auto& context = tracks.context;
     auto& selection = context.getSongSelection();
     phazite::CommandRegistry registry;
     phazite::addContainerCommands (registry, getSelection (context));
@@ -515,11 +473,11 @@ TEST_CASE ("Group into Container and Ungroup Container act on the selected devic
     REQUIRE (group != nullptr);
     REQUIRE (ungroup != nullptr);
 
-    const auto effects = song.effectsOf (*song.a);
+    const auto effects = tracks.effectsOf (tracks.a);
     CHECK_FALSE (group->isEnabled());
 
     // Selecting devices deselects tracks, and selecting a track deselects devices.
-    selection.selectOnly (idOf (*song.a));
+    selection.selectOnly (tracks.a);
     selection.add (effects[0]);
     CHECK (selection.getTracks().empty());
     selection.add (effects[1]);
@@ -529,30 +487,32 @@ TEST_CASE ("Group into Container and Ungroup Container act on the selected devic
 
     // The container is selected after grouping, and its devices after ungrouping.
     registry.invoke ("device.group");
-    CHECK (song.describeUndo() == juce::String ("Undo Group into Container"));
-    const auto container = song.effectsOf (*song.a)[0];
+    CHECK (tracks.describeUndo() == juce::String ("Undo Group into Container"));
+    const auto container = tracks.effectsOf (tracks.a)[0];
     CHECK (selection.getDevices() == std::vector<DeviceID> { container });
     CHECK (ungroup->isEnabled());
     CHECK_FALSE (group->isEnabled());
     registry.invoke ("device.ungroup");
-    CHECK (song.describeUndo() == juce::String ("Undo Ungroup Container"));
+    CHECK (tracks.describeUndo() == juce::String ("Undo Ungroup Container"));
     CHECK (selection.getDevices() == std::vector<DeviceID> { effects[0], effects[1] });
 
-    selection.add (idOf (*song.b));
+    selection.add (tracks.b);
     CHECK (selection.getDevices().empty());
-    CHECK (selection.getTracks() == std::vector<phazite::TrackID> { idOf (*song.b) });
+    CHECK (selection.getTracks() == std::vector<TrackID> { tracks.b });
 }
 
 TEST_CASE ("A saved project opens with its containers, their devices and their macros")
 {
     phazite::test::TemporaryFolder temp;
     juce::String error;
-    auto project = phazite::Project::create (phazite::test::getEngine(), temp.folder, "Containers", error);
+    auto project = phazite::Project::create (temp.folder, "Containers", error);
     REQUIRE (project != nullptr);
 
     phazite::ProjectContext context { phazite::test::getEngineContext() };
-    setEdit (context, &project->getEdit());
-    const auto track = idOf (*te::getAudioTracks (project->getEdit())[0]);
+    setSong (context, &project->getSong());
+    const auto trackIDs = phazite::getTrackIDs (project->getSong());
+    REQUIRE_FALSE (trackIDs.empty());
+    const auto track = trackIDs.front();
     phazite::DeviceType eq;
 
     for (const auto& each : phazite::getDeviceTypes (context))
@@ -568,21 +528,14 @@ TEST_CASE ("A saved project opens with its containers, their devices and their m
     phazite::modulate (context, macro, gain, 0.5f);
     phazite::renameMacro (context, macro, "Air");
 
-    // A container made and undone leaves its rack type for the session, which the project drops when it opens.
-    phazite::addEffect (context, track, eq);
-    phazite::groupIntoContainer (context, { phazite::getEffects (context, track)[1].id });
-    phazite::undo (project->getEdit());
-    phazite::undo (project->getEdit());
-    CHECK (project->getEdit().getRackList().size() == 2);
     REQUIRE (project->save().wasOk());
     const auto file = project->getFile();
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
     project = nullptr;
 
-    project = phazite::Project::open (phazite::test::getEngine(), file, false, error);
+    project = phazite::Project::open (file, false, error);
     REQUIRE (project != nullptr);
-    setEdit (context, &project->getEdit());
-    CHECK (project->getEdit().getRackList().size() == 1);
+    setSong (context, &project->getSong());
     const auto effects = phazite::getEffects (context, track);
     REQUIRE (effects.size() == 1);
     CHECK (effects[0].isContainer);
@@ -592,5 +545,5 @@ TEST_CASE ("A saved project opens with its containers, their devices and their m
     REQUIRE (modulations.size() == 1);
     CHECK (modulations[0].modulator == macro);
     CHECK (modulations[0].amount == doctest::Approx (0.5f));
-    setEdit (context, nullptr);
+    setSong (context, nullptr);
 }

@@ -10,6 +10,7 @@
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
 
+#include <juce_graphics/juce_graphics.h>
 #include <optional>
 #include <vector>
 

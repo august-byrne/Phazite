@@ -10,73 +10,55 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
-#include "model/devices/internal/DevicePlugin.h"
-#include "model/mirror/internal/Mirror.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 
-using namespace tracktion::literals;
+using phazite::DeviceID;
+using phazite::TrackID;
 using phazite::test::TestGain;
 using phazite::test::TestSidechain;
 using phazite::test::TestTone;
 
 namespace
 {
-// An Edit with three tracks: Kick, Bass and Keys.
+// A song with three tracks: Kick, Bass and Keys.
 struct Song
 {
     Song()
     {
-        phazite::ensureTracks (*edit, 3);
-        const auto tracks = te::getAudioTracks (*edit);
+        const auto tracks = phazite::ensureTracks (*song, 3);
         kick = tracks[0];
         bass = tracks[1];
         keys = tracks[2];
-        phazite::setTrackName (*kick, "Kick");
-        phazite::setTrackName (*bass, "Bass");
-        phazite::setTrackName (*keys, "Keys");
+        phazite::setTrackName (*song, kick, "Kick");
+        phazite::setTrackName (*song, bass, "Bass");
+        phazite::setTrackName (*song, keys, "Keys");
     }
 
     // Adds a test device of that type to a track's chain.
-    te::Plugin& add (te::Track& track, const char* type)
+    DeviceID add (TrackID track, const char* type) { return phazite::test::addTestDevice (*song, track, type); }
+
+    // Adds Phazite's compressor at the end of a track's chain.
+    DeviceID addCompressor (TrackID track)
     {
-        te::Plugin::Ptr device;
-        phazite::test::createTestDevice (*edit, type, device);
-        REQUIRE (phazite::insertDevice (track, device) != nullptr);
-        return *device;
+        const auto id =
+            phazite::insertDeviceState (*song, track, phazite::makeOwnDeviceState (*song, phazite::devices::Compressor::typeID));
+        REQUIRE (id.isValid());
+        return id;
     }
 
-    std::unique_ptr<te::Edit> edit = phazite::createSongEdit (phazite::test::getEngine());
-    te::AudioTrack* kick = nullptr;
-    te::AudioTrack* bass = nullptr;
-    te::AudioTrack* keys = nullptr;
+    phazite::Song::Ptr song = phazite::createSong();
+    TrackID kick, bass, keys;
 };
 
-// Renders the song's first two seconds, as they sound with its tracks muted or not, and returns their peak level.
-// (Tracktion's simplest render unmutes every track while it renders.)
-float renderPeak (te::Edit& edit)
+// Renders the song's first two seconds through Phazite's engine, as they sound with its tracks muted or not, and returns
+// their peak level.
+float renderPeak (phazite::Song& song)
 {
-    juce::TemporaryFile wav (".wav");
-    te::Renderer::Parameters params (edit);
-    params.destFile = wav.getFile();
-    params.audioFormat = edit.engine.getAudioFileFormatManager().getWavFormat();
-    params.bitDepth = 32;
-    params.sampleRateForAudio = 44100.0;
-    params.blockSizeForAudio = 512;
-    params.time = te::TimeRange (0_tp, 2_tp);
-    params.tracksToDo = te::toBitSet (te::getAllTracks (edit));
-    params.useMasterPlugins = true;
-    params.canRenderInMono = false;
-    params.ditheringEnabled = false;
-    REQUIRE (te::Renderer::renderToFile ("Sidechain test", params) == params.destFile);
-
-    const std::unique_ptr<juce::AudioFormatReader> reader (
-        edit.engine.getAudioFileFormatManager().readFormatManager.createReaderFor (wav.getFile()));
-    REQUIRE (reader != nullptr);
-
-    juce::AudioBuffer<float> audio ((int) reader->numChannels, (int) reader->lengthInSamples);
-    REQUIRE (reader->read (&audio, 0, audio.getNumSamples(), 0, true, true));
+    const auto audio = phazite::renderWithOwnEngine (song, 2 * 44100, 44100.0, 512);
     return audio.getMagnitude (0, audio.getNumSamples());
 }
 } // namespace
@@ -84,158 +66,150 @@ float renderPeak (te::Edit& edit)
 TEST_CASE ("A device's sidechain can listen to any track whose sound doesn't come from the device's own")
 {
     Song song;
-    auto& ducker = song.add (*song.bass, TestSidechain::typeID);
-    CHECK (phazite::hasSidechain (ducker));
-    CHECK_FALSE (phazite::hasSidechain (song.add (*song.keys, TestGain::typeID)));
-    CHECK (phazite::getSidechainSources (ducker) == juce::Array<te::AudioTrack*> { song.kick, song.keys });
+    auto& model = *song.song;
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
+    CHECK (phazite::hasSidechain (model, ducker));
+    CHECK_FALSE (phazite::hasSidechain (model, song.add (song.keys, TestGain::typeID)));
+    CHECK (phazite::getSidechainSources (model, ducker) == std::vector<TrackID> { song.kick, song.keys });
 
     // A return the bass sends to, and a track with a device that listens to the bass, would make loops.
-    auto* reverbReturn = phazite::addNewReturnTrack (*song.edit, nullptr);
-    REQUIRE (reverbReturn != nullptr);
-    REQUIRE (phazite::addSend (*song.bass, phazite::getReturnBus (*reverbReturn), false) != nullptr);
-    phazite::setSidechainSource (song.add (*song.keys, TestSidechain::typeID), song.bass);
-    CHECK (phazite::getSidechainSources (ducker) == juce::Array<te::AudioTrack*> { song.kick });
+    const auto reverbReturn = phazite::addNewReturnTrack (model, nullptr);
+    REQUIRE (reverbReturn.isValid());
+    REQUIRE (phazite::addSend (model, song.bass, reverbReturn, false).isValid());
+    phazite::setSidechainSource (model, song.add (song.keys, TestSidechain::typeID), song.bass);
+    CHECK (phazite::getSidechainSources (model, ducker) == std::vector<TrackID> { song.kick });
 
     // A device on a bus can listen to the tracks inside it, whose sound doesn't come from the bus, but the bass can't
     // listen to the bus's sound, which comes from the bass.
-    auto* folder = phazite::groupIntoFolder ({ song.bass }, nullptr);
-    REQUIRE (folder != nullptr);
-    phazite::setMixedAsBus (*folder, true);
-    auto& onBus = song.add (*folder, TestSidechain::typeID);
-    CHECK (phazite::getSidechainSources (onBus) == juce::Array<te::AudioTrack*> { song.kick, song.bass, song.keys, reverbReturn });
+    const auto folder = phazite::groupIntoFolder (model, { song.bass }, nullptr);
+    REQUIRE (folder.isValid());
+    phazite::setMixedAsBus (model, folder, true);
+    const auto onBus = song.add (folder, TestSidechain::typeID);
+    CHECK (phazite::getSidechainSources (model, onBus) == std::vector<TrackID> { song.kick, song.bass, song.keys, reverbReturn });
 }
 
 TEST_CASE ("Picking a sidechain's source is one undo step, and deleting the source forgets it")
 {
+    namespace schema = phazite::schema;
     Song song;
-    auto& ducker = song.add (*song.bass, TestSidechain::typeID);
-    auto& undoManager = phazite::getSong (*song.edit).getUndoManager();
-    CHECK (phazite::getSidechainSource (ducker) == nullptr);
+    auto& model = *song.song;
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
+    auto& undoManager = model.getUndoManager();
+    CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
 
-    phazite::setSidechainSource (ducker, song.kick);
-    CHECK (phazite::getSidechainSource (ducker) == song.kick);
+    phazite::setSidechainSource (model, ducker, song.kick);
+    CHECK (phazite::getSidechainSource (model, ducker) == song.kick);
     CHECK (undoManager.getUndoDescription() == juce::String ("Sidechain from Kick"));
-    CHECK (ducker.getNumWires() == 4); // the kick's left and right to the sidechain's inputs
 
     // Its own track would make a loop, so nothing changes.
-    phazite::setSidechainSource (ducker, song.bass);
-    CHECK (phazite::getSidechainSource (ducker) == song.kick);
+    phazite::setSidechainSource (model, ducker, song.bass);
+    CHECK (phazite::getSidechainSource (model, ducker) == song.kick);
 
-    phazite::setSidechainSource (ducker, nullptr);
-    CHECK (phazite::getSidechainSource (ducker) == nullptr);
+    phazite::setSidechainSource (model, ducker, TrackID());
+    CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
     CHECK (undoManager.getUndoDescription() == juce::String ("Turn Sidechain Off"));
-    phazite::undo (*song.edit);
-    CHECK (phazite::getSidechainSource (ducker) == song.kick);
+    phazite::undo (model);
+    CHECK (phazite::getSidechainSource (model, ducker) == song.kick);
 
     // Deleting the kick turns the sidechain off in the same step; undoing it brings both back.
     {
-        const phazite::UndoStep step (*song.edit, "Delete Kick");
-        phazite::deleteTracks ({ song.kick }, nullptr);
+        const phazite::UndoStep step (model, "Delete Kick");
+        phazite::deleteTracks (model, { song.kick }, nullptr);
     }
 
-    CHECK (phazite::getSidechainSource (ducker) == nullptr);
-    CHECK_FALSE (ducker.getSidechainSourceID().isValid());
+    CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
+    CHECK_FALSE (phazite::findDeviceState (model, ducker).hasProperty (schema::deviceSidechain));
 
-    phazite::undo (*song.edit);
-    auto* restored = phazite::getSidechainSource (ducker);
-    REQUIRE (restored != nullptr);
-    CHECK (restored->getName() == juce::String ("Kick"));
+    phazite::undo (model);
+    const auto restored = phazite::getSidechainSource (model, ducker);
+    REQUIRE (restored.isValid());
+    CHECK (phazite::getTrackName (model, restored) == juce::String ("Kick"));
 }
 
-TEST_CASE ("A device's sidechain is the song's, which Tracktion's and an Edit built from the song alone follow")
+TEST_CASE ("A device's sidechain is the song's, by the track's ID, which a song made from its state alone keeps")
 {
     namespace schema = phazite::schema;
     Song song;
-    auto* compressor =
-        phazite::insertDevice (*song.bass, song.edit->getPluginCache().createNewPlugin (phazite::devices::Compressor::typeID, {}));
-    REQUIRE (compressor != nullptr);
-    phazite::setSidechainSource (*compressor, song.kick);
+    auto& model = *song.song;
+    const auto compressor = song.addCompressor (song.bass);
+    phazite::setSidechainSource (model, compressor, song.kick);
 
     // The track it listens to, by its ID (Schema.h: deviceSidechain).
-    const auto element = phazite::findDeviceState (*song.edit, phazite::getDeviceID (*compressor));
-    CHECK ((juce::int64) element[schema::deviceSidechain] == (juce::int64) phazite::getTrackID (*song.kick).getRaw());
+    const auto element = phazite::findDeviceState (model, compressor);
+    CHECK ((juce::int64) element[schema::deviceSidechain] == (juce::int64) song.kick.getRaw());
 
-    // Built again from the song alone, it listens to the kick, wired as before.
+    // Made again from the song's state alone, it listens to the kick.
     {
-        const auto rebuilt =
-            phazite::createEditFromSong (phazite::test::getEngine(), phazite::getSong (*song.edit).getState().createCopy());
-        REQUIRE (rebuilt != nullptr);
-        const auto copy = te::findPluginForID (*rebuilt, compressor->itemID);
+        const auto copy = phazite::makeSong (model.getState().createCopy());
         REQUIRE (copy != nullptr);
-        CHECK (copy->getSidechainSourceID() == song.kick->itemID);
-        CHECK (copy->getNumWires() == compressor->getNumWires());
+        CHECK (phazite::getSidechainSource (*copy, compressor) == song.kick);
     }
 
-    // Tracktion's alone turned off is turned on again; the song's turned off, Tracktion's follows.
-    compressor->setSidechainSourceID ({});
-    phazite::mirror::reconcileDevices (*song.edit);
-    CHECK (compressor->getSidechainSourceID() == song.kick->itemID);
-    phazite::setSidechainSource (*compressor, nullptr);
+    // Turned off, the song's goes.
+    phazite::setSidechainSource (model, compressor, TrackID());
     CHECK_FALSE (element.hasProperty (schema::deviceSidechain));
-    CHECK_FALSE (compressor->getSidechainSourceID().isValid());
+    CHECK_FALSE (phazite::getSidechainSource (model, compressor).isValid());
 }
 
 TEST_CASE ("A sidechain's source reaches the device as the song plays, muted or not")
 {
     Song song;
+    auto& model = *song.song;
 
     // The kick plays a steady level, and the bass plays what its sidechain hears.
-    te::Plugin::Ptr tone;
-    phazite::test::createTestDevice (*song.edit, TestTone::typeID, tone);
-    REQUIRE (phazite::setInstrument (*song.kick, tone) != nullptr);
+    song.add (song.kick, TestTone::typeID);
     using phazite::test::at, phazite::test::lasting;
-    auto& phaziteSong = phazite::getSong (*song.edit);
-    const auto clip = phazite::test::addMidiClip (phaziteSong, phazite::getTrackID (*song.kick), { at (0.0), at (4.0) }, "Notes");
+    const auto clip = phazite::test::addMidiClip (model, song.kick, { at (0.0), at (4.0) }, "Notes");
     REQUIRE (clip.isValid());
-    phazite::test::addMidiNote (phaziteSong, clip, 60, at (0.0), lasting (4.0), 64);
-    auto& ducker = song.add (*song.bass, TestSidechain::typeID);
+    phazite::test::addMidiNote (model, clip, 60, at (0.0), lasting (4.0), 64);
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
 
-    const auto kickAlone = renderPeak (*song.edit); // the bass's sidechain hears nothing yet
+    const auto kickAlone = renderPeak (model); // the bass's sidechain hears nothing yet
     CHECK (kickAlone > 0.1f);
 
-    phazite::setTrackMuted (*song.kick, true);
-    CHECK (renderPeak (*song.edit) < 1.0e-4f);
+    phazite::setTrackMuted (model, song.kick, true);
+    CHECK (renderPeak (model) < 1.0e-4f);
 
     // A muted kick still feeds the sidechain, the way a "ghost" kick ducks a bass.
-    phazite::setSidechainSource (ducker, song.kick);
-    CHECK (renderPeak (*song.edit) > 0.5f * kickAlone);
+    phazite::setSidechainSource (model, ducker, song.kick);
+    CHECK (renderPeak (model) > 0.5f * kickAlone);
 }
 
 TEST_CASE ("A sidechain's choices name every track but the device's own, in their colours, and why one would make a loop")
 {
     Song song;
-    auto& ducker = song.add (*song.bass, TestSidechain::typeID);
-    phazite::setSidechainSource (song.add (*song.keys, TestSidechain::typeID), song.bass); // the keys' sound comes from the bass
+    auto& model = *song.song;
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
+    phazite::setSidechainSource (model, song.add (song.keys, TestSidechain::typeID), song.bass); // the keys' sound comes from the bass
 
-    const auto choices = phazite::describeSidechainChoices (ducker);
+    const auto choices = phazite::describeSidechainChoices (model, ducker);
     REQUIRE (choices.size() == 2);
     CHECK (choices[0].name == juce::String ("Kick"));
     CHECK (choices[0].whyNot.isEmpty());
     CHECK (choices[1].name == juce::String ("Keys"));
     CHECK (choices[1].whyNot == juce::String ("its sound comes from Bass"));
-    CHECK (choices[0].colour == phazite::getTrackColour (*song.kick, 0));
+    CHECK (choices[0].colour == phazite::getTrackColour (model, song.kick, 0));
 
     // As the mixer shows the device: what it listens to.
-    CHECK_FALSE (phazite::describeSidechainSource (ducker).track.isValid());
-    phazite::setSidechainSource (ducker, song.kick);
-    CHECK (phazite::describeSidechainSource (ducker).name == juce::String ("Kick"));
+    CHECK_FALSE (phazite::describeSidechainSource (model, ducker).track.isValid());
+    phazite::setSidechainSource (model, ducker, song.kick);
+    CHECK (phazite::describeSidechainSource (model, ducker).name == juce::String ("Kick"));
 
     // A device with no sidechain has no choices.
-    CHECK (phazite::describeSidechainChoices (song.add (*song.keys, TestGain::typeID)).empty());
+    CHECK (phazite::describeSidechainChoices (model, song.add (song.keys, TestGain::typeID)).empty());
 }
 
 TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidechain is first chosen, in the same undo step")
 {
-    using phazite::devices::Compressor;
     Song song;
-    const auto valueOf = [] (te::Plugin& device, const char* id) { return device.getAutomatableParameterByID (id)->getCurrentValue(); };
-    const auto addCompressor = [&song] (te::Track& track) -> te::Plugin&
-    { return *phazite::insertDevice (track, song.edit->getPluginCache().createNewPlugin (Compressor::typeID, {})); };
+    auto& model = *song.song;
+    const auto valueOf = [&model] (DeviceID device, const char* id)
+    { return phazite::getValueSetByHand (model, phazite::ParameterRef { device, id }); };
 
     // On the bass, from the kick: quick, slow to let go, deep; the key whole, as the kick plays no drum sampler.
-    auto& compressor = addCompressor (*song.bass);
-    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
-    phazite::setSidechainSource (compressor, song.kick);
+    const auto compressor = song.addCompressor (song.bass);
+    model.getUndoManager().clearUndoHistory();
+    phazite::setSidechainSource (model, compressor, song.kick);
     const auto ducking = phazite::devices::curves::makeCompression (-30.0f, 8.0f); // its curve: 8:1 over -30 dB
     CHECK (valueOf (compressor, "points") == doctest::Approx ((float) ducking.size()));
     CHECK (valueOf (compressor, "point2X") == doctest::Approx (ducking[1][0]));
@@ -243,45 +217,50 @@ TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidech
     CHECK (valueOf (compressor, "attack") == doctest::Approx (1.0f));
     CHECK (valueOf (compressor, "release") == doctest::Approx (150.0f));
     CHECK (valueOf (compressor, "keyHighCut") == doctest::Approx (20000.0f));
-    CHECK (phazite::getSong (*song.edit).getUndoManager().getUndoDescription() == juce::String ("Sidechain from Kick"));
+    CHECK (model.getUndoManager().getUndoDescription() == juce::String ("Sidechain from Kick"));
 
     // One step: undo puts back both the source and the settings.
-    phazite::undo (*song.edit);
-    CHECK (phazite::getSidechainSource (compressor) == nullptr);
+    phazite::undo (model);
+    CHECK_FALSE (phazite::getSidechainSource (model, compressor).isValid());
     CHECK (valueOf (compressor, "point2X") == doctest::Approx (phazite::devices::curves::axisForDecibels (-18.0f)).epsilon (1.0e-5));
     CHECK (valueOf (compressor, "attack") == doctest::Approx (10.0f));
 
     // A compressor already set its own way keeps its settings.
-    phazite::setDeviceValue (*compressor.getAutomatableParameterByID ("attack"), 2.0f);
-    phazite::setSidechainSource (compressor, song.kick);
+    {
+        const phazite::UndoStep step (model, "Change Attack");
+        phazite::setValueSetByHand (model, phazite::ParameterRef { compressor, "attack" }, 2.0f);
+    }
+
+    phazite::setSidechainSource (model, compressor, song.kick);
     CHECK (valueOf (compressor, "attack") == doctest::Approx (2.0f));
     CHECK (valueOf (compressor, "point2X") == doctest::Approx (phazite::devices::curves::axisForDecibels (-18.0f)).epsilon (1.0e-5));
 
     // A source that plays a drum sampler: only its lows, so that the kick ducks the keys and the hats don't.
-    REQUIRE (phazite::setInstrument (*song.kick, song.edit->getPluginCache().createNewPlugin (phazite::devices::DrumSampler::typeID, {}))
-             != nullptr);
-    auto& onKeys = addCompressor (*song.keys);
-    phazite::setSidechainSource (onKeys, song.kick);
+    REQUIRE (
+        phazite::setInstrument (model, song.kick, phazite::makeOwnDeviceState (model, phazite::devices::DrumSampler::typeID)).isValid());
+    const auto onKeys = song.addCompressor (song.keys);
+    phazite::setSidechainSource (model, onKeys, song.kick);
     CHECK (valueOf (onKeys, "keyHighCut") == doctest::Approx (150.0f));
 }
 
 TEST_CASE ("Duck Under puts a compressor on a track, ducking under another, as one undo step")
 {
     Song song;
-    phazite::getSong (*song.edit).getUndoManager().clearUndoHistory();
-    auto* compressor = phazite::duckUnder (*song.bass, *song.kick);
-    REQUIRE (compressor != nullptr);
-    CHECK (compressor->getOwnerTrack() == song.bass);
-    CHECK (phazite::getSidechainSource (*compressor) == song.kick);
-    CHECK (compressor->getAutomatableParameterByID ("point2X")->getCurrentValue()
+    auto& model = *song.song;
+    model.getUndoManager().clearUndoHistory();
+    const auto compressor = phazite::duckUnder (model, song.bass, song.kick);
+    REQUIRE (compressor.isValid());
+    CHECK (phazite::getDeviceChannel (model, compressor) == song.bass);
+    CHECK (phazite::getSidechainSource (model, compressor) == song.kick);
+    CHECK (phazite::getValueSetByHand (model, phazite::ParameterRef { compressor, "point2X" })
            == doctest::Approx (phazite::devices::curves::axisForDecibels (-30.0f))); // ducking, 8:1 over -30 dB
-    CHECK (phazite::getSong (*song.edit).getUndoManager().getUndoDescription() == juce::String ("Duck Bass Under Kick"));
+    CHECK (model.getUndoManager().getUndoDescription() == juce::String ("Duck Bass Under Kick"));
 
-    phazite::undo (*song.edit);
-    CHECK (song.bass->pluginList.getPluginsOfType<phazite::DevicePlugin>().isEmpty());
+    phazite::undo (model);
+    CHECK (phazite::getDevices (model, song.bass).empty());
 
     // Not under its own sound, nor under a track whose sound comes from it.
-    CHECK (phazite::duckUnder (*song.bass, *song.bass) == nullptr);
-    phazite::setSidechainSource (song.add (*song.keys, TestSidechain::typeID), song.bass);
-    CHECK (phazite::duckUnder (*song.bass, *song.keys) == nullptr);
+    CHECK_FALSE (phazite::duckUnder (model, song.bass, song.bass).isValid());
+    phazite::setSidechainSource (model, song.add (song.keys, TestSidechain::typeID), song.bass);
+    CHECK_FALSE (phazite::duckUnder (model, song.bass, song.keys).isValid());
 }
