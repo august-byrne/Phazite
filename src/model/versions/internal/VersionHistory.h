@@ -74,6 +74,10 @@ public:
     // How many bytes the history takes on disk.
     juce::int64 getSize() const;
 
+    // The audio files every version plays, and every branch's song as it was left: their paths as the songs hold them
+    // (findAudioFilePaths()), each once (model/project/UnusedAudio.h).
+    juce::StringArray findVersionsAudioPaths() const;
+
     //==============================================================================
     // Bounces (docs/versions.md: Bounces and hearing them): a version's file, whether it has one or not, and whether it has
     // one; how many bytes they take, of the history's size; the bounces folder read again, after one was made or deleted (it

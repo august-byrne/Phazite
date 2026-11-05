@@ -107,6 +107,7 @@ version.hear
 version.bounce
 version.deleteBounce
 project.export | ctrl + shift + R
+project.cleanUpAudio
 view.commandPalette | ctrl + K
 view.menus | F10
 view.searchBrowser | ctrl + F

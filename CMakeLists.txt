@@ -361,6 +361,8 @@ target_sources(phazite_core PRIVATE
     src/model/project/ProjectContext.cpp
     src/model/project/ProjectContext.h
     src/model/project/UnsavedProjects.cpp
+    src/model/project/UnusedAudio.cpp
+    src/model/project/UnusedAudio.h
     src/model/project/internal/ExampleSongs.h
     src/model/project/internal/Export.h
     src/model/project/internal/NewProject.h
@@ -719,6 +721,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/ActivityBar.h
     src/ui/shell/AppShell.cpp
     src/ui/shell/AppShell.h
+    src/ui/shell/CleanUpPanel.cpp
+    src/ui/shell/CleanUpPanel.h
     src/ui/shell/CommandPalette.cpp
     src/ui/shell/CommandPalette.h
     src/ui/shell/ExportPanel.cpp
@@ -919,6 +923,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
         tests/ChordLaneTests.cpp
+        tests/CleanUpTests.cpp
         tests/ChordModelTests.cpp
         tests/ChordValueTests.cpp
         tests/ClipboardTests.cpp

@@ -9,6 +9,7 @@
 #include "model/project/internal/Export.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/input/KeymapStore.h"
+#include "ui/shell/CleanUpPanel.h"
 #include "ui/shell/ExportPanel.h"
 #include "ui/shell/ProgressionsPanel.h"
 #include "ui/shell/RenderPanel.h"
@@ -149,11 +150,13 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
 
     session.dialogParent = this;
     session.onExport = [this] { showExport(); };
+    session.onCleanUpAudio = [this] { showCleanUp(); };
     session.onProjectClosing = [this]
     {
         delete exportWindow.getComponent();       // its export holds the song
         delete renderWindow.getComponent();       // its freeze or bounce too
         delete progressionsWindow.getComponent(); // it plays and changes that project's chords
+        delete cleanUpWindow.getComponent();      // it lists that project's files
         deviceWindows->closeAll();                // storing what their plug-ins changed into the song
     };
     session.onProjectChanged = [this]
@@ -174,6 +177,7 @@ MainWindow::~MainWindow()
     session.onProjectClosing = nullptr;
     session.onProjectChanged = nullptr;
     session.onExport = nullptr;
+    session.onCleanUpAudio = nullptr;
     session.dialogParent = nullptr;
 
     // Close the dialogs: they point into the engine context and the commands, which are destroyed after this window, and
@@ -182,6 +186,7 @@ MainWindow::~MainWindow()
     delete exportWindow.getComponent();
     delete renderWindow.getComponent();
     delete progressionsWindow.getComponent();
+    delete cleanUpWindow.getComponent();
     delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
     delete welcomeWindow.getComponent();
@@ -549,6 +554,28 @@ void MainWindow::showExport()
     exportWindow = o.launchAsync();
 }
 
+void MainWindow::showCleanUp()
+{
+    if (cleanUpWindow != nullptr)
+    {
+        cleanUpWindow->toFront (true);
+        return;
+    }
+
+    auto* panel = new ui::CleanUpPanel (session.getContext());
+
+    juce::DialogWindow::LaunchOptions o;
+    o.dialogTitle = panel->getTitle();
+    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = false;
+    o.componentToCentreAround = this;
+    o.content.setOwned (panel);
+
+    cleanUpWindow = o.launchAsync();
+}
+
 void MainWindow::runRender (std::unique_ptr<TrackRender> render)
 {
     delete renderWindow.getComponent(); // one at a time: the window is modal, so there is none
@@ -807,6 +834,8 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             add (menu, { "project.save", "project.saveAs", "version.save" });
             menu.addSeparator();
             add (menu, { "project.export" });
+            menu.addSeparator();
+            add (menu, { "project.cleanUpAudio" });
             menu.addSeparator();
             add (menu, { "app.quit" });
             break;

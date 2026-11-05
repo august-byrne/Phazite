@@ -247,6 +247,23 @@ juce::int64 VersionHistory::getSize() const
     return store != nullptr ? store->getPieces().getSize() : 0;
 }
 
+juce::StringArray VersionHistory::findVersionsAudioPaths() const
+{
+    juce::StringArray paths;
+
+    for (const auto& [id, version] : versions)
+        for (const auto& file : version.files)
+            paths.addIfNotAlreadyThere (file.path);
+
+    if (store != nullptr)
+        for (const auto& branch : branches)
+            if (branch.working.isNotEmpty())
+                for (const auto& path : findAudioFilePaths (store->readSong (branch.working)))
+                    paths.addIfNotAlreadyThere (path);
+
+    return paths;
+}
+
 //==============================================================================
 bool VersionHistory::saveVersion (const juce::String& name, const juce::String& note, std::function<void (juce::Result)> done)
 {

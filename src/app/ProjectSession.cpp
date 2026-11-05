@@ -4,6 +4,7 @@
 #include "model/engine/internal/LiveInput.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ExampleSongs.h"
+#include "model/project/UnusedAudio.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Export.h"
 #include "model/project/internal/NewProject.h"
@@ -673,5 +674,20 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& re
                     .synonyms = { "render", "bounce", "mixdown", "wav", "flac", "audio file", "loudness", "lufs", "stems", "multitrack" },
                     .perform = [this] { exportSong(); },
                     .isEnabled = [this] { return project != nullptr && canExport (project->getSong()); } });
+
+    registry.add ({ .id = "project.cleanUpAudio",
+                    .name = "Clean Up Unused Audio...",
+                    .category = "Project",
+                    .description = "Lists the audio files in the project's folder that neither the song, nor a version, nor a branch "
+                                   "plays, to move those you tick to the recycle bin.",
+                    .synonyms = { "unused", "delete", "free space", "takes", "recordings", "tidy", "purge" },
+                    .perform = [this] { cleanUpAudio(); },
+                    .isEnabled = [this] { return canCleanUpAudio (context) && ! isUntitled(); } });
+}
+
+void ProjectSession::cleanUpAudio()
+{
+    if (project != nullptr && onCleanUpAudio != nullptr)
+        onCleanUpAudio();
 }
 } // namespace phazite

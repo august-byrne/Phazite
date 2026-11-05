@@ -69,7 +69,7 @@ private:
 
     std::unique_ptr<juce::TooltipWindow> tooltipWindow; // hover help; null when it is turned off
     juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow, progressionsWindow,
-        renderWindow;
+        renderWindow, cleanUpWindow;
     juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
     juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
 
@@ -77,6 +77,7 @@ private:
     void showPluginList();                                     // the plug-ins scanning found, with a scan for VST3s
     void showWelcome (ui::WelcomePanel::Page);
     void showExport();       // for the open project's song
+    void showCleanUp();      // Clean Up Unused Audio..., for the open project
     void showProgressions(); // the chord progressions, for the open project's chord lane
     void setTheme (ui::ThemeName);
     void setHoverHelp (bool);

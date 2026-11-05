@@ -43,6 +43,7 @@ public:
     std::function<void()> onProjectClosing;  // the open project is about to close, still open: let go of what holds its song
     std::function<void()> onProjectChanged;  // another project is open now (or none), or it was saved
     std::function<void()> onExport;          // shows the export window (the main window's), for Export Song
+    std::function<void()> onCleanUpAudio;    // shows the window of Clean Up Unused Audio... (the main window's)
     juce::Component* dialogParent = nullptr; // dialogs appear over this
     std::function<void (const juce::String& title, const juce::String& message)> onError;  // shows an error; unset, a dialog
     std::function<void (const juce::String& title, const juce::String& message)> onNotice; // says what Phazite did; unset, a dialog
@@ -79,6 +80,7 @@ public:
     void saveProject();                           // asks where first if the project is untitled
     void saveProjectAs();                         // a copy under a new name, which then stays open; the first save if untitled
     void exportSong();                            // through onExport
+    void cleanUpAudio();                          // through onCleanUpAudio
     void openBranchSong (const juce::ValueTree&); // another branch's song in the project's file, as a project opens
 
     // Makes an untitled project with what the settings choose, and opens it: the new-project window's Create.
