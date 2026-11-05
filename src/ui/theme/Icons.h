@@ -53,10 +53,13 @@ enum class Icon
     // A panel's corner (ui/shell/PanelLayout.h)
     maximizePanel,
     restorePanels,
-    hidePanelLeft, // the browser
+    hidePanelLeft, // the left panel
     hidePanelTop,  // the song's views
     hidePanelBottom,
     hidePanelRight,
+    // The activity bar (ui/shell/ActivityBar.h): the left panel's views
+    library,  // the browser
+    versions, // the project's versions: a branch
     // The title bar (ui/shell/TitleBar.h)
     menu, // the menus, folded
     undo,

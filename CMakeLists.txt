@@ -459,9 +459,11 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/folder-open.svg
         resources/icons/lucide/folder-plus.svg
         resources/icons/lucide/folder.svg
+        resources/icons/lucide/git-branch.svg
         resources/icons/lucide/headphones.svg
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/layout-dashboard.svg
+        resources/icons/lucide/library.svg
         resources/icons/lucide/magnet.svg
         resources/icons/lucide/maximize-2.svg
         resources/icons/lucide/menu.svg
@@ -707,6 +709,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/playlist/TrackHeader.h
     src/ui/playlist/TrackHeights.cpp
     src/ui/playlist/TrackHeights.h
+    src/ui/shell/ActivityBar.cpp
+    src/ui/shell/ActivityBar.h
     src/ui/shell/AppShell.cpp
     src/ui/shell/AppShell.h
     src/ui/shell/CommandPalette.cpp
@@ -755,7 +759,9 @@ target_sources(phazite_ui PRIVATE
     src/ui/timeline/TimelineGesture.cpp
     src/ui/timeline/TimelineGesture.h
     src/ui/timeline/TimelineView.cpp
-    src/ui/timeline/TimelineView.h)
+    src/ui/timeline/TimelineView.h
+    src/ui/versions/VersionsView.cpp
+    src/ui/versions/VersionsView.h)
 
 phazite_use_core(phazite_ui)
 
@@ -886,6 +892,7 @@ if(PHAZITE_BUILD_TESTS)
     target_sources(phazite_tests PRIVATE
         tests/TestMain.cpp
         tests/TestHelpers.h
+        tests/ActivityBarTests.cpp
         tests/AppInfoTests.cpp
         tests/AppScreen.h
         tests/AppShellTests.cpp

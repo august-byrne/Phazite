@@ -804,7 +804,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
             menu.addSubMenu ("Open Recent", recentMenu, ! recent.isEmpty());
             menu.addSeparator();
-            add (menu, { "project.save", "project.saveAs" });
+            add (menu, { "project.save", "project.saveAs", "version.save" });
             menu.addSeparator();
             add (menu, { "project.export" });
             menu.addSeparator();
@@ -870,16 +870,17 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
         {
             // The panels, each shown or hidden, and the two views used most; the rest in a submenu each, every command as
             // it was (and in the command palette, on its keys and in the right-click menus).
-            add (menu, { "view.toggleBrowser", "view.toggleSong", "view.toggleEditor", "view.toggleInspector" });
+            add (menu, { "view.toggleLeftPanel", "view.toggleSong", "view.toggleEditor", "view.toggleInspector" });
+            add (menu, { "view.browser", "view.versions" });
 
             // How the panels sit: one filling the window until the others are restored, one in a window of its own, or
             // a layout of them all.
             juce::PopupMenu panelsMenu;
             add (panelsMenu, { "view.maximizePanel" });
             panelsMenu.addSeparator();
-            add (panelsMenu, { "view.maximizeBrowser", "view.maximizeSong", "view.maximizeEditor", "view.maximizeInspector" });
+            add (panelsMenu, { "view.maximizeLeftPanel", "view.maximizeSong", "view.maximizeEditor", "view.maximizeInspector" });
             panelsMenu.addSeparator();
-            add (panelsMenu, { "view.detachBrowser", "view.detachInspector", "view.detachEditor" });
+            add (panelsMenu, { "view.detachLeftPanel", "view.detachInspector", "view.detachEditor" });
             panelsMenu.addSeparator();
             add (panelsMenu, { "view.layoutBeat", "view.layoutMix", "view.layoutFull", "view.focusMode" });
             menu.addSubMenu ("Panels", panelsMenu);

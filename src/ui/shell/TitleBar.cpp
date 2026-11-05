@@ -146,8 +146,8 @@ struct TitleBar::PanelSwitch : public juce::Button
     {
         switch (panel)
         {
-            case Panel::browser:
-                return "Browser";
+            case Panel::left:
+                return "Left panel";
             case Panel::editor:
                 return "Lower panel";
             case Panel::inspector:
@@ -173,7 +173,7 @@ struct TitleBar::PanelSwitch : public juce::Button
         const auto frame = getLocalBounds().toFloat().withSizeKeepingCentre (Shell::panelSwitchWidth, Shell::panelSwitchHeight);
         auto part = frame;
 
-        if (panel == Panel::browser)
+        if (panel == Panel::left)
             part = part.removeFromLeft (frame.getWidth() * Shell::panelSwitchSideShare);
         else if (panel == Panel::inspector)
             part = part.removeFromRight (frame.getWidth() * Shell::panelSwitchSideShare);
@@ -185,7 +185,7 @@ struct TitleBar::PanelSwitch : public juce::Button
 
         if (getToggleState())
             g.fillRoundedRectangle (part.reduced (1.5f), Shell::panelSwitchCorner / 2.0f);
-        else if (panel == Panel::browser)
+        else if (panel == Panel::left)
             g.drawVerticalLine (juce::roundToInt (part.getRight()), frame.getY(), frame.getBottom());
         else if (panel == Panel::inspector)
             g.drawVerticalLine (juce::roundToInt (part.getX()), frame.getY(), frame.getBottom());
@@ -202,7 +202,7 @@ struct TitleBar::PanelSwitch : public juce::Button
 TitleBar::TitleBar (CommandBridge& bridge)
     : commands (bridge),
       searchBox (std::make_unique<SearchBox> (bridge)),
-      browserSwitch (std::make_unique<PanelSwitch> (bridge, Panel::browser)),
+      leftSwitch (std::make_unique<PanelSwitch> (bridge, Panel::left)),
       editorSwitch (std::make_unique<PanelSwitch> (bridge, Panel::editor)),
       inspectorSwitch (std::make_unique<PanelSwitch> (bridge, Panel::inspector))
 {
@@ -230,7 +230,7 @@ TitleBar::TitleBar (CommandBridge& bridge)
 
     menuButton.setVisible (false);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &projectName, searchBox.get(), browserSwitch.get(), editorSwitch.get(),
+    for (auto* c : std::initializer_list<juce::Component*> { &projectName, searchBox.get(), leftSwitch.get(), editorSwitch.get(),
                                                              inspectorSwitch.get() })
         addAndMakeVisible (c);
 
@@ -307,7 +307,7 @@ void TitleBar::showLayoutMenu()
     juce::PopupMenu menu;
     addCommandItems (menu, commands, { "view.layoutBeat", "view.layoutMix", "view.layoutFull" });
     menu.addSeparator();
-    addCommandItems (menu, commands, { "view.toggleBrowser", "view.toggleSong", "view.toggleEditor", "view.toggleInspector" });
+    addCommandItems (menu, commands, { "view.toggleLeftPanel", "view.toggleSong", "view.toggleEditor", "view.toggleInspector" });
     menu.addSeparator();
     addCommandItems (menu, commands, { "view.maximizePanel", "view.fullScreen" });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (layoutButton));
@@ -364,7 +364,7 @@ void TitleBar::setWindowActive (bool isActive)
         if (button != nullptr)
             button->dimmed = ! active;
 
-    for (auto* panelSwitch : { browserSwitch.get(), editorSwitch.get(), inspectorSwitch.get() })
+    for (auto* panelSwitch : { leftSwitch.get(), editorSwitch.get(), inspectorSwitch.get() })
         panelSwitch->dimmed = ! active;
 
     projectName.setAlpha (active ? 1.0f : Shell::inactiveAlpha);
@@ -373,7 +373,7 @@ void TitleBar::setWindowActive (bool isActive)
 
 void TitleBar::showPanels (const PanelLayout& layout)
 {
-    for (auto* panelSwitch : { browserSwitch.get(), editorSwitch.get(), inspectorSwitch.get() })
+    for (auto* panelSwitch : { leftSwitch.get(), editorSwitch.get(), inspectorSwitch.get() })
     {
         panelSwitch->setToggleState (layout.takesRoom (panelSwitch->panel), juce::dontSendNotification);
         panelSwitch->setEnabled (layout.canToggle (panelSwitch->panel));
@@ -392,7 +392,7 @@ void TitleBar::refreshTooltips()
     menuButton.setTooltip (withShortcut (commands, "The menus: File, Edit, Add, View, Options and Help", "view.menus"));
     layoutButton.setTooltip ("Layout: arrange the panels, show or hide each, or fill the window with one");
 
-    for (auto* panelSwitch : { browserSwitch.get(), editorSwitch.get(), inspectorSwitch.get() })
+    for (auto* panelSwitch : { leftSwitch.get(), editorSwitch.get(), inspectorSwitch.get() })
         panelSwitch->setTooltip (withShortcut (commands, "Shows or hides " + describePanel (panelSwitch->panel),
                                                getPanelCommandID ("toggle", panelSwitch->panel)));
 
@@ -459,7 +459,7 @@ juce::Component::WindowControlKind TitleBar::getControlAt (juce::Point<int> poin
     // The bar's controls are the window's content; the rest, the project's name too, drags the window.
     for (const auto* control :
          std::initializer_list<const juce::Component*> { menuBar.get(), &menuButton, &undoButton, &redoButton, searchBox.get(),
-                                                         browserSwitch.get(), editorSwitch.get(), inspectorSwitch.get(), &layoutButton })
+                                                         leftSwitch.get(), editorSwitch.get(), inspectorSwitch.get(), &layoutButton })
         if (control != nullptr && control->isVisible() && control->getBounds().contains (point))
             return Kind::client;
 
@@ -492,7 +492,7 @@ void TitleBar::resized()
     layoutButton.setBounds (centred (area.removeFromRight (buttonSize)));
     area.removeFromRight (Space::xs);
 
-    for (auto* panelSwitch : { inspectorSwitch.get(), editorSwitch.get(), browserSwitch.get() })
+    for (auto* panelSwitch : { inspectorSwitch.get(), editorSwitch.get(), leftSwitch.get() })
         panelSwitch->setBounds (centred (area.removeFromRight (buttonSize)));
 
     area.removeFromRight (Space::m);

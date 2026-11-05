@@ -8,6 +8,7 @@
 #include "model/project/internal/Export.h"
 #include "model/project/internal/NewProject.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/versions/VersionsModel.h"
 #include "services/Library.h"
 #include "ui/shell/NewProjectPanel.h"
 #include "ui/theme/LookAndFeel.h"
@@ -635,6 +636,10 @@ void ProjectSession::addCommands (CommandRegistry& registry)
                     .synonyms = { "store", "write" },
                     .perform = [this] { saveProject(); },
                     .isEnabled = [this] { return project != nullptr; } });
+
+    // Save Version: the project saved first, asking where for an untitled one, then a version of its song
+    // (model/versions/VersionsModel.h).
+    addVersionCommands (registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); });
 
     registry.add ({ .id = "project.export",
                     .name = "Export Song",

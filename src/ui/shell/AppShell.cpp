@@ -11,7 +11,7 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr std::array<Panel, 4> allPanels { Panel::browser, Panel::song, Panel::editor, Panel::inspector };
+    constexpr std::array<Panel, 4> allPanels { Panel::left, Panel::song, Panel::editor, Panel::inspector };
 
     // Where a panel's own window goes: on another monitor if there is one, otherwise over the main window.
     juce::Rectangle<int> choosePanelWindowBounds (const juce::Component& mainWindowContent, juce::Point<int> size)
@@ -76,6 +76,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       titleBar (bridge),
       topBar (bridge, keyboard, context),
       browser (library, previewer, pack, s, context),
+      versionsView (bridge, context),
       playlist (bridge, context),
       inspector (bridge, context),
       pianoRoll (bridge, context),
@@ -83,6 +84,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       mixer (bridge, context),
       devices (bridge, context),
       statusBar (engine, bridge, context),
+      activityBar (bridge, context),
       guide (bridge, s),
       lessons (bridge, context, s)
 {
@@ -152,8 +154,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     devices.onShowPresets = [this] (DeviceID device, const juce::String& name, juce::Component& target)
     { browser.showDevicePresetMenu (device, name, target); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &titleBar, &topBar, &browser, &browserDivider, &centre, &inspectorDivider,
-                                                             &inspector, &statusBar, &browserButtons, &inspectorButtons })
+    for (auto* c : std::initializer_list<juce::Component*> { &titleBar, &topBar, &activityBar, &leftPanel, &leftDivider, &centre,
+                                                             &inspectorDivider, &inspector, &statusBar, &leftButtons, &inspectorButtons })
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &upperRow, &editorDivider, &lowerRow, &songButtons, &editorButtons })
@@ -162,8 +164,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     centre.onResize = [this] { layOutCentre(); };
 
     // Dragged, the dividers size the panels beside them.
-    browserDivider.onDragStart = [this] { sizeAtDragStart = browser.getWidth(); };
-    browserDivider.onDrag = [this] (int distance) { dragDivider (Panel::browser, distance); };
+    leftDivider.onDragStart = [this] { sizeAtDragStart = leftPanel.getWidth(); };
+    leftDivider.onDrag = [this] (int distance) { dragDivider (Panel::left, distance); };
     inspectorDivider.onDragStart = [this] { sizeAtDragStart = inspector.getWidth(); };
     inspectorDivider.onDrag = [this] (int distance) { dragDivider (Panel::inspector, distance); };
     editorDivider.onDragStart = [this] { sizeAtDragStart = lowerRow.getHeight(); };
@@ -257,7 +259,7 @@ void AppShell::setLayout (Layout layout)
         panels.show (panel);
 
     if (layout == Layout::mix)
-        panels.hide (Panel::browser);
+        panels.hide (Panel::left);
     else if (layout == Layout::beat)
         panels.hide (Panel::inspector);
 
@@ -457,6 +459,58 @@ void AppShell::showSelectedDevice()
     revealView (devices.getPage() == DevicesView::Page::instrument ? ViewTab::instrument : ViewTab::effects);
 }
 
+void AppShell::showLeftView (LeftView view)
+{
+    // As VS Code's activity bar: the view that shows hides the panel; another one, or any while the panel is hidden, shows
+    // there. In its own window, the panel just shows it.
+    if (leftWindow != nullptr)
+    {
+        panels.leftView = view;
+        leftWindow->toFront (true);
+    }
+    else if (panels.takesRoom (Panel::left) && panels.leftView == view)
+    {
+        panels.hide (Panel::left);
+    }
+    else
+    {
+        panels.leftView = view;
+        panels.show (Panel::left);
+    }
+
+    updateLayout();
+
+    // Showing a view gives it the keys, as the views in the centre get them.
+    if (leftPanel.isShowing())
+    {
+        if (view == LeftView::versions)
+            versionsView.focusName();
+        else
+            browser.focusSearch();
+    }
+}
+
+AppShell::LeftPanel::LeftPanel (juce::Component& browserToShow, juce::Component& versionsToShow)
+    : browserView (browserToShow),
+      versionsView (versionsToShow)
+{
+    setTitle ("Left panel");
+    addChildComponent (browserView);
+    addChildComponent (versionsView);
+}
+
+void AppShell::LeftPanel::show (LeftView view)
+{
+    browserView.setVisible (view == LeftView::browser);
+    versionsView.setVisible (view == LeftView::versions);
+}
+
+void AppShell::LeftPanel::resized()
+{
+    browserView.setBounds (getLocalBounds());
+    versionsView.setBounds (getLocalBounds());
+}
+
 void AppShell::showCommandPalette()
 {
     CommandPalette::show (commands, titleBar.getSearchBox());
@@ -513,7 +567,7 @@ void AppShell::setDetached (Panel which, bool detached)
     {
         // As large as it shows here, or as it would beside the others while it fills the window.
         const auto width = ! panels.isMaximized (which) ? panel.getWidth()
-                           : which == Panel::browser    ? panels.browserWidth
+                           : which == Panel::left       ? panels.leftWidth
                            : which == Panel::inspector  ? panels.inspectorWidth
                                                         : centre.getWidth();
         const auto height =
@@ -554,8 +608,8 @@ juce::Component& AppShell::getPanel (Panel which)
 {
     switch (which)
     {
-        case Panel::browser:
-            return browser;
+        case Panel::left:
+            return leftPanel;
         case Panel::song:
             return upperRow;
         case Panel::inspector:
@@ -570,8 +624,8 @@ PanelButtons& AppShell::getButtons (Panel which)
 {
     switch (which)
     {
-        case Panel::browser:
-            return browserButtons;
+        case Panel::left:
+            return leftButtons;
         case Panel::song:
             return songButtons;
         case Panel::inspector:
@@ -588,8 +642,8 @@ std::unique_ptr<AppShell::PanelWindow>& AppShell::getWindow (Panel which)
 
     switch (which)
     {
-        case Panel::browser:
-            return browserWindow;
+        case Panel::left:
+            return leftWindow;
         case Panel::inspector:
             return inspectorWindow;
         case Panel::song:
@@ -673,12 +727,16 @@ void AppShell::updateLayout()
 {
     // A panel in its own window, or behind a maximized one, takes no room here; panels in their own windows stay visible
     // there.
-    const auto browserDocked = panels.takesRoom (Panel::browser), songDocked = takesRoom (Panel::song);
+    const auto leftDocked = panels.takesRoom (Panel::left), songDocked = takesRoom (Panel::song);
     const auto editorDocked = takesRoom (Panel::editor), inspectorDocked = panels.takesRoom (Panel::inspector);
     const auto centreDocked = songDocked || editorDocked;
 
-    if (browserWindow == nullptr)
-        browser.setVisible (browserDocked);
+    if (leftWindow == nullptr)
+        leftPanel.setVisible (leftDocked);
+
+    // The left panel's view, and its icon marked while it shows, here or in its own window.
+    leftPanel.show (panels.leftView);
+    activityBar.showLeftPanel (leftDocked || leftWindow != nullptr, panels.leftView);
 
     if (inspectorWindow == nullptr)
         inspector.setVisible (inspectorDocked);
@@ -688,7 +746,7 @@ void AppShell::updateLayout()
 
     upperRow.setVisible (songDocked);
     centre.setVisible (centreDocked);
-    browserDivider.setVisible (browserDocked && centreDocked);
+    leftDivider.setVisible (leftDocked && centreDocked);
     inspectorDivider.setVisible (inspectorDocked && centreDocked);
     editorDivider.setVisible (songDocked && editorDocked);
 
@@ -717,14 +775,14 @@ void AppShell::dragDivider (Panel panel, int distance)
         return getWidth() - otherWidth - Shell::dividerSize - Shell::minimumCentreWidth;
     };
 
-    if (panel == Panel::browser)
+    if (panel == Panel::left)
     {
-        const auto most = juce::jlimit (Shell::minimumBrowserWidth, Shell::maximumBrowserWidth, roomBeside (Panel::inspector));
-        panels.browserWidth = juce::jlimit (Shell::minimumBrowserWidth, most, sizeAtDragStart + distance);
+        const auto most = juce::jlimit (Shell::minimumLeftPanelWidth, Shell::maximumLeftPanelWidth, roomBeside (Panel::inspector));
+        panels.leftWidth = juce::jlimit (Shell::minimumLeftPanelWidth, most, sizeAtDragStart + distance);
     }
     else if (panel == Panel::inspector)
     {
-        const auto most = juce::jlimit (Shell::minimumInspectorWidth, Shell::maximumInspectorWidth, roomBeside (Panel::browser));
+        const auto most = juce::jlimit (Shell::minimumInspectorWidth, Shell::maximumInspectorWidth, roomBeside (Panel::left));
         panels.inspectorWidth = juce::jlimit (Shell::minimumInspectorWidth, most, sizeAtDragStart - distance);
     }
     else if (centre.getHeight() > 0)
@@ -795,6 +853,9 @@ void AppShell::resized()
     topBar.setBounds (area.removeFromTop (Shell::transportBarHeight));
     statusBar.setBounds (area.removeFromBottom (Shell::statusBarHeight));
     area = area.reduced (edgeInset, 0);
+
+    // The activity bar down the left edge, whatever shows beside it.
+    activityBar.setBounds (area.removeFromLeft (Shell::activityBarWidth));
     openingLabel.setBounds (area);
 
     // The side panels at the widths they keep, as far as the window has room, and the centre between them. A panel in its
@@ -802,12 +863,12 @@ void AppShell::resized()
     const auto sides = panels.getSideWidths (area.getWidth());
     const auto centreDocked = takesRoom (Panel::song) || takesRoom (Panel::editor);
 
-    if (panels.takesRoom (Panel::browser))
+    if (panels.takesRoom (Panel::left))
     {
-        browser.setBounds (area.removeFromLeft (sides.browser));
+        leftPanel.setBounds (area.removeFromLeft (sides.left));
 
         if (centreDocked)
-            browserDivider.setBounds (area.removeFromLeft (Shell::dividerSize));
+            leftDivider.setBounds (area.removeFromLeft (Shell::dividerSize));
     }
 
     if (panels.takesRoom (Panel::inspector))
@@ -922,18 +983,27 @@ void AppShell::addCommands (CommandRegistry& registry)
          { "find", "sounds", "samples", "plugins" },
          [this]
          {
-             if (browserWindow != nullptr)
-             {
-                 browserWindow->toFront (true);
-             }
-             else if (! panels.takesRoom (Panel::browser))
-             {
-                 panels.show (Panel::browser);
-                 updateLayout();
-             }
+             panels.leftView = LeftView::browser;
 
+             if (leftWindow != nullptr)
+                 leftWindow->toFront (true);
+             else if (! panels.takesRoom (Panel::left))
+                 panels.show (Panel::left);
+
+             updateLayout();
              browser.focusSearch();
          });
+
+    // The left panel's views, as the activity bar's icons show them (ActivityBar.h): each shows or hides it, as a view's
+    // tab does in the lower panel.
+    add ("view.browser", "Browser",
+         "Shows the browser in the left panel: sounds, instruments, effects and presets; or hides the panel if it shows it.",
+         { "library", "sounds", "samples", "plugins", "presets", "sidebar" }, [this] { showLeftView (LeftView::browser); });
+
+    add ("view.versions", "Versions",
+         "Shows the project's versions in the left panel, with the changes since the last one; or hides the panel if it shows "
+         "them.",
+         { "history", "branches", "git", "source control", "snapshots", "sidebar" }, [this] { showLeftView (LeftView::versions); });
 
     registry.add ({ .id = "device.add",
                     .name = "Add Instrument or Effect",
@@ -956,7 +1026,9 @@ void AppShell::addCommands (CommandRegistry& registry)
     };
 
     for (const auto& command :
-         { PanelCommands { Panel::browser, "Shows or hides the browser on the left.", { "files", "samples", "plugins", "sounds" } },
+         { PanelCommands { Panel::left,
+                           "Shows or hides the left panel, with the browser or the versions; the icons beside it stay.",
+                           { "browser", "versions", "sidebar", "files", "samples", "plugins", "sounds" } },
            PanelCommands { Panel::song,
                            "Shows or hides the upper panel, by default the playlist and the mixer; the lower panel takes its place.",
                            { "song", "arrangement", "centre", "tracks", "top" } },
@@ -1060,7 +1132,7 @@ void AppShell::addCommands (CommandRegistry& registry)
         const char* name;
     };
 
-    for (const auto& command : { DetachCommand { Panel::browser, "view.detachBrowser", "Browser in Its Own Window" },
+    for (const auto& command : { DetachCommand { Panel::left, "view.detachLeftPanel", "Left Panel in Its Own Window" },
                                  DetachCommand { Panel::inspector, "view.detachInspector", "Inspector in Its Own Window" },
                                  DetachCommand { Panel::editor, "view.detachEditor", "Lower Panel in Its Own Window" } })
     {
@@ -1089,6 +1161,8 @@ void AppShell::refreshShortcutTexts()
 {
     titleBar.refreshTooltips();
     topBar.refreshTooltips();
+    activityBar.refreshTooltips();
+    versionsView.refreshTooltips();
     for (auto* area : getAreas())
         area->refreshTooltips (commands);
 

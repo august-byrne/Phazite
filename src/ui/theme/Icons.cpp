@@ -104,6 +104,10 @@ namespace
                 return "panel-bottom-close.svg";
             case Icon::hidePanelRight:
                 return "panel-right-close.svg";
+            case Icon::library:
+                return "library.svg";
+            case Icon::versions:
+                return "git-branch.svg";
             case Icon::menu:
                 return "menu.svg";
             case Icon::undo:

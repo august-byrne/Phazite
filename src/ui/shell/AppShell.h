@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The main window's content: the title bar, the transport bar, the browser, two areas of views one over the other (by
-// default the playlist and the mixer over the clip editor and the devices), the inspector and the status bar.
+// The main window's content: the title bar, the transport bar, the activity bar down the left edge and the left panel beside
+// it (the browser or the versions), two areas of views one over the other (by default the playlist and the mixer over the
+// clip editor and the devices), the inspector and the status bar.
 #pragma once
 
+#include "ActivityBar.h"
 #include "Guide.h"
 #include "LessonCard.h"
 #include "Lessons.h"
@@ -20,6 +22,7 @@
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/theme/Icons.h"
+#include "ui/versions/VersionsView.h"
 
 namespace phazite::ui
 {
@@ -106,6 +109,20 @@ private:
     TitleBar titleBar;
     TopBar topBar;
     Browser browser;
+    VersionsView versionsView;
+
+    // The left panel: the browser or the versions, as the activity bar picks (PanelLayout::leftView). What moves to a window
+    // of its own when the panel is detached, with whichever view it shows.
+    struct LeftPanel : public juce::Component
+    {
+        LeftPanel (juce::Component& browserToShow, juce::Component& versionsToShow);
+        void show (LeftView);
+        void resized() override;
+
+        juce::Component &browserView, &versionsView;
+    };
+
+    LeftPanel leftPanel { browser, versionsView };
     Playlist playlist;
     Inspector inspector;
     PianoRoll pianoRoll;
@@ -117,8 +134,9 @@ private:
     ViewRow upperRow { Panel::song, { playlist, mixer, clipEditor, devices } };
     ViewRow lowerRow { Panel::editor, { playlist, mixer, clipEditor, devices } };
     StatusBar statusBar;
-    Guide guide;     // the hint bar's next step for newcomers
-    Lessons lessons; // Help > Lessons, in the lesson card while one runs
+    ActivityBar activityBar; // down the window's left edge, always there
+    Guide guide;             // the hint bar's next step for newcomers
+    Lessons lessons;         // Help > Lessons, in the lesson card while one runs
     LessonCard lessonCard { lessons, [this] (const juce::String& target) { return findLessonTarget (target); } };
     juce::Label openingLabel; // over the centre until a project is open: what the window shows as Phazite starts
 
@@ -141,17 +159,17 @@ private:
     };
 
     // Dragged, they size the panels beside them, which keep those sizes (PanelLayout).
-    PanelDivider browserDivider { "Browser's edge", true }, inspectorDivider { "Inspector's edge", true },
+    PanelDivider leftDivider { "Left panel's edge", true }, inspectorDivider { "Inspector's edge", true },
         editorDivider { "Editor's edge", false };
     Centre centre;
     int sizeAtDragStart = 0; // of the panel beside the divider dragged
 
     // In each docked panel's top right corner: Maximize, a window of its own, and Hide.
-    PanelButtons browserButtons { commands, Panel::browser }, songButtons { commands, Panel::song },
-        editorButtons { commands, Panel::editor }, inspectorButtons { commands, Panel::inspector };
+    PanelButtons leftButtons { commands, Panel::left }, songButtons { commands, Panel::song }, editorButtons { commands, Panel::editor },
+        inspectorButtons { commands, Panel::inspector };
 
     struct PanelWindow;
-    std::unique_ptr<PanelWindow> browserWindow, inspectorWindow, editorWindow; // null while docked
+    std::unique_ptr<PanelWindow> leftWindow, inspectorWindow, editorWindow; // null while docked
 
     void updateLayout(); // after the panels changed: lays them out, and keeps the layout in the settings
     void layOutCentre(); // the song's views over the editor dock
@@ -185,6 +203,7 @@ private:
     void resetViewPlaces();                            // every view back where it starts
     void placeViews();                                 // in the areas, as viewPlaces says
     void showSelectedDevice();                         // in the Devices view (the "device.show" command)
+    void showLeftView (LeftView);                      // or hides the left panel if it shows it: an activity bar icon's click
     void placePanelButtons();
     void setActiveEditor (TimelineEditor*);
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track

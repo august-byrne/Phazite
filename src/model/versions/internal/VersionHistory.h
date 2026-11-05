@@ -102,6 +102,7 @@ private:
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
     void markAllChanged();
     void changed(); // tells onChange at the next tick
+    void tellNow(); // what was read or written, at once
     void takeChangesOutsideHistory();
     PluginParameterValues readPluginParameters() const;
 

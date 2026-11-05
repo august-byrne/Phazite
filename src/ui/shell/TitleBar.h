@@ -69,7 +69,7 @@ private:
     juce::Label projectName;
     IconButton undoButton { "Undo", Icon::undo }, redoButton { "Redo", Icon::redo }, layoutButton { "Layout", Icon::layout };
     std::unique_ptr<SearchBox> searchBox;
-    std::unique_ptr<PanelSwitch> browserSwitch, editorSwitch, inspectorSwitch;
+    std::unique_ptr<PanelSwitch> leftSwitch, editorSwitch, inspectorSwitch;
     std::unique_ptr<WindowButton> minimiseButton, maximiseButton, closeButton;
     std::optional<WindowActions> windowActions;
     bool active = true;

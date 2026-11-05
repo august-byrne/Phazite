@@ -7,13 +7,13 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr std::array<Panel, 4> allPanels { Panel::browser, Panel::song, Panel::editor, Panel::inspector };
+    constexpr std::array<Panel, 4> allPanels { Panel::left, Panel::song, Panel::editor, Panel::inspector };
 
     Icon getHideIcon (Panel panel)
     {
         switch (panel)
         {
-            case Panel::browser:
+            case Panel::left:
                 return Icon::hidePanelLeft;
             case Panel::song:
                 return Icon::hidePanelTop;
@@ -30,8 +30,8 @@ juce::String getPanelKey (Panel panel)
 {
     switch (panel)
     {
-        case Panel::browser:
-            return "browser";
+        case Panel::left:
+            return "leftPanel";
         case Panel::song:
             return "song";
         case Panel::editor:
@@ -61,8 +61,8 @@ juce::String getPanelName (Panel panel)
 {
     switch (panel)
     {
-        case Panel::browser:
-            return "Browser";
+        case Panel::left:
+            return "Left Panel";
         case Panel::song:
             return "Upper Panel"; // by default the playlist and the mixer (Panels.h: ViewPlaces)
         case Panel::editor:
@@ -77,8 +77,8 @@ juce::String describePanel (Panel panel)
 {
     switch (panel)
     {
-        case Panel::browser:
-            return "the browser";
+        case Panel::left:
+            return "the left panel";
         case Panel::song:
             return "the upper panel";
         case Panel::editor:
@@ -187,25 +187,25 @@ PanelLayout::SideWidths PanelLayout::getSideWidths (int width) const
 
     if (! centreShown) // a side panel maximized
     {
-        widths.browser = takesRoom (Panel::browser) ? width : 0;
+        widths.left = takesRoom (Panel::left) ? width : 0;
         widths.inspector = takesRoom (Panel::inspector) ? width : 0;
         return widths;
     }
 
-    widths.browser = takesRoom (Panel::browser) ? browserWidth : 0;
+    widths.left = takesRoom (Panel::left) ? leftWidth : 0;
     widths.inspector = takesRoom (Panel::inspector) ? inspectorWidth : 0;
 
     // Each gives way in proportion to what it has above its least.
-    const auto dividers = (widths.browser > 0 ? Shell::dividerSize : 0) + (widths.inspector > 0 ? Shell::dividerSize : 0);
-    const auto over = widths.browser + widths.inspector + dividers + Shell::minimumCentreWidth - width;
-    const auto spareBrowser = widths.browser > 0 ? juce::jmax (0, widths.browser - Shell::minimumBrowserWidth) : 0;
+    const auto dividers = (widths.left > 0 ? Shell::dividerSize : 0) + (widths.inspector > 0 ? Shell::dividerSize : 0);
+    const auto over = widths.left + widths.inspector + dividers + Shell::minimumCentreWidth - width;
+    const auto spareBrowser = widths.left > 0 ? juce::jmax (0, widths.left - Shell::minimumLeftPanelWidth) : 0;
     const auto spareInspector = widths.inspector > 0 ? juce::jmax (0, widths.inspector - Shell::minimumInspectorWidth) : 0;
 
     if (over > 0 && spareBrowser + spareInspector > 0)
     {
         const auto fromBrowser =
             juce::jmin (spareBrowser, juce::roundToInt (over * spareBrowser / (double) (spareBrowser + spareInspector)));
-        widths.browser -= fromBrowser;
+        widths.left -= fromBrowser;
         widths.inspector -= juce::jmin (spareInspector, over - fromBrowser);
     }
 
@@ -246,7 +246,8 @@ juce::String PanelLayout::toText() const
     if (maximized.has_value())
         text << " maximized=" << getPanelKey (*maximized);
 
-    text << " browser=" << browserWidth << " inspector=" << inspectorWidth << " editor=" << juce::String (editorShare, 3)
+    text << " left=" << leftWidth << " leftView=" << (leftView == LeftView::versions ? "versions" : "browser")
+         << " inspector=" << inspectorWidth << " editor=" << juce::String (editorShare, 3)
          << " upperSplit=" << juce::String (rowShares[0], 3) << " lowerSplit=" << juce::String (rowShares[1], 3);
     return text;
 }
@@ -275,9 +276,13 @@ void PanelLayout::setFromText (const juce::String& text)
             if (const auto panel = findPanelByKey (value))
                 maximized = panel;
         }
-        else if (key == "browser" && value.getIntValue() > 0)
+        else if (key == "left" && value.getIntValue() > 0)
         {
-            browserWidth = juce::jlimit (Shell::minimumBrowserWidth, Shell::maximumBrowserWidth, value.getIntValue());
+            leftWidth = juce::jlimit (Shell::minimumLeftPanelWidth, Shell::maximumLeftPanelWidth, value.getIntValue());
+        }
+        else if (key == "leftView" && (value == "browser" || value == "versions"))
+        {
+            leftView = value == "versions" ? LeftView::versions : LeftView::browser;
         }
         else if (key == "inspector" && value.getIntValue() > 0)
         {

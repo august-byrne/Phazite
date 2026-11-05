@@ -65,10 +65,10 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 
     for (const auto* id :
-         { "view.toggleBrowser",   "view.toggleBrowser", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll",
-           "view.instrument",      "view.effects",       "view.mixer",           "view.playlist",        "view.toggleEditor",
-           "view.toggleEditor",    "view.toggleSong",    "view.toggleSong",      "view.maximizeEditor",  "view.maximizeBrowser",
-           "view.maximizeBrowser", "view.maximizePanel", "view.maximizePanel",   "view.layoutBeat",      "view.layoutMix",
+         { "view.toggleLeftPanel",   "view.toggleLeftPanel", "view.toggleInspector", "view.toggleInspector", "view.pianoRoll",
+           "view.instrument",        "view.effects",         "view.mixer",           "view.playlist",        "view.toggleEditor",
+           "view.toggleEditor",      "view.toggleSong",      "view.toggleSong",      "view.maximizeEditor",  "view.maximizeLeftPanel",
+           "view.maximizeLeftPanel", "view.maximizePanel",   "view.maximizePanel",   "view.layoutBeat",      "view.layoutMix",
            "view.layoutFull" })
     {
         INFO ("after " << id);
@@ -123,7 +123,7 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     phazite::test::dispatchPendingMessages();
     phazite::test::settle();
 
-    auto& browser = screen.shell.getPanel (Panel::browser);
+    auto& browser = screen.shell.getPanel (Panel::left);
     auto& song = screen.shell.getPanel (Panel::song);
     auto& editor = screen.shell.getPanel (Panel::editor);
     auto& inspector = screen.shell.getPanel (Panel::inspector);
@@ -156,7 +156,7 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     // The playlist's Maximize: it fills the window between the bars, the other panels out of sight, and its first button
     // restores them, as they were.
     click (cornerOf (song), "Maximize");
-    CHECK (song.getWidth() == screen.shell.getWidth());
+    CHECK (song.getWidth() == screen.shell.getWidth() - phazite::ui::Shell::activityBarWidth); // beside the activity bar
     CHECK_FALSE (browser.isShowing());
     CHECK_FALSE (editor.isShowing());
     CHECK_FALSE (inspector.isShowing());
@@ -185,11 +185,11 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     REQUIRE (screen.registry.invoke ("view.playlist"));
     CHECK (song.isShowing());
 
-    // A divider dragged sizes the browser, which keeps that width while it hides and shows, in the settings too.
-    auto* divider = phazite::test::findComponentWithTitle (screen.shell, "Browser's edge");
+    // A divider dragged sizes the left panel, which keeps that width while it hides and shows, in the settings too.
+    auto* divider = phazite::test::findComponentWithTitle (screen.shell, "Left panel's edge");
     REQUIRE (divider != nullptr);
     CHECK (divider->getX() == browser.getRight());
-    CHECK (browserWidth == phazite::ui::Shell::browserWidth);
+    CHECK (browserWidth == phazite::ui::Shell::leftPanelWidth);
     phazite::test::Mouse dividerMouse (screen.shell); // the divider moves with the drag
     const auto middle = divider->getBounds().getCentre();
     dividerMouse.press (middle);
@@ -198,11 +198,11 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     dividerMouse.release();
     const auto dragged = browser.getWidth();
     CHECK (dragged == browserWidth + 40);
-    REQUIRE (screen.registry.invoke ("view.toggleBrowser"));
+    REQUIRE (screen.registry.invoke ("view.toggleLeftPanel"));
     CHECK_FALSE (browser.isShowing());
-    REQUIRE (screen.registry.invoke ("view.toggleBrowser"));
+    REQUIRE (screen.registry.invoke ("view.toggleLeftPanel"));
     CHECK (browser.getWidth() == dragged);
-    CHECK (screen.services.settings.get (phazite::Settings::panelLayout).contains ("browser=" + juce::String (dragged)));
+    CHECK (screen.services.settings.get (phazite::Settings::panelLayout).contains ("left=" + juce::String (dragged)));
 
     // The panel in use is the one with the keyboard focus (which the shell hears about after the focus moved).
     browser.grabKeyboardFocus();
@@ -211,14 +211,14 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     REQUIRE (focused != nullptr);
     REQUIRE (browser.isParentOf (focused));
     REQUIRE (screen.registry.invoke ("view.maximizePanel"));
-    CHECK (screen.shell.getPanelLayout().isMaximized (Panel::browser));
+    CHECK (screen.shell.getPanelLayout().isMaximized (Panel::left));
     CHECK_FALSE (song.isShowing());
     REQUIRE (screen.registry.invoke ("view.maximizePanel"));
     CHECK_FALSE (screen.shell.getPanelLayout().getMaximized().has_value());
     CHECK (song.isShowing());
 
     // Once that panel hides, the song's views are the ones in use.
-    REQUIRE (screen.registry.invoke ("view.toggleBrowser"));
+    REQUIRE (screen.registry.invoke ("view.toggleLeftPanel"));
     REQUIRE (screen.registry.invoke ("view.maximizePanel"));
     CHECK (screen.shell.getPanelLayout().isMaximized (Panel::song));
     CHECK_FALSE (browser.isShowing());
@@ -231,7 +231,7 @@ TEST_CASE ("A panel moved to a window of its own fills it at once, and keeps fil
     using phazite::ui::Panel;
     Screen screen;
 
-    for (const auto which : { Panel::browser, Panel::inspector, Panel::editor })
+    for (const auto which : { Panel::left, Panel::inspector, Panel::editor })
     {
         auto& panel = screen.shell.getPanel (which);
         screen.shell.setDetached (which, true);

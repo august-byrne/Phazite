@@ -10,14 +10,14 @@ TEST_CASE ("Panels hide and show, and the centre keeps the song's views or the e
 {
     PanelLayout layout;
 
-    for (const auto panel : { Panel::browser, Panel::song, Panel::editor, Panel::inspector })
+    for (const auto panel : { Panel::left, Panel::song, Panel::editor, Panel::inspector })
         CHECK (layout.takesRoom (panel));
 
-    layout.hide (Panel::browser);
-    CHECK_FALSE (layout.isShown (Panel::browser));
-    CHECK_FALSE (layout.takesRoom (Panel::browser));
-    layout.toggle (Panel::browser);
-    CHECK (layout.takesRoom (Panel::browser));
+    layout.hide (Panel::left);
+    CHECK_FALSE (layout.isShown (Panel::left));
+    CHECK_FALSE (layout.takesRoom (Panel::left));
+    layout.toggle (Panel::left);
+    CHECK (layout.takesRoom (Panel::left));
 
     // Hiding the song's views while the editor is hidden shows the editor, and the other way round.
     layout.hide (Panel::editor);
@@ -50,28 +50,28 @@ TEST_CASE ("One panel at a time fills the window, and the others come back as th
     layout.maximize (Panel::song);
     CHECK (layout.isMaximized (Panel::song));
     CHECK (layout.takesRoom (Panel::song));
-    CHECK_FALSE (layout.takesRoom (Panel::browser));
+    CHECK_FALSE (layout.takesRoom (Panel::left));
     CHECK_FALSE (layout.takesRoom (Panel::editor));
-    CHECK (layout.isShown (Panel::browser)); // only out of sight
+    CHECK (layout.isShown (Panel::left)); // only out of sight
 
     // Another one in its place; then restored, the inspector still hidden.
     layout.maximize (Panel::editor);
     CHECK_FALSE (layout.takesRoom (Panel::song));
     layout.toggleMaximized (Panel::editor);
     CHECK_FALSE (layout.getMaximized().has_value());
-    CHECK (layout.takesRoom (Panel::browser));
+    CHECK (layout.takesRoom (Panel::left));
     CHECK (layout.takesRoom (Panel::song));
     CHECK_FALSE (layout.takesRoom (Panel::inspector));
 
     // Asking to see another panel restores the window, and so does hiding the maximized one.
     layout.maximize (Panel::song);
-    layout.toggle (Panel::browser); // shown, but out of sight: it comes back
+    layout.toggle (Panel::left); // shown, but out of sight: it comes back
     CHECK_FALSE (layout.getMaximized().has_value());
-    CHECK (layout.takesRoom (Panel::browser));
-    layout.maximize (Panel::browser);
-    layout.hide (Panel::browser);
+    CHECK (layout.takesRoom (Panel::left));
+    layout.maximize (Panel::left);
+    layout.hide (Panel::left);
     CHECK_FALSE (layout.getMaximized().has_value());
-    CHECK_FALSE (layout.isShown (Panel::browser));
+    CHECK_FALSE (layout.isShown (Panel::left));
 
     // Maximizing a hidden panel shows it.
     layout.maximize (Panel::inspector);
@@ -99,12 +99,12 @@ TEST_CASE ("One panel at a time fills the window, and the others come back as th
 TEST_CASE ("The panels' commands say what they do now")
 {
     PanelLayout layout;
-    CHECK (layout.getToggleName (Panel::browser) == juce::String ("Hide the Browser"));
+    CHECK (layout.getToggleName (Panel::left) == juce::String ("Hide the Left Panel"));
     CHECK (layout.getMaximizeName (Panel::song).isEmpty());
     CHECK (layout.getMaximizeInUseName().isEmpty());
 
     layout.maximize (Panel::song);
-    CHECK (layout.getToggleName (Panel::browser) == juce::String ("Show the Browser")); // out of sight
+    CHECK (layout.getToggleName (Panel::left) == juce::String ("Show the Left Panel")); // out of sight
     CHECK (layout.getToggleName (Panel::song) == juce::String ("Hide the Upper Panel"));
     CHECK (layout.getMaximizeName (Panel::song) == juce::String ("Restore the Panels"));
     CHECK (layout.getMaximizeName (Panel::editor).isEmpty());
@@ -114,29 +114,32 @@ TEST_CASE ("The panels' commands say what they do now")
 TEST_CASE ("The panels' layout goes into the settings as text, and back")
 {
     PanelLayout layout;
-    layout.hide (Panel::browser);
+    layout.hide (Panel::left);
     layout.maximize (Panel::editor);
-    layout.browserWidth = 300;
+    layout.leftWidth = 300;
+    layout.leftView = phazite::ui::LeftView::versions;
     layout.inspectorWidth = 200;
     layout.editorShare = 0.6;
     layout.rowShares = { 0.3, 0.5 };
     const auto text = layout.toText();
     CHECK (text
-           == juce::String ("shown=song,editor,inspector maximized=editor browser=300 inspector=200 editor=0.600 upperSplit=0.300 "
-                            "lowerSplit=0.500"));
+           == juce::String ("shown=song,editor,inspector maximized=editor left=300 leftView=versions inspector=200 editor=0.600 "
+                            "upperSplit=0.300 lowerSplit=0.500"));
 
     PanelLayout read;
     read.setFromText (text);
     CHECK (read.toText() == text);
     CHECK (read.isMaximized (Panel::editor));
-    CHECK_FALSE (read.isShown (Panel::browser));
+    CHECK_FALSE (read.isShown (Panel::left));
+    CHECK (read.leftView == phazite::ui::LeftView::versions);
 
     // What a text doesn't say, or says wrongly, stays as it was; the centre keeps one of its panels.
     PanelLayout odd;
-    odd.setFromText ("shown=browser browser=9999 editor=7 maximized=nothing nonsense");
+    odd.setFromText ("shown=leftPanel left=9999 leftView=elsewhere editor=7 maximized=nothing nonsense");
     CHECK (odd.isShown (Panel::song));
     CHECK (odd.isShown (Panel::editor));
-    CHECK (odd.browserWidth == phazite::ui::Shell::maximumBrowserWidth);
+    CHECK (odd.leftWidth == phazite::ui::Shell::maximumLeftPanelWidth);
+    CHECK (odd.leftView == phazite::ui::LeftView::browser);
     CHECK (odd.editorShare == doctest::Approx (phazite::ui::Shell::editorShare));
     CHECK_FALSE (odd.getMaximized().has_value());
 }
@@ -146,24 +149,24 @@ TEST_CASE ("The side panels keep their widths while the window has room, and giv
     using phazite::ui::Shell::dividerSize, phazite::ui::Shell::minimumCentreWidth;
     PanelLayout layout;
     auto widths = layout.getSideWidths (1280);
-    CHECK (widths.browser == phazite::ui::Shell::browserWidth);
+    CHECK (widths.left == phazite::ui::Shell::leftPanelWidth);
     CHECK (widths.inspector == phazite::ui::Shell::inspectorWidth);
 
     // 800 wide, 10 short of both and the centre at its least: each gives way in proportion to what it has above its least.
     widths = layout.getSideWidths (800);
-    CHECK (widths.browser + widths.inspector + 2 * dividerSize + minimumCentreWidth == 800);
-    CHECK (widths.browser == phazite::ui::Shell::browserWidth - 5);
+    CHECK (widths.left + widths.inspector + 2 * dividerSize + minimumCentreWidth == 800);
+    CHECK (widths.left == phazite::ui::Shell::leftPanelWidth - 5);
 
     // Never below their least.
     widths = layout.getSideWidths (400);
-    CHECK (widths.browser == phazite::ui::Shell::minimumBrowserWidth);
+    CHECK (widths.left == phazite::ui::Shell::minimumLeftPanelWidth);
     CHECK (widths.inspector == phazite::ui::Shell::minimumInspectorWidth);
 
     // A hidden one takes none, and a maximized one all.
     layout.hide (Panel::inspector);
     CHECK (layout.getSideWidths (1280).inspector == 0);
-    layout.maximize (Panel::browser);
-    CHECK (layout.getSideWidths (1280).browser == 1280);
+    layout.maximize (Panel::left);
+    CHECK (layout.getSideWidths (1280).left == 1280);
 
     // The editor dock: its share of the centre, leaving the song's views their least.
     PanelLayout dock;

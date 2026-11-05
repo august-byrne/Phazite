@@ -4,6 +4,7 @@
 #include "model/arrangement/TimelineModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/transport/TransportModel.h"
+#include "model/versions/VersionsModel.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -175,6 +176,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
       commands (bridge),
       context (c),
       saveItem (std::make_unique<Item> ("Saved")),
+      branchItem (std::make_unique<Item> ("Branch")),
       selectionItem (std::make_unique<Item> ("Selection")),
       midiItem (std::make_unique<Item> ("MIDI")),
       renderItem (std::make_unique<Item> ("Stretching")),
@@ -185,6 +187,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Status bar");
     saveItem->onClick = [this] { commands.invoke ("project.save"); };
+    branchItem->onClick = [this] { commands.invoke ("view.versions"); };
     midiItem->onClick = [this] { commands.invoke ("options.midiSettings"); };
     delayItem->onClick = [this] { commands.invoke ("options.audioSettings"); };
     audioItem->onClick = [this] { commands.invoke ("options.audioSettings"); };
@@ -196,7 +199,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
 
     addAndMakeVisible (hintBar);
 
-    for (auto* item : { saveItem.get(), selectionItem.get(), midiItem.get(), renderItem.get(), delayItem.get() })
+    for (auto* item : { saveItem.get(), branchItem.get(), selectionItem.get(), midiItem.get(), renderItem.get(), delayItem.get() })
         addChildComponent (*item);
 
     addAndMakeVisible (*audioItem);
@@ -208,6 +211,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
 
     showAudioOutput (engine.getAudioOutput());
     showSelection();
+    showBranch();
     timerCallback();
     startTimerHz (4);
 }
@@ -289,6 +293,25 @@ void StatusBar::showAudioOutput (const EngineContext::AudioOutput& output)
     }
 
     resized();
+}
+
+void StatusBar::showBranch()
+{
+    // The branch the song is on, once the project has a version (docs/versions.md); a click shows the versions.
+    const auto branch = getCurrentBranch (context);
+    const auto wasVisible = branchItem->isVisible();
+    const auto oldWidth = branchItem->getPreferredWidth();
+    branchItem->setVisible (branch.has_value());
+
+    if (branch.has_value())
+    {
+        branchItem->show (branch->name, Item::Emphasis::quiet);
+        branchItem->setTooltip (
+            withShortcut (commands, "The branch the song is on, whose versions follow one another: click to see them", "view.versions"));
+    }
+
+    if (wasVisible != branchItem->isVisible() || oldWidth != branchItem->getPreferredWidth())
+        resized();
 }
 
 void StatusBar::showSelection()
@@ -388,6 +411,11 @@ juce::String StatusBar::getSaveText() const
     return saveItem->isVisible() ? saveItem->getButtonText() : juce::String();
 }
 
+juce::String StatusBar::getBranchText() const
+{
+    return branchItem->isVisible() ? branchItem->getButtonText() : juce::String();
+}
+
 juce::String StatusBar::getSelectionText() const
 {
     return selectionItem->isVisible() ? selectionItem->getButtonText() : juce::String();
@@ -426,6 +454,7 @@ juce::String StatusBar::getCpuText() const
 void StatusBar::projectChanged()
 {
     showSelection();
+    showBranch();
     timerCallback();
 }
 
@@ -481,7 +510,8 @@ void StatusBar::resized()
     // The others as they fit, leaving the hints room: what is selected goes first, then where MIDI goes, the delay
     // compensation and the renders; whether the project is saved stays.
     Item* const optional[] = { renderItem.get(), delayItem.get(), midiItem.get(), selectionItem.get() }; // most needed first
-    auto room = area.getWidth() - Shell::statusHintsMinimumWidth - (saveItem->isVisible() ? saveItem->getPreferredWidth() : 0);
+    auto room = area.getWidth() - Shell::statusHintsMinimumWidth - (saveItem->isVisible() ? saveItem->getPreferredWidth() : 0)
+                - (branchItem->isVisible() ? branchItem->getPreferredWidth() : 0);
     std::vector<Item*> fitting;
 
     for (auto* item : optional)
@@ -501,8 +531,8 @@ void StatusBar::resized()
     for (auto* item : { delayItem.get(), renderItem.get() })
         item->setBounds (fits (item) ? area.removeFromRight (item->getPreferredWidth()) : juce::Rectangle<int>());
 
-    for (auto* item : { saveItem.get(), selectionItem.get(), midiItem.get() })
-        if (item == saveItem.get() ? item->isVisible() : fits (item))
+    for (auto* item : { saveItem.get(), branchItem.get(), selectionItem.get(), midiItem.get() })
+        if (item == saveItem.get() || item == branchItem.get() ? item->isVisible() : fits (item))
             item->setBounds (area.removeFromLeft (item->getPreferredWidth()));
         else
             item->setBounds ({});

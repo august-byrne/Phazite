@@ -46,6 +46,7 @@ public:
 
     // What the items show now (empty for one that doesn't show), for tests.
     juce::String getSaveText() const;
+    juce::String getBranchText() const; // the current branch, once the project has a version
     juce::String getSelectionText() const;
     juce::String getMidiText() const;
     juce::String getRenderText() const;
@@ -67,16 +68,18 @@ private:
     CommandBridge& commands;
     ProjectContext& context;
     HintBar hintBar;
-    std::unique_ptr<Item> saveItem, selectionItem, midiItem, renderItem, delayItem, audioItem, cpuItem;
+    std::unique_ptr<Item> saveItem, branchItem, selectionItem, midiItem, renderItem, delayItem, audioItem, cpuItem;
     int shownCpu = -1; // the percentage shown, to repaint only on changes
 
     void showSelection();
+    void showBranch();
     void showMidi();
     void showRenders();
     void showDelay();
 
     void projectChanged() override;
     void songChanged (const SongChanges&) override;
+    void versionsChanged() override { showBranch(); }
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection, or the range selected
     void timerCallback() override;                                   // a few times a second
 };

@@ -84,22 +84,22 @@ TEST_CASE ("The title bar's switches show which panels show, and show or hide th
 {
     Screen screen;
     auto& bar = screen.shell.getTitleBar();
-    auto* browserSwitch = dynamic_cast<juce::Button*> (findButton (bar, "Browser"));
-    REQUIRE (browserSwitch != nullptr);
-    CHECK (browserSwitch->getToggleState());
+    auto* leftSwitch = dynamic_cast<juce::Button*> (findButton (bar, "Left panel"));
+    REQUIRE (leftSwitch != nullptr);
+    CHECK (leftSwitch->getToggleState());
 
-    phazite::test::Mouse mouse (*browserSwitch);
-    mouse.click (browserSwitch->getLocalBounds().getCentre());
-    CHECK_FALSE (screen.shell.getPanelLayout().isShown (phazite::ui::Panel::browser));
-    CHECK_FALSE (browserSwitch->getToggleState());
+    phazite::test::Mouse mouse (*leftSwitch);
+    mouse.click (leftSwitch->getLocalBounds().getCentre());
+    CHECK_FALSE (screen.shell.getPanelLayout().isShown (phazite::ui::Panel::left));
+    CHECK_FALSE (leftSwitch->getToggleState());
     mouse.pause();
-    mouse.click (browserSwitch->getLocalBounds().getCentre());
-    CHECK (screen.shell.getPanel (phazite::ui::Panel::browser).isShowing());
-    CHECK (browserSwitch->getToggleState());
+    mouse.click (leftSwitch->getLocalBounds().getCentre());
+    CHECK (screen.shell.getPanel (phazite::ui::Panel::left).isShowing());
+    CHECK (leftSwitch->getToggleState());
 
     // A maximized panel leaves the others' switches unlit: they are out of sight.
     REQUIRE (screen.registry.invoke ("view.maximizeSong"));
-    CHECK_FALSE (browserSwitch->getToggleState());
+    CHECK_FALSE (leftSwitch->getToggleState());
 }
 
 TEST_CASE ("The title bar's menus fold into one button in a narrow window, and it says where the window is dragged")
@@ -166,12 +166,12 @@ TEST_CASE ("The panels keep out of the band along a restored window's sides, and
     const auto inset = phazite::ui::Shell::edgeInset;
 
     shell.setEdgeInset (inset); // as the main window sets it on Windows, while it isn't maximized
-    CHECK (shell.getPanel (Panel::browser).getX() == inset);
+    CHECK (shell.getPanel (Panel::left).getX() == inset + phazite::ui::Shell::activityBarWidth); // beside the activity bar
     CHECK (shell.getPanel (Panel::inspector).getRight() == shell.getWidth() - inset);
     CHECK (shell.getTitleBar().getWidth() == shell.getWidth());
     CHECK (shell.getStatusBar().getWidth() == shell.getWidth());
 
     shell.setEdgeInset (0); // maximized
-    CHECK (shell.getPanel (Panel::browser).getX() == 0);
+    CHECK (shell.getPanel (Panel::left).getX() == phazite::ui::Shell::activityBarWidth);
     CHECK (shell.getPanel (Panel::inspector).getRight() == shell.getWidth());
 }

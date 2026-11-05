@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Which of the main window's panels show, and how large (docs/design.md, section 4): the browser on the left, the song's
-// views (the playlist or the mixer) in the centre over the editor dock, and the inspector on the right. Each can be
+// Which of the main window's panels show, and how large (docs/design.md, section 4): the left panel (the browser or the
+// versions, as the activity bar beside it picks: ActivityBar.h), the song's views (the playlist or the mixer) in the centre
+// over the editor dock, and the inspector on the right. Each can be
 // hidden, and one at a time can fill the window, maximized, until it is restored: the others then come back as they
 // were, at their sizes. Asking to see another panel restores the window first. The centre always shows the song's views,
 // the editor dock or both, so hiding the one of them that shows shows the other. A panel in a window of its own
@@ -22,10 +23,17 @@ namespace phazite::ui
 {
 enum class Panel
 {
-    browser,
+    left, // the browser or the versions (LeftView)
     song, // the playlist or the mixer
     editor,
     inspector
+};
+
+// What the left panel shows: the browser, or the project's versions (docs/versions.md).
+enum class LeftView
+{
+    browser,
+    versions
 };
 
 class PanelLayout
@@ -54,10 +62,13 @@ public:
     // Whether the panel takes room in the main window now: shown, not in a window of its own, and no other maximized.
     bool takesRoom (Panel) const noexcept;
 
-    // The sizes the dividers were dragged to, kept while panels hide and show: the side panels' widths, in pixels, and
-    // the share of the centre the editor dock takes under the song's views.
-    int browserWidth = Shell::browserWidth, inspectorWidth = Shell::inspectorWidth;
+    // The sizes the dividers were dragged to, kept while panels hide and show: the side panels' widths, in pixels (the left
+    // panel's the same for both its views), and the share of the centre the editor dock takes under the song's views.
+    int leftWidth = Shell::leftPanelWidth, inspectorWidth = Shell::inspectorWidth;
     double editorShare = Shell::editorShare;
+
+    // What the left panel shows, while it shows and while it is hidden.
+    LeftView leftView = LeftView::browser;
 
     // While a row of the centre has two areas side by side (Panels.h: ViewRow), the left one's share of its width: the upper
     // row's, then the lower one's.
@@ -68,21 +79,21 @@ public:
     // dock's height under the song's views in a centre this tall, each at least its least.
     struct SideWidths
     {
-        int browser = 0, inspector = 0;
+        int left = 0, inspector = 0;
     };
 
     SideWidths getSideWidths (int width) const;
     int getEditorHeight (int centreHeight) const;
 
-    // What its commands are called as menus show them now: "Hide the Browser" while it shows here, otherwise "Show the
-    // Browser"; and "Restore the Panels" while it fills the window (or, for the panel in use, any does), otherwise nothing
+    // What its commands are called as menus show them now: "Hide the Left Panel" while it shows here, otherwise "Show the
+    // Left Panel"; and "Restore the Panels" while it fills the window (or, for the panel in use, any does), otherwise nothing
     // (the command's own name).
     juce::String getToggleName (Panel) const;
     juce::String getMaximizeName (Panel) const;
     juce::String getMaximizeInUseName() const;
 
-    // For the settings ("shown=browser,song,editor maximized=song browser=240 inspector=260 editor=0.45 upperSplit=0.5
-    // lowerSplit=0.5"), and back: what a text doesn't say, or says wrongly, stays as it is.
+    // For the settings ("shown=leftPanel,song,editor maximized=song left=240 leftView=versions inspector=260 editor=0.45
+    // upperSplit=0.5 lowerSplit=0.5"), and back: what a text doesn't say, or says wrongly, stays as it is.
     juce::String toText() const;
     void setFromText (const juce::String&);
 
@@ -94,9 +105,9 @@ private:
     static size_t indexOf (Panel panel) noexcept { return (size_t) panel; }
 };
 
-// The name a panel goes by in the settings ("browser", "song", "editor", "inspector"); its commands' IDs ("view." and
-// the verb, then "Browser", "Song", "Editor" or "Inspector": view.toggleBrowser); its name in commands ("Browser",
-// "Upper Panel"); and what a tooltip calls it ("the browser").
+// The name a panel goes by in the settings ("leftPanel", "song", "editor", "inspector"); its commands' IDs ("view." and
+// the verb, then "LeftPanel", "Song", "Editor" or "Inspector": view.toggleLeftPanel); its name in commands ("Left Panel",
+// "Upper Panel"); and what a tooltip calls it ("the left panel").
 juce::String getPanelKey (Panel);
 std::optional<Panel> findPanelByKey (const juce::String&);
 juce::String getPanelCommandID (const char* verb, Panel);

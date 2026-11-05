@@ -157,7 +157,7 @@ void VersionHistory::opened (int number, std::vector<BranchRecord> branchesRead,
 
     setBaseline (head, std::move (parameters));
     hasRead = true;
-    changed();
+    tellNow();
 }
 
 void VersionHistory::followFolder()
@@ -290,6 +290,7 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
         version.parents.add (branch.head);
 
     saving = true;
+    tellNow(); // "Saving..."
 
     run (
         [store = store, number = generation, copy, parameters, version, branch, projectFolder = song.getFile().getParentDirectory(),
@@ -333,7 +334,7 @@ void VersionHistory::saved (int number, bool ok, const VersionRecord& version, c
 
     if (! ok || number != generation)
     {
-        changed();
+        tellNow();
         return;
     }
 
@@ -347,7 +348,7 @@ void VersionHistory::saved (int number, bool ok, const VersionRecord& version, c
         branches.push_back (branch);
 
     setBaseline (copy, std::move (parameters));
-    changed();
+    tellNow();
 }
 
 PluginParameterValues VersionHistory::readPluginParameters() const
@@ -596,6 +597,15 @@ void VersionHistory::changed()
 {
     changesReady = false;
     notifyPending = true;
+}
+
+void VersionHistory::tellNow()
+{
+    changed();
+    notifyPending = false;
+
+    if (onChange != nullptr)
+        onChange();
 }
 
 void VersionHistory::takeChangesOutsideHistory()

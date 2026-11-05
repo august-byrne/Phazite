@@ -127,7 +127,12 @@ namespace Shell
         return buttons * panelButtonSize + buttons * (Space::xs / 2);
     }
 
-    inline constexpr int minimumBrowserWidth = 160, maximumBrowserWidth = 480, browserWidth = 240;
+    inline constexpr int minimumLeftPanelWidth = 160, maximumLeftPanelWidth = 480, leftPanelWidth = 240; // the browser or the versions
+
+    // The activity bar along the window's left edge (ui/shell/ActivityBar.h): its width and its icons', the marker along the
+    // left edge of the view that shows, and the dot on the Versions icon while the song has changes since its last version.
+    inline constexpr int activityBarWidth = 40, activityIconSize = 20, activityMarkerWidth = 2;
+    inline constexpr float activityDotSize = 7.0f;
     inline constexpr int minimumInspectorWidth = 180, maximumInspectorWidth = 420, inspectorWidth = 260;
     inline constexpr int minimumCentreWidth = 300, minimumCentreHeight = 120; // the song's views, and the editor dock
     inline constexpr int minimumAreaWidth = 240; // an area of views beside another in a row of the centre (ui/shell/Panels.h)
@@ -175,6 +180,15 @@ inline std::optional<juce::Colour> getFamilyColour (DeviceFamily family, ThemeNa
 }
 
 // The knobs of devices' editors, square: a device's main controls large, the rest compact.
+// The Versions view (ui/versions/VersionsView.h): its rows, and the history's graph, a line for each branch in its color with
+// a dot for each of its versions.
+namespace History
+{
+    inline constexpr int changeRowHeight = 24, versionRowHeight = 30, noteHeight = 52;
+    inline constexpr int laneWidth = 12; // a branch's line's column
+    inline constexpr float dotSize = 8.0f, lineWidth = 2.0f;
+} // namespace History
+
 inline constexpr int knobSize = 64;
 inline constexpr int compactKnobSize = 40;
 
