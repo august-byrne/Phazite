@@ -331,9 +331,9 @@ public:
 
         if (row > 0)
             view.showMenu ({ "version.hear", "version.bringBack", "version.takeFrom", "version.newBranch", "version.merge",
-                             "version.bounce", "version.deleteBounce" });
+                             "version.bounce", "version.deleteBounce", "version.exportDawProject" });
         else
-            view.showMenu ({ "version.hear", "version.newBranch" });
+            view.showMenu ({ "version.hear", "version.newBranch", "version.exportDawProject" });
     }
 
     void selectedRowsChanged (int row) override

@@ -5,6 +5,7 @@
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ExampleSongs.h"
 #include "model/project/UnusedAudio.h"
+#include "model/project/internal/DawProject.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Export.h"
 #include "model/project/internal/NewProject.h"
@@ -13,6 +14,8 @@
 #include "services/Library.h"
 #include "ui/shell/NewProjectPanel.h"
 #include "ui/theme/LookAndFeel.h"
+
+#include <algorithm>
 
 namespace phazite
 {
@@ -683,11 +686,64 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& re
                     .synonyms = { "unused", "delete", "free space", "takes", "recordings", "tidy", "purge" },
                     .perform = [this] { cleanUpAudio(); },
                     .isEnabled = [this] { return canCleanUpAudio (context) && ! isUntitled(); } });
+
+    registry.add ({ .id = "project.importDawProject",
+                    .name = "Import DAWproject...",
+                    .category = "Project",
+                    .description = "Opens a DAWproject file, from Bitwig Studio, Studio One, Cubase or another DAW, as a new project. One "
+                                   "exported from a version of this project comes back as a branch from that version, with what changed.",
+                    .synonyms = { "dawproject", "bitwig", "studio one", "cubase", "open", "import", "collaborate" },
+                    .perform = [this] { importDawProject(); } });
 }
 
 void ProjectSession::cleanUpAudio()
 {
     if (project != nullptr && onCleanUpAudio != nullptr)
         onCleanUpAudio();
+}
+
+void ProjectSession::importDawProject()
+{
+    fileChooser = std::make_unique<juce::FileChooser> ("Import a DAWproject", projectsFolder, "*.dawproject");
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& chooser)
+                              {
+                                  if (chooser.getResult().existsAsFile())
+                                      importDawProject (chooser.getResult());
+                              });
+}
+
+void ProjectSession::importDawProject (const juce::File& file)
+{
+    const auto read = std::make_shared<DawProjectFile> (readDawProject (file));
+
+    if (read->project == nullptr)
+    {
+        showError ("Phazite couldn't import " + file.getFileName(), read->error);
+        return;
+    }
+
+    // One from a version of this project: a branch from that version, with what changed in it.
+    const auto versions = getVersions (context);
+
+    if (read->fromVersion.isNotEmpty() && project != nullptr
+        && std::any_of (versions.begin(), versions.end(), [&read] (const VersionInfo& version) { return version.id == read->fromVersion; }))
+    {
+        juce::StringArray said;
+
+        if (importDawProjectAsBranch (context, *read, [this] (const juce::ValueTree& song) { openBranchSong (song); }, said))
+            showNotice ("Imported " + file.getFileName(),
+                        "It came back as a new branch from the version it was exported from."
+                            + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString (", ") + "."));
+        else
+            showError ("Phazite couldn't import " + file.getFileName(), said.joinIntoString (" "));
+
+        return;
+    }
+
+    // Any other: a new project of its own.
+    if (const auto result = createUntitled (file.getFileNameWithoutExtension(), [read] (Song& song) { takeDawProject (song, *read); });
+        result.failed())
+        showError ("Phazite couldn't import " + file.getFileName(), result.getErrorMessage());
 }
 } // namespace phazite

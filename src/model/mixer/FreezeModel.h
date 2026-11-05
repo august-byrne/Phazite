@@ -78,6 +78,9 @@ public:
     // The render it runs has finished, or one couldn't start: its title ("Freezing Bass"), and what came of it, with why
     // it failed. The host may delete the render here.
     virtual void renderFinished (const juce::String& title, const juce::Result&) = 0;
+
+    // A render that wrote a file for the user (an export as DAWproject) has, after renderFinished(): where it is, to show.
+    virtual void renderWrote (const juce::String& /*title*/, const juce::File&) {}
 };
 
 // The commands' functions, for the selected track (the first, if several are): Freeze Track, or Unfreeze Track on a frozen

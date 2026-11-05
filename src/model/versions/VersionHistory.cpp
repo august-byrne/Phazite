@@ -804,6 +804,35 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
     return branch.id;
 }
 
+juce::String VersionHistory::makeBranchWithSong (const juce::String& fromVersion, const juce::ValueTree& branchSong)
+{
+    const auto id = makeBranch (fromVersion, false);
+
+    if (id.isEmpty())
+        return {};
+
+    const auto pieces = splitSong (branchSong.createCopy());
+
+    if (! store->writeSong (pieces))
+        return {};
+
+    for (auto& branch : branches)
+    {
+        if (branch.id == id)
+        {
+            auto withSong = branch;
+            withSong.working = pieces.song;
+
+            if (! store->writeBranch (withSong))
+                return {};
+
+            branch = withSong;
+        }
+    }
+
+    return id;
+}
+
 juce::ValueTree VersionHistory::leaveFor (const juce::String& branchID)
 {
     followFolder();

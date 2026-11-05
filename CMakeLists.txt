@@ -351,6 +351,7 @@ target_sources(phazite_core PRIVATE
     src/model/presets/PresetModel.h
     src/model/presets/Presets.cpp
     src/model/presets/internal/Presets.h
+    src/model/project/DawProject.cpp
     src/model/project/ExampleSongs.cpp
     src/model/project/ExampleSongs.h
     src/model/project/Export.cpp
@@ -363,6 +364,7 @@ target_sources(phazite_core PRIVATE
     src/model/project/UnsavedProjects.cpp
     src/model/project/UnusedAudio.cpp
     src/model/project/UnusedAudio.h
+    src/model/project/internal/DawProject.h
     src/model/project/internal/ExampleSongs.h
     src/model/project/internal/Export.h
     src/model/project/internal/NewProject.h
@@ -937,6 +939,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ContainerTests.cpp
         tests/ContainerUiTests.cpp
         tests/ControlsTests.cpp
+        tests/DawProjectTests.cpp
         tests/DesignTokenTests.cpp
         tests/DeviceEditorTests.cpp
         tests/DeviceInfoTests.cpp

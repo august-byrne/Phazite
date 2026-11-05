@@ -217,6 +217,13 @@ bool hearVersion (ProjectContext&, const juce::String& versionID);
 juce::String getHeardVersion (const ProjectContext&); // none while the song itself is heard
 juce::String describeHearing (const ProjectContext&); // "Hearing: Verse 2" while a version is heard, for the transport bar
 
+// Export as DAWproject... (step D1; model/project/internal/DawProject.h): the version the Versions view selects, or the song
+// as it is (Now), written as a DAWproject into the project's Renders folder ("<project> - <version>.dawproject"), in the host,
+// which says where it went. What it is called now ("Export "Verse 2" as DAWproject..."), and whether it can be.
+juce::String describeDawProjectExport (const ProjectContext&);
+bool canExportDawProject (const ProjectContext&);
+void exportDawProject (ProjectContext&, TrackRenderHost&);
+
 // The commands on the version the Versions view selects (version.hear: Now while none is; version.bounce: the last while none
 // is; version.deleteBounce), each render ending in the host, as Freeze Track's does.
 void hearSelectedVersion (ProjectContext&);

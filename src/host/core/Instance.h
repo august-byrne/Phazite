@@ -37,6 +37,11 @@ public:
     void prepare (std::unique_ptr<sandbox::BlockChannel>, double sampleRate); // a new channel, for another rate or size
     juce::MemoryBlock getState();
     void setState (const juce::MemoryBlock&);
+
+    // Its state as its format's own preset file, which other hosts read (a VST3's .vstpreset, which JUCE writes with the
+    // plug-in's class ID), or empty for another format; and one taken in, true if the plug-in took it.
+    juce::MemoryBlock getPreset();
+    bool setPreset (const juce::MemoryBlock&);
     void setProgram (int index);
     void setParameter (int index, float value);
     juce::String getParameterText (int index, float value) const;

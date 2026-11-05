@@ -179,6 +179,24 @@ void Instance::setState (const juce::MemoryBlock& state)
     plugin->setStateInformation (state.getData(), (int) state.getSize());
 }
 
+juce::MemoryBlock Instance::getPreset()
+{
+    // What a VST3's format offers of its own (JUCE's VST3 client): its preset, as JUCE writes it.
+    const auto* vst3 = plugin->getVST3Client();
+    return vst3 != nullptr ? vst3->getPreset() : juce::MemoryBlock();
+}
+
+bool Instance::setPreset (const juce::MemoryBlock& preset)
+{
+    auto* vst3 = plugin->getVST3Client();
+
+    if (vst3 == nullptr)
+        return false;
+
+    const juce::ScopedLock held (plugin->getCallbackLock()); // as setState()
+    return vst3->setPreset (preset);
+}
+
 void Instance::setProgram (int index)
 {
     // As a state is given, not while a block plays.

@@ -34,6 +34,7 @@ public:
     // A freeze or a bounce, in a progress window with Cancel; and what came of it, an error if it failed.
     void runRender (std::unique_ptr<TrackRender>) override;
     void renderFinished (const juce::String& title, const juce::Result&) override;
+    void renderWrote (const juce::String& title, const juce::File&) override;
 
     ui::AppShell& getShell() noexcept { return *shell; }
 

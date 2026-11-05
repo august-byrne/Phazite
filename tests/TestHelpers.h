@@ -46,6 +46,10 @@ struct RenderHost : public TrackRenderHost
         finished.add (title + ": " + (result.wasOk() ? juce::String ("ok") : result.getErrorMessage()));
         render = nullptr; // it is calling back, and lets go of itself last
     }
+
+    juce::Array<juce::File> wrote; // the files renders wrote for the user
+
+    void renderWrote (const juce::String&, const juce::File& file) override { wrote.add (file); }
 };
 
 // A folder in the temp directory, deleted again at the end of the test.

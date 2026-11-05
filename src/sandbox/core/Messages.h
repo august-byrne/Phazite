@@ -14,7 +14,7 @@ namespace phazite::sandbox
 // The program's argument that names the pipe it connects to ("--PhaziteSandbox:<pipe>"), and the messages' version,
 // which both sides must have.
 inline constexpr const char* helperProcessID = "PhaziteSandbox";
-inline constexpr std::int32_t protocolVersion = 2;
+inline constexpr std::int32_t protocolVersion = 3;
 
 enum class MessageType : std::int32_t
 {
@@ -34,6 +34,9 @@ enum class MessageType : std::int32_t
     closeEditor,     // instance -> nothing (once it has gone)
     scan,            // a plug-in format's name, a file (or identifier) -> how many plug-ins it holds, and each one's
                      // description (JUCE's XML for it): a plug-in scan, which loads the plug-in's code in the helper
+    getPreset,       // instance -> its state as its format's own preset file, which other hosts read: a VST3's .vstpreset,
+                     // its class ID in it; empty for a plug-in of another format
+    setPreset,       // instance, such a preset file -> whether the plug-in took it
 
     // Phazite's notices.
     quit = 50,     // the helper ends

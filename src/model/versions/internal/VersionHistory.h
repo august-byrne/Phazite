@@ -108,6 +108,10 @@ public:
     // kept on the branch it leaves, and the other branch's song as it was left there (or its last version's), to open in its
     // place: invalid if it can't be. And a branch named anew.
     juce::String makeBranch (const juce::String& fromVersion, bool makeCurrent);
+
+    // A branch from a version, whose song is another (a DAWproject's that came back: model/project/internal/DawProject.h),
+    // kept there as the song left on it, to switch to: its id, or none.
+    juce::String makeBranchWithSong (const juce::String& fromVersion, const juce::ValueTree& song);
     juce::ValueTree leaveFor (const juce::String& branchID);
     bool renameBranch (const juce::String& branchID, const juce::String& name);
     juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to

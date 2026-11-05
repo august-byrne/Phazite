@@ -126,6 +126,12 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
+    // Its state as its format's own preset file, which other hosts read (a VST3's .vstpreset, for DAWproject:
+    // model/project/internal/DawProject.h), within the time a state takes: empty for another format, or a plug-in that
+    // crashed or didn't answer. And one taken in: whether the plug-in took it.
+    juce::MemoryBlock getPreset();
+    bool setPreset (const juce::MemoryBlock&);
+
 private:
     class Parameter;
 

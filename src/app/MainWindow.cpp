@@ -610,6 +610,24 @@ void MainWindow::renderFinished (const juce::String& title, const juce::Result& 
                                   nullptr);
 }
 
+void MainWindow::renderWrote (const juce::String& title, const juce::File& file)
+{
+    // Where it went, and the folder shown on asking.
+    juce::AlertWindow::showAsync (
+        juce::MessageBoxOptions()
+            .withIconType (juce::MessageBoxIconType::InfoIcon)
+            .withTitle (title)
+            .withMessage ("Phazite wrote " + file.getFileName() + " into " + file.getParentDirectory().getFullPathName() + ".")
+            .withButton ("Show in Folder")
+            .withButton ("OK")
+            .withAssociatedComponent (this),
+        [file] (int button)
+        {
+            if (button == 1)
+                file.revealToUser();
+        });
+}
+
 void MainWindow::showProgressions()
 {
     if (progressionsWindow != nullptr)
@@ -821,7 +839,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
     {
         case 0: // File
         {
-            add (menu, { "project.new", "project.open" });
+            add (menu, { "project.new", "project.open", "project.importDawProject" });
 
             juce::PopupMenu recentMenu;
             const auto recent = session.getRecentProjects();
@@ -833,7 +851,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSeparator();
             add (menu, { "project.save", "project.saveAs", "version.save" });
             menu.addSeparator();
-            add (menu, { "project.export" });
+            add (menu, { "project.export", "version.exportDawProject" });
             menu.addSeparator();
             add (menu, { "project.cleanUpAudio" });
             menu.addSeparator();

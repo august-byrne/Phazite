@@ -5,10 +5,12 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/AppInfo.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/Export.h"
+#include "model/project/internal/DawProject.h"
 #include "model/project/internal/Export.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -1133,6 +1135,96 @@ bool canDeleteSelectedBounce (const ProjectContext& context)
     return history != nullptr && (history->hasBounce (selected) || getBounceProgress (context, selected).has_value());
 }
 
+//==============================================================================
+namespace
+{
+    // An old version's song exported as a DAWproject: the song, made for it, kept while it renders.
+    class VersionExport final : public TrackRender::Impl
+    {
+    public:
+        explicit VersionExport (Song::Ptr s)
+            : song (std::move (s))
+        {
+        }
+
+        Song& getSong() const noexcept { return *song; }
+        void setRender (std::unique_ptr<TrackRender> r) { render = std::move (r); }
+        float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
+        juce::String getTitle() const override { return render != nullptr ? render->getTitle() : juce::String(); }
+
+    private:
+        Song::Ptr song;
+        std::unique_ptr<TrackRender> render; // goes before the song
+    };
+
+    // The version selected, or none for Now (the song as it is).
+    const VersionRecord* findVersionToExport (const ProjectContext& context)
+    {
+        const auto* history = findHistory (context);
+        return history != nullptr ? history->findVersion (getSelectedVersion (context)) : nullptr;
+    }
+} // namespace
+
+juce::String describeDawProjectExport (const ProjectContext& context)
+{
+    const auto* version = findVersionToExport (context);
+    return version != nullptr ? "Export \"" + getDisplayName (*version) + "\" as DAWproject..." : juce::String ("Export as DAWproject...");
+}
+
+bool canExportDawProject (const ProjectContext& context)
+{
+    const auto* song = findSong (context);
+    return song != nullptr && song->getFile() != juce::File() && ! isRecording (*song)
+           && (findVersionToExport (context) != nullptr || getSongEnd (*song) > BeatPosition());
+}
+
+void exportDawProject (ProjectContext& context, TrackRenderHost& host)
+{
+    auto* open = findSong (context);
+
+    if (! canExportDawProject (context))
+        return;
+
+    const auto* version = findVersionToExport (context);
+    const auto project = open->getFile().getFileNameWithoutExtension();
+    const auto title = version != nullptr ? "\"" + getDisplayName (*version) + "\"" : project;
+    const auto file = open->getFile().getSiblingFile ("Renders").getChildFile (
+        juce::File::createLegalFileName (version != nullptr ? project + " - " + getDisplayName (*version) : project) + ".dawproject");
+
+    // The version it came from, by which importing it again finds it (step D2).
+    const auto comment = "Exported by " + juce::String (appName) + " " + getVersionString()
+                         + (version != nullptr ? " from the version \"" + getDisplayName (*version) + "\" (" + version->id + ")."
+                                               : juce::String (" from the song as it was."));
+    const auto heading = "Exporting " + title + " as DAWproject";
+    const auto finished = [&host, heading, file] (const juce::Result& result)
+    {
+        host.renderFinished (heading, result); // which may delete the render
+
+        if (result.wasOk())
+            host.renderWrote (heading, file);
+    };
+
+    if (version == nullptr)
+    {
+        host.runRender (startDawProjectExport (*open, nullptr, file, title, comment, finished));
+        return;
+    }
+
+    const auto state = findHistory (context)->readSong (version->id);
+    auto song = state.isValid() ? makeSong (state, open->getFile(), open->getCacheFolder()) : nullptr;
+
+    if (song == nullptr)
+    {
+        host.renderFinished (heading, juce::Result::fail ("Phazite couldn't read " + title + "."));
+        return;
+    }
+
+    auto exporting = std::make_unique<VersionExport> (song);
+    exporting->setRender (
+        startDawProjectExport (exporting->getSong(), &getPluginHost (getEngineContext (context)), file, title, comment, finished));
+    host.runRender (std::make_unique<TrackRender> (std::move (exporting)));
+}
+
 void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen, OpenSong openSong,
                          TrackRenderHost& renders)
 {
@@ -1256,5 +1348,16 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                     .synonyms = { "remove", "free space", "clean up", "delete audio" },
                     .perform = [&context] { deleteSelectedBounce (context); },
                     .isEnabled = [&context] { return canDeleteSelectedBounce (context); } });
+
+    registry.add ({ .id = "version.exportDawProject",
+                    .name = "Export as DAWproject...",
+                    .category = "Project",
+                    .description =
+                        "Writes the selected version, or the song as it is, as a DAWproject file, which Bitwig Studio, Studio One "
+                        "and Cubase open, into the project's Renders folder. What they can't play is bounced beside its notes.",
+                    .synonyms = { "dawproject", "bitwig", "studio one", "cubase", "share", "collaborate", "interchange" },
+                    .perform = [&context, &renders] { exportDawProject (context, renders); },
+                    .isEnabled = [&context] { return canExportDawProject (context); },
+                    .currentName = [&context] { return describeDawProjectExport (context); } });
 }
 } // namespace phazite

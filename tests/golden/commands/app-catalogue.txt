@@ -106,8 +106,10 @@ version.showChanges
 version.hear
 version.bounce
 version.deleteBounce
+version.exportDawProject
 project.export | ctrl + shift + R
 project.cleanUpAudio
+project.importDawProject
 view.commandPalette | ctrl + K
 view.menus | F10
 view.searchBrowser | ctrl + F

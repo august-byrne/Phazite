@@ -167,6 +167,16 @@ void Host::handle (const juce::MemoryBlock& message)
             scan (reader, answer);
             break;
 
+        case MessageType::getPreset:
+            if (auto* instance = findInstance (reader.readInt64()))
+                answer.add (instance->getPreset());
+            break;
+
+        case MessageType::setPreset:
+            if (auto* instance = findInstance (reader.readInt64()))
+                answer.add (instance->setPreset (reader.readBlock()));
+            break;
+
         // Notices: nothing to answer.
         case MessageType::setParameter:
             if (auto* instance = findInstance (reader.readInt64()))
