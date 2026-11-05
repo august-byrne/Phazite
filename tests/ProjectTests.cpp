@@ -129,6 +129,55 @@ TEST_CASE ("A project saves and reopens with Phazite's own data")
     CHECK (reopened->getSong().getCacheFolder() == reopened->getCacheFolder()); // where its frozen files are
 }
 
+TEST_CASE ("The project file holds each property on a line of its own, in the order of their names")
+{
+    namespace schema = phazite::schema;
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Lines");
+    auto state = project->getSong().getState();
+    phazite::ensureTracks (project->getSong(), 2);
+
+    // Set against the order of their names, which the file follows instead.
+    state.setProperty (schema::patternsKeepTheirSpeed, true, nullptr);
+    state.setProperty (schema::outline, "Electronic", nullptr);
+    auto track = phazite::getTrackList (project->getSong()).getChild (0);
+    track.setProperty (schema::trackName, "Bass", nullptr);
+    track.setProperty (schema::channelVolume, -6.0, nullptr);
+    track.setProperty (schema::trackColour, "ff336699", nullptr);
+    REQUIRE (project->save().wasOk());
+
+    for (const auto& line : juce::StringArray::fromLines (project->getFile().loadFileAsString()))
+    {
+        INFO (line.toStdString());
+        CHECK ((line.startsWith ("<?xml") || line.indexOf ("=\"") == line.lastIndexOf ("=\""))); // past the XML declaration
+    }
+
+    const std::function<void (const juce::XmlElement&)> checkOrder = [&checkOrder] (const juce::XmlElement& element)
+    {
+        for (int i = 1; i < element.getNumAttributes(); ++i)
+        {
+            INFO ((element.getTagName() + ": " + element.getAttributeName (i - 1) + ", " + element.getAttributeName (i)).toStdString());
+            CHECK (element.getAttributeName (i - 1).compare (element.getAttributeName (i)) < 0);
+        }
+
+        for (const auto* child : element.getChildIterator())
+            checkOrder (*child);
+    };
+
+    const auto xml = phazite::test::readXml (project->getFile());
+    checkOrder (*xml);
+
+    // And it reads back as it was.
+    const auto file = project->getFile();
+    project = nullptr;
+    auto reopened = openProject (file);
+    const auto reopenedTrack = phazite::getTrackList (reopened->getSong()).getChild (0);
+    CHECK (reopened->getSong().getState()[schema::outline].toString() == "Electronic");
+    CHECK (reopenedTrack[schema::trackName].toString() == "Bass");
+    CHECK (juce::approximatelyEqual ((double) reopenedTrack[schema::channelVolume], -6.0));
+    CHECK_FALSE (reopened->hasUnsavedChanges());
+}
+
 TEST_CASE ("The song numbers its items itself, each new one past every ID it holds, never one twice, and saves where it got to")
 {
     namespace schema = phazite::schema;

@@ -11,6 +11,8 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -42,12 +44,44 @@ namespace
         countIDs (song);
     }
 
-    // Writes a song into a project file, through a temporary file that takes its place once it is whole.
+    // Each element's properties in the order of their names, whatever order they were set in.
+    void sortProperties (juce::XmlElement& element)
+    {
+        std::vector<std::pair<juce::String, juce::String>> properties;
+
+        for (const auto& property : element.getAttributeIterator())
+            properties.emplace_back (property.name.toString(), property.value);
+
+        const auto byName = [] (const auto& a, const auto& b) { return a.first.compare (b.first) < 0; };
+
+        if (! std::is_sorted (properties.begin(), properties.end(), byName))
+        {
+            std::sort (properties.begin(), properties.end(), byName);
+            element.removeAllAttributes();
+
+            for (const auto& [name, value] : properties)
+                element.setAttribute (name, value);
+        }
+
+        for (auto* child : element.getChildIterator())
+            sortProperties (*child);
+    }
+
+    // Writes a song into a project file, through a temporary file that takes its place once it is whole: each property on a
+    // line of its own, in the order of their names, as the golden tests write songs, so that a tool that compares text (git,
+    // say) shows a change as the lines it changed.
     bool writeProjectFile (const juce::ValueTree& song, const juce::File& file)
     {
         const auto xml = song.createXml();
+
+        if (xml == nullptr)
+            return false;
+
+        sortProperties (*xml);
+        juce::XmlElement::TextFormat format;
+        format.lineWrapLength = 0; // a property on each line
         juce::TemporaryFile temporary (file);
-        return xml != nullptr && xml->writeTo (temporary.getFile()) && temporary.overwriteTargetFileWithTemporary();
+        return xml->writeTo (temporary.getFile(), format) && temporary.overwriteTargetFileWithTemporary();
     }
 
     // Makes the folder <parentFolder>/<name>, named as files can be, for a project of that name, or sets error and
