@@ -385,6 +385,18 @@ target_sources(phazite_core PRIVATE
     src/model/transport/internal/Recording.h
     src/model/transport/internal/Take.h
     src/model/transport/internal/Tempo.h
+    src/model/versions/PieceStore.cpp
+    src/model/versions/SongDiff.cpp
+    src/model/versions/SongPieces.cpp
+    src/model/versions/VersionHistory.cpp
+    src/model/versions/VersionStore.cpp
+    src/model/versions/VersionsModel.cpp
+    src/model/versions/VersionsModel.h
+    src/model/versions/internal/PieceStore.h
+    src/model/versions/internal/SongDiff.h
+    src/model/versions/internal/SongPieces.h
+    src/model/versions/internal/VersionHistory.h
+    src/model/versions/internal/VersionStore.h
     # sandbox: what Phazite and the helpers that host plug-ins share, engine-neutral
     src/sandbox/client/Helper.cpp
     src/sandbox/client/Helper.h
@@ -1019,6 +1031,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/UiTestHelpers.h
         tests/UndoTests.cpp
         tests/ValueTextTests.cpp
+        tests/VersionStoreTests.cpp
+        tests/VersionsTests.cpp
         tests/VocoderTests.cpp
         tests/WavetableEditorTests.cpp
         tests/WavetableModelTests.cpp

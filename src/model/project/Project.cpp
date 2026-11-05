@@ -479,6 +479,15 @@ juce::File Project::makeFolderWithFiles (const juce::File& parentFolder, const j
         }
     }
 
+    // Its versions (model/versions/), if it keeps any: a copy of a project is a copy with its past.
+    if (const auto versions = getFolder().getChildFile ("Versions");
+        versions.isDirectory() && ! versions.copyDirectoryTo (folder.getChildFile ("Versions")))
+    {
+        folder.deleteRecursively();
+        error = "Phazite couldn't copy the project's versions.";
+        return {};
+    }
+
     folder.getChildFile ("Backups").createDirectory();
     return folder.getChildFile (folder.getFileName() + fileExtension);
 }
@@ -569,7 +578,7 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
 
     const auto state = song->getState();
 
-    if (! (tree == state || tree.isAChildOf (state)) || ! isCounted (tree, property))
+    if (! (tree == state || tree.isAChildOf (state)) || ! schema::isCounted (tree, property))
         return;
 
     if (changedSinceSave)
@@ -593,37 +602,8 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
 
 void Project::markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child)
 {
-    if (! isUncountedElement (parent, child))
+    if (! schema::isUncountedElement (parent, child))
         markChanged (parent);
-}
-
-bool Project::isUncountedProperty (const juce::ValueTree& tree, const juce::Identifier& property)
-{
-    return (tree.hasType (schema::TRACK) && schema::isTrackViewProperty (property))
-           || (tree.hasType (schema::DEVICE) && schema::isDeviceViewProperty (property))
-           || (tree.hasType (schema::PHAZITE)
-               && (schema::isGridProperty (property) || property == schema::nextID || property == schema::loopFollowsSong
-                   || property == schema::punch || property == schema::lastInput || property == schema::loop
-                   || property == schema::loopStart || property == schema::loopEnd || property == schema::playStart
-                   || property == schema::metronome));
-}
-
-bool Project::isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)
-{
-    return (parent.hasType (schema::PHAZITE) && element.hasType (schema::PIANOROLL))
-           || ((parent.hasType (schema::TRACK) || parent.hasType (schema::MASTER)) && schema::isTrackViewElement (element));
-}
-
-bool Project::isCounted (const juce::ValueTree& tree, const juce::Identifier& property)
-{
-    if (isUncountedProperty (tree, property))
-        return false;
-
-    for (auto element = tree; element.isValid(); element = element.getParent())
-        if (isUncountedElement (element.getParent(), element))
-            return false;
-
-    return true;
 }
 
 bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTree& b)
@@ -638,7 +618,7 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTre
     {
         const auto name = a.getPropertyName (i);
 
-        if (isUncountedProperty (a, name))
+        if (schema::isUncountedProperty (a, name))
             continue;
 
         const auto* other = b.getPropertyPointer (name);
@@ -650,7 +630,7 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTre
     }
 
     for (int i = 0; i < b.getNumProperties(); ++i)
-        if (! isUncountedProperty (b, b.getPropertyName (i)))
+        if (! schema::isUncountedProperty (b, b.getPropertyName (i)))
             --numCounted;
 
     if (numCounted != 0)
@@ -659,10 +639,10 @@ bool Project::holdTheSameProject (const juce::ValueTree& a, const juce::ValueTre
     // The counted elements, in the same order, holding the same.
     for (int i = 0, j = 0;; ++i, ++j)
     {
-        while (i < a.getNumChildren() && isUncountedElement (a, a.getChild (i)))
+        while (i < a.getNumChildren() && schema::isUncountedElement (a, a.getChild (i)))
             ++i;
 
-        while (j < b.getNumChildren() && isUncountedElement (b, b.getChild (j)))
+        while (j < b.getNumChildren() && schema::isUncountedElement (b, b.getChild (j)))
             ++j;
 
         if (i == a.getNumChildren() || j == b.getNumChildren())

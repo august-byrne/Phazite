@@ -16,6 +16,7 @@ class ClipRenders;
 class EngineContext;
 class PlaybackSession;
 class ProjectContext;
+class VersionHistory;
 struct Clipboard;
 
 Song* findSong (const ProjectContext&); // the open project's song, or nullptr while none is open
@@ -38,6 +39,9 @@ ClipRenders* getClipRenders (const ProjectContext&);
 
 // What Cut and Copy keep for Paste (model/arrangement/internal/Clipboard.h), of the open song: empty after another opens.
 Clipboard& getClipboard (ProjectContext&);
+
+// The open song's versions (model/versions/internal/VersionHistory.h): nullptr while no project is open.
+VersionHistory* getVersionHistory (const ProjectContext&);
 
 // The song open now, or none: ProjectSession's (and tests'), which its project owns, and which outlives its being open
 // here. Nothing of the previous song stays selected, and the clipboard is empty. Then tells the listeners.

@@ -38,6 +38,8 @@ Song::Ptr makeSong (const juce::ValueTree& state, const juce::File& file = {}, c
 //   Cache/           what Phazite can make again: frozen tracks' files (model/mixer/internal/Freeze.h) and renders of
 //                    stretched audio clips (the song's cache folder). Closing the project deletes what nothing in it uses
 //                    any more.
+//   Versions/        the versions of the song the user saved, and their branches (model/versions/; Schema.h:
+//                    schema::versions), once there is one
 //
 // Create, open and destroy Projects on the message thread.
 class Project : private juce::ValueTree::Listener
@@ -139,7 +141,7 @@ private:
     bool compareAll = false;
 
     // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated, Renders and Cache folders, and
-    // returns the project file that goes in it. If the name is empty, the folder exists or something can't be written, sets
+    // of its Versions if it keeps any, and returns the project file that goes in it. If the name is empty, the folder exists or something can't be written, sets
     // error and returns nothing, leaving nothing behind.
     juce::File makeFolderWithFiles (const juce::File& parentFolder, const juce::String& name, juce::String& error) const;
     void setFile (const juce::File&); // the project file from now on, the song's too
@@ -150,17 +152,9 @@ private:
     void markChanged (const juce::ValueTree&, const juce::Identifier& property = {});
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
 
-    // These don't count as changes: the loop (where it is, whether it is on, and whether it follows the song), the
-    // metronome's switch and where playback starts, which are about playing the song rather than the song (design question
-    // 18); nor does the song's next ID (Schema.h: nextID), which the item it numbers comes with; nor do view settings,
-    // which are saved but aren't the song (decision 4: schema::isTrackViewProperty(), isGridProperty(), PIANOROLL, and
-    // isDeviceViewProperty(), where a device's window was, since step 2.12). A property (isUncountedProperty()), or an
-    // element with everything in it (isUncountedElement()): notifications and the comparison with savedState leave out the
-    // same. A plug-in's own change (its settings, which a save stores in the song) counts, as the song counts it
-    // (Song::markChangedOutsideHistory()).
-    static bool isUncountedProperty (const juce::ValueTree&, const juce::Identifier& property);
-    static bool isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element);
-    static bool isCounted (const juce::ValueTree&, const juce::Identifier& property);
+    // What isn't a change (Schema.h: schema::isUncountedProperty() and isUncountedElement(): view state, how the song plays,
+    // its next ID) is left out of notifications and of the comparison with savedState alike. A plug-in's own change (its
+    // settings, which a save stores in the song) counts, as the song counts it (Song::markChangedOutsideHistory()).
     static bool holdTheSameProject (const juce::ValueTree&, const juce::ValueTree&);
 
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override { markChanged (tree, property); }

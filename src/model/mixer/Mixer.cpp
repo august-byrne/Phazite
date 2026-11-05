@@ -248,8 +248,11 @@ bool needsInstrument (const Song& song, TrackID track)
 
 juce::String getDeviceName (const Song& song, DeviceID id)
 {
-    const auto state = findDeviceState (song, id);
+    return getDeviceName (findDeviceState (song, id));
+}
 
+juce::String getDeviceName (const juce::ValueTree& state)
+{
     if (isContainerState (state))
         return state[schema::containerName].toString();
 

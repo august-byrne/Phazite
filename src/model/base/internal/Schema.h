@@ -356,8 +356,8 @@ inline const juce::Identifier pointBeat { "beat" };
 inline const juce::Identifier pointValue { "value" };
 inline const juce::Identifier pointCurve { "curve" };
 
-// View settings: saved, written without undo steps, and not unsaved changes (decision 4; Project's isUncountedProperty()
-// and isUncountedElement()): on tracks, their heights, collapsed and pinned, drum mode and rows, and their automation
+// View settings: saved, written without undo steps, and not unsaved changes (decision 4; isUncountedProperty() and
+// isUncountedElement(), below): on tracks, their heights, collapsed and pinned, drum mode and rows, and their automation
 // lanes (the master's too); on PHAZITE, the playlist's grid; on devices (DEVICE), where their windows were. PIANOROLL and
 // LANE hold view settings only. Keep these lists exact: anything else a project holds is song or state.
 inline bool isTrackViewProperty (const juce::Identifier& p)
@@ -380,6 +380,100 @@ inline bool isTrackViewElement (const juce::ValueTree& element)
 {
     return element.hasType (LANE);
 }
+
+// What a project saves that is no change to it: view state (above); how the song plays rather than the song (design question
+// 18): the loop (where it is, whether it is on, and whether it follows the song), the metronome's switch, where playback
+// starts, the punch and the input chosen last; and the song's next ID (nextID), which the item it numbers comes with. As a
+// property (isUncountedProperty()), or as an element with everything in it (isUncountedElement()). A project's unsaved
+// changes (model/project/internal/Project.h) and the versions' differences (model/versions/) leave out the same.
+bool isUncountedProperty (const juce::ValueTree&, const juce::Identifier& property);
+bool isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element);
+
+// Whether a property of an element, or the element itself with everything in it, counts: not uncounted, nor in an
+// uncounted element.
+bool isCounted (const juce::ValueTree&, const juce::Identifier& property);
+
+//==============================================================================
+// How the versions (model/versions/) compare two songs, merge them, and make one like the other.
+
+// What tells an element of one song for the same element of another, among its parent's children: its type and its key.
+// An item by its ID (each kind's is named "id": TRACK, MASTER, DEVICE, CONTAINER, SEND, MODULATOR, MACRO, CLIP, NOTE,
+// SECTION); a curve, a lane and a modulation by their device and parameter; a plug-in's VALUE by its parameter; a tempo,
+// a time signature, a chord and a key by where they start; and an element there is one of in its parent (TEMPOMAP, TRACKS,
+// VALUES, SOUNDS...) by its type alone. Empty for what has no key of its own: a curve's points and a clip's controller
+// events, which their parent's elements of that kind hold as a whole.
+juce::String getElementKey (const juce::ValueTree&);
+
+// Whether the order of an element among its parent's elements means something, and which order it is in: the same name
+// for the elements of one order ("chain" for a track's or a container's devices and containers, in the order its sound goes
+// through them), and empty for those in no particular order (clips, notes, curves, sections, chords, tempos).
+juce::String getOrderGroup (const juce::ValueTree&);
+
+// The properties that hold an ID of the song's: an item's own (each kind's "id", a note's too), a channel's fader and VCA,
+// and an alias group (clipLink). And those that name one: a send's return (sendTo), a device's sidechain, and a lane's, a
+// curve's and a modulation's device. What a copy gives anew and renames to match (giveNewIDs()), and so does a merge for
+// what the other branch added.
+bool holdsID (const juce::ValueTree&, const juce::Identifier& property);
+bool namesID (const juce::ValueTree&, const juce::Identifier& property);
+
+//==============================================================================
+// The project's versions (model/versions/; docs/versions.md): the song as it was at each version the user saved, and its
+// branches, in the project's Versions folder. Nothing written there changes again, but a branch's file and the name of the
+// current branch, which are replaced whole.
+//
+//   Versions/
+//     pieces/<name>.pack   pieces, written together as a version is saved (model/versions/internal/PieceStore.h)
+//     branches/<id>.xml    a branch (BRANCH)
+//     current              the current branch's id
+//     files.xml            what each audio file the song plays hashes to (FILES), so that each is read once
+//
+// A piece is named by the SHA-256 of what it holds, in hexadecimal. It holds an element of the song as XML (UTF-8): its
+// properties in the order of their names, its children in their order, and nothing between them. Its tracks, clips,
+// devices, containers and curves are pieces of their own, each a PIECE in its place; a clip's many notes and a curve's
+// many points are in runs (RUN), each a piece of its own; and a plug-in's state is a piece of its own, in its bytes
+// (model/versions/internal/SongPieces.h). So a version stores only the pieces no version before it has.
+namespace versions
+{
+    // An element that is a piece of its own, in its place, by its name (piece); a run of notes or points, likewise.
+    inline const juce::Identifier PIECE { "PIECE" };
+    inline const juce::Identifier RUN { "RUN" };
+    inline const juce::Identifier piece { "piece" };
+
+    // On a plug-in's DEVICE in a piece, in place of its state (pluginState): the piece of the state's bytes. And the piece
+    // of its parameters' values as the plug-in told them when the version was saved (PARAMETERS: a PARAMETER for each, with
+    // its ID, the plug-in's own, its name and its value from 0 to 1), which the changes name the knobs by, as the state's
+    // bytes say nothing to anyone but the plug-in. Not part of the song.
+    inline const juce::Identifier statePiece { "statePiece" };
+    inline const juce::Identifier parametersPiece { "parametersPiece" };
+    inline const juce::Identifier PARAMETERS { "PARAMETERS" };
+    inline const juce::Identifier PARAMETER { "PARAMETER" };
+    inline const juce::Identifier parameterID { "id" }, parameterName { "name" }, parameterValue { "value" };
+
+    // A version, a piece of its own, named by its piece's name: its song's piece (song); the versions it follows (parents:
+    // one, or two for a merge, separated by spaces; none for the first); its name and note, as the user gave them, or none;
+    // the summary of its changes, which names it while it has no name of its own; when it was saved (saved, milliseconds
+    // since 1970); the branch it was saved on (branch: the branch's id); and the Phazite that saved it (phazite: its
+    // version, model/engine/AppInfo.h). With a FILE for each audio file its song plays: its path (as clipFile holds it),
+    // its size in bytes, and the SHA-256 of what it holds (sha256).
+    inline const juce::Identifier VERSION { "VERSION" };
+    inline const juce::Identifier versionSong { "song" }, versionParents { "parents" }, versionName { "name" }, versionNote { "note" },
+        versionSummary { "summary" }, versionSaved { "saved" }, versionBranch { "branch" }, versionPhazite { "phazite" };
+    inline const juce::Identifier FILE { "FILE" };
+    inline const juce::Identifier filePath { "path" }, fileSize { "size" }, fileHash { "sha256" };
+
+    // A branch, in a file of its own: its id (a juce::Uuid's 32 hexadecimal digits), its name and its color (as
+    // juce::Colour::toString() writes it), its last version (head; none before its first), and the song as it was left there
+    // when another branch was switched to (working: the song's piece, view state included; none while it is the current
+    // branch).
+    inline const juce::Identifier BRANCH { "BRANCH" };
+    inline const juce::Identifier branchID { "id" }, branchName { "name" }, branchColour { "colour" }, branchHead { "head" },
+        branchWorking { "working" };
+
+    // files.xml: FILES, with a FILE for each audio file read, its path, size and sha256 as a version's, and when it was last
+    // written (modified: milliseconds since 1970), by which a file read before is known again.
+    inline const juce::Identifier FILES { "FILES" };
+    inline const juce::Identifier fileModified { "modified" };
+} // namespace versions
 
 //==============================================================================
 // The song's sections (model/arrangement/internal/Sections.h; docs/design.md, section 6): named, colored parts of the
@@ -703,4 +797,9 @@ void countIDs (Song&);
 // the copy names them (the song's automation: model/automation/internal/Automation.h, copyCurves()).
 using CopiedIDs = std::map<std::uint64_t, std::uint64_t>;
 CopiedIDs giveNewIDs (Song&, juce::ValueTree& copy);
+
+// An ID as a property holds or names it (schema::holdsID(), namesID()), and another written as that one was: a device that
+// a lane, a curve or a modulation names is text ("1042"), the other IDs numbers.
+std::uint64_t readID (const juce::var&);
+juce::var writeIDLike (const juce::var& old, std::uint64_t id);
 } // namespace phazite

@@ -13,6 +13,7 @@
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "model/versions/internal/VersionHistory.h"
 
 namespace phazite
 {
@@ -230,6 +231,7 @@ struct ProjectContext::Impl
     std::unique_ptr<ClipRenders> clipRenders;      // renders what the clips play stretched, pitched or reversed
     std::unique_ptr<AutomationWatcher> automation; // the parameter touched last
     std::unique_ptr<PlaybackSession> playback;     // the song as Phazite's engine plays it
+    std::unique_ptr<VersionHistory> versions;      // the project's versions, beside its file
     DeviceWindowHost* windows = nullptr;           // what shows the devices' windows, the app's
     Clipboard clipboard;                           // what Cut and Copy keep for Paste
     std::unique_ptr<SongWatcher> songWatcher;
@@ -237,6 +239,7 @@ struct ProjectContext::Impl
 
     void dropSong()
     {
+        versions = nullptr; // a version being written is finished first
         playback = nullptr;
         automation = nullptr;
         clipRenders = nullptr; // its renders stopped
@@ -352,6 +355,11 @@ Clipboard& getClipboard (ProjectContext& context)
     return context.getImpl().clipboard;
 }
 
+VersionHistory* getVersionHistory (const ProjectContext& context)
+{
+    return context.getImpl().versions.get();
+}
+
 void setDeviceWindows (ProjectContext& context, DeviceWindowHost* windows)
 {
     context.getImpl().windows = windows;
@@ -385,6 +393,8 @@ void setSong (ProjectContext& context, Song* song)
         impl.clipRenders = std::make_unique<ClipRenders> (*song);
         impl.automation = std::make_unique<AutomationWatcher> (*song);
         impl.playback = std::make_unique<PlaybackSession> (*song, getPlaybackHost (impl.engine));
+        impl.versions = std::make_unique<VersionHistory> (
+            *song, [&impl] { impl.listeners.call ([] (ProjectContext::Listener& l) { l.versionsChanged(); }); });
     }
 
     impl.songWatcher->setState (song != nullptr ? song->getState() : juce::ValueTree());

@@ -45,6 +45,10 @@ public:
         virtual ~Listener() = default;
         virtual void projectChanged() = 0;
         virtual void songChanged (const SongChanges&) {}
+
+        // The project's versions, its branches or the changes since its last version may have changed
+        // (model/versions/VersionsModel.h): at most a few times a second.
+        virtual void versionsChanged() {}
     };
 
     // Plays the song it holds on an engine context, which outlives it (model/engine/internal/EngineContext.h).

@@ -54,8 +54,10 @@ TrackID getDeviceChannel (const Song&, DeviceID);
 // True if a track has notes but no instrument to play them, so they make no sound.
 bool needsInstrument (const Song&, TrackID);
 
-// A device's name: one of Phazite's own devices' (its type's), a container's own, or a plug-in's.
+// A device's name: one of Phazite's own devices' (its type's), a container's own, or a plug-in's; by its ID in the song, or
+// from its element.
 juce::String getDeviceName (const Song&, DeviceID);
+juce::String getDeviceName (const juce::ValueTree& deviceState);
 
 // Whether a device has a window of its own (app/PluginWindow.h): a plug-in; not one of Phazite's own devices, nor a
 // container, which the Devices view shows. And whether one of Phazite's own devices (not a container) can show in a

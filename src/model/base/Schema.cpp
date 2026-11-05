@@ -56,19 +56,19 @@ CopiedIDs giveNewIDs (Song& song, juce::ValueTree& copy)
 {
     CopiedIDs copied;
 
-    // Each kind of item's ID is named "id" (schema::trackID, clipID, deviceID, sendID, modulatorID), as a note's is, which
-    // keeps its own; a channel's fader and VCA are named after them.
+    // What holds an ID (schema::holdsID()), but a note's, which a copy of its clip keeps, and an alias group's, which the
+    // copies join.
     const std::function<void (juce::ValueTree)> renumber = [&] (juce::ValueTree tree)
     {
         if (tree.hasType (schema::NOTE))
             return;
 
-        for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
+        for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA }) // in the order they are given
         {
-            if (const auto* old = tree.getPropertyPointer (*property))
+            if (const auto* old = tree.getPropertyPointer (*property); old != nullptr && schema::holdsID (tree, *property))
             {
                 const auto id = song.makeID();
-                copied[(std::uint64_t) (juce::int64) *old] = id;
+                copied[readID (*old)] = id;
                 tree.setProperty (*property, (juce::int64) id, nullptr);
             }
         }
@@ -77,23 +77,18 @@ CopiedIDs giveNewIDs (Song& song, juce::ValueTree& copy)
             renumber (child);
     };
 
-    // A lane, a modulation and a sidechain name what they show, modulate or listen to: the copy's own if it holds it.
+    // What names one (schema::namesID()): a lane, a modulation and a sidechain name what they show, modulate or listen to,
+    // the copy's own if it holds it.
     const std::function<void (juce::ValueTree)> rename = [&] (juce::ValueTree tree)
     {
-        const auto renameDevice = [&] (const juce::Identifier& property)
+        for (int i = 0; i < tree.getNumProperties(); ++i)
         {
-            if (const auto found = copied.find ((std::uint64_t) tree[property].toString().getLargeIntValue()); found != copied.end())
-                tree.setProperty (property, juce::String ((juce::int64) found->second), nullptr);
-        };
+            const auto property = tree.getPropertyName (i);
 
-        if (tree.hasType (schema::LANE))
-            renameDevice (schema::laneDevice);
-        else if (tree.hasType (schema::MODULATES))
-            renameDevice (schema::modulatesDevice);
-
-        if (const auto* source = tree.getPropertyPointer (schema::deviceSidechain))
-            if (const auto found = copied.find ((std::uint64_t) (juce::int64) *source); found != copied.end())
-                tree.setProperty (schema::deviceSidechain, (juce::int64) found->second, nullptr);
+            if (schema::namesID (tree, property))
+                if (const auto found = copied.find (readID (tree[property])); found != copied.end())
+                    tree.setProperty (property, writeIDLike (tree[property], found->second), nullptr);
+        }
 
         for (const auto& child : tree)
             rename (child);
@@ -103,4 +98,125 @@ CopiedIDs giveNewIDs (Song& song, juce::ValueTree& copy)
     rename (copy);
     return copied;
 }
+
+std::uint64_t readID (const juce::var& value)
+{
+    return (std::uint64_t) value.toString().getLargeIntValue();
+}
+
+juce::var writeIDLike (const juce::var& old, std::uint64_t id)
+{
+    // A device named by a lane, a curve or a modulation is text ("1042"); the other IDs are numbers.
+    return old.isString() ? juce::var (juce::String ((juce::int64) id)) : juce::var ((juce::int64) id);
+}
+
+namespace schema
+{
+    bool isUncountedProperty (const juce::ValueTree& tree, const juce::Identifier& property)
+    {
+        return (tree.hasType (TRACK) && isTrackViewProperty (property)) || (tree.hasType (DEVICE) && isDeviceViewProperty (property))
+               || (tree.hasType (PHAZITE)
+                   && (isGridProperty (property) || property == nextID || property == loopFollowsSong || property == punch
+                       || property == lastInput || property == loop || property == loopStart || property == loopEnd || property == playStart
+                       || property == metronome));
+    }
+
+    bool isUncountedElement (const juce::ValueTree& parent, const juce::ValueTree& element)
+    {
+        return (parent.hasType (PHAZITE) && element.hasType (PIANOROLL))
+               || ((parent.hasType (TRACK) || parent.hasType (MASTER)) && isTrackViewElement (element));
+    }
+
+    bool isCounted (const juce::ValueTree& tree, const juce::Identifier& property)
+    {
+        if (isUncountedProperty (tree, property))
+            return false;
+
+        for (auto element = tree; element.isValid(); element = element.getParent())
+            if (isUncountedElement (element.getParent(), element))
+                return false;
+
+        return true;
+    }
+
+    namespace
+    {
+        // Where something starts, in beats, as a key: the same beat however it was written ("4", "4.0").
+        juce::String beatKey (const juce::var& beat)
+        {
+            return juce::String ((double) beat, 6);
+        }
+
+        bool isItem (const juce::ValueTree& element)
+        {
+            for (const auto* type : { &TRACK, &DEVICE, &CONTAINER, &SEND, &MODULATOR, &MACRO, &CLIP, &NOTE, &SECTION })
+                if (element.hasType (*type))
+                    return true;
+
+            return false;
+        }
+    } // namespace
+
+    juce::String getElementKey (const juce::ValueTree& element)
+    {
+        if (isItem (element))
+            return element[trackID].toString(); // each kind's ID is named "id"
+
+        if (element.hasType (CURVE))
+            return element[curveDevice].toString() + "/" + element[curveParameter].toString();
+
+        if (element.hasType (LANE))
+            return element[laneDevice].toString() + "/" + element[laneParameter].toString();
+
+        if (element.hasType (MODULATES))
+            return element[modulatesDevice].toString() + "/" + element[modulatesParameter].toString();
+
+        if (element.hasType (VALUE))
+            return element[valueParameter].toString();
+
+        if (element.hasType (TEMPO) || element.hasType (TIMESIGNATURE))
+            return beatKey (element[mapBeat]);
+
+        if (element.hasType (CHORD) || element.hasType (CHORDKEY))
+            return beatKey (element[chordStart]);
+
+        if (element.hasType (POINT) || element.hasType (CONTROL))
+            return {};
+
+        return element.getType().toString(); // one of its kind in its parent: MASTER, TEMPOMAP, TRACKS, VALUES...
+    }
+
+    juce::String getOrderGroup (const juce::ValueTree& element)
+    {
+        if (element.hasType (TRACK))
+            return "tracks";
+
+        if (element.hasType (DEVICE) || element.hasType (CONTAINER))
+            return "chain";
+
+        for (const auto* type : { &SEND, &MODULATOR, &MACRO, &MODULATES, &POINT, &CONTROL, &LANE })
+            if (element.hasType (*type))
+                return type->toString();
+
+        return {};
+    }
+
+    bool holdsID (const juce::ValueTree& element, const juce::Identifier& property)
+    {
+        if (property == trackID) // each kind's ID is named "id"
+            return isItem (element) || element.hasType (MASTER);
+
+        if (property == channelFader || property == channelVCA)
+            return element.hasType (TRACK) || element.hasType (MASTER);
+
+        return property == clipLink && element.hasType (CLIP);
+    }
+
+    bool namesID (const juce::ValueTree& element, const juce::Identifier& property)
+    {
+        return (element.hasType (SEND) && property == sendTo) || (element.hasType (DEVICE) && property == deviceSidechain)
+               || (element.hasType (LANE) && property == laneDevice) || (element.hasType (CURVE) && property == curveDevice)
+               || (element.hasType (MODULATES) && property == modulatesDevice);
+    }
+} // namespace schema
 } // namespace phazite
