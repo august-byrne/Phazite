@@ -353,15 +353,17 @@ inline juce::Colour getChangeColour (ChangeKind kind, ThemeName theme)
     // clang-format on
 }
 
-// What pops up over the window, a menu or a list such as the command search: a little translucent, as VS Code's menus are,
-// so that what is behind shows faintly through (VS Code blurs it too, which JUCE can't); opaque in the high contrast theme;
-// rounded (cardCornerRadius), outlined in the border colour, over a soft shadow this wide and dark. A menu as VS Code's: at
-// least so wide, its items so tall, each inset from its sides with its own corners (itemCornerRadius), the one highlighted in a
-// wash of the focus colour outlined in it, its text and its shortcut, fainter, this far from its ends; its separators' rows
-// so tall. And a picker's list (ui/versions/BranchPicker.h): its width, its rows and how many show at once, and its icons.
+// What pops up over the window, a menu, a tooltip or a list such as the command search, on frosted glass as VS Code's are
+// (ui/theme/Popups.h): what is behind it blurred this much (CSS's blur(12px), a standard deviation), under the popup's own
+// colour at this opacity (workbench.modernUIFrostedGlassOpacity's default), the blur worked out at this fraction of the
+// screen's resolution, which it hides; solid where it isn't frosted. Rounded (cardCornerRadius), outlined in the border
+// colour, over a soft shadow this wide and dark. A menu as VS Code's: at least so wide, its items so tall, each inset from
+// its sides with its own corners (itemCornerRadius), the one highlighted in a wash of the focus colour outlined in it, its
+// text and its shortcut, fainter, this far from its ends; its separators' rows so tall. And a picker's list
+// (ui/versions/BranchPicker.h): its width, its rows and how many show at once, and its icons.
 namespace Popup
 {
-    inline constexpr float backgroundAlpha = 0.92f;
+    inline constexpr float frostBlur = 12.0f, frostTint = 0.8f, frostResolution = 0.25f;
     inline constexpr int shadowRadius = 12;
     inline constexpr float shadowAlpha = 0.36f;
     inline constexpr int menuMinimumWidth = 160, itemHeight = 24, itemInset = 4, itemTextInset = 12, separatorHeight = 9;

@@ -13,6 +13,7 @@
 #include "ui/shell/SettingsPanel.h"
 #include "ui/shell/Welcome.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <optional>
 
@@ -68,7 +69,9 @@ private:
     std::unique_ptr<DeviceWindows> deviceWindows; // the open project's devices' windows, which use the keys above
     ui::AppShell* shell = nullptr;                // owned by the window as its content
 
-    std::unique_ptr<juce::TooltipWindow> tooltipWindow; // hover help; null when it is turned off
+    // Hover help: tips inside this window, on frosted glass, and those of the other windows (ui::Tooltips); null when it is
+    // turned off.
+    std::unique_ptr<ui::Tooltips> tipsInside, tipsElsewhere;
     juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow, progressionsWindow,
         renderWindow, cleanUpWindow;
     juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;

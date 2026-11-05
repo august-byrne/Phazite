@@ -520,3 +520,38 @@ from the `windows-profile` build on the owner's PC (section 1 says which), and w
 - *The whole start.* Timed by hand from a double-click to a window that plays, with Task Manager or a stopwatch, on the owner's PC and on a laptop: everything Phazite does itself takes under 0.2 s, so what is left is the process, Windows and the audio device.
 
 The benchmark of starting up and of the window at rest is in `tests/Benchmarks.cpp` ("Benchmark: starting up, and the window at rest"); it waits for messages as the app's message loop does (`waitForMessages()` in `tests/host/ThreadCpu.h`), so that the tests' own loop, which wakes every 5 ms, isn't counted.
+
+## 14. JUCE 9 and frosted glass (2026-11-05)
+
+The owner asked whether JUCE 9 helps the drawing load, then for the upgrade and for VS Code's frosted glass (the decision
+log in [design.md](design.md)). JUCE 9.0.5 replaced a JUCE 8.0.13 develop commit. It draws on the graphics card nowhere
+that JUCE 8 didn't: Windows already drew through Direct2D, macOS still draws with CoreGraphics, and Linux with JUCE's
+software renderer. JUCE 9 made that software renderer faster (it vectorised its pixel code). The UI benchmarks paint with
+the software renderer (section 1), so they show its speed-up. Measured with `phazite_tests.exe --test-suite=benchmark
+--no-skip` from the `windows-profile` build, before and after the upgrade:
+
+| `windows-profile` | JUCE 8.0.13 | JUCE 9.0.5 |
+|---|---|---|
+| The whole window painted, 16 tracks, 256 clips, 16,384 notes | 12.9 ms | 11.9 ms |
+| An 11-px column of the window, as a playhead repaints | 0.73 ms | 0.68 ms |
+| The playlist painted, 100 tracks, 2,400 clips and 38,400 notes | 1.45 to 1.51 ms | 1.04 to 1.11 ms |
+| A clip moved a beat: the UI thread's work | 3.54 ms | 3.16 ms |
+| The services, the commands and the window's content, at startup | 16.7 ms | 12.7 ms |
+
+The rest moved within the runs' spread. The CPU at rest varies from run to run on this PC: 0.6 to 3.8 % of a core for the
+process on JUCE 9, in consecutive runs, and nothing asked to repaint.
+
+**Frosted glass** (`src/ui/theme/Popups.h`). As a popup opens or moves, its glass takes what is behind it once: it
+paints that area at the screen's resolution, shrinks it four times, blurs it with three box blurs each way, and makes
+images of the screen's kind (Direct2D's on Windows). After that, each repaint of the popup draws the two images. From
+"Benchmark: frosted glass behind popups over a big song", over the song of the UI's work above, at 100 %:
+
+| A popup | Taken as it opens | The glass painted |
+|---|---|---|
+| A tooltip, 220 x 30 | 0.33 ms | 1.13 ms |
+| A menu, 220 x 320 | 1.73 ms | 0.69 ms |
+| The command search, 530 x 480 | 4.71 ms | 1.08 ms |
+
+Each "painted" figure includes making a Direct2D context and finishing it, which a window's repaint does once for
+everything it draws. What is behind a popup doesn't repaint with it, because the glass is opaque. Before, a menu was a
+translucent window of its own on the desktop, which Windows composited at each repaint.

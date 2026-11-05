@@ -197,41 +197,26 @@ namespace
     };
 } // namespace
 
-namespace
+ScopedDisplay::ScopedDisplay()
 {
-    // While a test mouse lets go, JUCE has a display, as a screen gives, where the machine has none (Linux CI's): a drag let
-    // go fades its image out through a copy of it, which JUCE's animator scales for the display it is on, and with none it
-    // read nothing and crashed (2026-11-01). Only then: otherwise the machine is one without a screen, as it is
-    // (Desktop::isHeadless()), to what asks, such as code that turns the screen saver off, which without a screen crashes.
-    class DisplayWhileReleasing
-    {
-    public:
-        DisplayWhileReleasing()
-        {
-            if (! displays.displays.isEmpty())
-                return;
+    if (! displays.displays.isEmpty())
+        return;
 
-            juce::Displays::Display screen;
-            screen.isMain = true;
-            screen.logicalBounds = screen.userBounds = { 0.0f, 0.0f, 1920.0f, 1080.0f };
-            screen.physicalBounds = { 0, 0, 1920, 1080 };
-            screen.scale = 1.0;
-            screen.dpi = 96.0;
-            displays.displays.add (screen);
-            added = true;
-        }
+    juce::Displays::Display screen;
+    screen.isMain = true;
+    screen.logicalBounds = screen.userBounds = { 0.0f, 0.0f, 1920.0f, 1080.0f };
+    screen.physicalBounds = { 0, 0, 1920, 1080 };
+    screen.scale = 1.0;
+    screen.dpi = 96.0;
+    displays.displays.add (screen);
+    added = true;
+}
 
-        ~DisplayWhileReleasing()
-        {
-            if (added)
-                displays.displays.clear();
-        }
-
-    private:
-        juce::Displays& displays = const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays());
-        bool added = false;
-    };
-} // namespace
+ScopedDisplay::~ScopedDisplay()
+{
+    if (added)
+        displays.displays.clear();
+}
 
 TestWindow::TestWindow (juce::Component& content, int width, int height)
 {
@@ -358,7 +343,7 @@ void Mouse::dragTo (juce::Point<int> where)
 void Mouse::release()
 {
     button = {};
-    const DisplayWhileReleasing display;
+    const ScopedDisplay display; // a drag let go fades its image out on its display
     send (position, keys);
     keys = {};
     juce::ModifierKeys::currentModifiers = {};

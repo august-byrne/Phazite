@@ -2,6 +2,7 @@
 #include "BranchPicker.h"
 #include "VersionsView.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 
@@ -15,7 +16,6 @@ BranchPicker::BranchPicker (CommandBridge& bridge, ProjectContext& projectContex
 {
     const auto renaming = mode == Mode::rename;
     setTitle (renaming ? "Rename the branch" : "Branches");
-    getProperties().set (LookAndFeel::popupListProperty, true); // translucent, as menus are
 
     searchField.setTitle (renaming ? "The branch's new name" : "Search the branches, or name a new one");
     searchField.setTextToShowWhenEmpty (renaming ? "The branch's new name" : "Select a branch to checkout, or type a new branch's name",
@@ -51,6 +51,9 @@ void BranchPicker::show (CommandBridge& bridge, ProjectContext& projectContext, 
     auto& box =
         juce::CallOutBox::launchAsynchronously (std::move (picker), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
     box.setArrowSize (0.0f); // a list that hangs from what opened it, as VS Code's quick input, without an arrow
+
+    if (findWindowForPopups (anchor) != nullptr)
+        FrostedGlass::putBehind (box, FrostedGlass::Shape::outlined, false); // on frosted glass, as VS Code's quick input
 
     // Type straight away, once the call-out is on screen.
     juce::MessageManager::callAsync (

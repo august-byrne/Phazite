@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginPicker.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 namespace phazite::ui
 {
@@ -26,7 +27,6 @@ PluginPicker::PluginPicker (const Library& l, std::function<void (const LibraryI
       list ("Devices", this)
 {
     setTitle ("Plug-in picker");
-    getProperties().set (LookAndFeel::popupListProperty, true); // translucent, as menus are
 
     searchField.setTitle ("Search instruments and effects");
     searchField.setTextToShowWhenEmpty ("Type an instrument or effect, e.g. reverb", getPalette (*this).textMuted);
@@ -54,6 +54,9 @@ void PluginPicker::show (const Library& library, juce::Component& anchor, std::f
     auto& box =
         juce::CallOutBox::launchAsynchronously (std::move (picker), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
     box.setArrowSize (0.0f); // a list that hangs from what opened it, as VS Code's quick input, without an arrow
+
+    if (findWindowForPopups (anchor) != nullptr)
+        FrostedGlass::putBehind (box, FrostedGlass::Shape::outlined, false); // on frosted glass, as VS Code's quick input
 
     // Type straight away, once the call-out is on screen.
     juce::MessageManager::callAsync (

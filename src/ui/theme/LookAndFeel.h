@@ -63,17 +63,23 @@ public:
     juce::Font getComboBoxFont (juce::ComboBox&) override;
     void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
 
-    // What pops up over the window a little translucent (Popup::backgroundAlpha; opaque in the high contrast theme): menus,
-    // and a call-out whose content is a list, which says so with popupListProperty set (the command search, the pickers).
-    // Each rounded, outlined and over a soft shadow, as VS Code's.
-    static constexpr const char* popupListProperty = "phazitePopupList";
-    float getPopupAlpha() const noexcept;
+    // What pops up over the window, as VS Code's: inside the main window on frosted glass (ui/theme/Popups.h), its colour a
+    // tint over what is behind it, blurred; solid in the high contrast theme, where the operating system is set to reduce
+    // transparency (setTransparencyReduced()), and on the desktop. Each rounded, outlined and over a soft shadow. A call-out
+    // is frosted with FrostedGlass::Shape::outlined glass behind it (the command search, the pickers).
+    bool isFrosted() const noexcept { return theme != ThemeName::highContrast && ! transparencyReduced; }
+    void setTransparencyReduced (bool);
+    float getPopupAlpha() const noexcept; // the popups' colour over their glass: Popup::frostTint, or 1 where not frosted
     void drawCallOutBoxBackground (juce::CallOutBox&, juce::Graphics&, const juce::Path&, juce::Image& cachedImage) override;
     float getCallOutBoxCornerSize (const juce::CallOutBox&) override { return cardCornerRadius; }
     std::unique_ptr<juce::DropShadower> createDropShadowerForComponent (juce::Component&) override;
 
-    // Menus as VS Code's (Popup): rounded items inset from the menu's sides, the highlighted one in a wash of the focus
-    // colour outlined in it, a tick at the left of one that is ticked, its shortcut fainter at the right.
+    // Menus as VS Code's (Popup): inside the window that they are opened from, where it is marked for it
+    // (findWindowForPopups()), over their glass and with their keys to themselves (keepKeysInMenu()); rounded items inset
+    // from the menu's sides, the highlighted one in a wash of the focus colour outlined in it, a tick at the left of one
+    // that is ticked, its shortcut fainter at the right.
+    juce::Component* getParentComponentForMenuOptions (const juce::PopupMenu::Options&) override;
+    void preparePopupMenuWindow (juce::Component&) override;
     void drawPopupMenuBackgroundWithOptions (juce::Graphics&, int width, int height, const juce::PopupMenu::Options&) override;
     void drawPopupMenuItem (juce::Graphics&, const juce::Rectangle<int>& area, bool isSeparator, bool isActive, bool isHighlighted,
                             bool isTicked, bool hasSubMenu, const juce::String& text, const juce::String& shortcutKeyText,
@@ -93,11 +99,13 @@ public:
     juce::Font getMenuBarFont (juce::MenuBarComponent&, int itemIndex, const juce::String& itemText) override;
     int getMenuBarItemWidth (juce::MenuBarComponent&, int itemIndex, const juce::String& itemText) override;
 
-    // Tooltips as VS Code's hovers: rounded and outlined on the raised surface (the tooltip window isn't opaque, so that its
-    // corners show what is behind: MainWindow).
+    // Tooltips as VS Code's hovers: rounded and outlined on the raised surface, solid, or as a tint over frosted glass (inside
+    // the main window: ui::Tooltips, which paints them with paintTooltip()). Their windows aren't opaque, so that their
+    // corners show what is behind.
     juce::Rectangle<int> getTooltipBounds (const juce::String& text, juce::Point<int> screenPosition,
                                            juce::Rectangle<int> parentArea) override;
     void drawTooltip (juce::Graphics&, const juce::String& text, int width, int height) override;
+    void paintTooltip (juce::Graphics&, const juce::String& text, juce::Rectangle<float> bounds, bool frosted);
 
     // Tabs as VS Code's panels' (TabTint): pills, the one that shows filled, the one under the pointer washed, on the bar's own
     // background, with no line under them.
@@ -110,6 +118,7 @@ public:
 
 private:
     ThemeName theme = ThemeName::dark;
+    bool transparencyReduced = false;
     Palette palette;
     juce::Typeface::Ptr regular, medium, semiBold;
     std::vector<juce::MouseCursor> standardPointers;

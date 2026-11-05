@@ -91,6 +91,24 @@ juce::Array<ComponentType*> findAll (juce::Component& root)
 // Checks that a component's visible children are inside it and don't overlap.
 void checkChildrenApart (juce::Component&);
 
+// While it lives, JUCE has a display, as a screen gives, where the machine has none (Linux CI's), for what JUCE places
+// or scales by its display: a drag's image let go, which a test mouse's release fades out through a copy that JUCE's
+// animator scales (with no display it read nothing and crashed, 2026-11-01), or a menu. Only then: otherwise the machine
+// is one without a screen, as it is (Desktop::isHeadless()), to what asks, such as code that turns the screen saver off,
+// which without a screen crashes.
+class ScopedDisplay
+{
+public:
+    ScopedDisplay();
+    ~ScopedDisplay();
+
+private:
+    juce::Displays& displays = const_cast<juce::Displays&> (juce::Desktop::getInstance().getDisplays());
+    bool added = false;
+
+    JUCE_DECLARE_NON_COPYABLE (ScopedDisplay)
+};
+
 // The mouse, in a test window. Positions are in the coordinates of a component in the window.
 class Mouse
 {

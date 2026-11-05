@@ -110,6 +110,10 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     setResizeLimits (800, 500, 16384, 16384);
     centreWithSize (1280, 800);
 
+    // Menus, tooltips and the pickers open inside this window, on frosted glass, unless the system reduces transparency
+    // (ui/theme/Popups.h).
+    ui::setPopupsInside (*this);
+    lookAndFeel.setTransparencyReduced (ui::isTransparencyReducedBySystem());
     setTheme (themeFromString (services.settings.get (Settings::theme)));
     setHoverHelp (services.settings.get (Settings::hoverHelp));
 
@@ -246,6 +250,18 @@ auto MainWindow::findControlAtPoint (juce::Point<float> point) const -> WindowCo
 
         if (point.y < (float) ui::Shell::titleBarHeight && (left || right))
             return left ? Kind::sizeLeft : Kind::sizeRight;
+    }
+
+    // What pops up inside the window (a menu, the command search, a tooltip: ui/theme/Popups.h) takes the mouse where it is,
+    // over the title bar too. By its bounds alone: contains() could ask Windows, which would ask this again.
+    for (const auto* child : getChildren())
+    {
+        auto clicks = false, clicksChildren = false;
+        child->getInterceptsMouseClicks (clicks, clicksChildren);
+
+        if (child != shell && clicks && child->isVisible() && dynamic_cast<const juce::ResizableBorderComponent*> (child) == nullptr
+            && dynamic_cast<const juce::ResizableCornerComponent*> (child) == nullptr && child->getBounds().toFloat().contains (point))
+            return Kind::client;
     }
 
     // The title bar's empty parts are the caption, which moves the window, and its window buttons are Windows' own.
@@ -427,8 +443,8 @@ void MainWindow::addCommands()
                     .category = "View",
                     .description = "Shows what a control does when the pointer rests on it. The hint bar always shows it.",
                     .synonyms = { "tooltips", "help" },
-                    .perform = [this] { setHoverHelp (tooltipWindow == nullptr); },
-                    .isTicked = [this] { return tooltipWindow != nullptr; } });
+                    .perform = [this] { setHoverHelp (tipsInside == nullptr); },
+                    .isTicked = [this] { return tipsInside != nullptr; } });
 
     registry.add ({ .id = "help.welcome",
                     .name = "Welcome",
@@ -735,10 +751,8 @@ void MainWindow::setTheme (ui::ThemeName theme)
 
 void MainWindow::setHoverHelp (bool on)
 {
-    tooltipWindow = on ? std::make_unique<juce::TooltipWindow> (nullptr, 700) : nullptr;
-
-    if (tooltipWindow != nullptr)
-        tooltipWindow->setOpaque (false); // its corners rounded, showing what is behind (ui::LookAndFeel::drawTooltip())
+    tipsInside = on ? std::make_unique<ui::Tooltips> (*this, true) : nullptr;
+    tipsElsewhere = on ? std::make_unique<ui::Tooltips> (*this, false) : nullptr;
 
     services.settings.set (Settings::hoverHelp, on);
     menuItemsChanged();

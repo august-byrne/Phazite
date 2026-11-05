@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "CommandPalette.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 namespace phazite::ui
 {
@@ -15,7 +16,6 @@ CommandPalette::CommandPalette (CommandBridge& bridge)
       list ("Commands", this)
 {
     setTitle ("Command palette");
-    getProperties().set (LookAndFeel::popupListProperty, true); // translucent, as menus are
 
     searchField.setTitle ("Search commands");
     searchField.setTextToShowWhenEmpty ("Type a command, e.g. undo", getPalette (*this).textMuted);
@@ -43,6 +43,9 @@ void CommandPalette::show (CommandBridge& bridge, juce::Component& anchor)
     auto& box =
         juce::CallOutBox::launchAsynchronously (std::move (palette), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
     box.setArrowSize (0.0f); // a list that hangs from what opened it, as VS Code's quick input, without an arrow
+
+    if (findWindowForPopups (anchor) != nullptr)
+        FrostedGlass::putBehind (box, FrostedGlass::Shape::outlined, false); // on frosted glass, as VS Code's quick input
 
     // Type straight away, once the call-out is on screen.
     juce::MessageManager::callAsync (

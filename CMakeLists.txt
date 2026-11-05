@@ -769,6 +769,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/theme/Icons.h
     src/ui/theme/LookAndFeel.cpp
     src/ui/theme/LookAndFeel.h
+    src/ui/theme/Popups.cpp
+    src/ui/theme/Popups.h
     src/ui/timeline/SmartTool.cpp
     src/ui/timeline/SmartTool.h
     src/ui/timeline/TimelineEditor.cpp
@@ -1015,6 +1017,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/PluginParametersTests.cpp
         tests/PluginWindowTests.cpp
         tests/PlaylistTests.cpp
+        tests/PopupsTests.cpp
         tests/PresetTests.cpp
         tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp

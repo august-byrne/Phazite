@@ -126,15 +126,3 @@ TEST_CASE ("Menus, buttons and scroll bars as VS Code's: items 24 pixels tall in
     CHECK (lookAndFeel.findColour (juce::TextButton::buttonOnColourId) == getPalette (ThemeName::dark).accent);
     CHECK (lookAndFeel.findColour (juce::TextEditor::focusedOutlineColourId) == getPalette (ThemeName::dark).focus);
 }
-
-TEST_CASE ("Menus and the lists that pop up are a little translucent, but in the high contrast theme")
-{
-    phazite::ui::LookAndFeel lookAndFeel;
-    CHECK (lookAndFeel.findColour (juce::PopupMenu::backgroundColourId).getFloatAlpha()
-           == doctest::Approx (Popup::backgroundAlpha).epsilon (0.01));
-    CHECK (lookAndFeel.getPopupAlpha() < 1.0f);
-
-    lookAndFeel.setTheme (ThemeName::highContrast);
-    CHECK (lookAndFeel.findColour (juce::PopupMenu::backgroundColourId).isOpaque());
-    CHECK (lookAndFeel.getPopupAlpha() == doctest::Approx (1.0f));
-}

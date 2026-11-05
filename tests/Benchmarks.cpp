@@ -48,6 +48,7 @@
 #include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 #include <algorithm>
 #include <chrono>
@@ -731,6 +732,74 @@ TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benc
 
     report << "| A note moved a step, with what follows (the views, the engine's new plan) | " << milliseconds (moving / 10 - 30.0)
            << " |\n";
+
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: frosted glass behind popups over a big song" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // What a tooltip, a menu and the command search cost on their frosted glass (ui/theme/Popups.h): as each opens, what
+    // is behind it painted, shrunk, blurred and made into images of the screen's kind; then the glass painted, as a repaint
+    // of the popup paints it, into an image of the screen's kind (Direct2D's on Windows). Over the playlist and the piano
+    // roll of 16 tracks, each of 16 clips of 4 bars with 64 notes.
+    phazite::ui::LookAndFeel lookAndFeel;
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    auto* open = phazite::findSong (screen.session.getContext());
+    REQUIRE (open != nullptr);
+    auto& song = *open;
+
+    for (const auto track : phazite::ensureTracks (song, 16))
+    {
+        for (int c = 0; c < 16; ++c)
+        {
+            const auto start = phazite::BeatPosition::fromBeats (c * 16.0);
+            const auto clip = phazite::test::addMidiClip (song, track, { start, start + phazite::BeatDuration::fromBeats (16.0) }, "Part");
+
+            for (int n = 0; n < 64; ++n)
+                phazite::test::addMidiNote (song, clip, 48 + (n * 7) % 24, phazite::BeatPosition::fromBeats (n * 0.25),
+                                            phazite::BeatDuration::fromBeats (0.2), 100);
+        }
+    }
+
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 1500);
+    const auto scale = juce::Component::getApproximateScaleFactorForComponent (&screen.window);
+    juce::String report;
+    report << "\n| Frosted glass over the song, at " << juce::String (scale * 100.0f, 0)
+           << " % | Taken as it opens | Painted |\n|---|---|---|\n";
+
+    const std::pair<const char*, juce::Point<int>> popups[] = { { "A tooltip", { 220, 30 } },
+                                                                { "A menu", { 220, 320 } },
+                                                                { "The command search", { 530, 480 } } };
+
+    for (const auto& [what, size] : popups)
+    {
+        juce::Component popup;
+        popup.setLookAndFeel (&lookAndFeel);
+        popup.setBounds (juce::Rectangle<int> (size.x, size.y).withCentre (screen.window.getLocalBounds().getCentre()));
+        screen.window.addChildComponent (popup);
+        auto& glass = phazite::ui::FrostedGlass::putBehind (popup, phazite::ui::FrostedGlass::Shape::rounded, false);
+        juce::Image target (juce::Image::ARGB, size.x, size.y, true); // the screen's kind
+        double taking = 0.0, painting = 0.0;
+        constexpr int times = 10;
+
+        for (int i = 0; i < times; ++i)
+        {
+            taking += millisecondsOf ([&] { popup.setVisible (true); });
+            painting += millisecondsOf (
+                [&]
+                {
+                    juce::Graphics g (target); // made and finished each time, as a repaint's context is
+                    glass.paintEntireComponent (g, false);
+                });
+            popup.setVisible (false);
+        }
+
+        report << "| " << what << ", " << size.x << " x " << size.y << " | " << milliseconds (taking / times) << " | "
+               << milliseconds (painting / times) << " |\n";
+        screen.window.removeChildComponent (&popup);
+        popup.setLookAndFeel (nullptr);
+    }
 
     MESSAGE (report);
 }

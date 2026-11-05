@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "LookAndFeel.h"
+#include "Popups.h"
 
 #include <juce_gui_extra/juce_gui_extra.h> // KeyMappingEditorComponent
 
@@ -453,12 +454,18 @@ void LookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
 //==============================================================================
 float LookAndFeel::getPopupAlpha() const noexcept
 {
-    return theme == ThemeName::highContrast ? 1.0f : Popup::backgroundAlpha;
+    return isFrosted() ? Popup::frostTint : 1.0f;
+}
+
+void LookAndFeel::setTransparencyReduced (bool reduced)
+{
+    transparencyReduced = reduced;
+    setTheme (theme); // the popups' colours
 }
 
 void LookAndFeel::drawCallOutBoxBackground (juce::CallOutBox& box, juce::Graphics& g, const juce::Path& path, juce::Image& cachedImage)
 {
-    // A soft shadow; then a list that pops up as translucent as the menus, and any other content (an editor) on the raised
+    // A soft shadow; then, on frosted glass, what is behind blurred under the raised surface as a tint, or the raised
     // surface itself; outlined in the border colour, rounded as VS Code's widgets are (getCallOutBoxCornerSize()).
     if (cachedImage.isNull())
     {
@@ -470,10 +477,13 @@ void LookAndFeel::drawCallOutBoxBackground (juce::CallOutBox& box, juce::Graphic
     g.setColour (juce::Colours::black);
     g.drawImageAt (cachedImage, 0, 0);
 
-    const auto& children = box.getChildren();
-    const auto isList = std::any_of (children.begin(), children.end(),
-                                     [] (const juce::Component* child) { return (bool) child->getProperties()[popupListProperty]; });
-    g.setColour (palette.surfaceRaised.withAlpha (isList ? getPopupAlpha() : 1.0f));
+    const auto* glass = FrostedGlass::findBehind (box);
+    const auto frosted = glass != nullptr && glass->isVisible();
+
+    if (frosted)
+        glass->paintBlurred (g, path);
+
+    g.setColour (palette.surfaceRaised.withAlpha (frosted ? getPopupAlpha() : 1.0f));
     g.fillPath (path);
     g.setColour (palette.border);
     g.strokePath (path, juce::PathStrokeType (1.0f));
@@ -486,13 +496,37 @@ std::unique_ptr<juce::DropShadower> LookAndFeel::createDropShadowerForComponent 
         juce::DropShadow (juce::Colours::black.withAlpha (Popup::shadowAlpha), Popup::shadowRadius, { 0, 2 }));
 }
 
-void LookAndFeel::drawPopupMenuBackgroundWithOptions (juce::Graphics& g, int width, int height, const juce::PopupMenu::Options&)
+juce::Component* LookAndFeel::getParentComponentForMenuOptions (const juce::PopupMenu::Options& options)
+{
+    // A submenu opens where its menu is; a menu from the main window, or opened over it, inside it.
+    if (auto* parent = options.getParentComponent())
+        return parent;
+
+    if (const auto* target = options.getTopLevelTargetComponent())
+        return findWindowForPopups (*target);
+
+    return findWindowForPopups (options.getTargetScreenArea().getCentre());
+}
+
+void LookAndFeel::preparePopupMenuWindow (juce::Component& menuWindow)
+{
+    // A menu inside a window: on frosted glass, with the shadow its window would have had on the desktop, and its keys to
+    // itself.
+    if (menuWindow.getParentComponent() != nullptr)
+    {
+        FrostedGlass::putBehind (menuWindow, FrostedGlass::Shape::rounded, true);
+        keepKeysInMenu (menuWindow);
+    }
+}
+
+void LookAndFeel::drawPopupMenuBackgroundWithOptions (juce::Graphics& g, int width, int height, const juce::PopupMenu::Options& options)
 {
     const auto background = findColour (juce::PopupMenu::backgroundColourId);
     const auto bounds = juce::Rectangle<int> (width, height).toFloat();
+    const auto inside = options.getParentComponent() != nullptr;
 
     // An opaque menu's window (the high contrast theme's) shows its corners, so it is square.
-    if (background.isOpaque() || ! juce::Desktop::canUseSemiTransparentWindows())
+    if (background.isOpaque() || (! inside && ! juce::Desktop::canUseSemiTransparentWindows()))
     {
         g.fillAll (background.withAlpha (1.0f));
         g.setColour (palette.border);
@@ -500,7 +534,8 @@ void LookAndFeel::drawPopupMenuBackgroundWithOptions (juce::Graphics& g, int wid
         return;
     }
 
-    g.setColour (background);
+    // Inside a window its colour is a tint over its frosted glass; on the desktop, solid.
+    g.setColour (inside ? background : background.withAlpha (1.0f));
     g.fillRoundedRectangle (bounds, cardCornerRadius);
     g.setColour (palette.border);
     g.drawRoundedRectangle (bounds.reduced (0.5f), cardCornerRadius, 1.0f);
@@ -656,8 +691,12 @@ juce::Rectangle<int> LookAndFeel::getTooltipBounds (const juce::String& text, ju
 
 void LookAndFeel::drawTooltip (juce::Graphics& g, const juce::String& text, int width, int height)
 {
-    const auto bounds = juce::Rectangle<int> (width, height).toFloat();
-    g.setColour (findColour (juce::TooltipWindow::backgroundColourId));
+    paintTooltip (g, text, juce::Rectangle<int> (width, height).toFloat(), false);
+}
+
+void LookAndFeel::paintTooltip (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> bounds, bool frosted)
+{
+    g.setColour (findColour (juce::TooltipWindow::backgroundColourId).withAlpha (frosted ? getPopupAlpha() : 1.0f));
     g.fillRoundedRectangle (bounds, cardCornerRadius);
     g.setColour (findColour (juce::TooltipWindow::outlineColourId));
     g.drawRoundedRectangle (bounds.reduced (0.5f), cardCornerRadius, 1.0f);
