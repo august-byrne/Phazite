@@ -158,26 +158,33 @@ struct Browser::Node : public juce::TreeViewItem
         const auto& p = getPalette (*owner);
         const auto* item = getItem();
         const auto focused = owner->hasKeyboardFocus (true);
-        const auto onAccent = isSelected() && focused;
         auto area = juce::Rectangle<int> (width, height);
 
-        // The selected row, in the accent color while the tree has the keyboard focus.
+        // The selected row as VS Code's lists show theirs: in the selection's wash, outlined in the focus colour, while the
+        // tree has the keyboard focus, else in the inactive selection's; its text bright.
         if (isSelected())
         {
-            g.setColour (focused ? p.accent : p.accent.withAlpha (selectionWash));
-            g.fillRoundedRectangle (area.toFloat().reduced (1.0f), cornerRadius);
+            const auto row = area.toFloat().withTrimmedRight (ListRow::inset);
+            g.setColour (focused ? p.selected : p.selectedInactive);
+            g.fillRoundedRectangle (row, cornerRadius);
+
+            if (focused)
+            {
+                g.setColour (p.focus);
+                g.drawRoundedRectangle (row.reduced (0.5f), cornerRadius, 1.0f);
+            }
         }
 
-        const auto textColour = onAccent ? p.textOnAccent : p.text;
-        const auto mutedColour = onAccent ? p.textOnAccent : p.textMuted;
+        const auto textColour = isSelected() ? p.textBright : p.text;
+        const auto mutedColour = p.textMuted;
         area.reduce (Space::xs, 0);
 
-        // Its icon: in the accent color while it plays.
+        // Its icon: in the focus colour while it plays.
         if (const auto icon = getIcon())
         {
             const auto playing = item != nullptr && browser.isPreviewing (*item);
             browser.drawIcon (g, *icon, area.removeFromLeft (iconSize).toFloat().withSizeKeepingCentre ((float) iconSize, (float) iconSize),
-                              playing && ! onAccent ? p.accent : mutedColour);
+                              playing ? p.focus : mutedColour);
             area.removeFromLeft (Space::s);
         }
 
@@ -189,7 +196,7 @@ struct Browser::Node : public juce::TreeViewItem
 
             if (favorite || isSelected())
                 browser.drawIcon (g, Icon::favorite, star.toFloat().withSizeKeepingCentre (14.0f, 14.0f),
-                                  favorite && ! onAccent ? p.warning : mutedColour, favorite);
+                                  favorite ? p.warning : mutedColour, favorite);
 
             if (const auto detail = BrowserModel::getDetail (*item); detail.isNotEmpty())
             {

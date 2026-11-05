@@ -6,8 +6,8 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr int rowHeight = 30;
-    constexpr int numVisibleRows = 10;
+    constexpr int rowHeight = ListRow::height; // as VS Code's quick input's
+    constexpr int numVisibleRows = 14;
 } // namespace
 
 CommandPalette::CommandPalette (CommandBridge& bridge)
@@ -19,7 +19,7 @@ CommandPalette::CommandPalette (CommandBridge& bridge)
 
     searchField.setTitle ("Search commands");
     searchField.setTextToShowWhenEmpty ("Type a command, e.g. undo", getPalette (*this).textMuted);
-    searchField.setFont (juce::FontOptions (TextSize::title));
+    searchField.setFont (juce::FontOptions (TextSize::body)); // as VS Code's quick input
     searchField.addListener (this);
     searchField.setWantsKeyboardFocus (true);
     searchField.onNavigationKey = [this] (const juce::KeyPress& key) { return moveSelection (key); };
@@ -31,7 +31,7 @@ CommandPalette::CommandPalette (CommandBridge& bridge)
     addAndMakeVisible (list);
 
     updateResults();
-    setSize (520, controlHeight + Space::s + rowHeight * numVisibleRows + Space::s * 2);
+    setSize (Popup::pickerWidth, controlHeight + Space::s + rowHeight * numVisibleRows + Space::s * 2);
 }
 
 void CommandPalette::show (CommandBridge& bridge, juce::Component& anchor)
@@ -40,7 +40,9 @@ void CommandPalette::show (CommandBridge& bridge, juce::Component& anchor)
     auto* searchField = &palette->searchField;
 
     auto* topLevel = anchor.getTopLevelComponent();
-    juce::CallOutBox::launchAsynchronously (std::move (palette), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
+    auto& box =
+        juce::CallOutBox::launchAsynchronously (std::move (palette), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
+    box.setArrowSize (0.0f); // a list that hangs from what opened it, as VS Code's quick input, without an arrow
 
     // Type straight away, once the call-out is on screen.
     juce::MessageManager::callAsync (
@@ -129,14 +131,13 @@ void CommandPalette::paintListBoxItem (int row, juce::Graphics& g, int width, in
     const auto mutedColour = selected ? p.textOnAccent : p.textMuted;
     area.reduce (Space::s, 0);
 
-    // The shortcut on the right, then the name, then the category in what's left.
+    // The shortcut on the right, its keys each in a box as VS Code's, then the name, then the category in what's left.
     const auto shortcuts = commands.getShortcutDescriptions (command->id);
 
     if (! shortcuts.isEmpty())
     {
-        g.setColour (mutedColour);
-        g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText (shortcuts[0], area.removeFromRight (140), juce::Justification::centredRight);
+        const auto taken = drawKeyCaps (g, p, shortcuts[0], area.toFloat(), textColour);
+        area.removeFromRight (juce::roundToInt (taken) + Space::s);
     }
 
     g.setColour (enabled ? textColour : textColour.withAlpha (0.5f));

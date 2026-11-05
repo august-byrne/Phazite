@@ -30,7 +30,7 @@ PluginPicker::PluginPicker (const Library& l, std::function<void (const LibraryI
 
     searchField.setTitle ("Search instruments and effects");
     searchField.setTextToShowWhenEmpty ("Type an instrument or effect, e.g. reverb", getPalette (*this).textMuted);
-    searchField.setFont (juce::FontOptions (TextSize::title));
+    searchField.setFont (juce::FontOptions (TextSize::body)); // as VS Code's quick input
     searchField.addListener (this);
     searchField.setWantsKeyboardFocus (true);
     searchField.onNavigationKey = [this] (const juce::KeyPress& key) { return moveSelection (key); };
@@ -51,7 +51,9 @@ void PluginPicker::show (const Library& library, juce::Component& anchor, std::f
     auto* searchField = &picker->searchField;
 
     auto* topLevel = anchor.getTopLevelComponent();
-    juce::CallOutBox::launchAsynchronously (std::move (picker), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
+    auto& box =
+        juce::CallOutBox::launchAsynchronously (std::move (picker), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
+    box.setArrowSize (0.0f); // a list that hangs from what opened it, as VS Code's quick input, without an arrow
 
     // Type straight away, once the call-out is on screen.
     juce::MessageManager::callAsync (

@@ -20,7 +20,7 @@ BranchPicker::BranchPicker (CommandBridge& bridge, ProjectContext& projectContex
     searchField.setTitle (renaming ? "The branch's new name" : "Search the branches, or name a new one");
     searchField.setTextToShowWhenEmpty (renaming ? "The branch's new name" : "Select a branch to checkout, or type a new branch's name",
                                         getPalette (*this).textMuted);
-    searchField.setFont (juce::FontOptions (TextSize::title));
+    searchField.setFont (juce::FontOptions (TextSize::body)); // as VS Code's quick input
     searchField.addListener (this);
     searchField.setWantsKeyboardFocus (true);
     searchField.onNavigationKey = [this] (const juce::KeyPress& key) { return moveSelection (key); };
@@ -48,7 +48,9 @@ void BranchPicker::show (CommandBridge& bridge, ProjectContext& projectContext, 
     auto* searchField = &picker->searchField;
 
     auto* topLevel = anchor.getTopLevelComponent();
-    juce::CallOutBox::launchAsynchronously (std::move (picker), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
+    auto& box =
+        juce::CallOutBox::launchAsynchronously (std::move (picker), topLevel->getLocalArea (&anchor, anchor.getLocalBounds()), topLevel);
+    box.setArrowSize (0.0f); // a list that hangs from what opened it, as VS Code's quick input, without an arrow
 
     // Type straight away, once the call-out is on screen.
     juce::MessageManager::callAsync (

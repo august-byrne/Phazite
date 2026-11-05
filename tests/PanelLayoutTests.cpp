@@ -152,10 +152,11 @@ TEST_CASE ("The side panels keep their widths while the window has room, and giv
     CHECK (widths.left == phazite::ui::Shell::leftPanelWidth);
     CHECK (widths.inspector == phazite::ui::Shell::inspectorWidth);
 
-    // 800 wide, 10 short of both and the centre at its least: each gives way in proportion to what it has above its least.
+    // 800 wide, as short of both and the centre at its least as two dividers are wide: each gives way in proportion to what
+    // it has above its least, the same here.
     widths = layout.getSideWidths (800);
     CHECK (widths.left + widths.inspector + 2 * dividerSize + minimumCentreWidth == 800);
-    CHECK (widths.left == phazite::ui::Shell::leftPanelWidth - 5);
+    CHECK (widths.left == phazite::ui::Shell::leftPanelWidth - dividerSize);
 
     // Never below their least.
     widths = layout.getSideWidths (400);

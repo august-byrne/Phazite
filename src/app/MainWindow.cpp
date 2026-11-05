@@ -80,7 +80,7 @@ namespace
 } // namespace
 
 MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAndFeel& lf, AppServices& appServices)
-    : juce::DocumentWindow ("Phazite", lf.getPalette().background, juce::DocumentWindow::allButtons),
+    : juce::DocumentWindow ("Phazite", lf.getPalette().surface, juce::DocumentWindow::allButtons),
       commands (bridge),
       session (s),
       lookAndFeel (lf),
@@ -716,7 +716,7 @@ void MainWindow::changeListenerCallback (juce::ChangeBroadcaster*)
 void MainWindow::setTheme (ui::ThemeName theme)
 {
     lookAndFeel.setTheme (theme);
-    setBackgroundColour (lookAndFeel.getPalette().background);
+    setBackgroundColour (lookAndFeel.getPalette().surface); // the window's frame, as the shell paints it
 
     // This window (even before it is on the screen), and every other one: panels in their own
     // windows, dialogs and tooltips.
@@ -736,6 +736,9 @@ void MainWindow::setTheme (ui::ThemeName theme)
 void MainWindow::setHoverHelp (bool on)
 {
     tooltipWindow = on ? std::make_unique<juce::TooltipWindow> (nullptr, 700) : nullptr;
+
+    if (tooltipWindow != nullptr)
+        tooltipWindow->setOpaque (false); // its corners rounded, showing what is behind (ui::LookAndFeel::drawTooltip())
 
     services.settings.set (Settings::hoverHelp, on);
     menuItemsChanged();

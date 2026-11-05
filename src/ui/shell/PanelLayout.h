@@ -157,4 +157,25 @@ public:
 private:
     bool betweenColumns;
 };
+
+//==============================================================================
+// The panels as VS Code's Modern UI shows its parts, each a card (Shell::cardGap apart on the window's frame): over the panels,
+// it rounds off their corners in the frame's colour and outlines each in the border colour. It takes no clicks, and paints
+// only where something under it repaints, from paths made as the layout changes.
+class PanelCards : public juce::Component
+{
+public:
+    PanelCards();
+
+    // Where the cards are now, in this component's coordinates.
+    void setCards (const juce::Array<juce::Rectangle<int>>&);
+    const juce::Array<juce::Rectangle<int>>& getCards() const noexcept { return cards; }
+
+    void paint (juce::Graphics&) override;
+    void lookAndFeelChanged() override { repaint(); }
+
+private:
+    juce::Array<juce::Rectangle<int>> cards;
+    juce::Path corners, edges; // every card's, the corners filled in the frame's colour and the edges in the border's
+};
 } // namespace phazite::ui

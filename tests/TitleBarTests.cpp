@@ -171,7 +171,8 @@ TEST_CASE ("The panels keep out of the band along a restored window's sides, and
     CHECK (shell.getTitleBar().getWidth() == shell.getWidth());
     CHECK (shell.getStatusBar().getWidth() == shell.getWidth());
 
-    shell.setEdgeInset (0); // maximized
-    CHECK (shell.getPanel (Panel::left).getX() == phazite::ui::Shell::activityBarWidth);
-    CHECK (shell.getPanel (Panel::inspector).getRight() == shell.getWidth());
+    // Maximized: the cards' gap from the window's sides, as VS Code's Modern UI keeps.
+    shell.setEdgeInset (0);
+    CHECK (shell.getPanel (Panel::left).getX() == phazite::ui::Shell::cardGap + phazite::ui::Shell::activityBarWidth);
+    CHECK (shell.getPanel (Panel::inspector).getRight() == shell.getWidth() - phazite::ui::Shell::cardGap);
 }

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's design tokens: the named colours, text sizes and spacings that every component uses
 // (docs/design.md, "Design language"). Change the look here rather than in components.
+//
+// The dark and light themes are VS Code's 2026 Dark and 2026 Light, and the sizes those of its Modern UI (docs/vscode-look.md,
+// where each value comes from): VS Code's source is under the MIT licence, whose notice ships next to the app
+// (licenses/VSCode.txt). The high contrast theme is Phazite's own.
 #pragma once
 
 #include <juce_graphics/juce_graphics.h>
@@ -16,24 +20,32 @@ enum class ThemeName
     highContrast
 };
 
+// Each with the colour of VS Code's it is (in the dark theme).
 struct Palette
 {
-    juce::Colour background;    // the window behind everything
-    juce::Colour surface;       // panels
-    juce::Colour surfaceRaised; // buttons, fields, the top bar
-    juce::Colour border;        // lines between panels (decorative)
-    juce::Colour text;
-    juce::Colour textMuted; // secondary text, still readable
-    juce::Colour accent;    // selection, focus and the main button
-    juce::Colour textOnAccent;
-    juce::Colour warning;
-    juce::Colour danger;
-    juce::Colour loop;       // where playback loops, in the rulers
-    juce::Colour modulation; // what modulation does to a control: the ring around a knob, a modulator's output
-    juce::Colour frozen;     // a frozen track's frost, over its clips and its snowflake (FrozenTint)
-    juce::Colour boost;      // a level brought up, as upward compression does (danger: one turned down), in devices' graphs
-    juce::Colour playing;    // a track's switch while the track plays, lit as FL Studio's mute switch is (TrackSwitch.h)
-    juce::Colour soloed;     // a soloed track's switch, in the yellow most DAWs light solo with
+    juce::Colour background;       // the song's views, as VS Code's editor: the playlist, the piano roll, the mixer (editor)
+    juce::Colour surface;          // the window's frame and the side panels, the browser and the inspector (sideBar, titleBar)
+    juce::Colour surfaceRaised;    // what pops up, fields and rulers (menu, editorWidget)
+    juce::Colour border;           // the panels' edges and the lines between parts, decorative (surface.border, widget.border)
+    juce::Colour controlBorder;    // around a field, a list to pick from and a button that isn't filled (input.border)
+    juce::Colour text;             // (foreground)
+    juce::Colour textMuted;        // secondary text, still readable (descriptionForeground)
+    juce::Colour textBright;       // on a selected row, and the activity bar's view that shows (list.activeSelectionForeground)
+    juce::Colour accent;           // the main button and what is switched on (button.background)
+    juce::Colour textOnAccent;     // (button.foreground)
+    juce::Colour focus;            // the keyboard focus's outline, and a menu's highlighted item (focusBorder, menu.selectionBorder)
+    juce::Colour hover;            // a wash under the pointer, translucent (list.hoverBackground)
+    juce::Colour selected;         // a wash behind what is selected, translucent (list.activeSelectionBackground)
+    juce::Colour selectedInactive; // the tab that shows, and the activity bar's view (list.inactiveSelectionBackground)
+    juce::Colour scrollThumb;      // a scroll bar's thumb, translucent; lighter under the pointer (scrollbarSlider.background)
+    juce::Colour warning;          // (list.warningForeground)
+    juce::Colour danger;           // (errorForeground)
+    juce::Colour loop;             // where playback loops, in the rulers
+    juce::Colour modulation;       // what modulation does to a control: the ring around a knob, a modulator's output
+    juce::Colour frozen;           // a frozen track's frost, over its clips and its snowflake (FrozenTint)
+    juce::Colour boost;            // a level brought up, as upward compression does (danger: one turned down), in devices' graphs
+    juce::Colour playing;          // a track's switch while the track plays, lit as FL Studio's mute switch is (TrackSwitch.h)
+    juce::Colour soloed;           // a soloed track's switch, in the yellow most DAWs light solo with
 };
 
 inline Palette getPalette (ThemeName theme)
@@ -43,31 +55,90 @@ inline Palette getPalette (ThemeName theme)
     switch (theme)
     {
         case ThemeName::light:
-            return { Colour (0xfff4f5f7), Colour (0xffffffff), Colour (0xffeceef1), Colour (0xffd3d7dd),
-                     Colour (0xff1b1f24), Colour (0xff545d69), Colour (0xff1f6feb), Colour (0xffffffff),
-                     Colour (0xff9a5b00), Colour (0xffc62828), Colour (0xff1a7f5a), Colour (0xff7b3fd4),
-                     Colour (0xff2b8fd6), Colour (0xff1e7d3c), Colour (0xff1f8a43), Colour (0xffb07d00) };
+            return { .background = Colour (0xffffffff),
+                     .surface = Colour (0xfffafafd),
+                     .surfaceRaised = Colour (0xfff0f0f3),
+                     .border = Colour (0xffe4e5e6),
+                     .controlBorder = Colour (0xffd8d8d8),
+                     .text = Colour (0xff202020),
+                     .textMuted = Colour (0xff606060),
+                     .textBright = Colour (0xff202020),
+                     .accent = Colour (0xff0069cc),
+                     .textOnAccent = Colour (0xffffffff),
+                     .focus = Colour (0xff0069cc),
+                     .hover = Colour (0x14000000),
+                     .selected = Colour (0x25000000),
+                     .selectedInactive = Colour (0xffe7e7e8),
+                     .scrollThumb = Colour (0xc0646464),
+                     .warning = Colour (0xff895503),
+                     .danger = Colour (0xffad0707),
+                     .loop = Colour (0xff1a7f5a),
+                     .modulation = Colour (0xff7b3fd4),
+                     .frozen = Colour (0xff2b8fd6),
+                     .boost = Colour (0xff1e7d3c),
+                     .playing = Colour (0xff1f8a43),
+                     .soloed = Colour (0xffb07d00) };
 
         case ThemeName::highContrast:
-            return { Colour (0xff000000), Colour (0xff000000), Colour (0xff1a1a1a), Colour (0xffffffff),
-                     Colour (0xffffffff), Colour (0xffe6e6e6), Colour (0xffffd400), Colour (0xff000000),
-                     Colour (0xffffb000), Colour (0xffff6b6b), Colour (0xff00ff9c), Colour (0xffff5cff),
-                     Colour (0xff00e5ff), Colour (0xff3dff7a), Colour (0xff3dff7a), Colour (0xffffe14d) };
+            return { .background = Colour (0xff000000),
+                     .surface = Colour (0xff000000),
+                     .surfaceRaised = Colour (0xff1a1a1a),
+                     .border = Colour (0xffffffff),
+                     .controlBorder = Colour (0xffffffff),
+                     .text = Colour (0xffffffff),
+                     .textMuted = Colour (0xffe6e6e6),
+                     .textBright = Colour (0xffffffff),
+                     .accent = Colour (0xffffd400),
+                     .textOnAccent = Colour (0xff000000),
+                     .focus = Colour (0xffffd400),
+                     .hover = Colour (0x33ffffff),
+                     .selected = Colour (0x4dffffff),
+                     .selectedInactive = Colour (0xff333333),
+                     .scrollThumb = Colour (0x99ffffff),
+                     .warning = Colour (0xffffb000),
+                     .danger = Colour (0xffff6b6b),
+                     .loop = Colour (0xff00ff9c),
+                     .modulation = Colour (0xffff5cff),
+                     .frozen = Colour (0xff00e5ff),
+                     .boost = Colour (0xff3dff7a),
+                     .playing = Colour (0xff3dff7a),
+                     .soloed = Colour (0xffffe14d) };
 
         case ThemeName::dark:
         default:
-            return { Colour (0xff15171a), Colour (0xff1c1f23), Colour (0xff272b31), Colour (0xff343a42),
-                     Colour (0xffe8eaed), Colour (0xffa5adb8), Colour (0xff5b9dff), Colour (0xff0b1220),
-                     Colour (0xfff2b84b), Colour (0xffff7a6b), Colour (0xff3fbf8f), Colour (0xffb48cff),
-                     Colour (0xffa8dcff), Colour (0xff6fdc8c), Colour (0xff4fd47c), Colour (0xfff7c948) };
+            return { .background = Colour (0xff121314),
+                     .surface = Colour (0xff191a1b),
+                     .surfaceRaised = Colour (0xff202122),
+                     .border = Colour (0xff2a2b2c),
+                     .controlBorder = Colour (0xff333536),
+                     .text = Colour (0xffbfbfbf),
+                     .textMuted = Colour (0xff8c8c8c),
+                     .textBright = Colour (0xffededed),
+                     .accent = Colour (0xff297aa0),
+                     .textOnAccent = Colour (0xffffffff),
+                     .focus = Colour (0xff3994bc),
+                     .hover = Colour (0x14ffffff),
+                     .selected = Colour (0x22ffffff),
+                     .selectedInactive = Colour (0xff2c2d2e),
+                     .scrollThumb = Colour (0x85a8a9aa),
+                     .warning = Colour (0xffe5ba7d),
+                     .danger = Colour (0xfff48771),
+                     .loop = Colour (0xff3fbf8f),
+                     .modulation = Colour (0xffb48cff),
+                     .frozen = Colour (0xffa8dcff),
+                     .boost = Colour (0xff6fdc8c),
+                     .playing = Colour (0xff4fd47c),
+                     .soloed = Colour (0xfff7c948) };
     }
 }
 
-// Text sizes at 100 % scale (JUCE font heights, in pixels).
+// Text sizes at 100 % scale (JUCE font heights, in pixels), as VS Code's: its body text (fontSize.body1), its labels, menus and
+// status bar (fontSize.label1) and its badges' counts (fontSize.label3). Two weights, regular and semibold (Inter's
+// SemiBold, what a bold font is), as VS Code's.
 namespace TextSize
 {
     inline constexpr float small = 12.0f;
-    inline constexpr float body = 14.0f;
+    inline constexpr float body = 13.0f;
     inline constexpr float title = 16.0f;
     inline constexpr float heading = 20.0f;
     inline constexpr float badge = 10.0f; // a count in a badge, such as the activity bar's
@@ -84,25 +155,71 @@ namespace Space
 } // namespace Space
 
 inline constexpr int controlHeight = 28;
+
+// Corners, as VS Code's: a control's, a button's, a field's, a row's or a tab's (cornerRadius.small); a menu's items
+// (cornerRadius.medium); and the panels' cards and what pops up, menus, lists and tooltips (cornerRadius.large).
 inline constexpr float cornerRadius = 4.0f;
+inline constexpr float itemCornerRadius = 6.0f;
+inline constexpr float cardCornerRadius = 8.0f;
+
+// A scroll bar, as VS Code's: so wide, its thumb rounded and no track behind it; the thumb's colour (Palette::scrollThumb) this
+// much more opaque under the pointer and while it is dragged.
+namespace ScrollTint
+{
+    inline constexpr int width = 10;
+    inline constexpr float hoverAlpha = 1.08f, dragAlpha = 1.17f;
+} // namespace ScrollTint
+
+// A list's rows, as VS Code's: so tall, and their hover and selection washes inset this far from the list's sides, rounded
+// (cornerRadius).
+namespace ListRow
+{
+    inline constexpr int height = 22;
+    inline constexpr float inset = 4.0f;
+} // namespace ListRow
+
+// A view area's tabs (ui/shell/Panels.h), as VS Code's panels' in its Modern UI: pills so tall in the middle of the bar, so far
+// apart, their names this far from their ends.
+namespace TabTint
+{
+    inline constexpr float pillHeight = 24.0f, pillInset = 2.0f;
+    inline constexpr int textInset = 10;
+} // namespace TabTint
+
+// A shortcut's keys as VS Code's command search shows them (drawKeyCaps()): each in a little box with these corners, so tall,
+// its text so big and so far from its ends, the boxes so far apart; filled in the muted text colour this opaque, outlined in
+// the control border.
+namespace KeyCap
+{
+    inline constexpr float corner = 3.0f, height = 18.0f, textSize = 11.0f, padding = 5.0f, gap = 3.0f;
+    inline constexpr float fill = 0.17f;
+} // namespace KeyCap
 
 // The main window's bars and panels (ui/shell/AppShell.h, PanelLayout.h, TitleBar.h, StatusBar.h).
 namespace Shell
 {
-    inline constexpr int titleBarHeight = 36;     // the menus, Undo and Redo, the command search and the panels' switches
+    inline constexpr int titleBarHeight = 35;     // the menus, Undo and Redo, the command search and the panels' switches
     inline constexpr int transportBarHeight = 44; // play, record, the tempo and the master level
     inline constexpr int tempoStretchWidth = 320; // what a tempo change stretches, under the tempo field as it changes
     inline constexpr int tempoStretchSeconds = 4; // how long that stays once the tempo stops changing
-    inline constexpr int statusBarHeight = 24;    // whether the project is saved, the selection, the hints, the audio output...
+
+    // Whether the project is saved, the selection, the hints, the audio output...: as VS Code's status bar, its items so
+    // tall in the middle of it, each lit under the pointer in the hover wash, rounded.
+    inline constexpr int statusBarHeight = 28, statusItemHeight = 22;
+
+    // As VS Code's Modern UI lays out its parts: each panel a card, rounded (cardCornerRadius) and outlined in the border
+    // colour, so far apart and from the window's sides and foot, on the window's frame (the surface).
+    inline constexpr int cardGap = 4;
 
     // The title bar's parts: the window's buttons, as wide as Windows 11's, with their glyphs, Close red under the pointer as
-    // there (in every theme); the command search, as wide as it can be in the middle; the project's name at its widest; the
+    // VS Code's (in every theme); the command search, as wide as it can be in the middle and as tall as VS Code's command
+    // center; the project's name at its widest; the
     // panels' switches, a little window with the panel's part filled while it shows; and how faint the bar's text goes while
     // another window is in front. The window's edges resize it within this band.
     inline constexpr int windowButtonWidth = 46;
     inline constexpr float windowGlyphSize = 10.0f;
-    inline constexpr juce::uint32 closeButtonColour = 0xffc42b1c, closeButtonText = 0xffffffff;
-    inline constexpr int searchMinimumWidth = 240, searchMaximumWidth = 520, searchIconSize = 14;
+    inline constexpr juce::uint32 closeButtonColour = 0xe6e81123, closeButtonText = 0xffffffff;
+    inline constexpr int searchMinimumWidth = 240, searchMaximumWidth = 520, searchIconSize = 14, searchHeight = 22;
     inline constexpr int projectNameWidth = 200;
     inline constexpr float panelSwitchWidth = 16.0f, panelSwitchHeight = 12.0f, panelSwitchCorner = 2.0f;
     inline constexpr float panelSwitchSideShare = 0.35f, panelSwitchBottomShare = 0.4f; // of the little window, the panel's part
@@ -118,9 +235,9 @@ namespace Shell
     inline constexpr int statusProgressWidth = 80, statusProgressHeight = 6;
     inline constexpr int statusHintsMinimumWidth = 240;
 
-    inline constexpr int dividerSize = 5;      // between panels, dragged to size them
-    inline constexpr float dividerLit = 0.5f;  // the accent's alpha on a divider under the pointer
-    inline constexpr int panelButtonSize = 26; // in a panel's top right corner: maximize, detach and hide
+    inline constexpr int dividerSize = cardGap; // between panels, dragged to size them
+    inline constexpr float dividerLit = 0.5f;   // the focus colour's alpha on a divider under the pointer
+    inline constexpr int panelButtonSize = 26;  // in a panel's top right corner: maximize, detach and hide
 
     // What a panel's buttons take of its top right corner, with their margins, so that what is there leaves them room.
     constexpr int getPanelCornerWidth (int buttons)
@@ -130,11 +247,13 @@ namespace Shell
 
     inline constexpr int minimumLeftPanelWidth = 160, maximumLeftPanelWidth = 480, leftPanelWidth = 240; // the browser or the versions
 
-    // The activity bar along the window's left edge (ui/shell/ActivityBar.h): its width and its icons', the marker along the
-    // left edge of the view that shows, and the badge on the Versions icon with how many changes the song has since its last
-    // version, up to the most it counts ("99+" past it).
-    inline constexpr int activityBarWidth = 40, activityIconSize = 20, activityMarkerWidth = 2;
-    inline constexpr float activityBadgeHeight = 14.0f;
+    // The activity bar along the window's left edge (ui/shell/ActivityBar.h), as VS Code's Modern UI's: its width, its items'
+    // height and the room between them, their icons, and the rounded box behind the icon of the view that shows and under
+    // the pointer; and the badge on the Source Control icon with how many changes the song has since its last commit, up to
+    // the most it counts ("99+" past it).
+    inline constexpr int activityBarWidth = 44, activityItemHeight = 36, activityItemGap = 8, activityIconSize = 24;
+    inline constexpr float activityBoxSize = 32.0f;
+    inline constexpr float activityBadgeHeight = 16.0f;
     inline constexpr int activityBadgeMost = 99;
     inline constexpr int minimumInspectorWidth = 180, maximumInspectorWidth = 420, inspectorWidth = 260;
     inline constexpr int minimumCentreWidth = 300, minimumCentreHeight = 120; // the song's views, and the editor dock
@@ -182,12 +301,11 @@ inline std::optional<juce::Colour> getFamilyColour (DeviceFamily family, ThemeNa
     // clang-format on
 }
 
-// The knobs of devices' editors, square: a device's main controls large, the rest compact.
-// The Versions view (ui/versions/VersionsView.h): its rows, and the history's graph, a line for each branch in its color with
-// a dot for each of its versions.
+// The Source Control view (ui/versions/VersionsView.h): its rows, and the graph, a line for each branch in its color with a
+// dot for each of its commits.
 namespace History
 {
-    inline constexpr int changeRowHeight = 24, versionRowHeight = 30, noteHeight = 52;
+    inline constexpr int changeRowHeight = ListRow::height, versionRowHeight = 30, noteHeight = 52;
     inline constexpr int laneWidth = 12; // a branch's line's column
     inline constexpr float dotSize = 8.0f, lineWidth = 2.0f;
     inline constexpr int buttonWidth = 72;                     // Done, Merge and Cancel, at their widest
@@ -195,22 +313,21 @@ namespace History
     inline constexpr int playWidth = 20;                       // a version's play mark's column, while any has a bounce
     inline constexpr float playSize = 8.0f;
 
-    // As VS Code's Source Control view lays out its parts: the message, at most so many lines tall as it grows; Save Version
-    // across the view with its menu's part at its right end; a section's heading (its chevron and its count's badge); and a
-    // change's row: its icon, its name and what changed, the Put Back under the pointer and its letter (A, M, D) at its end.
+    // As VS Code's Source Control view lays out its parts: the message, at most so many lines tall as it grows; Commit across
+    // the view with its menu's part at its right end; a section's heading (its chevron and its count's badge); and a change's
+    // row: its icon, its name and what changed, its actions under the pointer and its letter (U, A, M, D, C) at its end.
     inline constexpr int messageLines = 6;
     inline constexpr int saveMenuWidth = 28;
     inline constexpr float sectionChevronSize = 14.0f, badgeHeight = 16.0f;
     inline constexpr float rowIconSize = 14.0f;
     inline constexpr int actionWidth = 22, letterWidth = 16;
-    inline constexpr float hoverWash = 0.07f;             // the text color's alpha behind the row under the pointer
-    inline constexpr float branchBadgeAlpha = 0.25f;      // a branch's color behind its name on its last version, in the history
+    inline constexpr float branchBadgeAlpha = 0.25f;      // a branch's color behind its name on its last commit, in the graph
     inline constexpr float strikethroughThickness = 1.0f; // through the name of what was taken away
 } // namespace History
 
-// The changes since a version (ui/versions/VersionsView.h), as VS Code colors what git finds changed: what was added green,
-// what changed amber, what was taken away red, its letter beside each, so that color is never the only sign. VS Code's Dark+,
-// Light+ and High Contrast colors, the dark theme's red lighter, to read as text does on the surface (4.5:1).
+// The changes since a commit (ui/versions/VersionsView.h), as VS Code colors what git finds changed: what was added green,
+// what changed amber, what was taken away red, its letter beside each, so that color is never the only sign. VS Code's 2026
+// Dark and 2026 Light colors (gitDecoration.*), and High Contrast's.
 enum class ChangeKind
 {
     added,
@@ -228,24 +345,44 @@ inline juce::Colour getChangeColour (ChangeKind kind, ThemeName theme)
     // clang-format off
     switch (kind)
     {   //                                 dark        light       high contrast
-        case ChangeKind::added:   return pick (0xff81b88b, 0xff587c0c, 0xffa1e3ad);
-        case ChangeKind::removed: return pick (0xffe5675a, 0xffad0707, 0xffff6b6b);
+        case ChangeKind::added:   return pick (0xff73c991, 0xff587c0c, 0xffa1e3ad);
+        case ChangeKind::removed: return pick (0xfff48771, 0xffad0707, 0xffff6b6b);
         case ChangeKind::changed:
-        default:                  return pick (0xffe2c08d, 0xff895503, 0xffe2c08d);
+        default:                  return pick (0xffe5ba7d, 0xff667309, 0xffe2c08d);
     }
     // clang-format on
 }
 
 // What pops up over the window, a menu or a list such as the command search: a little translucent, as VS Code's menus are,
-// so that what is behind shows faintly through; opaque in the high contrast theme. And a picker's list (ui/versions/
-// BranchPicker.h): its width, its rows and how many show at once, and its icons.
+// so that what is behind shows faintly through (VS Code blurs it too, which JUCE can't); opaque in the high contrast theme;
+// rounded (cardCornerRadius), outlined in the border colour, over a soft shadow this wide and dark. A menu as VS Code's: at
+// least so wide, its items so tall, each inset from its sides with its own corners (itemCornerRadius), the one highlighted in a
+// wash of the focus colour outlined in it, its text and its shortcut, fainter, this far from its ends; its separators' rows
+// so tall. And a picker's list (ui/versions/BranchPicker.h): its width, its rows and how many show at once, and its icons.
 namespace Popup
 {
     inline constexpr float backgroundAlpha = 0.92f;
+    inline constexpr int shadowRadius = 12;
+    inline constexpr float shadowAlpha = 0.36f;
+    inline constexpr int menuMinimumWidth = 160, itemHeight = 24, itemInset = 4, itemTextInset = 12, separatorHeight = 9;
+    inline constexpr float selectionWash = 0.15f, shortcutAlpha = 0.7f;
     inline constexpr int pickerWidth = 520, pickerRowHeight = 30, pickerRows = 10;
     inline constexpr float pickerIconSize = 16.0f;
+
+    // A tooltip, as VS Code's hovers: its text this far from its edges, its lines at most so long; and so far from the pointer.
+    inline constexpr int tooltipPaddingX = 8, tooltipPaddingY = 4, tooltipMaximumWidth = 400, tooltipOffset = 12;
 } // namespace Popup
 
+// A button as VS Code's: filled in the accent (the main one, or one switched on), else clear with a border in the control
+// border colour, the hover wash over it under the pointer; outlined in the focus colour while it has the keyboard focus, its
+// fill this far inside the outline, as VS Code's focus outline is drawn outside the button. A tick box this big, rounded.
+namespace ButtonTint
+{
+    inline constexpr float focusGap = 2.0f;
+    inline constexpr float tickBoxSize = 18.0f, tickBoxCorner = 3.0f;
+} // namespace ButtonTint
+
+// The knobs of devices' editors, square: a device's main controls large, the rest compact.
 inline constexpr int knobSize = 64;
 inline constexpr int compactKnobSize = 40;
 
@@ -284,8 +421,8 @@ namespace GraphTint
 } // namespace GraphTint
 
 // How far a button that needs attention, such as one asking for the instrument a track's notes need, is mixed with the
-// warning color.
-inline constexpr float attentionTint = 0.35f;
+// warning color (as dark as VS Code's warning fields are, so that its text still reads at 4.5:1).
+inline constexpr float attentionTint = 0.2f;
 
 // The accent color's alpha behind something selected: a device's slot in the mixer, or a browser row while the browser
 // hasn't the keyboard focus.

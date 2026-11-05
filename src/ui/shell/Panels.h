@@ -250,6 +250,7 @@ public:
     // The left area's part of the row's width while it has two, which the line's drag changes; the settings keep it.
     double share = 0.5;
     std::function<void()> onShareChanged;
+    std::function<void()> onLayout; // once its areas are laid out: the panels' cards follow them (PanelCards)
 
     void resized() override;
 

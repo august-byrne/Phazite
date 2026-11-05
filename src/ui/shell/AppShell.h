@@ -174,6 +174,9 @@ private:
     PanelButtons leftButtons { commands, Panel::left }, songButtons { commands, Panel::song }, editorButtons { commands, Panel::editor },
         inspectorButtons { commands, Panel::inspector };
 
+    // Over the panels, under the lesson's card: their corners and edges, each a card as VS Code's Modern UI's.
+    PanelCards cards;
+
     struct PanelWindow;
     std::unique_ptr<PanelWindow> leftWindow, inspectorWindow, editorWindow; // null while docked
 
@@ -211,6 +214,8 @@ private:
     void showSelectedDevice();                         // in the Devices view (the "device.show" command)
     void showLeftView (LeftView);                      // or hides the left panel if it shows it: an activity bar icon's click
     void placePanelButtons();
+    void updateCards();         // where the panels' cards are, after they moved
+    void keepOverlaysInFront(); // the cards over the panels, the lesson's ring and card over them
     void setActiveEditor (TimelineEditor*);
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track
     juce::String getDefaultHint() const;                 // the guide's next step, or how to search for commands

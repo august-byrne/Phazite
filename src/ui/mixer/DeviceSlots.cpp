@@ -305,8 +305,8 @@ void DeviceSlots::updateAddButton()
         addButton.setTooltip (need == 1 ? "This track has notes, but no instrument to play them, so they make no sound. Choose "
                                           "one: a synth or a sampler"
                                         : "Adds an instrument, which plays the track's notes: a synth or a sampler, built in or a plug-in");
-        addButton.setColour (juce::TextButton::buttonColourId,
-                             need == 1 ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint) : p.surfaceRaised);
+        addButton.setColour (juce::TextButton::buttonColourId, need == 1 ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint)
+                                                                         : juce::Colours::transparentBlack); // clear, as other buttons
     }
 }
 

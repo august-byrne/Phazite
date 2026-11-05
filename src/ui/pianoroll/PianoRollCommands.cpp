@@ -115,8 +115,8 @@ void PianoRoll::updateToolbar()
     const auto silent = track.isValid() && ! instrument.has_value();
     instrumentButton.setButtonText (instrument.has_value() ? instrument->name : juce::String ("Choose instrument"));
     instrumentButton.setEnabled (canHoldInstrument (context, track));
-    instrumentButton.setColour (juce::TextButton::buttonColourId,
-                                silent ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint) : p.surfaceRaised);
+    instrumentButton.setColour (juce::TextButton::buttonColourId, silent ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint)
+                                                                         : juce::Colours::transparentBlack); // clear, as other buttons
     instrumentButton.setTooltip (silent
                                      ? "This track has no instrument, so its notes make no sound. Click to choose one: a synth or a sampler"
                                      : "The instrument that plays this track's notes. Click to open or replace it");

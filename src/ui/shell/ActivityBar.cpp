@@ -18,14 +18,22 @@ juce::String getLeftViewName (LeftView view)
 
 namespace
 {
-    // An icon of the bar, in full color while it is on or the pointer is on it, otherwise dimmed (still readable): the area
-    // it was drawn in.
-    juce::Rectangle<float> drawIcon (juce::Graphics& g, juce::Component& item, juce::Drawable* drawable, juce::Colour& drawnIn, bool lit)
+    // An icon of the bar as VS Code's Modern UI draws them: on a rounded box in the inactive selection's colour, bright,
+    // while its view shows; on the hover wash under the pointer; otherwise dimmed (still readable). The area it was drawn in.
+    juce::Rectangle<float> drawIcon (juce::Graphics& g, juce::Component& item, juce::Drawable* drawable, juce::Colour& drawnIn, bool on,
+                                     bool lit)
     {
         const auto& p = getPalette (item);
-        const auto colour = lit ? p.text : p.textMuted;
-        const auto area =
-            item.getLocalBounds().toFloat().withSizeKeepingCentre ((float) Shell::activityIconSize, (float) Shell::activityIconSize);
+        const auto bounds = item.getLocalBounds().toFloat();
+
+        if (on || lit)
+        {
+            g.setColour (on ? p.selectedInactive : p.hover);
+            g.fillRoundedRectangle (bounds.withSizeKeepingCentre (Shell::activityBoxSize, Shell::activityBoxSize), cornerRadius);
+        }
+
+        const auto colour = on ? p.textBright : lit ? p.text : p.textMuted;
+        const auto area = bounds.withSizeKeepingCentre ((float) Shell::activityIconSize, (float) Shell::activityIconSize);
 
         if (drawable != nullptr)
         {
@@ -83,15 +91,7 @@ public:
     void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
     {
         const auto& p = getPalette (*this);
-
-        // The view that shows: a bar in the accent color along its left edge.
-        if (getToggleState())
-        {
-            g.setColour (p.accent);
-            g.fillRect (getLocalBounds().removeFromLeft (Shell::activityMarkerWidth));
-        }
-
-        const auto iconArea = drawIcon (g, *this, drawable.get(), drawableColour, getToggleState() || isHighlighted || isDown);
+        const auto iconArea = drawIcon (g, *this, drawable.get(), drawableColour, getToggleState(), isHighlighted || isDown);
 
         // As VS Code counts the changes on its Source Control icon: a pill at the icon's lower right, in the accent color.
         if (badge > 0)
@@ -143,7 +143,7 @@ public:
 
     void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
     {
-        drawIcon (g, *this, drawable.get(), drawableColour, isHighlighted || isDown);
+        drawIcon (g, *this, drawable.get(), drawableColour, false, isHighlighted || isDown);
     }
 
 private:
@@ -268,18 +268,27 @@ void ActivityBar::updateBadge()
 
 void ActivityBar::paint (juce::Graphics& g)
 {
-    g.fillAll (getPalette (*this).background);
+    // As the left panel beside it, in the same card, the line between them its own, as VS Code joins its activity bar to its
+    // side bar.
+    const auto& p = getPalette (*this);
+    g.fillAll (p.surface);
+    g.setColour (p.border);
+    g.fillRect (getLocalBounds().removeFromRight (1));
 }
 
 void ActivityBar::resized()
 {
-    // The views' icons from the top, the account's and the settings' up from the foot.
-    auto area = getLocalBounds();
+    // The views' icons from the top, the account's and the settings' up from the foot, so far apart as VS Code's.
+    auto area = getLocalBounds().withTrimmedRight (1).reduced (0, Shell::activityItemGap / 2);
 
     for (auto* item : { browserItem.get(), versionsItem.get() })
-        item->setBounds (area.removeFromTop (getWidth()));
+    {
+        item->setBounds (area.removeFromTop (Shell::activityItemHeight));
+        area.removeFromTop (Shell::activityItemGap);
+    }
 
-    settingsItem->setBounds (area.removeFromBottom (getWidth()));
-    accountItem->setBounds (area.removeFromBottom (getWidth()));
+    settingsItem->setBounds (area.removeFromBottom (Shell::activityItemHeight));
+    area.removeFromBottom (Shell::activityItemGap);
+    accountItem->setBounds (area.removeFromBottom (Shell::activityItemHeight));
 }
 } // namespace phazite::ui

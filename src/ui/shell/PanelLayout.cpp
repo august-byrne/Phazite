@@ -399,9 +399,10 @@ PanelDivider::PanelDivider (const juce::String& title, bool isBetweenColumns)
 
 void PanelDivider::paint (juce::Graphics& g)
 {
-    // The shell's border colour shows through, until the pointer is on it.
+    // The window's frame shows through, between the cards, until the pointer is on it: then a line in the focus colour, as
+    // VS Code's sashes light.
     if (isMouseOverOrDragging())
-        g.fillAll (getPalette (*this).accent.withAlpha (Shell::dividerLit));
+        g.fillAll (getPalette (*this).focus.withAlpha (Shell::dividerLit));
 }
 
 void PanelDivider::mouseDown (const juce::MouseEvent&)
@@ -414,5 +415,50 @@ void PanelDivider::mouseDrag (const juce::MouseEvent& e)
 {
     if (onDrag != nullptr)
         onDrag (betweenColumns ? e.getScreenX() - e.getMouseDownScreenX() : e.getScreenY() - e.getMouseDownScreenY()); // it moves meanwhile
+}
+
+//==============================================================================
+PanelCards::PanelCards()
+{
+    setInterceptsMouseClicks (false, false);
+    setAccessible (false); // what it draws is the panels' edges
+}
+
+void PanelCards::setCards (const juce::Array<juce::Rectangle<int>>& newCards)
+{
+    if (newCards == cards)
+        return;
+
+    cards = newCards;
+    corners.clear();
+    edges.clear();
+
+    for (const auto& card : cards)
+    {
+        if (card.isEmpty())
+            continue;
+
+        // The corners: what lies between the card's rectangle and its rounded shape.
+        const auto area = card.toFloat();
+        corners.addRectangle (area);
+        corners.addRoundedRectangle (area, cardCornerRadius);
+
+        juce::Path edge;
+        edge.addRoundedRectangle (area.reduced (0.5f), cardCornerRadius);
+        juce::PathStrokeType (1.0f).createStrokedPath (edge, edge);
+        edges.addPath (edge);
+    }
+
+    corners.setUsingNonZeroWinding (false);
+    repaint();
+}
+
+void PanelCards::paint (juce::Graphics& g)
+{
+    const auto& p = getPalette (*this);
+    g.setColour (p.surface);
+    g.fillPath (corners);
+    g.setColour (p.border);
+    g.fillPath (edges);
 }
 } // namespace phazite::ui

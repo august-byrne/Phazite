@@ -8,6 +8,8 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/input/Keymap.h"
 #include "ui/pianoroll/PianoRoll.h"
+#include "ui/shell/ActivityBar.h"
+#include "ui/shell/PanelLayout.h"
 
 #include <algorithm>
 #include <functional>
@@ -18,14 +20,20 @@ namespace
 using Screen = phazite::test::AppScreen;
 
 // The window's parts, as checkChildrenApart() checks them, except the panels' buttons (maximize, a window of its own,
-// hide), which sit in their panel's top right corner on purpose: each lies inside a panel.
+// hide), which sit in their panel's top right corner on purpose: each lies inside a panel; and what lies over them all
+// and takes no clicks, the panels' cards' corners and edges (ui::PanelCards).
 void checkPartsApart (juce::Component& shell)
 {
     juce::Array<juce::Component*> parts, cornerButtons;
 
     for (auto* child : shell.getChildren())
-        if (child->isVisible() && ! child->getBounds().isEmpty())
+    {
+        bool takesClicks = true, childrenTakeClicks = true;
+        child->getInterceptsMouseClicks (takesClicks, childrenTakeClicks);
+
+        if (child->isVisible() && ! child->getBounds().isEmpty() && (takesClicks || childrenTakeClicks))
             (child->getTitle() == "Panel buttons" ? cornerButtons : parts).add (child);
+    }
 
     for (int i = 0; i < parts.size(); ++i)
     {
@@ -156,7 +164,8 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     // The playlist's Maximize: it fills the window between the bars, the other panels out of sight, and its first button
     // restores them, as they were.
     click (cornerOf (song), "Maximize");
-    CHECK (song.getWidth() == screen.shell.getWidth() - phazite::ui::Shell::activityBarWidth); // beside the activity bar
+    // Beside the activity bar's card, with the cards' gaps from the window's sides and between them.
+    CHECK (song.getWidth() == screen.shell.getWidth() - phazite::ui::Shell::activityBarWidth - 3 * phazite::ui::Shell::cardGap);
     CHECK_FALSE (browser.isShowing());
     CHECK_FALSE (editor.isShowing());
     CHECK_FALSE (inspector.isShowing());
@@ -222,6 +231,47 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     REQUIRE (screen.registry.invoke ("view.maximizePanel"));
     CHECK (screen.shell.getPanelLayout().isMaximized (Panel::song));
     CHECK_FALSE (browser.isShowing());
+}
+
+TEST_CASE ("The panels are cards, as VS Code's Modern UI's: apart on the window's frame, the activity bar one with the left panel")
+{
+    using phazite::ui::Panel, phazite::ui::Shell::cardGap;
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& shell = screen.shell;
+    const auto overlays = phazite::test::findAll<phazite::ui::PanelCards> (shell);
+    const auto bars = phazite::test::findAll<phazite::ui::ActivityBar> (shell);
+    REQUIRE (overlays.size() == 1);
+    REQUIRE (bars.size() == 1);
+    const auto& cards = overlays[0]->getCards();
+    const auto rail = bars[0]->getBounds();
+
+    // The activity bar and the left panel one card, the inspector one, and the upper and lower panels' areas one each.
+    CHECK (cards.size() == 4);
+    CHECK (cards.contains (rail.getUnion (shell.getPanel (Panel::left).getBounds())));
+    CHECK (cards.contains (shell.getPanel (Panel::inspector).getBounds()));
+
+    // Under the bars, each the gap apart from the others and from the window's sides and the status bar.
+    for (int i = 0; i < cards.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK (cards[i].getY() >= shell.getTitleBar().getHeight() + phazite::ui::Shell::transportBarHeight + cardGap);
+        CHECK (shell.getLocalBounds().reduced (cardGap).contains (cards[i]));
+        CHECK (cards[i].getBottom() + cardGap <= shell.getStatusBar().getY());
+
+        for (int j = i + 1; j < cards.size(); ++j)
+            CHECK_FALSE (cards[i].expanded (cardGap - 1).intersects (cards[j]));
+    }
+
+    // Over the panels, it takes no clicks: they still get theirs.
+    CHECK (shell.getComponentAt (shell.getPanel (Panel::inspector).getBounds().getCentre()) != overlays[0]);
+
+    // The left panel hidden: the activity bar a card of its own; the cards follow the panels as they change.
+    REQUIRE (screen.registry.invoke ("view.toggleLeftPanel"));
+    phazite::test::dispatchPendingMessages();
+    CHECK (overlays[0]->getCards().contains (rail));
+    CHECK (overlays[0]->getCards().size() == 4);
 }
 
 #if JUCE_WINDOWS

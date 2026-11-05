@@ -115,7 +115,7 @@ void LessonCard::update()
     const auto& p = getPalette (*this);
     const auto finished = lessons.isFinished();
     const auto waits = lessons.waitsForNext();
-    kind.setColour (juce::Label::textColourId, p.accent);
+    kind.setColour (juce::Label::textColourId, p.focus); // text in the focus colour, which reads on the card (4.5:1)
     progress.setColour (juce::Label::textColourId, p.textMuted);
     name.setText (lesson->name, juce::dontSendNotification);
     progress.setText (finished ? juce::String ("Done")

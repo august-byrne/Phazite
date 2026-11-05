@@ -62,8 +62,8 @@ enum class Icon
     versions, // the project's versions: a branch
     account,
     settings,
-    // The Versions view (ui/versions/VersionsView.h)
-    check,       // Save Version, and the branch the song is on
+    // The Source Control view (ui/versions/VersionsView.h)
+    check,       // Commit, and the branch the song is on
     moreActions, // a view's menu of what else it does: three dots
     song,        // a change to the song's own: its tempo, sections, chords
     minus,       // a line unstaged
@@ -107,7 +107,7 @@ public:
     // inside other controls, such as the chevron that collapses a track.
     void setQuiet (bool);
 
-    // An accented button is a view's main one, in the accent color, as Save Version is.
+    // An accented button is a view's main one, in the accent color, as Commit is.
     void setAccented (bool);
 
     void paintButton (juce::Graphics&, bool isHighlighted, bool isDown) override;

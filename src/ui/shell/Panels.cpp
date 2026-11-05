@@ -786,13 +786,17 @@ void ViewRow::resized()
         areas[1]->setBounds (area);
         areas[0]->setCornerButtons (0);
         areas[1]->setCornerButtons (buttons);
-        return;
+    }
+    else
+    {
+        for (auto& each : areas)
+        {
+            each->setBounds (area);
+            each->setCornerButtons (buttons);
+        }
     }
 
-    for (auto& each : areas)
-    {
-        each->setBounds (area);
-        each->setCornerButtons (buttons);
-    }
+    if (onLayout != nullptr)
+        onLayout();
 }
 } // namespace phazite::ui

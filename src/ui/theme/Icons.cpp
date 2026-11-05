@@ -225,9 +225,28 @@ void IconButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown
     const auto& p = getPalette (*this);
     const bool on = getToggleState() || accented;
 
-    if (! quiet || on || isHighlighted || isDown || hasKeyboardFocus (false))
+    if (quiet && ! on)
+    {
+        // As VS Code's toolbars' buttons: no border, the hover wash under the pointer, the focus outline with the keyboard.
+        const auto bounds = getLocalBounds().toFloat();
+
+        if (isEnabled() && (isHighlighted || isDown))
+        {
+            g.setColour (isDown ? p.selected : p.hover);
+            g.fillRoundedRectangle (bounds, cornerRadius);
+        }
+
+        if (hasKeyboardFocus (false))
+        {
+            g.setColour (p.focus);
+            g.drawRoundedRectangle (bounds.reduced (0.5f), cornerRadius, 1.0f);
+        }
+    }
+    else
+    {
         getLookAndFeel().drawButtonBackground (
             g, *this, findColour (on ? juce::TextButton::buttonOnColourId : juce::TextButton::buttonColourId), isHighlighted, isDown);
+    }
 
     const auto colour = (on ? p.textOnAccent : p.text).withMultipliedAlpha (isEnabled() ? 1.0f : 0.5f);
     const auto label = getButtonText();

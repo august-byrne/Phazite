@@ -21,12 +21,19 @@ struct TitleBar::SearchBox : public juce::Button
 
     void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
     {
+        // As VS Code's command center: clear on the bar in a faint outline, washed and outlined in the control border under
+        // the pointer.
         const auto& p = getPalette (*this);
         const auto box = getLocalBounds().toFloat().reduced (0.5f);
-        g.setColour (isDown ? p.surface : p.surfaceRaised);
-        g.fillRoundedRectangle (box, cornerRadius);
-        g.setColour (isHighlighted ? p.textMuted : p.border);
-        g.drawRoundedRectangle (box, cornerRadius, 1.0f);
+
+        if (isHighlighted || isDown)
+        {
+            g.setColour (isDown ? p.selected : p.hover);
+            g.fillRoundedRectangle (box, itemCornerRadius);
+        }
+
+        g.setColour (isHighlighted || isDown ? p.controlBorder : p.border);
+        g.drawRoundedRectangle (box, itemCornerRadius, 1.0f);
 
         // The icon and "Search commands" in the middle, the palette's key at the right, where there is room.
         const auto colour = p.textMuted.withMultipliedAlpha (dimmed ? Shell::inactiveAlpha : 1.0f);
@@ -103,7 +110,7 @@ struct TitleBar::WindowButton : public juce::Button
         const auto lit = isHighlighted || isDown;
 
         if (lit)
-            g.fillAll (closes ? juce::Colour (Shell::closeButtonColour) : p.surfaceRaised);
+            g.fillAll (closes ? juce::Colour (Shell::closeButtonColour) : isDown ? p.selected : p.hover);
 
         const auto colour =
             (lit && closes ? juce::Colour (Shell::closeButtonText) : p.text).withMultipliedAlpha (dimmed ? Shell::inactiveAlpha : 1.0f);
@@ -164,7 +171,7 @@ struct TitleBar::PanelSwitch : public juce::Button
 
         if (isHighlighted || isDown)
         {
-            g.setColour (p.surfaceRaised);
+            g.setColour (isDown ? p.selected : p.hover);
             g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
         }
 
@@ -468,10 +475,8 @@ juce::Component::WindowControlKind TitleBar::getControlAt (juce::Point<int> poin
 
 void TitleBar::paint (juce::Graphics& g)
 {
-    const auto& p = getPalette (*this);
-    g.fillAll (p.background);
-    g.setColour (p.border);
-    g.fillRect (getLocalBounds().removeFromBottom (1));
+    // On the window's frame, as VS Code's title bar in its Modern UI.
+    g.fillAll (getPalette (*this).surface);
 }
 
 void TitleBar::resized()
@@ -552,7 +557,7 @@ void TitleBar::resized()
         searchX = juce::jlimit (first, juce::jmax (first, area.getRight() - searchWidth), (getWidth() - searchWidth) / 2);
     }
 
-    searchBox->setBounds (searchX, (getHeight() - buttonSize) / 2, searchWidth, buttonSize);
+    searchBox->setBounds (searchX, (getHeight() - Shell::searchHeight) / 2, searchWidth, Shell::searchHeight);
     redoButton.setBounds (searchX - Space::s - buttonSize, (getHeight() - buttonSize) / 2, buttonSize, buttonSize);
     undoButton.setBounds (redoButton.getX() - Space::xs - buttonSize, redoButton.getY(), buttonSize, buttonSize);
 }

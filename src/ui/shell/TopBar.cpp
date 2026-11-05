@@ -291,15 +291,13 @@ bool TopBar::isCommandTicked (const juce::String& commandID) const
 void TopBar::lookAndFeelChanged()
 {
     recordButton.setColour (juce::TextButton::buttonOnColourId, getPalette (*this).danger);
-    hearing.setColour (juce::Label::textColourId, getPalette (*this).accent);
+    hearing.setColour (juce::Label::textColourId, getPalette (*this).focus); // which reads as text (4.5:1), as the accent may not
 }
 
 void TopBar::paint (juce::Graphics& g)
 {
-    const auto& p = getPalette (*this);
-    g.fillAll (p.surfaceRaised);
-    g.setColour (p.border);
-    g.fillRect (getLocalBounds().removeFromBottom (1));
+    // On the window's frame, under the title bar, as one with it: the panels' cards begin under it.
+    g.fillAll (getPalette (*this).surface);
 }
 
 void TopBar::resized()

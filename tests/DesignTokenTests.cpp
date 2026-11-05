@@ -106,6 +106,27 @@ TEST_CASE ("Track names and handles stay readable on their headers, in every the
     }
 }
 
+TEST_CASE ("Menus, buttons and scroll bars as VS Code's: items 24 pixels tall in menus at least 160 wide, buttons clear but the main one")
+{
+    phazite::ui::LookAndFeel lookAndFeel;
+    int width = 0, height = 0;
+    lookAndFeel.getIdealPopupMenuItemSize ("Undo", false, 0, width, height);
+    CHECK (height == Popup::itemHeight);
+    CHECK (width + 2 * lookAndFeel.getPopupMenuBorderSize() >= Popup::menuMinimumWidth);
+    lookAndFeel.getIdealPopupMenuItemSize ({}, true, 0, width, height);
+    CHECK (height == Popup::separatorHeight);
+
+    // A long item is as wide as its text needs.
+    lookAndFeel.getIdealPopupMenuItemSize (juce::String::repeatedString ("Export ", 20), false, 0, width, height);
+    CHECK (width > Popup::menuMinimumWidth);
+
+    CHECK (lookAndFeel.getDefaultScrollbarWidth() == ScrollTint::width);
+    CHECK_FALSE (lookAndFeel.areScrollbarButtonsVisible());
+    CHECK (lookAndFeel.findColour (juce::TextButton::buttonColourId).isTransparent());
+    CHECK (lookAndFeel.findColour (juce::TextButton::buttonOnColourId) == getPalette (ThemeName::dark).accent);
+    CHECK (lookAndFeel.findColour (juce::TextEditor::focusedOutlineColourId) == getPalette (ThemeName::dark).focus);
+}
+
 TEST_CASE ("Menus and the lists that pop up are a little translucent, but in the high contrast theme")
 {
     phazite::ui::LookAndFeel lookAndFeel;

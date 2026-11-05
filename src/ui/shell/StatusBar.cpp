@@ -140,10 +140,13 @@ struct StatusBar::Item : public juce::Button
     {
         const auto& p = getPalette (*this);
 
+        // As VS Code's status bar items: a rounded pill under the pointer, as tall as the items, a little in from its sides.
         if ((isHighlighted || isDown) && onClick != nullptr)
         {
-            g.setColour (isDown ? p.background : p.surface);
-            g.fillRect (getLocalBounds().withTrimmedTop (1));
+            g.setColour (isDown ? p.selected : p.hover);
+            g.fillRoundedRectangle (
+                getLocalBounds().toFloat().withSizeKeepingCentre ((float) getWidth() - (float) Space::xs, (float) Shell::statusItemHeight),
+                cornerRadius);
         }
 
         auto area = getLocalBounds().reduced (Space::s, 0);
@@ -499,16 +502,15 @@ void StatusBar::timerCallback()
 
 void StatusBar::paint (juce::Graphics& g)
 {
-    const auto& p = getPalette (*this);
-    g.fillAll (p.surfaceRaised);
-    g.setColour (p.border);
-    g.fillRect (getLocalBounds().removeFromTop (1));
+    // On the window's frame, as VS Code's status bar in its Modern UI, without a line above it.
+    g.fillAll (getPalette (*this).surface);
 }
 
 void StatusBar::resized()
 {
-    // The CPU as wide as it is at its widest, so that the others don't move as it changes.
-    auto area = getLocalBounds();
+    // The CPU as wide as it is at its widest, so that the others don't move as it changes. A little in from the window's sides,
+    // as the panels' cards are.
+    auto area = getLocalBounds().reduced (Shell::cardGap, 0);
     cpuItem->setBounds (area.removeFromRight (cpuItem->getWidthFor ("CPU 100%")));
     audioItem->setBounds (area.removeFromRight (audioItem->getPreferredWidth()));
 

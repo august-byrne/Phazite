@@ -770,8 +770,8 @@ void DevicesView::Row::refresh()
     instrumentButton.setTooltip (needs ? "This track has notes, but no instrument to play them, so they make no sound. Choose one: a "
                                          "synth or a sampler"
                                        : "Adds an instrument, which plays the track's notes: a synth or a sampler, built in or a plug-in");
-    instrumentButton.setColour (juce::TextButton::buttonColourId,
-                                needs ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint) : p.surfaceRaised);
+    instrumentButton.setColour (juce::TextButton::buttonColourId, needs ? p.surfaceRaised.interpolatedWith (p.warning, attentionTint)
+                                                                        : juce::Colours::transparentBlack); // clear, as other buttons
     addButton.setVisible (page == Page::effects);
     addButton.setEnabled (view.context.hasProject());
     resized();

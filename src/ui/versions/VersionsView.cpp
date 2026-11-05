@@ -165,7 +165,7 @@ public:
 
         if (isHighlighted || isDown)
         {
-            g.setColour (p.text.withAlpha (History::hoverWash));
+            g.setColour (isDown ? p.selected : p.hover);
             g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
         }
 
@@ -276,7 +276,8 @@ public:
         area.removeFromLeft (Space::xs);
 
         if (count > 0)
-            area.removeFromRight (drawBadge (g, area, juce::String (count), p.border, p.text) + Space::xs);
+            area.removeFromRight (drawBadge (g, area, juce::String (count), p.accent, p.textOnAccent)
+                                  + Space::xs); // VS Code's badge colours
 
         if (! actions.empty() && actions.front()->isVisible())
             area.removeFromRight ((int) actions.size() * getHeight());
@@ -387,11 +388,7 @@ public:
         const auto theme = getThemeOf (view);
         auto area = juce::Rectangle<int> (width, height);
 
-        if (selected || row == getHover().row)
-        {
-            g.setColour (selected ? p.accent.withAlpha (selectionWash) : p.text.withAlpha (History::hoverWash));
-            g.fillRect (area);
-        }
+        drawListRow (g, view, area.toFloat(), selected, row == getHover().row);
 
         area.reduce (Space::s, 0);
 
@@ -589,11 +586,7 @@ public:
         const auto& p = getPalette (view);
         auto area = juce::Rectangle<int> (width, height);
 
-        if (selected)
-        {
-            g.setColour (p.accent.withAlpha (selectionWash));
-            g.fillRect (area);
-        }
+        drawListRow (g, view, area.toFloat(), selected, false);
 
         area.reduce (Space::s, 0);
         const auto lanes = juce::jmax (1, (int) view.branches.size());

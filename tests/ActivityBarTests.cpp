@@ -110,7 +110,7 @@ TEST_CASE ("The activity bar's icons show or hide their views in the left panel,
     Screen screen;
     auto& bar = screen.getBar();
     CHECK (bar.isShowing());
-    CHECK (bar.getX() == 0);
+    CHECK (bar.getX() == phazite::ui::Shell::cardGap); // in its card, the cards' gap from the window's side
     CHECK (bar.getWidth() == phazite::ui::Shell::activityBarWidth);
     CHECK (screen.leftShows (LeftView::browser));
     CHECK (bar.isMarked (LeftView::browser));
@@ -471,8 +471,8 @@ TEST_CASE ("The account and the settings sit at the foot of the activity bar, th
     auto& bar = screen.getBar();
     auto& account = bar.getAccountButton();
     auto& settings = bar.getSettingsButton();
-    CHECK (settings.getBottom() == bar.getHeight());
-    CHECK (account.getBottom() == settings.getY());
+    CHECK (settings.getBottom() == bar.getHeight() - phazite::ui::Shell::activityItemGap / 2);
+    CHECK (account.getBottom() + phazite::ui::Shell::activityItemGap == settings.getY());
     CHECK (account.getTitle() == "Account");
     CHECK (settings.getTitle() == "Settings");
     CHECK (account.getTooltip().isNotEmpty());

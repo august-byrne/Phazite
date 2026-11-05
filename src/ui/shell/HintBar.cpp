@@ -19,10 +19,9 @@ void HintBar::setDefaultHint (std::function<juce::String()> getText)
 
 void HintBar::paint (juce::Graphics& g)
 {
+    // On the status bar's background, the window's frame.
     const auto& p = getPalette (*this);
-    g.fillAll (p.surfaceRaised);
-    g.setColour (p.border);
-    g.fillRect (getLocalBounds().removeFromTop (1));
+    g.fillAll (p.surface);
 
     g.setColour (alert.isNotEmpty() ? p.warning : p.textMuted);
     g.setFont (juce::FontOptions (TextSize::small));

@@ -110,8 +110,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     lessons.onChange = [this]
     {
         lessonCard.update();
-        lessonCard.getRing().toFront (false);
-        lessonCard.toFront (false);
+        keepOverlaysInFront();
     };
 
     // Double-clicking a clip opens it in its editor, a MIDI clip in the piano roll and an audio clip in the audio clip
@@ -140,6 +139,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
             panels.rowShares[row == &upperRow ? 0 : 1] = row->share;
             settings.set (Settings::panelLayout, panels.toText());
         };
+        row->onLayout = [this] { updateCards(); };
     }
 
     clipEditor.onEditorChanged = [this]
@@ -192,7 +192,9 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     addChildComponent (openingLabel);
     openingLabel.setVisible (! projectContext.hasProject());
 
-    // Over everything while a lesson runs: the ring around a step's control, which clicks pass through, and the card.
+    // Over the panels, their cards' corners and edges; over everything while a lesson runs: the ring around a step's
+    // control, which clicks pass through, and the card.
+    addAndMakeVisible (cards);
     addChildComponent (lessonCard.getRing());
     addChildComponent (lessonCard);
 
@@ -605,6 +607,7 @@ void AppShell::setDetached (Panel which, bool detached)
         auto& parent = which == Panel::editor ? static_cast<juce::Component&> (centre) : static_cast<juce::Component&> (*this);
         parent.addChildComponent (panel);
         getButtons (which).toFront (false);
+        keepOverlaysInFront();
     }
 
     panels.setDetached (which, detached);
@@ -812,13 +815,39 @@ void AppShell::dragDivider (Panel panel, int distance)
 
 void AppShell::paint (juce::Graphics& g)
 {
-    const auto& p = getPalette (*this);
-    g.fillAll (p.border); // shows through the dividers
+    // The window's frame, as VS Code's Modern UI's shell: behind the bars, and between the panels' cards (PanelCards).
+    g.fillAll (getPalette (*this).surface);
+}
 
-    // The window's sides beside the panels (setEdgeInset()), as the title bar's background.
-    g.setColour (p.background);
-    g.fillRect (getLocalBounds().removeFromLeft (edgeInset));
-    g.fillRect (getLocalBounds().removeFromRight (edgeInset));
+void AppShell::updateCards()
+{
+    // The activity bar and the left panel beside it as one card, as VS Code joins its activity bar to its side bar; the
+    // inspector; and each area of views that shows here.
+    juce::Array<juce::Rectangle<int>> shown;
+    auto rail = activityBar.getBounds();
+
+    if (leftPanel.isVisible() && leftPanel.getParentComponent() == this)
+        rail = rail.getUnion (leftPanel.getBounds());
+
+    shown.add (rail);
+
+    if (inspector.isVisible() && inspector.getParentComponent() == this)
+        shown.add (inspector.getBounds());
+
+    if (centre.isVisible())
+        for (auto* area : getAreas())
+            if (area->isVisible() && area->getParentComponent() != nullptr && area->getParentComponent()->isVisible() && isParentOf (area))
+                shown.add (getLocalArea (area, area->getLocalBounds()));
+
+    cards.setBounds (getLocalBounds());
+    cards.setCards (shown);
+}
+
+void AppShell::keepOverlaysInFront()
+{
+    cards.toFront (false);
+    lessonCard.getRing().toFront (false);
+    lessonCard.toFront (false);
 }
 
 void AppShell::updateAudioAlert()
@@ -864,9 +893,13 @@ void AppShell::resized()
     titleBar.setBounds (area.removeFromTop (Shell::titleBarHeight));
     topBar.setBounds (area.removeFromTop (Shell::transportBarHeight));
     statusBar.setBounds (area.removeFromBottom (Shell::statusBarHeight));
-    area = area.reduced (edgeInset, 0);
 
-    // The activity bar down the left edge, whatever shows beside it.
+    // The panels' cards, so far apart and from the window's sides, or the band along a restored window's sides that resizes
+    // it, if that is wider.
+    const auto sideMargin = juce::jmax (edgeInset, Shell::cardGap);
+    area = area.withTrimmedTop (Shell::cardGap).withTrimmedBottom (Shell::cardGap).reduced (sideMargin, 0);
+
+    // The activity bar down the left edge, whatever shows beside it; the left panel right beside it, in the same card.
     activityBar.setBounds (area.removeFromLeft (Shell::activityBarWidth));
     openingLabel.setBounds (area);
 
@@ -882,6 +915,10 @@ void AppShell::resized()
         if (centreDocked)
             leftDivider.setBounds (area.removeFromLeft (Shell::dividerSize));
     }
+    else if (centreDocked)
+    {
+        area.removeFromLeft (Shell::cardGap); // the activity bar's card apart from the centre's
+    }
 
     if (panels.takesRoom (Panel::inspector))
     {
@@ -895,6 +932,7 @@ void AppShell::resized()
         centre.setBounds (area);
 
     placePanelButtons();
+    updateCards();
 
     // The lesson card in the bottom right corner, over the panels and above the status bar, as tall as its text; its ring
     // over the whole window.
@@ -951,6 +989,7 @@ void AppShell::layOutCentre()
         upperRow.setBounds (area);
 
     placePanelButtons();
+    updateCards();
 }
 
 void AppShell::placePanelButtons()
@@ -965,7 +1004,7 @@ void AppShell::placePanelButtons()
         auto& buttons = getButtons (panel);
         const auto bounds = getPanel (panel).getBounds();
         const auto width = buttons.getPreferredWidth();
-        buttons.setBounds (bounds.getRight() - width - Space::xs / 2, bounds.getY() + Space::xs / 2, width, Shell::panelButtonSize);
+        buttons.setBounds (bounds.getRight() - width - Space::xs, bounds.getY() + Space::xs / 2, width, Shell::panelButtonSize);
     }
 }
 
