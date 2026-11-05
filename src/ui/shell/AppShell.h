@@ -22,6 +22,7 @@
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/theme/Icons.h"
+#include "ui/versions/BranchPicker.h"
 #include "ui/versions/VersionsView.h"
 
 namespace phazite::ui
@@ -75,8 +76,13 @@ public:
     void showCommandPalette();
     void showPluginPicker(); // F8
 
-    // Adds the commands for panels, layouts and the palette (the "view." commands), the plug-in picker, and saving
-    // presets, which the browser shows.
+    // The branch picker (ui/versions/BranchPicker.h), where the command search is, as VS Code opens its pickers; and Bounce
+    // Each Version, as the settings keep it, for the song open now too.
+    void showBranchPicker (BranchPicker::Mode);
+    void toggleBounceEachVersion();
+
+    // Adds the commands for panels, layouts and the palette (the "view." commands), the plug-in picker, the branch picker,
+    // and saving presets, which the browser shows.
     void addCommands (CommandRegistry&);
 
     // Updates tooltips and hints that mention shortcuts, e.g. after the keymap changed.

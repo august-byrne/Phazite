@@ -70,6 +70,7 @@ namespace TextSize
     inline constexpr float body = 14.0f;
     inline constexpr float title = 16.0f;
     inline constexpr float heading = 20.0f;
+    inline constexpr float badge = 10.0f; // a count in a badge, such as the activity bar's
 } // namespace TextSize
 
 // Spacing, on a 4-pixel grid.
@@ -130,9 +131,11 @@ namespace Shell
     inline constexpr int minimumLeftPanelWidth = 160, maximumLeftPanelWidth = 480, leftPanelWidth = 240; // the browser or the versions
 
     // The activity bar along the window's left edge (ui/shell/ActivityBar.h): its width and its icons', the marker along the
-    // left edge of the view that shows, and the dot on the Versions icon while the song has changes since its last version.
+    // left edge of the view that shows, and the badge on the Versions icon with how many changes the song has since its last
+    // version, up to the most it counts ("99+" past it).
     inline constexpr int activityBarWidth = 40, activityIconSize = 20, activityMarkerWidth = 2;
-    inline constexpr float activityDotSize = 7.0f;
+    inline constexpr float activityBadgeHeight = 14.0f;
+    inline constexpr int activityBadgeMost = 99;
     inline constexpr int minimumInspectorWidth = 180, maximumInspectorWidth = 420, inspectorWidth = 260;
     inline constexpr int minimumCentreWidth = 300, minimumCentreHeight = 120; // the song's views, and the editor dock
     inline constexpr int minimumAreaWidth = 240; // an area of views beside another in a row of the centre (ui/shell/Panels.h)
@@ -187,11 +190,61 @@ namespace History
     inline constexpr int changeRowHeight = 24, versionRowHeight = 30, noteHeight = 52;
     inline constexpr int laneWidth = 12; // a branch's line's column
     inline constexpr float dotSize = 8.0f, lineWidth = 2.0f;
-    inline constexpr int saveButtonWidth = 120, buttonWidth = 72; // Save Version; Done, Merge and Cancel, at their widest
-    inline constexpr float tickSize = 12.0f, tickInset = 3.0f;    // a merge's line's box, filled while the line is taken
-    inline constexpr int playWidth = 20;                          // a version's play mark's column, while any has a bounce
+    inline constexpr int buttonWidth = 72;                     // Done, Merge and Cancel, at their widest
+    inline constexpr float tickSize = 12.0f, tickInset = 3.0f; // a merge's line's box, filled while the line is taken
+    inline constexpr int playWidth = 20;                       // a version's play mark's column, while any has a bounce
     inline constexpr float playSize = 8.0f;
+
+    // As VS Code's Source Control view lays out its parts: the message, at most so many lines tall as it grows; Save Version
+    // across the view with its menu's part at its right end; a section's heading (its chevron and its count's badge); and a
+    // change's row: its icon, its name and what changed, the Put Back under the pointer and its letter (A, M, D) at its end.
+    inline constexpr int messageLines = 6;
+    inline constexpr int saveMenuWidth = 28;
+    inline constexpr float sectionChevronSize = 14.0f, badgeHeight = 16.0f;
+    inline constexpr float rowIconSize = 14.0f;
+    inline constexpr int actionWidth = 22, letterWidth = 16;
+    inline constexpr float hoverWash = 0.07f;             // the text color's alpha behind the row under the pointer
+    inline constexpr float branchBadgeAlpha = 0.25f;      // a branch's color behind its name on its last version, in the history
+    inline constexpr float strikethroughThickness = 1.0f; // through the name of what was taken away
 } // namespace History
+
+// The changes since a version (ui/versions/VersionsView.h), as VS Code colors what git finds changed: what was added green,
+// what changed amber, what was taken away red, its letter beside each, so that color is never the only sign. VS Code's Dark+,
+// Light+ and High Contrast colors, the dark theme's red lighter, to read as text does on the surface (4.5:1).
+enum class ChangeKind
+{
+    added,
+    changed,
+    removed
+};
+
+inline juce::Colour getChangeColour (ChangeKind kind, ThemeName theme)
+{
+    const auto pick = [theme] (juce::uint32 dark, juce::uint32 light, juce::uint32 highContrast)
+    {
+        return juce::Colour (theme == ThemeName::light ? light : theme == ThemeName::highContrast ? highContrast : dark);
+    };
+
+    // clang-format off
+    switch (kind)
+    {   //                                 dark        light       high contrast
+        case ChangeKind::added:   return pick (0xff81b88b, 0xff587c0c, 0xffa1e3ad);
+        case ChangeKind::removed: return pick (0xffe5675a, 0xffad0707, 0xffff6b6b);
+        case ChangeKind::changed:
+        default:                  return pick (0xffe2c08d, 0xff895503, 0xffe2c08d);
+    }
+    // clang-format on
+}
+
+// What pops up over the window, a menu or a list such as the command search: a little translucent, as VS Code's menus are,
+// so that what is behind shows faintly through; opaque in the high contrast theme. And a picker's list (ui/versions/
+// BranchPicker.h): its width, its rows and how many show at once, and its icons.
+namespace Popup
+{
+    inline constexpr float backgroundAlpha = 0.92f;
+    inline constexpr int pickerWidth = 520, pickerRowHeight = 30, pickerRows = 10;
+    inline constexpr float pickerIconSize = 16.0f;
+} // namespace Popup
 
 inline constexpr int knobSize = 64;
 inline constexpr int compactKnobSize = 40;

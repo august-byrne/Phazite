@@ -40,6 +40,12 @@ public:
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour, bool isHighlighted,
                                bool isDown) override;
 
+    // What pops up over the window a little translucent (Popup::backgroundAlpha; opaque in the high contrast theme): menus,
+    // and a call-out whose content is a list, which says so with popupListProperty set (the command search, the pickers).
+    static constexpr const char* popupListProperty = "phazitePopupList";
+    float getPopupAlpha() const noexcept;
+    void drawCallOutBoxBackground (juce::CallOutBox&, juce::Graphics&, const juce::Path&, juce::Image& cachedImage) override;
+
     // Menu bars: each name lit under the pointer and while its menu is open; the title bar's (ui/shell/TitleBar.h), with
     // onBarProperty set, on the bar's own background, and others, such as a plug-in window's, on the raised surface.
     static constexpr const char* onBarProperty = "phaziteMenuBarOnBar";

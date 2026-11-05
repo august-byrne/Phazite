@@ -57,9 +57,15 @@ enum class Icon
     hidePanelTop,  // the song's views
     hidePanelBottom,
     hidePanelRight,
-    // The activity bar (ui/shell/ActivityBar.h): the left panel's views
+    // The activity bar (ui/shell/ActivityBar.h): the left panel's views, then the account and the settings at its foot
     library,  // the browser
     versions, // the project's versions: a branch
+    account,
+    settings,
+    // The Versions view (ui/versions/VersionsView.h)
+    check,       // Save Version, and the branch the song is on
+    moreActions, // a view's menu of what else it does: three dots
+    song,        // a change to the song's own: its tempo, sections, chords
     // The title bar (ui/shell/TitleBar.h)
     menu, // the menus, folded
     undo,
@@ -73,6 +79,18 @@ enum class Icon
 // The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read. A filled icon has its shape
 // filled as well as outlined, such as a favorite's star.
 std::unique_ptr<juce::Drawable> createIcon (Icon, bool filled = false);
+
+// An icon drawn in any color, as a list's rows draw theirs: recolored only when the color changes.
+class TintedIcon
+{
+public:
+    explicit TintedIcon (Icon);
+    void draw (juce::Graphics&, juce::Rectangle<float> area, juce::Colour);
+
+private:
+    std::unique_ptr<juce::Drawable> drawable;
+    juce::Colour colour { juce::Colours::black }; // the color the drawing is in now
+};
 
 //==============================================================================
 // A button that shows an icon, with its text beside it if it has any, in the theme's colors.
@@ -88,11 +106,14 @@ public:
     // inside other controls, such as the chevron that collapses a track.
     void setQuiet (bool);
 
+    // An accented button is a view's main one, in the accent color, as Save Version is.
+    void setAccented (bool);
+
     void paintButton (juce::Graphics&, bool isHighlighted, bool isDown) override;
 
 private:
     Icon icon;
-    bool quiet = false;
+    bool quiet = false, accented = false;
     std::unique_ptr<juce::Drawable> drawable;
     juce::Colour drawableColour { juce::Colours::black }; // the color the drawing is in now
 };

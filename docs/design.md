@@ -155,7 +155,8 @@ Phazite's look should be as clean and consistent as its workflow. Its design lan
 - **Color:**
   - semantic tokens (background, surface, text, accent, warning) instead of hard-coded colors;
   - a dark theme first, then light and high-contrast themes;
-  - a track-color palette that stays distinguishable for color-blind users.
+  - a track-color palette that stays distinguishable for color-blind users;
+  - what pops up over the window, menus and the lists that drop down (the command search, the pickers), a little translucent, as VS Code's are (2026-11-05, as the owner asked), so the window shows faintly through: `Popup::backgroundAlpha`, 92 % opaque; fully opaque in the high-contrast theme. An editor in a call-out (a modulator's) stays opaque.
 - **Spacing and sizing:** a 4-pixel grid, standard control heights and consistent padding.
 - **Icons (decided in step 0.6): [Lucide](https://lucide.dev)** ([B42](#appendix-b-sources)), line icons under the ISC licence (those taken from Feather: MIT), drawn in the theme's colors, plus custom icons drawn to match. Phazite copies in only the icons it uses (`resources/icons/lucide/`).
 - **Motion:** short, purposeful animation (around 100–150 ms). None in places that redraw constantly, and the system's reduced-motion setting is respected.

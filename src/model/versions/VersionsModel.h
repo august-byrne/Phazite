@@ -139,10 +139,12 @@ bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProj
 // Whether the song can switch to another branch now: not while it records (a take not finished would be lost), while a
 // render has its plug-ins (an export, a freeze, a bounce), while a version is being saved or the versions are read.
 bool canSwitchBranch (const ProjectContext&);
-bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::String& name);
 bool canMakeBranch (const ProjectContext&);
 
-// The branch the Versions view's branch menu picked, which version.switchBranch switches to.
+// A branch named anew: false for an empty name, or one another branch has (in any case). Not an undo step.
+bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::String& name);
+
+// The branch the branch picker picked (ui/versions/BranchPicker.h), which version.switchBranch switches to.
 void selectBranch (ProjectContext&, const juce::String& branchID);
 
 //==============================================================================

@@ -455,17 +455,21 @@ juce_add_binary_data(phazite_data
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
         resources/icons/lucide/audio-lines.svg
+        resources/icons/lucide/check.svg
         resources/icons/lucide/chevron-down.svg
         resources/icons/lucide/chevron-right.svg
         resources/icons/lucide/chevrons-down-up.svg
         resources/icons/lucide/chevrons-up-down.svg
         resources/icons/lucide/circle.svg
+        resources/icons/lucide/circle-user-round.svg
         resources/icons/lucide/clock-arrow-down.svg
         resources/icons/lucide/clock.svg
         resources/icons/lucide/corner-down-left.svg
         resources/icons/lucide/copy.svg
         resources/icons/lucide/download.svg
+        resources/icons/lucide/ellipsis.svg
         resources/icons/lucide/eraser.svg
+        resources/icons/lucide/file-music.svg
         resources/icons/lucide/folder-open.svg
         resources/icons/lucide/folder-plus.svg
         resources/icons/lucide/folder.svg
@@ -496,6 +500,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/repeat.svg
         resources/icons/lucide/scissors.svg
         resources/icons/lucide/search.svg
+        resources/icons/lucide/settings.svg
         resources/icons/lucide/sliders-horizontal.svg
         resources/icons/lucide/snowflake.svg
         resources/icons/lucide/square-dashed-mouse-pointer.svg
@@ -772,6 +777,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/timeline/TimelineGesture.h
     src/ui/timeline/TimelineView.cpp
     src/ui/timeline/TimelineView.h
+    src/ui/versions/BranchPicker.cpp
+    src/ui/versions/BranchPicker.h
     src/ui/versions/VersionsView.cpp
     src/ui/versions/VersionsView.h)
 

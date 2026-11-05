@@ -115,6 +115,9 @@ view.menus | F10
 view.searchBrowser | ctrl + F
 view.browser
 view.versions
+version.pickBranch
+version.renameBranch
+version.bounceEach
 device.add | F8
 device.savePreset
 track.savePreset

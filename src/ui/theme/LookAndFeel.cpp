@@ -61,7 +61,7 @@ void LookAndFeel::setTheme (ThemeName newTheme)
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxHighlightColourId, p.accent.withAlpha (0.4f));
     setColour (juce::ListBox::backgroundColourId, p.surface);
-    setColour (juce::PopupMenu::backgroundColourId, p.surfaceRaised);
+    setColour (juce::PopupMenu::backgroundColourId, p.surfaceRaised.withAlpha (getPopupAlpha()));
     setColour (juce::PopupMenu::textColourId, p.text);
     setColour (juce::PopupMenu::highlightedBackgroundColourId, p.accent);
     setColour (juce::PopupMenu::highlightedTextColourId, p.textOnAccent);
@@ -238,13 +238,51 @@ void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button,
     if (isDown || isHighlighted)
         colour = colour.contrasting (isDown ? 0.15f : 0.06f);
 
+    // Square where it joins another button (setConnectedEdges()), as the two parts of Save Version do.
+    const auto outline = [&button] (juce::Rectangle<float> area)
+    {
+        const auto left = ! button.isConnectedOnLeft(), right = ! button.isConnectedOnRight();
+        juce::Path path;
+        path.addRoundedRectangle (area.getX(), area.getY(), area.getWidth(), area.getHeight(), cornerRadius, cornerRadius, left, right,
+                                  left, right);
+        return path;
+    };
+
     g.setColour (colour);
-    g.fillRoundedRectangle (bounds, cornerRadius);
+    g.fillPath (outline (bounds));
 
     // The keyboard focus shows as a thick outline in the text color, which stands out on every background.
     const bool focused = button.hasKeyboardFocus (false);
     g.setColour (focused ? palette.text : palette.border);
-    g.drawRoundedRectangle (focused ? bounds.reduced (1.0f) : bounds, cornerRadius, focused ? 2.0f : 1.0f);
+    g.strokePath (outline (focused ? bounds.reduced (1.0f) : bounds), juce::PathStrokeType (focused ? 2.0f : 1.0f));
+}
+
+float LookAndFeel::getPopupAlpha() const noexcept
+{
+    return theme == ThemeName::highContrast ? 1.0f : Popup::backgroundAlpha;
+}
+
+void LookAndFeel::drawCallOutBoxBackground (juce::CallOutBox& box, juce::Graphics& g, const juce::Path& path, juce::Image& cachedImage)
+{
+    // Its shadow as LookAndFeel_V4 draws it; then a list that pops up as translucent as the menus, and any other content (an
+    // editor) on the raised surface itself.
+    if (cachedImage.isNull())
+    {
+        cachedImage = { juce::Image::ARGB, box.getWidth(), box.getHeight(), true };
+        juce::Graphics shadow (cachedImage);
+        juce::DropShadow (juce::Colours::black.withAlpha (0.7f), 8, { 0, 2 }).drawForPath (shadow, path);
+    }
+
+    g.setColour (juce::Colours::black);
+    g.drawImageAt (cachedImage, 0, 0);
+
+    const auto& children = box.getChildren();
+    const auto isList = std::any_of (children.begin(), children.end(),
+                                     [] (const juce::Component* child) { return (bool) child->getProperties()[popupListProperty]; });
+    g.setColour (palette.surfaceRaised.withAlpha (isList ? getPopupAlpha() : 1.0f));
+    g.fillPath (path);
+    g.setColour (palette.border);
+    g.strokePath (path, juce::PathStrokeType (1.0f));
 }
 
 void LookAndFeel::drawMenuBarBackground (juce::Graphics& g, int width, int height, bool, juce::MenuBarComponent& menuBar)

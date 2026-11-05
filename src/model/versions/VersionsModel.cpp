@@ -1045,8 +1045,12 @@ bool deleteBounce (ProjectContext& context, const juce::String& versionID)
 
 void setBounceWithVersion (ProjectContext& context, bool bounce)
 {
-    if (auto* history = findHistory (context))
+    // Told, as what Save Version says changes with it.
+    if (auto* history = findHistory (context); history != nullptr && history->bounceWithVersion != bounce)
+    {
         history->bounceWithVersion = bounce;
+        history->tellNow();
+    }
 }
 
 bool getBounceWithVersion (const ProjectContext& context)

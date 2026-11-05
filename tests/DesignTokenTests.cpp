@@ -2,6 +2,7 @@
 #include "TestHelpers.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "ui/theme/DesignTokens.h"
+#include "ui/theme/LookAndFeel.h"
 
 using namespace phazite::ui;
 
@@ -60,6 +61,13 @@ TEST_CASE ("Every theme meets WCAG 2.2's contrast for text and controls")
         const auto distance = [] (juce::Colour a, juce::Colour b)
         { return std::abs (a.getRed() - b.getRed()) + std::abs (a.getGreen() - b.getGreen()) + std::abs (a.getBlue() - b.getBlue()); };
 
+        // What changed since a version: the names and letters of the Versions view's changes, text on its panel.
+        for (const auto kind : { ChangeKind::added, ChangeKind::changed, ChangeKind::removed })
+        {
+            CAPTURE ((int) kind);
+            CHECK (getContrastRatio (getChangeColour (kind, theme), p.surface) >= 4.5);
+        }
+
         CHECK_FALSE (getFamilyColour (DeviceFamily::instrument, theme).has_value()); // the accent
 
         for (const auto family : families)
@@ -96,4 +104,16 @@ TEST_CASE ("Track names and handles stay readable on their headers, in every the
             }
         }
     }
+}
+
+TEST_CASE ("Menus and the lists that pop up are a little translucent, but in the high contrast theme")
+{
+    phazite::ui::LookAndFeel lookAndFeel;
+    CHECK (lookAndFeel.findColour (juce::PopupMenu::backgroundColourId).getFloatAlpha()
+           == doctest::Approx (Popup::backgroundAlpha).epsilon (0.01));
+    CHECK (lookAndFeel.getPopupAlpha() < 1.0f);
+
+    lookAndFeel.setTheme (ThemeName::highContrast);
+    CHECK (lookAndFeel.findColour (juce::PopupMenu::backgroundColourId).isOpaque());
+    CHECK (lookAndFeel.getPopupAlpha() == doctest::Approx (1.0f));
 }

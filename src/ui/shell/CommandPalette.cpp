@@ -15,6 +15,7 @@ CommandPalette::CommandPalette (CommandBridge& bridge)
       list ("Commands", this)
 {
     setTitle ("Command palette");
+    getProperties().set (LookAndFeel::popupListProperty, true); // translucent, as menus are
 
     searchField.setTitle ("Search commands");
     searchField.setTextToShowWhenEmpty ("Type a command, e.g. undo", getPalette (*this).textMuted);

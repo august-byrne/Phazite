@@ -190,6 +190,10 @@ The bar is a column of icons along the window's left edge, from under the transp
 - **Browser**, the browser as it is now ([design section 11](design.md#11-the-browser)).
 - **Versions** (below).
 
+**At its foot,** as VS Code's Accounts and Manage icons:
+- **Account** (Lucide "circle-user-round"): none yet. Its menu says so, and that projects and their versions stay on this computer.
+- **Settings** (Lucide "settings"): a menu, as VS Code's Manage menu: Search Commands, then Settings, Audio Settings, MIDI Settings, Keyboard Shortcuts and Scan for Plug-ins, then Theme and Keymap.
+
 Each view is a command, so it can have a key, its tooltip names that key, and it is in the View menu and the command palette:
 - `view.browser`, Browser;
 - `view.versions`, Versions.
@@ -200,7 +204,7 @@ Showing a view gives it the keyboard, as F5 to F9 do for the views in the centre
 - the view on show: in full color, with a 2-pixel bar in the accent color along its left edge;
 - the other icon: dimmed, but still at 3:1 contrast, which the theme tests check;
 - while the panel is hidden, no icon is marked;
-- while the song has changes since its branch's last version, a dot on the Versions icon. VS Code's Source Control icon shows a number there; a count of changes isn't one number a musician needs, so a dot says it.
+- while the song has changes since its branch's last version, a badge on the Versions icon counts them, as VS Code's Source Control icon does: the same count as the changes' heading, one for each track that changed (the master and the song's own count too), "99+" past 99.
 
 **For screen readers,** each icon is a switch: "Versions, switch, on".
 
@@ -211,25 +215,28 @@ Showing a view gives it the keyboard, as F5 to F9 do for the views in the centre
 - The panel's width is the same for both views.
 - The settings keep the width and which view the panel shows.
 
-**Later icons** come only for views of the left panel; nothing that already has one way in gets a second. The account, once the cloud is there and only if the user turns it on, would go at the bar's foot, as VS Code's Accounts icon is.
+**Later icons** come only for views of the left panel; nothing that already has one way in gets a second. The account's menu fills once the cloud is there, and only if the user turns it on.
 
 ### The Versions view
 
+The view is laid out as VS Code's Source Control view: the message, the button across the view, then the changes and the graph, each folding under its heading.
+
 ```
 +------------------------------+
-| VERSIONS        [Main    v]  |  the branch: a click switches, or makes one
-| [Name this version         ] |  left empty: named by what changed
-| [Note                      ] |  optional: why, or what to try next
-| [x] With a bounce   [ Save ] |
-| CHANGES SINCE "Chorus"    4  |
-|   Bass    volume, 12 notes   |  a click selects it in the song
-|   Drums   2 clips added      |  its menu: Put Back
-|   + Strings                  |
-|   Master  Limiter            |
-| HISTORY                      |
-|  > Now                       |
-|  o Chorus drums      2 h  >  |  > : hear it (it has a bounce)
-|  | o Half-time      3 h  >  |  another branch's line, in its color
+| VERSIONS                 ... |  ...: rename the branch, DAWproject, clean up
+| Y Main v                     |  the branch: opens the branch picker
+| [Message (Ctrl+Enter to save |  first line: the name; the rest: a note
+|  a version on Main)        ] |  both optional
+| [ v  Save Version      | v ] |  its menu: Bounce Each Version
+| v CHANGES since "Chorus" (4) |
+|   ~ Bass  volume, 12 notes M |  a click selects it in the song
+|   ~ Drums 2 clips added   <M |  < : Put Back, under the pointer
+|   ~ Strings               A  |  green A, amber M, red D (struck through)
+|   = Master  Limiter       M  |
+| v HISTORY                    |
+|  o Now                       |
+|  o Chorus drums [Main] 2 h > |  > : hear it (it has a bounce)
+|  | o Half-time [Idea 2] 3 h >|  another branch's line, in its color
 |  o-' Verse 2         Mon  >  |
 |  o First idea        Mon     |  no bounce, nothing to hear
 +------------------------------+
@@ -237,16 +244,18 @@ Showing a view gives it the keyboard, as F5 to F9 do for the views in the centre
 
 **Saving a version:**
 - **Save Version** (`version.save`; Ctrl+Alt+S, Cubase's key for Save New Version; Ctrl+N in FL Studio's keymap, FL Studio's own key for it) saves the project and records a version.
+- **One message,** as a commit's in VS Code: its first line is the version's name, the lines after it its note. Enter starts a new line, and Ctrl+Enter saves the version, as in VS Code.
 - **Its name.** A name is optional. Left empty, the version is named by what changed ("Bass, Drums, + Strings").
 - **A note,** optional too, says why: what the version tried, or what to try next. It shows under the name in the history. Cubase's users ask for one ([forum](https://forums.steinberg.net/t/save-as-new-version-add-note-for-version-information/1031505)). A study of CAD users found that numbered versions mean nothing once there are about fifty ([arXiv](https://arxiv.org/abs/2602.09236)).
-- **"With a bounce"** renders the song into the version as Export Song does: the whole song with its tails, muted tracks silent, in a progress window with Cancel. Playback stops for it, as it does for an export. Cancelling leaves the version without a bounce. The setting keeps the box as it was left.
+- **Bounce Each Version** (`version.bounceEach`, in Save Version's menu, whose button then reads "Save Version and Bounce") renders the song into the version as Export Song does: the whole song with its tails, muted tracks silent, in a progress window with Cancel. Playback stops for it, as it does for an export. Cancelling leaves the version without a bounce. The settings keep it.
 - **Not an undo step:** saving a version changes the history, not the song.
 
 **Changes since the last version** lists what the song holds now that it didn't then, by track, as VS Code lists changed files:
 - Each line is named in Phazite's own words: tracks added or removed, clips, notes, devices and their parameters, the mix, automation, sections, the tempo and the chord lane.
 - View state and how the song plays (track heights, the loop, the playhead) never show. They use the same lists as the unsaved changes ([design section 18](design.md#18-projects-saving-and-export)).
+- **Each line,** as VS Code's: an icon (a track, the master, the song's own), the name, what changed, muted, and a letter at its end, in VS Code's colors for it: A added (green), M changed (amber), D taken away (red, its name struck through). The heading counts the lines in a badge.
 - A click on a line selects that thing in the song.
-- **Put Back** takes that thing back from the last version, as one undo step.
+- **Put Back** takes that thing back from the last version, as one undo step: the arrow on the line under the pointer (or the line selected), as VS Code's Discard Changes, or the line's menu.
 - **Marked in the playlist too.** While the Versions view shows, the playlist marks the clips and track headers that changed since the last version, so a change is seen where it is. Figma's and Onshape's reviews show a branch's changes on the design itself in the same way. A version chosen in the history marks what it changed instead.
 
 **The history:**
@@ -276,7 +285,7 @@ Showing a view gives it the keyboard, as F5 to F9 do for the views in the centre
 **Branches** ("New Branch from Here", on a version or on Now):
 - **No questions.** A new branch is named "Idea 2" (the next number free) and gets the next color. Phazite switches to it at once, with no window. Its menu's Name and Color… changes either later. Ink & Switch found that people branch when a branch is quick to make and asks for nothing ([Patchwork](https://www.inkandswitch.com/patchwork/notebook/2024-version-control/06/)).
 - **Unsaved changes.** A branch made from Now takes the unsaved changes with it.
-- **Switching** is done from the branch menu at the top of the view, or from the branch's name in the status bar, beside the save state; that name shows once the project has a version.
+- **Switching** is done in the branch picker (Switch Branch…, `version.pickBranch`), as VS Code's: from the branch button at the top of the view, or from the branch's name in the status bar, beside the save state, which shows once the project has a version, with a star while the song has changes since its last version ("Main*"). The picker lists New Branch from Now first, named as typed (else "Idea 2"), then the branches, the one the song is on ticked, each with its last version and when; typing narrows them. Rename Branch… (`version.renameBranch`) names the current branch anew in the same picker; no two branches share a name.
   - The branch left behind is kept as it was, unsaved changes included.
   - The song becomes the other branch's in place, as it was left there, with its view state. What both branches have stays as it is: its plug-ins stay loaded and its audio stays read, and the song plays on.
   - The project is saved after the switch, so that its file is the branch's song.
@@ -652,8 +661,7 @@ Not built yet:
 
 - the playlist marking what changed since the last version;
 - Name and Note… for a saved version, whose record is a piece and doesn't change;
-- the branch menu's Name and Color… (the model can rename a branch);
-- switching branches from the status bar's branch name;
+- a branch's Color… (its name changes with Rename Branch…);
 - the benchmark of Save Version and the changes list on the 100-track song;
 - importing a DAWproject's plug-ins and sends into a new project.
 

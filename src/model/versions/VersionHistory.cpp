@@ -917,8 +917,10 @@ bool VersionHistory::switchTo (const juce::String& branchID)
 bool VersionHistory::renameBranch (const juce::String& branchID, const juce::String& name)
 {
     const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
+    const auto taken = std::any_of (branches.begin(), branches.end(), [&branchID, &name] (const auto& branch)
+                                    { return branch.id != branchID && branch.name.equalsIgnoreCase (name.trim()); });
 
-    if (store == nullptr || found == branches.end() || name.trim().isEmpty())
+    if (store == nullptr || found == branches.end() || name.trim().isEmpty() || taken)
         return false;
 
     auto renamed = *found;

@@ -10,16 +10,29 @@ namespace phazite::ui
 {
 namespace
 {
-    // A line's name, "+ " for what was added, "- " for what was taken away.
-    juce::String getMarkedName (const VersionChange& change)
+    ChangeKind getKind (const VersionChange& change)
     {
-        return (change.kind == VersionChange::Kind::added ? "+ " : change.kind == VersionChange::Kind::removed ? "- " : "") + change.name;
+        return change.kind == VersionChange::Kind::added     ? ChangeKind::added
+               : change.kind == VersionChange::Kind::removed ? ChangeKind::removed
+                                                             : ChangeKind::changed;
     }
 
+    // A change's letter, as VS Code marks what git finds: A added, M changed, D taken away.
+    juce::String getLetter (const VersionChange& change)
+    {
+        return change.kind == VersionChange::Kind::added ? "A" : change.kind == VersionChange::Kind::removed ? "D" : "M";
+    }
+
+    // A line as screen readers say it: "Bass: volume", "Keys, added", "Lead, taken away".
     juce::String describeChangeLine (const VersionChange& change)
     {
-        const auto name = getMarkedName (change);
-        return change.what.isEmpty() ? name : name + ": " + change.what;
+        if (change.kind == VersionChange::Kind::added)
+            return change.name + ", added" + (change.what.isEmpty() ? juce::String() : ": " + change.what);
+
+        if (change.kind == VersionChange::Kind::removed)
+            return change.name + ", taken away";
+
+        return change.what.isEmpty() ? change.name : change.name + ": " + change.what;
     }
 
     juce::String describeValue (const ClashInfo& clash, int value)
@@ -28,25 +41,39 @@ namespace
         return whose[value] + ": " + clash.values[value];
     }
 
-    void setUpHeading (juce::Label& label, const juce::String& text)
+    // A row's name and what it says of it, side by side, the name struck through for what was taken away.
+    void drawLine (juce::Graphics& g, juce::Rectangle<int> area, juce::Colour nameColour, juce::Colour whatColour, const juce::String& name,
+                   const juce::String& what, bool struckThrough = false)
     {
-        label.setText (text, juce::dontSendNotification);
-        label.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
-        label.setJustificationType (juce::Justification::centredLeft);
-        label.setMinimumHorizontalScale (1.0f);
-    }
-
-    // A row's name and what it says of it, side by side.
-    void drawLine (juce::Graphics& g, juce::Rectangle<int> area, const Palette& p, const juce::String& name, const juce::String& what)
-    {
-        g.setColour (p.text);
+        g.setColour (nameColour);
         g.setFont (juce::FontOptions (TextSize::body));
         const auto nameWidth =
-            juce::jmin (area.getWidth() / 2, juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), name)) + Space::m);
-        g.drawText (name, area.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
-        g.setColour (p.textMuted);
+            juce::jmin (area.getWidth(), juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), name)) + Space::s);
+        const auto nameArea = area.removeFromLeft (nameWidth);
+        g.drawText (name, nameArea, juce::Justification::centredLeft, true);
+
+        if (struckThrough)
+            g.fillRect (juce::Rectangle<float> ((float) nameArea.getX(), (float) nameArea.getCentreY(),
+                                                (float) nameWidth - (float) Space::s, History::strikethroughThickness));
+
+        g.setColour (whatColour);
         g.setFont (juce::FontOptions (TextSize::small));
         g.drawText (what, area, juce::Justification::centredLeft, true);
+    }
+
+    // A pill with a text in it, as VS Code counts a section's rows and names a branch on its last version: its width.
+    int drawBadge (juce::Graphics& g, juce::Rectangle<int> rightOf, const juce::String& text, juce::Colour fill, juce::Colour textColour)
+    {
+        // The font set, then measured, as the headings are: measured first, a bold one came out in a serif face.
+        g.setFont (juce::FontOptions (TextSize::badge, juce::Font::bold));
+        const auto width = juce::roundToInt (
+            juce::jmax (History::badgeHeight, juce::TextLayout::getStringWidth (g.getCurrentFont(), text) + History::badgeHeight));
+        const auto pill = rightOf.removeFromRight (width).toFloat().withSizeKeepingCentre ((float) width, History::badgeHeight);
+        g.setColour (fill);
+        g.fillRoundedRectangle (pill, History::badgeHeight / 2.0f);
+        g.setColour (textColour);
+        g.drawText (text, pill, juce::Justification::centred, false);
+        return width;
     }
 } // namespace
 
@@ -71,6 +98,186 @@ juce::String VersionsView::describeWhen (juce::Time saved, juce::Time now)
 }
 
 //==============================================================================
+// The message for the next version: Enter starts a new line, Ctrl+Enter saves, as in VS Code.
+class VersionsView::MessageField : public juce::TextEditor
+{
+public:
+    std::function<void()> onSave;
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0) && onSave != nullptr)
+        {
+            onSave();
+            return true;
+        }
+
+        return juce::TextEditor::keyPressed (key);
+    }
+};
+
+//==============================================================================
+// The branch the song is on, as VS Code's status bar names it: its icon and name in its color, and a chevron; a click opens
+// the branch picker.
+class VersionsView::BranchButton : public juce::Button
+{
+public:
+    BranchButton()
+        : juce::Button ("Branch")
+    {
+        setTitle ("Branch");
+    }
+
+    void setBranch (const juce::String& name, juce::Colour newColour)
+    {
+        setButtonText (name);
+        colour = newColour;
+        repaint();
+    }
+
+    void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
+    {
+        const auto& p = getPalette (*this);
+
+        if (isHighlighted || isDown)
+        {
+            g.setColour (p.text.withAlpha (History::hoverWash));
+            g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
+        }
+
+        auto area = getLocalBounds().reduced (Space::xs, 0);
+        const auto iconArea = [&area]
+        {
+            return area.removeFromLeft ((int) History::rowIconSize)
+                .toFloat()
+                .withSizeKeepingCentre (History::rowIconSize, History::rowIconSize);
+        };
+
+        // Its icon, its name, and the chevron right after the name.
+        icon.draw (g, iconArea(), colour);
+        area.removeFromLeft (Space::xs);
+        g.setColour (colour);
+        g.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
+        const auto nameWidth =
+            juce::jmin (area.getWidth() - (int) History::rowIconSize,
+                        juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), getButtonText())) + Space::xs);
+        g.drawText (getButtonText(), area.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
+        chevron.draw (g, iconArea(), p.textMuted);
+    }
+
+private:
+    juce::Colour colour;
+    TintedIcon icon { Icon::versions }, chevron { Icon::expanded };
+};
+
+//==============================================================================
+// A section's heading, which folds it: its chevron, its name and what it is about, and its count's badge, as VS Code's.
+class VersionsView::Section : public juce::Button
+{
+public:
+    explicit Section (const juce::String& name)
+        : juce::Button (name)
+    {
+        setTitle (name);
+        setClickingTogglesState (true);
+        setToggleable (true);
+        setToggleState (true, juce::dontSendNotification); // open
+    }
+
+    void set (const juce::String& newHeading, const juce::String& newDetail, int newCount)
+    {
+        if (heading == newHeading && detail == newDetail && count == newCount)
+            return;
+
+        heading = newHeading;
+        detail = newDetail;
+        count = newCount;
+        setDescription (count > 0 ? juce::String (count) : juce::String());
+        repaint();
+    }
+
+    juce::String getText() const { return detail.isEmpty() ? heading : heading + " " + detail; }
+
+    void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
+    {
+        const auto& p = getPalette (*this);
+        auto area = getLocalBounds();
+        const auto lit = isHighlighted || isDown;
+
+        chevron (getToggleState())
+            .draw (g,
+                   area.removeFromLeft ((int) History::sectionChevronSize)
+                       .toFloat()
+                       .withSizeKeepingCentre (History::sectionChevronSize, History::sectionChevronSize),
+                   lit ? p.text : p.textMuted);
+        area.removeFromLeft (Space::xs);
+
+        if (count > 0)
+        {
+            area.removeFromRight (drawBadge (g, area, juce::String (count), p.border, p.text) + Space::xs);
+        }
+
+        g.setColour (p.text);
+        g.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
+        const auto headingWidth =
+            juce::jmin (area.getWidth(), juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), heading)) + Space::s);
+        g.drawText (heading, area.removeFromLeft (headingWidth), juce::Justification::centredLeft, true);
+        g.setColour (p.textMuted);
+        g.setFont (juce::FontOptions (TextSize::small));
+        g.drawText (detail, area, juce::Justification::centredLeft, true);
+    }
+
+private:
+    juce::String heading, detail;
+    int count = 0;
+    TintedIcon open { Icon::expanded }, folded { Icon::folded };
+
+    TintedIcon& chevron (bool isOpen) { return isOpen ? open : folded; }
+};
+
+//==============================================================================
+// Which row of a list is under the pointer, for what shows there only then (a change's Put Back).
+struct VersionsView::RowHover : public juce::MouseListener
+{
+    RowHover (juce::ListBox& l, std::function<void (int previous, int row)> changed)
+        : list (l),
+          onChange (std::move (changed))
+    {
+        list.addMouseListener (this, true);
+    }
+
+    ~RowHover() override { list.removeMouseListener (this); }
+
+    void mouseMove (const juce::MouseEvent& e) override { update (e); }
+    void mouseEnter (const juce::MouseEvent& e) override { update (e); }
+    void mouseDrag (const juce::MouseEvent& e) override { update (e); }
+    void mouseExit (const juce::MouseEvent& e) override
+    {
+        // Out of a row's component into another's is a move; out of the list is none under the pointer.
+        if (! list.getLocalBounds().contains (e.getEventRelativeTo (&list).getPosition()))
+            setRow (-1);
+    }
+
+    int row = -1;
+
+private:
+    juce::ListBox& list;
+    std::function<void (int, int)> onChange;
+
+    void update (const juce::MouseEvent& e)
+    {
+        const auto position = e.getEventRelativeTo (&list).getPosition();
+        setRow (list.getRowContainingPosition (position.x, position.y));
+    }
+
+    void setRow (int newRow)
+    {
+        if (newRow != row)
+            onChange (std::exchange (row, newRow), newRow);
+    }
+};
+
+//==============================================================================
 // The list of lines: the changes since the last version, a click selecting a line's track; a merge's lines, a click ticking
 // one; or a merge's clashes, a click choosing a value.
 class VersionsView::ChangesModel : public juce::ListBoxModel
@@ -89,24 +296,36 @@ public:
             return;
 
         const auto& p = getPalette (view);
-        auto area = juce::Rectangle<int> (width, height).reduced (Space::s, 0);
+        const auto theme = getThemeOf (view);
+        auto area = juce::Rectangle<int> (width, height);
 
-        if (selected)
+        if (selected || row == view.changesHover->row)
         {
-            g.setColour (p.accent.withAlpha (selectionWash));
-            g.fillRect (0, 0, width, height);
+            g.setColour (selected ? p.accent.withAlpha (selectionWash) : p.text.withAlpha (History::hoverWash));
+            g.fillRect (area);
         }
+
+        area.reduce (Space::s, 0);
+        const auto iconArea = [&area]
+        {
+            return area.removeFromLeft ((int) History::rowIconSize)
+                .toFloat()
+                .withSizeKeepingCentre (History::rowIconSize, History::rowIconSize);
+        };
 
         if (view.lines == Lines::merge)
         {
-            // A box ticked while the merge takes the line, and a word where it clashes with what this branch changed.
+            // A box ticked while the merge takes the line, its letter, and a word where it clashes with this branch's change.
             const auto& line = view.mergeLines[(size_t) row];
+            const auto colour = getChangeColour (getKind (line.change), theme);
             const auto box = area.removeFromLeft (height).toFloat().withSizeKeepingCentre (History::tickSize, History::tickSize);
             g.setColour (line.ticked ? p.accent : p.textMuted);
             g.drawRoundedRectangle (box.reduced (0.5f), cornerRadius / 2.0f, 1.0f);
 
             if (line.ticked)
                 g.fillRoundedRectangle (box.reduced (History::tickInset), cornerRadius / 2.0f);
+
+            drawLetter (g, area, getLetter (line.change), colour);
 
             if (line.clashes)
             {
@@ -117,19 +336,35 @@ public:
                 g.drawText (word, area.removeFromRight (wordWidth), juce::Justification::centredRight, false);
             }
 
-            drawLine (g, area, p, getMarkedName (line.change), line.change.what);
+            drawLine (g, area, colour, p.textMuted, line.change.name, line.change.what, line.change.kind == VersionChange::Kind::removed);
             return;
         }
 
         if (view.lines == Lines::clashes)
         {
             const auto& clash = view.clashes[(size_t) row];
-            drawLine (g, area, p, clash.line + ": " + clash.what, describeValue (clash, clash.chosen));
+            g.setColour (p.warning);
+            g.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
+            g.drawText ("!", area.removeFromRight (History::letterWidth), juce::Justification::centred, false);
+            drawLine (g, area, p.text, p.textMuted, clash.line + ": " + clash.what, describeValue (clash, clash.chosen));
             return;
         }
 
+        // Its icon, its name and what changed, its Put Back under the pointer, and its letter, in its kind's color.
         const auto& change = view.changes[(size_t) row];
-        drawLine (g, area, p, getMarkedName (change), change.what);
+        const auto colour = getChangeColour (getKind (change), theme);
+        auto& icon = change.isSong ? view.songIcon : change.isMaster ? view.masterIcon : view.trackIcon;
+        icon.draw (g, iconArea(), p.textMuted);
+        area.removeFromLeft (Space::xs);
+        drawLetter (g, area, getLetter (change), colour);
+
+        if (view.showsPutBack (row))
+        {
+            const auto action = area.removeFromRight (History::actionWidth).toFloat();
+            view.putBackIcon.draw (g, action.withSizeKeepingCentre (History::rowIconSize, History::rowIconSize), p.text);
+        }
+
+        drawLine (g, area, colour, p.textMuted, change.name, change.what, change.kind == VersionChange::Kind::removed);
     }
 
     void listBoxItemClicked (int row, const juce::MouseEvent& e) override
@@ -149,9 +384,16 @@ public:
             return;
         }
 
-        // A click selects what changed: its track, or the master; the right button shows what can be done with it.
+        // A click selects what changed: its track, or the master; on its Put Back, puts it back; the right button shows what
+        // can be done with it.
         const auto& change = view.changes[(size_t) row];
         selectChange (view.context, change);
+
+        if (! e.mods.isPopupMenu() && view.getPutBackPosition (row).contains (e.getEventRelativeTo (&view.changesList).getPosition()))
+        {
+            view.commands.invoke ("version.putBack");
+            return;
+        }
 
         if (change.track.isValid() && change.kind != VersionChange::Kind::removed)
             view.context.getSongSelection().selectOnly (change.track);
@@ -164,6 +406,8 @@ public:
     {
         if (view.lines == Lines::changes && juce::isPositiveAndBelow (row, (int) view.changes.size()))
             selectChange (view.context, view.changes[(size_t) row]);
+
+        view.changesList.repaint(); // the Put Back on the row selected now
     }
 
     void returnKeyPressed (int row) override
@@ -187,16 +431,31 @@ public:
         if (view.lines == Lines::clashes)
             return view.describeChange (row) + ". Both lines changed it: click to choose whose value the song has.";
 
-        return view.describeChange (row) + ". Click to select it in the song; right-click to put it back.";
+        return view.describeChange (row) + ". Click to select it in the song; its arrow puts it back as it was.";
     }
 
 private:
     VersionsView& view;
+
+    static ThemeName getThemeOf (const juce::Component& component)
+    {
+        if (const auto* lookAndFeel = dynamic_cast<const LookAndFeel*> (&component.getLookAndFeel()))
+            return lookAndFeel->getTheme();
+
+        return ThemeName::dark;
+    }
+
+    static void drawLetter (juce::Graphics& g, juce::Rectangle<int>& area, const juce::String& letter, juce::Colour colour)
+    {
+        g.setColour (colour);
+        g.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
+        g.drawText (letter, area.removeFromRight (History::letterWidth), juce::Justification::centred, false);
+    }
 };
 
 //==============================================================================
 // The history: "Now", the song as it is, then every branch's versions, newest first, each a dot on its branch's line, in its
-// branch's column.
+// branch's column, and on a branch's last version the branch's name.
 class VersionsView::HistoryModel : public juce::ListBoxModel
 {
 public:
@@ -288,10 +547,25 @@ public:
         g.drawText (when, area.removeFromRight (juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), when)) + Space::xs),
                     juce::Justification::centredRight, false);
 
+        // The names of the branches whose last version it is, as VS Code's graph names them: the current one's filled.
+        for (const auto& branch : view.branches)
+        {
+            if (branch.head != version.id)
+                continue;
+
+            const auto isCurrent = branch.id == view.currentBranch;
+            area.removeFromRight (drawBadge (g, area, branch.name,
+                                             isCurrent ? branch.colour : branch.colour.withAlpha (History::branchBadgeAlpha),
+                                             isCurrent ? p.background : branch.colour)
+                                  + Space::xs);
+        }
+
         auto text = area;
 
         if (version.note.isNotEmpty())
         {
+            g.setColour (p.textMuted);
+            g.setFont (juce::FontOptions (TextSize::small));
             g.drawText (version.note, text.removeFromBottom (height / 2 - 1), juce::Justification::centredLeft, true);
             text = text.withTrimmedTop (2);
         }
@@ -352,6 +626,10 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     : commands (bridge),
       context (projectContext),
       settings (s),
+      branchButton (std::make_unique<BranchButton>()),
+      messageField (std::make_unique<MessageField>()),
+      changesSection (std::make_unique<Section> ("Changes")),
+      historySection (std::make_unique<Section> ("History")),
       changesModel (std::make_unique<ChangesModel> (*this)),
       historyModel (std::make_unique<HistoryModel> (*this)),
       changesList ("Changes since the last version", changesModel.get()),
@@ -360,9 +638,11 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     setTitle ("Versions");
     const auto& p = getPalette (*this);
 
-    setUpHeading (title, "VERSIONS");
-    setUpHeading (changesHeading, {});
-    setUpHeading (historyHeading, "HISTORY");
+    title.setText ("VERSIONS", juce::dontSendNotification);
+    title.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
+    title.setJustificationType (juce::Justification::centredLeft);
+    title.setMinimumHorizontalScale (1.0f);
+
     for (auto* label : { &emptyText, &roomText })
     {
         label->setFont (juce::FontOptions (TextSize::small));
@@ -371,34 +651,38 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     }
 
     roomText.setTitle ("Room the versions take");
-    branchButton.setTitle ("Branch");
-    branchButton.onClick = [this] { showBranchMenu(); };
+    branchButton->onClick = [this] { commands.invoke ("version.pickBranch"); };
+    moreButton.setQuiet (true);
+    moreButton.onClick = [this] { makeMoreMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton)); };
 
-    nameField.setTitle ("Version name");
-    nameField.setTextToShowWhenEmpty ("Name this version (optional)", p.textMuted);
-    noteField.setTitle ("Version note");
-    noteField.setTextToShowWhenEmpty ("Note: why, or what to try next", p.textMuted);
-
-    for (auto* field : { &nameField, &noteField })
+    // One message, as VS Code's: its first line names the version, the lines after it are its note.
+    messageField->setTitle ("Version message");
+    messageField->setMultiLine (true, true);
+    messageField->setReturnKeyStartsNewLine (true);
+    messageField->setScrollbarsShown (true);
+    messageField->setFont (juce::FontOptions (TextSize::body));
+    messageField->addListener (this);
+    messageField->onSave = [this]
     {
-        field->setFont (juce::FontOptions (TextSize::body));
-        field->addListener (this);
-    }
-
-    saveButton.setButtonText ("Save Version");
-    saveButton.onClick = [this]
-    {
-        setVersionDraft (context, nameField.getText(), noteField.getText()); // as typed, the last key too
+        takeMessage(); // as typed, the last key too
         commands.invoke ("version.save");
     };
 
-    // With a bounce, as the settings keep it: the model's for the open song follows it (refresh()).
-    bounceBox.setToggleState (settings.get (Settings::versionBounce), juce::dontSendNotification);
-    bounceBox.onClick = [this]
+    // Save Version across the view, in the accent color, its menu's part at its right end, joined to it.
+    saveButton.setAccented (true);
+    saveButton.setConnectedEdges (juce::Button::ConnectedOnRight);
+    saveButton.onClick = [this]
     {
-        settings.set (Settings::versionBounce, bounceBox.getToggleState());
-        setBounceWithVersion (context, bounceBox.getToggleState());
+        takeMessage();
+        commands.invoke ("version.save");
     };
+
+    saveMenuButton.setAccented (true);
+    saveMenuButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    saveMenuButton.onClick = [this] { makeSaveMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&saveMenuButton)); };
+
+    for (auto* section : { changesSection.get(), historySection.get() })
+        section->onClick = [this] { resized(); };
 
     doneButton.setButtonText ("Done");
     doneButton.onClick = [this] { commands.invoke ("version.showChanges"); };
@@ -415,9 +699,16 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
 
     changesList.setRowHeight (History::changeRowHeight);
     historyList.setRowHeight (History::versionRowHeight);
+    changesHover = std::make_unique<RowHover> (changesList,
+                                               [this] (int previous, int row)
+                                               {
+                                                   changesList.repaintRow (previous);
+                                                   changesList.repaintRow (row);
+                                               });
 
-    for (auto* c : std::initializer_list<juce::Component*> { &title, &branchButton, &nameField, &noteField, &bounceBox, &saveButton,
-                                                             &changesHeading, &changesList, &historyHeading, &historyList })
+    for (auto* c : std::initializer_list<juce::Component*> { &title, branchButton.get(), &moreButton, messageField.get(), &saveButton,
+                                                             &saveMenuButton, changesSection.get(), &changesList, historySection.get(),
+                                                             &historyList })
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText })
@@ -430,25 +721,73 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
 
 VersionsView::~VersionsView()
 {
+    changesHover = nullptr;
     context.removeListener (this);
+}
+
+juce::TextEditor& VersionsView::getMessageField() noexcept
+{
+    return *messageField;
+}
+
+juce::Button& VersionsView::getBranchButton() noexcept
+{
+    return *branchButton;
+}
+
+juce::Button& VersionsView::getChangesSection() noexcept
+{
+    return *changesSection;
+}
+
+juce::Button& VersionsView::getHistorySection() noexcept
+{
+    return *historySection;
+}
+
+juce::String VersionsView::getChangesHeading() const
+{
+    return changesSection->getText();
 }
 
 void VersionsView::refreshTooltips()
 {
     saveButton.setTooltip (withShortcut (commands,
-                                         "Saves the project and keeps the song as it is now as a version, named as you typed above, or "
-                                         "by what changed",
+                                         "Saves the project and keeps the song as it is now as a version, named by the message's first "
+                                         "line, or by what changed",
                                          "version.save"));
-    nameField.setTooltip ("The version's name. Left empty, the version is named by what changed");
-    noteField.setTooltip ("A note to keep with the version: what it tried, or what to try next");
-    changesList.setTooltip ("What the song holds now that its last version didn't, by track. Right-click a line to put it back");
+    saveMenuButton.setTooltip ("Save Version's choices: whether each version is bounced as it is saved");
+    messageField->setTooltip ("The version's message: its first line is its name, the lines after it a note. Left empty, the version is "
+                              "named by what changed. Ctrl+Enter saves it");
+    changesList.setTooltip ("What the song holds now that its last version didn't, by track. A added, M changed, D taken away");
     doneButton.setTooltip (withShortcut (commands, "Lists the changes since the last version again", "version.showChanges"));
     mergeButton.setTooltip (withShortcut (commands, "Takes the lines ticked into the song, as one undo step", "version.finishMerge"));
     cancelButton.setTooltip (withShortcut (commands, "Closes the merge's list, taking nothing", "version.cancelMerge"));
-    branchButton.setTooltip ("The branch the song is on: click to switch to another, or to start one");
+    branchButton->setTooltip (
+        withShortcut (commands, "The branch the song is on: click to switch to another, or to start one", "version.pickBranch"));
+    moreButton.setTooltip ("More: rename the branch, export or import a DAWproject, clean up unused audio");
     historyList.setTooltip ("Every version, newest first, each on its branch's line");
-    bounceBox.setTooltip ("Saving a version renders the song into it too, as Export Song does, to hear it later against the song");
     roomText.setTooltip ("What the versions take on disk: nearly all of it is bounces, each deleted on its own (Delete Bounce)");
+}
+
+juce::PopupMenu VersionsView::makeSaveMenu()
+{
+    juce::PopupMenu menu;
+    addCommandItems (menu, commands, { "version.save" });
+    menu.addSeparator();
+    addCommandItems (menu, commands, { "version.bounceEach" });
+    return menu;
+}
+
+juce::PopupMenu VersionsView::makeMoreMenu()
+{
+    juce::PopupMenu menu;
+    addCommandItems (menu, commands, { "version.pickBranch", "version.renameBranch" });
+    menu.addSeparator();
+    addCommandItems (menu, commands, { "version.exportDawProject", "project.importDawProject" });
+    menu.addSeparator();
+    addCommandItems (menu, commands, { "project.cleanUpAudio" });
+    return menu;
 }
 
 bool VersionsView::hasPlayMark (int row) const
@@ -466,10 +805,26 @@ juce::Rectangle<int> VersionsView::getPlayMarkPosition (int row) const
     return bounds.withTrimmedRight (Space::s).removeFromRight (History::playWidth);
 }
 
-void VersionsView::focusName()
+juce::Rectangle<int> VersionsView::getPutBackPosition (int row) const
 {
-    if (nameField.isShowing())
-        nameField.grabKeyboardFocus();
+    // Before the letter, inside the row's margin (ChangesModel::paintListBoxItem()).
+    if (lines != Lines::changes || ! showsPutBack (row))
+        return {};
+
+    const auto bounds = changesList.getRowPosition (row, true);
+    return bounds.withTrimmedRight (Space::s + History::letterWidth).removeFromRight (History::actionWidth);
+}
+
+bool VersionsView::showsPutBack (int row) const
+{
+    return juce::isPositiveAndBelow (row, (int) changes.size()) && lines == Lines::changes
+           && (row == changesHover->row || changesList.isRowSelected (row));
+}
+
+void VersionsView::focusMessage()
+{
+    if (messageField->isShowing())
+        messageField->grabKeyboardFocus();
 }
 
 int VersionsView::getLane (const juce::String& branchID) const
@@ -524,6 +879,17 @@ juce::String VersionsView::describeChange (int row) const
     return describeChangeLine (changes[(size_t) row]);
 }
 
+juce::String VersionsView::getChangeLetter (int row) const
+{
+    if (lines == Lines::merge && juce::isPositiveAndBelow (row, (int) mergeLines.size()))
+        return getLetter (mergeLines[(size_t) row].change);
+
+    if (lines == Lines::changes && juce::isPositiveAndBelow (row, (int) changes.size()))
+        return getLetter (changes[(size_t) row]);
+
+    return {};
+}
+
 juce::String VersionsView::describeHistoryRow (int row) const
 {
     if (row == 0)
@@ -554,37 +920,6 @@ void VersionsView::showMenu (std::initializer_list<const char*> commandIDs)
     juce::PopupMenu menu;
     addCommandItems (menu, commands, commandIDs);
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
-}
-
-void VersionsView::showBranchMenu()
-{
-    // Each branch, the one the song is on ticked; then a new one from Now.
-    juce::PopupMenu menu;
-
-    for (const auto& branch : branches)
-    {
-        menu.addItem (branch.name, true, branch.id == currentBranch,
-                      [this, id = branch.id]
-                      {
-                          if (id == currentBranch)
-                              return;
-
-                          selectBranch (context, id);
-                          commands.invoke ("version.switchBranch");
-                      });
-    }
-
-    if (! branches.empty())
-        menu.addSeparator();
-
-    menu.addItem ("New Branch from Now", canMakeBranch (context), false,
-                  [this]
-                  {
-                      selectVersion (context, {});
-                      commands.invoke ("version.newBranch");
-                  });
-
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (branchButton));
 }
 
 void VersionsView::showClashMenu (int index)
@@ -625,12 +960,11 @@ void VersionsView::refresh()
         }
     }
 
-    // With a bounce, as the box (the settings) says, for the song open now; and the room the versions take.
-    if (getBounceWithVersion (context) != bounceBox.getToggleState())
-        setBounceWithVersion (context, bounceBox.getToggleState());
+    // Bounce Each Version, as the settings keep it, for the song open now; and the room the versions take, or why an old
+    // version's bounce failed, until the next one.
+    if (const auto bounces = settings.get (Settings::versionBounce); getBounceWithVersion (context) != bounces)
+        setBounceWithVersion (context, bounces);
 
-    bounceBox.setEnabled (keeps);
-    // Why an old version's bounce failed, until the next one; or else the room.
     const auto room = getVersionsRoom (context);
     const auto problem = getBounceProblem (context);
     roomText.setText (problem.isNotEmpty() ? problem
@@ -643,31 +977,32 @@ void VersionsView::refresh()
     const auto branch = getCurrentBranch (context);
     currentBranch = branch.has_value() ? branch->id : juce::String();
     refreshHistoryLines (branch.has_value() ? branch->head : juce::String());
-    branchButton.setButtonText (branch.has_value() ? branch->name + juce::String::fromUTF8 (" \xe2\x96\xbe") : juce::String());
-    branchButton.setColour (juce::TextButton::textColourOffId, branch.has_value() ? branch->colour : getPalette (*this).textMuted);
-    branchButton.setVisible (branch.has_value());
+    branchButton->setBranch (branch.has_value() ? branch->name : juce::String(),
+                             branch.has_value() ? branch->colour : getPalette (*this).textMuted);
+    branchButton->setVisible (branch.has_value());
 
     // A merge's list while it shows; its clashes while it waits for its version; otherwise the changes.
     lines = ! mergeLines.empty() ? Lines::merge : ! clashes.empty() ? Lines::clashes : Lines::changes;
     const auto last = getLastVersion (context);
     const auto compared = getComparedVersion (context);
     const auto merged = describeMerge (context);
+    const auto branchName = branch.has_value() ? branch->name : juce::String();
     juce::String comparedName;
 
     for (const auto& version : versions)
         if (version.id == compared)
             comparedName = version.name;
 
-    const auto count = "  " + juce::String (getNumChanges());
-    const auto branchNameText = branch.has_value() ? branch->name : juce::String();
+    if (lines == Lines::merge)
+        changesSection->set ("MERGE", "\"" + merged + "\" into " + branchName, getNumChanges());
+    else if (lines == Lines::clashes)
+        changesSection->set ("CLASHES", {}, getNumChanges());
+    else if (compared.isNotEmpty())
+        changesSection->set ("TAKE FROM", "\"" + comparedName + "\"", getNumChanges());
+    else
+        changesSection->set ("CHANGES", last.has_value() ? "since \"" + last->name + "\"" : juce::String(), getNumChanges());
 
-    changesHeading.setText (lines == Lines::merge     ? "MERGE \"" + merged + "\" INTO " + branchNameText + count
-                            : lines == Lines::clashes ? "CLASHES" + count
-                            : compared.isNotEmpty()   ? "TAKE FROM \"" + comparedName + "\"" + count
-                            : last.has_value()        ? "CHANGES SINCE \"" + last->name + "\"" + count
-                                                      : juce::String ("CHANGES"),
-                            juce::dontSendNotification);
-
+    historySection->set ("HISTORY", {}, 0);
     doneButton.setVisible (lines == Lines::changes && compared.isNotEmpty());
     mergeButton.setVisible (lines == Lines::merge);
     cancelButton.setVisible (lines == Lines::merge);
@@ -691,17 +1026,25 @@ void VersionsView::refresh()
     emptyText.setText (said, juce::dontSendNotification);
     emptyText.setVisible (said.isNotEmpty());
 
-    // The drafts the model holds: empty again once a version was saved with them.
-    if (nameField.getText() != getVersionDraftName (context))
-        nameField.setText (getVersionDraftName (context), false);
+    // The draft the model holds, as one message, when it changed there (empty again once a version was saved with it, or
+    // another project's): what is being typed stays as it is.
+    if (const auto draft = getDraftMessage(); draft != takenMessage)
+    {
+        takenMessage = draft;
+        messageField->setText (draft, false);
+    }
 
-    if (noteField.getText() != getVersionDraftNote (context))
-        noteField.setText (getVersionDraftNote (context), false);
+    const auto onBranch = branch.has_value() ? " on " + branch->name : juce::String();
+    const auto saveKey = formatKey (juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0).getTextDescription())
+                             .replace ("Return", "Enter");
+    messageField->setTextToShowWhenEmpty ("Message (" + saveKey + " to save a version" + onBranch + ")", getPalette (*this).textMuted);
+    messageField->setEnabled (keeps);
 
     saveButton.setEnabled (canSaveVersion (context));
-    saveButton.setButtonText (isSavingVersion (context) ? "Saving..." : "Save Version");
-    nameField.setEnabled (keeps);
-    noteField.setEnabled (keeps);
+    saveMenuButton.setEnabled (keeps);
+    saveButton.setButtonText (isSavingVersion (context)        ? "Saving..."
+                              : getBounceWithVersion (context) ? "Save Version and Bounce"
+                                                               : "Save Version");
 
     changesList.updateContent();
     historyList.updateContent();
@@ -740,15 +1083,24 @@ void VersionsView::refreshHistoryLines (const juce::String& nowFollows)
             addLine ((int) i + 1, versions[i].branch, versions[i].parents[p], p == 0);
 }
 
-void VersionsView::textEditorTextChanged (juce::TextEditor&)
+void VersionsView::takeMessage()
 {
-    setVersionDraft (context, nameField.getText(), noteField.getText());
+    const auto text = messageField->getText();
+    setVersionDraft (context, text.upToFirstOccurrenceOf ("\n", false, false).trim(),
+                     text.fromFirstOccurrenceOf ("\n", false, false).trim());
+    takenMessage = getDraftMessage();
 }
 
-void VersionsView::textEditorReturnKeyPressed (juce::TextEditor&)
+juce::String VersionsView::getDraftMessage() const
 {
-    setVersionDraft (context, nameField.getText(), noteField.getText());
-    commands.invoke ("version.save");
+    const auto note = getVersionDraftNote (context);
+    return getVersionDraftName (context) + (note.isNotEmpty() ? "\n" + note : juce::String());
+}
+
+void VersionsView::textEditorTextChanged (juce::TextEditor&)
+{
+    takeMessage();
+    resized(); // the message grows with its lines
 }
 
 void VersionsView::paint (juce::Graphics& g)
@@ -759,33 +1111,52 @@ void VersionsView::paint (juce::Graphics& g)
 void VersionsView::resized()
 {
     auto area = getLocalBounds().reduced (Space::s);
+
+    // The title and the view's menu, clear of the panel's buttons in its top right corner; then the branch, on a row of its
+    // own, as the panel is narrow.
     auto top = area.removeFromTop (controlHeight);
-    branchButton.setBounds (top.removeFromRight (top.getWidth() / 2));
+    top.removeFromRight (Shell::getPanelCornerWidth (3) + Space::xs - Space::s);
+    moreButton.setBounds (top.removeFromRight (controlHeight));
     title.setBounds (top);
+
+    if (branchButton->isVisible())
+        branchButton->setBounds (area.removeFromTop (controlHeight));
+
     area.removeFromTop (Space::xs);
-    nameField.setBounds (area.removeFromTop (controlHeight));
+
+    // The message, as tall as its lines as they wrap, up to a few.
+    const auto lineHeight = juce::roundToInt (messageField->getFont().getHeight() * 1.2f);
+    const auto padding = controlHeight - lineHeight;
+    juce::AttributedString text (messageField->getText().isEmpty() ? juce::String ("M") : messageField->getText());
+    text.setFont (messageField->getFont());
+    juce::TextLayout layout;
+    layout.createLayout (text, (float) juce::jmax (1, area.getWidth() - padding));
+    const auto messageLines = juce::jlimit (1, History::messageLines, layout.getNumLines());
+    messageField->setBounds (area.removeFromTop (padding + lineHeight * messageLines));
     area.removeFromTop (Space::xs);
-    noteField.setBounds (area.removeFromTop (controlHeight));
-    area.removeFromTop (Space::xs);
+
     auto saveRow = area.removeFromTop (controlHeight);
-    saveButton.setBounds (saveRow.removeFromRight (juce::jmin (saveRow.getWidth(), History::saveButtonWidth)));
-    saveRow.removeFromRight (Space::xs);
-    bounceBox.setBounds (saveRow);
+    saveMenuButton.setBounds (saveRow.removeFromRight (History::saveMenuWidth));
+    saveRow.removeFromRight (1); // a hairline between the two parts
+    saveButton.setBounds (saveRow);
     area.removeFromTop (Space::s);
 
     // The room the versions take, at the foot of the view.
     if (roomText.isVisible())
         roomText.setBounds (area.removeFromBottom (controlHeight));
 
-    // The lines, as many rows as they have (up to half of what is left), then the history.
-    auto heading = area.removeFromTop (controlHeight);
+    // The changes, as many rows as they have (up to half of what is left) while open, then the history.
+    changesSection->setBounds (area.removeFromTop (controlHeight));
+    const auto changesOpen = changesSection->getToggleState();
 
-    if (doneButton.isVisible())
-        doneButton.setBounds (heading.removeFromRight (juce::jmin (heading.getWidth() / 3, History::buttonWidth)));
+    if (doneButton.isVisible() && changesOpen)
+    {
+        auto buttons = area.removeFromTop (controlHeight);
+        doneButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth(), History::buttonWidth)));
+        area.removeFromTop (Space::xs);
+    }
 
-    changesHeading.setBounds (heading);
-
-    if (mergeButton.isVisible())
+    if (mergeButton.isVisible() && changesOpen)
     {
         auto buttons = area.removeFromTop (controlHeight);
         cancelButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth() / 2, History::buttonWidth)));
@@ -794,14 +1165,21 @@ void VersionsView::resized()
         area.removeFromTop (Space::xs);
     }
 
-    if (emptyText.isVisible())
-        emptyText.setBounds (area.removeFromTop (History::noteHeight + (isMerging (context) ? History::noteHeight : 0)));
+    for (auto* button : { &doneButton, &mergeButton, &cancelButton })
+        if (! changesOpen)
+            button->setBounds ({});
 
-    const auto rows = getNumChanges();
+    if (emptyText.isVisible() && changesOpen)
+        emptyText.setBounds (area.removeFromTop (History::noteHeight + (isMerging (context) ? History::noteHeight : 0)));
+    else
+        emptyText.setBounds ({});
+
+    const auto rows = changesOpen ? getNumChanges() : 0;
     const auto listHeight = juce::jmin (area.getHeight() / 2, juce::jmax (1, rows) * History::changeRowHeight);
     changesList.setBounds (rows == 0 ? juce::Rectangle<int>() : area.removeFromTop (listHeight));
     area.removeFromTop (Space::s);
-    historyHeading.setBounds (area.removeFromTop (controlHeight));
-    historyList.setBounds (area);
+
+    historySection->setBounds (area.removeFromTop (controlHeight));
+    historyList.setBounds (historySection->getToggleState() ? area : juce::Rectangle<int>());
 }
 } // namespace phazite::ui

@@ -26,6 +26,7 @@ PluginPicker::PluginPicker (const Library& l, std::function<void (const LibraryI
       list ("Devices", this)
 {
     setTitle ("Plug-in picker");
+    getProperties().set (LookAndFeel::popupListProperty, true); // translucent, as menus are
 
     searchField.setTitle ("Search instruments and effects");
     searchField.setTextToShowWhenEmpty ("Type an instrument or effect, e.g. reverb", getPalette (*this).textMuted);

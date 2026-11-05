@@ -108,6 +108,16 @@ namespace
                 return "library.svg";
             case Icon::versions:
                 return "git-branch.svg";
+            case Icon::account:
+                return "circle-user-round.svg";
+            case Icon::settings:
+                return "settings.svg";
+            case Icon::check:
+                return "check.svg";
+            case Icon::moreActions:
+                return "ellipsis.svg";
+            case Icon::song:
+                return "file-music.svg";
             case Icon::menu:
                 return "menu.svg";
             case Icon::undo:
@@ -156,6 +166,26 @@ std::unique_ptr<juce::Drawable> createIcon (Icon icon, bool filled)
 }
 
 //==============================================================================
+TintedIcon::TintedIcon (Icon icon)
+    : drawable (createIcon (icon))
+{
+}
+
+void TintedIcon::draw (juce::Graphics& g, juce::Rectangle<float> area, juce::Colour newColour)
+{
+    if (drawable == nullptr)
+        return;
+
+    if (newColour != colour)
+    {
+        drawable->replaceColour (colour, newColour);
+        colour = newColour;
+    }
+
+    drawable->drawWithin (g, area, juce::RectanglePlacement::centred, 1.0f);
+}
+
+//==============================================================================
 IconButton::IconButton (const juce::String& title, Icon i)
     : juce::Button ({}),
       icon (i),
@@ -182,10 +212,16 @@ void IconButton::setQuiet (bool shouldBeQuiet)
     repaint();
 }
 
+void IconButton::setAccented (bool shouldBeAccented)
+{
+    accented = shouldBeAccented;
+    repaint();
+}
+
 void IconButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown)
 {
     const auto& p = getPalette (*this);
-    const bool on = getToggleState();
+    const bool on = getToggleState() || accented;
 
     if (! quiet || on || isHighlighted || isDown || hasKeyboardFocus (false))
         getLookAndFeel().drawButtonBackground (

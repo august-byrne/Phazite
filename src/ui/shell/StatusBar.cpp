@@ -187,7 +187,7 @@ StatusBar::StatusBar (EngineContext& e, CommandBridge& bridge, ProjectContext& c
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Status bar");
     saveItem->onClick = [this] { commands.invoke ("project.save"); };
-    branchItem->onClick = [this] { commands.invoke ("view.versions"); };
+    branchItem->onClick = [this] { commands.invoke ("version.pickBranch"); };
     midiItem->onClick = [this] { commands.invoke ("options.midiSettings"); };
     delayItem->onClick = [this] { commands.invoke ("options.audioSettings"); };
     audioItem->onClick = [this] { commands.invoke ("options.audioSettings"); };
@@ -297,7 +297,8 @@ void StatusBar::showAudioOutput (const EngineContext::AudioOutput& output)
 
 void StatusBar::showBranch()
 {
-    // The branch the song is on, once the project has a version (docs/versions.md); a click shows the versions.
+    // The branch the song is on, once the project has a version (docs/versions.md), marked with a star while the song has
+    // changes since its last version, as VS Code marks one; a click opens the branch picker.
     const auto branch = getCurrentBranch (context);
     const auto wasVisible = branchItem->isVisible();
     const auto oldWidth = branchItem->getPreferredWidth();
@@ -305,9 +306,13 @@ void StatusBar::showBranch()
 
     if (branch.has_value())
     {
-        branchItem->show (branch->name, Item::Emphasis::quiet);
-        branchItem->setTooltip (
-            withShortcut (commands, "The branch the song is on, whose versions follow one another: click to see them", "view.versions"));
+        const auto changed = hasChangesSinceLastVersion (context);
+        branchItem->show (branch->name + (changed ? "*" : ""), Item::Emphasis::quiet);
+        branchItem->setTooltip (withShortcut (commands,
+                                              "The branch the song is on"
+                                                  + juce::String (changed ? ", with changes since its last version (*)" : "")
+                                                  + ": click to switch to another, or to start one",
+                                              "version.pickBranch"));
     }
 
     if (wasVisible != branchItem->isVisible() || oldWidth != branchItem->getPreferredWidth())

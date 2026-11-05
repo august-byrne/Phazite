@@ -484,7 +484,7 @@ void AppShell::showLeftView (LeftView view)
     if (leftPanel.isShowing())
     {
         if (view == LeftView::versions)
-            versionsView.focusName();
+            versionsView.focusMessage();
         else
             browser.focusSearch();
     }
@@ -514,6 +514,18 @@ void AppShell::LeftPanel::resized()
 void AppShell::showCommandPalette()
 {
     CommandPalette::show (commands, titleBar.getSearchBox());
+}
+
+void AppShell::showBranchPicker (BranchPicker::Mode mode)
+{
+    BranchPicker::show (commands, projectContext, titleBar.getSearchBox(), mode);
+}
+
+void AppShell::toggleBounceEachVersion()
+{
+    const auto bounces = ! settings.get (Settings::versionBounce);
+    settings.set (Settings::versionBounce, bounces);
+    setBounceWithVersion (projectContext, bounces);
 }
 
 void AppShell::showPluginPicker()
@@ -1004,6 +1016,33 @@ void AppShell::addCommands (CommandRegistry& registry)
          "Shows the project's versions in the left panel, with the changes since the last one; or hides the panel if it shows "
          "them.",
          { "history", "branches", "git", "source control", "snapshots", "sidebar" }, [this] { showLeftView (LeftView::versions); });
+
+    // The branch picker, as the Versions view's branch button and the status bar's branch open it, and Bounce Each Version,
+    // as Save Version's menu shows it.
+    registry.add ({ .id = "version.pickBranch",
+                    .name = "Switch Branch...",
+                    .category = "Project",
+                    .description = "Lists the project's branches to switch to, or starts a new one from now, named as you type.",
+                    .synonyms = { "branch", "checkout", "git", "switch", "idea", "new branch" },
+                    .perform = [this] { showBranchPicker (BranchPicker::Mode::pick); },
+                    .isEnabled = [this] { return getCurrentBranch (projectContext).has_value(); } });
+
+    registry.add ({ .id = "version.renameBranch",
+                    .name = "Rename Branch...",
+                    .category = "Project",
+                    .description = "Names the branch the song is on anew.",
+                    .synonyms = { "branch", "name", "rename", "title" },
+                    .perform = [this] { showBranchPicker (BranchPicker::Mode::rename); },
+                    .isEnabled = [this] { return getCurrentBranch (projectContext).has_value(); } });
+
+    registry.add ({ .id = "version.bounceEach",
+                    .name = "Bounce Each Version",
+                    .category = "Project",
+                    .description = "Renders the song into each version as Save Version keeps it, as Export Song renders it, to hear "
+                                   "that version later against the song.",
+                    .synonyms = { "bounce", "render", "audio", "with a bounce", "mixdown" },
+                    .perform = [this] { toggleBounceEachVersion(); },
+                    .isTicked = [this] { return settings.get (Settings::versionBounce); } });
 
     registry.add ({ .id = "device.add",
                     .name = "Add Instrument or Effect",
