@@ -46,13 +46,29 @@ public:
     const VersionRecord* findVersion (const juce::String& id) const;
     const VersionRecord* findLastVersion() const;
 
-    // The changes since the current branch's last version: none before the first version, nor while it is being read.
+    // The changes in the working tree, as git's: from the staged song (getStagedSong()) to the song, none before the first
+    // commit, nor while the history is being read. And whether anything changed since the current branch's last commit,
+    // staged or not.
     const std::vector<SongChange>& getChanges();
     bool hasChanges();
 
-    // Saves a version of the song as it is now, its name and note as given (each may be empty), and calls back on the
-    // message thread once it is written, or not: the song is copied here, then split and written on the history's thread.
-    // One at a time, and not while the history is being read: false then, with done told why.
+    // Staging, as git's index: the staged song is what the next commit records, the current branch's last commit with the
+    // lines staged since taken from the song as they were when they were staged. Its changes from the last commit; a line
+    // staged (its track, the master or the song's own, with its plug-ins' settings and knobs as they are now) or unstaged
+    // (as the last commit has it again); every line at once. False for a line neither has. Kept while the project is open,
+    // for its branch: a switch, or the project opening again, starts with nothing staged.
+    const std::vector<SongChange>& getStagedChanges();
+    const juce::ValueTree& getStagedSong() const noexcept { return staged; }
+    bool stage (const SongChange&);
+    bool unstage (const SongChange&);
+    void stageAll();
+    void unstageAll();
+
+    // Commits: the staged song, or, with nothing staged or a merge being made, the song as it is now (git's smart commit),
+    // its name and note as given (each may be empty), and calls back on the message thread once it is written, or not: the
+    // song is copied here, then split and written on the history's thread. One at a time, and not while the history is
+    // being read: false then, with done told why. The first, made as soon as the history has read that it has none, is
+    // "Initial commit", on main.
     bool saveVersion (const juce::String& name, const juce::String& note, std::function<void (juce::Result)> done = {});
     bool isSaving() const noexcept { return saving; }
 
@@ -66,10 +82,14 @@ public:
     // last version). What differs from that one, as the changes are listed (from it to the song now), and its song.
     juce::String selectedVersion;
     std::optional<SongChange> selectedChange;
+    bool selectedChangeIsStaged = false;
     void compareWith (const juce::String& versionID);
     const juce::String& getComparedVersion() const noexcept { return comparedVersion; }
     const std::vector<SongChange>& getListedChanges();
-    const juce::ValueTree& getComparedSong() const noexcept { return comparedVersion.isEmpty() ? baseline : comparedSong; }
+
+    // What a line of the changes is taken back from: the staged song (Discard Changes, as git restores from its index), or
+    // the version the changes are listed against.
+    const juce::ValueTree& getComparedSong() const noexcept { return comparedVersion.isEmpty() ? staged : comparedSong; }
 
     // How many bytes the history takes on disk.
     juce::int64 getSize() const;
@@ -103,8 +123,9 @@ public:
 
     //==============================================================================
     // Branches (docs/versions.md: Branches). One made from a version, or from the current branch's last version (none), named
-    // "Idea 2" and on, in the next color; and made the current one, the song going on there, if asked: its id, or none if it
-    // can't be made. And a branch named anew.
+    // "idea-2" and on, in the next color; and made the current one, the song going on there, if asked: its id, or none if it
+    // can't be made. And a branch named anew, as git names one (model/versions/VersionsModel.h: toBranchName()), never as
+    // another is.
     juce::String makeBranch (const juce::String& fromVersion, bool makeCurrent);
 
     // A branch from a version, whose song is another (a DAWproject's that came back: model/project/internal/DawProject.h),
@@ -122,6 +143,10 @@ public:
 
     // The newest version that two versions both are or follow; none for two of no common line.
     juce::String findCommonVersion (const juce::String& a, const juce::String& b) const;
+
+    // A commit as git names one in a merge's message: "branch 'idea-2'" for another branch's last commit, else
+    // "commit '1a2b3c4'" (its id's first seven characters).
+    juce::String describeCommit (const juce::String& versionID) const;
 
     // A merge, from its window (preview) until the version that finishes it is saved (merging): the version merged, the
     // song it parted from and the other's, the other's changes by line, and the clashes; then which value of each the song
@@ -162,11 +187,17 @@ private:
     std::set<juce::String> bounces; // the versions that have one
     juce::int64 bouncesSize = 0;
 
-    // The current branch's last version's song, which the changes are from: its tracks by their IDs, and its plug-ins'
-    // parameters' values.
+    // The current branch's last version's song, which the staged changes are from, and its plug-ins' parameters' values;
+    // and the staged song, which the changes are from: its tracks by their IDs, its plug-ins' values, and its changes.
     juce::ValueTree baseline;
-    std::map<std::uint64_t, juce::ValueTree> baselineTracks;
     PluginParameterValues baselineParameters;
+    juce::ValueTree staged;
+    std::map<std::uint64_t, juce::ValueTree> stagedTracks;
+    PluginParameterValues stagedParameters;
+    std::vector<SongChange> stagedChanges;
+    bool stagedReady = false;
+    void takeLine (const SongChange&, const juce::ValueTree& from, const PluginParameterValues& fromParameters);
+    void stagedChanged();
 
     // The changes, worked out a thing at a time: each track's (and the master's) by its ID, those with changes; the song's
     // own; the devices whose automation changed; and what changed in the song since.

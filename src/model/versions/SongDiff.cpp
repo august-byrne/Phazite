@@ -585,37 +585,52 @@ std::vector<SongChange> findChanges (const juce::ValueTree& songBefore, const ju
 
 juce::String summarise (const std::vector<SongChange>& changes)
 {
-    juce::StringArray parts;
+    // As a commit's message is written: in the imperative, what was added, updated and removed, a few names each.
+    juce::StringArray added, updated, removed;
 
     for (const auto& change : changes)
     {
         if (change.where == SongChange::Where::song)
-        {
-            for (const auto& word : change.what)
-                parts.add (word.substring (0, 1).toUpperCase() + word.substring (1));
-        }
+            updated.addArray (change.what); // "tempo", "sections"
         else
-        {
-            parts.add ((change.kind == SongChange::Kind::added     ? "+ "
-                        : change.kind == SongChange::Kind::removed ? "- "
-                                                                   : "")
-                       + change.name);
-        }
+            (change.kind == SongChange::Kind::added     ? added
+             : change.kind == SongChange::Kind::removed ? removed
+                                                        : updated)
+                .add (change.name);
     }
 
-    if (parts.isEmpty())
+    if (added.isEmpty() && updated.isEmpty() && removed.isEmpty())
         return "No changes";
 
-    // At most a few, then how many more.
-    constexpr int mostShown = 4;
-
-    if (parts.size() > mostShown + 1)
+    // At most a few, then how many more; the last after "and".
+    const auto list = [] (juce::StringArray names)
     {
-        const auto more = parts.size() - mostShown;
-        parts.removeRange (mostShown, more);
-        parts.add (juce::String (more) + " more");
-    }
+        constexpr int mostShown = 3;
 
-    return parts.joinIntoString (", ");
+        if (names.size() > mostShown + 1)
+        {
+            const auto more = names.size() - mostShown;
+            names.removeRange (mostShown, more);
+            names.add (juce::String (more) + " more");
+        }
+
+        const auto last = names[names.size() - 1];
+        names.remove (names.size() - 1);
+        return names.isEmpty() ? last : names.joinIntoString (", ") + " and " + last;
+    };
+
+    juce::StringArray parts;
+
+    if (! added.isEmpty())
+        parts.add ("add " + list (added));
+
+    if (! updated.isEmpty())
+        parts.add ("update " + list (updated));
+
+    if (! removed.isEmpty())
+        parts.add ("remove " + list (removed));
+
+    const auto message = parts.joinIntoString ("; ");
+    return message.substring (0, 1).toUpperCase() + message.substring (1);
 }
 } // namespace phazite

@@ -8,6 +8,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/transport/internal/Recording.h"
+#include "model/versions/VersionsModel.h"
 
 #include <algorithm>
 
@@ -163,6 +164,10 @@ void VersionHistory::opened (int number, std::vector<BranchRecord> branchesRead,
     setBaseline (head, std::move (parameters));
     hasRead = true;
     readBounces(); // and tells
+
+    // A project keeps versions from its start, as a repository from its first commit: the song as it is now, on main.
+    if (versions.empty())
+        saveVersion ("Initial commit", {});
 }
 
 void VersionHistory::followFolder()
@@ -279,31 +284,45 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
     };
 
     if (store == nullptr)
-        return refuse ("This song isn't a project's, so it keeps no versions.");
+        return refuse ("This song isn't a project's, so it keeps no commits.");
 
     if (! hasRead)
-        return refuse ("Phazite is still reading the project's versions.");
+        return refuse ("Phazite is still reading the project's commits.");
 
     if (saving)
-        return refuse ("A version is being saved.");
+        return refuse ("A commit is being made.");
 
-    // The song as a save stores it, its plug-ins' own settings included, and their knobs' values.
-    song.storeDeviceStates();
-    auto copy = song.getState().createCopy();
-    auto parameters = readPluginParameters();
+    // The staged song; or, with nothing staged or a merge being made, the song as a save stores it, its plug-ins' own
+    // settings included, and their knobs' values.
+    const auto commitsStaged = ! merging.has_value() && ! getStagedChanges().empty();
+    juce::ValueTree copy;
+    PluginParameterValues parameters;
 
-    // On the current branch, or the first: Main.
+    if (commitsStaged)
+    {
+        copy = staged.createCopy();
+        parameters = stagedParameters;
+    }
+    else
+    {
+        song.storeDeviceStates();
+        copy = song.getState().createCopy();
+        parameters = readPluginParameters();
+    }
+
+    // On the current branch, or the first: main.
     BranchRecord branch;
 
     if (const auto* current = findCurrentBranch())
         branch = *current;
     else
-        branch = { juce::Uuid().toString(), "Main", getTrackColours()[1].colour, {}, {} };
+        branch = { juce::Uuid().toString(), "main", getTrackColours()[1].colour, {}, {} };
 
     VersionRecord version;
     version.name = name.trim();
     version.note = note.trim();
-    version.summary = branch.head.isEmpty() ? juce::String ("First version") : summarise (getChanges());
+    version.summary =
+        branch.head.isEmpty() ? juce::String ("Initial commit") : summarise (commitsStaged ? getStagedChanges() : getChanges());
     version.saved = juce::Time::currentTimeMillis();
     version.branch = branch.id;
     version.phazite = getVersionString();
@@ -311,13 +330,12 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
     if (branch.head.isNotEmpty())
         version.parents.add (branch.head);
 
-    // A merge's version follows both lines, and is named for what it merged while it has no name of its own.
+    // A merge's commit follows both lines, and is named as git names one while it has no name of its own: "Merge branch
+    // 'idea-2'" for a branch's last commit, else "Merge commit '1a2b3c4'".
     if (merging.has_value() && merging->version.isNotEmpty() && ! version.parents.contains (merging->version))
     {
         version.parents.add (merging->version);
-
-        if (const auto* merged = findVersion (merging->version))
-            version.summary = "Merge \"" + getDisplayName (*merged) + "\"";
+        version.summary = "Merge " + describeCommit (merging->version);
     }
 
     saving = true;
@@ -350,7 +368,7 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
 
                     if (done != nullptr)
                         done (ok ? juce::Result::ok()
-                                 : juce::Result::fail ("Phazite couldn't write the version into the project's Versions folder."));
+                                 : juce::Result::fail ("Phazite couldn't write the commit into the project's Versions folder."));
                 });
         });
 
@@ -411,10 +429,119 @@ PluginParameterValues VersionHistory::readPluginParameters() const
 //==============================================================================
 void VersionHistory::setBaseline (juce::ValueTree baselineSong, PluginParameterValues parameters)
 {
+    // Nothing staged: the staged song is the last commit's.
     baseline = std::move (baselineSong);
     baselineParameters = std::move (parameters);
-    baselineTracks = indexTracks (baseline);
+    staged = baseline.isValid() ? baseline.createCopy() : juce::ValueTree();
+    stagedParameters = baselineParameters;
+    stagedChanged();
+}
+
+void VersionHistory::stagedChanged()
+{
+    stagedTracks = indexTracks (staged);
+    stagedReady = false;
     markAllChanged();
+}
+
+juce::String VersionHistory::describeCommit (const juce::String& versionID) const
+{
+    for (const auto& branch : branches)
+        if (branch.head == versionID && branch.id != currentBranch)
+            return "branch '" + branch.name + "'";
+
+    return "commit '" + versionID.substring (0, 7) + "'";
+}
+
+const std::vector<SongChange>& VersionHistory::getStagedChanges()
+{
+    if (! stagedReady)
+    {
+        stagedChanges = hasRead && baseline.isValid() && staged.isValid()
+                            ? findChanges (baseline, staged, { &baselineParameters, &stagedParameters })
+                            : std::vector<SongChange>();
+        stagedReady = true;
+    }
+
+    return stagedChanges;
+}
+
+void VersionHistory::takeLine (const SongChange& line, const juce::ValueTree& from, const PluginParameterValues& fromParameters)
+{
+    // The line's part of the staged song made what it is in from, and its plug-ins' knobs taken with it.
+    const auto findIn = [&line] (const juce::ValueTree& song)
+    {
+        if (line.where == SongChange::Where::master)
+            return song.getChildWithName (schema::MASTER);
+
+        for (const auto& track : getTrackElements (song))
+            if (readID (track[schema::trackID]) == line.trackID)
+                return track;
+
+        return juce::ValueTree();
+    };
+
+    auto devices = getAutomatableIDs (findIn (staged));
+    devices.merge (getAutomatableIDs (findIn (from)));
+
+    if (line.where == SongChange::Where::song)
+        makeSongOwnLike (staged, from);
+    else
+        makeTrackLike (staged, TrackID::fromRaw (line.trackID), from);
+
+    for (const auto device : devices)
+    {
+        if (const auto found = fromParameters.find (device); found != fromParameters.end())
+            stagedParameters[device] = found->second;
+        else
+            stagedParameters.erase (device);
+    }
+
+    stagedChanged();
+    tellNow();
+}
+
+bool VersionHistory::stage (const SongChange& line)
+{
+    if (! hasRead || ! staged.isValid())
+        return false;
+
+    // Its plug-ins' own settings as they are now go in with it.
+    song.storeDeviceStates();
+    takeLine (line, song.getState(), readPluginParameters());
+    return true;
+}
+
+bool VersionHistory::unstage (const SongChange& line)
+{
+    if (! hasRead || ! staged.isValid() || ! baseline.isValid())
+        return false;
+
+    takeLine (line, baseline, baselineParameters);
+    return true;
+}
+
+void VersionHistory::stageAll()
+{
+    if (! hasRead || ! staged.isValid())
+        return;
+
+    song.storeDeviceStates();
+    staged = song.getState().createCopy();
+    stagedParameters = readPluginParameters();
+    stagedChanged();
+    tellNow();
+}
+
+void VersionHistory::unstageAll()
+{
+    if (! hasRead || ! baseline.isValid())
+        return;
+
+    staged = baseline.createCopy();
+    stagedParameters = baselineParameters;
+    stagedChanged();
+    tellNow();
 }
 
 const std::vector<SongChange>& VersionHistory::getChanges()
@@ -427,12 +554,12 @@ const std::vector<SongChange>& VersionHistory::getChanges()
     changesReady = true;
     changes.clear();
 
-    if (! hasRead || ! baseline.isValid())
+    if (! hasRead || ! staged.isValid())
         return changes;
 
     const auto now = song.getState();
     const auto current = indexTracks (now);
-    const auto masterBefore = baseline.getChildWithName (schema::MASTER), masterNow = now.getChildWithName (schema::MASTER);
+    const auto masterBefore = staged.getChildWithName (schema::MASTER), masterNow = now.getChildWithName (schema::MASTER);
     const auto masterID = readID (masterNow[schema::trackID]);
 
     if (allDirty)
@@ -443,7 +570,7 @@ const std::vector<SongChange>& VersionHistory::getChanges()
         for (const auto& [id, track] : current)
             dirtyTracks.insert (id);
 
-        for (const auto& [id, track] : baselineTracks)
+        for (const auto& [id, track] : stagedTracks)
             dirtyTracks.insert (id);
 
         dirtyTracks.insert (masterID);
@@ -456,16 +583,16 @@ const std::vector<SongChange>& VersionHistory::getChanges()
         if (id == masterID)
             return { masterBefore, masterNow };
 
-        const auto before = baselineTracks.find (id);
+        const auto before = stagedTracks.find (id);
         const auto after = current.find (id);
-        return { before != baselineTracks.end() ? before->second : juce::ValueTree(),
+        return { before != stagedTracks.end() ? before->second : juce::ValueTree(),
                  after != current.end() ? after->second : juce::ValueTree() };
     };
 
     if (! dirtyTracks.empty())
     {
         const auto parameters = readPluginParameters();
-        const PluginValues values { &baselineParameters, &parameters };
+        const PluginValues values { &stagedParameters, &parameters };
 
         for (const auto id : dirtyTracks)
         {
@@ -477,7 +604,7 @@ const std::vector<SongChange>& VersionHistory::getChanges()
                 continue;
             }
 
-            if (auto change = findTrackChange (before, after, baseline, now, values);
+            if (auto change = findTrackChange (before, after, staged, now, values);
                 change.kind != SongChange::Kind::changed || ! change.what.isEmpty())
                 trackChanges[id] = std::move (change);
             else
@@ -489,13 +616,13 @@ const std::vector<SongChange>& VersionHistory::getChanges()
 
     if (songDirty)
     {
-        songChange = findSongChange (baseline, now);
+        songChange = findSongChange (staged, now);
         songDirty = false;
     }
 
     if (automationDirty)
     {
-        automated = findAutomatedDevicesChanged (baseline, now);
+        automated = findAutomatedDevicesChanged (staged, now);
         automationDirty = false;
     }
 
@@ -517,7 +644,7 @@ const std::vector<SongChange>& VersionHistory::getChanges()
         if (found == trackChanges.end() && ! touchesAutomation)
             return;
 
-        auto line = found != trackChanges.end() ? found->second : findTrackChange (before, after, baseline, now);
+        auto line = found != trackChanges.end() ? found->second : findTrackChange (before, after, staged, now);
 
         if (touchesAutomation)
             line.what.addIfNotAlreadyThere ("automation");
@@ -534,7 +661,7 @@ const std::vector<SongChange>& VersionHistory::getChanges()
         addLine (id);
     }
 
-    for (const auto& track : getTrackElements (baseline))
+    for (const auto& track : getTrackElements (staged))
         if (const auto id = readID (track[schema::trackID]); shown.count (id) == 0)
             addLine (id);
 
@@ -549,7 +676,7 @@ const std::vector<SongChange>& VersionHistory::getChanges()
 
 bool VersionHistory::hasChanges()
 {
-    return ! getChanges().empty();
+    return ! getChanges().empty() || ! getStagedChanges().empty();
 }
 
 //==============================================================================
@@ -778,17 +905,19 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
     if (findVersion (head) == nullptr)
         return {};
 
-    // "Idea 2", the next number no branch has, in the next color of the tracks' palette (Main took the second).
+    // "idea-2", the next number no branch has, in the next color of the tracks' palette (main took the second).
     const auto isTaken = [this] (const juce::String& name)
-    { return std::any_of (branches.begin(), branches.end(), [&name] (const auto& branch) { return branch.name == name; }); };
+    {
+        return std::any_of (branches.begin(), branches.end(), [&name] (const auto& branch) { return branch.name.equalsIgnoreCase (name); });
+    };
 
     auto number = 2;
 
-    while (isTaken ("Idea " + juce::String (number)))
+    while (isTaken ("idea-" + juce::String (number)))
         ++number;
 
     const BranchRecord branch { juce::Uuid().toString(),
-                                "Idea " + juce::String (number),
+                                "idea-" + juce::String (number),
                                 getTrackColours()[(branches.size() + 1) % getTrackColours().size()].colour,
                                 head,
                                 {} };
@@ -916,15 +1045,17 @@ bool VersionHistory::switchTo (const juce::String& branchID)
 
 bool VersionHistory::renameBranch (const juce::String& branchID, const juce::String& name)
 {
+    // As git names a branch: no spaces (a dash in their place, as VS Code puts one), nor what refs can't hold.
+    const auto newName = toBranchName (name);
     const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
-    const auto taken = std::any_of (branches.begin(), branches.end(), [&branchID, &name] (const auto& branch)
-                                    { return branch.id != branchID && branch.name.equalsIgnoreCase (name.trim()); });
+    const auto taken = std::any_of (branches.begin(), branches.end(), [&branchID, &newName] (const auto& branch)
+                                    { return branch.id != branchID && branch.name.equalsIgnoreCase (newName); });
 
-    if (store == nullptr || found == branches.end() || name.trim().isEmpty() || taken)
+    if (store == nullptr || found == branches.end() || newName.isEmpty() || taken)
         return false;
 
     auto renamed = *found;
-    renamed.name = name.trim();
+    renamed.name = newName;
 
     if (! store->writeBranch (renamed))
         return false;

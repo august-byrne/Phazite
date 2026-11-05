@@ -66,6 +66,7 @@ enum class Icon
     check,       // Save Version, and the branch the song is on
     moreActions, // a view's menu of what else it does: three dots
     song,        // a change to the song's own: its tempo, sections, chords
+    minus,       // a line unstaged
     // The title bar (ui/shell/TitleBar.h)
     menu, // the menus, folded
     undo,

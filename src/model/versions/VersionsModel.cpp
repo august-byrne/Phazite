@@ -17,6 +17,8 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 
+#include <set>
+
 namespace phazite
 {
 namespace
@@ -98,9 +100,10 @@ std::optional<VersionInfo> getLastVersion (const ProjectContext& context)
 
 namespace
 {
-    VersionChange toLine (const SongChange& change)
+    VersionChange toLine (const SongChange& change, bool staged = false)
     {
         VersionChange line;
+        line.staged = staged;
         line.kind = change.kind == SongChange::Kind::added     ? VersionChange::Kind::added
                     : change.kind == SongChange::Kind::removed ? VersionChange::Kind::removed
                                                                : VersionChange::Kind::changed;
@@ -127,12 +130,12 @@ namespace
         return change;
     }
 
-    std::vector<VersionChange> toLines (const std::vector<SongChange>& changes)
+    std::vector<VersionChange> toLines (const std::vector<SongChange>& changes, bool staged = false)
     {
         std::vector<VersionChange> lines;
 
         for (const auto& change : changes)
-            lines.push_back (toLine (change));
+            lines.push_back (toLine (change, staged));
 
         return lines;
     }
@@ -148,6 +151,99 @@ bool hasChangesSinceLastVersion (const ProjectContext& context)
 {
     auto* history = findHistory (context);
     return history != nullptr && history->hasChanges();
+}
+
+std::vector<VersionChange> getStagedChanges (const ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    return history != nullptr ? toLines (history->getStagedChanges(), true) : std::vector<VersionChange>();
+}
+
+int countChanges (const ProjectContext& context)
+{
+    // Each thing once, staged, changed since, or both.
+    auto* history = findHistory (context);
+
+    if (history == nullptr)
+        return 0;
+
+    std::set<std::pair<int, std::uint64_t>> things;
+
+    for (const auto* list : { &history->getChanges(), &history->getStagedChanges() })
+        for (const auto& change : *list)
+            things.insert ({ (int) change.where, change.trackID });
+
+    return (int) things.size();
+}
+
+bool stageChange (ProjectContext& context, const VersionChange& line)
+{
+    auto* history = findHistory (context);
+    return history != nullptr && history->stage (fromLine (line));
+}
+
+bool unstageChange (ProjectContext& context, const VersionChange& line)
+{
+    auto* history = findHistory (context);
+    return history != nullptr && history->unstage (fromLine (line));
+}
+
+void stageAllChanges (ProjectContext& context)
+{
+    if (auto* history = findHistory (context))
+        history->stageAll();
+}
+
+void unstageAllChanges (ProjectContext& context)
+{
+    if (auto* history = findHistory (context))
+        history->unstageAll();
+}
+
+bool discardAllChanges (ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    auto* song = findSong (context);
+
+    if (song == nullptr || history == nullptr || ! history->getStagedSong().isValid() || history->getChanges().empty())
+        return false;
+
+    // A change of its own, one undo step, as git restore makes the working tree the index again.
+    const UndoStep step (*song, "Discard All Changes");
+    song->storeDeviceStates();
+    makeSongLike (*song, history->getStagedSong());
+    removeBrokenReferences (*song);
+    return true;
+}
+
+juce::String toBranchName (const juce::String& typed)
+{
+    // Spaces as dashes, and only what a ref can hold (git check-ref-format).
+    juce::String name;
+
+    for (const auto c : typed.trim())
+    {
+        if (juce::CharacterFunctions::isWhitespace (c))
+            name << '-';
+        else if (c >= 32 && c != 127 && juce::String ("~^:?*[\\").indexOfChar (c) < 0)
+            name << juce::String::charToString (c);
+    }
+
+    while (name.contains ("--"))
+        name = name.replace ("--", "-");
+
+    while (name.contains (".."))
+        name = name.replace ("..", ".");
+
+    while (name.contains ("//"))
+        name = name.replace ("//", "/");
+
+    name = name.replace ("@{", "@").trimCharactersAtStart ("-./").trimCharactersAtEnd ("./");
+
+    while (name.endsWithIgnoreCase (".lock"))
+        name = name.dropLastCharacters (5).trimCharactersAtEnd ("./");
+
+    return name;
 }
 
 void setVersionDraft (ProjectContext& context, const juce::String& name, const juce::String& note)
@@ -178,7 +274,7 @@ bool saveVersion (ProjectContext& context, std::function<void (juce::Result)> do
     if (history == nullptr)
     {
         if (done != nullptr)
-            done (juce::Result::fail ("This song isn't a project's, so it keeps no versions."));
+            done (juce::Result::fail ("This song isn't a project's, so it keeps no commits."));
 
         return false;
     }
@@ -246,9 +342,9 @@ bool bringBackVersion (ProjectContext& context, const juce::String& versionID)
     if (! then.isValid())
         return false;
 
-    // A change of its own, one undo step. The plug-ins' own settings as they are now, to tell which differ from the
-    // version's: only those are set again.
-    const UndoStep step (*song, "Bring Back \"" + getDisplayName (*version) + "\"");
+    // A change of its own, one undo step, as git restore --source makes the working tree a commit's. The plug-ins' own
+    // settings as they are now, to tell which differ from the commit's: only those are set again.
+    const UndoStep step (*song, "Restore from \"" + getDisplayName (*version) + "\"");
     song->storeDeviceStates();
     makeSongLike (*song, then);
     return true;
@@ -283,9 +379,9 @@ bool takeBack (ProjectContext& context, const VersionChange& line)
     const auto then = history->getComparedSong();
     const auto* compared = history->findVersion (history->getComparedVersion());
 
-    // A change of its own, one undo step: Put Back from the last version, Take from another.
-    const UndoStep step (*song, compared != nullptr ? "Take " + line.name + " from \"" + getDisplayName (*compared) + "\""
-                                                    : "Put Back " + line.name);
+    // A change of its own, one undo step: Discard Changes, from the staged song (git restore); Restore from another commit.
+    const UndoStep step (*song, compared != nullptr ? "Restore " + line.name + " from \"" + getDisplayName (*compared) + "\""
+                                                    : "Discard Changes in " + line.name);
     song->storeDeviceStates();
     auto done = true;
 
@@ -314,28 +410,32 @@ juce::String getSelectedVersion (const ProjectContext& context)
 void selectChange (ProjectContext& context, std::optional<VersionChange> line)
 {
     if (auto* history = findHistory (context))
+    {
         history->selectedChange = line.has_value() ? std::optional<SongChange> (fromLine (*line)) : std::nullopt;
+        history->selectedChangeIsStaged = line.has_value() && line->staged;
+    }
 }
 
 std::optional<VersionChange> getSelectedChange (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
-    return history != nullptr && history->selectedChange.has_value() ? std::optional<VersionChange> (toLine (*history->selectedChange))
-                                                                     : std::nullopt;
+    return history != nullptr && history->selectedChange.has_value()
+               ? std::optional<VersionChange> (toLine (*history->selectedChange, history->selectedChangeIsStaged))
+               : std::nullopt;
 }
 
 juce::String describeBringBack (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
     const auto* version = history != nullptr ? history->findVersion (history->selectedVersion) : nullptr;
-    return version != nullptr ? "Bring Back \"" + getDisplayName (*version) + "\"" : juce::String();
+    return version != nullptr ? "Restore from \"" + getDisplayName (*version) + "\"" : juce::String();
 }
 
 juce::String describePutBack (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
     const auto* compared = history != nullptr ? history->findVersion (history->getComparedVersion()) : nullptr;
-    return compared != nullptr ? "Take from \"" + getDisplayName (*compared) + "\"" : juce::String();
+    return compared != nullptr ? "Restore from \"" + getDisplayName (*compared) + "\"" : juce::String();
 }
 
 bool canBringBack (const ProjectContext& context)
@@ -353,8 +453,43 @@ bool canTakeFrom (const ProjectContext& context)
 
 bool canPutBack (const ProjectContext& context)
 {
+    // A line of the working tree's: a staged one is unstaged first, as in git.
     const auto* history = findHistory (context);
-    return history != nullptr && history->selectedChange.has_value();
+    return history != nullptr && history->selectedChange.has_value() && ! history->selectedChangeIsStaged;
+}
+
+bool canStageSelected (const ProjectContext& context)
+{
+    const auto line = getSelectedChange (context);
+    return line.has_value() && ! line->staged && getComparedVersion (context).isEmpty();
+}
+
+bool canUnstageSelected (const ProjectContext& context)
+{
+    const auto line = getSelectedChange (context);
+    return line.has_value() && line->staged;
+}
+
+void stageSelectedChange (ProjectContext& context)
+{
+    if (const auto line = getSelectedChange (context); line.has_value() && stageChange (context, *line))
+        selectChange (context, std::nullopt);
+}
+
+void unstageSelectedChange (ProjectContext& context)
+{
+    if (const auto line = getSelectedChange (context); line.has_value() && unstageChange (context, *line))
+        selectChange (context, std::nullopt);
+}
+
+bool canStageAll (const ProjectContext& context)
+{
+    return ! getChangesSinceLastVersion (context).empty() && getComparedVersion (context).isEmpty();
+}
+
+bool canUnstageAll (const ProjectContext& context)
+{
+    return ! getStagedChanges (context).empty();
 }
 
 void takeFromSelectedVersion (ProjectContext& context)
@@ -491,7 +626,7 @@ bool canMerge (const ProjectContext& context)
 juce::String describeMergeInto (const ProjectContext& context)
 {
     const auto branch = getCurrentBranch (context);
-    return "Merge into " + (branch.has_value() ? branch->name : juce::String ("the Current Branch")) + "...";
+    return branch.has_value() ? "Merge into '" + branch->name + "'..." : juce::String ("Merge into Current Branch...");
 }
 
 bool startMerge (ProjectContext& context, const juce::String& versionID)
@@ -593,12 +728,11 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
 
     auto merge = std::move (*history->preview);
     history->preview.reset();
-    const auto* version = history->findVersion (merge.version);
-
-    // A change of its own, one undo step: the song made what the merge of its lines makes, its IDs counted on past them.
+    // A change of its own, one undo step named as git names a merge ("Merge branch 'idea-2'"): the song made what the merge
+    // of its lines makes, its IDs counted on past them.
     song->storeDeviceStates();
     auto result = mergeSongs (merge.base, song->getState(), merge.theirs, toMergeLines (lines), [song] { return song->makeID(); });
-    const UndoStep step (*song, "Merge \"" + (version != nullptr ? getDisplayName (*version) : juce::String ("a version")) + "\"");
+    const UndoStep step (*song, "Merge " + history->describeCommit (merge.version));
     makeSongLike (*song, result.song);
     countIDs (*song);
 
@@ -644,9 +778,9 @@ std::vector<ClashInfo> getClashes (const ProjectContext& context)
         }
         else
         {
-            info.values[0] = clash.baseElement.isValid() ? "as before" : "none";
-            info.values[1] = clash.oursElement.isValid() ? "this branch's" : "none";
-            info.values[2] = clash.theirsElement.isValid() ? merging.otherBranch + "'s" : "none";
+            info.values[0] = clash.baseElement.isValid() ? "as in the base" : "none";
+            info.values[1] = clash.oursElement.isValid() ? "as on this branch" : "none";
+            info.values[2] = clash.theirsElement.isValid() ? "as on " + merging.otherBranch : "none";
         }
 
         infos.push_back (std::move (info));
@@ -666,11 +800,10 @@ bool chooseClash (ProjectContext& context, int index, int value)
 
     auto& merging = *history->merging;
     const auto& clash = merging.clashes[(size_t) index];
-    const juce::String whose[] = { "the value before both", "this branch's", merging.otherBranch + "'s" };
     auto* undo = &song->getUndoManager();
 
-    // A change of its own, one undo step: "Take Idea 2's Bass volume".
-    const UndoStep step (*song, "Take " + whose[value] + " " + clash.line + " " + clash.what);
+    // A change of its own, one undo step, as a merge editor names its choices: "Accept Incoming Change: Bass volume".
+    const UndoStep step (*song, getClashChoiceName (value) + ": " + clash.line + " " + clash.what);
 
     if (clash.property.isValid())
     {
@@ -709,6 +842,11 @@ bool chooseClash (ProjectContext& context, int index, int value)
     merging.chosen[(size_t) index] = value;
     history->tellNow();
     return true;
+}
+
+juce::String getClashChoiceName (int value)
+{
+    return value == 0 ? "Accept Base" : value == 1 ? "Accept Current Change" : "Accept Incoming Change";
 }
 
 void mergeSelectedVersion (ProjectContext& context)
@@ -867,7 +1005,7 @@ namespace
             const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
 
             if (open == nullptr || version == nullptr)
-                return juce::Result::fail ("That version isn't there any more.");
+                return juce::Result::fail ("That commit isn't there any more.");
 
             title = "Bouncing \"" + getDisplayName (*version) + "\"";
             const auto state = history->readSong (versionID);
@@ -987,7 +1125,7 @@ void bounceVersion (ProjectContext& context, const juce::String& versionID, Trac
 {
     auto* history = findHistory (context);
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
-    const auto title = "Bouncing \"" + (version != nullptr ? getDisplayName (*version) : juce::String ("the version")) + "\"";
+    const auto title = "Bouncing \"" + (version != nullptr ? getDisplayName (*version) : juce::String ("the commit")) + "\"";
 
     if (! canBounce (context, versionID))
     {
@@ -1212,7 +1350,7 @@ void exportDawProject (ProjectContext& context, TrackRenderHost& host)
 
     // The version it came from, by which importing it again finds it (step D2).
     const auto comment = "Exported by " + juce::String (appName) + " " + getVersionString()
-                         + (version != nullptr ? " from the version \"" + getDisplayName (*version) + "\" (" + version->id + ")."
+                         + (version != nullptr ? " from the commit \"" + getDisplayName (*version) + "\" (" + version->id + ")."
                                                : juce::String (" from the song as it was."));
     const auto heading = "Exporting " + title + " as DAWproject";
     const auto finished = [&host, heading, file] (const juce::Result& result)
@@ -1246,137 +1384,162 @@ void exportDawProject (ProjectContext& context, TrackRenderHost& host)
 
 void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen, TrackRenderHost& renders)
 {
-    registry.add ({ .id = "version.save",
-                    .name = "Save Version",
-                    .category = "Project",
-                    .description = "Saves the project and keeps the song as it is now as a version, which you can go back to, hear and "
-                                   "compare later.",
-                    .synonyms = { "commit", "snapshot", "save new version", "history", "checkpoint" },
-                    .perform = [&context, saveProjectThen, &renders] { saveProjectAndVersion (context, saveProjectThen, renders); },
-                    .isEnabled = [&context] { return canSaveVersion (context); } });
+    // In git's words (docs/versions.md: Words), as VS Code's Source Control names them.
+    const auto add = [&registry] (Command command)
+    {
+        command.category = "Source Control";
+        registry.add (std::move (command));
+    };
 
-    // On the version selected in the Versions view's history, and the line of the changes selected there; each a change of
-    // its own, which names its undo step after what it brings back.
-    registry.add ({ .id = "version.bringBack",
-                    .name = "Bring Back This Version",
-                    .category = "Project",
-                    .description = "Makes the song what it was in the selected version, as one undo step. The history keeps every "
-                                   "version, so the changes since show what it took back.",
-                    .synonyms = { "restore", "revert", "go back", "checkout", "roll back" },
-                    .perform = [&context] { bringBackSelectedVersion (context); },
-                    .isEnabled = [&context] { return canBringBack (context); },
-                    .currentName = [&context] { return describeBringBack (context); } });
+    add ({ .id = "version.save",
+           .name = "Commit",
+           .description = "Saves the project and commits the staged changes to the current branch, or every change while none is "
+                          "staged, with the message typed, to go back to, hear and compare later.",
+           .synonyms = { "save version", "snapshot", "checkpoint", "history", "version" },
+           .perform = [&context, saveProjectThen, &renders] { saveProjectAndVersion (context, saveProjectThen, renders); },
+           .isEnabled = [&context] { return canSaveVersion (context); } });
 
-    registry.add ({ .id = "version.takeFrom",
-                    .name = "Take from This Version...",
-                    .category = "Project",
-                    .description = "Lists what differs between the selected version and the song now, by track, each to take back "
-                                   "from the version on its own.",
-                    .synonyms = { "compare", "diff", "cherry-pick", "take", "differences" },
-                    .perform = [&context] { takeFromSelectedVersion (context); },
-                    .isEnabled = [&context] { return canTakeFrom (context); } });
+    // Staging, as git add and git restore --staged: on the line selected in the changes, or on every line.
+    add ({ .id = "version.stage",
+           .name = "Stage Changes",
+           .description = "Stages the selected line of the changes, as it is now, for the next commit.",
+           .synonyms = { "add", "git add", "index" },
+           .perform = [&context] { stageSelectedChange (context); },
+           .isEnabled = [&context] { return canStageSelected (context); } });
 
-    registry.add ({ .id = "version.putBack",
-                    .name = "Put Back",
-                    .category = "Project",
-                    .description = "Takes the selected line of the changes back from the last version (or from the version the "
-                                   "changes are listed against), as one undo step.",
-                    .synonyms = { "revert", "undo change", "restore", "take" },
-                    .perform = [&context] { putBackSelectedChange (context); },
-                    .isEnabled = [&context] { return canPutBack (context); },
-                    .currentName = [&context] { return describePutBack (context); } });
+    add ({ .id = "version.unstage",
+           .name = "Unstage Changes",
+           .description = "Takes the selected line of the staged changes out of the next commit; the song keeps it as it is.",
+           .synonyms = { "reset", "restore staged", "index" },
+           .perform = [&context] { unstageSelectedChange (context); },
+           .isEnabled = [&context] { return canUnstageSelected (context); } });
 
-    // Branches and merges: a switch saves the project after it.
-    registry.add ({ .id = "version.newBranch",
-                    .name = "New Branch from Here",
-                    .category = "Project",
-                    .description = "Starts a branch, named and colored at once: from the selected version, which the song then becomes, or "
-                                   "from now, the song going on there with its changes. The branch left keeps its own.",
-                    .synonyms = { "branch", "fork", "idea", "alternative", "try something" },
-                    .perform = [&context, saveProjectThen] { newBranchFromSelection (context, saveProjectThen); },
-                    .isEnabled = [&context] { return canMakeBranch (context); } });
+    add ({ .id = "version.stageAll",
+           .name = "Stage All Changes",
+           .description = "Stages every change, as the song is now, for the next commit.",
+           .synonyms = { "add all", "git add", "index" },
+           .perform = [&context] { stageAllChanges (context); },
+           .isEnabled = [&context] { return canStageAll (context); } });
 
-    registry.add ({ .id = "version.switchBranch",
-                    .name = "Switch to the Branch",
-                    .category = "Project",
-                    .description = "Makes the song the branch's picked in the Versions view, as it was left there, and keeps it as it "
-                                   "is now on the branch it leaves, its changes too. It goes on playing.",
-                    .synonyms = { "checkout", "branch", "go to", "open branch" },
-                    .perform = [&context, saveProjectThen] { switchToSelectedBranch (context, saveProjectThen); },
-                    .isEnabled = [&context] { return canSwitchBranch (context); } });
+    add ({ .id = "version.unstageAll",
+           .name = "Unstage All Changes",
+           .description = "Takes every staged change out of the next commit; the song keeps them as they are.",
+           .synonyms = { "reset", "restore staged", "index" },
+           .perform = [&context] { unstageAllChanges (context); },
+           .isEnabled = [&context] { return canUnstageAll (context); } });
 
-    registry.add ({ .id = "version.merge",
-                    .name = "Merge into the Current Branch...",
-                    .category = "Project",
-                    .description = "Lists what the selected version changed since the newest version both lines have, by track, to take "
-                                   "into the song as one undo step.",
-                    .synonyms = { "merge", "combine", "join", "pull" },
-                    .perform = [&context] { mergeSelectedVersion (context); },
-                    .isEnabled = [&context] { return canMerge (context); },
-                    .currentName = [&context] { return describeMergeInto (context); } });
+    add ({ .id = "version.discardAll",
+           .name = "Discard All Changes",
+           .description = "Makes the song what is staged again, or the last commit while nothing is, as one undo step.",
+           .synonyms = { "restore", "revert", "reset", "throw away", "git restore" },
+           .perform = [&context] { discardAllChanges (context); },
+           .isEnabled = [&context] { return ! getChangesSinceLastVersion (context).empty(); } });
 
-    registry.add ({ .id = "version.finishMerge",
-                    .name = "Merge",
-                    .category = "Project",
-                    .description = "Takes the lines ticked in the merge's list into the song, as one undo step; save a version to finish "
-                                   "the merge.",
-                    .synonyms = { "merge", "apply", "take" },
-                    .perform = [&context] { finishTickedMerge (context); },
-                    .isEnabled = [&context] { return ! getMergeLines (context).empty(); } });
+    add ({ .id = "version.putBack",
+           .name = "Discard Changes",
+           .description = "Makes the selected line of the changes what is staged again, or the last commit while nothing is (while "
+                          "the changes are compared with another commit, what that commit had), as one undo step.",
+           .synonyms = { "revert", "restore", "undo change", "git restore" },
+           .perform = [&context] { putBackSelectedChange (context); },
+           .isEnabled = [&context] { return canPutBack (context); },
+           .currentName = [&context] { return describePutBack (context); } });
 
-    registry.add ({ .id = "version.cancelMerge",
-                    .name = "Cancel the Merge",
-                    .category = "Project",
-                    .description = "Closes the merge's list without taking anything into the song.",
-                    .synonyms = { "cancel", "close", "back" },
-                    .perform = [&context] { cancelMerge (context); },
-                    .isEnabled = [&context] { return ! getMergeLines (context).empty(); } });
+    // On the commit selected in the graph; each a change of its own, which names its undo step after what it restores.
+    add ({ .id = "version.bringBack",
+           .name = "Restore from This Commit",
+           .description = "Makes the song what it was in the selected commit, as one undo step, as git restore --source does. "
+                          "The history keeps every commit, so the changes show what it took back.",
+           .synonyms = { "revert", "go back", "checkout", "roll back", "bring back" },
+           .perform = [&context] { bringBackSelectedVersion (context); },
+           .isEnabled = [&context] { return canBringBack (context); },
+           .currentName = [&context] { return describeBringBack (context); } });
 
-    registry.add ({ .id = "version.showChanges",
-                    .name = "Show the Changes Since the Last Version",
-                    .category = "Project",
-                    .description = "Lists the changes since the last version again, rather than what differs from another one.",
-                    .synonyms = { "done", "changes", "back" },
-                    .perform = [&context] { compareWithVersion (context, {}); },
-                    .isEnabled = [&context] { return getComparedVersion (context).isNotEmpty(); } });
+    add ({ .id = "version.takeFrom",
+           .name = "Compare with Working Tree",
+           .description = "Lists what differs between the selected commit and the song now, by track, each to restore from the "
+                          "commit on its own.",
+           .synonyms = { "compare", "diff", "cherry-pick", "differences", "take from" },
+           .perform = [&context] { takeFromSelectedVersion (context); },
+           .isEnabled = [&context] { return canTakeFrom (context); } });
+
+    add ({ .id = "version.showChanges",
+           .name = "Close the Comparison",
+           .description = "Lists the changes since the last commit again, rather than what differs from another commit.",
+           .synonyms = { "done", "changes", "back" },
+           .perform = [&context] { compareWithVersion (context, {}); },
+           .isEnabled = [&context] { return getComparedVersion (context).isNotEmpty(); } });
+
+    // Branches and merges: a checkout saves the project after it.
+    add ({ .id = "version.newBranch",
+           .name = "Create Branch",
+           .description = "Creates a branch, named at once (idea-2 and on), from the selected commit, which the song then becomes, "
+                          "or from the current one, the song going on there with its changes. The branch left keeps its own.",
+           .synonyms = { "branch", "fork", "idea", "alternative", "new branch" },
+           .perform = [&context, saveProjectThen] { newBranchFromSelection (context, saveProjectThen); },
+           .isEnabled = [&context] { return canMakeBranch (context); } });
+
+    add ({ .id = "version.switchBranch",
+           .name = "Checkout Branch",
+           .description = "Checks out the branch picked: the song becomes that branch's, as it was left there, and the branch it "
+                          "leaves keeps it as it is now, its changes too. It goes on playing.",
+           .synonyms = { "switch", "branch", "go to", "git checkout", "git switch" },
+           .perform = [&context, saveProjectThen] { switchToSelectedBranch (context, saveProjectThen); },
+           .isEnabled = [&context] { return canSwitchBranch (context); } });
+
+    add ({ .id = "version.merge",
+           .name = "Merge into Current Branch...",
+           .description = "Lists what the selected commit changed since the newest commit both lines have, by track, to take into "
+                          "the song as one undo step.",
+           .synonyms = { "merge", "combine", "join", "pull", "git merge" },
+           .perform = [&context] { mergeSelectedVersion (context); },
+           .isEnabled = [&context] { return canMerge (context); },
+           .currentName = [&context] { return describeMergeInto (context); } });
+
+    add ({ .id = "version.finishMerge",
+           .name = "Merge",
+           .description = "Takes the lines ticked in the merge's list into the song, as one undo step; commit to finish the merge.",
+           .synonyms = { "merge", "apply", "take" },
+           .perform = [&context] { finishTickedMerge (context); },
+           .isEnabled = [&context] { return ! getMergeLines (context).empty(); } });
+
+    add ({ .id = "version.cancelMerge",
+           .name = "Abort Merge",
+           .description = "Closes the merge's list without taking anything into the song, as git merge --abort.",
+           .synonyms = { "cancel", "close", "back", "abort" },
+           .perform = [&context] { cancelMerge (context); },
+           .isEnabled = [&context] { return ! getMergeLines (context).empty(); } });
 
     // Bounces, and hearing them: not undo steps, as they change the history and what is heard, not the song.
-    registry.add ({ .id = "version.hear",
-                    .name = "Hear It",
-                    .category = "Project",
-                    .description = "Plays the selected version's bounce in place of the song, at the same beat and as loud, to compare "
-                                   "them; on Now, the song itself again. An edit to the song switches back to it.",
-                    .synonyms = { "listen", "compare", "a/b", "reference", "play version" },
-                    .perform = [&context] { hearSelectedVersion (context); },
-                    .isEnabled = [&context] { return canHearSelected (context); } });
+    add ({ .id = "version.hear",
+           .name = "Hear It",
+           .description = "Plays the selected commit's bounce in place of the song, at the same beat and as loud, to compare them; "
+                          "on the uncommitted changes, the song itself again. An edit to the song switches back to it.",
+           .synonyms = { "listen", "compare", "a/b", "reference", "play commit" },
+           .perform = [&context] { hearSelectedVersion (context); },
+           .isEnabled = [&context] { return canHearSelected (context); } });
 
-    registry.add ({ .id = "version.bounce",
-                    .name = "Bounce",
-                    .category = "Project",
-                    .description = "Renders the song into the version it is now, as Export Song renders it, to hear that version later "
-                                   "against the song.",
-                    .synonyms = { "render", "bounce", "mixdown", "audio" },
-                    .perform = [&context, &renders] { bounceSelectedVersion (context, renders); },
-                    .isEnabled = [&context] { return canBounceSelected (context); } });
+    add ({ .id = "version.bounce",
+           .name = "Bounce",
+           .description = "Renders the selected commit, as Export Song renders the song, to hear it later against the song.",
+           .synonyms = { "render", "bounce", "mixdown", "audio" },
+           .perform = [&context, &renders] { bounceSelectedVersion (context, renders); },
+           .isEnabled = [&context] { return canBounceSelected (context); } });
 
-    registry.add ({ .id = "version.deleteBounce",
-                    .name = "Delete Bounce",
-                    .category = "Project",
-                    .description = "Deletes the selected version's bounce, which nearly all of the room the versions take is. The "
-                                   "version stays.",
-                    .synonyms = { "remove", "free space", "clean up", "delete audio" },
-                    .perform = [&context] { deleteSelectedBounce (context); },
-                    .isEnabled = [&context] { return canDeleteSelectedBounce (context); } });
+    add ({ .id = "version.deleteBounce",
+           .name = "Delete Bounce",
+           .description = "Deletes the selected commit's bounce, which nearly all of the room the history takes is. The commit "
+                          "stays.",
+           .synonyms = { "remove", "free space", "clean up", "delete audio" },
+           .perform = [&context] { deleteSelectedBounce (context); },
+           .isEnabled = [&context] { return canDeleteSelectedBounce (context); } });
 
-    registry.add ({ .id = "version.exportDawProject",
-                    .name = "Export as DAWproject...",
-                    .category = "Project",
-                    .description =
-                        "Writes the selected version, or the song as it is, as a DAWproject file, which Bitwig Studio, Studio One "
-                        "and Cubase open, into the project's Renders folder. What they can't play is bounced beside its notes.",
-                    .synonyms = { "dawproject", "bitwig", "studio one", "cubase", "share", "collaborate", "interchange" },
-                    .perform = [&context, &renders] { exportDawProject (context, renders); },
-                    .isEnabled = [&context] { return canExportDawProject (context); },
-                    .currentName = [&context] { return describeDawProjectExport (context); } });
+    add ({ .id = "version.exportDawProject",
+           .name = "Export as DAWproject...",
+           .description = "Writes the selected commit, or the song as it is, as a DAWproject file, which Bitwig Studio, Studio One "
+                          "and Cubase open, into the project's Renders folder. What they can't play is bounced beside its notes.",
+           .synonyms = { "dawproject", "bitwig", "studio one", "cubase", "share", "collaborate", "interchange" },
+           .perform = [&context, &renders] { exportDawProject (context, renders); },
+           .isEnabled = [&context] { return canExportDawProject (context); },
+           .currentName = [&context] { return describeDawProjectExport (context); } });
 }
 } // namespace phazite

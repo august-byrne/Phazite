@@ -1291,13 +1291,13 @@ bool importDawProjectAsBranch (ProjectContext& context, const DawProjectFile& in
 
     if (open == nullptr || version == nullptr || in.project == nullptr)
     {
-        said = { "It wasn't exported from a version of this project." };
+        said = { "It wasn't exported from a commit of this project." };
         return false;
     }
 
     if (! canSwitchBranch (context))
     {
-        said = { "Not while the song records, renders, or saves a version." };
+        said = { "Not while the song records, renders, or commits." };
         return false;
     }
 
@@ -1308,7 +1308,7 @@ bool importDawProjectAsBranch (ProjectContext& context, const DawProjectFile& in
 
     if (song == nullptr)
     {
-        said = { "Phazite couldn't read the version it came from." };
+        said = { "Phazite couldn't read the commit it came from." };
         return false;
     }
 

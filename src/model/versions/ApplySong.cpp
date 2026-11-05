@@ -204,10 +204,9 @@ namespace
     }
 
     // The curves of these devices like the other's.
-    void makeCurvesLike (Song& song, const std::set<std::uint64_t>& devices, const juce::ValueTree& other)
+    void makeCurvesLike (juce::ValueTree state, juce::UndoManager* undo, const std::set<std::uint64_t>& devices,
+                         const juce::ValueTree& other)
     {
-        auto* undo = &song.getUndoManager();
-        auto state = song.getState();
         auto automation = state.getChildWithName (schema::AUTOMATION);
         const auto otherAutomation = other.getChildWithName (schema::AUTOMATION);
         const auto isOurs = [&devices] (const juce::ValueTree& curve) { return devices.count (readID (curve[schema::curveDevice])) > 0; };
@@ -287,123 +286,141 @@ void makeSongTheSame (Song& song, const juce::ValueTree& other)
     song.getUndoManager().clearUndoHistory();
 }
 
-bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
+namespace
 {
-    auto* undo = &song.getUndoManager();
-    const auto state = song.getState();
-    auto live = findTrack (state, id.getRaw());
-    const auto then = findTrack (other, id.getRaw());
-
-    if (! live.isValid() && ! then.isValid())
-        return false;
-
-    // Its devices' automation, of what either of them holds.
-    auto devices = getAutomatableIDs (live);
-    devices.merge (getAutomatableIDs (then));
-
-    if (live.isValid() && then.isValid())
+    bool makeTrackLikeIn (juce::ValueTree state, TrackID id, const juce::ValueTree& other, juce::UndoManager* undo)
     {
-        makeLike (live, then, undo, false);
-    }
-    else if (live.isValid())
-    {
-        // Added since: taken away.
-        live.getParent().removeChild (live, undo);
-    }
-    else
-    {
-        // Gone since: back where it was, after the track before it there, with the tracks it held that aren't elsewhere now.
-        auto parent = findTrackParent (state, then.getParent());
-        auto copy = then.createCopy();
+        auto live = findTrack (state, id.getRaw());
+        const auto then = findTrack (other, id.getRaw());
 
-        for (int i = copy.getNumChildren(); --i >= 0;)
-            if (const auto child = copy.getChild (i);
-                child.hasType (schema::TRACK) && findTrack (state, readID (child[schema::trackID])).isValid())
-                copy.removeChild (i, nullptr);
+        if (! live.isValid() && ! then.isValid())
+            return false;
 
-        int index = 0;
+        // Its devices' automation, of what either of them holds.
+        auto devices = getAutomatableIDs (live);
+        devices.merge (getAutomatableIDs (then));
 
-        for (auto before = then.getSibling (-1); before.isValid(); before = before.getSibling (-1))
+        if (live.isValid() && then.isValid())
         {
-            if (const auto found = parent.indexOf (findTrack (state, readID (before[schema::trackID]))); found >= 0)
+            makeLike (live, then, undo, false);
+        }
+        else if (live.isValid())
+        {
+            // Added since: taken away.
+            live.getParent().removeChild (live, undo);
+        }
+        else
+        {
+            // Gone since: back where it was, after the track before it there, with the tracks it held that aren't elsewhere now.
+            auto parent = findTrackParent (state, then.getParent());
+            auto copy = then.createCopy();
+
+            for (int i = copy.getNumChildren(); --i >= 0;)
+                if (const auto child = copy.getChild (i);
+                    child.hasType (schema::TRACK) && findTrack (state, readID (child[schema::trackID])).isValid())
+                    copy.removeChild (i, nullptr);
+
+            int index = 0;
+
+            for (auto before = then.getSibling (-1); before.isValid(); before = before.getSibling (-1))
             {
-                index = found + 1;
-                break;
+                if (const auto found = parent.indexOf (findTrack (state, readID (before[schema::trackID]))); found >= 0)
+                {
+                    index = found + 1;
+                    break;
+                }
             }
+
+            parent.addChild (copy, index, undo);
         }
 
-        parent.addChild (copy, index, undo);
+        makeCurvesLike (state, undo, devices, other);
+        return true;
     }
 
-    makeCurvesLike (song, devices, other);
-    return true;
+    void makeSongOwnLikeIn (juce::ValueTree state, const juce::ValueTree& other, juce::UndoManager* undo)
+    {
+        // Its own properties.
+        for (int i = state.getNumProperties(); --i >= 0;)
+            if (const auto name = state.getPropertyName (i); ! schema::isUncountedProperty (state, name) && ! other.hasProperty (name))
+                state.removeProperty (name, undo);
+
+        for (int i = 0; i < other.getNumProperties(); ++i)
+            if (const auto name = other.getPropertyName (i); ! schema::isUncountedProperty (other, name))
+                if (const auto* value = state.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
+                    state.setProperty (name, other[name], undo);
+
+        // Its tempo map, sections, chord lane and the key set last: each as the other has it, or none.
+        for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
+        {
+            auto live = state.getChildWithName (*type);
+            const auto then = other.getChildWithName (*type);
+
+            if (live.isValid() && then.isValid())
+                makeLike (live, then, undo);
+            else if (live.isValid())
+                state.removeChild (live, undo);
+            else if (then.isValid())
+                state.appendChild (then.createCopy(), undo);
+        }
+
+        // The tracks both have, in the other's order: in its folders, and in its order there.
+        const auto wanted = findTrackPlaces (other);
+
+        for (const auto& track : getTrackElements (other))
+        {
+            const auto id = readID (track[schema::trackID]);
+            auto live = findTrack (state, id);
+
+            if (! live.isValid())
+                continue;
+
+            auto parent = findTrackParent (state, track.getParent());
+
+            if (live.getParent() != parent)
+            {
+                live.getParent().removeChild (live, undo);
+                parent.addChild (live, -1, undo);
+            }
+
+            // After the track before it there that both have.
+            int index = 0;
+
+            for (auto before = track.getSibling (-1); before.isValid(); before = before.getSibling (-1))
+            {
+                if (const auto found = parent.indexOf (findTrack (state, readID (before[schema::trackID]))); found >= 0)
+                {
+                    index = found + 1;
+                    break;
+                }
+            }
+
+            if (const auto current = parent.indexOf (live); current != index && current != index - 1)
+                parent.moveChild (current, current < index ? index - 1 : index, undo);
+        }
+
+        juce::ignoreUnused (wanted);
+    }
+} // namespace
+
+bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
+{
+    return makeTrackLikeIn (song.getState(), id, other, &song.getUndoManager());
+}
+
+bool makeTrackLike (juce::ValueTree song, TrackID id, const juce::ValueTree& other)
+{
+    return makeTrackLikeIn (std::move (song), id, other, nullptr);
 }
 
 void makeSongOwnLike (Song& song, const juce::ValueTree& other)
 {
-    auto* undo = &song.getUndoManager();
-    auto state = song.getState();
+    makeSongOwnLikeIn (song.getState(), other, &song.getUndoManager());
+}
 
-    // Its own properties.
-    for (int i = state.getNumProperties(); --i >= 0;)
-        if (const auto name = state.getPropertyName (i); ! schema::isUncountedProperty (state, name) && ! other.hasProperty (name))
-            state.removeProperty (name, undo);
-
-    for (int i = 0; i < other.getNumProperties(); ++i)
-        if (const auto name = other.getPropertyName (i); ! schema::isUncountedProperty (other, name))
-            if (const auto* value = state.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
-                state.setProperty (name, other[name], undo);
-
-    // Its tempo map, sections, chord lane and the key set last: each as the other has it, or none.
-    for (const auto* type : { &schema::TEMPOMAP, &schema::SECTIONS, &schema::CHORDLANE, &schema::LASTKEY })
-    {
-        auto live = state.getChildWithName (*type);
-        const auto then = other.getChildWithName (*type);
-
-        if (live.isValid() && then.isValid())
-            makeLike (live, then, undo);
-        else if (live.isValid())
-            state.removeChild (live, undo);
-        else if (then.isValid())
-            state.appendChild (then.createCopy(), undo);
-    }
-
-    // The tracks both have, in the other's order: in its folders, and in its order there.
-    const auto wanted = findTrackPlaces (other);
-
-    for (const auto& track : getTrackElements (other))
-    {
-        const auto id = readID (track[schema::trackID]);
-        auto live = findTrack (state, id);
-
-        if (! live.isValid())
-            continue;
-
-        auto parent = findTrackParent (state, track.getParent());
-
-        if (live.getParent() != parent)
-        {
-            live.getParent().removeChild (live, undo);
-            parent.addChild (live, -1, undo);
-        }
-
-        // After the track before it there that both have.
-        int index = 0;
-
-        for (auto before = track.getSibling (-1); before.isValid(); before = before.getSibling (-1))
-        {
-            if (const auto found = parent.indexOf (findTrack (state, readID (before[schema::trackID]))); found >= 0)
-            {
-                index = found + 1;
-                break;
-            }
-        }
-
-        if (const auto current = parent.indexOf (live); current != index && current != index - 1)
-            parent.moveChild (current, current < index ? index - 1 : index, undo);
-    }
-
-    juce::ignoreUnused (wanted);
+void makeSongOwnLike (juce::ValueTree song, const juce::ValueTree& other)
+{
+    makeSongOwnLikeIn (std::move (song), other, nullptr);
 }
 
 int removeBrokenReferences (Song& song)

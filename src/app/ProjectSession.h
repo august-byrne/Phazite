@@ -101,8 +101,18 @@ public:
     // untitled, Exports next to the projects folder (the untitled project's own folder goes when it closes).
     juce::File getExportFolder() const;
 
-    // Asks whether to save unsaved changes first. Calls back with false if the user cancelled.
+    // Asks whether to save unsaved changes first; with Auto Save on, a project with a file of its own saves them without
+    // asking. Calls back with false if the user cancelled.
     void closeThen (std::function<void (bool closed)>);
+
+    // Auto Save (File > Auto Save, project.autoSave), as VS Code's: while on, a project with a file of its own saves itself a
+    // moment after each change (model/project/internal/Project.h: AutosaveTimer::setAutoSave()), so its changes show in
+    // source control at once; a new project, once its first save put it somewhere. The settings keep it (the main
+    // window's), told by onAutoSaveChanged.
+    void setAutoSave (bool);
+    void toggleAutoSave(); // and tells onAutoSaveChanged
+    bool isAutoSaving() const noexcept { return autoSave; }
+    std::function<void (bool)> onAutoSaveChanged;
 
     juce::Array<juce::File> getRecentProjects() const { return recent.getProjects(); }
 
@@ -118,6 +128,8 @@ private:
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
     std::unique_ptr<juce::FileChooser> fileChooser;
+    bool autoSave = true;
+    void updateAutoSave(); // the timer saves the project, or autosaves it, as Auto Save and the project say
 
     // The project, and the folder it was made in if it was untitled, deleted once the project has closed.
     void setProject (std::unique_ptr<Project>, std::unique_ptr<UnsavedFolder> = {});

@@ -314,7 +314,9 @@ juce::Result Project::save()
     JUCE_ASSERT_MESSAGE_THREAD
 
     autosaveWriter->wait(); // an autosave being written, which this makes old
+    backgroundSave = {};    // and a save in the background, which this overtakes
     backUpProjectFile();
+    backedUpAt = juce::Time::currentTimeMillis();
 
     {
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
@@ -389,6 +391,61 @@ void Project::autosaveInBackground()
 bool Project::isAutosaving() const
 {
     return autosaveWriter->isBusy();
+}
+
+void Project::saveInBackground()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    compareWithSavedState();
+
+    if (! changedSinceSave || autosaveWriter->isBusy() || backgroundSave.isValid())
+        return;
+
+    // The previous file into the backups every few minutes, not at every save.
+    if (const auto now = juce::Time::currentTimeMillis(); now - backedUpAt >= (juce::int64) backupMinutes * 60 * 1000)
+    {
+        backUpProjectFile();
+        backedUpAt = now;
+    }
+
+    {
+        const juce::ScopedValueSetter<bool> writing (isWriting, true);
+        storeForSaving (*song);
+        backgroundSave = song->getState().createCopy();
+        autosaveWriter->write (backgroundSave.createCopy(), file);
+    }
+
+    changesAtBackgroundSave = changeCount;
+    outsideAtBackgroundSave = song->getChangesOutsideHistory();
+}
+
+bool Project::finishBackgroundSave()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! backgroundSave.isValid() || autosaveWriter->isBusy())
+        return true;
+
+    const auto written = std::exchange (backgroundSave, {});
+
+    if (autosaveWriter->takeFailure())
+        return false; // its changes are still to save
+
+    // What the file holds now: saved, unless the song changed since it was copied.
+    savedState = written;
+    mayHaveChanged = compareAll = false;
+    elementsToCompare.clearQuick();
+    changesOutsideHistory = outsideAtBackgroundSave;
+
+    if (changeCount == changesAtBackgroundSave && song->getChangesOutsideHistory() == outsideAtBackgroundSave)
+    {
+        changedSinceSave = changedSinceAutosave = false;
+        getAutosaveFile (file).deleteFile();
+        autosavedAt = 0;
+        autosaveWriter->forgetWritten();
+    }
+
+    return true;
 }
 
 std::optional<juce::Time> Project::getLastAutosave() const
@@ -581,6 +638,8 @@ void Project::markChanged (const juce::ValueTree& tree, const juce::Identifier& 
     if (! (tree == state || tree.isAChildOf (state)) || ! schema::isCounted (tree, property))
         return;
 
+    ++changeCount;
+
     if (changedSinceSave)
     {
         changedSinceAutosave = true;
@@ -659,7 +718,13 @@ AutosaveTimer::AutosaveTimer (Project& p, int interval, int firstDelay)
       intervalSeconds (interval),
       firstDelaySeconds (firstDelay)
 {
-    startTimer (1000);
+    startTimer (250);
+}
+
+void AutosaveTimer::setAutoSave (bool shouldAutoSave)
+{
+    autoSave = shouldAutoSave;
+    changedSince = 0;
 }
 
 AutosaveTimer::~AutosaveTimer()
@@ -673,17 +738,20 @@ void AutosaveTimer::timerCallback()
     const auto recordingEnded = wasRecording && ! recording;
     wasRecording = recording;
 
-    // A write that finished: one that failed counts its changes as not autosaved, so they are written again, and after a
-    // few in a row the app says so. The project file itself is untouched.
+    // A write that finished, of the project file (Auto Save) or of the autosave: one that failed counts its changes as not
+    // written, so they are written again, and after a few in a row the app says so.
     if (const auto autosaving = project.isAutosaving(); wasAutosaving && ! autosaving)
     {
-        if (! project.takeAutosaveFailure())
+        const auto wasSave = project.hasBackgroundSave();
+
+        if (wasSave ? project.finishBackgroundSave() : ! project.takeAutosaveFailure())
         {
             failures = 0;
         }
         else
         {
-            juce::Logger::writeToLog ("Autosave failed: " + Project::getAutosaveFile (project.getFile()).getFullPathName());
+            juce::Logger::writeToLog ((wasSave ? "Auto save failed: " + project.getFile().getFullPathName()
+                                               : "Autosave failed: " + Project::getAutosaveFile (project.getFile()).getFullPathName()));
 
             if (++failures == failuresToReport && onRepeatedFailures != nullptr)
                 onRepeatedFailures();
@@ -694,6 +762,33 @@ void AutosaveTimer::timerCallback()
 
     if (recording || wasAutosaving)
         return;
+
+    // Auto Save: a moment after the last change, as VS Code's afterDelay; while the song plays, at most every few seconds.
+    if (autoSave)
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+
+        if (const auto changes = project.getChangeCount() + project.getSong().getChangesOutsideHistory(); changes != lastChangeCount)
+        {
+            lastChangeCount = changes;
+            lastChangeAt = now;
+        }
+
+        if (! project.hasUnsavedChanges())
+            return;
+
+        const auto quiet = now - lastChangeAt >= (juce::uint32) autoSaveDelayMs;
+        const auto playingTooSoon = isSongPlaying (project.getSong()) && now - savedAt < (juce::uint32) playingSaveSeconds * 1000;
+
+        if (recordingEnded || (quiet && ! playingTooSoon))
+        {
+            project.saveInBackground();
+            wasAutosaving = project.isAutosaving();
+            savedAt = now;
+        }
+
+        return;
+    }
 
     if (! project.hasChangesToAutosave())
     {

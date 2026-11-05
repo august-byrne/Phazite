@@ -12,6 +12,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
+#include "model/versions/internal/VersionHistory.h"
 
 namespace phazite::test
 {
@@ -37,6 +38,14 @@ TestSong::TestSong (Start start)
     setSong (context, &project->getSong());
     addSongCommands (commands, context, renders);
     save = [this] (std::function<void (bool)> then) { then (project->save().wasOk()); };
+
+    // Its history read, and its initial commit made, as a project's are as it starts.
+    REQUIRE (dispatchMessagesUntil (
+        [this]
+        {
+            const auto* history = getVersionHistory (context);
+            return history == nullptr || (! history->isReading() && ! history->isBusy());
+        }));
 
     const auto tracks = getAllPlaylistTracks (context);
     REQUIRE (! tracks.empty());

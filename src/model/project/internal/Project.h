@@ -100,6 +100,19 @@ public:
     bool isAutosaving() const;
     bool takeAutosaveFailure();
 
+    // Auto Save (AutosaveTimer::setAutoSave()): as save(), into the project file, with the state copied here and its XML
+    // made and written on a background thread as autosaveInBackground() writes, so that the window and what plays don't wait
+    // for it; the previous file into Backups/ at most every backupMinutes, so that the backups keep the project as it was
+    // then. Nothing while a write is under way, or with nothing to save. Then, once isAutosaving() is false,
+    // finishBackgroundSave() takes in what was written: the project is saved, unless it changed since it was copied; false if
+    // the write failed, which leaves its changes to save again. And how many changes the project has had, to tell when they
+    // stop.
+    void saveInBackground();
+    bool hasBackgroundSave() const noexcept { return backgroundSave.isValid(); }
+    bool finishBackgroundSave();
+    juce::int64 getChangeCount() const noexcept { return changeCount; }
+    static constexpr int backupMinutes = 10;
+
     // When the autosave was last written, whole, for the window to say so; none since the project opened or last saved
     // (which deletes it). Message thread only.
     std::optional<juce::Time> getLastAutosave() const;
@@ -129,6 +142,12 @@ private:
     std::unique_ptr<BackgroundWriter> autosaveWriter;
     bool changedSinceSave = false, changedSinceAutosave = false, isWriting = false;
     juce::int64 autosavedAt = 0; // when autosave() last wrote it, in milliseconds since 1970; 0 for none
+
+    // A save in the background: what it writes, and the counts of the changes as it was copied; when the project file was
+    // last backed up (milliseconds since 1970); and the changes counted since the project opened.
+    juce::ValueTree backgroundSave;
+    juce::int64 changesAtBackgroundSave = 0, backedUpAt = 0, changeCount = 0;
+    int outsideAtBackgroundSave = 0;
 
     // The song as it was when the project was opened, with Phazite's parts added, or last saved. JUCE notifies a value
     // written again as another type, which changes nothing. So while the project has no unsaved changes, a notification
@@ -176,10 +195,17 @@ public:
     explicit AutosaveTimer (Project&, int intervalSeconds = 120, int firstDelaySeconds = 15);
     ~AutosaveTimer() override;
 
-    // Called once when failuresToReport autosaves in a row have failed (docs/performance-audit.md, R7).
+    // Called once when failuresToReport autosaves (or auto saves) in a row have failed (docs/performance-audit.md, R7).
     std::function<void()> onRepeatedFailures;
     static constexpr int failuresToReport = 3;
     static constexpr int maxWaitWhilePlayingSeconds = 600;
+
+    // Auto Save, as VS Code's files.autoSave "afterDelay": while on (for a project with a file of its own), the project saves
+    // itself autoSaveDelayMs after its last change (Project::saveInBackground()), in place of autosaving for a crash; while
+    // the song plays, at most every playingSaveSeconds; never while it records, and at once as a recording ends.
+    void setAutoSave (bool);
+    bool isAutoSaving() const noexcept { return autoSave; }
+    static constexpr int autoSaveDelayMs = 1000, playingSaveSeconds = 10;
 
 private:
     Project& project;
@@ -188,6 +214,9 @@ private:
     bool autosavedOnce = false;
     bool wasRecording = false, wasAutosaving = false;
     int failures = 0; // in a row
+    bool autoSave = false;
+    juce::int64 lastChangeCount = 0;
+    juce::uint32 lastChangeAt = 0, savedAt = 0; // the millisecond counter
 
     void timerCallback() override;
 };

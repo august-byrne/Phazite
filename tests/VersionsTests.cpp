@@ -9,6 +9,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
@@ -63,28 +64,31 @@ juce::String describeChanges (phazite::ProjectContext& context)
 }
 } // namespace
 
-TEST_CASE ("A project keeps no versions until one is saved, then lists it on Main")
+TEST_CASE ("A project starts with its initial commit on main, and lists each commit after it")
 {
     TestSong s;
     waitForVersions (s.context);
     CHECK (phazite::keepsVersions (s.context));
-    CHECK (phazite::getVersions (s.context).empty());
-    CHECK_FALSE (phazite::getCurrentBranch (s.context).has_value());
-    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context)); // nothing to be changed from yet
-    CHECK_FALSE (s.getProject().getFolder().getChildFile ("Versions").exists());
+    const auto initial = phazite::getVersions (s.context);
+    REQUIRE (initial.size() == 1);
+    CHECK (initial[0].name == "Initial commit");
+    CHECK (initial[0].parents.isEmpty());
+    CHECK (phazite::getCurrentBranch (s.context)->name == "main");
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (s.getProject().getFolder().getChildFile ("Versions").isDirectory());
 
     keepVersion (s.context, "First idea", "Drums only, for now");
 
     const auto versions = phazite::getVersions (s.context);
-    REQUIRE (versions.size() == 1);
+    REQUIRE (versions.size() == 2);
     CHECK (versions[0].name == "First idea");
     CHECK (versions[0].note == "Drums only, for now");
     CHECK (versions[0].hasOwnName);
-    CHECK (versions[0].parents.isEmpty());
+    CHECK (versions[0].parents == juce::StringArray (initial[0].id));
 
     const auto branch = phazite::getCurrentBranch (s.context);
     REQUIRE (branch.has_value());
-    CHECK (branch->name == "Main");
+    CHECK (branch->name == "main");
     CHECK (branch->head == versions[0].id);
     CHECK (versions[0].branch == branch->id);
     CHECK (phazite::getLastVersion (s.context)->id == versions[0].id);
@@ -126,9 +130,9 @@ TEST_CASE ("The changes since the last version name each track's, in Phazite's o
     s.setTempo (128.0);
     CHECK (describeChanges (s.context).endsWith ("; Song: tempo"));
 
-    // Saved without a name, the version is named by what changed.
+    // Committed without a message, the commit is named by what changed, as git's messages are written.
     keepVersion (s.context);
-    CHECK (phazite::getVersions (s.context).front().name == "Bass, + Strings, Tempo");
+    CHECK (phazite::getVersions (s.context).front().name == "Add Strings; update Bass and tempo");
     CHECK_FALSE (phazite::getVersions (s.context).front().hasOwnName);
     CHECK (describeChanges (s.context).isEmpty());
     juce::ignoreUnused (strings);
@@ -173,9 +177,10 @@ TEST_CASE ("A project's versions are read again as it opens, with the song each 
     waitForVersions (s.context);
 
     const auto versions = phazite::getVersions (s.context);
-    REQUIRE (versions.size() == 2);
+    REQUIRE (versions.size() == 3);
     CHECK (versions[0].name == "Two");
     CHECK (versions[1].name == "One");
+    CHECK (versions[2].name == "Initial commit");
     CHECK (versions[0].parents == juce::StringArray (versions[1].id));
     CHECK (phazite::getCurrentBranch (s.context)->head == versions[0].id);
     CHECK (describeChanges (s.context) == "Bass: volume");
@@ -189,7 +194,7 @@ TEST_CASE ("A project's versions are read again as it opens, with the song each 
     CHECK (phazite::findChanges (read, firstSong).empty());
 }
 
-TEST_CASE ("Save Version saves the project first, then records the version")
+TEST_CASE ("Commit saves the project first, then commits")
 {
     TestSong s;
     phazite::CommandRegistry commands;
@@ -212,9 +217,9 @@ TEST_CASE ("Save Version saves the project first, then records the version")
 
     CHECK (saves == 1);
     CHECK_FALSE (s.getProject().hasUnsavedChanges());
-    CHECK (phazite::getVersions (s.context).size() == 1);
+    CHECK (phazite::getVersions (s.context).size() == 2);
     CHECK_FALSE (phazite::getVersions (s.context).front().hasOwnName);
-    CHECK (phazite::getVersions (s.context).front().name == "First version");
+    CHECK (phazite::getVersions (s.context).front().name == "Add Lead");
 }
 
 TEST_CASE ("A copy of a project takes its versions with it")
@@ -235,7 +240,7 @@ TEST_CASE ("A copy of a project takes its versions with it")
     waitForVersions (context);
 
     const auto versions = phazite::getVersions (context);
-    REQUIRE (versions.size() == 1);
+    REQUIRE (versions.size() == 2);
     CHECK (versions[0].name == "Before the copy");
     phazite::setSong (context, nullptr);
 }
@@ -273,7 +278,7 @@ TEST_CASE ("The differences between two songs match items by their IDs, wherever
     CHECK (change.what == juce::StringArray (juce::String ("Serum: Cutoff 40%") + juce::String::fromUTF8 (" \xe2\x86\x92 ") + "55%"));
 }
 
-TEST_CASE ("A version without a name is named by its changes, a few of them")
+TEST_CASE ("A commit without a message gets one as git's are written, from its changes, a few of them")
 {
     using Change = phazite::SongChange;
     const std::vector<Change> changes { { Change::Where::track, Change::Kind::changed, 1, "Bass", { "volume" } },
@@ -282,7 +287,82 @@ TEST_CASE ("A version without a name is named by its changes, a few of them")
                                         { Change::Where::track, Change::Kind::removed, 4, "Pad", {} },
                                         { Change::Where::song, Change::Kind::changed, 0, "Song", { "tempo", "sections" } } };
 
-    CHECK (phazite::summarise ({ changes.begin(), changes.begin() + 3 }) == "Bass, Drums, + Strings");
-    CHECK (phazite::summarise (changes) == "Bass, Drums, + Strings, - Pad, 2 more");
+    CHECK (phazite::summarise ({ changes.begin(), changes.begin() + 3 }) == "Add Strings; update Bass and Drums");
+    CHECK (phazite::summarise (changes) == "Add Strings; update Bass, Drums, tempo and sections; remove Pad");
     CHECK (phazite::summarise ({}) == "No changes");
+}
+
+TEST_CASE ("Staging, as git's: the staged changes are what a commit records, and the changes what changed since they were staged")
+{
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    const auto drums = s.addTrack ("Drums");
+    keepVersion (s.context, "Start");
+    const auto volume = [&s] (phazite::TrackID track) { return phazite::getChannelVolume (*phazite::findSong (s.context), track); };
+
+    s.setVolume (bass, -6.0f);
+    s.setVolume (drums, -9.0f);
+    CHECK (describeChanges (s.context) == "Bass: volume; Drums: volume");
+    CHECK (phazite::getStagedChanges (s.context).empty());
+    CHECK (phazite::countChanges (s.context) == 2);
+
+    // Bass staged: in the staged changes, no more in the changes; Drums still to stage.
+    REQUIRE (phazite::stageChange (s.context, phazite::getChangesSinceLastVersion (s.context)[0]));
+    auto staged = phazite::getStagedChanges (s.context);
+    REQUIRE (staged.size() == 1);
+    CHECK (staged[0].name == "Bass");
+    CHECK (staged[0].staged);
+    CHECK (describeChanges (s.context) == "Drums: volume");
+    CHECK (phazite::countChanges (s.context) == 2);
+
+    // Changed again once staged: in both, as in git; Discard Changes takes it back to what is staged, as git restore does.
+    s.setVolume (bass, -3.0f);
+    CHECK (describeChanges (s.context) == "Bass: volume; Drums: volume");
+    REQUIRE (phazite::takeBack (s.context, phazite::getChangesSinceLastVersion (s.context)[0]));
+    CHECK (volume (bass) == doctest::Approx (-6.0f));
+    CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Discard Changes in Bass");
+    CHECK (describeChanges (s.context) == "Drums: volume");
+
+    // A commit records what is staged alone: Drums stays a change since it.
+    auto* history = phazite::getVersionHistory (s.context);
+    const auto start = phazite::getLastVersion (s.context)->id;
+    keepVersion (s.context, "Bass down");
+    CHECK (phazite::getStagedChanges (s.context).empty());
+    CHECK (describeChanges (s.context) == "Drums: volume");
+    CHECK (describe (phazite::getChangesSinceLastVersion (s.context)) == "Drums: volume");
+    const auto committed = phazite::findChanges (history->readSong (start), history->readSong (phazite::getLastVersion (s.context)->id));
+    REQUIRE (committed.size() == 1);
+    CHECK (committed[0].name == "Bass");
+
+    // Unstaged again: the line back in the changes; every line at once.
+    REQUIRE (phazite::stageChange (s.context, phazite::getChangesSinceLastVersion (s.context)[0]));
+    REQUIRE (phazite::unstageChange (s.context, phazite::getStagedChanges (s.context)[0]));
+    CHECK (phazite::getStagedChanges (s.context).empty());
+    CHECK (describeChanges (s.context) == "Drums: volume");
+    phazite::stageAllChanges (s.context);
+    CHECK (phazite::getChangesSinceLastVersion (s.context).empty());
+    CHECK (phazite::getStagedChanges (s.context).size() == 1);
+    phazite::unstageAllChanges (s.context);
+    CHECK (phazite::getStagedChanges (s.context).empty());
+
+    // With nothing staged, a commit takes every change, as git's smart commit.
+    keepVersion (s.context, "Drums down");
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+
+    // Discard All Changes: the song as committed again, one undo step.
+    s.setVolume (bass, 0.0f);
+    s.addTrack ("Keys");
+    REQUIRE (phazite::discardAllChanges (s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Discard All Changes");
+}
+
+TEST_CASE ("A branch's name is what git takes: spaces as dashes, without what a ref can't hold")
+{
+    CHECK (phazite::toBranchName ("Half time") == "Half-time");
+    CHECK (phazite::toBranchName ("  big   chorus ") == "big-chorus");
+    CHECK (phazite::toBranchName ("what?*[now]:~^") == "whatnow]");
+    CHECK (phazite::toBranchName ("../.hidden.lock") == "hidden");
+    CHECK (phazite::toBranchName ("feature//new idea/") == "feature/new-idea");
+    CHECK (phazite::toBranchName ("---") == "");
 }

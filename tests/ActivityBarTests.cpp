@@ -177,29 +177,30 @@ TEST_CASE ("The left panel in a window of its own shows the view an icon picks, 
     CHECK (screen.leftShows (LeftView::versions));
 }
 
-TEST_CASE ("Save Version saves the project and a version, named as typed, and the history lists it")
+TEST_CASE ("Commit saves the project and commits, named as typed, and the graph lists it after the initial commit")
 {
     Screen screen;
     auto& context = screen.session.getContext();
     REQUIRE (screen.registry.invoke ("view.versions"));
     REQUIRE (screen.registry.invoke ("track.add")); // a new project starts with none
     auto& view = screen.getVersionsView();
-    CHECK (view.getNumHistoryRows() == 1); // Now
-    CHECK (view.describeHistoryRow (0) == "Now");
+    CHECK (view.getNumHistoryRows() == 2); // the uncommitted changes, and the initial commit
+    CHECK (view.describeHistoryRow (0) == "Uncommitted Changes");
+    CHECK (view.describeHistoryRow (1).startsWith ("Initial commit, now, on main"));
 
     view.getMessageField().setText ("First idea\nDrums only");
     phazite::test::dispatchPendingMessages(); // a text field tells what changed in it after the change
     CHECK (phazite::getVersionDraftName (context) == "First idea");
     screen.click (view.getSaveButton());
     screen.waitForVersions();
-    phazite::test::dispatchMessagesUntil ([&view] { return view.getNumHistoryRows() == 2; });
+    phazite::test::dispatchMessagesUntil ([&view] { return view.getNumHistoryRows() == 3; });
 
-    REQUIRE (view.getNumHistoryRows() == 2);
-    CHECK (view.describeHistoryRow (1).startsWith ("First idea, now, on Main. Drums only"));
+    REQUIRE (view.getNumHistoryRows() == 3);
+    CHECK (view.describeHistoryRow (1).startsWith ("First idea, now, on main. Drums only"));
     CHECK (view.getMessageField().getText().isEmpty()); // ready for the next one
     CHECK_FALSE (screen.session.isUntitled());          // its first save asked where it goes
     CHECK (screen.session.getProject()->getFolder().getChildFile ("Versions").isDirectory());
-    CHECK (screen.shell.getStatusBar().getBranchText() == "Main");
+    CHECK (screen.shell.getStatusBar().getBranchText() == "main");
 
     // A change since: the changes list names it with its letter, the Versions icon counts it, and a click on it selects its track.
     const auto tracks = phazite::getTrackIDs (*phazite::findSong (context));
@@ -210,7 +211,8 @@ TEST_CASE ("Save Version saves the project and a version, named as typed, and th
     REQUIRE (view.getNumChanges() == 1);
     CHECK (view.describeChange (0).endsWith (": volume"));
     CHECK (view.getChangeLetter (0) == "M");
-    CHECK (view.getChangesHeading() == "CHANGES since \"First idea\"");
+    CHECK (view.getChangesHeading() == "Changes");
+    CHECK (view.getChangesSection().getDescription() == "1"); // its badge's count
     CHECK (screen.getBar().getVersionsBadge() == 1);
 
     context.getSongSelection().selectOnly (phazite::TrackID());
@@ -221,7 +223,7 @@ TEST_CASE ("Save Version saves the project and a version, named as typed, and th
     CHECK (context.getSongSelection().getTracks() == std::vector<phazite::TrackID> { tracks.front() });
 }
 
-TEST_CASE ("A version selected in the history is what Bring Back and Take from This Version act on")
+TEST_CASE ("A commit selected in the graph is what Restore and Compare with Working Tree act on")
 {
     Screen screen;
     auto& context = screen.session.getContext();
@@ -237,56 +239,55 @@ TEST_CASE ("A version selected in the history is what Bring Back and Take from T
     REQUIRE (screen.registry.invoke ("track.add"));
     screen.click (view.getSaveButton());
     screen.waitForVersions();
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumHistoryRows() == 3; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumHistoryRows() == 4; }));
 
-    // A click on the older version selects it; Take from This Version lists what differs from it, until Done.
-    auto& history = *phazite::test::findAll<juce::ListBox> (view).getLast();
+    // A click on the older commit selects it; Compare with Working Tree lists what differs from it, until Done.
+    auto& history = view.getHistoryList();
     phazite::test::Mouse mouse (history);
     mouse.click (history.getRowPosition (2, true).getCentre());
     phazite::test::dispatchPendingMessages();
     REQUIRE (view.describeHistoryRow (2).startsWith ("One"));
-    CHECK (phazite::getSelectedVersion (context) == phazite::getVersions (context).back().id);
-    CHECK (phazite::getCurrentName (*screen.registry.find ("version.bringBack")) == "Bring Back \"One\"");
+    CHECK (phazite::getSelectedVersion (context) == phazite::getVersions (context)[1].id);
+    CHECK (phazite::getCurrentName (*screen.registry.find ("version.bringBack")) == "Restore from \"One\"");
 
     REQUIRE (screen.registry.invoke ("version.takeFrom"));
-    CHECK (view.getChangesHeading().startsWith ("TAKE FROM \"One\""));
+    CHECK (view.getChangesHeading() == "Compare with \"One\"");
     CHECK (view.getDoneButton().isShowing());
     CHECK (view.getNumChanges() == 1); // the track added since
     screen.click (view.getDoneButton());
-    CHECK (view.getChangesHeading() == "CHANGES since \"Two\"");
+    CHECK (view.getChangesHeading() == "Changes");
     CHECK_FALSE (view.getDoneButton().isShowing());
 
-    // Bring Back: the song as it was then, one undo step.
+    // Restore: the song as it was then, one undo step.
     REQUIRE (screen.registry.invoke ("version.bringBack"));
     CHECK (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
     CHECK (screen.registry.invoke ("edit.undo"));
 }
 
-TEST_CASE ("The branch button names the branch the song is on, and the history shows each version on its branch")
+TEST_CASE ("The branch button names the branch the song is on from the start, and the graph shows each commit on its branch")
 {
     Screen screen;
     REQUIRE (screen.registry.invoke ("track.add"));
     REQUIRE (screen.registry.invoke ("view.versions"));
     auto& view = screen.getVersionsView();
-    CHECK_FALSE (view.getBranchButton().isVisible()); // before the first version
+    CHECK (view.getBranchButton().isShowing()); // main, from the initial commit
     screen.saveVersion ("First");
-    CHECK (view.getBranchButton().isShowing());
-    CHECK (view.getBranchButton().getButtonText().startsWith ("Main"));
+    CHECK (view.getBranchButton().getButtonText().startsWith ("main"));
 
     // A branch from Now: the song goes on there, and its version is on its line.
     screen.onVersion ({}, "version.newBranch");
-    CHECK (view.getBranchButton().getButtonText().startsWith ("Idea 2"));
-    CHECK (screen.shell.getStatusBar().getBranchText() == "Idea 2");
+    CHECK (view.getBranchButton().getButtonText().startsWith ("idea-2"));
+    CHECK (screen.shell.getStatusBar().getBranchText() == "idea-2");
     screen.setFirstTrackVolume (0.4f);
     screen.saveVersion ("Quieter");
-    REQUIRE (view.getNumHistoryRows() == 3);
-    CHECK (view.describeHistoryRow (1).startsWith ("Quieter, now, on Idea 2"));
-    CHECK (view.describeHistoryRow (2).startsWith ("First, now, on Main"));
+    REQUIRE (view.getNumHistoryRows() == 4);
+    CHECK (view.describeHistoryRow (1).startsWith ("Quieter, now, on idea-2"));
+    CHECK (view.describeHistoryRow (2).startsWith ("First, now, on main"));
 
     // Back on Main, the same view shows it.
-    screen.onBranch ("Main", "version.switchBranch");
-    CHECK (view.getBranchButton().getButtonText().startsWith ("Main"));
-    CHECK (screen.getVersionsView().getNumHistoryRows() == 3);
+    screen.onBranch ("main", "version.switchBranch");
+    CHECK (view.getBranchButton().getButtonText().startsWith ("main"));
+    CHECK (screen.getVersionsView().getNumHistoryRows() == 4);
     juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds())); // its lines and dots drawn
 }
 
@@ -301,11 +302,11 @@ TEST_CASE ("A merge's lines show ticked in the Versions view: a click leaves one
     screen.onVersion ({}, "version.newBranch");
     screen.setFirstTrackVolume (0.4f);
     const auto quieter = screen.saveVersion ("Quieter");
-    screen.onBranch ("Main", "version.switchBranch");
+    screen.onBranch ("main", "version.switchBranch");
 
     screen.onVersion (quieter, "version.merge");
     REQUIRE (view.getLines() == phazite::ui::VersionsView::Lines::merge);
-    CHECK (view.getChangesHeading() == "MERGE \"Quieter\" into Main");
+    CHECK (view.getChangesHeading() == "Merge \"Quieter\" into main");
     CHECK (view.getMergeButton().isShowing());
     CHECK (view.getCancelButton().isShowing());
     REQUIRE (view.getNumChanges() == 1);
@@ -329,14 +330,14 @@ TEST_CASE ("A merge's lines show ticked in the Versions view: a click leaves one
     CHECK (view.getNumChanges() == 1);
     screen.saveVersion();
     CHECK_FALSE (phazite::isMerging (context));
-    CHECK (view.describeHistoryRow (1).startsWith ("Merge \"Quieter\", now, on Main"));
+    CHECK (view.describeHistoryRow (1).startsWith ("Merge branch 'idea-2', now, on main"));
     juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds()));
 
-    // Cancel closes a merge's list, taking nothing.
+    // Abort closes a merge's list, taking nothing.
     screen.onVersion ({}, "version.newBranch");
     screen.setFirstTrackVolume (0.8f);
     const auto louder = screen.saveVersion ("Louder");
-    screen.onBranch ("Main", "version.switchBranch");
+    screen.onBranch ("main", "version.switchBranch");
     screen.onVersion (louder, "version.merge");
     REQUIRE (view.getLines() == phazite::ui::VersionsView::Lines::merge);
     screen.click (view.getCancelButton());
@@ -356,24 +357,24 @@ TEST_CASE ("A merge's clashes list in the Versions view after Merge, each with w
     screen.onVersion ({}, "version.newBranch");
     screen.setFirstTrackVolume (0.2f);
     const auto theirs = screen.saveVersion ("Much quieter");
-    screen.onBranch ("Main", "version.switchBranch");
+    screen.onBranch ("main", "version.switchBranch");
     screen.setFirstTrackVolume (0.4f);
     screen.saveVersion ("Quieter");
 
     screen.onVersion (theirs, "version.merge");
     REQUIRE (view.getNumChanges() == 1);
-    CHECK (view.describeChange (0).endsWith (", clashes"));
+    CHECK (view.describeChange (0).endsWith (", conflict"));
     screen.click (view.getMergeButton());
 
     REQUIRE (view.getLines() == phazite::ui::VersionsView::Lines::clashes);
-    CHECK (view.getChangesHeading() == "CLASHES");
+    CHECK (view.getChangesHeading() == "Merge Changes");
     CHECK (view.getChangesSection().getDescription() == "1"); // its badge's count
-    CHECK (view.describeChange (0).contains (", This branch: "));
+    CHECK (view.describeChange (0).contains (", Current: "));
     juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds()));
 
     // A value chosen, as the clash's menu chooses it.
     REQUIRE (phazite::chooseClash (context, 0, 2));
-    CHECK (view.describeChange (0).contains (", Idea 2: "));
+    CHECK (view.describeChange (0).contains (", Incoming (idea-2): "));
 
     // The next version finishes the merge.
     screen.saveVersion();
@@ -395,7 +396,7 @@ TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it
     // Bounce Each Version, in Save Version's menu, which the settings keep.
     CHECK_FALSE (screen.registry.find ("version.bounceEach")->isTicked());
     REQUIRE (screen.registry.invoke ("version.bounceEach"));
-    CHECK (view.getSaveButton().getButtonText() == "Save Version and Bounce");
+    CHECK (view.getSaveButton().getButtonText() == "Commit and Bounce");
     CHECK (screen.services.settings.get (phazite::Settings::versionBounce));
     CHECK (phazite::getBounceWithVersion (context));
 
@@ -403,7 +404,7 @@ TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it
     REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.renders.finished.isEmpty(); }, 60000));
     CHECK (screen.renders.finished[0] == "Bouncing \"Bounced\": ok");
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.describeHistoryRow (1).contains (", with a bounce"); }));
-    CHECK (view.getRoomText().startsWith ("Versions take "));
+    CHECK (view.getRoomText().startsWith ("Commits take "));
     CHECK (view.getRoomText().contains (", bounces "));
     juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds())); // the play marks drawn
 
@@ -429,7 +430,7 @@ TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it
     phazite::test::dispatchPendingMessages();
     CHECK (phazite::getHeardVersion (context).isEmpty());
     CHECK (hearing().isEmpty());
-    CHECK (view.describeHistoryRow (0) == "Now, heard");
+    CHECK (view.describeHistoryRow (0) == "Uncommitted Changes, heard");
     phazite::stopAndReturn (*phazite::findSong (context));
 
     // An older version without one: bounced in the background, its row saying so while it renders.
@@ -529,7 +530,7 @@ TEST_CASE ("Ctrl+Enter in the message saves a version, its first line the name; 
     mouse.moveTo (list.getRowPosition (0, true).getCentre());
     mouse.click (view.getPutBackPosition (0).getCentre());
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 0; }));
-    CHECK (phazite::describeUndo (phazite::findSong (context)).startsWith ("Undo Put Back"));
+    CHECK (phazite::describeUndo (phazite::findSong (context)).startsWith ("Undo Discard Changes in"));
 
     // The sections fold under their headings.
     screen.click (view.getHistorySection());
@@ -546,36 +547,36 @@ TEST_CASE ("The branch picker switches branches, starts one from now named as ty
     REQUIRE (screen.registry.invoke ("track.add"));
     REQUIRE (screen.registry.invoke ("view.versions"));
     screen.saveVersion ("First");
-    screen.onVersion ({}, "version.newBranch"); // Idea 2, the song on it
+    screen.onVersion ({}, "version.newBranch"); // idea-2, the song on it
     const auto type = [] (BranchPicker& picker, const juce::String& text)
     {
         picker.getSearchField().setText (text);
         phazite::test::dispatchPendingMessages(); // a text field tells what changed in it after the change
     };
 
-    // New Branch from Now first, then the branch the song is on, then the others.
+    // Create new branch first, as VS Code's, then the branch the song is on, then the others.
     {
         BranchPicker picker (screen.commands, context, BranchPicker::Mode::pick);
         REQUIRE (picker.getNumRows() == 3);
-        CHECK (picker.getNameForRow (0) == "New Branch from Now, from \"First\", with the changes since");
-        CHECK (picker.getNameForRow (1) == "Idea 2, the song is on it, no changes");
-        CHECK (picker.getNameForRow (2) == "Main, First, now");
+        CHECK (picker.getNameForRow (0) == "Create new branch..., from the current commit, with the changes");
+        CHECK (picker.getNameForRow (1) == "idea-2, current");
+        CHECK (picker.getNameForRow (2) == "main, First, now");
 
-        // What is typed narrows the branches; Main, switched to.
+        // What is typed narrows the branches; main, checked out.
         type (picker, "mai");
         REQUIRE (picker.getNumRows() == 2);
-        CHECK (picker.getNameForRow (0).startsWith ("New Branch \"mai\" from Now"));
+        CHECK (picker.getNameForRow (0).startsWith ("Create new branch 'mai'"));
         picker.choose (1);
         phazite::test::dispatchPendingMessages();
         screen.waitForVersions();
     }
 
-    CHECK (phazite::getCurrentBranch (context)->name == "Main");
+    CHECK (phazite::getCurrentBranch (context)->name == "main");
 
-    // A new branch, named as typed.
+    // A new branch, named as typed, as git keeps it.
     {
         BranchPicker picker (screen.commands, context, BranchPicker::Mode::pick);
-        type (picker, "Half-time");
+        type (picker, "Half time");
         REQUIRE (picker.getNumRows() == 1);
         picker.choose (0);
         phazite::test::dispatchPendingMessages();
@@ -590,7 +591,7 @@ TEST_CASE ("The branch picker switches branches, starts one from now named as ty
         BranchPicker picker (screen.commands, context, BranchPicker::Mode::pick);
         type (picker, "main");
         REQUIRE (picker.getNumRows() == 1);
-        CHECK (picker.getNameForRow (0).startsWith ("Main, "));
+        CHECK (picker.getNameForRow (0).startsWith ("main, "));
     }
 
     // Renamed: not to another branch's name.
@@ -604,7 +605,43 @@ TEST_CASE ("The branch picker switches branches, starts one from now named as ty
         phazite::test::dispatchPendingMessages();
     }
 
-    CHECK (phazite::getCurrentBranch (context)->name == "Half-time feel");
-    CHECK (screen.shell.getStatusBar().getBranchText() == "Half-time feel");
+    CHECK (phazite::getCurrentBranch (context)->name == "Half-time-feel");
+    CHECK (screen.shell.getStatusBar().getBranchText() == "Half-time-feel");
     CHECK_FALSE (phazite::renameBranch (context, phazite::getCurrentBranch (context)->id, "MAIN"));
+}
+
+TEST_CASE ("A change's plus stages it into Staged Changes, whose minus unstages it, as in VS Code")
+{
+    Screen screen;
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    auto& view = screen.getVersionsView();
+    screen.saveVersion ("First");
+    screen.setFirstTrackVolume (0.4f);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
+    CHECK_FALSE (view.getStagedSection().isVisible()); // while nothing is staged
+
+    // Its plus, under the pointer: staged, its letter M as git marks it, said as VS Code says it.
+    auto& list = view.getChangesList();
+    phazite::test::Mouse mouse (list);
+    mouse.moveTo (list.getRowPosition (0, true).getCentre());
+    REQUIRE_FALSE (view.getStagePosition (0).isEmpty());
+    mouse.click (view.getStagePosition (0).getCentre());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumStaged() == 1; }));
+    CHECK (view.getStagedSection().isVisible());
+    CHECK (view.getNumChanges() == 0);
+    CHECK (view.getStagedLetter (0) == "M");
+    CHECK (view.describeStaged (0).endsWith (", Index Modified: volume"));
+    juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds())); // both lists drawn
+
+    // Its minus: back in the changes.
+    auto& staged = view.getStagedList();
+    phazite::test::Mouse stagedMouse (staged);
+    stagedMouse.moveTo (staged.getRowPosition (0, true).getCentre());
+    REQUIRE_FALSE (view.getUnstagePosition (0).isEmpty());
+    stagedMouse.click (view.getUnstagePosition (0).getCentre());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumStaged() == 0; }));
+    CHECK_FALSE (view.getStagedSection().isVisible());
+    CHECK (view.getNumChanges() == 1);
+    CHECK (view.describeChange (0).endsWith (", Modified: volume"));
 }

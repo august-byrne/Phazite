@@ -18,7 +18,7 @@ BranchPicker::BranchPicker (CommandBridge& bridge, ProjectContext& projectContex
     getProperties().set (LookAndFeel::popupListProperty, true); // translucent, as menus are
 
     searchField.setTitle (renaming ? "The branch's new name" : "Search the branches, or name a new one");
-    searchField.setTextToShowWhenEmpty (renaming ? "The branch's new name" : "Select a branch to switch to, or type a new branch's name",
+    searchField.setTextToShowWhenEmpty (renaming ? "The branch's new name" : "Select a branch to checkout, or type a new branch's name",
                                         getPalette (*this).textMuted);
     searchField.setFont (juce::FontOptions (TextSize::title));
     searchField.addListener (this);
@@ -71,12 +71,13 @@ void BranchPicker::updateRows()
 {
     rows.clear();
     const auto typed = searchField.getText().trim();
+    const auto name = toBranchName (typed); // as git keeps it
     const auto current = getCurrentBranch (context);
     const auto branches = getBranches (context);
-    const auto isTaken = [&branches, &typed] (const juce::String& except)
+    const auto isTaken = [&branches, &name] (const juce::String& except)
     {
         return std::any_of (branches.begin(), branches.end(),
-                            [&] (const BranchInfo& branch) { return branch.id != except && branch.name.equalsIgnoreCase (typed); });
+                            [&] (const BranchInfo& branch) { return branch.id != except && branch.name.equalsIgnoreCase (name); });
     };
 
     if (mode == Mode::rename)
@@ -85,9 +86,8 @@ void BranchPicker::updateRows()
         if (current.has_value())
         {
             const auto taken = isTaken (current->id);
-            Row row { Row::Kind::rename, *current, {}, {}, false, typed.isNotEmpty() && ! taken && typed != current->name };
-            row.name =
-                typed.isEmpty() ? juce::String ("Type the branch's new name") : "Rename \"" + current->name + "\" to \"" + typed + "\"";
+            Row row { Row::Kind::rename, *current, {}, {}, false, name.isNotEmpty() && ! taken && name != current->name };
+            row.name = name.isEmpty() ? juce::String ("Type the branch's new name") : "Rename '" + current->name + "' to '" + name + "'";
             row.about = taken ? juce::String ("another branch has that name") : juce::String();
             rows.push_back (std::move (row));
         }
@@ -98,15 +98,16 @@ void BranchPicker::updateRows()
         return;
     }
 
-    // New Branch from Now, named as typed, unless a branch has that name: Enter on its name switches to it instead.
+    // Create new branch, as VS Code's first item, named as typed, unless a branch has that name: Enter on its name checks it
+    // out instead.
     if (! isTaken ({}))
     {
         const auto last = getLastVersion (context);
         Row row {
             Row::Kind::newBranch, {}, {}, {}, false, last.has_value() && ! isSavingVersion (context) && ! isReadingVersions (context)
         };
-        row.name = typed.isEmpty() ? juce::String ("New Branch from Now") : "New Branch \"" + typed + "\" from Now";
-        row.about = last.has_value() ? "from \"" + last->name + "\", with the changes since" : juce::String ("save a version first");
+        row.name = name.isEmpty() ? juce::String ("Create new branch...") : "Create new branch '" + name + "'";
+        row.about = last.has_value() ? juce::String ("from the current commit, with the changes") : juce::String ("no commit yet");
         rows.push_back (std::move (row));
     }
 
@@ -120,7 +121,7 @@ void BranchPicker::updateRows()
 
     for (const auto& branch : ordered)
     {
-        if (typed.isNotEmpty() && ! branch.name.containsIgnoreCase (typed))
+        if (typed.isNotEmpty() && ! branch.name.containsIgnoreCase (typed) && ! branch.name.containsIgnoreCase (name))
             continue;
 
         const auto isCurrent = current.has_value() && branch.id == current->id;
@@ -128,17 +129,16 @@ void BranchPicker::updateRows()
 
         if (isCurrent)
         {
-            const auto changes = (int) getChangesSinceLastVersion (context).size();
+            const auto changes = countChanges (context);
             row.about =
-                "the song is on it"
-                + (changes == 0 ? juce::String (", no changes") : ", " + juce::String (changes) + (changes == 1 ? " change" : " changes"));
+                "current" + (changes == 0 ? juce::String() : ", " + juce::String (changes) + (changes == 1 ? " change" : " changes"));
         }
         else
         {
             const auto head =
                 std::find_if (versions.begin(), versions.end(), [&branch] (const VersionInfo& v) { return v.id == branch.head; });
             row.about = head != versions.end() ? head->name + ", " + VersionsView::describeWhen (head->saved, now)
-                                               : juce::String ("no versions yet");
+                                               : juce::String ("no commits yet");
         }
 
         if (firstMatch < 0)

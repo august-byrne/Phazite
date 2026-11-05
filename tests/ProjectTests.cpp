@@ -334,6 +334,45 @@ TEST_CASE ("Autosave comes soon after the first change, then waits its interval"
     CHECK (autosaveFile.loadFileAsString() == first);
 }
 
+TEST_CASE ("Auto Save saves the project file a moment after the last change, in the background, and changes since wait for the next")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Auto");
+    const auto file = project->getFile();
+    phazite::AutosaveTimer timer (*project, 120, 1);
+    timer.setAutoSave (true);
+
+    // A change: saved into the project file itself, not into an autosave, a moment after it was made.
+    project->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    CHECK (project->hasUnsavedChanges());
+    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }, 5000));
+    CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "pop");
+    CHECK_FALSE (phazite::Project::getAutosaveFile (file).exists());
+
+    // Changes one after another: saved once they stop, the last of them too.
+    for (const auto* outline : { "rock", "jazz", "house" })
+        project->getSong().getState().setProperty (phazite::schema::outline, outline, nullptr);
+
+    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }, 5000));
+    CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "house");
+
+    // A change made while a save is being written stays unsaved until the next.
+    project->getSong().getState().setProperty (phazite::schema::outline, "funk", nullptr);
+    project->saveInBackground();
+    project->getSong().getState().setProperty (phazite::schema::outline, "soul", nullptr);
+    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->isAutosaving(); }, 5000));
+    CHECK (project->finishBackgroundSave());
+    CHECK (project->hasUnsavedChanges());
+    REQUIRE (phazite::test::runTimersUntil ([&project] { return ! project->hasUnsavedChanges(); }, 5000));
+    CHECK (openProject (file)->getSong().getState()[phazite::schema::outline].toString() == "soul");
+
+    // Off, it autosaves for a crash again, the project file as it was.
+    timer.setAutoSave (false);
+    project->getSong().getState().setProperty (phazite::schema::outline, "disco", nullptr);
+    CHECK (phazite::test::runTimersUntil ([&file] { return phazite::Project::getAutosaveFile (file).existsAsFile(); }, 5000));
+    CHECK (project->hasUnsavedChanges());
+}
+
 TEST_CASE ("Save As makes a copy with the unsaved changes, and leaves the original file alone")
 {
     TemporaryFolder temp;

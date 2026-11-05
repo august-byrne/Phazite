@@ -13,7 +13,7 @@ juce::String getLeftViewCommandID (LeftView view)
 
 juce::String getLeftViewName (LeftView view)
 {
-    return view == LeftView::versions ? "Versions" : "Browser";
+    return view == LeftView::versions ? "Source Control" : "Browser";
 }
 
 namespace
@@ -68,7 +68,7 @@ public:
             setToggleState (marked, juce::dontSendNotification);
     }
 
-    // The count on its badge (0: none), which screen readers say after its name ("Versions, 3 changes").
+    // The count on its badge (0: none), which screen readers say after its name ("Source Control, 3 changes").
     void setBadge (int count)
     {
         if (std::exchange (badge, count) == count)
@@ -112,10 +112,11 @@ public:
 
     void refreshTooltip()
     {
-        const auto about = view == LeftView::versions
-                               ? juce::String ("Versions: save the song as it is now, see what changed since, and go back. Click again "
-                                               "to hide the left panel")
-                               : juce::String ("Browser: sounds, instruments, effects and presets. Click again to hide the left panel");
+        const auto about =
+            view == LeftView::versions
+                ? juce::String ("Source Control: commit the song as it is now, see what changed since, and go back. Click again "
+                                "to hide the left panel")
+                : juce::String ("Browser: sounds, instruments, effects and presets. Click again to hide the left panel");
         setTooltip (withShortcut (commands, about, getLeftViewCommandID (view)));
     }
 
@@ -195,7 +196,7 @@ void ActivityBar::refreshTooltips()
 {
     browserItem->refreshTooltip();
     versionsItem->refreshTooltip();
-    accountItem->setTooltip ("Account: none yet. Your projects and their versions stay on this computer");
+    accountItem->setTooltip ("Account: none yet. Your projects and their history stay on this computer");
     settingsItem->setTooltip (withShortcut (commands, "Settings: audio, MIDI, keys, themes and the other settings", "options.settings"));
 }
 
@@ -256,13 +257,13 @@ void ActivityBar::showAccountMenu()
     juce::PopupMenu menu;
     menu.addSectionHeader ("Account");
     menu.addItem ("Accounts aren't built yet", false, false, nullptr);
-    menu.addItem ("Your projects and their versions stay on this computer", false, false, nullptr);
+    menu.addItem ("Your projects and their history stay on this computer", false, false, nullptr);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (accountItem.get()));
 }
 
 void ActivityBar::updateBadge()
 {
-    versionsItem->setBadge ((int) getChangesSinceLastVersion (context).size());
+    versionsItem->setBadge (countChanges (context)); // staged or not, each thing once
 }
 
 void ActivityBar::paint (juce::Graphics& g)

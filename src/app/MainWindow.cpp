@@ -149,6 +149,8 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     ui::setClipWaveformMaker (getClipWaveformMaker());
 
     session.dialogParent = this;
+    session.setAutoSave (services.settings.get (Settings::autoSave)); // File > Auto Save, as the settings keep it
+    session.onAutoSaveChanged = [this] (bool on) { services.settings.set (Settings::autoSave, on); };
     session.onExport = [this] { showExport(); };
     session.onCleanUpAudio = [this] { showCleanUp(); };
     session.onProjectClosing = [this]
@@ -849,7 +851,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
             menu.addSubMenu ("Open Recent", recentMenu, ! recent.isEmpty());
             menu.addSeparator();
-            add (menu, { "project.save", "project.saveAs", "version.save" });
+            add (menu, { "project.save", "project.saveAs", "project.autoSave", "version.save" });
             menu.addSeparator();
             add (menu, { "project.export", "version.exportDawProject" });
             menu.addSeparator();

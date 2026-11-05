@@ -1012,20 +1012,21 @@ void AppShell::addCommands (CommandRegistry& registry)
          "Shows the browser in the left panel: sounds, instruments, effects and presets; or hides the panel if it shows it.",
          { "library", "sounds", "samples", "plugins", "presets", "sidebar" }, [this] { showLeftView (LeftView::browser); });
 
-    add ("view.versions", "Versions",
-         "Shows the project's versions in the left panel, with the changes since the last one; or hides the panel if it shows "
-         "them.",
-         { "history", "branches", "git", "source control", "snapshots", "sidebar" }, [this] { showLeftView (LeftView::versions); });
+    add ("view.versions", "Source Control",
+         "Shows the project's source control in the left panel: its changes, staged or not, the commit and the graph of its "
+         "branches; or hides the panel if it shows them.",
+         { "versions", "history", "branches", "git", "commits", "snapshots", "sidebar" }, [this] { showLeftView (LeftView::versions); });
 
     // The branch picker, as the Versions view's branch button and the status bar's branch open it, and Bounce Each Version,
     // as Save Version's menu shows it.
-    registry.add ({ .id = "version.pickBranch",
-                    .name = "Switch Branch...",
-                    .category = "Project",
-                    .description = "Lists the project's branches to switch to, or starts a new one from now, named as you type.",
-                    .synonyms = { "branch", "checkout", "git", "switch", "idea", "new branch" },
-                    .perform = [this] { showBranchPicker (BranchPicker::Mode::pick); },
-                    .isEnabled = [this] { return getCurrentBranch (projectContext).has_value(); } });
+    registry.add (
+        { .id = "version.pickBranch",
+          .name = "Checkout to...",
+          .category = "Project",
+          .description = "Lists the project's branches to check out, or creates a new one from the current commit, named as you type.",
+          .synonyms = { "branch", "checkout", "git", "switch", "idea", "new branch" },
+          .perform = [this] { showBranchPicker (BranchPicker::Mode::pick); },
+          .isEnabled = [this] { return getCurrentBranch (projectContext).has_value(); } });
 
     registry.add ({ .id = "version.renameBranch",
                     .name = "Rename Branch...",
@@ -1036,10 +1037,10 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .isEnabled = [this] { return getCurrentBranch (projectContext).has_value(); } });
 
     registry.add ({ .id = "version.bounceEach",
-                    .name = "Bounce Each Version",
+                    .name = "Bounce Each Commit",
                     .category = "Project",
-                    .description = "Renders the song into each version as Save Version keeps it, as Export Song renders it, to hear "
-                                   "that version later against the song.",
+                    .description = "Renders the song into each commit as Commit makes it, as Export Song renders it, to hear that "
+                                   "commit later against the song.",
                     .synonyms = { "bounce", "render", "audio", "with a bounce", "mixdown" },
                     .perform = [this] { toggleBounceEachVersion(); },
                     .isTicked = [this] { return settings.get (Settings::versionBounce); } });
@@ -1066,7 +1067,7 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     for (const auto& command :
          { PanelCommands { Panel::left,
-                           "Shows or hides the left panel, with the browser or the versions; the icons beside it stay.",
+                           "Shows or hides the left panel, with the browser or source control; the icons beside it stay.",
                            { "browser", "versions", "sidebar", "files", "samples", "plugins", "sounds" } },
            PanelCommands { Panel::song,
                            "Shows or hides the upper panel, by default the playlist and the mixer; the lower panel takes its place.",

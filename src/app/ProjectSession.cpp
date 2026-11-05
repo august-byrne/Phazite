@@ -395,8 +395,9 @@ bool ProjectSession::moveUntitledTo (const juce::File& chosen)
         return false;
     }
 
-    // Its folder from now on; the untitled one goes when the project closes.
+    // Its folder from now on; the untitled one goes when the project closes. It saves itself from now on, with Auto Save.
     recent.add (project->getFile());
+    updateAutoSave();
 
     if (onProjectChanged != nullptr)
         onProjectChanged();
@@ -426,11 +427,43 @@ void ProjectSession::exportSong()
         onExport();
 }
 
+void ProjectSession::setAutoSave (bool shouldAutoSave)
+{
+    autoSave = shouldAutoSave;
+    updateAutoSave();
+}
+
+void ProjectSession::toggleAutoSave()
+{
+    setAutoSave (! autoSave);
+
+    if (onAutoSaveChanged != nullptr)
+        onAutoSaveChanged (autoSave);
+}
+
+void ProjectSession::updateAutoSave()
+{
+    if (autosaveTimer != nullptr)
+        autosaveTimer->setAutoSave (autoSave && project != nullptr && ! isUntitled());
+}
+
 void ProjectSession::closeThen (std::function<void (bool)> callback)
 {
     if (project == nullptr || ! project->hasUnsavedChanges())
     {
         callback (true);
+        return;
+    }
+
+    // With Auto Save, as in VS Code: the changes saved, nothing asked.
+    if (autoSave && ! isUntitled())
+    {
+        const auto result = project->save();
+
+        if (result.failed())
+            showError ("Phazite couldn't save the project", result.getErrorMessage());
+
+        callback (result.wasOk());
         return;
     }
 
@@ -544,6 +577,8 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
         if (! isUntitled()) // it is in Open Recent once it is saved
             recent.add (project->getFile());
 
+        updateAutoSave();
+
         routeLiveMidiInput (project->getSong()); // MIDI keyboards and the computer keyboard play it
     }
 
@@ -641,6 +676,15 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& re
                     .perform = [this] { saveProject(); },
                     .isEnabled = [this] { return project != nullptr; } });
 
+    registry.add ({ .id = "project.autoSave",
+                    .name = "Auto Save",
+                    .category = "Project",
+                    .description = "Saves the project a moment after each change, as VS Code's Auto Save does, so that its changes "
+                                   "show in source control as they are made; a new project once its first save puts it somewhere.",
+                    .synonyms = { "autosave", "save automatically", "keep saved" },
+                    .perform = [this] { toggleAutoSave(); },
+                    .isTicked = [this] { return isAutoSaving(); } });
+
     // Save Version: the project saved first, asking where for an untitled one, then a version of its song; a switch to
     // another branch saves it after (model/versions/VersionsModel.h).
     addVersionCommands (registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, renders);
@@ -657,7 +701,7 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& re
     registry.add ({ .id = "project.cleanUpAudio",
                     .name = "Clean Up Unused Audio...",
                     .category = "Project",
-                    .description = "Lists the audio files in the project's folder that neither the song, nor a version, nor a branch "
+                    .description = "Lists the audio files in the project's folder that neither the song, nor a commit, nor a branch "
                                    "plays, to move those you tick to the recycle bin.",
                     .synonyms = { "unused", "delete", "free space", "takes", "recordings", "tidy", "purge" },
                     .perform = [this] { cleanUpAudio(); },
@@ -667,7 +711,7 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& re
                     .name = "Import DAWproject...",
                     .category = "Project",
                     .description = "Opens a DAWproject file, from Bitwig Studio, Studio One, Cubase or another DAW, as a new project. One "
-                                   "exported from a version of this project comes back as a branch from that version, with what changed.",
+                                   "exported from a commit of this project comes back as a branch from that commit, with what changed.",
                     .synonyms = { "dawproject", "bitwig", "studio one", "cubase", "open", "import", "collaborate" },
                     .perform = [this] { importDawProject(); } });
 }
@@ -709,7 +753,7 @@ void ProjectSession::importDawProject (const juce::File& file)
 
         if (importDawProjectAsBranch (context, *read, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, said))
             showNotice ("Imported " + file.getFileName(),
-                        "It came back as a new branch from the version it was exported from."
+                        "It came back as a new branch from the commit it was exported from."
                             + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString (", ") + "."));
         else
             showError ("Phazite couldn't import " + file.getFileName(), said.joinIntoString (" "));

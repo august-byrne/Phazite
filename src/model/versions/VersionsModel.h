@@ -39,7 +39,8 @@ struct BranchInfo
     juce::String head; // its last version's id; none before its first
 };
 
-// A line of the changes since the last version: a track (a folder or a return too), the master, or the song's own.
+// A line of the changes, as git lists a file's: a track (a folder or a return too), the master, or the song's own; in the
+// staged changes, or in the working tree's.
 struct VersionChange
 {
     enum class Kind
@@ -54,6 +55,7 @@ struct VersionChange
     bool isMaster = false, isSong = false;
     juce::String name; // "Bass", "Master", "Song"
     juce::String what; // "volume, 12 notes"; empty for a track added or taken away
+    bool staged = false;
 };
 
 // Whether the open project keeps versions (it has a project file), and whether they are still being read as it opens.
@@ -67,19 +69,33 @@ std::vector<BranchInfo> getBranches (const ProjectContext&);
 std::optional<BranchInfo> getCurrentBranch (const ProjectContext&);
 std::optional<VersionInfo> getLastVersion (const ProjectContext&);
 
-// What the song holds now that the current branch's last version didn't, by track: none before the first version.
+// What changed since the current branch's last commit, as git sees it (docs/versions.md: Staging): the changes in the
+// working tree, from the staged song to the song, and whether anything changed since the commit, staged or not; the staged
+// changes, what the next commit records; and how many things changed, staged or not, each once (the activity bar's badge).
 std::vector<VersionChange> getChangesSinceLastVersion (const ProjectContext&);
 bool hasChangesSinceLastVersion (const ProjectContext&);
+std::vector<VersionChange> getStagedChanges (const ProjectContext&);
+int countChanges (const ProjectContext&);
+
+// Staging (git add, git restore --staged): a line, with its plug-ins as they are now, or every line, into the staged song,
+// or out of it again. Not undo steps: they change the staged song, not the song. False for a line neither has.
+bool stageChange (ProjectContext&, const VersionChange&);
+bool unstageChange (ProjectContext&, const VersionChange&);
+void stageAllChanges (ProjectContext&);
+void unstageAllChanges (ProjectContext&);
+
+// Discard All Changes (git restore): the song made the staged song again, as one undo step.
+bool discardAllChanges (ProjectContext&);
 
 // The name and the note for the next version, as the Versions view holds them while they are typed.
 void setVersionDraft (ProjectContext&, const juce::String& name, const juce::String& note);
 juce::String getVersionDraftName (const ProjectContext&);
 juce::String getVersionDraftNote (const ProjectContext&);
 
-// Records a version of the song as it is now, with the draft's name and note (which it then clears), written in the
-// background, and calls back once it is written, or not (why, then); false if it can't start (while one is being saved,
-// while the versions are being read, or for a song that keeps none). Not an undo step: it changes the history, not the
-// song.
+// Commits: the staged changes, or every change while none is staged, with the draft's name and note (which it then
+// clears), written in the background, and calls back once it is written, or not (why, then); false if it can't start (while
+// one is being made, while the commits are being read, or for a song that keeps none). Not an undo step: it changes the
+// history, not the song.
 bool saveVersion (ProjectContext&, std::function<void (juce::Result)> done = {});
 bool isSavingVersion (const ProjectContext&);
 
@@ -120,6 +136,15 @@ void takeFromSelectedVersion (ProjectContext&);
 void bringBackSelectedVersion (ProjectContext&);
 void putBackSelectedChange (ProjectContext&);
 
+// The staging commands on the selected line, and on every line (version.stage, version.unstage, version.stageAll,
+// version.unstageAll), and whether they can run: a line of the working tree's is staged, a staged one unstaged.
+bool canStageSelected (const ProjectContext&);
+bool canUnstageSelected (const ProjectContext&);
+void stageSelectedChange (ProjectContext&);
+void unstageSelectedChange (ProjectContext&);
+bool canStageAll (const ProjectContext&);
+bool canUnstageAll (const ProjectContext&);
+
 //==============================================================================
 // The app's save, which asks where a project goes the first time, and calls back with whether it saved: Save Version saves
 // the project first, and a switch to another branch saves it after.
@@ -130,9 +155,9 @@ using SaveProjectThen = std::function<void (std::function<void (bool saved)>)>;
 // stays as it is (its plug-ins loaded, the song playing on); the undo history starts again, and the project is saved, so
 // that its file is the branch's song, as the versions say. Not undo steps.
 
-// New Branch from Here: a branch named "Idea 2" (the next number free), in the next color, from a version, or from Now (none):
-// from the current branch's last version, the song with its unsaved changes going on there. From a version, the song becomes
-// that version's, a switch. False if it can't be made (before the first version, while one is being saved).
+// Create Branch: a branch named "idea-2" (the next number free), in the next color, from a commit, or from Now (none): from
+// the current branch's last commit, the song with its changes going on there. From a commit, the song becomes that
+// commit's, a checkout. False if it can't be made (before the first commit, while one is being made).
 bool newBranch (ProjectContext&, const juce::String& fromVersion, const SaveProjectThen&);
 bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProjectThen&);
 
@@ -141,8 +166,13 @@ bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProj
 bool canSwitchBranch (const ProjectContext&);
 bool canMakeBranch (const ProjectContext&);
 
-// A branch named anew: false for an empty name, or one another branch has (in any case). Not an undo step.
+// A branch named anew, as toBranchName() makes the name: false for an empty one, or one another branch has (in any case).
+// Not an undo step.
 bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::String& name);
+
+// A name as git takes it for a branch: spaces as dashes (as VS Code puts them), without what a ref can't hold (control
+// characters, ~ ^ : ? * [ \, "..", "@{", a leading dash or dot, a trailing dot, slash or ".lock"). Empty if nothing is left.
+juce::String toBranchName (const juce::String& typed);
 
 // The branch the branch picker picked (ui/versions/BranchPicker.h), which version.switchBranch switches to.
 void selectBranch (ProjectContext&, const juce::String& branchID);
@@ -183,6 +213,10 @@ struct ClashInfo
 
 std::vector<ClashInfo> getClashes (const ProjectContext&);
 bool chooseClash (ProjectContext&, int clash, int value); // 0 before both, 1 this branch's, 2 the other's
+
+// A conflict's three choices as a merge editor names them: "Accept Base" (0), "Accept Current Change" (1), "Accept Incoming
+// Change" (2).
+juce::String getClashChoiceName (int value);
 
 //==============================================================================
 // Bounces, and hearing them (docs/versions.md: Hearing a version). A version's bounce is the song as it was then, rendered as

@@ -25,6 +25,16 @@ namespace
 {
 using namespace phazite::test;
 
+// Whether a commit, by its id, has its bounce.
+bool hasBounceOf (const phazite::ProjectContext& context, const juce::String& id)
+{
+    for (const auto& version : phazite::getVersions (context))
+        if (version.id == id)
+            return version.hasBounce;
+
+    return false;
+}
+
 void waitForVersions (phazite::ProjectContext& context)
 {
     REQUIRE (dispatchMessagesUntil (
@@ -193,8 +203,8 @@ TEST_CASE ("Bounce renders the version the song is now, once, as Export Song doe
     REQUIRE (phazite::deleteBounce (s.context, first));
     CHECK (dispatchMessagesUntil ([&file] { return ! file.existsAsFile(); }));
     CHECK (phazite::getVersionsRoom (s.context).bounces == 0);
-    REQUIRE (phazite::getVersions (s.context).size() == 2);
-    CHECK_FALSE (phazite::getVersions (s.context).back().hasBounce);
+    REQUIRE (phazite::getVersions (s.context).size() == 3); // and the initial commit
+    CHECK_FALSE (hasBounceOf (s.context, first));
 }
 
 TEST_CASE ("An old version's bounce is its song alone, rendered in the background with plug-ins of its own, as an export of it")
@@ -219,7 +229,7 @@ TEST_CASE ("An old version's bounce is its song alone, rendered in the backgroun
     CHECK_FALSE (phazite::getSession (s.context)->isLentToRender());
     CHECK_FALSE (phazite::canBounce (s.context, phazite::getLastVersion (s.context)->id)); // one at a time
 
-    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getVersions (s.context).back().hasBounce; }, 60000));
+    REQUIRE (dispatchMessagesUntil ([&s, &quiet] { return hasBounceOf (s.context, quiet); }, 60000));
     CHECK (phazite::getBounceProblem (s.context).isEmpty());
     CHECK_FALSE (phazite::getBounceProgress (s.context, quiet).has_value());
     CHECK (phazite::isSongPlaying (*phazite::findSong (s.context)));
@@ -304,7 +314,7 @@ TEST_CASE ("No bounce starts while the song records, and one going on in the bac
     REQUIRE (phazite::isRecording (song));
     CHECK (dispatchMessagesUntil ([&s, &old] { return ! phazite::getBounceProgress (s.context, old).has_value(); }));
     CHECK (phazite::getBounceProblem (s.context) == "Bouncing \"Old\" stopped for recording.");
-    CHECK_FALSE (phazite::getVersions (s.context).back().hasBounce);
+    CHECK_FALSE (hasBounceOf (s.context, old));
     phazite::stopRecording (song);
 
     // Deleting a bounce that renders stops it, leaving nothing.

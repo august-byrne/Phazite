@@ -219,43 +219,54 @@ Showing a view gives it the keyboard, as F5 to F9 do for the views in the centre
 
 ### The Versions view
 
-The view is laid out as VS Code's Source Control view: the message, the button across the view, then the changes and the graph, each folding under its heading.
+The view is laid out as VS Code's Source Control view, and says what it does in git's words (below): the message, the button across the view, then the staged changes, the changes and the graph, each folding under its heading.
 
 ```
 +------------------------------+
-| VERSIONS                 ... |  ...: rename the branch, DAWproject, clean up
-| Y Main v                     |  the branch: opens the branch picker
-| [Message (Ctrl+Enter to save |  first line: the name; the rest: a note
-|  a version on Main)        ] |  both optional
-| [ v  Save Version      | v ] |  its menu: Bounce Each Version
-| v CHANGES since "Chorus" (4) |
-|   ~ Bass  volume, 12 notes M |  a click selects it in the song
-|   ~ Drums 2 clips added   <M |  < : Put Back, under the pointer
-|   ~ Strings               A  |  green A, amber M, red D (struck through)
+| Source Control           ... |  ...: Commit, Changes, Branch, DAWproject, clean up
+| Y main v                     |  the branch: opens the branch picker
+| [Message (Ctrl+Enter to      |  first line: the name; the rest: a note
+|  commit on 'main')         ] |  both optional
+| [ v  Commit            | v ] |  its menu: Bounce Each Commit
+| v Staged Changes        (1)  |  -: Unstage All, under the pointer
+|   ~ Bass  volume, 12 notes M |  - : Unstage Changes, under the pointer
+| v Changes          <  + (3)  |  < : Discard All, + : Stage All
+|   ~ Drums 2 clips added <+ M |  < : Discard Changes, + : Stage Changes
+|   ~ Strings               U  |  green U untracked, amber M, red D (struck through)
 |   = Master  Limiter       M  |
-| v HISTORY                    |
-|  o Now                       |
-|  o Chorus drums [Main] 2 h > |  > : hear it (it has a bounce)
-|  | o Half-time [Idea 2] 3 h >|  another branch's line, in its color
+| v GRAPH                      |
+|  o Uncommitted Changes       |
+|  o Chorus drums [main] 2 h > |  > : hear it (it has a bounce)
+|  | o Half-time [idea-2] 3 h >|  another branch's line, in its color
 |  o-' Verse 2         Mon  >  |
-|  o First idea        Mon     |  no bounce, nothing to hear
+|  o Initial commit    Mon     |  no bounce, nothing to hear
 +------------------------------+
 ```
 
-**Saving a version:**
-- **Save Version** (`version.save`; Ctrl+Alt+S, Cubase's key for Save New Version; Ctrl+N in FL Studio's keymap, FL Studio's own key for it) saves the project and records a version.
-- **One message,** as a commit's in VS Code: its first line is the version's name, the lines after it its note. Enter starts a new line, and Ctrl+Enter saves the version, as in VS Code.
-- **Its name.** A name is optional. Left empty, the version is named by what changed ("Bass, Drums, + Strings").
-- **A note,** optional too, says why: what the version tried, or what to try next. It shows under the name in the history. Cubase's users ask for one ([forum](https://forums.steinberg.net/t/save-as-new-version-add-note-for-version-information/1031505)). A study of CAD users found that numbered versions mean nothing once there are about fifty ([arXiv](https://arxiv.org/abs/2602.09236)).
-- **Bounce Each Version** (`version.bounceEach`, in Save Version's menu, whose button then reads "Save Version and Bounce") renders the song into the version as Export Song does: the whole song with its tails, muted tracks silent, in a progress window with Cancel. Playback stops for it, as it does for an export. Cancelling leaves the version without a bounce. The settings keep it.
-- **Not an undo step:** saving a version changes the history, not the song.
+**From the start, saved as it goes** (the owner, 2026-11-05: "more seamless and automatic"):
+- **Initial commit.** A project keeps commits from its start, as a repository from its first commit: as soon as its history is read and has none, the song as it is is committed, "Initial commit", on **main**. A new project's history is in the folder it was made in, and moves with it at its first save.
+- **Auto Save** (File > Auto Save, `project.autoSave`, on by default, as the settings keep it), as VS Code's: a project with a file of its own saves itself a second after its last change, written in the background from a copy, so the window and what plays don't wait for it; while the song plays, at most every 10 seconds, and never while it records (at once as a recording ends). Closing it saves without asking. The previous file goes into Backups/ at most every 10 minutes, so the backups keep the project as it was then. A new project, untitled until its first save asks where it goes, autosaves for a crash as before.
+- So every change shows in the changes as it is made, to stage and commit.
 
-**Changes since the last version** lists what the song holds now that it didn't then, by track, as VS Code lists changed files:
+**Committing:**
+- **Commit** (`version.save`; Ctrl+Alt+S, Cubase's key for Save New Version; Ctrl+N in FL Studio's keymap, FL Studio's own key for it) saves the project and commits the staged changes, or, while none is staged, every change (git's smart commit, as VS Code makes it by default).
+- **One message,** as a commit's in VS Code: its first line is the commit's name, the lines after it its note. Enter starts a new line, and Ctrl+Enter commits, as in VS Code.
+- **Its name.** A name is optional. Left empty, the commit is named by what changed, in the imperative as git's messages are written ("Add Strings; update Bass and Drums").
+- **A note,** optional too, says why: what the version tried, or what to try next. It shows under the name in the history. Cubase's users ask for one ([forum](https://forums.steinberg.net/t/save-as-new-version-add-note-for-version-information/1031505)). A study of CAD users found that numbered versions mean nothing once there are about fifty ([arXiv](https://arxiv.org/abs/2602.09236)).
+- **Bounce Each Commit** (`version.bounceEach`, in Commit's menu, whose button then reads "Commit and Bounce") renders the song into the commit as Export Song does: the whole song with its tails, muted tracks silent, in a progress window with Cancel. Playback stops for it, as it does for an export. Cancelling leaves the commit without a bounce. The settings keep it.
+- **Not an undo step:** committing changes the history, not the song.
+
+**Staging,** as git's index: the staged song is what the next commit records, the last commit with the lines staged since taken from the song as they were then (`VersionHistory::getStagedSong()`).
+- **Staged Changes** lists what is staged, from the last commit; it shows while anything is. **Changes** lists the working tree's changes, from the staged song to the song, so a line staged and then changed again is in both, as in git.
+- **Stage Changes** (`version.stage`, the plus on a line under the pointer) takes a line into the staged song, with its plug-ins' settings and knobs as they are now; **Unstage Changes** (`version.unstage`, the minus) takes it out again; **Stage All Changes** and **Unstage All Changes** take every line. Not undo steps: they change the staged song, not the song.
+- **Discard Changes** (`version.putBack`, the arrow) makes a line what is staged again (or the last commit's, while nothing is staged), as git restore does; **Discard All Changes** every line. Each is one undo step.
+- The staged song is kept while the project is open, for its branch: a checkout, or opening the project again, starts with nothing staged.
+
+**Changes** lists what the song holds now that the staged song doesn't, by track, as VS Code lists changed files:
 - Each line is named in Phazite's own words: tracks added or removed, clips, notes, devices and their parameters, the mix, automation, sections, the tempo and the chord lane.
 - View state and how the song plays (track heights, the loop, the playhead) never show. They use the same lists as the unsaved changes ([design section 18](design.md#18-projects-saving-and-export)).
-- **Each line,** as VS Code's: an icon (a track, the master, the song's own), the name, what changed, muted, and a letter at its end, in VS Code's colors for it: A added (green), M changed (amber), D taken away (red, its name struck through). The heading counts the lines in a badge.
-- A click on a line selects that thing in the song.
-- **Put Back** takes that thing back from the last version, as one undo step: the arrow on the line under the pointer (or the line selected), as VS Code's Discard Changes, or the line's menu.
+- **Each line,** as VS Code's: an icon (a track, the master, the song's own), the name, what changed, muted, and a letter at its end, as git marks a file, in VS Code's colors for it: U untracked (added, not staged yet: green), A added (staged), M modified (amber), D deleted (red, its name struck through); C, a merge's conflict. Screen readers say the status as VS Code names it: "Bass, Modified: volume", "Keys, Untracked", "Lead, Index Deleted". The heading counts the lines in a badge.
+- A click on a line selects that thing in the song; its actions show on the line under the pointer and on the selected one, as VS Code's, and in its menu.
 - **Marked in the playlist too.** While the Versions view shows, the playlist marks the clips and track headers that changed since the last version, so a change is seen where it is. Figma's and Onshape's reviews show a branch's changes on the design itself in the same way. A version chosen in the history marks what it changed instead.
 
 **The history:**
@@ -305,9 +316,14 @@ The view is laid out as VS Code's Source Control view: the message, the button a
   A flip is an edit like any other, one undo step, so it is heard at once while the song plays. A dialog box can't offer that. Dolt keeps a conflict's three values until it is resolved in the same way ([Dolt](https://www.dolthub.com/blog/2020-07-15-three-way-merge/)).
 - **The window warns** where both sides changed the same bars of one track. A merge can't hear that two bass lines don't go together.
 
-**Words.** The view says:
-- version, branch, merge, clash, bring back, take, hear, bounce;
-- never commit, checkout, HEAD, stage, stash, rebase, cherry-pick or hash.
+**Words** (the owner, 2026-11-05: "the lingo for the screen reader and for anything associated with this git-like versioning should follow standard git conventions"): git's, as VS Code's Source Control says them.
+- **Commit** (once "version": Save Version is Commit, the history is the graph); **Uncommitted Changes** (once "Now"); **Initial commit**, the first.
+- **Stage, unstage, discard, staged changes, changes, untracked**; the letters U, A, M, D and C.
+- **Branch, main** (git's default name, lowercase), **Create Branch, Checkout Branch, Checkout to...** (the branch picker, as VS Code's command), **Rename Branch...**. Branch names as git takes them: spaces become dashes, as VS Code puts them, and what a ref can't hold goes (`toBranchName()`); new ones are idea-2 and on.
+- **Merge, Merge into 'main'..., Abort Merge, Merge Changes, conflict**; a conflict's choices as a merge editor names them: **Accept Current Change, Accept Incoming Change, Accept Base**. A merge commit's message, while it has none of its own, is git's: "Merge branch 'idea-2'", or "Merge commit '1a2b3c4'".
+- **Restore from This Commit** (once "Bring Back"), **Compare with Working Tree** (once "Take from This Version"), its lines restored from that commit; **Discard Changes** (once "Put Back").
+- Phazite's own, where git has no word: hear, bounce.
+- Not yet: stash, rebase, cherry-pick, tags, HEAD; hashes show only in a merge's message.
 
 ## How it works
 

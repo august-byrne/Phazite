@@ -75,6 +75,7 @@ std::set<std::uint64_t> getAutomatableIDs (const juce::ValueTree& track);
 std::vector<juce::ValueTree> getTrackElements (const juce::ValueTree& song);
 juce::String getTrackNameIn (const juce::ValueTree& song, const juce::ValueTree& track);
 
-// A version's name while it has none of its own: what its changes are about, "Bass, Drums, + Strings".
+// A commit's message while it has none of its own, as git's are written: what its changes are about, "Add Strings;
+// update Bass and Drums".
 juce::String summarise (const std::vector<SongChange>&);
 } // namespace phazite

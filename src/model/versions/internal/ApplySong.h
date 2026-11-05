@@ -32,6 +32,10 @@ bool makeTrackLike (Song&, TrackID, const juce::ValueTree& other);
 // tracks both have.
 void makeSongOwnLike (Song&, const juce::ValueTree& other);
 
+// The same in a song's tree outside any undo history: the staged song (VersionHistory.h, git's index).
+bool makeTrackLike (juce::ValueTree song, TrackID, const juce::ValueTree& other);
+void makeSongOwnLike (juce::ValueTree song, const juce::ValueTree& other);
+
 // What a part of the song names that isn't there any more, taken away: a sidechain from a track that is gone, a modulation
 // of a device that is gone (a send to a return that is gone stays, as the song keeps one for an undo that brings the
 // return back). In the caller's step; how many it took away.

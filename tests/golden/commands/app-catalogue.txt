@@ -93,16 +93,22 @@ project.open | ctrl + O
 project.openRecent
 project.saveAs | ctrl + shift + S
 project.save | ctrl + S
+project.autoSave
 version.save | ctrl + alt + S
+version.stage
+version.unstage
+version.stageAll
+version.unstageAll
+version.discardAll
+version.putBack
 version.bringBack
 version.takeFrom
-version.putBack
+version.showChanges
 version.newBranch
 version.switchBranch
 version.merge
 version.finishMerge
 version.cancelMerge
-version.showChanges
 version.hear
 version.bounce
 version.deleteBounce

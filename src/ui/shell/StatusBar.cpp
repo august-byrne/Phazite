@@ -310,8 +310,8 @@ void StatusBar::showBranch()
         branchItem->show (branch->name + (changed ? "*" : ""), Item::Emphasis::quiet);
         branchItem->setTooltip (withShortcut (commands,
                                               "The branch the song is on"
-                                                  + juce::String (changed ? ", with changes since its last version (*)" : "")
-                                                  + ": click to switch to another, or to start one",
+                                                  + juce::String (changed ? ", with changes since its last commit (*)" : "")
+                                                  + ": click to check out another, or to create one",
                                               "version.pickBranch"));
     }
 

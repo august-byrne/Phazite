@@ -94,8 +94,10 @@ public:
     static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon };  // ui/shell/PanelLayout.h
     static constexpr TextSetting viewPlaces { "phaziteViewPlaces", "", SaveTiming::soon };    // ui/shell/Panels.h: ViewPlaces
 
-    // Save Version's "With a bounce" (ui/versions/VersionsView.h).
+    // Bounce Each Commit, in Commit's menu (ui/versions/VersionsView.h); and Auto Save (File > Auto Save, as VS Code's: a
+    // saved project saves itself a moment after each change, app/ProjectSession.h).
     static constexpr BoolSetting versionBounce { "phaziteVersionBounce", false, SaveTiming::now };
+    static constexpr BoolSetting autoSave { "phaziteAutoSave", true, SaveTiming::now };
 
     // Kept in that file (which must outlive this), or, without one, in memory (tests). The parameter isn't named
     // 'file': it would hide the member (C4458, -Wshadow).

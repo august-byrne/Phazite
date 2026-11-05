@@ -133,8 +133,8 @@ TEST_CASE ("Bring Back makes the song what it was, as one undo step, and leaves 
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
     CHECK (phazite::findChanges (then, song.getState()).empty());
     CHECK ((int) phazite::findTrackState (song, bass)[schema::trackHeight] == 140); // view state stays
-    CHECK (phazite::describeUndo (&song) == "Undo Bring Back \"Verse\"");
-    CHECK (phazite::getVersions (s.context).size() == 1); // the history keeps every version
+    CHECK (phazite::describeUndo (&song) == "Undo Restore from \"Verse\"");
+    CHECK (phazite::getVersions (s.context).size() == 2); // the history keeps every commit, the initial one too
 
     // Undo takes it all back, in one step.
     phazite::undo (song);
@@ -163,7 +163,7 @@ TEST_CASE ("Put Back takes one line back from the last version, and Take from Th
 
     REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Bass")));
     CHECK (phazite::getChannelVolume (*phazite::findSong (s.context), bass) == doctest::Approx (-12.0f));
-    CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Put Back Bass");
+    CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Discard Changes in Bass");
 
     REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Strings")));
     REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Keys")));
@@ -182,7 +182,7 @@ TEST_CASE ("Put Back takes one line back from the last version, and Take from Th
     CHECK (describeChanges (phazite::getListedChanges (s.context)) == "Bass: volume");
     REQUIRE (phazite::takeBack (s.context, *findLine (phazite::getListedChanges (s.context), "Bass")));
     CHECK (phazite::getChannelVolume (*phazite::findSong (s.context), bass) == doctest::Approx (-6.0f));
-    CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Take Bass from \"First\"");
+    CHECK (phazite::describeUndo (phazite::findSong (s.context)) == "Undo Restore Bass from \"First\"");
     CHECK (describeChanges (phazite::getListedChanges (s.context)).isEmpty());
 
     // Back to the changes since the last version, which that one is now.
@@ -201,7 +201,7 @@ TEST_CASE ("The commands bring back the version selected, and put back the line 
 
     CHECK_FALSE (commands.invoke ("version.bringBack")); // nothing selected
     phazite::selectVersion (s.context, first);
-    CHECK (phazite::getCurrentName (*commands.find ("version.bringBack")) == "Bring Back \"First\"");
+    CHECK (phazite::getCurrentName (*commands.find ("version.bringBack")) == "Restore from \"First\"");
     CHECK_FALSE (phazite::canTakeFrom (s.context)); // it is the last version: its changes are listed already
     REQUIRE (commands.invoke ("version.bringBack"));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));

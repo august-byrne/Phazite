@@ -465,7 +465,7 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     REQUIRE (read.fromVersion == first);
     juce::StringArray said;
     REQUIRE (phazite::importDawProjectAsBranch (s.context, read, s.save, said));
-    CHECK (phazite::getCurrentBranch (s.context)->name == "Idea 2");
+    CHECK (phazite::getCurrentBranch (s.context)->name == "idea-2");
 
     // Those two changes, and nothing else: the rest as it was, to the bit.
     const auto changes = phazite::getChangesSinceLastVersion (s.context);
@@ -484,9 +484,9 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     CHECK (getPitches (song, riff) == std::vector<int> { 36, 41 });
     CHECK (keptNote (36).isEquivalentTo (low)); // its ID and its values, as they were
 
-    // Kept as a version there, it merges into Main with those two lines and no clash.
+    // Kept as a version there, it merges into main with those two lines and no clash.
     const auto back = keepVersion (s.context, "From another DAW");
-    REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "Main"), s.save));
+    REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "main"), s.save));
     REQUIRE (phazite::startMerge (s.context, back));
     const auto lines = phazite::getMergeLines (s.context);
     REQUIRE (lines.size() == 2);
