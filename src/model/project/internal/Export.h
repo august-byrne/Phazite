@@ -15,6 +15,7 @@ namespace phazite
 {
 struct ExportReport;
 struct ExportSettings;
+class PluginHost;
 class SongExport;
 
 // The song's time that an export covers: from its start to its end (model/transport/internal/Playback.h: getSongEnd()).
@@ -38,4 +39,10 @@ juce::String getStemFileName (int index, const juce::String& channelName, const 
 // lends them while it renders. Make it on the message thread; the song must outlive it.
 std::unique_ptr<SongExport> startExport (Song&, const juce::File&, const ExportSettings&,
                                          std::function<void (const ExportReport&)> onFinished);
+
+// The same of a song that no project's session plays (an old version's song: model/versions/), into a file, with plug-in
+// instances of its own in the plug-in host, made as it starts, in the background: at a low priority, on one thread, while
+// the open song plays on.
+std::unique_ptr<SongExport> startBackgroundExport (Song&, PluginHost&, const juce::File&, const ExportSettings&,
+                                                   std::function<void (const ExportReport&)> onFinished);
 } // namespace phazite

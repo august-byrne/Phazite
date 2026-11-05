@@ -21,6 +21,8 @@
 
 namespace phazite
 {
+class TrackRender;
+
 class VersionHistory : private juce::ValueTree::Listener,
                        private juce::Timer
 {
@@ -82,6 +84,12 @@ public:
     void readBounces();
     bool bounceWithVersion = false;
     std::set<juce::String> bouncesGoing; // deleted, whose files go once the engine lets go of them: none to read
+
+    // An old version's bounce, its song rendered in the background beside the song playing (step V5), one at a time, which
+    // stops as recording starts: the version, and the render; and why the last one failed, until the next starts.
+    juce::String bouncingVersion;
+    std::unique_ptr<TrackRender> backgroundBounce;
+    juce::String bounceProblem;
 
     // Hearing a version: the version whose bounce plays beside the song in the song's session, compared with it (none while
     // none does), and whether it is heard rather than the song. An edit to the song switches back to the song, so that what

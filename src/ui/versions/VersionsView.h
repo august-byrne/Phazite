@@ -92,8 +92,10 @@ private:
     std::vector<VersionInfo> versions;
     std::vector<BranchInfo> branches;
     juce::String currentBranch;
-    juce::String heardVersion; // none while the song itself is heard
-    bool anyBounce = false;    // the history shows play marks
+    juce::String heardVersion;    // none while the song itself is heard
+    bool anyBounce = false;       // the history shows play marks
+    juce::String bouncingVersion; // an old version's, rendering in the background, and how far it has come
+    float bounceProgress = 0.0f;
     bool hasPlayMark (int row) const;
 
     // The history's lines, from a row to the row of a version it follows: down the column of the newer row's branch, turning

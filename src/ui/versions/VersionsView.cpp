@@ -282,7 +282,9 @@ public:
 
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::small));
-        const auto when = describeWhen (version.saved, juce::Time::getCurrentTime());
+        const auto when = version.id == view.bouncingVersion
+                              ? "bouncing " + juce::String (juce::roundToInt (view.bounceProgress * 100.0f)) + "%"
+                              : describeWhen (version.saved, juce::Time::getCurrentTime());
         g.drawText (when, area.removeFromRight (juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), when)) + Space::xs),
                     juce::Justification::centredRight, false);
 
@@ -538,6 +540,8 @@ juce::String VersionsView::describeHistoryRow (int row) const
 
     if (version.hasBounce)
         text << (version.id == heardVersion ? ", heard" : ", with a bounce");
+    else if (version.id == bouncingVersion)
+        text << ", bouncing";
 
     if (version.note.isNotEmpty())
         text << ". " << version.note;
@@ -610,16 +614,29 @@ void VersionsView::refresh()
     branches = getBranches (context);
     heardVersion = getHeardVersion (context);
     anyBounce = std::any_of (versions.begin(), versions.end(), [] (const VersionInfo& version) { return version.hasBounce; });
+    bouncingVersion.clear();
+
+    for (const auto& version : versions)
+    {
+        if (const auto progress = getBounceProgress (context, version.id))
+        {
+            bouncingVersion = version.id;
+            bounceProgress = *progress;
+        }
+    }
 
     // With a bounce, as the box (the settings) says, for the song open now; and the room the versions take.
     if (getBounceWithVersion (context) != bounceBox.getToggleState())
         setBounceWithVersion (context, bounceBox.getToggleState());
 
     bounceBox.setEnabled (keeps);
+    // Why an old version's bounce failed, until the next one; or else the room.
     const auto room = getVersionsRoom (context);
-    roomText.setText (versions.empty() ? juce::String()
-                                       : "Versions take " + juce::File::descriptionOfSizeInBytes (room.songs) + ", bounces "
-                                             + juce::File::descriptionOfSizeInBytes (room.bounces),
+    const auto problem = getBounceProblem (context);
+    roomText.setText (problem.isNotEmpty() ? problem
+                      : versions.empty()   ? juce::String()
+                                           : "Versions take " + juce::File::descriptionOfSizeInBytes (room.songs) + ", bounces "
+                                                 + juce::File::descriptionOfSizeInBytes (room.bounces),
                       juce::dontSendNotification);
     roomText.setVisible (roomText.getText().isNotEmpty());
 

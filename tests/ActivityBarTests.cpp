@@ -427,6 +427,18 @@ TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it
     CHECK (hearing().isEmpty());
     CHECK (view.describeHistoryRow (0) == "Now, heard");
     phazite::stopAndReturn (*phazite::findSong (context));
+
+    // An older version without one: bounced in the background, its row saying so while it renders.
+    screen.click (view.getBounceBox()); // off
+    REQUIRE (screen.registry.invoke ("track.add"));
+    const auto third = screen.saveVersion ("Third");
+    REQUIRE (screen.registry.invoke ("track.add"));
+    screen.saveVersion ("Fourth");
+    phazite::selectVersion (context, third);
+    REQUIRE (screen.registry.invoke ("version.bounce"));
+    REQUIRE (view.describeHistoryRow (2).startsWith ("Third"));
+    CHECK (view.describeHistoryRow (2).contains (", bouncing"));
+    CHECK (phazite::test::dispatchMessagesUntil ([&view] { return view.describeHistoryRow (2).contains (", with a bounce"); }, 60000));
 }
 
 TEST_CASE ("The activity bar's icons are switches screen readers name, with tooltips that name their keys")

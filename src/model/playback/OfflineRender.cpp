@@ -51,7 +51,7 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
         jobs.push_back (std::move (compiled));
     }
 
-    startThread();
+    startThread (setup.background ? juce::Thread::Priority::low : juce::Thread::Priority::normal);
 }
 
 OfflineRender::~OfflineRender()

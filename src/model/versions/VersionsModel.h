@@ -188,16 +188,22 @@ struct VersionsRoom
 
 VersionsRoom getVersionsRoom (const ProjectContext&);
 
-// Bounce: a version that is the song as it is now (the current branch's last version, with no changes since), which has none
-// yet, while nothing else renders the song. Started, or nothing (with no call back) if it can't be.
+// Bounce: a version that has none yet, while nothing else renders the song or records. The version the song is now (the
+// current branch's last version, with no changes since) is the open song rendered, playback stopped for it, in a progress
+// window: started, or nothing (with no call back) if it can't be. An older one is its song alone, rendered in the
+// background with plug-in instances of its own while the song plays on (step V5), one at a time, which stops if recording
+// starts: how far it has come, while it renders; and why the last one failed, until the next.
 bool canBounce (const ProjectContext&, const juce::String& versionID);
 std::unique_ptr<TrackRender> startBounce (ProjectContext&, const juce::String& versionID,
                                           std::function<void (const juce::Result&)> onFinished);
+bool startBackgroundBounce (ProjectContext&, const juce::String& versionID);
+std::optional<float> getBounceProgress (const ProjectContext&, const juce::String& versionID); // from 0 to 1
+juce::String getBounceProblem (const ProjectContext&);
 
-// The same in a host, which runs it and is told how it ended, or why it couldn't start.
+// The one or the other: in a host, which runs the song's and is told how it ended, or why a bounce couldn't start.
 void bounceVersion (ProjectContext&, const juce::String& versionID, TrackRenderHost&);
 
-// Delete Bounce: its file goes, and the room it took with it.
+// Delete Bounce: its file goes, and the room it took with it; one rendering in the background stops.
 bool deleteBounce (ProjectContext&, const juce::String& versionID);
 
 // "With a bounce": whether Save Version bounces the version it saves, as the Versions view's box says.

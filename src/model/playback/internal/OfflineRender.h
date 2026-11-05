@@ -38,7 +38,8 @@ public:
 
     // How it renders: the session of the project it renders (findSession(), or none), which lends it the plug-ins; what
     // makes a player of the song (a SongPlayer of the project's song), one for each job; and on so many threads, at a rate, in
-    // blocks of so many samples, the engine's share of each job's progress (the rest is Rendered's).
+    // blocks of so many samples, the engine's share of each job's progress (the rest is Rendered's); in the background, its
+    // thread at a low priority, beside the song that plays (an old version's bounce: model/versions/).
     struct Setup
     {
         PlaybackSession* session = nullptr;
@@ -47,6 +48,7 @@ public:
         double sampleRate = 48000.0;
         int blockSize = 512;
         double playedShare = 1.0;
+        bool background = false;
     };
 
     OfflineRender (Setup, const std::vector<Job>&, Rendered, Finished);

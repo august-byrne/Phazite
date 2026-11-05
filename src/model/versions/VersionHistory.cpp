@@ -3,8 +3,10 @@
 #include "model/arrangement/TrackColours.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
+#include "model/mixer/FreezeModel.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/transport/internal/Recording.h"
 
 #include <algorithm>
 
@@ -63,6 +65,7 @@ VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
 VersionHistory::~VersionHistory()
 {
     stopTimer();
+    backgroundBounce = nullptr; // cancelled, before what it renders goes
     state.removeListener (this);
     thread.removeAllJobs (false, 30000); // a version being written is finished, never cut short
 }
@@ -723,6 +726,21 @@ void VersionHistory::timerCallback()
 {
     followFolder();
     takeChangesOutsideHistory();
+
+    // An old version's bounce goes on, its progress shown, unless recording starts: it never runs while the song records.
+    if (backgroundBounce != nullptr)
+    {
+        if (isRecording (song))
+        {
+            const auto* version = findVersion (bouncingVersion);
+            bounceProblem = "Bouncing \"" + (version != nullptr ? getDisplayName (*version) : juce::String()) + "\" stopped for recording.";
+            backgroundBounce = nullptr;
+            bouncingVersion.clear();
+            readBounces();
+        }
+
+        changed();
+    }
 
     if (std::exchange (notifyPending, false) && onChange != nullptr)
         onChange();

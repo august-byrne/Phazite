@@ -3,13 +3,19 @@
 // made as Export Song renders the song, deleted with the room it took, and heard through Phazite's engine as the app plays
 // the song, a block at a time: at once, on the same beat, and as loud as the song.
 #include "EnginePlayback.h"
+#include "RealTimePlayback.h"
+#include "TestPlugin.h"
 #include "TestSong.h"
 #include "engine/nodes/LoudnessMeter.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/mixer/MixerModel.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/project/Export.h"
+#include "model/project/internal/Export.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
 
@@ -116,6 +122,18 @@ juce::AudioBuffer<float> join (std::initializer_list<const juce::AudioBuffer<flo
     return all;
 }
 
+// A file's audio, whole, on two channels.
+juce::AudioBuffer<float> readAudio (const juce::File& file)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    REQUIRE (reader != nullptr);
+    juce::AudioBuffer<float> audio (2, (int) reader->lengthInSamples);
+    reader->read (&audio, 0, audio.getNumSamples(), 0, true, true);
+    return audio;
+}
+
 // The integrated loudness of a stretch of what was played, in LUFS.
 float measureLoudness (const juce::AudioBuffer<float>& audio, int start, int length)
 {
@@ -163,11 +181,12 @@ TEST_CASE ("Bounce renders the version the song is now, once, as Export Song doe
         CHECK (reader->lengthInSamples >= (juce::int64) std::lround (4.0 * reader->sampleRate));
     }
 
-    // Only the version the song is now: not once the song changed, nor an older one.
+    // Once the song changed, a version is bounced from its own song (an old version's bounce, below); one with a bounce, not
+    // again.
     const auto second = keepVersion (s.context, "Second");
     CHECK (phazite::canBounce (s.context, second));
     s.setVolume (track, -12.0f);
-    CHECK_FALSE (phazite::canBounce (s.context, second));
+    CHECK (phazite::canBounce (s.context, second));
     CHECK_FALSE (phazite::canBounce (s.context, first));
 
     // Delete Bounce: its file, and the room it took, go; the version stays.
@@ -176,6 +195,123 @@ TEST_CASE ("Bounce renders the version the song is now, once, as Export Song doe
     CHECK (phazite::getVersionsRoom (s.context).bounces == 0);
     REQUIRE (phazite::getVersions (s.context).size() == 2);
     CHECK_FALSE (phazite::getVersions (s.context).back().hasBounce);
+}
+
+TEST_CASE ("An old version's bounce is its song alone, rendered in the background with plug-ins of its own, as an export of it")
+{
+    TestPlugin plugin; // before the songs that hold it
+    TestSong s;
+    TemporaryFolder sounds;
+    const auto track = s.addTrack ("Hits");
+    s.addAudioClip (track, writeHits (sounds.folder.getChildFile ("Hits.wav"), 4.0, 0.5f), 0.0);
+    const auto effect = TestPlugin::add (*phazite::findSong (s.context), track);
+    s.setParameter (effect, TestPlugin::gainID, 0.25f);
+    const auto quiet = keepVersion (s.context, "Quiet");
+    phazite::removeDevice (s.context, effect);
+    keepVersion (s.context, "Loud");
+
+    // While the song plays on, the session keeping its plug-ins: the old version's own, in their helper.
+    phazite::playOrStop (*phazite::findSong (s.context));
+    REQUIRE (phazite::canBounce (s.context, quiet));
+    REQUIRE (phazite::startBackgroundBounce (s.context, quiet));
+    CHECK (phazite::getBounceProgress (s.context, quiet).has_value());
+    CHECK (phazite::isSongPlaying (*phazite::findSong (s.context)));
+    CHECK_FALSE (phazite::getSession (s.context)->isLentToRender());
+    CHECK_FALSE (phazite::canBounce (s.context, phazite::getLastVersion (s.context)->id)); // one at a time
+
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getVersions (s.context).back().hasBounce; }, 60000));
+    CHECK (phazite::getBounceProblem (s.context).isEmpty());
+    CHECK_FALSE (phazite::getBounceProgress (s.context, quiet).has_value());
+    CHECK (phazite::isSongPlaying (*phazite::findSong (s.context)));
+    phazite::stopAndReturn (*phazite::findSong (s.context));
+
+    // The same as an export of that version's song, brought back, written as a bounce is.
+    REQUIRE (phazite::bringBackVersion (s.context, quiet));
+    phazite::ExportSettings settings;
+    settings.format = phazite::ExportSettings::Format::flac;
+    settings.bitDepth = 16;
+    settings.sampleRate = phazite::getSession (s.context)->getEngine().getSampleRate();
+    const auto exported = sounds.folder.getChildFile ("Quiet.flac");
+    std::optional<phazite::ExportReport> report;
+    const auto exporting = phazite::startExport (*phazite::findSong (s.context), exported, settings,
+                                                 [&report] (const phazite::ExportReport& r) { report = r; });
+    REQUIRE (dispatchMessagesUntil ([&report] { return report.has_value(); }, 60000));
+    REQUIRE (report->result.wasOk());
+
+    const auto bounced = readAudio (phazite::getVersionHistory (s.context)->getBounceFile (quiet)), wanted = readAudio (exported);
+    REQUIRE (bounced.getNumSamples() == wanted.getNumSamples());
+    CHECK (bounced.getMagnitude (0, 0, bounced.getNumSamples()) > 0.01f); // through the plug-in at its gain, as the export
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        auto differs = 0;
+
+        for (int i = 0; i < bounced.getNumSamples(); ++i)
+            differs += juce::exactlyEqual (bounced.getSample (channel, i), wanted.getSample (channel, i)) ? 0 : 1;
+
+        CHECK (differs == 0);
+    }
+}
+
+TEST_CASE ("The song plays in real time while an old version renders in the background, no block late")
+{
+    TestSong s;
+    TemporaryFolder sounds;
+    const auto track = s.addTrack ("Hits");
+    s.addAudioClip (track, writeHits (sounds.folder.getChildFile ("Hits.wav"), 90.0, 0.5f), 0.0);
+    const auto old = keepVersion (s.context, "Old");
+    s.setVolume (track, -6.0f);
+    keepVersion (s.context, "New");
+
+    const RealTimePlayback playback;
+    auto& engine = phazite::getSession (s.context)->getEngine();
+    phazite::playOrStop (*phazite::findSong (s.context));
+    RealTimePlayback::wait (300);
+    engine.takeBlockTimes(); // from here on
+
+    REQUIRE (phazite::startBackgroundBounce (s.context, old));
+    RealTimePlayback::wait (1500);
+    const auto times = engine.takeBlockTimes();
+    INFO ("longest gap " << times.longestGap * 1000.0 << " ms, longest block " << times.longestBlock * 1000.0 << " ms");
+    CHECK (phazite::getBounceProgress (s.context, old).has_value()); // still rendering, all the while
+    CHECK (times.late == 0);
+    phazite::stopAndReturn (*phazite::findSong (s.context));
+    REQUIRE (phazite::deleteBounce (s.context, old)); // stops it
+}
+
+TEST_CASE ("No bounce starts while the song records, and one going on in the background stops as recording starts")
+{
+    TestSong s;
+    TemporaryFolder sounds;
+    const auto track = s.addTrack ("Hits");
+    s.addAudioClip (track, writeHits (sounds.folder.getChildFile ("Hits.wav"), 90.0, 0.5f), 0.0); // long, to be rendering still
+    const auto old = keepVersion (s.context, "Old");
+    s.setVolume (track, -6.0f);
+    keepVersion (s.context, "New");
+    auto& song = *phazite::findSong (s.context);
+    phazite::getSession (s.context)->setLiveTrack (track); // live MIDI plays it: it can record
+
+    // Recording: none starts.
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    CHECK_FALSE (phazite::canBounce (s.context, old));
+    phazite::stopRecording (song);
+    REQUIRE (phazite::canBounce (s.context, old));
+
+    // One going on stops as recording starts, and says so.
+    REQUIRE (phazite::startBackgroundBounce (s.context, old));
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    CHECK (dispatchMessagesUntil ([&s, &old] { return ! phazite::getBounceProgress (s.context, old).has_value(); }));
+    CHECK (phazite::getBounceProblem (s.context) == "Bouncing \"Old\" stopped for recording.");
+    CHECK_FALSE (phazite::getVersions (s.context).back().hasBounce);
+    phazite::stopRecording (song);
+
+    // Deleting a bounce that renders stops it, leaving nothing.
+    REQUIRE (phazite::startBackgroundBounce (s.context, old));
+    REQUIRE (phazite::deleteBounce (s.context, old));
+    CHECK_FALSE (phazite::getBounceProgress (s.context, old).has_value());
+    CHECK_FALSE (phazite::getVersionHistory (s.context)->getBounceFile (old).existsAsFile());
 }
 
 TEST_CASE ("Save Version with a bounce bounces the version it saves, in the host, as the box says")

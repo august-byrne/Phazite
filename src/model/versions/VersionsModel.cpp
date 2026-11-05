@@ -5,12 +5,15 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/Export.h"
 #include "model/project/internal/Export.h"
+#include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
 
 namespace phazite
 {
@@ -736,6 +739,16 @@ namespace
         return 48000.0;
     }
 
+    // What a bounce is: FLAC of 16 bits, dithered, at that rate.
+    ExportSettings getBounceSettings (const ProjectContext& context)
+    {
+        ExportSettings settings;
+        settings.format = ExportSettings::Format::flac;
+        settings.bitDepth = 16;
+        settings.sampleRate = getBounceRate (context);
+        return settings;
+    }
+
     // A version's bounce: the song rendered as Export Song renders it (model/project/internal/Export.h), into the version's
     // file among the bounces, in FLAC of 16 bits, dithered. The file is the export's: written whole, or not at all.
     class VersionBounce final : public TrackRender::Impl
@@ -761,12 +774,7 @@ namespace
             if (! file.getParentDirectory().createDirectory())
                 return false;
 
-            ExportSettings settings;
-            settings.format = ExportSettings::Format::flac;
-            settings.bitDepth = 16;
-            settings.sampleRate = getBounceRate (context);
-
-            exporting = startExport (*song, file, settings,
+            exporting = startExport (*song, file, getBounceSettings (context),
                                      [this, done = std::move (onFinished)] (const ExportReport& report)
                                      {
                                          if (auto* h = findHistory (context))
@@ -814,21 +822,101 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    // Whether the song is a version as it is now: the current branch's last, with no changes since.
+    bool isSongNow (VersionHistory& history, const juce::String& versionID)
+    {
+        const auto* last = history.findLastVersion();
+        return last != nullptr && last->id == versionID && ! history.hasChanges();
+    }
+
+    // An old version's bounce (step V5): its song alone, read from the versions and made a song of its own in the project's
+    // folders, rendered in the background as Export Song renders a song (internal/Export.h: startBackgroundExport()), with
+    // plug-in instances of its own, while the open song plays on. The history holds it while it renders.
+    class OldVersionBounce final : public TrackRender::Impl
+    {
+    public:
+        OldVersionBounce (ProjectContext& c, juce::String id)
+            : context (c),
+              versionID (std::move (id))
+        {
+        }
+
+        juce::Result start()
+        {
+            auto* history = findHistory (context);
+            auto* open = findSong (context);
+            const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
+
+            if (open == nullptr || version == nullptr)
+                return juce::Result::fail ("That version isn't there any more.");
+
+            title = "Bouncing \"" + getDisplayName (*version) + "\"";
+            const auto state = history->readSong (versionID);
+            song = state.isValid() ? makeSong (state, open->getFile(), open->getCacheFolder()) : nullptr;
+
+            if (song == nullptr)
+                return juce::Result::fail ("Phazite couldn't read \"" + getDisplayName (*version) + "\".");
+
+            if (getSongEnd (*song) <= BeatPosition())
+                return juce::Result::fail ("\"" + getDisplayName (*version) + "\" has no clips, so there is nothing to bounce.");
+
+            const auto file = history->getBounceFile (versionID);
+
+            if (! file.getParentDirectory().createDirectory())
+                return juce::Result::fail ("Phazite couldn't write into the project's Versions folder.");
+
+            exporting = startBackgroundExport (*song, getPluginHost (getEngineContext (context)), file, getBounceSettings (context),
+                                               [this] (const ExportReport& report) { finished (report.result); });
+            return juce::Result::ok();
+        }
+
+        float getProgress() const override { return exporting != nullptr ? exporting->getProgress() : 0.0f; }
+        juce::String getTitle() const override { return title; }
+
+    private:
+        ProjectContext& context;
+        const juce::String versionID;
+        juce::String title;
+        Song::Ptr song;                        // the version's, alone
+        std::unique_ptr<SongExport> exporting; // goes before the song it renders
+
+        void finished (const juce::Result& result)
+        {
+            auto* history = findHistory (context);
+
+            if (history == nullptr)
+                return;
+
+            history->bounceProblem =
+                result.wasOk() ? juce::String() : title.replace ("Bouncing", "Couldn't bounce") + ": " + result.getErrorMessage();
+            history->bouncingVersion.clear();
+            const auto self = std::move (history->backgroundBounce); // this: it goes as this returns
+            history->readBounces();
+        }
+    };
+} // namespace
+
 bool canBounce (const ProjectContext& context, const juce::String& versionID)
 {
     auto* history = findHistory (context);
     auto* song = findSong (context);
-    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
     const auto* session = getSession (context);
 
-    return song != nullptr && last != nullptr && last->id == versionID && ! history->isSaving() && ! history->hasBounce (versionID)
-           && ! history->hasChanges() && canExport (*song) && (session == nullptr || ! session->isLentToRender());
+    if (song == nullptr || history == nullptr || history->findVersion (versionID) == nullptr || history->isSaving()
+        || history->hasBounce (versionID) || history->backgroundBounce != nullptr || isRecording (*song)
+        || (session != nullptr && session->isLentToRender()))
+        return false;
+
+    // The song as it is now must have something to play; an old version's song is rendered on its own.
+    return ! isSongNow (*history, versionID) || canExport (*song);
 }
 
 std::unique_ptr<TrackRender> startBounce (ProjectContext& context, const juce::String& versionID,
                                           std::function<void (const juce::Result&)> onFinished)
 {
-    if (! canBounce (context, versionID))
+    if (! canBounce (context, versionID) || ! isSongNow (*findHistory (context), versionID))
         return {};
 
     auto bounce = std::make_unique<VersionBounce> (context, versionID, getDisplayName (*findHistory (context)->findVersion (versionID)));
@@ -839,15 +927,64 @@ std::unique_ptr<TrackRender> startBounce (ProjectContext& context, const juce::S
     return std::make_unique<TrackRender> (std::move (bounce));
 }
 
-void bounceVersion (ProjectContext& context, const juce::String& versionID, TrackRenderHost& host)
+bool startBackgroundBounce (ProjectContext& context, const juce::String& versionID)
+{
+    auto* history = findHistory (context);
+
+    if (! canBounce (context, versionID) || isSongNow (*history, versionID))
+        return false;
+
+    auto bounce = std::make_unique<OldVersionBounce> (context, versionID);
+
+    if (const auto started = bounce->start(); started.failed())
+    {
+        history->bounceProblem = started.getErrorMessage();
+        history->tellNow();
+        return false;
+    }
+
+    history->bounceProblem.clear();
+    history->bouncingVersion = versionID;
+    history->backgroundBounce = std::make_unique<TrackRender> (std::move (bounce));
+    history->tellNow();
+    return true;
+}
+
+std::optional<float> getBounceProgress (const ProjectContext& context, const juce::String& versionID)
 {
     const auto* history = findHistory (context);
+
+    if (history == nullptr || history->backgroundBounce == nullptr || history->bouncingVersion != versionID)
+        return std::nullopt;
+
+    return history->backgroundBounce->getProgress();
+}
+
+juce::String getBounceProblem (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr ? history->bounceProblem : juce::String();
+}
+
+void bounceVersion (ProjectContext& context, const juce::String& versionID, TrackRenderHost& host)
+{
+    auto* history = findHistory (context);
     const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
     const auto title = "Bouncing \"" + (version != nullptr ? getDisplayName (*version) : juce::String ("the version")) + "\"";
 
     if (! canBounce (context, versionID))
     {
-        host.renderFinished (title, juce::Result::fail ("Only the version the song is now can be bounced, once."));
+        host.renderFinished (title, juce::Result::fail ("It can't be bounced now: it has a bounce already, or the song is being bounced, "
+                                                        "exported or recorded."));
+        return;
+    }
+
+    // An old version: in the background, beside the song playing.
+    if (! isSongNow (*history, versionID))
+    {
+        if (! startBackgroundBounce (context, versionID))
+            host.renderFinished (title, juce::Result::fail (getBounceProblem (context)));
+
         return;
     }
 
@@ -863,7 +1000,19 @@ bool deleteBounce (ProjectContext& context, const juce::String& versionID)
     auto* history = findHistory (context);
     auto* song = findSong (context);
 
-    if (history == nullptr || song == nullptr || ! history->hasBounce (versionID))
+    if (history == nullptr || song == nullptr)
+        return false;
+
+    // Still rendering in the background: it stops, and leaves nothing.
+    if (history->backgroundBounce != nullptr && history->bouncingVersion == versionID)
+    {
+        history->backgroundBounce = nullptr;
+        history->bouncingVersion.clear();
+        history->readBounces();
+        return true;
+    }
+
+    if (! history->hasBounce (versionID))
         return false;
 
     // Compared with the song until now: the song alone again first, then the file, once the engine lets go of it.
@@ -979,8 +1128,9 @@ void deleteSelectedBounce (ProjectContext& context)
 
 bool canDeleteSelectedBounce (const ProjectContext& context)
 {
+    const auto selected = getSelectedVersion (context);
     const auto* history = findHistory (context);
-    return history != nullptr && history->hasBounce (getSelectedVersion (context));
+    return history != nullptr && (history->hasBounce (selected) || getBounceProgress (context, selected).has_value());
 }
 
 void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen, OpenSong openSong,

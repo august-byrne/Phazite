@@ -9,6 +9,7 @@
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
@@ -146,17 +147,19 @@ namespace
     }
 
     // How an export renders: on Phazite's engine, on as many threads as it plays on, with the plug-ins of the song's
-    // session, which it lends (none play without one).
-    OfflineRender::Setup getRenderSetup (Song& song, double sampleRate)
+    // session, which it lends (none play without one); or, for a song no session plays, with plug-in instances of its own,
+    // in the background, on one thread.
+    OfflineRender::Setup getRenderSetup (Song& song, double sampleRate, PluginInstances* own = nullptr)
     {
         auto* session = findSession (song);
+        auto* plugins = session != nullptr ? &session->getPlugins() : own;
         return { .session = session,
-                 .makePlayer = [&song, session]
-                 { return std::make_unique<SongPlayer> (song, session != nullptr ? &session->getPlugins() : nullptr); },
+                 .makePlayer = [&song, plugins] { return std::make_unique<SongPlayer> (song, plugins); },
                  .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
                  .sampleRate = sampleRate,
                  .blockSize = renderBlockSize,
-                 .playedShare = renderedShare };
+                 .playedShare = renderedShare,
+                 .background = session == nullptr && own != nullptr };
     }
 
     //==============================================================================
@@ -298,7 +301,8 @@ namespace
     // measured again.
     struct SongRender final : SongExport::Impl
     {
-        SongRender (Song& song, const juce::File& file, const ExportSettings& settings, std::function<void (const ExportReport&)> callback)
+        SongRender (Song& song, const juce::File& file, const ExportSettings& settings, std::function<void (const ExportReport&)> callback,
+                    PluginHost* pluginHost = nullptr)
             : temporary (file),
               onFinished (std::move (callback)),
               alive (std::make_shared<SongRender*> (this))
@@ -317,10 +321,14 @@ namespace
             file.getParentDirectory().createDirectory();
             renderMissingClipAudio (song); // the engine plays a clip whose render isn't there silent
 
+            // A song no session plays: its plug-ins in instances of its own.
+            if (findSession (song) == nullptr && pluginHost != nullptr)
+                ownPlugins = std::make_unique<PluginInstances> (song, *pluginHost, settings.sampleRate);
+
             // Played into floats, written into the file, and measured on the render thread before the message thread hears.
             const OfflineRender::Job job { floats.getFile(), toSeconds (song, getExportRange (song).getEnd()), tailSeconds, std::nullopt };
             renderer = std::make_unique<OfflineRender> (
-                getRenderSetup (song, settings.sampleRate), std::vector { job },
+                getRenderSetup (song, settings.sampleRate, ownPlugins.get()), std::vector { job },
                 [settings, floatsFile = floats.getFile(), written = temporary.getFile()] (OfflineRender& render, int index,
                                                                                           const auto& readings)
                 { return writeExport (render, index, floatsFile, written, settings, readings); },
@@ -353,7 +361,8 @@ namespace
         juce::TemporaryFile temporary; // the render, until it replaces the chosen file; deleted if it never does
         juce::TemporaryFile floats { temporary.getFile().withFileExtension ("wav") }; // what is played, before it is written
         const std::function<void (const ExportReport&)> onFinished;
-        std::shared_ptr<SongRender*> alive; // what the render thread's report holds on to
+        std::shared_ptr<SongRender*> alive;          // what the render thread's report holds on to
+        std::unique_ptr<PluginInstances> ownPlugins; // which the render plays, and goes after it
         std::unique_ptr<OfflineRender> renderer;
 
         JUCE_DECLARE_NON_COPYABLE (SongRender)
@@ -475,6 +484,13 @@ std::unique_ptr<SongExport> startExport (Song& song, const juce::File& file, con
         return std::make_unique<SongExport> (std::make_unique<StemsRender> (song, file, settings, std::move (onFinished)));
 
     return std::make_unique<SongExport> (std::make_unique<SongRender> (song, file, settings, std::move (onFinished)));
+}
+
+std::unique_ptr<SongExport> startBackgroundExport (Song& song, PluginHost& plugins, const juce::File& file, const ExportSettings& settings,
+                                                   std::function<void (const ExportReport&)> onFinished)
+{
+    jassert (findSession (song) == nullptr && ! settings.stems);
+    return std::make_unique<SongExport> (std::make_unique<SongRender> (song, file, settings, std::move (onFinished), &plugins));
 }
 
 SongExport::SongExport (std::unique_ptr<Impl> i)
