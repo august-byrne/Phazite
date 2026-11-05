@@ -3,17 +3,28 @@
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <map>
+
 namespace phazite::ui
 {
 namespace
 {
+    // A line's name, "+ " for what was added, "- " for what was taken away.
+    juce::String getMarkedName (const VersionChange& change)
+    {
+        return (change.kind == VersionChange::Kind::added ? "+ " : change.kind == VersionChange::Kind::removed ? "- " : "") + change.name;
+    }
+
     juce::String describeChangeLine (const VersionChange& change)
     {
-        const auto name = (change.kind == VersionChange::Kind::added     ? "+ "
-                           : change.kind == VersionChange::Kind::removed ? "- "
-                                                                         : "")
-                          + change.name;
+        const auto name = getMarkedName (change);
         return change.what.isEmpty() ? name : name + ": " + change.what;
+    }
+
+    juce::String describeValue (const ClashInfo& clash, int value)
+    {
+        const juce::String whose[] = { "Before both", "This branch", clash.otherBranch };
+        return whose[value] + ": " + clash.values[value];
     }
 
     void setUpHeading (juce::Label& label, const juce::String& text)
@@ -22,6 +33,19 @@ namespace
         label.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
         label.setJustificationType (juce::Justification::centredLeft);
         label.setMinimumHorizontalScale (1.0f);
+    }
+
+    // A row's name and what it says of it, side by side.
+    void drawLine (juce::Graphics& g, juce::Rectangle<int> area, const Palette& p, const juce::String& name, const juce::String& what)
+    {
+        g.setColour (p.text);
+        g.setFont (juce::FontOptions (TextSize::body));
+        const auto nameWidth =
+            juce::jmin (area.getWidth() / 2, juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), name)) + Space::m);
+        g.drawText (name, area.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
+        g.setColour (p.textMuted);
+        g.setFont (juce::FontOptions (TextSize::small));
+        g.drawText (what, area, juce::Justification::centredLeft, true);
     }
 } // namespace
 
@@ -46,7 +70,8 @@ juce::String VersionsView::describeWhen (juce::Time saved, juce::Time now)
 }
 
 //==============================================================================
-// The changes since the last version: a track's name, then what changed of it; a click selects the track.
+// The list of lines: the changes since the last version, a click selecting a line's track; a merge's lines, a click ticking
+// one; or a merge's clashes, a click choosing a value.
 class VersionsView::ChangesModel : public juce::ListBoxModel
 {
 public:
@@ -59,11 +84,10 @@ public:
 
     void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
     {
-        if (! juce::isPositiveAndBelow (row, (int) view.changes.size()))
+        if (! juce::isPositiveAndBelow (row, view.getNumChanges()))
             return;
 
         const auto& p = getPalette (view);
-        const auto& change = view.changes[(size_t) row];
         auto area = juce::Rectangle<int> (width, height).reduced (Space::s, 0);
 
         if (selected)
@@ -72,25 +96,57 @@ public:
             g.fillRect (0, 0, width, height);
         }
 
-        const auto name = (change.kind == VersionChange::Kind::added     ? "+ "
-                           : change.kind == VersionChange::Kind::removed ? "- "
-                                                                         : "")
-                          + change.name;
-        g.setColour (p.text);
-        g.setFont (juce::FontOptions (TextSize::body));
-        const auto nameWidth =
-            juce::jmin (area.getWidth() / 2, juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), name)) + Space::m);
-        g.drawText (name, area.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
+        if (view.lines == Lines::merge)
+        {
+            // A box ticked while the merge takes the line, and a word where it clashes with what this branch changed.
+            const auto& line = view.mergeLines[(size_t) row];
+            const auto box = area.removeFromLeft (height).toFloat().withSizeKeepingCentre (History::tickSize, History::tickSize);
+            g.setColour (line.ticked ? p.accent : p.textMuted);
+            g.drawRoundedRectangle (box.reduced (0.5f), cornerRadius / 2.0f, 1.0f);
 
-        g.setColour (p.textMuted);
-        g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText (change.what, area, juce::Justification::centredLeft, true);
+            if (line.ticked)
+                g.fillRoundedRectangle (box.reduced (History::tickInset), cornerRadius / 2.0f);
+
+            if (line.clashes)
+            {
+                g.setColour (p.warning);
+                g.setFont (juce::FontOptions (TextSize::small));
+                const juce::String word ("clashes");
+                const auto wordWidth = juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), word)) + Space::s;
+                g.drawText (word, area.removeFromRight (wordWidth), juce::Justification::centredRight, false);
+            }
+
+            drawLine (g, area, p, getMarkedName (line.change), line.change.what);
+            return;
+        }
+
+        if (view.lines == Lines::clashes)
+        {
+            const auto& clash = view.clashes[(size_t) row];
+            drawLine (g, area, p, clash.line + ": " + clash.what, describeValue (clash, clash.chosen));
+            return;
+        }
+
+        const auto& change = view.changes[(size_t) row];
+        drawLine (g, area, p, getMarkedName (change), change.what);
     }
 
     void listBoxItemClicked (int row, const juce::MouseEvent& e) override
     {
-        if (! juce::isPositiveAndBelow (row, (int) view.changes.size()))
+        if (! juce::isPositiveAndBelow (row, view.getNumChanges()))
             return;
+
+        if (view.lines == Lines::merge)
+        {
+            tickMergeLine (view.context, row, ! view.mergeLines[(size_t) row].ticked);
+            return;
+        }
+
+        if (view.lines == Lines::clashes)
+        {
+            view.showClashMenu (row);
+            return;
+        }
 
         // A click selects what changed: its track, or the master; the right button shows what can be done with it.
         const auto& change = view.changes[(size_t) row];
@@ -105,18 +161,32 @@ public:
 
     void selectedRowsChanged (int row) override
     {
-        if (juce::isPositiveAndBelow (row, (int) view.changes.size()))
+        if (view.lines == Lines::changes && juce::isPositiveAndBelow (row, (int) view.changes.size()))
             selectChange (view.context, view.changes[(size_t) row]);
+    }
+
+    void returnKeyPressed (int row) override
+    {
+        if (view.lines == Lines::merge && juce::isPositiveAndBelow (row, (int) view.mergeLines.size()))
+            tickMergeLine (view.context, row, ! view.mergeLines[(size_t) row].ticked);
+        else if (view.lines == Lines::clashes)
+            view.showClashMenu (row);
     }
 
     juce::String getNameForRow (int row) override { return view.describeChange (row); }
 
     juce::String getTooltipForRow (int row) override
     {
-        if (! juce::isPositiveAndBelow (row, (int) view.changes.size()))
+        if (! juce::isPositiveAndBelow (row, view.getNumChanges()))
             return {};
 
-        return describeChangeLine (view.changes[(size_t) row]) + ". Click to select it in the song.";
+        if (view.lines == Lines::merge)
+            return view.describeChange (row) + ". Click to take it, or to leave it out.";
+
+        if (view.lines == Lines::clashes)
+            return view.describeChange (row) + ". Both lines changed it: click to choose whose value the song has.";
+
+        return view.describeChange (row) + ". Click to select it in the song; right-click to put it back.";
     }
 
 private:
@@ -124,7 +194,8 @@ private:
 };
 
 //==============================================================================
-// The history: "Now", the song as it is, then every branch's versions, newest first, each a dot on its branch's line.
+// The history: "Now", the song as it is, then every branch's versions, newest first, each a dot on its branch's line, in its
+// branch's column.
 class VersionsView::HistoryModel : public juce::ListBoxModel
 {
 public:
@@ -147,15 +218,39 @@ public:
         }
 
         area.reduce (Space::s, 0);
-        auto lane = area.removeFromLeft (History::laneWidth + Space::xs);
-        const auto dot = juce::Rectangle<float> (History::dotSize, History::dotSize)
-                             .withCentre ({ (float) lane.getX() + History::laneWidth / 2.0f, (float) height / 2.0f });
+        const auto lanes = juce::jmax (1, (int) view.branches.size());
+        const auto laneArea = area.removeFromLeft (lanes * History::laneWidth + Space::xs);
+        const auto laneCentre = [&laneArea] (int lane)
+        { return (float) laneArea.getX() + ((float) lane + 0.5f) * (float) History::laneWidth; };
+        const auto middle = (float) height / 2.0f;
+
+        // The lines through this row, under its dot.
+        for (const auto& line : view.historyLines)
+        {
+            if (row < line.top || row > line.bottom || line.top == line.bottom)
+                continue;
+
+            const auto top = laneCentre (line.topLane), bottom = laneCentre (line.bottomLane);
+            const auto down = line.turnsAtBottom ? top : bottom; // the column it goes down
+            g.setColour (line.colour);
+
+            if (row == line.top)
+                g.drawLine (top, middle, down, (float) height, History::lineWidth);
+            else if (row == line.bottom)
+                g.drawLine (down, 0.0f, bottom, middle, History::lineWidth);
+            else
+                g.drawLine (down, 0.0f, down, (float) height, History::lineWidth);
+        }
+
+        const auto dotAt = [&] (const juce::String& branch)
+        { return juce::Rectangle<float> (History::dotSize, History::dotSize).withCentre ({ laneCentre (view.getLane (branch)), middle }); };
 
         if (row == 0)
         {
             g.setColour (p.textMuted);
-            g.drawEllipse (dot.reduced (0.5f), History::lineWidth / 2.0f);
+            g.fillEllipse (dotAt (view.currentBranch).reduced (1.0f));
             g.setColour (p.text);
+            g.drawEllipse (dotAt (view.currentBranch).reduced (0.5f), History::lineWidth / 2.0f);
             g.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
             g.drawText ("Now", area, juce::Justification::centredLeft, true);
             return;
@@ -165,12 +260,8 @@ public:
             return;
 
         const auto& version = view.versions[(size_t) row - 1];
-        const auto colour = view.getBranchColour (version.branch);
-
-        // Its branch's line through it, to the version before it.
-        g.setColour (colour);
-        g.fillRect (juce::Rectangle<float> (History::lineWidth, (float) height).withCentre (dot.getCentre()));
-        g.fillEllipse (dot);
+        g.setColour (view.getBranchColour (version.branch));
+        g.fillEllipse (dotAt (version.branch));
 
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::small));
@@ -178,17 +269,17 @@ public:
         g.drawText (when, area.removeFromRight (juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), when)) + Space::xs),
                     juce::Justification::centredRight, false);
 
-        auto lines = area;
+        auto text = area;
 
         if (version.note.isNotEmpty())
         {
-            g.drawText (version.note, lines.removeFromBottom (height / 2 - 1), juce::Justification::centredLeft, true);
-            lines = lines.withTrimmedTop (2);
+            g.drawText (version.note, text.removeFromBottom (height / 2 - 1), juce::Justification::centredLeft, true);
+            text = text.withTrimmedTop (2);
         }
 
         g.setColour (version.hasOwnName ? p.text : p.textMuted);
         g.setFont (juce::FontOptions (TextSize::body));
-        g.drawText (version.name, lines, juce::Justification::centredLeft, true);
+        g.drawText (version.name, text, juce::Justification::centredLeft, true);
     }
 
     juce::String getNameForRow (int row) override { return view.describeHistoryRow (row); }
@@ -196,7 +287,7 @@ public:
     juce::String getTooltipForRow (int row) override
     {
         if (row == 0)
-            return "Now: the song as it is, with the changes since its last version";
+            return "Now: the song as it is, with the changes since its last version. Right-click to make a branch from it";
 
         return view.describeHistoryRow (row) + ". Right-click for what can be done with it.";
     }
@@ -205,8 +296,13 @@ public:
     {
         selectedRowsChanged (row);
 
-        if (e.mods.isPopupMenu() && row > 0)
-            view.showMenu ({ "version.bringBack", "version.takeFrom" });
+        if (! e.mods.isPopupMenu())
+            return;
+
+        if (row > 0)
+            view.showMenu ({ "version.bringBack", "version.takeFrom", "version.newBranch", "version.merge" });
+        else
+            view.showMenu ({ "version.newBranch" });
     }
 
     void selectedRowsChanged (int row) override
@@ -233,14 +329,14 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     const auto& p = getPalette (*this);
 
     setUpHeading (title, "VERSIONS");
-    branchName.setFont (juce::FontOptions (TextSize::small));
-    branchName.setJustificationType (juce::Justification::centredRight);
-    branchName.setTitle ("Branch");
     setUpHeading (changesHeading, {});
     setUpHeading (historyHeading, "HISTORY");
     emptyText.setFont (juce::FontOptions (TextSize::small));
     emptyText.setJustificationType (juce::Justification::topLeft);
     emptyText.setColour (juce::Label::textColourId, p.textMuted);
+
+    branchButton.setTitle ("Branch");
+    branchButton.onClick = [this] { showBranchMenu(); };
 
     nameField.setTitle ("Version name");
     nameField.setTextToShowWhenEmpty ("Name this version (optional)", p.textMuted);
@@ -259,8 +355,13 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
         setVersionDraft (context, nameField.getText(), noteField.getText()); // as typed, the last key too
         commands.invoke ("version.save");
     };
+
     doneButton.setButtonText ("Done");
     doneButton.onClick = [this] { commands.invoke ("version.showChanges"); };
+    mergeButton.setButtonText ("Merge");
+    mergeButton.onClick = [this] { commands.invoke ("version.finishMerge"); };
+    cancelButton.setButtonText ("Cancel");
+    cancelButton.onClick = [this] { commands.invoke ("version.cancelMerge"); };
 
     for (auto* list : { &changesList, &historyList })
     {
@@ -271,12 +372,13 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     changesList.setRowHeight (History::changeRowHeight);
     historyList.setRowHeight (History::versionRowHeight);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &title, &branchName, &nameField, &noteField, &saveButton, &changesHeading,
+    for (auto* c : std::initializer_list<juce::Component*> { &title, &branchButton, &nameField, &noteField, &saveButton, &changesHeading,
                                                              &changesList, &historyHeading, &historyList })
         addAndMakeVisible (c);
 
-    addChildComponent (emptyText);
-    addChildComponent (doneButton);
+    for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton })
+        addChildComponent (c);
+
     refreshTooltips();
     context.addListener (this);
     refresh();
@@ -297,6 +399,9 @@ void VersionsView::refreshTooltips()
     noteField.setTooltip ("A note to keep with the version: what it tried, or what to try next");
     changesList.setTooltip ("What the song holds now that its last version didn't, by track. Right-click a line to put it back");
     doneButton.setTooltip (withShortcut (commands, "Lists the changes since the last version again", "version.showChanges"));
+    mergeButton.setTooltip (withShortcut (commands, "Takes the lines ticked into the song, as one undo step", "version.finishMerge"));
+    cancelButton.setTooltip (withShortcut (commands, "Closes the merge's list, taking nothing", "version.cancelMerge"));
+    branchButton.setTooltip ("The branch the song is on: click to switch to another, or to start one");
     historyList.setTooltip ("Every version, newest first, each on its branch's line");
 }
 
@@ -304,6 +409,15 @@ void VersionsView::focusName()
 {
     if (nameField.isShowing())
         nameField.grabKeyboardFocus();
+}
+
+int VersionsView::getLane (const juce::String& branchID) const
+{
+    for (size_t i = 0; i < branches.size(); ++i)
+        if (branches[i].id == branchID)
+            return (int) i;
+
+    return 0;
 }
 
 juce::Colour VersionsView::getBranchColour (const juce::String& id) const
@@ -324,9 +438,29 @@ juce::String VersionsView::getBranchName (const juce::String& id) const
     return {};
 }
 
+int VersionsView::getNumChanges() const noexcept
+{
+    return lines == Lines::merge ? (int) mergeLines.size() : lines == Lines::clashes ? (int) clashes.size() : (int) changes.size();
+}
+
 juce::String VersionsView::describeChange (int row) const
 {
-    return juce::isPositiveAndBelow (row, (int) changes.size()) ? describeChangeLine (changes[(size_t) row]) : juce::String();
+    if (! juce::isPositiveAndBelow (row, getNumChanges()))
+        return {};
+
+    if (lines == Lines::merge)
+    {
+        const auto& line = mergeLines[(size_t) row];
+        return (line.ticked ? "Taken: " : "Left out: ") + describeChangeLine (line.change) + (line.clashes ? ", clashes" : "");
+    }
+
+    if (lines == Lines::clashes)
+    {
+        const auto& clash = clashes[(size_t) row];
+        return clash.line + ": " + clash.what + ", " + describeValue (clash, clash.chosen);
+    }
+
+    return describeChangeLine (changes[(size_t) row]);
 }
 
 juce::String VersionsView::describeHistoryRow (int row) const
@@ -356,43 +490,113 @@ void VersionsView::showMenu (std::initializer_list<const char*> commandIDs)
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 
+void VersionsView::showBranchMenu()
+{
+    // Each branch, the one the song is on ticked; then a new one from Now.
+    juce::PopupMenu menu;
+
+    for (const auto& branch : branches)
+    {
+        menu.addItem (branch.name, true, branch.id == currentBranch,
+                      [this, id = branch.id]
+                      {
+                          if (id == currentBranch)
+                              return;
+
+                          selectBranch (context, id);
+                          commands.invoke ("version.switchBranch");
+                      });
+    }
+
+    if (! branches.empty())
+        menu.addSeparator();
+
+    menu.addItem ("New Branch from Now", canMakeBranch (context), false,
+                  [this]
+                  {
+                      selectVersion (context, {});
+                      commands.invoke ("version.newBranch");
+                  });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (branchButton));
+}
+
+void VersionsView::showClashMenu (int index)
+{
+    if (! juce::isPositiveAndBelow (index, (int) clashes.size()))
+        return;
+
+    // Its three values, the one the song has ticked: a choice is heard at once.
+    juce::PopupMenu menu;
+    const auto& clash = clashes[(size_t) index];
+
+    for (int value : { 1, 2, 0 })
+        menu.addItem (describeValue (clash, value), true, clash.chosen == value,
+                      [this, index, value] { chooseClash (context, index, value); });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
 void VersionsView::refresh()
 {
     const auto keeps = keepsVersions (context);
     const auto reading = isReadingVersions (context);
     changes = getListedChanges (context);
+    mergeLines = getMergeLines (context);
+    clashes = getClashes (context);
     versions = getVersions (context);
     branches = getBranches (context);
 
     const auto branch = getCurrentBranch (context);
-    branchName.setText (branch.has_value() ? branch->name : juce::String(), juce::dontSendNotification);
-    branchName.setColour (juce::Label::textColourId, branch.has_value() ? branch->colour : getPalette (*this).textMuted);
+    currentBranch = branch.has_value() ? branch->id : juce::String();
+    refreshHistoryLines (branch.has_value() ? branch->head : juce::String());
+    branchButton.setButtonText (branch.has_value() ? branch->name + juce::String::fromUTF8 (" \xe2\x96\xbe") : juce::String());
+    branchButton.setColour (juce::TextButton::textColourOffId, branch.has_value() ? branch->colour : getPalette (*this).textMuted);
+    branchButton.setVisible (branch.has_value());
 
-    // The changes since the last version, or what differs from the version taken from (Take from This Version...).
+    // A merge's list while it shows; its clashes while it waits for its version; otherwise the changes.
+    lines = ! mergeLines.empty() ? Lines::merge : ! clashes.empty() ? Lines::clashes : Lines::changes;
     const auto last = getLastVersion (context);
     const auto compared = getComparedVersion (context);
+    const auto merged = describeMerge (context);
     juce::String comparedName;
 
     for (const auto& version : versions)
         if (version.id == compared)
             comparedName = version.name;
 
-    const auto count = "  " + juce::String ((int) changes.size());
-    changesHeading.setText (compared.isNotEmpty() ? "TAKE FROM \"" + comparedName + "\"" + count
-                            : last.has_value()    ? "CHANGES SINCE \"" + last->name + "\"" + count
-                                                  : juce::String ("CHANGES"),
-                            juce::dontSendNotification);
-    doneButton.setVisible (compared.isNotEmpty());
+    const auto count = "  " + juce::String (getNumChanges());
+    const auto branchNameText = branch.has_value() ? branch->name : juce::String();
 
-    // What there is to say while there is nothing to list.
-    emptyText.setText (! keeps   ? juce::String ("Versions are kept for a project, once it has been saved.")
-                       : reading ? juce::String ("Reading the versions...")
-                       : ! last  ? juce::String ("No versions yet. Save Version keeps the song as it is now, to come back to.")
-                       : changes.empty() && compared.isNotEmpty() ? juce::String ("The song is as that version was.")
-                       : changes.empty()                          ? juce::String ("No changes since the last version.")
-                                                                  : juce::String(),
-                       juce::dontSendNotification);
-    emptyText.setVisible (emptyText.getText().isNotEmpty());
+    changesHeading.setText (lines == Lines::merge     ? "MERGE \"" + merged + "\" INTO " + branchNameText + count
+                            : lines == Lines::clashes ? "CLASHES" + count
+                            : compared.isNotEmpty()   ? "TAKE FROM \"" + comparedName + "\"" + count
+                            : last.has_value()        ? "CHANGES SINCE \"" + last->name + "\"" + count
+                                                      : juce::String ("CHANGES"),
+                            juce::dontSendNotification);
+
+    doneButton.setVisible (lines == Lines::changes && compared.isNotEmpty());
+    mergeButton.setVisible (lines == Lines::merge);
+    cancelButton.setVisible (lines == Lines::merge);
+
+    // What there is to say while there is nothing to list, and while a merge waits for its version.
+    juce::String said = ! keeps   ? juce::String ("Versions are kept for a project, once it has been saved.")
+                        : reading ? juce::String ("Reading the versions...")
+                        : ! last  ? juce::String ("No versions yet. Save Version keeps the song as it is now, to come back to.")
+                        : getNumChanges() == 0 && compared.isNotEmpty() ? juce::String ("The song is as that version was.")
+                        : getNumChanges() == 0                          ? juce::String ("No changes since the last version.")
+                                                                        : juce::String();
+
+    if (isMerging (context))
+    {
+        said = "Merging \"" + merged + "\": save a version to finish." + (said.isNotEmpty() ? " " + said : juce::String());
+
+        for (const auto& note : getMergeNotes (context))
+            said << "\n" << note;
+    }
+
+    emptyText.setText (said, juce::dontSendNotification);
+    emptyText.setVisible (said.isNotEmpty());
 
     // The drafts the model holds: empty again once a version was saved with them.
     if (nameField.getText() != getVersionDraftName (context))
@@ -411,6 +615,36 @@ void VersionsView::refresh()
     changesList.repaint();
     historyList.repaint();
     resized();
+}
+
+void VersionsView::refreshHistoryLines (const juce::String& nowFollows)
+{
+    // Each version's lines to the versions it follows, and Now's to the current branch's last version (or, on a branch without
+    // versions yet, the one it was made from).
+    std::map<juce::String, int> rows;
+
+    for (size_t i = 0; i < versions.size(); ++i)
+        rows[versions[i].id] = (int) i + 1;
+
+    historyLines.clear();
+
+    const auto addLine = [this, &rows] (int row, const juce::String& branch, const juce::String& parent, bool first)
+    {
+        const auto found = rows.find (parent);
+
+        if (found == rows.end())
+            return;
+
+        const auto& parentBranch = versions[(size_t) found->second - 1].branch;
+        historyLines.push_back (
+            { row, found->second, getLane (branch), getLane (parentBranch), first, getBranchColour (first ? branch : parentBranch) });
+    };
+
+    addLine (0, currentBranch, nowFollows, true);
+
+    for (size_t i = 0; i < versions.size(); ++i)
+        for (int p = 0; p < versions[i].parents.size(); ++p)
+            addLine ((int) i + 1, versions[i].branch, versions[i].parents[p], p == 0);
 }
 
 void VersionsView::textEditorTextChanged (juce::TextEditor&)
@@ -433,29 +667,39 @@ void VersionsView::resized()
 {
     auto area = getLocalBounds().reduced (Space::s);
     auto top = area.removeFromTop (controlHeight);
-    branchName.setBounds (top.removeFromRight (top.getWidth() / 2));
+    branchButton.setBounds (top.removeFromRight (top.getWidth() / 2));
     title.setBounds (top);
     area.removeFromTop (Space::xs);
     nameField.setBounds (area.removeFromTop (controlHeight));
     area.removeFromTop (Space::xs);
     noteField.setBounds (area.removeFromTop (controlHeight));
     area.removeFromTop (Space::xs);
-    saveButton.setBounds (area.removeFromTop (controlHeight).removeFromRight (juce::jmin (area.getWidth(), 120)));
+    saveButton.setBounds (area.removeFromTop (controlHeight).removeFromRight (juce::jmin (area.getWidth(), History::saveButtonWidth)));
     area.removeFromTop (Space::s);
 
-    // The changes, as many rows as they have (up to half of what is left), then the history.
+    // The lines, as many rows as they have (up to half of what is left), then the history.
     auto heading = area.removeFromTop (controlHeight);
 
     if (doneButton.isVisible())
-        doneButton.setBounds (heading.removeFromRight (juce::jmin (heading.getWidth() / 3, 72)));
+        doneButton.setBounds (heading.removeFromRight (juce::jmin (heading.getWidth() / 3, History::buttonWidth)));
 
     changesHeading.setBounds (heading);
-    const auto changesHeight = juce::jmin (area.getHeight() / 2, juce::jmax (1, (int) changes.size()) * History::changeRowHeight);
+
+    if (mergeButton.isVisible())
+    {
+        auto buttons = area.removeFromTop (controlHeight);
+        cancelButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth() / 2, History::buttonWidth)));
+        buttons.removeFromRight (Space::xs);
+        mergeButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth(), History::buttonWidth)));
+        area.removeFromTop (Space::xs);
+    }
 
     if (emptyText.isVisible())
-        emptyText.setBounds (area.removeFromTop (History::noteHeight));
+        emptyText.setBounds (area.removeFromTop (History::noteHeight + (isMerging (context) ? History::noteHeight : 0)));
 
-    changesList.setBounds (changes.empty() ? juce::Rectangle<int>() : area.removeFromTop (changesHeight));
+    const auto rows = getNumChanges();
+    const auto listHeight = juce::jmin (area.getHeight() / 2, juce::jmax (1, rows) * History::changeRowHeight);
+    changesList.setBounds (rows == 0 ? juce::Rectangle<int>() : area.removeFromTop (listHeight));
     area.removeFromTop (Space::s);
     historyHeading.setBounds (area.removeFromTop (controlHeight));
     historyList.setBounds (area);

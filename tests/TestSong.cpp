@@ -71,6 +71,18 @@ void TestSong::reopen()
     setSong (context, &project->getSong());
 }
 
+void TestSong::openSong (const juce::ValueTree& song)
+{
+    const auto file = project->getFile();
+    setSong (context, nullptr);
+    project = nullptr;
+
+    juce::String error;
+    project = Project::openSong (file, song, error);
+    REQUIRE_MESSAGE (project != nullptr, error.toStdString());
+    setSong (context, &project->getSong());
+}
+
 void TestSong::run (const juce::String& commandID)
 {
     REQUIRE_MESSAGE (commands.invoke (commandID), (commandID + " is unknown or greyed out").toStdString());

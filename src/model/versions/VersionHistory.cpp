@@ -289,6 +289,15 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
     if (branch.head.isNotEmpty())
         version.parents.add (branch.head);
 
+    // A merge's version follows both lines, and is named for what it merged while it has no name of its own.
+    if (merging.has_value() && merging->version.isNotEmpty() && ! version.parents.contains (merging->version))
+    {
+        version.parents.add (merging->version);
+
+        if (const auto* merged = findVersion (merging->version))
+            version.summary = "Merge \"" + getDisplayName (*merged) + "\"";
+    }
+
     saving = true;
     tellNow(); // "Saving..."
 
@@ -340,6 +349,7 @@ void VersionHistory::saved (int number, bool ok, const VersionRecord& version, c
 
     versions[version.id] = version;
     currentBranch = branch.id;
+    merging.reset();         // its version finishes it
     comparedVersion.clear(); // the changes since the new version
     comparedSong = {};
 
@@ -664,5 +674,150 @@ void VersionHistory::timerCallback()
 
     if (std::exchange (notifyPending, false) && onChange != nullptr)
         onChange();
+}
+
+//==============================================================================
+juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool makeCurrent)
+{
+    followFolder();
+
+    if (store == nullptr || ! hasRead || saving)
+        return {};
+
+    const auto* current = findCurrentBranch();
+    const auto head = fromVersion.isNotEmpty() ? fromVersion : current != nullptr ? current->head : juce::String();
+
+    if (findVersion (head) == nullptr)
+        return {};
+
+    // "Idea 2", the next number no branch has, in the next color of the tracks' palette (Main took the second).
+    const auto isTaken = [this] (const juce::String& name)
+    { return std::any_of (branches.begin(), branches.end(), [&name] (const auto& branch) { return branch.name == name; }); };
+
+    auto number = 2;
+
+    while (isTaken ("Idea " + juce::String (number)))
+        ++number;
+
+    const BranchRecord branch { juce::Uuid().toString(),
+                                "Idea " + juce::String (number),
+                                getTrackColours()[(branches.size() + 1) % getTrackColours().size()].colour,
+                                head,
+                                {} };
+
+    if (! store->writeBranch (branch) || (makeCurrent && ! store->writeCurrentBranch (branch.id)))
+        return {};
+
+    branches.push_back (branch);
+
+    if (makeCurrent)
+        currentBranch = branch.id; // the same last version: the changes since stay as they are
+
+    tellNow();
+    return branch.id;
+}
+
+juce::ValueTree VersionHistory::leaveFor (const juce::String& branchID)
+{
+    followFolder();
+    const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
+    const auto current =
+        std::find_if (branches.begin(), branches.end(), [this] (const auto& branch) { return branch.id == currentBranch; });
+
+    if (store == nullptr || ! hasRead || saving || found == branches.end() || current == branches.end() || branchID == currentBranch)
+        return {};
+
+    // The song as it is now, its view state and unsaved changes too, its plug-ins' settings stored, on the branch it leaves.
+    song.storeDeviceStates();
+    const auto pieces = splitSong (song.getState().createCopy(), readPluginParameters());
+
+    if (! store->writeSong (pieces))
+        return {};
+
+    auto left = *current;
+    left.working = pieces.song;
+
+    // The other's, as it was left there, or as its last version had it.
+    const auto* head = findVersion (found->head);
+    auto other = found->working.isNotEmpty() ? store->readSong (found->working)
+                 : head != nullptr           ? store->readSong (head->song)
+                                             : juce::ValueTree();
+    store->getPieces().closeFiles();
+
+    if (! other.isValid() || ! store->writeBranch (left))
+        return {};
+
+    auto entered = *found;
+    entered.working = {};
+
+    if (! store->writeBranch (entered) || ! store->writeCurrentBranch (entered.id))
+        return {};
+
+    *current = left;
+    *found = entered;
+    currentBranch = entered.id;
+    merging.reset();
+    preview.reset();
+    return other;
+}
+
+bool VersionHistory::renameBranch (const juce::String& branchID, const juce::String& name)
+{
+    const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
+
+    if (store == nullptr || found == branches.end() || name.trim().isEmpty())
+        return false;
+
+    auto renamed = *found;
+    renamed.name = name.trim();
+
+    if (! store->writeBranch (renamed))
+        return false;
+
+    *found = renamed;
+    tellNow();
+    return true;
+}
+
+juce::String VersionHistory::findCommonVersion (const juce::String& a, const juce::String& b) const
+{
+    // Every version a is or follows; then, of those b is or follows, the one saved last.
+    const auto ancestors = [this] (const juce::String& from)
+    {
+        std::set<juce::String> found;
+        juce::StringArray toVisit (from);
+
+        while (! toVisit.isEmpty())
+        {
+            const auto id = toVisit[toVisit.size() - 1];
+            toVisit.remove (toVisit.size() - 1);
+
+            if (id.isEmpty() || ! found.insert (id).second)
+                continue;
+
+            if (const auto* version = findVersion (id))
+                toVisit.addArray (version->parents);
+        }
+
+        return found;
+    };
+
+    const auto ofA = ancestors (a);
+    juce::String newest;
+    juce::int64 newestSaved = -1;
+
+    for (const auto& id : ancestors (b))
+    {
+        if (ofA.count (id) == 0)
+            continue;
+
+        if (const auto* version = findVersion (id); version != nullptr && version->saved > newestSaved)
+        {
+            newest = id;
+            newestSaved = version->saved;
+        }
+    }
+
+    return newest;
 }
 } // namespace phazite

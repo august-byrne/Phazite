@@ -2,6 +2,7 @@
 #include "VersionsModel.h"
 #include "internal/ApplySong.h"
 #include "internal/VersionHistory.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/internal/ProjectContext.h"
@@ -347,7 +348,355 @@ void putBackSelectedChange (ProjectContext& context)
         takeBack (context, *line);
 }
 
-void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen)
+//==============================================================================
+bool newBranch (ProjectContext& context, const juce::String& fromVersion, const OpenSong& openSong)
+{
+    auto* history = findHistory (context);
+
+    if (history == nullptr)
+        return false;
+
+    // From Now, the song goes on there as it is; from a version, that version's song opens there.
+    if (fromVersion.isEmpty())
+        return history->makeBranch ({}, true).isNotEmpty();
+
+    const auto branch = history->makeBranch (fromVersion, false);
+    return branch.isNotEmpty() && switchBranch (context, branch, openSong);
+}
+
+bool switchBranch (ProjectContext& context, const juce::String& branchID, const OpenSong& openSong)
+{
+    auto* history = findHistory (context);
+
+    if (history == nullptr || openSong == nullptr)
+        return false;
+
+    const auto song = history->leaveFor (branchID);
+
+    if (! song.isValid())
+        return false;
+
+    openSong (song); // last: it closes this song, and its history with it
+    return true;
+}
+
+bool renameBranch (ProjectContext& context, const juce::String& branchID, const juce::String& name)
+{
+    auto* history = findHistory (context);
+    return history != nullptr && history->renameBranch (branchID, name);
+}
+
+bool canMakeBranch (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && ! history->isReading() && ! history->isSaving()
+           && (history->findVersion (history->selectedVersion) != nullptr || history->findLastVersion() != nullptr);
+}
+
+void selectBranch (ProjectContext& context, const juce::String& branchID)
+{
+    if (auto* history = findHistory (context))
+        history->selectedBranch = branchID;
+}
+
+void newBranchFromSelection (ProjectContext& context, const OpenSong& openSong)
+{
+    newBranch (context, getSelectedVersion (context), openSong);
+}
+
+void switchToSelectedBranch (ProjectContext& context, const OpenSong& openSong)
+{
+    if (const auto* history = findHistory (context))
+        switchBranch (context, history->selectedBranch, openSong);
+}
+
+//==============================================================================
+namespace
+{
+    MergeLines toMergeLines (const std::vector<VersionChange>& lines)
+    {
+        MergeLines merged;
+
+        for (const auto& line : lines)
+        {
+            if (line.isSong)
+                merged.songOwn = true;
+            else
+                merged.tracks.insert (line.track.getRaw());
+        }
+
+        return merged;
+    }
+
+    bool isOnLine (const MergeClash& clash, const SongChange& line)
+    {
+        return line.where == SongChange::Where::song ? clash.trackID == 0 : clash.trackID == line.trackID;
+    }
+} // namespace
+
+bool canMerge (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+
+    if (history == nullptr || history->isReading() || history->isSaving())
+        return false;
+
+    const auto* last = history->findLastVersion();
+    const auto& selected = history->selectedVersion;
+
+    // Not the current branch's last version, nor one it follows: what it has already.
+    return last != nullptr && history->findVersion (selected) != nullptr && history->findCommonVersion (last->id, selected) != selected;
+}
+
+juce::String describeMergeInto (const ProjectContext& context)
+{
+    const auto branch = getCurrentBranch (context);
+    return "Merge into " + (branch.has_value() ? branch->name : juce::String ("the Current Branch")) + "...";
+}
+
+bool startMerge (ProjectContext& context, const juce::String& versionID)
+{
+    auto* history = findHistory (context);
+    auto* song = findSong (context);
+    const auto* last = history != nullptr ? history->findLastVersion() : nullptr;
+    const auto* version = history != nullptr ? history->findVersion (versionID) : nullptr;
+
+    if (song == nullptr || last == nullptr || version == nullptr)
+        return false;
+
+    // From the newest version both lines have, or from nothing for two of no common line.
+    VersionHistory::Merge preview;
+    preview.version = versionID;
+    const auto parted = history->findCommonVersion (last->id, versionID);
+    preview.base = parted.isNotEmpty() ? history->readSong (parted) : juce::ValueTree (schema::PHAZITE);
+    preview.theirs = history->readSong (versionID);
+
+    for (const auto& branch : history->getBranches())
+        if (branch.id == version->branch)
+            preview.otherBranch = branch.name;
+
+    if (! preview.base.isValid() || ! preview.theirs.isValid())
+        return false;
+
+    // What it changed, by line, and what of it clashes with what the song changed: a merge of every line, tried on copies.
+    preview.lines = findChanges (preview.base, preview.theirs);
+    auto next = juce::jmax (findNextID (song->getState()), findNextID (preview.theirs));
+    MergeLines everything;
+
+    for (const auto& line : preview.lines)
+    {
+        if (line.where == SongChange::Where::song)
+            everything.songOwn = true;
+        else
+            everything.tracks.insert (line.trackID);
+    }
+
+    preview.clashes = mergeSongs (preview.base, song->getState(), preview.theirs, everything, [&next] { return next++; }).clashes;
+    history->ticked.assign (preview.lines.size(), true);
+    history->preview = std::move (preview);
+    history->tellNow();
+    return true;
+}
+
+std::vector<MergeLine> getMergeLines (const ProjectContext& context)
+{
+    std::vector<MergeLine> lines;
+
+    if (const auto* history = findHistory (context); history != nullptr && history->preview.has_value())
+    {
+        for (const auto& line : history->preview->lines)
+        {
+            const auto clashes = std::any_of (history->preview->clashes.begin(), history->preview->clashes.end(),
+                                              [&line] (const MergeClash& clash) { return isOnLine (clash, line); });
+            const auto index = lines.size();
+            lines.push_back ({ toLine (line), clashes, index < history->ticked.size() && history->ticked[index] });
+        }
+    }
+
+    return lines;
+}
+
+juce::String describeMerge (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+
+    if (history == nullptr)
+        return {};
+
+    const auto& merge = history->preview.has_value() ? history->preview : history->merging;
+    const auto* version = merge.has_value() ? history->findVersion (merge->version) : nullptr;
+    return version != nullptr ? getDisplayName (*version) : juce::String();
+}
+
+juce::StringArray getMergeNotes (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->merging.has_value() ? history->merging->notes : juce::StringArray();
+}
+
+void cancelMerge (ProjectContext& context)
+{
+    if (auto* history = findHistory (context); history != nullptr && history->preview.has_value())
+    {
+        history->preview.reset();
+        history->tellNow();
+    }
+}
+
+bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lines)
+{
+    auto* history = findHistory (context);
+    auto* song = findSong (context);
+
+    if (song == nullptr || history == nullptr || ! history->preview.has_value())
+        return false;
+
+    auto merge = std::move (*history->preview);
+    history->preview.reset();
+    const auto* version = history->findVersion (merge.version);
+
+    // A change of its own, one undo step: the song made what the merge of its lines makes, its IDs counted on past them.
+    song->storeDeviceStates();
+    auto result = mergeSongs (merge.base, song->getState(), merge.theirs, toMergeLines (lines), [song] { return song->makeID(); });
+    const UndoStep step (*song, "Merge \"" + (version != nullptr ? getDisplayName (*version) : juce::String ("a version")) + "\"");
+    makeSongLike (*song, result.song);
+    countIDs (*song);
+
+    merge.clashes = std::move (result.clashes);
+    merge.chosen.assign (merge.clashes.size(), 1);
+    merge.notes = result.notes;
+    history->merging = std::move (merge);
+    history->tellNow();
+    return true;
+}
+
+bool isMerging (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->merging.has_value();
+}
+
+std::vector<ClashInfo> getClashes (const ProjectContext& context)
+{
+    std::vector<ClashInfo> infos;
+    const auto* history = findHistory (context);
+
+    if (history == nullptr || ! history->merging.has_value())
+        return infos;
+
+    const auto& merging = *history->merging;
+
+    for (size_t i = 0; i < merging.clashes.size(); ++i)
+    {
+        const auto& clash = merging.clashes[i];
+        ClashInfo info;
+        info.line = clash.line;
+        info.what = clash.what;
+        info.otherBranch = merging.otherBranch;
+        info.chosen = merging.chosen[i];
+
+        if (clash.property.isValid())
+        {
+            const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+
+            for (int v = 0; v < 3; ++v)
+                info.values[v] = values[v]->isVoid() ? juce::String ("none") : values[v]->toString();
+        }
+        else
+        {
+            info.values[0] = clash.baseElement.isValid() ? "as before" : "none";
+            info.values[1] = clash.oursElement.isValid() ? "this branch's" : "none";
+            info.values[2] = clash.theirsElement.isValid() ? merging.otherBranch + "'s" : "none";
+        }
+
+        infos.push_back (std::move (info));
+    }
+
+    return infos;
+}
+
+bool chooseClash (ProjectContext& context, int index, int value)
+{
+    auto* history = findHistory (context);
+    auto* song = findSong (context);
+
+    if (song == nullptr || history == nullptr || ! history->merging.has_value() || ! juce::isPositiveAndBelow (value, 3)
+        || ! juce::isPositiveAndBelow (index, (int) history->merging->clashes.size()))
+        return false;
+
+    auto& merging = *history->merging;
+    const auto& clash = merging.clashes[(size_t) index];
+    const juce::String whose[] = { "the value before both", "this branch's", merging.otherBranch + "'s" };
+    auto* undo = &song->getUndoManager();
+
+    // A change of its own, one undo step: "Take Idea 2's Bass volume".
+    const UndoStep step (*song, "Take " + whose[value] + " " + clash.line + " " + clash.what);
+
+    if (clash.property.isValid())
+    {
+        auto element = findByPath (song->getState(), clash.path);
+
+        if (! element.isValid())
+            return false;
+
+        const juce::var* values[] = { &clash.base, &clash.ours, &clash.theirs };
+
+        if (values[value]->isVoid())
+            element.removeProperty (clash.property, undo);
+        else
+            element.setProperty (clash.property, *values[value], undo);
+    }
+    else
+    {
+        auto parentPath = clash.path;
+        parentPath.remove (parentPath.size() - 1);
+        auto parent = findByPath (song->getState(), parentPath);
+
+        if (! parent.isValid())
+            return false;
+
+        const auto existing = findByPath (song->getState(), clash.path);
+        const juce::ValueTree* elements[] = { &clash.baseElement, &clash.oursElement, &clash.theirsElement };
+        const auto place = existing.isValid() ? parent.indexOf (existing) : -1;
+
+        if (existing.isValid())
+            parent.removeChild (existing, undo);
+
+        if (elements[value]->isValid())
+            parent.addChild (elements[value]->createCopy(), place, undo);
+    }
+
+    merging.chosen[(size_t) index] = value;
+    history->tellNow();
+    return true;
+}
+
+void mergeSelectedVersion (ProjectContext& context)
+{
+    startMerge (context, getSelectedVersion (context));
+}
+
+void tickMergeLine (ProjectContext& context, int line, bool ticked)
+{
+    if (auto* history = findHistory (context); history != nullptr && juce::isPositiveAndBelow (line, (int) history->ticked.size()))
+    {
+        history->ticked[(size_t) line] = ticked;
+        history->tellNow();
+    }
+}
+
+void finishTickedMerge (ProjectContext& context)
+{
+    std::vector<VersionChange> ticked;
+
+    for (const auto& line : getMergeLines (context))
+        if (line.ticked)
+            ticked.push_back (line.change);
+
+    finishMerge (context, ticked);
+}
+
+void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen, OpenSong openSong)
 {
     registry.add ({ .id = "version.save",
                     .name = "Save Version",
@@ -388,6 +737,51 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                     .perform = [&context] { putBackSelectedChange (context); },
                     .isEnabled = [&context] { return canPutBack (context); },
                     .currentName = [&context] { return describePutBack (context); } });
+
+    // Branches and merges: what opens another branch's song is the app's (openSong).
+    registry.add ({ .id = "version.newBranch",
+                    .name = "New Branch from Here",
+                    .category = "Project",
+                    .description = "Starts a branch, named and colored at once: from the selected version, which the song then becomes, or "
+                                   "from now, the song going on there with its changes. The branch left keeps its own.",
+                    .synonyms = { "branch", "fork", "idea", "alternative", "try something" },
+                    .perform = [&context, openSong] { newBranchFromSelection (context, openSong); },
+                    .isEnabled = [&context] { return canMakeBranch (context); } });
+
+    registry.add ({ .id = "version.switchBranch",
+                    .name = "Switch to the Branch",
+                    .category = "Project",
+                    .description = "Opens the branch picked in the Versions view as it was left, and keeps the song as it is now on "
+                                   "the branch it leaves, its changes too.",
+                    .synonyms = { "checkout", "branch", "go to", "open branch" },
+                    .perform = [&context, openSong] { switchToSelectedBranch (context, openSong); } });
+
+    registry.add ({ .id = "version.merge",
+                    .name = "Merge into the Current Branch...",
+                    .category = "Project",
+                    .description = "Lists what the selected version changed since the newest version both lines have, by track, to take "
+                                   "into the song as one undo step.",
+                    .synonyms = { "merge", "combine", "join", "pull" },
+                    .perform = [&context] { mergeSelectedVersion (context); },
+                    .isEnabled = [&context] { return canMerge (context); },
+                    .currentName = [&context] { return describeMergeInto (context); } });
+
+    registry.add ({ .id = "version.finishMerge",
+                    .name = "Merge",
+                    .category = "Project",
+                    .description = "Takes the lines ticked in the merge's list into the song, as one undo step; save a version to finish "
+                                   "the merge.",
+                    .synonyms = { "merge", "apply", "take" },
+                    .perform = [&context] { finishTickedMerge (context); },
+                    .isEnabled = [&context] { return ! getMergeLines (context).empty(); } });
+
+    registry.add ({ .id = "version.cancelMerge",
+                    .name = "Cancel the Merge",
+                    .category = "Project",
+                    .description = "Closes the merge's list without taking anything into the song.",
+                    .synonyms = { "cancel", "close", "back" },
+                    .perform = [&context] { cancelMerge (context); },
+                    .isEnabled = [&context] { return ! getMergeLines (context).empty(); } });
 
     registry.add ({ .id = "version.showChanges",
                     .name = "Show the Changes Since the Last Version",

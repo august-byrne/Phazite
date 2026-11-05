@@ -195,12 +195,14 @@ TEST_CASE ("Save Version saves the project first, then records the version")
     phazite::CommandRegistry commands;
     int saves = 0;
 
-    phazite::addVersionCommands (commands, s.context,
-                                 [&s, &saves] (std::function<void (bool)> then)
-                                 {
-                                     ++saves;
-                                     then (s.getProject().save().wasOk());
-                                 });
+    phazite::addVersionCommands (
+        commands, s.context,
+        [&s, &saves] (std::function<void (bool)> then)
+        {
+            ++saves;
+            then (s.getProject().save().wasOk());
+        },
+        [&s] (const juce::ValueTree& song) { s.openSong (song); });
 
     waitForVersions (s.context);
     s.addTrack ("Lead");

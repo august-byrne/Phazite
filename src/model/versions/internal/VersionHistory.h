@@ -7,6 +7,7 @@
 #pragma once
 
 #include "SongDiff.h"
+#include "SongMerge.h"
 #include "VersionStore.h"
 #include "model/base/Song.h"
 
@@ -71,6 +72,39 @@ public:
     // How many bytes the history takes on disk.
     juce::int64 getSize() const;
 
+    //==============================================================================
+    // Branches (docs/versions.md: Branches). One made from a version, or from the current branch's last version (none), named
+    // "Idea 2" and on, in the next color; and made the current one, the song going on there, if asked: its id, or none if it
+    // can't be made. Leaving the current branch for another: the song as it is now, view state and unsaved changes included,
+    // kept on the branch it leaves, and the other branch's song as it was left there (or its last version's), to open in its
+    // place: invalid if it can't be. And a branch named anew.
+    juce::String makeBranch (const juce::String& fromVersion, bool makeCurrent);
+    juce::ValueTree leaveFor (const juce::String& branchID);
+    bool renameBranch (const juce::String& branchID, const juce::String& name);
+    juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to
+
+    // The newest version that two versions both are or follow; none for two of no common line.
+    juce::String findCommonVersion (const juce::String& a, const juce::String& b) const;
+
+    // A merge, from its window (preview) until the version that finishes it is saved (merging): the version merged, the
+    // song it parted from and the other's, the other's changes by line, and the clashes; then which value of each the song
+    // has (0, the one before either side changed it; 1, this branch's; 2, the other's) and the notes.
+    struct Merge
+    {
+        juce::String version, otherBranch;
+        juce::ValueTree base, theirs;
+        std::vector<SongChange> lines;
+        std::vector<MergeClash> clashes;
+        std::vector<int> chosen;
+        juce::StringArray notes;
+    };
+
+    std::optional<Merge> preview, merging;
+    std::vector<bool> ticked; // the merge window's lines that Merge takes
+
+    // Tells onChange at once: what was read or written, a branch made, a merge begun.
+    void tellNow();
+
     // The name and the note the Versions view holds for the next version, until it is saved with them.
     juce::String draftName, draftNote;
 
@@ -123,7 +157,6 @@ private:
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
     void markAllChanged();
     void changed(); // tells onChange at the next tick
-    void tellNow(); // what was read or written, at once
     void takeChangesOutsideHistory();
     PluginParameterValues readPluginParameters() const;
 

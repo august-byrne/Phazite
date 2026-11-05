@@ -482,6 +482,28 @@ void ProjectSession::askWhetherToRestore (const juce::File& file, bool untitled,
     juce::AlertWindow::showAsync (options, [callback] (int result) { callback (result == 1); });
 }
 
+void ProjectSession::openBranchSong (const juce::ValueTree& song)
+{
+    // Another branch's song in the project's file, opened as a project opens (model/versions/VersionsModel.h: switchBranch()):
+    // what the song held was kept on the branch it left.
+    if (project == nullptr)
+        return;
+
+    const auto file = project->getFile();
+    setProject (nullptr);
+
+    juce::String error;
+
+    if (auto opened = Project::openSong (file, song, error))
+    {
+        setProject (std::move (opened));
+        return;
+    }
+
+    showError ("Phazite couldn't open the branch", error);
+    open (file, false);
+}
+
 void ProjectSession::open (const juce::File& file, bool restoreAutosave)
 {
     juce::String error;
@@ -639,7 +661,9 @@ void ProjectSession::addCommands (CommandRegistry& registry)
 
     // Save Version: the project saved first, asking where for an untitled one, then a version of its song
     // (model/versions/VersionsModel.h).
-    addVersionCommands (registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); });
+    addVersionCommands (
+        registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); },
+        [this] (const juce::ValueTree& song) { openBranchSong (song); });
 
     registry.add ({ .id = "project.export",
                     .name = "Export Song",

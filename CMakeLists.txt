@@ -388,6 +388,7 @@ target_sources(phazite_core PRIVATE
     src/model/versions/ApplySong.cpp
     src/model/versions/PieceStore.cpp
     src/model/versions/SongDiff.cpp
+    src/model/versions/SongMerge.cpp
     src/model/versions/SongPieces.cpp
     src/model/versions/VersionHistory.cpp
     src/model/versions/VersionStore.cpp
@@ -396,6 +397,7 @@ target_sources(phazite_core PRIVATE
     src/model/versions/internal/ApplySong.h
     src/model/versions/internal/PieceStore.h
     src/model/versions/internal/SongDiff.h
+    src/model/versions/internal/SongMerge.h
     src/model/versions/internal/SongPieces.h
     src/model/versions/internal/VersionHistory.h
     src/model/versions/internal/VersionStore.h
@@ -1041,7 +1043,9 @@ if(PHAZITE_BUILD_TESTS)
         tests/UndoTests.cpp
         tests/ValueTextTests.cpp
         tests/VersionStoreTests.cpp
+        tests/VersionsBranchTests.cpp
         tests/VersionsGoingBackTests.cpp
+        tests/VersionsMergeTests.cpp
         tests/VersionsTests.cpp
         tests/VocoderTests.cpp
         tests/WavetableEditorTests.cpp

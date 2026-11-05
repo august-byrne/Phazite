@@ -73,10 +73,11 @@ public:
     void newProject(); // the new-project window
     void openProject();
     void openProject (const juce::File&);
-    void chooseRecentProject(); // a menu of the recent projects
-    void saveProject();         // asks where first if the project is untitled
-    void saveProjectAs();       // a copy under a new name, which then stays open; the first save if untitled
-    void exportSong();          // through onExport
+    void chooseRecentProject();                   // a menu of the recent projects
+    void saveProject();                           // asks where first if the project is untitled
+    void saveProjectAs();                         // a copy under a new name, which then stays open; the first save if untitled
+    void exportSong();                            // through onExport
+    void openBranchSong (const juce::ValueTree&); // another branch's song in the project's file, as a project opens
 
     // Makes an untitled project with what the settings choose, and opens it: the new-project window's Create.
     juce::Result createProject (const NewProjectSettings&);

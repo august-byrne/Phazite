@@ -187,6 +187,8 @@ namespace History
     inline constexpr int changeRowHeight = 24, versionRowHeight = 30, noteHeight = 52;
     inline constexpr int laneWidth = 12; // a branch's line's column
     inline constexpr float dotSize = 8.0f, lineWidth = 2.0f;
+    inline constexpr int saveButtonWidth = 120, buttonWidth = 72; // Save Version; Done, Merge and Cancel, at their widest
+    inline constexpr float tickSize = 12.0f, tickInset = 3.0f;    // a merge's line's box, filled while the line is taken
 } // namespace History
 
 inline constexpr int knobSize = 64;

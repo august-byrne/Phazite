@@ -116,10 +116,70 @@ void takeFromSelectedVersion (ProjectContext&);
 void bringBackSelectedVersion (ProjectContext&);
 void putBackSelectedChange (ProjectContext&);
 
+//==============================================================================
+// Branches (docs/versions.md: Branches). Switching opens the other branch's song as a project opens, which the app does
+// (OpenSong: ProjectSession, tests' TestSong::openSong()): the song as it is now, unsaved changes included, is kept on the
+// branch it leaves, and the undo history starts again. Not undo steps.
+using OpenSong = std::function<void (const juce::ValueTree& song)>;
+
+// New Branch from Here: a branch named "Idea 2" (the next number free), in the next color, from a version, or from Now (none):
+// from the current branch's last version, the song with its unsaved changes going on there. From a version, the song becomes
+// that version's. False if it can't be made (before the first version, while one is being saved).
+bool newBranch (ProjectContext&, const juce::String& fromVersion, const OpenSong&);
+bool switchBranch (ProjectContext&, const juce::String& branchID, const OpenSong&);
+bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::String& name);
+bool canMakeBranch (const ProjectContext&);
+
+// The branch the Versions view's branch menu picked, which version.switchBranch switches to.
+void selectBranch (ProjectContext&, const juce::String& branchID);
+
+//==============================================================================
+// Merging (docs/versions.md: Merging). A version of another line (another branch's, or one the current branch's past doesn't
+// hold) into the song: its window lists what it changed since the newest version both have, by line, each with whether it
+// clashes with what the song changed; Merge takes the lines ticked as one undo step ("Merge "Half-time""). Then, until the
+// next version is saved (which follows both lines), each clash switches between its three values, each switch an undo step.
+struct MergeLine
+{
+    VersionChange change;
+    bool clashes = false; // with what this side changed
+    bool ticked = true;   // to be taken: each to start with
+};
+
+bool canMerge (const ProjectContext&);                  // the version selected can be: not the current branch's last, nor in its past
+juce::String describeMergeInto (const ProjectContext&); // version.merge's name: "Merge into Main..."
+bool startMerge (ProjectContext&, const juce::String& versionID);
+std::vector<MergeLine> getMergeLines (const ProjectContext&); // the merge window's, while it shows
+juce::String describeMerge (const ProjectContext&);           // "Half-time" (the version's name), while it shows or is merging
+juce::StringArray getMergeNotes (const ProjectContext&);      // what the merge couldn't decide, once it is made
+void cancelMerge (ProjectContext&);
+bool finishMerge (ProjectContext&, const std::vector<VersionChange>& lines);
+bool isMerging (const ProjectContext&); // made, until its version is saved
+
+// The merge window's ticks, and its Merge with the lines ticked (version.finishMerge).
+void tickMergeLine (ProjectContext&, int line, bool ticked);
+void finishTickedMerge (ProjectContext&);
+
+struct ClashInfo
+{
+    juce::String line, what;
+    juce::String values[3]; // before both changed it, this branch's, the other's: as text
+    juce::String otherBranch;
+    int chosen = 1;
+};
+
+std::vector<ClashInfo> getClashes (const ProjectContext&);
+bool chooseClash (ProjectContext&, int clash, int value); // 0 before both, 1 this branch's, 2 the other's
+
 // Save Version (version.save): the project saved first, then a version recorded, as saveProjectThen() does it: the app's
 // save, which asks where a project goes the first time, and calls back with whether it saved.
 using SaveProjectThen = std::function<void (std::function<void (bool saved)>)>;
 void saveProjectAndVersion (ProjectContext&, const SaveProjectThen&);
 bool canSaveVersion (const ProjectContext&);
-void addVersionCommands (CommandRegistry&, ProjectContext&, SaveProjectThen);
+
+// The versions' commands: version.save, the commands on the version and the line the Versions view selects, and those of
+// branches and merges, which open another branch's song through openSong.
+void addVersionCommands (CommandRegistry&, ProjectContext&, SaveProjectThen, OpenSong);
+void newBranchFromSelection (ProjectContext&, const OpenSong&);
+void switchToSelectedBranch (ProjectContext&, const OpenSong&);
+void mergeSelectedVersion (ProjectContext&);
 } // namespace phazite

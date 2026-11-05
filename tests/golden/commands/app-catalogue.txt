@@ -97,6 +97,11 @@ version.save | ctrl + alt + S
 version.bringBack
 version.takeFrom
 version.putBack
+version.newBranch
+version.switchBranch
+version.merge
+version.finishMerge
+version.cancelMerge
 version.showChanges
 project.export | ctrl + shift + R
 view.commandPalette | ctrl + K
