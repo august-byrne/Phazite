@@ -70,7 +70,7 @@ public:
     juce::RectangleList<int> takeRepaintedArea();
 
     void resized() override; // the content fills the window
-    juce::ComponentPeer* createNewPeer (int styleFlags, void* nativeWindowToAttachTo) override;
+    juce::ComponentPeer* createNewPeer (const juce::DesktopWindowOptions&) override;
 };
 
 // The components of a type in a tree (the root included).

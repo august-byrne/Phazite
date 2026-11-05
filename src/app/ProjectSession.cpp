@@ -118,12 +118,12 @@ void ProjectSession::askHowToOpenAfterCrash (const juce::File& file, std::functi
                              .withMessage ("The last time, \"" + file.getFileNameWithoutExtension()
                                            + "\" was open. If a plug-in in it crashed Phazite, open it with its plug-ins off: they "
                                              "stay as they were, silent, until it opens again.")
-                             .withButton ("Open")
-                             .withButton ("Open with Plug-ins Off")
-                             .withButton ("Start a New Project")
+                             .withButton ("Open", 1)
+                             .withButton ("Open with Plug-ins Off", 2)
+                             .withButton ("Start a New Project", 0)
                              .withAssociatedComponent (dialogParent);
 
-    // With three buttons, JUCE reports the first as 1, the second as 2 and the last as 0.
+    // Escape, or closing the window, answers 0, as the last button does.
     juce::AlertWindow::showAsync (
         options, [callback] (int result)
         { callback (result == 1   ? AfterCrash::open
@@ -471,13 +471,13 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
                              .withIconType (juce::MessageBoxIconType::QuestionIcon)
                              .withTitle ("Save changes?")
                              .withMessage ("Save the changes to \"" + project->getFile().getFileNameWithoutExtension() + "\" first?")
-                             .withButton ("Save")
-                             .withButton ("Don't save")
-                             .withButton ("Cancel")
+                             .withButton ("Save", 1)
+                             .withButton ("Don't save", 2)
+                             .withButton ("Cancel", 0)
                              .withAssociatedComponent (dialogParent);
 
-    // With three buttons, JUCE reports the first as 1, the second as 2 and the third as 0. A save that fails, or an
-    // untitled project's save dialog cancelled, leaves the project open.
+    // Escape, or closing the window, answers 0, as Cancel does. A save that fails, or an untitled project's save dialog
+    // cancelled, leaves the project open.
     juce::AlertWindow::showAsync (options,
                                   [this, callback] (int result)
                                   {
@@ -511,11 +511,11 @@ void ProjectSession::askWhetherToRestore (const juce::File& file, bool untitled,
             .withTitle ("Restore unsaved changes?")
             .withMessage ("Phazite didn't close properly the last time " + name + " was open" + (untitled ? ", before it was saved" : "")
                           + ", but it had saved your changes automatically. Restore them?")
-            .withButton ("Restore")
-            .withButton (untitled ? "Discard them" : "Open the last saved version")
+            .withButton ("Restore", 1)
+            .withButton (untitled ? "Discard them" : "Open the last saved version", 0)
             .withAssociatedComponent (dialogParent);
 
-    // With two buttons, JUCE reports the first as 1 and the second as 0.
+    // Escape, or closing the window, answers 0, as the second button does.
     juce::AlertWindow::showAsync (options, [callback] (int result) { callback (result == 1); });
 }
 
@@ -598,7 +598,7 @@ void ProjectSession::showNotice (const juce::String& title, const juce::String& 
                                       .withIconType (juce::MessageBoxIconType::InfoIcon)
                                       .withTitle (title)
                                       .withMessage (message)
-                                      .withButton ("OK")
+                                      .withButton ("OK", 0)
                                       .withAssociatedComponent (dialogParent),
                                   static_cast<juce::ModalComponentManager::Callback*> (nullptr));
 }
@@ -617,7 +617,7 @@ void ProjectSession::showError (const juce::String& title, const juce::String& m
                                       .withIconType (juce::MessageBoxIconType::WarningIcon)
                                       .withTitle (title)
                                       .withMessage (message)
-                                      .withButton ("OK")
+                                      .withButton ("OK", 0)
                                       .withAssociatedComponent (dialogParent),
                                   static_cast<juce::ModalComponentManager::Callback*> (nullptr));
 }

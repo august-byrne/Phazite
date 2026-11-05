@@ -467,7 +467,7 @@ void reloadDevice (ProjectContext& context, DeviceID device, juce::Component& ta
                                           .withIconType (juce::MessageBoxIconType::WarningIcon)
                                           .withTitle ("The plug-in didn't reload")
                                           .withMessage (*problem)
-                                          .withButton ("OK")
+                                          .withButton ("OK", 0)
                                           .withAssociatedComponent (&target),
                                       nullptr);
 }

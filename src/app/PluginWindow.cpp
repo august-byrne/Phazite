@@ -164,7 +164,7 @@ namespace
                                               .withIconType (juce::MessageBoxIconType::WarningIcon)
                                               .withTitle (name)
                                               .withMessage (message)
-                                              .withButton ("OK")
+                                              .withButton ("OK", 0)
                                               .withAssociatedComponent (&window),
                                           nullptr);
         }

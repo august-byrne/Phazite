@@ -136,11 +136,15 @@ ExportPanel::ExportPanel (Settings& s, const juce::File& defaultFile, double sec
     {
         const auto replaces = existing.isDirectory() ? juce::String (" Exporting replaces it, and the old one goes to the recycle bin.")
                                                      : juce::String (" Exporting replaces it.");
-        juce::AlertWindow::showAsync (juce::MessageBoxOptions::makeOptionsOkCancel (
-                                          juce::MessageBoxIconType::QuestionIcon, "Replace " + existing.getFileName() + "?",
-                                          "It is in " + existing.getParentDirectory().getFullPathName() + " already." + replaces, "Replace",
-                                          "Cancel", this),
-                                      [callback = std::move (callback)] (int result) { callback (result == 1); });
+        juce::AlertWindow::showAsync (
+            juce::MessageBoxOptions()
+                .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                .withTitle ("Replace " + existing.getFileName() + "?")
+                .withMessage ("It is in " + existing.getParentDirectory().getFullPathName() + " already." + replaces)
+                .withButton ("Replace", 1)
+                .withButton ("Cancel", 0)
+                .withAssociatedComponent (this),
+            [callback = std::move (callback)] (int result) { callback (result == 1); });
     };
 
     for (auto* c : std::initializer_list<juce::Component*> {

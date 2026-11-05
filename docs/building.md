@@ -147,7 +147,7 @@ After the restart, open Ubuntu with `wsl -d Ubuntu-24.04`; its first start asks 
 sudo apt update
 sudo apt install -y build-essential git cmake ninja-build pkg-config \
     libasound2-dev libfreetype-dev libfontconfig-dev \
-    libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev
+    libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 sudo apt install -y gdb libasound2-plugins   # optional: VS Code debugging, sound under WSL2
 git clone https://github.com/august-byrne/Phazite.git ~/src/Phazite
 cd ~/src/Phazite

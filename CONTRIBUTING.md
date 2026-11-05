@@ -166,7 +166,7 @@ The hooks don't replace reading the diff: gitleaks can't recognize personal data
 
 | Submodule | Pinned at |
 |---|---|
-| `external/JUCE` | `37c894f8` (JUCE 8.0.13 plus 7 commits on `develop`) |
+| `external/JUCE` | `d60b7a78` (JUCE 9.0.5) |
 | `external/doctest` | `ae7a1353` (doctest 2.4.11) |
 | `external/rubberband` | `1d95888b` (Rubber Band Library 4.0) |
 | `external/WindowsToolchain` | `1373361e` (v0.14.0 plus 11 commits) |

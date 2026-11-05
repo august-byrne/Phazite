@@ -147,7 +147,7 @@ Phazite's look should be as clean and consistent as its workflow. Its design lan
   - The OFL explicitly allows bundling with any software, and the software doesn't have to adopt the font's licence ([B38](#appendix-b-sources)).
   - The GNU project lists it as a free license for fonts ([B39](#appendix-b-sources)).
   - Phazite ships the font files next to the app rather than compiling them in, together with their licence text and copyright notice.
-- **Numbers:** tempo, time, levels and meter readouts use Inter's fixed-width (tabular) digits, so values don't jitter as they change. JUCE 8 can switch this OpenType feature on (`FontOptions::withFeatureEnabled`).
+- **Numbers:** tempo, time, levels and meter readouts use Inter's fixed-width (tabular) digits, so values don't jitter as they change. JUCE can switch this OpenType feature on (`FontOptions::withFeatureEnabled`).
 - **Scale:** a small set of sizes and three weights (regular, medium and semibold), scaled with the UI.
 - **Fallback:** if the font files are missing, Phazite uses the system font.
 

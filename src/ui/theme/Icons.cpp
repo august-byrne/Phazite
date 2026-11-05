@@ -151,7 +151,7 @@ std::unique_ptr<juce::Drawable> createIcon (Icon icon, bool filled)
 
         int size = 0;
 
-        // Lucide draws in "currentColor", which JUCE's SVG reader doesn't know: read it as black.
+        // Lucide draws in "currentColor": read as black, the colour that the icons' tints replace.
         if (const auto* data = PhaziteData::getNamedResource (PhaziteData::namedResourceList[i], size))
         {
             auto text = juce::String::fromUTF8 (data, size).replace ("currentColor", "#000000");
@@ -159,8 +159,7 @@ std::unique_ptr<juce::Drawable> createIcon (Icon icon, bool filled)
             if (filled)
                 text = text.replace ("fill=\"none\"", "fill=\"#000000\"");
 
-            if (const auto svg = juce::parseXML (text))
-                return juce::Drawable::createFromSVG (*svg);
+            return juce::Drawable::createFromSVGString (text);
         }
     }
 

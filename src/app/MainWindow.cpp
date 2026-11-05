@@ -607,7 +607,7 @@ void MainWindow::renderFinished (const juce::String& title, const juce::Result& 
                                       .withIconType (juce::MessageBoxIconType::WarningIcon)
                                       .withTitle (title)
                                       .withMessage (result.getErrorMessage())
-                                      .withButton ("OK")
+                                      .withButton ("OK", 0)
                                       .withAssociatedComponent (this),
                                   nullptr);
 }
@@ -620,8 +620,8 @@ void MainWindow::renderWrote (const juce::String& title, const juce::File& file)
             .withIconType (juce::MessageBoxIconType::InfoIcon)
             .withTitle (title)
             .withMessage ("Phazite wrote " + file.getFileName() + " into " + file.getParentDirectory().getFullPathName() + ".")
-            .withButton ("Show in Folder")
-            .withButton ("OK")
+            .withButton ("Show in Folder", 1)
+            .withButton ("OK", 0)
             .withAssociatedComponent (this),
         [file] (int button)
         {

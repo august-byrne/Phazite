@@ -23,7 +23,7 @@
 
 Done before this plan (progress since then is under [Status](#status)):
 - **Tooling:** CMake presets, the MSVC toolchain wrapper and the Windows setup script.
-- **Dependencies:** JUCE (8.0.13), Rubber Band Library and doctest as pinned submodules, and WindowsToolchain at build time on Windows.
+- **Dependencies:** JUCE (9.0.5), Rubber Band Library and doctest as pinned submodules, and WindowsToolchain at build time on Windows.
 - **Smoke-test app:** play/stop, audio settings, out-of-process plug-in scanning, ASIO® on Windows.
 - **Checks:** git hooks for commit identity, secrets and formatting; clang-format; CI on Windows and Linux with warnings as errors.
 

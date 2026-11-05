@@ -249,7 +249,7 @@ TestWindow::~TestWindow()
     removeFromDesktop();
 }
 
-juce::ComponentPeer* TestWindow::createNewPeer (int, void*)
+juce::ComponentPeer* TestWindow::createNewPeer (const juce::DesktopWindowOptions&)
 {
     return new HeadlessPeer (*this);
 }

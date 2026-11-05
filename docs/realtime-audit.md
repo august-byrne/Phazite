@@ -1,6 +1,6 @@
 # Real-time audit
 
-*Phazite's own engine, with JUCE 8.0.13; measured on 2026-11-02.* This is [roadmap](roadmap.md) step 0.3. It records:
+*Phazite's own engine, with JUCE 9.0.5; measured on 2026-11-05.* This is [roadmap](roadmap.md) step 0.3. It records:
 - how Phazite checks that the audio thread follows the real-time rules in `CLAUDE.md`;
 - what is known to break them, in JUCE's code, a plug-in's, or Phazite's own until it was fixed;
 - what Phazite does about each finding.
@@ -27,7 +27,7 @@ A problem in Phazite's own code is fixed; one in JUCE's is worked around, or acc
 
 ## Results (Windows Debug)
 
-Every scenario plays as the app plays: its song opened as a project, the tests' device calling Phazite's callback on the one audio thread, and Phazite's engine on that thread, with a tone coming into the device's two inputs; the preview plays beside an empty song. The first column covers the warm-up after playback starts (about 0.5 s); the second covers the next second. Measured on 2026-11-02.
+Every scenario plays as the app plays: its song opened as a project, the tests' device calling Phazite's callback on the one audio thread, and Phazite's engine on that thread, with a tone coming into the device's two inputs; the preview plays beside an empty song. The first column covers the warm-up after playback starts (about 0.5 s); the second covers the next second. Measured on 2026-11-05.
 
 | Scenario | Warm-up | Next 1 s |
 |---|---|---|
@@ -68,7 +68,7 @@ Every scenario plays as the app plays: its song opened as a project, the tests' 
 | Two tracks in a folder bus with Phazite's compressor | 0 | 0 |
 | A loop at 120 BPM stretched to 100 BPM, played from Phazite's render | 0 | 0 |
 | An audio clip turned up 6 dB, pitched up 3 semitones and reversed, played from Phazite's render | 0 | 0 |
-| A loop at 120 BPM previewed at 100 BPM, stretched by Phazite into memory as it starts (the browser's preview) | JUCE's device manager's mixing buffer, once (finding 3) | 0 |
+| A loop at 120 BPM previewed at 100 BPM, stretched by Phazite into memory as it starts (the browser's preview) | 0 | 0 |
 
 Steady playback is clean everywhere, and the warm-up nearly so: what is left is JUCE's device callback sizing its buffer on a device's first callback (finding 3).
 
@@ -96,7 +96,7 @@ Steady playback is clean everywhere, and the warm-up nearly so: what is left is 
 
 **17. Previews** (measured, step 1.5; fixed 2026-10-28): stretching a previewed loop as it played grew the stretcher's buffers in its first blocks, so a preview started while the song played could make it glitch.
 - **Action (step 2.18):** Phazite stretches a previewed loop itself, as its clip would be, with Rubber Band's R3 engine (`model/engine/internal/PreviewLoop.h`): on a thread of its own, into memory, at the output's rate, starting at once (R3 offline needs no study pass, which only counts frames), and the preview plays as soon as a quarter of a second is ready with the render running at least twice as fast as it plays: about 55 ms after it is chosen for four bars (`windows-profile`).
-- **Since 2026-11-02:** previews play on Phazite's engine for previews, beside the song's (`model/playback/internal/PlaybackHost.h`). The stretched loop is an audio region whose file the previews' own reading thread reads from memory, waiting there for the render, and a loop starts once the first 32768 frames are stretched (the part the engine reads of a file at once). The guarded scenario plays it beside an empty song and allocates nothing in steady playback; its warm-up allocates JUCE's device manager's mixing buffer once (finding 3).
+- **Since 2026-11-02:** previews play on Phazite's engine for previews, beside the song's (`model/playback/internal/PlaybackHost.h`). The stretched loop is an audio region whose file the previews' own reading thread reads from memory, waiting there for the render, and a loop starts once the first 32768 frames are stretched (the part the engine reads of a file at once). The guarded scenario plays it beside an empty song and allocates nothing, in steady playback or (since JUCE 9) its warm-up.
 
 **22. Live MIDI** (source; found by the performance audit, 2026-10-21, finding R8).
 - **What:** a note played live comes from another thread (a MIDI input's, or the message thread for the computer keyboard) while the audio thread plays; a lock between them would make the audio thread wait whenever a note arrives as a block is processed.
