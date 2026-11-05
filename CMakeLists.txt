@@ -173,6 +173,8 @@ target_sources(phazite_core PRIVATE
     src/engine/modulation/ModulatorNode.h
     src/engine/nodes/Channel.cpp
     src/engine/nodes/Channel.h
+    src/engine/nodes/Comparison.cpp
+    src/engine/nodes/Comparison.h
     src/engine/nodes/DeviceNode.cpp
     src/engine/nodes/DeviceNode.h
     src/engine/nodes/DeviceRunner.cpp
@@ -1045,6 +1047,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionStoreTests.cpp
         tests/VersionsBranchTests.cpp
         tests/VersionsGoingBackTests.cpp
+        tests/VersionsHearingTests.cpp
         tests/VersionsMergeTests.cpp
         tests/VersionsTests.cpp
         tests/VocoderTests.cpp

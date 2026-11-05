@@ -64,7 +64,7 @@ public:
                                                     getUnsavedProjectsFolder());
         mainWindow = std::make_unique<MainWindow> (*commandBridge, *session, *lookAndFeel, *services);
         addSongCommands (*commands, session->getContext(), *mainWindow);
-        session->addCommands (*commands);
+        session->addCommands (*commands, *mainWindow);
         mainWindow->addCommands();
 
         // The keymap the user chose, with their own changes to it.

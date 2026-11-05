@@ -71,6 +71,45 @@ public:
         return audio;
     }
 
+    // Waits until the audio files the engine's plan plays have been read (its audio clips', and a version's bounce compared
+    // with the song: a short file whole, a longer one's start), the song's changes given to it first. Live, the engine's
+    // reading thread reads them ahead of the audio thread (engine/audio/AudioFile.h), and played faster than real time, what
+    // isn't read yet would sound as silence.
+    static void waitForFiles()
+    {
+        dispatchPendingMessages();
+        const auto isRead = [] (const std::shared_ptr<engine::AudioFile>& file)
+        {
+            if (file == nullptr)
+                return true;
+
+            const auto whole = (double) file->getLength() <= engine::AudioFile::shortSeconds * file->getSampleRate();
+            const auto end = whole ? file->getLength() : std::min<std::int64_t> (file->getLength(), engine::AudioFile::chunkSamples);
+
+            for (std::int64_t at = 0; at < end; at += engine::AudioFile::chunkSamples)
+                if (auto count = 1; file->getSamples (0, at, count) == nullptr)
+                    return false;
+
+            return true;
+        };
+
+        REQUIRE (dispatchMessagesUntil (
+            [&isRead]
+            {
+                const auto* plan = getPlaybackHost (getEngineContext()).getEngine().getPlan();
+
+                if (plan == nullptr)
+                    return false;
+
+                for (const auto& strip : plan->strips)
+                    for (const auto& region : strip.audio)
+                        if (! isRead (region.file))
+                            return false;
+
+                return ! plan->comparison.has_value() || isRead (plan->comparison->bounce.file);
+            }));
+    }
+
 private:
     const Input input;
     juce::AudioBuffer<float> previous { 2, blockSize }; // what comes in

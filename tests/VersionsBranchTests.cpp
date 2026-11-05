@@ -225,7 +225,7 @@ TEST_CASE ("The branch commands act on the version and the branch the Versions v
 {
     Branches b;
     phazite::CommandRegistry commands;
-    phazite::addVersionCommands (commands, b.s.context, [] (std::function<void (bool)> then) { then (true); }, b.open);
+    phazite::addVersionCommands (commands, b.s.context, [] (std::function<void (bool)> then) { then (true); }, b.open, b.s.renders);
 
     phazite::selectVersion (b.s.context, {}); // Now
     REQUIRE (commands.invoke ("version.newBranch"));

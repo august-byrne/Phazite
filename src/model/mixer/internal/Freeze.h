@@ -8,6 +8,7 @@
 
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
+#include "model/mixer/FreezeModel.h"
 
 #include <map>
 #include <vector>
@@ -77,5 +78,15 @@ private:
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { check (parent); }
 
     JUCE_DECLARE_NON_COPYABLE (FreezeKeeper)
+};
+
+//==============================================================================
+// What a TrackRender runs while it lives, which its progress window shows: a freeze's or a bounce's (Freeze.cpp), or a
+// version's bounce (model/versions/VersionsModel.h).
+struct TrackRender::Impl
+{
+    virtual ~Impl() = default;
+    virtual float getProgress() const = 0;
+    virtual juce::String getTitle() const = 0;
 };
 } // namespace phazite

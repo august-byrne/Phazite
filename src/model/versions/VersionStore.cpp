@@ -201,6 +201,11 @@ bool VersionStore::writeCurrentBranch (const juce::String& id)
     return replaceFile (folder.getChildFile ("current"), id);
 }
 
+juce::File VersionStore::getBounceFile (const juce::String& versionID) const
+{
+    return getBouncesFolder().getChildFile (juce::File::createLegalFileName (versionID) + ".flac");
+}
+
 std::vector<VersionRecord::File> VersionStore::hashFiles (const juce::StringArray& paths, const juce::File& projectFolder)
 {
     const juce::ScopedLock sl (filesLock);

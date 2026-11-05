@@ -421,13 +421,6 @@ void FreezeKeeper::check (const juce::ValueTree& changed)
 }
 
 //==============================================================================
-struct TrackRender::Impl
-{
-    virtual ~Impl() = default;
-    virtual float getProgress() const = 0;
-    virtual juce::String getTitle() const = 0;
-};
-
 namespace
 {
     // A track rendered by Phazite's engine in the background (model/playback/internal/OfflineRender.h), before its fader,

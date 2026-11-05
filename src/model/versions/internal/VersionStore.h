@@ -74,6 +74,11 @@ public:
     // read once while its size and its time stay the same (files.xml). A file that is missing is left out.
     std::vector<VersionRecord::File> hashFiles (const juce::StringArray& paths, const juce::File& projectFolder);
 
+    // The versions' bounces, each the song as it was then rendered as Export Song renders it (docs/versions.md: Bounces and
+    // hearing them), in their folder by their versions' ids; and a version's, whether it has one or not.
+    juce::File getBouncesFolder() const { return folder.getChildFile ("bounces"); }
+    juce::File getBounceFile (const juce::String& versionID) const;
+
 private:
     const juce::File folder;
     PieceStore pieces;

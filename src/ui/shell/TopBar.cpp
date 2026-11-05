@@ -89,10 +89,24 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     for (auto* c : std::initializer_list<juce::Component*> { &tempoField, &masterMeter, &masterVolume })
         addAndMakeVisible (c);
 
+    // Nothing hidden: while a version's bounce is heard rather than the song, the bar says so.
+    hearing.setTitle ("Hearing");
+    hearing.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
+    hearing.setJustificationType (juce::Justification::centredLeft);
+    hearing.setTooltip ("A version's bounce is heard in place of the song. Hear Now, or any edit, plays the song again");
+    addChildComponent (hearing);
+
     lookAndFeelChanged();
     projectContext.addListener (this);
     projectChanged();
     startTimerHz (4);
+}
+
+void TopBar::versionsChanged()
+{
+    const auto text = describeHearing (projectContext);
+    hearing.setText (text, juce::dontSendNotification);
+    hearing.setVisible (text.isNotEmpty());
 }
 
 TopBar::~TopBar()
@@ -106,6 +120,7 @@ void TopBar::projectChanged()
     masterVolumeAttachment.setParameter (getMasterVolume (projectContext));
     masterMeter.setSource (getMasterLevel (projectContext));
     timerCallback();
+    versionsChanged();
 }
 
 void TopBar::refreshTooltips()
@@ -275,6 +290,7 @@ bool TopBar::isCommandTicked (const juce::String& commandID) const
 void TopBar::lookAndFeelChanged()
 {
     recordButton.setColour (juce::TextButton::buttonOnColourId, getPalette (*this).danger);
+    hearing.setColour (juce::Label::textColourId, getPalette (*this).accent);
 }
 
 void TopBar::paint (juce::Graphics& g)
@@ -306,6 +322,8 @@ void TopBar::resized()
     masterVolume.setBounds (area.removeFromRight (120));
     area.removeFromRight (Space::xs);
     masterMeter.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 12));
+    area.removeFromRight (Space::m);
+    hearing.setBounds (area);
 }
 
 void TopBar::timerCallback()

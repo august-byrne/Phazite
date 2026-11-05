@@ -8,6 +8,7 @@
 
 #include "TempoMap.h"
 #include "engine/audio/AudioRegion.h"
+#include "engine/nodes/Comparison.h"
 #include "engine/nodes/DeviceNode.h"
 #include "engine/nodes/NoteSequence.h"
 #include "engine/nodes/Strip.h"
@@ -112,5 +113,17 @@ struct Plan
 
     // The strips whose instruments are handed their blocks early, in their order: the engine's, as it is given the plan.
     std::vector<int> earlyStrips;
+
+    // A version's bounce heard against the song, after the master (Comparison.h): its whole file from the version's start,
+    // where each of the song's beats is in it (the version's tempo map, at the plan's rate), and which of the two is heard.
+    // None while nothing is compared.
+    struct Comparison
+    {
+        AudioRegion bounce;
+        TempoMap tempo;
+        std::shared_ptr<ComparisonState> state;
+    };
+
+    std::optional<Comparison> comparison;
 };
 } // namespace phazite::engine

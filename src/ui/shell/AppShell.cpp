@@ -76,7 +76,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       titleBar (bridge),
       topBar (bridge, keyboard, context),
       browser (library, previewer, pack, s, context),
-      versionsView (bridge, context),
+      versionsView (bridge, context, s),
       playlist (bridge, context),
       inspector (bridge, context),
       pianoRoll (bridge, context),

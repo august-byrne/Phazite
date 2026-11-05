@@ -189,6 +189,8 @@ namespace History
     inline constexpr float dotSize = 8.0f, lineWidth = 2.0f;
     inline constexpr int saveButtonWidth = 120, buttonWidth = 72; // Save Version; Done, Merge and Cancel, at their widest
     inline constexpr float tickSize = 12.0f, tickInset = 3.0f;    // a merge's line's box, filled while the line is taken
+    inline constexpr int playWidth = 20;                          // a version's play mark's column, while any has a bounce
+    inline constexpr float playSize = 8.0f;
 } // namespace History
 
 inline constexpr int knobSize = 64;

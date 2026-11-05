@@ -605,7 +605,7 @@ void ProjectSession::showError (const juce::String& title, const juce::String& m
                                   static_cast<juce::ModalComponentManager::Callback*> (nullptr));
 }
 
-void ProjectSession::addCommands (CommandRegistry& registry)
+void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& renders)
 {
     // Help > Example Songs, each as a new untitled project.
     for (const auto& song : getExampleSongs())
@@ -663,7 +663,7 @@ void ProjectSession::addCommands (CommandRegistry& registry)
     // (model/versions/VersionsModel.h).
     addVersionCommands (
         registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); },
-        [this] (const juce::ValueTree& song) { openBranchSong (song); });
+        [this] (const juce::ValueTree& song) { openBranchSong (song); }, renders);
 
     registry.add ({ .id = "project.export",
                     .name = "Export Song",

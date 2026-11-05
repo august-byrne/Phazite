@@ -196,7 +196,7 @@ TEST_CASE ("The commands bring back the version selected, and put back the line 
     phazite::CommandRegistry commands;
     phazite::addVersionCommands (
         commands, s.context, [] (std::function<void (bool)> then) { then (true); },
-        [&s] (const juce::ValueTree& song) { s.openSong (song); });
+        [&s] (const juce::ValueTree& song) { s.openSong (song); }, s.renders);
     const auto bass = s.addTrack ("Bass");
     const auto first = keepVersion (s.context, "First");
     s.setVolume (bass, -9.0f);

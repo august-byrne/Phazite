@@ -103,6 +103,9 @@ version.merge
 version.finishMerge
 version.cancelMerge
 version.showChanges
+version.hear
+version.bounce
+version.deleteBounce
 project.export | ctrl + shift + R
 view.commandPalette | ctrl + K
 view.menus | F10

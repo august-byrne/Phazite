@@ -2,9 +2,11 @@
 // The activity bar down the window's left edge and the left panel's two views, the browser and the versions
 // (docs/versions.md: What the user sees), in the whole window as the app builds it.
 #include "AppScreen.h"
+#include "TestClips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
 #include "ui/shell/ActivityBar.h"
@@ -374,6 +376,57 @@ TEST_CASE ("A merge's clashes list in the Versions view after Merge, each with w
     screen.saveVersion();
     CHECK (view.getLines() == phazite::ui::VersionsView::Lines::changes);
     CHECK (view.getNumChanges() == 0);
+}
+
+TEST_CASE ("With a bounce, each version saved is bounced; its play mark hears it, the transport bar says so, and the room shows")
+{
+    Screen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    REQUIRE (screen.registry.invoke ("track.add"));
+    const auto track = phazite::getTrackIDs (*phazite::findSong (context)).front();
+    REQUIRE (
+        phazite::test::addMidiClip (*phazite::findSong (context), track, { phazite::test::at (0.0), phazite::test::at (4.0) }).isValid());
+    auto& view = screen.getVersionsView();
+
+    // The box, which the settings keep.
+    CHECK_FALSE (view.getBounceBox().getToggleState());
+    screen.click (view.getBounceBox());
+    CHECK (screen.services.settings.get (phazite::Settings::versionBounce));
+    CHECK (phazite::getBounceWithVersion (context));
+
+    screen.saveVersion ("Bounced");
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&screen] { return ! screen.renders.finished.isEmpty(); }, 60000));
+    CHECK (screen.renders.finished[0] == "Bouncing \"Bounced\": ok");
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.describeHistoryRow (1).contains (", with a bounce"); }));
+    CHECK (view.getRoomText().startsWith ("Versions take "));
+    CHECK (view.getRoomText().contains (", bounces "));
+    juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds())); // the play marks drawn
+
+    // Its play mark hears it, and the transport bar says so; Now's, the song again.
+    auto& history = view.getHistoryList();
+    phazite::test::Mouse mouse (history);
+    mouse.click (view.getPlayMarkPosition (1).getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getHeardVersion (context) == phazite::getLastVersion (context)->id);
+    CHECK (view.describeHistoryRow (1).contains (", heard"));
+
+    const auto hearing = [&screen]
+    {
+        for (auto* label : phazite::test::findAll<juce::Label> (screen.shell))
+            if (label->getTitle() == "Hearing")
+                return label->isVisible() ? label->getText() : juce::String();
+
+        return juce::String ("(none)");
+    };
+
+    CHECK (hearing() == "Hearing: Bounced");
+    mouse.click (view.getPlayMarkPosition (0).getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getHeardVersion (context).isEmpty());
+    CHECK (hearing().isEmpty());
+    CHECK (view.describeHistoryRow (0) == "Now, heard");
+    phazite::stopAndReturn (*phazite::findSong (context));
 }
 
 TEST_CASE ("The activity bar's icons are switches screen readers name, with tooltips that name their keys")

@@ -351,6 +351,10 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     plan->strips.push_back (std::move (master));
 
+    // A version's bounce compared with the song, while it plays live.
+    if (live.has_value() && comparison.has_value())
+        addComparison (*plan, sampleRate);
+
     // What the song doesn't hold any more goes with the last plan that plays it (a plug-in told that nothing of it moves
     // now, as it lives on in its track's freeze, or in the undo history).
     std::set<std::int64_t> tracks;
@@ -1142,6 +1146,56 @@ std::shared_ptr<engine::AudioFile> SongPlayer::getAudioFile (const juce::File& f
 
     usedFiles.insert (path);
     return kept;
+}
+
+void SongPlayer::setComparison (std::optional<Comparison> next)
+{
+    const auto sameFile = comparison.has_value() && next.has_value() && comparison->file == next->file;
+    comparison = std::move (next);
+
+    if (! comparison.has_value())
+    {
+        comparisonState = nullptr; // freed with the last plan that plays it
+        comparisonRegion = nullptr;
+        return;
+    }
+
+    if (! sameFile)
+        comparisonState = nullptr;
+
+    prepareComparison (preparedRate > 0.0 ? preparedRate : 48000.0, preparedBlockSize > 0 ? preparedBlockSize : 512);
+}
+
+void SongPlayer::prepareComparison (double sampleRate, int maximumBlockSize)
+{
+    if (comparisonState != nullptr && juce::exactlyEqual (comparisonState->getSampleRate(), sampleRate)
+        && comparisonState->getMaximumBlockSize() == maximumBlockSize)
+        return;
+
+    const auto hearing = comparisonState != nullptr && comparisonState->isHearingVersion();
+    comparisonState = std::make_shared<engine::ComparisonState>();
+    comparisonState->prepare (sampleRate, maximumBlockSize);
+    comparisonRegion = std::make_shared<engine::RegionState>();
+
+    if (hearing)
+        comparisonState->hear (true);
+}
+
+void SongPlayer::addComparison (engine::Plan& plan, double sampleRate)
+{
+    auto file = getAudioFile (comparison->file);
+
+    if (file == nullptr)
+        return;
+
+    prepareComparison (sampleRate, preparedBlockSize);
+
+    // The whole bounce from the version's start, which the comparison plays at the song's beats.
+    engine::AudioRegion bounce;
+    bounce.file = file;
+    bounce.state = comparisonRegion;
+    bounce.length = (std::int64_t) std::ceil ((double) file->getLength() * sampleRate / file->getSampleRate());
+    plan.comparison = engine::Plan::Comparison { std::move (bounce), getTempoMap (comparison->song, sampleRate), comparisonState };
 }
 
 engine::AudioRegion SongPlayer::makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile> file)

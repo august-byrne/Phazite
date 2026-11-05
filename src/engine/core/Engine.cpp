@@ -35,6 +35,28 @@ void Engine::prepare (double rate, int blockSize)
     accentClick = makeClick (sampleRate, true);
     clicking = nullptr;
     transport.plan = nullptr; // a plan for another rate: the playhead stays on its beat
+
+    // What was asked while no audio thread took it (no device played; past 64 commands, the latest were dropped): the
+    // transport as last asked, at once, rather than the commands one by one.
+    if (commandFifo.getNumReady() > 0)
+    {
+        commandFifo.reset();
+        transport.notesOff = transport.notesOff || transport.playing;
+        transport.chase = transport.chase || playing;
+        transport.flush = transport.flush || (playing && ! transport.playing);
+        transport.playing = playing;
+        transport.countIn.left = 0;
+        brokeTake = true;
+
+        if (const auto asked = locatesAsked.load(); asked != locatesTaken.load())
+        {
+            transport.beat = requestedBeat.load();
+            transport.chase = true;
+            publishPlayhead (transport.beat, 0.0, 0.0); // shown there until the next block
+            locatesTaken.store (asked);
+        }
+    }
+
     controlPoints.assign ((size_t) (maximumBlockSize / controlPointSpacing + 3), {});
     numControlPoints = 0;
     loudness.prepare (sampleRate, maximumBlockSize);
@@ -82,10 +104,10 @@ void Engine::push (Command command)
 {
     const auto scope = commandFifo.write (1);
 
+    // Full, the audio thread hasn't taken the commands for 64 blocks: no device plays the engine, and the one that does next
+    // prepares it, which takes the transport as last asked (prepare()).
     if (scope.blockSize1 > 0)
         commands[(size_t) scope.startIndex1] = command;
-    else
-        jassertfalse; // the audio thread hasn't taken the commands for 64 blocks: is it running?
 }
 
 void Engine::play (bool countIn)
@@ -432,15 +454,27 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
     {
         playStrips (plan, offset, numSamples);
 
-        // The master's sound goes out (on the first two channels).
+        // The master's sound goes out (on the first two channels), or while a version is compared with the song, the one of
+        // the two that is heard.
         const auto& master = *plan.strips.back().state;
-
-        for (int channel = 0; channel < std::min (numOutputs, 2); ++channel)
-            if (outputs[channel] != nullptr)
-                juce::FloatVectorOperations::add (outputs[channel] + offset, master.buffer.getReadPointer (channel, offset), numSamples);
-
-        // How loud it is.
         const float* out[] = { master.buffer.getReadPointer (0, offset), master.buffer.getReadPointer (1, offset) };
+
+        if (plan.comparison.has_value() && numOutputs > 0)
+        {
+            float* heard[] = { outputs[0] != nullptr ? outputs[0] + offset : nullptr,
+                               numOutputs > 1 && outputs[1] != nullptr ? outputs[1] + offset : nullptr };
+            const auto& comparison = *plan.comparison;
+            comparison.state->process (comparison.bounce, plan.tempo, comparison.tempo, out, heard, std::min (numOutputs, 2),
+                                       transport.sample, numSamples, transport.playing && transport.countIn.left == 0);
+        }
+        else
+        {
+            for (int channel = 0; channel < std::min (numOutputs, 2); ++channel)
+                if (outputs[channel] != nullptr)
+                    juce::FloatVectorOperations::add (outputs[channel] + offset, out[channel], numSamples);
+        }
+
+        // How loud the song is.
         loudness.process (out, 2, numSamples);
     }
 

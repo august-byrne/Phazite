@@ -101,6 +101,19 @@ public:
     // plays them.
     void makePluginsAnew();
 
+    // A version's bounce compared with the song, which of the two is heard switched through its state
+    // (engine/nodes/Comparison.h), in the live plans from the next on: its file, and the version's song (a song's state, of
+    // which only its tempo map counts here); or none. The same file again keeps the comparison as it was, its loudness so far
+    // too. Its state is none while there is no comparison.
+    struct Comparison
+    {
+        juce::File file;
+        juce::ValueTree song;
+    };
+
+    void setComparison (std::optional<Comparison>);
+    engine::ComparisonState* getComparisonState() const noexcept { return comparisonState.get(); }
+
 private:
     Song& song;
     PluginInstances* const plugins;
@@ -157,6 +170,14 @@ private:
     engine::AudioRegion makeRegion (std::int64_t id, std::shared_ptr<engine::AudioFile>);
     void addAudio (engine::Plan::Strip&, const juce::ValueTree& trackState);
     bool addFrozenFile (engine::Plan::Strip&, const juce::ValueTree& trackState);
+
+    // The comparison, and what plays it from plan to plan: made anew for another rate or block size, still hearing what it
+    // heard.
+    std::optional<Comparison> comparison;
+    std::shared_ptr<engine::ComparisonState> comparisonState;
+    std::shared_ptr<engine::RegionState> comparisonRegion;
+    void prepareComparison (double sampleRate, int maximumBlockSize);
+    void addComparison (engine::Plan&, double sampleRate);
 
     // The audio device's inputs a track hears: its input, while it is armed or always hears it (RecordingModel.h).
     std::vector<int> getHeardInput (const juce::ValueTree& trackState) const;

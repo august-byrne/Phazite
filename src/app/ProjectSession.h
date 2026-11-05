@@ -17,6 +17,8 @@
 
 namespace phazite
 {
+class TrackRenderHost;
+
 class ProjectSession : private juce::ChangeListener
 {
 public:
@@ -98,8 +100,8 @@ public:
 
     juce::Array<juce::File> getRecentProjects() const { return recent.getProjects(); }
 
-    // The "project." commands.
-    void addCommands (CommandRegistry&);
+    // The "project." commands, and the versions', whose bounces render in a host (the main window's progress window).
+    void addCommands (CommandRegistry&, TrackRenderHost&);
 
 private:
     EngineContext& engineContext;

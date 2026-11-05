@@ -69,7 +69,8 @@ TEST_CASE ("The session opens and saves a project")
 
         // Its commands save it.
         phazite::CommandRegistry registry;
-        session.addCommands (registry);
+        phazite::test::RenderHost renders;
+        session.addCommands (registry, renders);
         const auto* save = registry.find ("project.save");
         REQUIRE (save != nullptr);
         CHECK (save->isEnabled());
@@ -121,7 +122,8 @@ TEST_CASE ("An example song opens as a new untitled project, with the computer k
 
     // Help > Example Songs.
     phazite::CommandRegistry registry;
-    session.addCommands (registry);
+    phazite::test::RenderHost renders;
+    session.addCommands (registry, renders);
     REQUIRE (registry.invoke ("help.example.trapBeat"));
     phazite::test::dispatchPendingMessages();
 
@@ -323,7 +325,8 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     phazite::RecentProjects recent (settings);
     phazite::ProjectSession session (engine, recent, projects, unsaved);
     phazite::CommandRegistry registry;
-    session.addCommands (registry);
+    phazite::test::RenderHost renders;
+    session.addCommands (registry, renders);
 
     // The save dialog: what it suggests, and what it answers (no file: Cancel).
     juce::Array<juce::File> suggested;

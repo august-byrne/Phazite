@@ -426,6 +426,8 @@ bool namesID (const juce::ValueTree&, const juce::Identifier& property);
 //     branches/<id>.xml    a branch (BRANCH)
 //     current              the current branch's id
 //     files.xml            what each audio file the song plays hashes to (FILES), so that each is read once
+//     bounces/<id>.flac    a version's bounce, by the version's id: its song rendered as Export Song renders it, in FLAC
+//                          (16 bits, dithered), which a deleted bounce takes with it
 //
 // A piece is named by the SHA-256 of what it holds, in hexadecimal. It holds an element of the song as XML (UTF-8): its
 // properties in the order of their names, its children in their order, and nothing between them. Its tracks, clips,

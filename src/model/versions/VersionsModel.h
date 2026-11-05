@@ -10,12 +10,15 @@
 #include <juce_graphics/juce_graphics.h>
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
 
 namespace phazite
 {
 class CommandRegistry;
+class TrackRender;
+class TrackRenderHost;
 
 struct VersionInfo
 {
@@ -26,6 +29,7 @@ struct VersionInfo
     juce::Time saved;
     juce::String branch;       // its branch's id
     juce::StringArray parents; // the versions it follows: none for the first, two for a merge
+    bool hasBounce = false;    // the song as it was then, rendered to be heard
 };
 
 struct BranchInfo
@@ -170,15 +174,62 @@ struct ClashInfo
 std::vector<ClashInfo> getClashes (const ProjectContext&);
 bool chooseClash (ProjectContext&, int clash, int value); // 0 before both, 1 this branch's, 2 the other's
 
+//==============================================================================
+// Bounces, and hearing them (docs/versions.md: Hearing a version). A version's bounce is the song as it was then, rendered as
+// Export Song renders it (model/project/Export.h: the whole song with its tails, muted tracks silent; playback stops for it),
+// into the project's versions, while a progress window shows it (TrackRender, model/mixer/FreezeModel.h). Not undo steps:
+// they change the history, not the song.
+
+// The room the versions take on disk: the songs' (their pieces and the branches) and the bounces', apart.
+struct VersionsRoom
+{
+    juce::int64 songs = 0, bounces = 0;
+};
+
+VersionsRoom getVersionsRoom (const ProjectContext&);
+
+// Bounce: a version that is the song as it is now (the current branch's last version, with no changes since), which has none
+// yet, while nothing else renders the song. Started, or nothing (with no call back) if it can't be.
+bool canBounce (const ProjectContext&, const juce::String& versionID);
+std::unique_ptr<TrackRender> startBounce (ProjectContext&, const juce::String& versionID,
+                                          std::function<void (const juce::Result&)> onFinished);
+
+// The same in a host, which runs it and is told how it ended, or why it couldn't start.
+void bounceVersion (ProjectContext&, const juce::String& versionID, TrackRenderHost&);
+
+// Delete Bounce: its file goes, and the room it took with it.
+bool deleteBounce (ProjectContext&, const juce::String& versionID);
+
+// "With a bounce": whether Save Version bounces the version it saves, as the Versions view's box says.
+void setBounceWithVersion (ProjectContext&, bool);
+bool getBounceWithVersion (const ProjectContext&);
+
+// Hear It: a version's bounce heard in place of the song from the engine's next block, at the same beat, the song playing
+// from its playhead if it was stopped; none, the song itself (Now). Each switch matches the two's loudness so far, the louder
+// turned down to the other's. An edit to the song switches back to it. False for a version without a bounce.
+bool hearVersion (ProjectContext&, const juce::String& versionID);
+juce::String getHeardVersion (const ProjectContext&); // none while the song itself is heard
+juce::String describeHearing (const ProjectContext&); // "Hearing: Verse 2" while a version is heard, for the transport bar
+
+// The commands on the version the Versions view selects (version.hear: Now while none is; version.bounce: the last while none
+// is; version.deleteBounce), each render ending in the host, as Freeze Track's does.
+void hearSelectedVersion (ProjectContext&);
+bool canHearSelected (const ProjectContext&);
+void bounceSelectedVersion (ProjectContext&, TrackRenderHost&);
+bool canBounceSelected (const ProjectContext&);
+void deleteSelectedBounce (ProjectContext&);
+bool canDeleteSelectedBounce (const ProjectContext&);
+
 // Save Version (version.save): the project saved first, then a version recorded, as saveProjectThen() does it: the app's
-// save, which asks where a project goes the first time, and calls back with whether it saved.
+// save, which asks where a project goes the first time, and calls back with whether it saved. Then its bounce, with a bounce
+// (getBounceWithVersion()), in the host.
 using SaveProjectThen = std::function<void (std::function<void (bool saved)>)>;
-void saveProjectAndVersion (ProjectContext&, const SaveProjectThen&);
+void saveProjectAndVersion (ProjectContext&, const SaveProjectThen&, TrackRenderHost&);
 bool canSaveVersion (const ProjectContext&);
 
-// The versions' commands: version.save, the commands on the version and the line the Versions view selects, and those of
-// branches and merges, which open another branch's song through openSong.
-void addVersionCommands (CommandRegistry&, ProjectContext&, SaveProjectThen, OpenSong);
+// The versions' commands: version.save, the commands on the version and the line the Versions view selects, those of
+// branches and merges, which open another branch's song through openSong, and those of bounces, which render in the host.
+void addVersionCommands (CommandRegistry&, ProjectContext&, SaveProjectThen, OpenSong, TrackRenderHost&);
 void newBranchFromSelection (ProjectContext&, const OpenSong&);
 void switchToSelectedBranch (ProjectContext&, const OpenSong&);
 void mergeSelectedVersion (ProjectContext&);

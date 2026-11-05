@@ -3,6 +3,7 @@
 #include "model/arrangement/TrackColours.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 
 #include <algorithm>
@@ -157,7 +158,7 @@ void VersionHistory::opened (int number, std::vector<BranchRecord> branchesRead,
 
     setBaseline (head, std::move (parameters));
     hasRead = true;
-    tellNow();
+    readBounces(); // and tells
 }
 
 void VersionHistory::followFolder()
@@ -536,6 +537,8 @@ void VersionHistory::markChanged (const juce::ValueTree& tree, const juce::Ident
     if (! schema::isCounted (tree, property))
         return;
 
+    edited();
+
     // The track (or the master) it is in, nearest first, or else the song's own.
     for (auto element = tree; element.isValid(); element = element.getParent())
     {
@@ -562,6 +565,8 @@ void VersionHistory::markChildChanged (const juce::ValueTree& parent, const juce
 {
     if (schema::isUncountedElement (parent, child) || ! schema::isCounted (parent, {}))
         return;
+
+    edited();
 
     // A track added or taken away changes the others' names ("Track 3") and the song's order of them.
     if (child.hasType (schema::TRACK) || child.hasType (schema::TRACKS) || child.hasType (schema::MASTER))
@@ -594,7 +599,10 @@ void VersionHistory::valueTreeChildOrderChanged (juce::ValueTree& parent, int, i
 {
     // Tracks in another order: the song's line, and their numbers.
     if (parent.getChild (newIndex).hasType (schema::TRACK))
+    {
+        edited();
         markAllChanged();
+    }
     else
         markChanged (parent, {});
 }
@@ -609,6 +617,49 @@ void VersionHistory::changed()
 {
     changesReady = comparedReady = false;
     notifyPending = true;
+}
+
+void VersionHistory::edited()
+{
+    // What is heard is what is shown: an edit is heard as it is made, in the song.
+    if (! hearingBounce)
+        return;
+
+    hearingBounce = false;
+
+    if (auto* session = findSession (song))
+        if (auto* comparison = session->getPlayer().getComparisonState())
+            comparison->hear (false);
+
+    changed();
+}
+
+//==============================================================================
+juce::File VersionHistory::getBounceFile (const juce::String& versionID) const
+{
+    return store != nullptr && versionID.isNotEmpty() ? store->getBounceFile (versionID) : juce::File();
+}
+
+void VersionHistory::readBounces()
+{
+    bounces.clear();
+    bouncesSize = 0;
+    std::erase_if (bouncesGoing, [this] (const juce::String& id) { return ! getBounceFile (id).existsAsFile(); });
+
+    if (store != nullptr)
+    {
+        // Those of versions the history has (not a render cut off midway, which left its temporary file).
+        for (const auto& file : store->getBouncesFolder().findChildFiles (juce::File::findFiles, false, "*.flac"))
+        {
+            if (const auto id = file.getFileNameWithoutExtension(); versions.count (id) > 0 && bouncesGoing.count (id) == 0)
+            {
+                bounces.insert (id);
+                bouncesSize += file.getSize();
+            }
+        }
+    }
+
+    tellNow();
 }
 
 void VersionHistory::compareWith (const juce::String& versionID)
@@ -663,6 +714,7 @@ void VersionHistory::takeChangesOutsideHistory()
     if (const auto outside = song.getChangesOutsideHistory(); outside != changesOutsideHistory)
     {
         changesOutsideHistory = outside;
+        edited();
         markAllChanged();
     }
 }

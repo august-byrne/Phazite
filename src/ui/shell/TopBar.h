@@ -5,6 +5,7 @@
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
 #include "model/transport/TransportModel.h"
+#include "model/versions/VersionsModel.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
@@ -63,9 +64,11 @@ private:
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", decibelsToFaderPosition (0.0f) };
     ParameterAttachment masterVolumeAttachment { masterVolume };
     int shownKeyboardState = -1; // what the keyboard button shows, to update it only on changes
+    juce::Label hearing;         // "Hearing: Verse 2", while a version's bounce is heard in place of the song
 
-    void projectChanged() override; // the tempo, the master volume and the meter follow the open project
-    void timerCallback() override;  // updates the readouts a few times a second; only changes repaint
+    void projectChanged() override;  // the tempo, the master volume and the meter follow the open project
+    void versionsChanged() override; // which version is heard
+    void timerCallback() override;   // updates the readouts a few times a second; only changes repaint
     void updateKeyboardButton();
     void updateTempo();
     void showTempoStretch(); // what the tempo stretches, as it starts to change

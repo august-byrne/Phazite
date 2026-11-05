@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The project's versions, in the left panel (docs/versions.md: The Versions view): the branch, whose menu switches to another
-// or makes one; a version saved with a name and a note, both optional; the changes since the current branch's last version,
-// by track, a click on one selecting its track (or, while a merge's list shows, what the other line changed, ticked to take
-// it; while a merge waits for its version, its clashes, each switched between its values); and the history, every branch's
-// versions newest first, each on its branch's line in its color. By the model's functions (model/versions/VersionsModel.h)
-// and the versions' commands.
+// or makes one; a version saved with a name and a note, both optional, and with a bounce if asked (the settings keep the
+// box); the changes since the current branch's last version, by track, a click on one selecting its track (or, while a
+// merge's list shows, what the other line changed, ticked to take it; while a merge waits for its version, its clashes, each
+// switched between its values); the history, every branch's versions newest first, each on its branch's line in its color,
+// with a play mark on those with a bounce, which hears it in place of the song (Now's, the song again); and the room the
+// versions take. By the model's functions (model/versions/VersionsModel.h) and the versions' commands.
 #pragma once
 
 #include "model/project/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
+#include "services/Settings.h"
 #include "ui/input/CommandBridge.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -20,7 +22,7 @@ class VersionsView : public juce::Component,
                      private juce::TextEditor::Listener
 {
 public:
-    VersionsView (CommandBridge&, ProjectContext&);
+    VersionsView (CommandBridge&, ProjectContext&, Settings&);
     ~VersionsView() override;
 
     // The keyboard to the version's name, as showing the view gives it the keyboard.
@@ -52,8 +54,14 @@ public:
     juce::Button& getMergeButton() noexcept { return mergeButton; }
     juce::Button& getCancelButton() noexcept { return cancelButton; }
     juce::Button& getBranchButton() noexcept { return branchButton; }
+    juce::Button& getBounceBox() noexcept { return bounceBox; }
     juce::ListBox& getChangesList() noexcept { return changesList; }
+    juce::ListBox& getHistoryList() noexcept { return historyList; }
     juce::String getChangesHeading() const { return changesHeading.getText(); }
+    juce::String getRoomText() const { return roomText.getText(); }
+
+    // Where a history row's play mark is, in the history list, while any version has a bounce (and the row has one).
+    juce::Rectangle<int> getPlayMarkPosition (int row) const;
 
     // When a version was saved, as the history shows it: "now", "5 min", "2 h", the day this week ("Mon"), or the date.
     static juce::String describeWhen (juce::Time saved, juce::Time now);
@@ -64,10 +72,12 @@ private:
 
     CommandBridge& commands;
     ProjectContext& context;
+    Settings& settings;
 
-    juce::Label title, changesHeading, historyHeading, emptyText;
+    juce::Label title, changesHeading, historyHeading, emptyText, roomText;
     juce::TextButton branchButton;
     juce::TextEditor nameField, noteField;
+    juce::ToggleButton bounceBox { "With a bounce" };
     juce::TextButton saveButton;
     juce::TextButton doneButton;                // from another version's differences back to the changes
     juce::TextButton mergeButton, cancelButton; // a merge's list's
@@ -82,6 +92,9 @@ private:
     std::vector<VersionInfo> versions;
     std::vector<BranchInfo> branches;
     juce::String currentBranch;
+    juce::String heardVersion; // none while the song itself is heard
+    bool anyBounce = false;    // the history shows play marks
+    bool hasPlayMark (int row) const;
 
     // The history's lines, from a row to the row of a version it follows: down the column of the newer row's branch, turning
     // into the older's at its end (a version's first parent: its own branch's line, or where its branch started), or turning

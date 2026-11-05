@@ -60,6 +60,8 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
+#include "model/versions/VersionsModel.h"
+#include "model/versions/internal/VersionHistory.h"
 
 #include <chrono>
 #include <thread>
@@ -345,6 +347,30 @@ void addChords (const TestSong& song, phazite::TrackID track)
     for (int i = 0; i < 32; ++i)
         for (const auto note : { 48, 52, 55, 59 })
             phazite::test::addMidiNote (played, clip, note + (i % 2) * 5, at (i * 0.25), lasting (0.25), 100);
+}
+
+// The song kept as a version, as Save Version keeps it, and bounced, as Bounce renders it: the version's id.
+juce::String keepAndBounce (TestSong& song, const juce::String& name)
+{
+    const auto idle = [&song]
+    {
+        const auto* history = phazite::getVersionHistory (song.context);
+        return history != nullptr && ! history->isBusy();
+    };
+
+    REQUIRE (phazite::test::dispatchMessagesUntil (idle));
+    phazite::setVersionDraft (song.context, name, {});
+    std::optional<juce::Result> saved;
+    REQUIRE (phazite::saveVersion (song.context, [&saved] (juce::Result r) { saved = r; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved.has_value(); }));
+    REQUIRE (saved->wasOk());
+    REQUIRE (phazite::test::dispatchMessagesUntil (idle));
+
+    const auto version = phazite::getLastVersion (song.context)->id;
+    phazite::bounceVersion (song.context, version, song.renders);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.renders.finished.isEmpty(); }, 60000));
+    REQUIRE (song.renders.finished[0].endsWith (": ok"));
+    return version;
 }
 
 // A cutoff swept by its automation, from one value to another and back on every beat, over two bars.
@@ -1057,6 +1083,26 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playAndMeasure (song);
         report ("A frozen track: its synth's notes, played from its frozen file", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: a version's bounce heard in place of the song, both measured as they play")
+    {
+        // As Hear It plays it (docs/versions.md: Hearing a version): the bounce read from its file after the master, at the
+        // song's beat, the song played and measured beside it, the louder turned down.
+        TestSong song;
+        addTone (song, song.firstTrack);
+        const auto version = keepAndBounce (song, "Tone");
+        song.setVolume (song.firstTrack, -6.0f);
+
+        const auto m = playAndMeasure (song,
+                                       [&song, &version]
+                                       {
+                                           REQUIRE (phazite::hearVersion (song.context, version));
+                                           phazite::stopAndReturn (getSong (song)); // played from its start, as the others
+                                       });
+        report ("A version's bounce heard in place of the song", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }

@@ -91,32 +91,46 @@ namespace
     };
 } // namespace
 
+namespace
+{
+    // A song's state's tempo map: its tempos and time signatures, in order, a first at the song's start if there is none.
+    std::vector<TempoChange> readTempoChanges (const juce::ValueTree& songState)
+    {
+        std::vector<TempoChange> changes;
+
+        for (const auto& entry : getEntries (songState.getChildWithName (schema::TEMPOMAP), schema::TEMPO))
+            changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]), (double) entry.getProperty (schema::bpm, 120.0) });
+
+        if (changes.empty())
+            changes.push_back ({});
+
+        return changes;
+    }
+
+    std::vector<TimeSignatureChange> readTimeSignatureChanges (const juce::ValueTree& songState)
+    {
+        std::vector<TimeSignatureChange> changes;
+
+        for (const auto& entry : getEntries (songState.getChildWithName (schema::TEMPOMAP), schema::TIMESIGNATURE))
+            changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]),
+                                 { (int) entry.getProperty (schema::numerator, 4), (int) entry.getProperty (schema::denominator, 4) } });
+
+        if (changes.empty())
+            changes.push_back ({});
+
+        return changes;
+    }
+} // namespace
+
 //==============================================================================
 std::vector<TempoChange> getTempoChanges (const Song& song)
 {
-    std::vector<TempoChange> changes;
-
-    for (const auto& entry : getEntries (findTempoMap (song), schema::TEMPO))
-        changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]), (double) entry.getProperty (schema::bpm, 120.0) });
-
-    if (changes.empty())
-        changes.push_back ({});
-
-    return changes;
+    return readTempoChanges (song.getState());
 }
 
 std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song& song)
 {
-    std::vector<TimeSignatureChange> changes;
-
-    for (const auto& entry : getEntries (findTempoMap (song), schema::TIMESIGNATURE))
-        changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]),
-                             { (int) entry.getProperty (schema::numerator, 4), (int) entry.getProperty (schema::denominator, 4) } });
-
-    if (changes.empty())
-        changes.push_back ({});
-
-    return changes;
+    return readTimeSignatureChanges (song.getState());
 }
 
 Bars getBars (const Song& song)
@@ -126,13 +140,18 @@ Bars getBars (const Song& song)
 
 engine::TempoMap getTempoMap (const Song& song, double sampleRate)
 {
+    return getTempoMap (song.getState(), sampleRate);
+}
+
+engine::TempoMap getTempoMap (const juce::ValueTree& songState, double sampleRate)
+{
     std::vector<engine::TempoMap::Tempo> tempos;
     std::vector<engine::TempoMap::TimeSignature> signatures;
 
-    for (const auto& change : getTempoChanges (song))
+    for (const auto& change : readTempoChanges (songState))
         tempos.push_back ({ change.beat.inBeats(), change.bpm });
 
-    for (const auto& change : getTimeSignatureChanges (song))
+    for (const auto& change : readTimeSignatureChanges (songState))
         signatures.push_back ({ change.beat.inBeats(), change.signature.numerator, change.signature.denominator });
 
     return engine::TempoMap (std::move (tempos), std::move (signatures), sampleRate);

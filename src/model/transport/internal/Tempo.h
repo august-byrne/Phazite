@@ -25,8 +25,10 @@ std::vector<TimeSignatureChange> getTimeSignatureChanges (const Song&);
 Bars getBars (const Song&);
 
 // The song's tempo map as Phazite's engine plays it (engine/core/TempoMap.h), at a sample rate: at one sample a second, its
-// beats in seconds, which audio clips, fades, recordings and renders count in.
+// beats in seconds, which audio clips, fades, recordings and renders count in. And the same of a song's state, which needn't
+// be open (a version's: model/versions/).
 engine::TempoMap getTempoMap (const Song&, double sampleRate = 1.0);
+engine::TempoMap getTempoMap (const juce::ValueTree& songState, double sampleRate);
 
 // Where a beat is in seconds from the song's start, and the other way round; and its tempo at a beat, in beats per minute.
 double toSeconds (const Song&, BeatPosition);

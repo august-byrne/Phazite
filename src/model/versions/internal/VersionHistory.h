@@ -73,6 +73,23 @@ public:
     juce::int64 getSize() const;
 
     //==============================================================================
+    // Bounces (docs/versions.md: Bounces and hearing them): a version's file, whether it has one or not, and whether it has
+    // one; how many bytes they take, of the history's size; the bounces folder read again, after one was made or deleted (it
+    // is read as the versions are); and whether Save Version bounces the version it saves, as the Versions view's box says.
+    juce::File getBounceFile (const juce::String& versionID) const;
+    bool hasBounce (const juce::String& versionID) const { return bounces.count (versionID) > 0; }
+    juce::int64 getBouncesSize() const noexcept { return bouncesSize; }
+    void readBounces();
+    bool bounceWithVersion = false;
+    std::set<juce::String> bouncesGoing; // deleted, whose files go once the engine lets go of them: none to read
+
+    // Hearing a version: the version whose bounce plays beside the song in the song's session, compared with it (none while
+    // none does), and whether it is heard rather than the song. An edit to the song switches back to the song, so that what
+    // is heard is what is shown.
+    juce::String bounceCompared;
+    bool hearingBounce = false;
+
+    //==============================================================================
     // Branches (docs/versions.md: Branches). One made from a version, or from the current branch's last version (none), named
     // "Idea 2" and on, in the next color; and made the current one, the song going on there, if asked: its id, or none if it
     // can't be made. Leaving the current branch for another: the song as it is now, view state and unsaved changes included,
@@ -121,6 +138,8 @@ private:
     std::vector<BranchRecord> branches;
     juce::String currentBranch; // its id
     std::map<juce::String, VersionRecord> versions;
+    std::set<juce::String> bounces; // the versions that have one
+    juce::int64 bouncesSize = 0;
 
     // The current branch's last version's song, which the changes are from: its tracks by their IDs, and its plug-ins'
     // parameters' values.
@@ -157,6 +176,7 @@ private:
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
     void markAllChanged();
     void changed(); // tells onChange at the next tick
+    void edited();  // the song changed as the changes count it
     void takeChangesOutsideHistory();
     PluginParameterValues readPluginParameters() const;
 

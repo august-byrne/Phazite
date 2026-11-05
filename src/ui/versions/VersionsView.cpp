@@ -3,6 +3,7 @@
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
 #include <map>
 
 namespace phazite::ui
@@ -245,6 +246,22 @@ public:
         const auto dotAt = [&] (const juce::String& branch)
         { return juce::Rectangle<float> (History::dotSize, History::dotSize).withCentre ({ laneCentre (view.getLane (branch)), middle }); };
 
+        // Its play mark, while any version has a bounce: what is heard in the accent's color.
+        if (view.anyBounce)
+        {
+            const auto mark =
+                area.removeFromRight (History::playWidth).toFloat().withSizeKeepingCentre (History::playSize, History::playSize);
+
+            if (view.hasPlayMark (row))
+            {
+                const auto heard = row == 0 ? view.heardVersion.isEmpty() : view.versions[(size_t) row - 1].id == view.heardVersion;
+                juce::Path triangle;
+                triangle.addTriangle (mark.getTopLeft(), mark.getBottomLeft(), { mark.getRight(), mark.getCentreY() });
+                g.setColour (heard ? p.accent : p.textMuted);
+                g.fillPath (triangle);
+            }
+        }
+
         if (row == 0)
         {
             g.setColour (p.textMuted);
@@ -286,23 +303,35 @@ public:
 
     juce::String getTooltipForRow (int row) override
     {
-        if (row == 0)
-            return "Now: the song as it is, with the changes since its last version. Right-click to make a branch from it";
+        const auto play = view.hasPlayMark (row) ? " Its play mark hears it." : "";
 
-        return view.describeHistoryRow (row) + ". Right-click for what can be done with it.";
+        if (row == 0)
+            return "Now: the song as it is, with the changes since its last version. Right-click to make a branch from it."
+                   + juce::String (play);
+
+        return view.describeHistoryRow (row) + ". Right-click for what can be done with it." + play;
     }
 
     void listBoxItemClicked (int row, const juce::MouseEvent& e) override
     {
         selectedRowsChanged (row);
 
+        // On its play mark: it is heard (Now's: the song again).
+        if (! e.mods.isPopupMenu() && view.hasPlayMark (row)
+            && view.getPlayMarkPosition (row).contains (e.getEventRelativeTo (&view.historyList).getPosition()))
+        {
+            hearVersion (view.context, row == 0 ? juce::String() : view.versions[(size_t) row - 1].id);
+            return;
+        }
+
         if (! e.mods.isPopupMenu())
             return;
 
         if (row > 0)
-            view.showMenu ({ "version.bringBack", "version.takeFrom", "version.newBranch", "version.merge" });
+            view.showMenu ({ "version.hear", "version.bringBack", "version.takeFrom", "version.newBranch", "version.merge",
+                             "version.bounce", "version.deleteBounce" });
         else
-            view.showMenu ({ "version.newBranch" });
+            view.showMenu ({ "version.hear", "version.newBranch" });
     }
 
     void selectedRowsChanged (int row) override
@@ -317,9 +346,10 @@ private:
 };
 
 //==============================================================================
-VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContext)
+VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContext, Settings& s)
     : commands (bridge),
       context (projectContext),
+      settings (s),
       changesModel (std::make_unique<ChangesModel> (*this)),
       historyModel (std::make_unique<HistoryModel> (*this)),
       changesList ("Changes since the last version", changesModel.get()),
@@ -331,10 +361,14 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     setUpHeading (title, "VERSIONS");
     setUpHeading (changesHeading, {});
     setUpHeading (historyHeading, "HISTORY");
-    emptyText.setFont (juce::FontOptions (TextSize::small));
-    emptyText.setJustificationType (juce::Justification::topLeft);
-    emptyText.setColour (juce::Label::textColourId, p.textMuted);
+    for (auto* label : { &emptyText, &roomText })
+    {
+        label->setFont (juce::FontOptions (TextSize::small));
+        label->setJustificationType (juce::Justification::topLeft);
+        label->setColour (juce::Label::textColourId, p.textMuted);
+    }
 
+    roomText.setTitle ("Room the versions take");
     branchButton.setTitle ("Branch");
     branchButton.onClick = [this] { showBranchMenu(); };
 
@@ -356,6 +390,14 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
         commands.invoke ("version.save");
     };
 
+    // With a bounce, as the settings keep it: the model's for the open song follows it (refresh()).
+    bounceBox.setToggleState (settings.get (Settings::versionBounce), juce::dontSendNotification);
+    bounceBox.onClick = [this]
+    {
+        settings.set (Settings::versionBounce, bounceBox.getToggleState());
+        setBounceWithVersion (context, bounceBox.getToggleState());
+    };
+
     doneButton.setButtonText ("Done");
     doneButton.onClick = [this] { commands.invoke ("version.showChanges"); };
     mergeButton.setButtonText ("Merge");
@@ -372,11 +414,11 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     changesList.setRowHeight (History::changeRowHeight);
     historyList.setRowHeight (History::versionRowHeight);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &title, &branchButton, &nameField, &noteField, &saveButton, &changesHeading,
-                                                             &changesList, &historyHeading, &historyList })
+    for (auto* c : std::initializer_list<juce::Component*> { &title, &branchButton, &nameField, &noteField, &bounceBox, &saveButton,
+                                                             &changesHeading, &changesList, &historyHeading, &historyList })
         addAndMakeVisible (c);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText })
         addChildComponent (c);
 
     refreshTooltips();
@@ -403,6 +445,23 @@ void VersionsView::refreshTooltips()
     cancelButton.setTooltip (withShortcut (commands, "Closes the merge's list, taking nothing", "version.cancelMerge"));
     branchButton.setTooltip ("The branch the song is on: click to switch to another, or to start one");
     historyList.setTooltip ("Every version, newest first, each on its branch's line");
+    bounceBox.setTooltip ("Saving a version renders the song into it too, as Export Song does, to hear it later against the song");
+    roomText.setTooltip ("What the versions take on disk: nearly all of it is bounces, each deleted on its own (Delete Bounce)");
+}
+
+bool VersionsView::hasPlayMark (int row) const
+{
+    if (! anyBounce)
+        return false;
+
+    return row == 0 || (juce::isPositiveAndBelow (row - 1, (int) versions.size()) && versions[(size_t) row - 1].hasBounce);
+}
+
+juce::Rectangle<int> VersionsView::getPlayMarkPosition (int row) const
+{
+    // The last column of the row, inside its margin (HistoryModel::paintListBoxItem()).
+    const auto bounds = historyList.getRowPosition (row, true);
+    return bounds.withTrimmedRight (Space::s).removeFromRight (History::playWidth);
 }
 
 void VersionsView::focusName()
@@ -466,7 +525,7 @@ juce::String VersionsView::describeChange (int row) const
 juce::String VersionsView::describeHistoryRow (int row) const
 {
     if (row == 0)
-        return "Now";
+        return heardVersion.isEmpty() && anyBounce ? "Now, heard" : "Now";
 
     if (! juce::isPositiveAndBelow (row - 1, (int) versions.size()))
         return {};
@@ -476,6 +535,9 @@ juce::String VersionsView::describeHistoryRow (int row) const
 
     if (const auto branch = getBranchName (version.branch); branch.isNotEmpty())
         text << ", on " << branch;
+
+    if (version.hasBounce)
+        text << (version.id == heardVersion ? ", heard" : ", with a bounce");
 
     if (version.note.isNotEmpty())
         text << ". " << version.note;
@@ -546,6 +608,20 @@ void VersionsView::refresh()
     clashes = getClashes (context);
     versions = getVersions (context);
     branches = getBranches (context);
+    heardVersion = getHeardVersion (context);
+    anyBounce = std::any_of (versions.begin(), versions.end(), [] (const VersionInfo& version) { return version.hasBounce; });
+
+    // With a bounce, as the box (the settings) says, for the song open now; and the room the versions take.
+    if (getBounceWithVersion (context) != bounceBox.getToggleState())
+        setBounceWithVersion (context, bounceBox.getToggleState());
+
+    bounceBox.setEnabled (keeps);
+    const auto room = getVersionsRoom (context);
+    roomText.setText (versions.empty() ? juce::String()
+                                       : "Versions take " + juce::File::descriptionOfSizeInBytes (room.songs) + ", bounces "
+                                             + juce::File::descriptionOfSizeInBytes (room.bounces),
+                      juce::dontSendNotification);
+    roomText.setVisible (roomText.getText().isNotEmpty());
 
     const auto branch = getCurrentBranch (context);
     currentBranch = branch.has_value() ? branch->id : juce::String();
@@ -674,8 +750,15 @@ void VersionsView::resized()
     area.removeFromTop (Space::xs);
     noteField.setBounds (area.removeFromTop (controlHeight));
     area.removeFromTop (Space::xs);
-    saveButton.setBounds (area.removeFromTop (controlHeight).removeFromRight (juce::jmin (area.getWidth(), History::saveButtonWidth)));
+    auto saveRow = area.removeFromTop (controlHeight);
+    saveButton.setBounds (saveRow.removeFromRight (juce::jmin (saveRow.getWidth(), History::saveButtonWidth)));
+    saveRow.removeFromRight (Space::xs);
+    bounceBox.setBounds (saveRow);
     area.removeFromTop (Space::s);
+
+    // The room the versions take, at the foot of the view.
+    if (roomText.isVisible())
+        roomText.setBounds (area.removeFromBottom (controlHeight));
 
     // The lines, as many rows as they have (up to half of what is left), then the history.
     auto heading = area.removeFromTop (controlHeight);

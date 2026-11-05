@@ -94,6 +94,9 @@ public:
     static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon };  // ui/shell/PanelLayout.h
     static constexpr TextSetting viewPlaces { "phaziteViewPlaces", "", SaveTiming::soon };    // ui/shell/Panels.h: ViewPlaces
 
+    // Save Version's "With a bounce" (ui/versions/VersionsView.h).
+    static constexpr BoolSetting versionBounce { "phaziteVersionBounce", false, SaveTiming::now };
+
     // Kept in that file (which must outlive this), or, without one, in memory (tests). The parameter isn't named
     // 'file': it would hide the member (C4458, -Wshadow).
     explicit Settings (juce::PropertiesFile* propertiesFile = nullptr);

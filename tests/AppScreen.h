@@ -25,7 +25,7 @@ struct AppScreen
     {
         // As Main.cpp and MainWindow do.
         addSongCommands (registry, session.getContext(), renders);
-        session.addCommands (registry);
+        session.addCommands (registry, renders);
         shell.addCommands (registry);
 
         session.chooseSaveFile = [] (const juce::File& suggested, std::function<void (const juce::File&)> callback)

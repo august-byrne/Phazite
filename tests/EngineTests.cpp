@@ -661,6 +661,37 @@ TEST_CASE ("The engine stops and locates as the message thread asks, at its next
     CHECK (silence.getMagnitude (0, 1024) == 0.0f);
 }
 
+TEST_CASE ("Asked more than its queue holds while no device plays it, the engine plays the transport as last asked once one does")
+{
+    engine::Engine player;
+    player.prepare (rate, 256);
+    player.setPlan (makeClickPlan());
+
+    // Played and stopped, again and again, then put between beats and played: past 64, the queue drops what is asked.
+    for (int i = 0; i < 40; ++i)
+    {
+        player.play();
+        player.stop();
+    }
+
+    player.locate (3.5);
+    player.play();
+
+    // A device starts (prepares it): the next beat, a bar's first, clicks half a beat later.
+    player.prepare (rate, 256);
+    CHECK (player.getPlayheadBeat() == doctest::Approx (3.5));
+    juce::AudioBuffer<float> played (2, 24000);
+    played.clear();
+
+    for (int done = 0; done < played.getNumSamples(); done += 256)
+    {
+        float* channels[] = { played.getWritePointer (0, done), played.getWritePointer (1, done) };
+        player.process (channels, 2, std::min (256, played.getNumSamples() - done));
+    }
+
+    requireSame (played, expectClicks (24000, { { 12000, true } }));
+}
+
 TEST_CASE ("The engine tells of blocks that started more than two blocks' length after the one before, once")
 {
     engine::Engine player;
