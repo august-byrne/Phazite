@@ -131,6 +131,10 @@ using OpenSong = std::function<void (const juce::ValueTree& song)>;
 // that version's. False if it can't be made (before the first version, while one is being saved).
 bool newBranch (ProjectContext&, const juce::String& fromVersion, const OpenSong&);
 bool switchBranch (ProjectContext&, const juce::String& branchID, const OpenSong&);
+
+// Whether the song can switch to another branch now: not while it records (a take not finished would be lost), while a
+// render has its plug-ins (an export, a freeze, a bounce), while a version is being saved or the versions are read.
+bool canSwitchBranch (const ProjectContext&);
 bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::String& name);
 bool canMakeBranch (const ProjectContext&);
 

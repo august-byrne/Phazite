@@ -1295,6 +1295,12 @@ bool importDawProjectAsBranch (ProjectContext& context, const DawProjectFile& in
         return false;
     }
 
+    if (! canSwitchBranch (context))
+    {
+        said = { "Not while the song records, renders, or saves a version." };
+        return false;
+    }
+
     // The version's song, made a song of its own, with what came back taken in; then a branch from the version, with it.
     const auto state = history->readSong (version->id);
     const auto song = state.isValid() ? makeSong (state, open->getFile(), open->getCacheFolder()) : nullptr;

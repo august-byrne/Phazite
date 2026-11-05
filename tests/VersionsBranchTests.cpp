@@ -6,8 +6,10 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Recording.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
 
@@ -219,6 +221,32 @@ TEST_CASE ("A knob both branches changed is a clash, which switches between its 
 
     phazite::undo (*phazite::findSong (b.s.context));
     CHECK (b.volume (b.bass) == doctest::Approx (-12.0f));
+}
+
+TEST_CASE ("No switching branches while the song records, which would lose the take, nor a branch from a version")
+{
+    Branches b;
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.open)); // from Now: no switch
+    auto& song = *phazite::findSong (b.s.context);
+    phazite::getSession (b.s.context)->setLiveTrack (b.bass); // live MIDI plays it: it can record
+
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    CHECK_FALSE (phazite::canSwitchBranch (b.s.context));
+    CHECK_FALSE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "Main"), b.open));
+    CHECK (phazite::findSong (b.s.context) == &song); // the same song, still recording
+    CHECK (phazite::isRecording (song));
+    CHECK (b.current() == "Idea 2");
+
+    // Nor a branch from an old version, which switches to it; from Now still, which doesn't.
+    phazite::selectVersion (b.s.context, b.first);
+    CHECK_FALSE (phazite::canMakeBranch (b.s.context));
+    CHECK_FALSE (phazite::newBranch (b.s.context, b.first, b.open));
+    CHECK (phazite::getBranches (b.s.context).size() == 2);
+
+    phazite::stopRecording (song);
+    CHECK (phazite::canSwitchBranch (b.s.context));
+    CHECK (phazite::canMakeBranch (b.s.context));
 }
 
 TEST_CASE ("The branch commands act on the version and the branch the Versions view picks")

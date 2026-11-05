@@ -381,19 +381,33 @@ bool newBranch (ProjectContext& context, const juce::String& fromVersion, const 
     if (history == nullptr)
         return false;
 
-    // From Now, the song goes on there as it is; from a version, that version's song opens there.
+    // From Now, the song goes on there as it is; from a version, that version's song opens there, a switch.
     if (fromVersion.isEmpty())
         return history->makeBranch ({}, true).isNotEmpty();
 
+    if (! canSwitchBranch (context))
+        return false;
+
     const auto branch = history->makeBranch (fromVersion, false);
     return branch.isNotEmpty() && switchBranch (context, branch, openSong);
+}
+
+bool canSwitchBranch (const ProjectContext& context)
+{
+    // Not while the song records (a take not finished would be lost), while a render has its plug-ins, while a version is
+    // being saved or the versions read.
+    const auto* history = findHistory (context);
+    const auto* song = findSong (context);
+    const auto* session = getSession (context);
+    return history != nullptr && song != nullptr && ! history->isReading() && ! history->isSaving() && ! isRecording (*song)
+           && (session == nullptr || ! session->isLentToRender());
 }
 
 bool switchBranch (ProjectContext& context, const juce::String& branchID, const OpenSong& openSong)
 {
     auto* history = findHistory (context);
 
-    if (history == nullptr || openSong == nullptr)
+    if (history == nullptr || openSong == nullptr || ! canSwitchBranch (context))
         return false;
 
     const auto song = history->leaveFor (branchID);
@@ -413,9 +427,13 @@ bool renameBranch (ProjectContext& context, const juce::String& branchID, const 
 
 bool canMakeBranch (const ProjectContext& context)
 {
+    // From Now, while there is a version; from another version, whenever the song can switch to it.
     const auto* history = findHistory (context);
-    return history != nullptr && ! history->isReading() && ! history->isSaving()
-           && (history->findVersion (history->selectedVersion) != nullptr || history->findLastVersion() != nullptr);
+
+    if (history == nullptr || history->isReading() || history->isSaving())
+        return false;
+
+    return history->findVersion (history->selectedVersion) != nullptr ? canSwitchBranch (context) : history->findLastVersion() != nullptr;
 }
 
 void selectBranch (ProjectContext& context, const juce::String& branchID)
@@ -1284,7 +1302,8 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                     .description = "Opens the branch picked in the Versions view as it was left, and keeps the song as it is now on "
                                    "the branch it leaves, its changes too.",
                     .synonyms = { "checkout", "branch", "go to", "open branch" },
-                    .perform = [&context, openSong] { switchToSelectedBranch (context, openSong); } });
+                    .perform = [&context, openSong] { switchToSelectedBranch (context, openSong); },
+                    .isEnabled = [&context] { return canSwitchBranch (context); } });
 
     registry.add ({ .id = "version.merge",
                     .name = "Merge into the Current Branch...",
