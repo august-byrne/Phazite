@@ -278,8 +278,10 @@ Showing a view gives it the keyboard, as F5 to F9 do for the views in the centre
 - **Unsaved changes.** A branch made from Now takes the unsaved changes with it.
 - **Switching** is done from the branch menu at the top of the view, or from the branch's name in the status bar, beside the save state; that name shows once the project has a version.
   - The branch left behind is kept as it was, unsaved changes included.
-  - The other branch opens as it was left, with its view state, as a project opens.
+  - The song becomes the other branch's in place, as it was left there, with its view state. What both branches have stays as it is: its plug-ins stay loaded and its audio stays read, and the song plays on.
+  - The project is saved after the switch, so that its file is the branch's song.
   - Switching isn't an undo step, and the undo history starts again.
+  - Not while the song records: the take isn't finished.
 - **Main** is the first branch's name.
 
 **Merging** ("Merge into Main…", on another branch or a version):
@@ -470,7 +472,7 @@ It is worth it only for editing together live, which the one DAW built on it, Oh
 
 **Copies of the audio in the store.** These would double the project's size, for files that never change.
 
-**Every branch's plug-ins kept loaded.** Switching would be instant, but each branch would cost its plug-ins' memory and CPU. Switching opens the branch as a project opens, and can later reuse the instances whose device and plug-in are the same.
+**Every branch's plug-ins kept loaded.** Switching would be instant, but each branch would cost its plug-ins' memory and CPU. Switching makes the song the other branch's in place instead, which keeps the instances both branches have and loads the others.
 
 **DAWproject as Phazite's own format** ([next](#dawproject-with-versions)).
 
@@ -624,6 +626,12 @@ line, V1, V2, V4, V3, V5, Clean Up Unused Audio, then D1 and D2. Where the build
   state too; the differences, Bring Back and the merge leave out what isn't counted.
 - **A plug-in's knobs** are read from its instance as a version is saved, and kept beside its state, so the changes can
   name them.
+- **Switching branches** makes the song the other branch's in place with the fewest edits, view state included, outside
+  the undo history, which then starts again (`ApplySong.h`: `makeSongTheSame()`). Its count of IDs becomes the larger of
+  the two, and a DAWproject that comes back as a branch takes IDs past the open song's, so no two branches give one ID
+  to two things. A merge waiting for its version stays with the branch it was made on, for the session. A frozen track
+  stays frozen only where its file holds what it plays there: a track's frozen file is its own, whichever branch froze
+  it last.
 - **Merging** is a mode of the Versions view's list (Merge and Cancel under its heading), not a window of its own. A
   merge's notes (what it couldn't decide, where both sides changed a track's clips over the same beats) show while it waits
   for its version.

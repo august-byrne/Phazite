@@ -224,8 +224,7 @@ TEST_CASE ("Export as DAWproject writes a zip of project.xml, metadata.xml, the 
     song.s.setTempo (90.0);
 
     phazite::CommandRegistry commands;
-    phazite::addVersionCommands (
-        commands, song.s.context, [] (std::function<void (bool)> then) { then (true); }, [] (const juce::ValueTree&) {}, song.s.renders);
+    phazite::addVersionCommands (commands, song.s.context, [] (std::function<void (bool)> then) { then (true); }, song.s.renders);
     const auto exportOf = [&song, &commands] (const juce::String& version)
     {
         phazite::selectVersion (song.s.context, version);
@@ -464,13 +463,8 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
 
     const auto read = phazite::readDawProject (file);
     REQUIRE (read.fromVersion == first);
-    const phazite::OpenSong open = [&s] (const juce::ValueTree& song)
-    {
-        s.openSong (song);
-        waitForVersions (s.context);
-    };
     juce::StringArray said;
-    REQUIRE (phazite::importDawProjectAsBranch (s.context, read, open, said));
+    REQUIRE (phazite::importDawProjectAsBranch (s.context, read, s.save, said));
     CHECK (phazite::getCurrentBranch (s.context)->name == "Idea 2");
 
     // Those two changes, and nothing else: the rest as it was, to the bit.
@@ -492,7 +486,7 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
 
     // Kept as a version there, it merges into Main with those two lines and no clash.
     const auto back = keepVersion (s.context, "From another DAW");
-    REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "Main"), open));
+    REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "Main"), s.save));
     REQUIRE (phazite::startMerge (s.context, back));
     const auto lines = phazite::getMergeLines (s.context);
     REQUIRE (lines.size() == 2);

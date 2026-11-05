@@ -121,16 +121,20 @@ void bringBackSelectedVersion (ProjectContext&);
 void putBackSelectedChange (ProjectContext&);
 
 //==============================================================================
-// Branches (docs/versions.md: Branches). Switching opens the other branch's song as a project opens, which the app does
-// (OpenSong: ProjectSession, tests' TestSong::openSong()): the song as it is now, unsaved changes included, is kept on the
-// branch it leaves, and the undo history starts again. Not undo steps.
-using OpenSong = std::function<void (const juce::ValueTree& song)>;
+// The app's save, which asks where a project goes the first time, and calls back with whether it saved: Save Version saves
+// the project first, and a switch to another branch saves it after.
+using SaveProjectThen = std::function<void (std::function<void (bool saved)>)>;
+
+// Branches (docs/versions.md: Branches). Switching makes the song the other branch's in place, as it was left there: the
+// song as it is now, its view state and unsaved changes included, is kept on the branch it leaves; what both branches have
+// stays as it is (its plug-ins loaded, the song playing on); the undo history starts again, and the project is saved, so
+// that its file is the branch's song, as the versions say. Not undo steps.
 
 // New Branch from Here: a branch named "Idea 2" (the next number free), in the next color, from a version, or from Now (none):
 // from the current branch's last version, the song with its unsaved changes going on there. From a version, the song becomes
-// that version's. False if it can't be made (before the first version, while one is being saved).
-bool newBranch (ProjectContext&, const juce::String& fromVersion, const OpenSong&);
-bool switchBranch (ProjectContext&, const juce::String& branchID, const OpenSong&);
+// that version's, a switch. False if it can't be made (before the first version, while one is being saved).
+bool newBranch (ProjectContext&, const juce::String& fromVersion, const SaveProjectThen&);
+bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProjectThen&);
 
 // Whether the song can switch to another branch now: not while it records (a take not finished would be lost), while a
 // render has its plug-ins (an export, a freeze, a bounce), while a version is being saved or the versions are read.
@@ -237,17 +241,15 @@ bool canBounceSelected (const ProjectContext&);
 void deleteSelectedBounce (ProjectContext&);
 bool canDeleteSelectedBounce (const ProjectContext&);
 
-// Save Version (version.save): the project saved first, then a version recorded, as saveProjectThen() does it: the app's
-// save, which asks where a project goes the first time, and calls back with whether it saved. Then its bounce, with a bounce
-// (getBounceWithVersion()), in the host.
-using SaveProjectThen = std::function<void (std::function<void (bool saved)>)>;
+// Save Version (version.save): the project saved first (saveProjectThen), then a version recorded. Then its bounce, with a
+// bounce (getBounceWithVersion()), in the host.
 void saveProjectAndVersion (ProjectContext&, const SaveProjectThen&, TrackRenderHost&);
 bool canSaveVersion (const ProjectContext&);
 
 // The versions' commands: version.save, the commands on the version and the line the Versions view selects, those of
-// branches and merges, which open another branch's song through openSong, and those of bounces, which render in the host.
-void addVersionCommands (CommandRegistry&, ProjectContext&, SaveProjectThen, OpenSong, TrackRenderHost&);
-void newBranchFromSelection (ProjectContext&, const OpenSong&);
-void switchToSelectedBranch (ProjectContext&, const OpenSong&);
+// branches and merges, and those of bounces, which render in the host.
+void addVersionCommands (CommandRegistry&, ProjectContext&, SaveProjectThen, TrackRenderHost&);
+void newBranchFromSelection (ProjectContext&, const SaveProjectThen&);
+void switchToSelectedBranch (ProjectContext&, const SaveProjectThen&);
 void mergeSelectedVersion (ProjectContext&);
 } // namespace phazite

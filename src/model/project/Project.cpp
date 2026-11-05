@@ -221,29 +221,6 @@ std::unique_ptr<Project> Project::open (const juce::File& projectFile, bool rest
     return project;
 }
 
-std::unique_ptr<Project> Project::openSong (const juce::File& projectFile, const juce::ValueTree& state, juce::String& error)
-{
-    JUCE_ASSERT_MESSAGE_THREAD
-
-    auto song = makeSong (state.createCopy(), projectFile, getCacheFolder (projectFile));
-
-    if (song == nullptr)
-    {
-        error = "Phazite couldn't read that song.";
-        return {};
-    }
-
-    std::unique_ptr<Project> project (new Project (std::move (song), projectFile));
-
-    if (const auto result = project->save(); result.failed())
-    {
-        error = result.getErrorMessage();
-        return {};
-    }
-
-    return project;
-}
-
 bool Project::hasNewerAutosave (const juce::File& projectFile)
 {
     const auto autosaveFile = getAutosaveFile (projectFile);

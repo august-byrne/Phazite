@@ -62,11 +62,6 @@ struct Files
     TestSong s;
     TemporaryFolder sounds;
     phazite::TrackID track = s.addTrack ("Audio");
-    const phazite::OpenSong open = [this] (const juce::ValueTree& song)
-    {
-        s.openSong (song);
-        waitForVersions (s.context);
-    };
 
     Files()
     {
@@ -74,9 +69,9 @@ struct Files
         const auto kept = s.addAudioClip (track, writeSound (sounds.folder.getChildFile ("Kept.wav"), 0.5), 4.0);
         keepVersion (s.context, "Both");
 
-        REQUIRE (phazite::newBranch (s.context, {}, open));
+        REQUIRE (phazite::newBranch (s.context, {}, s.save));
         s.addAudioClip (s.firstTrack, writeSound (sounds.folder.getChildFile ("Tried.wav"), 0.5), 8.0);
-        REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "Main"), open)); // Tried: on the branch, as it was left
+        REQUIRE (phazite::switchBranch (s.context, findBranch (s.context, "Main"), s.save)); // Tried: on the branch, as it was left
 
         s.select (kept);
         s.run ("edit.delete"); // Kept: in the version alone

@@ -374,14 +374,14 @@ void putBackSelectedChange (ProjectContext& context)
 }
 
 //==============================================================================
-bool newBranch (ProjectContext& context, const juce::String& fromVersion, const OpenSong& openSong)
+bool newBranch (ProjectContext& context, const juce::String& fromVersion, const SaveProjectThen& saveProjectThen)
 {
     auto* history = findHistory (context);
 
     if (history == nullptr)
         return false;
 
-    // From Now, the song goes on there as it is; from a version, that version's song opens there, a switch.
+    // From Now, the song goes on there as it is; from a version, the song becomes that version's there, a switch.
     if (fromVersion.isEmpty())
         return history->makeBranch ({}, true).isNotEmpty();
 
@@ -389,7 +389,7 @@ bool newBranch (ProjectContext& context, const juce::String& fromVersion, const 
         return false;
 
     const auto branch = history->makeBranch (fromVersion, false);
-    return branch.isNotEmpty() && switchBranch (context, branch, openSong);
+    return branch.isNotEmpty() && switchBranch (context, branch, saveProjectThen);
 }
 
 bool canSwitchBranch (const ProjectContext& context)
@@ -403,19 +403,16 @@ bool canSwitchBranch (const ProjectContext& context)
            && (session == nullptr || ! session->isLentToRender());
 }
 
-bool switchBranch (ProjectContext& context, const juce::String& branchID, const OpenSong& openSong)
+bool switchBranch (ProjectContext& context, const juce::String& branchID, const SaveProjectThen& saveProjectThen)
 {
     auto* history = findHistory (context);
 
-    if (history == nullptr || openSong == nullptr || ! canSwitchBranch (context))
+    if (history == nullptr || ! canSwitchBranch (context)
+        || ! switchSongInPlace (context, [history, &branchID] { return history->switchTo (branchID); }))
         return false;
 
-    const auto song = history->leaveFor (branchID);
-
-    if (! song.isValid())
-        return false;
-
-    openSong (song); // last: it closes this song, and its history with it
+    // The project's file the branch's song, as the versions now say it is.
+    saveProjectThen ([] (bool) {});
     return true;
 }
 
@@ -442,15 +439,15 @@ void selectBranch (ProjectContext& context, const juce::String& branchID)
         history->selectedBranch = branchID;
 }
 
-void newBranchFromSelection (ProjectContext& context, const OpenSong& openSong)
+void newBranchFromSelection (ProjectContext& context, const SaveProjectThen& saveProjectThen)
 {
-    newBranch (context, getSelectedVersion (context), openSong);
+    newBranch (context, getSelectedVersion (context), saveProjectThen);
 }
 
-void switchToSelectedBranch (ProjectContext& context, const OpenSong& openSong)
+void switchToSelectedBranch (ProjectContext& context, const SaveProjectThen& saveProjectThen)
 {
     if (const auto* history = findHistory (context))
-        switchBranch (context, history->selectedBranch, openSong);
+        switchBranch (context, history->selectedBranch, saveProjectThen);
 }
 
 //==============================================================================
@@ -1243,8 +1240,7 @@ void exportDawProject (ProjectContext& context, TrackRenderHost& host)
     host.runRender (std::make_unique<TrackRender> (std::move (exporting)));
 }
 
-void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen, OpenSong openSong,
-                         TrackRenderHost& renders)
+void addVersionCommands (CommandRegistry& registry, ProjectContext& context, SaveProjectThen saveProjectThen, TrackRenderHost& renders)
 {
     registry.add ({ .id = "version.save",
                     .name = "Save Version",
@@ -1286,23 +1282,23 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
                     .isEnabled = [&context] { return canPutBack (context); },
                     .currentName = [&context] { return describePutBack (context); } });
 
-    // Branches and merges: what opens another branch's song is the app's (openSong).
+    // Branches and merges: a switch saves the project after it.
     registry.add ({ .id = "version.newBranch",
                     .name = "New Branch from Here",
                     .category = "Project",
                     .description = "Starts a branch, named and colored at once: from the selected version, which the song then becomes, or "
                                    "from now, the song going on there with its changes. The branch left keeps its own.",
                     .synonyms = { "branch", "fork", "idea", "alternative", "try something" },
-                    .perform = [&context, openSong] { newBranchFromSelection (context, openSong); },
+                    .perform = [&context, saveProjectThen] { newBranchFromSelection (context, saveProjectThen); },
                     .isEnabled = [&context] { return canMakeBranch (context); } });
 
     registry.add ({ .id = "version.switchBranch",
                     .name = "Switch to the Branch",
                     .category = "Project",
-                    .description = "Opens the branch picked in the Versions view as it was left, and keeps the song as it is now on "
-                                   "the branch it leaves, its changes too.",
+                    .description = "Makes the song the branch's picked in the Versions view, as it was left there, and keeps it as it "
+                                   "is now on the branch it leaves, its changes too. It goes on playing.",
                     .synonyms = { "checkout", "branch", "go to", "open branch" },
-                    .perform = [&context, openSong] { switchToSelectedBranch (context, openSong); },
+                    .perform = [&context, saveProjectThen] { switchToSelectedBranch (context, saveProjectThen); },
                     .isEnabled = [&context] { return canSwitchBranch (context); } });
 
     registry.add ({ .id = "version.merge",

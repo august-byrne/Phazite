@@ -202,7 +202,7 @@ TEST_CASE ("Save Version saves the project first, then records the version")
             ++saves;
             then (s.getProject().save().wasOk());
         },
-        [&s] (const juce::ValueTree& song) { s.openSong (song); }, s.renders);
+        s.renders);
 
     waitForVersions (s.context);
     s.addTrack ("Lead");

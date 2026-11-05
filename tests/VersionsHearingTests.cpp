@@ -321,8 +321,7 @@ TEST_CASE ("Save Version with a bounce bounces the version it saves, in the host
     s.addAudioClip (s.addTrack ("Hits"), writeHits (sounds.folder.getChildFile ("Hits.wav"), 2.0, 0.5f), 0.0);
     phazite::CommandRegistry commands;
     phazite::addVersionCommands (
-        commands, s.context, [&s] (std::function<void (bool)> then) { then (s.getProject().save().wasOk()); },
-        [&s] (const juce::ValueTree& song) { s.openSong (song); }, s.renders);
+        commands, s.context, [&s] (std::function<void (bool)> then) { then (s.getProject().save().wasOk()); }, s.renders);
     waitForVersions (s.context);
 
     phazite::setBounceWithVersion (s.context, true);

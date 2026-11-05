@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/VersionHistory.h"
+#include "internal/ApplySong.h"
 #include "model/arrangement/TrackColours.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/AppInfo.h"
@@ -875,6 +876,42 @@ juce::ValueTree VersionHistory::leaveFor (const juce::String& branchID)
     merging.reset();
     preview.reset();
     return other;
+}
+
+bool VersionHistory::switchTo (const juce::String& branchID)
+{
+    // A merge waiting for its version stays with the branch it was made on.
+    const auto leaving = currentBranch;
+    auto waiting = std::move (merging);
+    merging.reset();
+    const auto other = leaveFor (branchID);
+
+    if (! other.isValid())
+    {
+        merging = std::move (waiting);
+        return false;
+    }
+
+    if (waiting.has_value())
+        mergesWaiting.insert_or_assign (leaving, std::move (*waiting));
+
+    if (const auto kept = mergesWaiting.find (currentBranch); kept != mergesWaiting.end())
+    {
+        merging = std::move (kept->second);
+        mergesWaiting.erase (kept);
+    }
+
+    // The other branch's song, in place; its changes since its last version from here on.
+    makeSongTheSame (song, other);
+    const auto* last = findLastVersion();
+    PluginParameterValues parameters;
+    auto lastSong = last != nullptr ? readSong (last->id, &parameters) : juce::ValueTree();
+    setBaseline (std::move (lastSong), std::move (parameters));
+    comparedVersion.clear();
+    comparedSong = {};
+    selectedChange.reset();
+    tellNow();
+    return true;
 }
 
 bool VersionHistory::renameBranch (const juce::String& branchID, const juce::String& name)

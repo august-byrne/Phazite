@@ -36,6 +36,7 @@ TestSong::TestSong (Start start)
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     setSong (context, &project->getSong());
     addSongCommands (commands, context, renders);
+    save = [this] (std::function<void (bool)> then) { then (project->save().wasOk()); };
 
     const auto tracks = getAllPlaylistTracks (context);
     REQUIRE (! tracks.empty());
@@ -77,8 +78,11 @@ void TestSong::openSong (const juce::ValueTree& song)
     setSong (context, nullptr);
     project = nullptr;
 
+    const auto xml = song.createXml();
+    REQUIRE ((xml != nullptr && xml->writeTo (file)));
+
     juce::String error;
-    project = Project::openSong (file, song, error);
+    project = Project::open (file, false, error);
     REQUIRE_MESSAGE (project != nullptr, error.toStdString());
     setSong (context, &project->getSong());
 }

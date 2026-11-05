@@ -17,6 +17,12 @@ namespace phazite
 // The whole song like the other.
 void makeSongLike (Song&, const juce::ValueTree& other);
 
+// The whole song the same as the other, what isn't counted too (its view state, how it plays): another branch's song, which
+// the song becomes in place as it switches to it (VersionHistory::switchTo()). With the fewest edits, so that what both
+// have stays as it is, and none of them an undo step: the song's undo history starts again, as what was in it belongs to
+// the song it was. Its count of IDs is the larger of the two.
+void makeSongTheSame (Song&, const juce::ValueTree& other);
+
 // One track (a folder's own part, a return, or the master by its ID) like the other's, with what it holds and its devices'
 // automation; one the other hasn't taken away, and one the song hasn't put back where the other has it (after the track
 // before it there, in the same folder). False if neither has it.

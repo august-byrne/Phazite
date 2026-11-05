@@ -10,6 +10,7 @@
 #include "model/base/Song.h"
 #include "model/mixer/FreezeModel.h"
 
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -62,10 +63,17 @@ public:
     explicit FreezeKeeper (Song&);
     ~FreezeKeeper() override;
 
+    // The song made another branch's in place by apply (model/versions/internal/VersionHistory.h: switchTo()), which this
+    // doesn't watch, and which says whether it was. A track frozen there stays frozen only if its file holds what it plays
+    // there, as far as this knows: what the file held as the track was last frozen (on any branch: a track's file is its
+    // own, getFrozenFile(), whichever froze it), or as the project opened. Every other plays live.
+    bool keepThrough (const std::function<bool()>& apply);
+
 private:
     Song& song;
     juce::ValueTree state;                     // the song's
     std::map<TrackID, juce::ValueTree> frozen; // what each frozen track's file holds
+    std::map<TrackID, juce::ValueTree> files;  // and each track's file, kept as it is unfrozen, as the file stays
     bool checking = false;
 
     void takeFrozenTracks();

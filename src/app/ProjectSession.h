@@ -86,7 +86,6 @@ public:
     // version of the open project comes back as a new branch from that version; any other opens as a new untitled project.
     void importDawProject();
     void importDawProject (const juce::File&);
-    void openBranchSong (const juce::ValueTree&); // another branch's song in the project's file, as a project opens
 
     // Makes an untitled project with what the settings choose, and opens it: the new-project window's Create.
     juce::Result createProject (const NewProjectSettings&);

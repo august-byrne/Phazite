@@ -82,8 +82,9 @@ DawProjectFile readDawProject (const juce::File&);
 juce::StringArray takeDawProject (Song&, const DawProjectFile&);
 
 // The same into a new branch from the version it came from, of the open project, whose versions must have it: the version's
-// song with what the DAWproject holds taken in, which the app opens there as switching to a branch opens one (openSong). False,
-// with why, if it can't be; else what it couldn't take.
-bool importDawProjectAsBranch (ProjectContext&, const DawProjectFile&, const std::function<void (const juce::ValueTree& song)>& openSong,
-                               juce::StringArray& said);
+// song with what the DAWproject holds taken in, which the song then switches to, as it switches to any branch, the project
+// saved after it (model/versions/VersionsModel.h: switchBranch(), with the app's save). False, with why, if it can't be; else
+// what it couldn't take.
+bool importDawProjectAsBranch (ProjectContext&, const DawProjectFile&,
+                               const std::function<void (std::function<void (bool saved)>)>& saveProjectThen, juce::StringArray& said);
 } // namespace phazite

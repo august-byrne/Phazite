@@ -59,10 +59,6 @@ public:
     // then still writes to the project file.
     static std::unique_ptr<Project> open (const juce::File& projectFile, bool restoreAutosave, juce::String& error);
 
-    // Opens a project's file with another song in it, as another of its versions' branches holds it (model/versions/), and
-    // saves it there: the project then is that song. Its previous file goes into Backups/ as a save's does.
-    static std::unique_ptr<Project> openSong (const juce::File& projectFile, const juce::ValueTree& song, juce::String& error);
-
     // True if the project has an autosave from a session that ended without saving or closing the
     // project, such as a crash: saving and closing both delete the autosave.
     static bool hasNewerAutosave (const juce::File& projectFile);

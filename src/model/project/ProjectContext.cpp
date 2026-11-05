@@ -400,4 +400,18 @@ void setSong (ProjectContext& context, Song* song)
     impl.songWatcher->setState (song != nullptr ? song->getState() : juce::ValueTree());
     impl.listeners.call ([] (ProjectContext::Listener& l) { l.projectChanged(); });
 }
+
+bool switchSongInPlace (ProjectContext& context, const std::function<bool()>& apply)
+{
+    auto& impl = context.getImpl();
+
+    if (impl.song == nullptr || impl.freezes == nullptr || ! impl.freezes->keepThrough (apply))
+        return false;
+
+    impl.songSelection->setNoteClips ({});
+    impl.rangeSelection.clear();
+    impl.selection.deselectAll();
+    impl.automation = std::make_unique<AutomationWatcher> (*impl.song);
+    return true;
+}
 } // namespace phazite

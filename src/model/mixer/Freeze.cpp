@@ -365,6 +365,31 @@ void FreezeKeeper::takeFrozenTracks()
     }
 
     frozen = std::move (now);
+
+    for (const auto& [track, holds] : frozen)
+        files[track] = holds;
+}
+
+bool FreezeKeeper::keepThrough (const std::function<bool()>& apply)
+{
+    const juce::ScopedValueSetter<bool> busy (checking, true); // what it changes, and the unfreezing, aren't checked
+
+    if (! apply())
+        return false;
+
+    // A frozen track stays frozen where its file holds what it plays now.
+    frozen.clear();
+
+    for (const auto track : getFrozenTracks (song))
+    {
+        if (const auto file = files.find (track);
+            file != files.end() && getFrozenFile (song, track).existsAsFile() && holdsWhatWasFrozen (song, track, file->second))
+            frozen[track] = file->second;
+        else
+            unfreeze (song, track);
+    }
+
+    return true;
 }
 
 void FreezeKeeper::compare (TrackID track)

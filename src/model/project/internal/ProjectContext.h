@@ -9,6 +9,8 @@
 #include "model/base/Song.h"
 #include "model/base/internal/Selection.h"
 
+#include <functional>
+
 namespace phazite
 {
 class AutomationWatcher;
@@ -46,6 +48,13 @@ VersionHistory* getVersionHistory (const ProjectContext&);
 // The song open now, or none: ProjectSession's (and tests'), which its project owns, and which outlives its being open
 // here. Nothing of the previous song stays selected, and the clipboard is empty. Then tells the listeners.
 void setSong (ProjectContext&, Song*);
+
+// The open song made another branch's in place by apply (model/versions/internal/VersionHistory.h: switchTo()), which says
+// whether it was. Then what holds parts of it by their IDs starts again (nothing selected, no time range, no notes in the
+// editors, the parameter touched last forgotten), and its frozen tracks stay frozen only where their files hold what they
+// play (model/mixer/internal/Freeze.h: FreezeKeeper::keepThrough()), while the views go on showing the same song, which
+// told them what changed in it, and the clipboard keeps what it holds, to paste on this branch.
+bool switchSongInPlace (ProjectContext&, const std::function<bool()>& apply);
 
 // What shows the devices' windows: a plug-in's own editor, or Phazite's editor of one of its own devices, each in a window
 // of its own. The app's (src/app/PluginWindow.h), which it sets as it starts; without one (as in most tests), no device

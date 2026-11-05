@@ -1283,7 +1283,7 @@ juce::StringArray takeDawProject (Song& song, const DawProjectFile& in)
 }
 
 bool importDawProjectAsBranch (ProjectContext& context, const DawProjectFile& in,
-                               const std::function<void (const juce::ValueTree& song)>& openSong, juce::StringArray& said)
+                               const std::function<void (std::function<void (bool saved)>)>& saveProjectThen, juce::StringArray& said)
 {
     auto* history = getVersionHistory (context);
     auto* open = findSong (context);
@@ -1301,7 +1301,8 @@ bool importDawProjectAsBranch (ProjectContext& context, const DawProjectFile& in
         return false;
     }
 
-    // The version's song, made a song of its own, with what came back taken in; then a branch from the version, with it.
+    // The version's song, made a song of its own, with what came back taken in; then a branch from the version, with it. What
+    // it adds takes IDs past the open song's, which no other branch has (VersionHistory::switchTo()).
     const auto state = history->readSong (version->id);
     const auto song = state.isValid() ? makeSong (state, open->getFile(), open->getCacheFolder()) : nullptr;
 
@@ -1311,10 +1312,12 @@ bool importDawProjectAsBranch (ProjectContext& context, const DawProjectFile& in
         return false;
     }
 
+    song->getState().setProperty (schema::nextID, (juce::int64) std::max (findNextID (song->getState()), findNextID (open->getState())),
+                                  nullptr);
     said = takeDawProject (*song, in);
     const auto branch = history->makeBranchWithSong (version->id, song->getState());
 
-    if (branch.isEmpty() || ! switchBranch (context, branch, openSong))
+    if (branch.isEmpty() || ! switchBranch (context, branch, saveProjectThen))
     {
         said = { "Phazite couldn't make a branch for it." };
         return false;

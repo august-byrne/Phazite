@@ -486,28 +486,6 @@ void ProjectSession::askWhetherToRestore (const juce::File& file, bool untitled,
     juce::AlertWindow::showAsync (options, [callback] (int result) { callback (result == 1); });
 }
 
-void ProjectSession::openBranchSong (const juce::ValueTree& song)
-{
-    // Another branch's song in the project's file, opened as a project opens (model/versions/VersionsModel.h: switchBranch()):
-    // what the song held was kept on the branch it left.
-    if (project == nullptr)
-        return;
-
-    const auto file = project->getFile();
-    setProject (nullptr);
-
-    juce::String error;
-
-    if (auto opened = Project::openSong (file, song, error))
-    {
-        setProject (std::move (opened));
-        return;
-    }
-
-    showError ("Phazite couldn't open the branch", error);
-    open (file, false);
-}
-
 void ProjectSession::open (const juce::File& file, bool restoreAutosave)
 {
     juce::String error;
@@ -663,11 +641,9 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& re
                     .perform = [this] { saveProject(); },
                     .isEnabled = [this] { return project != nullptr; } });
 
-    // Save Version: the project saved first, asking where for an untitled one, then a version of its song
-    // (model/versions/VersionsModel.h).
-    addVersionCommands (
-        registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); },
-        [this] (const juce::ValueTree& song) { openBranchSong (song); }, renders);
+    // Save Version: the project saved first, asking where for an untitled one, then a version of its song; a switch to
+    // another branch saves it after (model/versions/VersionsModel.h).
+    addVersionCommands (registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, renders);
 
     registry.add ({ .id = "project.export",
                     .name = "Export Song",
@@ -731,7 +707,7 @@ void ProjectSession::importDawProject (const juce::File& file)
     {
         juce::StringArray said;
 
-        if (importDawProjectAsBranch (context, *read, [this] (const juce::ValueTree& song) { openBranchSong (song); }, said))
+        if (importDawProjectAsBranch (context, *read, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, said))
             showNotice ("Imported " + file.getFileName(),
                         "It came back as a new branch from the version it was exported from."
                             + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString (", ") + "."));

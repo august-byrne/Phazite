@@ -24,7 +24,24 @@ namespace
         juce::String name;
     };
 
-    std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true)
+    // Which of an element's parts making it like another takes: what is counted, or everything (switching in place).
+    enum class Taken
+    {
+        counted,
+        everything
+    };
+
+    bool isTaken (Taken taken, const juce::ValueTree& element, const juce::Identifier& property)
+    {
+        return taken == Taken::everything || ! schema::isUncountedProperty (element, property);
+    }
+
+    bool isTaken (Taken taken, const juce::ValueTree& element, const juce::ValueTree& child)
+    {
+        return taken == Taken::everything || ! schema::isUncountedElement (element, child);
+    }
+
+    std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true, Taken taken = Taken::counted)
     {
         std::vector<Child> children;
         std::map<juce::String, int> numUnkeyed;
@@ -32,7 +49,7 @@ namespace
 
         for (const auto& child : element)
         {
-            if (schema::isUncountedElement (element, child) || (! withTracks && child.hasType (schema::TRACK)))
+            if (! isTaken (taken, element, child) || (! withTracks && child.hasType (schema::TRACK)))
                 continue;
 
             const auto type = child.getType().toString();
@@ -51,17 +68,18 @@ namespace
 
     // The element made like the other, its children too, but for the tracks in it while withTracks is off (a folder's,
     // which are things of their own).
-    void makeLike (juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo, bool withTracks = true)
+    void makeLike (juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo, bool withTracks = true,
+                   Taken taken = Taken::counted)
     {
         for (int i = live.getNumProperties(); --i >= 0;)
-            if (const auto name = live.getPropertyName (i); ! schema::isUncountedProperty (live, name) && ! other.hasProperty (name))
+            if (const auto name = live.getPropertyName (i); isTaken (taken, live, name) && ! other.hasProperty (name))
                 live.removeProperty (name, undo);
 
         for (int i = 0; i < other.getNumProperties(); ++i)
         {
             const auto name = other.getPropertyName (i);
 
-            if (schema::isUncountedProperty (other, name))
+            if (! isTaken (taken, other, name))
                 continue;
 
             if (const auto* value = live.getPropertyPointer (name); value == nullptr || ! isSameValue (*value, other[name]))
@@ -70,7 +88,7 @@ namespace
 
         // The children it has that the other hasn't go; then, in the other's order, each it has made like the other's and
         // each it hasn't added, after the uncounted children before them (its lanes, which are view state).
-        const auto wanted = getCountedChildren (other, withTracks);
+        const auto wanted = getCountedChildren (other, withTracks, taken);
         std::set<juce::String> wantedNames;
 
         for (const auto& child : wanted)
@@ -78,7 +96,7 @@ namespace
 
         std::map<juce::String, juce::ValueTree> kept;
 
-        for (const auto& child : getCountedChildren (live, withTracks))
+        for (const auto& child : getCountedChildren (live, withTracks, taken))
         {
             if (wantedNames.count (child.name) == 0)
                 live.removeChild (child.tree, undo);
@@ -91,14 +109,13 @@ namespace
         for (const auto& child : wanted)
         {
             while (place < live.getNumChildren()
-                   && (schema::isUncountedElement (live, live.getChild (place))
-                       || (! withTracks && live.getChild (place).hasType (schema::TRACK))))
+                   && (! isTaken (taken, live, live.getChild (place)) || (! withTracks && live.getChild (place).hasType (schema::TRACK))))
                 ++place;
 
             if (const auto found = kept.find (child.name); found != kept.end())
             {
                 auto tree = found->second;
-                makeLike (tree, child.tree, undo);
+                makeLike (tree, child.tree, undo, true, taken);
 
                 if (const auto index = live.indexOf (tree); index != place)
                     live.moveChild (index, place, undo);
@@ -258,6 +275,16 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
     auto* undo = &song.getUndoManager();
     removeMovedItems (song.getState(), other, undo);
     makeLike (song.getState(), other, undo);
+}
+
+void makeSongTheSame (Song& song, const juce::ValueTree& other)
+{
+    // Its count of IDs the larger of the two: what either branch made keeps an ID of its own.
+    const auto next = std::max (findNextID (song.getState()), findNextID (other));
+    removeMovedItems (song.getState(), other, nullptr);
+    makeLike (song.getState(), other, nullptr, true, Taken::everything);
+    song.getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
+    song.getUndoManager().clearUndoHistory();
 }
 
 bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
