@@ -10,10 +10,11 @@ namespace phazite
 {
 namespace
 {
-    // The same value as a file holds it and as the model wrote it (Project.cpp: isSameValue()).
+    // The same value as a file holds it: the model may hold a number where a version holds its text, with more digits than
+    // the text keeps (a clip at 12.000000000000002 beats is at "12.0").
     bool isSameValue (const juce::var& a, const juce::var& b)
     {
-        return a == b && b == a;
+        return (a == b && b == a) || a.toString() == b.toString();
     }
 
     // The counted properties that two elements don't hold the same of.

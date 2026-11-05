@@ -226,14 +226,14 @@ const VersionRecord* VersionHistory::findLastVersion() const
     return branch != nullptr ? findVersion (branch->head) : nullptr;
 }
 
-juce::ValueTree VersionHistory::readSong (const juce::String& versionID) const
+juce::ValueTree VersionHistory::readSong (const juce::String& versionID, PluginParameterValues* parameters) const
 {
     const auto* version = findVersion (versionID);
 
     if (version == nullptr || store == nullptr)
         return {};
 
-    auto read = store->readSong (version->song);
+    auto read = store->readSong (version->song, parameters);
     store->getPieces().closeFiles();
     return read;
 }
@@ -340,6 +340,8 @@ void VersionHistory::saved (int number, bool ok, const VersionRecord& version, c
 
     versions[version.id] = version;
     currentBranch = branch.id;
+    comparedVersion.clear(); // the changes since the new version
+    comparedSong = {};
 
     if (auto found = std::find_if (branches.begin(), branches.end(), [&branch] (const auto& b) { return b.id == branch.id; });
         found != branches.end())
@@ -595,8 +597,45 @@ void VersionHistory::markAllChanged()
 
 void VersionHistory::changed()
 {
-    changesReady = false;
+    changesReady = comparedReady = false;
     notifyPending = true;
+}
+
+void VersionHistory::compareWith (const juce::String& versionID)
+{
+    // The last version is the changes' own; another is read once, to list what differs from it while the song changes.
+    const auto* last = findLastVersion();
+    const auto other = versionID.isNotEmpty() && (last == nullptr || last->id != versionID) ? versionID : juce::String();
+
+    if (other == comparedVersion)
+        return;
+
+    comparedVersion = other;
+    comparedParameters.clear();
+    comparedSong = other.isNotEmpty() ? readSong (other, &comparedParameters) : juce::ValueTree();
+
+    if (other.isNotEmpty() && ! comparedSong.isValid())
+        comparedVersion.clear(); // it can't be read
+
+    selectedChange.reset();
+    tellNow();
+}
+
+const std::vector<SongChange>& VersionHistory::getListedChanges()
+{
+    if (comparedVersion.isEmpty())
+        return getChanges();
+
+    takeChangesOutsideHistory();
+
+    if (! comparedReady)
+    {
+        const auto parameters = readPluginParameters();
+        comparedChanges = findChanges (comparedSong, song.getState(), { &comparedParameters, &parameters });
+        comparedReady = true;
+    }
+
+    return comparedChanges;
 }
 
 void VersionHistory::tellNow()

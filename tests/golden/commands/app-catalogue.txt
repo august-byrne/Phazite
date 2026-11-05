@@ -94,6 +94,10 @@ project.openRecent
 project.saveAs | ctrl + shift + S
 project.save | ctrl + S
 version.save | ctrl + alt + S
+version.bringBack
+version.takeFrom
+version.putBack
+version.showChanges
 project.export | ctrl + shift + R
 view.commandPalette | ctrl + K
 view.menus | F10

@@ -15,6 +15,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 
 namespace phazite
@@ -52,8 +53,20 @@ public:
     bool saveVersion (const juce::String& name, const juce::String& note, std::function<void (juce::Result)> done = {});
     bool isSaving() const noexcept { return saving; }
 
-    // A version's song, read from its pieces: invalid if one can't be read.
-    juce::ValueTree readSong (const juce::String& versionID) const;
+    // A version's song, read from its pieces, with its plug-ins' parameters' values if asked: invalid if one can't be read.
+    // And the current branch's last version's song, which the changes are from (invalid before the first version).
+    juce::ValueTree readSong (const juce::String& versionID, PluginParameterValues* parameters = nullptr) const;
+    const juce::ValueTree& getLastVersionSong() const noexcept { return baseline; }
+
+    // The Versions view's choices, which the commands act on: the version selected in its history, and the line of the
+    // changes selected; and the version the changes are listed against while Take from This Version… shows one (none: the
+    // last version). What differs from that one, as the changes are listed (from it to the song now), and its song.
+    juce::String selectedVersion;
+    std::optional<SongChange> selectedChange;
+    void compareWith (const juce::String& versionID);
+    const juce::String& getComparedVersion() const noexcept { return comparedVersion; }
+    const std::vector<SongChange>& getListedChanges();
+    const juce::ValueTree& getComparedSong() const noexcept { return comparedVersion.isEmpty() ? baseline : comparedSong; }
 
     // How many bytes the history takes on disk.
     juce::int64 getSize() const;
@@ -89,6 +102,14 @@ private:
     bool allDirty = true, songDirty = true, automationDirty = true, changesReady = false, notifyPending = false;
     std::vector<SongChange> changes;
     int changesOutsideHistory = 0; // the song's count, as the changes last took it in (a plug-in's own change)
+
+    // While the changes are listed against another version: its song, its plug-ins' values, and what differs from it, worked
+    // out again after each change to the song.
+    juce::String comparedVersion;
+    juce::ValueTree comparedSong;
+    PluginParameterValues comparedParameters;
+    std::vector<SongChange> comparedChanges;
+    bool comparedReady = false;
 
     void open(); // the store beside the song's file, read on the history's thread
     void opened (int generation, std::vector<BranchRecord>, const juce::String& current, std::map<juce::String, VersionRecord>,

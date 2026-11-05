@@ -176,6 +176,47 @@ TEST_CASE ("Save Version saves the project and a version, named as typed, and th
     CHECK (context.getSongSelection().getTracks() == std::vector<phazite::TrackID> { tracks.front() });
 }
 
+TEST_CASE ("A version selected in the history is what Bring Back and Take from This Version act on")
+{
+    Screen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    auto& view = screen.getVersionsView();
+    view.getNameField().setText ("One");
+    phazite::test::dispatchPendingMessages();
+    screen.click (view.getSaveButton());
+    screen.waitForVersions();
+    view.getNameField().setText ("Two");
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    screen.click (view.getSaveButton());
+    screen.waitForVersions();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumHistoryRows() == 3; }));
+
+    // A click on the older version selects it; Take from This Version lists what differs from it, until Done.
+    auto& history = *phazite::test::findAll<juce::ListBox> (view).getLast();
+    phazite::test::Mouse mouse (history);
+    mouse.click (history.getRowPosition (2, true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (view.describeHistoryRow (2).startsWith ("One"));
+    CHECK (phazite::getSelectedVersion (context) == phazite::getVersions (context).back().id);
+    CHECK (phazite::getCurrentName (*screen.registry.find ("version.bringBack")) == "Bring Back \"One\"");
+
+    REQUIRE (screen.registry.invoke ("version.takeFrom"));
+    CHECK (view.getChangesHeading().startsWith ("TAKE FROM \"One\""));
+    CHECK (view.getDoneButton().isShowing());
+    CHECK (view.getNumChanges() == 1); // the track added since
+    screen.click (view.getDoneButton());
+    CHECK (view.getChangesHeading().startsWith ("CHANGES SINCE \"Two\""));
+    CHECK_FALSE (view.getDoneButton().isShowing());
+
+    // Bring Back: the song as it was then, one undo step.
+    REQUIRE (screen.registry.invoke ("version.bringBack"));
+    CHECK (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
+    CHECK (screen.registry.invoke ("edit.undo"));
+}
+
 TEST_CASE ("The activity bar's icons are switches screen readers name, with tooltips that name their keys")
 {
     Screen screen;

@@ -87,14 +87,26 @@ public:
         g.drawText (change.what, area, juce::Justification::centredLeft, true);
     }
 
-    void listBoxItemClicked (int row, const juce::MouseEvent&) override
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override
     {
         if (! juce::isPositiveAndBelow (row, (int) view.changes.size()))
             return;
 
-        // A click selects what changed: its track, or the master.
-        if (const auto& change = view.changes[(size_t) row]; change.track.isValid() && change.kind != VersionChange::Kind::removed)
+        // A click selects what changed: its track, or the master; the right button shows what can be done with it.
+        const auto& change = view.changes[(size_t) row];
+        selectChange (view.context, change);
+
+        if (change.track.isValid() && change.kind != VersionChange::Kind::removed)
             view.context.getSongSelection().selectOnly (change.track);
+
+        if (e.mods.isPopupMenu())
+            view.showMenu ({ "version.putBack" });
+    }
+
+    void selectedRowsChanged (int row) override
+    {
+        if (juce::isPositiveAndBelow (row, (int) view.changes.size()))
+            selectChange (view.context, view.changes[(size_t) row]);
     }
 
     juce::String getNameForRow (int row) override { return view.describeChange (row); }
@@ -186,7 +198,22 @@ public:
         if (row == 0)
             return "Now: the song as it is, with the changes since its last version";
 
-        return view.describeHistoryRow (row);
+        return view.describeHistoryRow (row) + ". Right-click for what can be done with it.";
+    }
+
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override
+    {
+        selectedRowsChanged (row);
+
+        if (e.mods.isPopupMenu() && row > 0)
+            view.showMenu ({ "version.bringBack", "version.takeFrom" });
+    }
+
+    void selectedRowsChanged (int row) override
+    {
+        // Now, or a version, which the commands act on.
+        const auto isVersion = juce::isPositiveAndBelow (row - 1, (int) view.versions.size());
+        selectVersion (view.context, isVersion ? view.versions[(size_t) row - 1].id : juce::String());
     }
 
 private:
@@ -232,6 +259,8 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
         setVersionDraft (context, nameField.getText(), noteField.getText()); // as typed, the last key too
         commands.invoke ("version.save");
     };
+    doneButton.setButtonText ("Done");
+    doneButton.onClick = [this] { commands.invoke ("version.showChanges"); };
 
     for (auto* list : { &changesList, &historyList })
     {
@@ -247,6 +276,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
         addAndMakeVisible (c);
 
     addChildComponent (emptyText);
+    addChildComponent (doneButton);
     refreshTooltips();
     context.addListener (this);
     refresh();
@@ -265,7 +295,8 @@ void VersionsView::refreshTooltips()
                                          "version.save"));
     nameField.setTooltip ("The version's name. Left empty, the version is named by what changed");
     noteField.setTooltip ("A note to keep with the version: what it tried, or what to try next");
-    changesList.setTooltip ("What the song holds now that its last version didn't, by track");
+    changesList.setTooltip ("What the song holds now that its last version didn't, by track. Right-click a line to put it back");
+    doneButton.setTooltip (withShortcut (commands, "Lists the changes since the last version again", "version.showChanges"));
     historyList.setTooltip ("Every version, newest first, each on its branch's line");
 }
 
@@ -318,11 +349,18 @@ juce::String VersionsView::describeHistoryRow (int row) const
     return text;
 }
 
+void VersionsView::showMenu (std::initializer_list<const char*> commandIDs)
+{
+    juce::PopupMenu menu;
+    addCommandItems (menu, commands, commandIDs);
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
 void VersionsView::refresh()
 {
     const auto keeps = keepsVersions (context);
     const auto reading = isReadingVersions (context);
-    changes = getChangesSinceLastVersion (context);
+    changes = getListedChanges (context);
     versions = getVersions (context);
     branches = getBranches (context);
 
@@ -330,17 +368,29 @@ void VersionsView::refresh()
     branchName.setText (branch.has_value() ? branch->name : juce::String(), juce::dontSendNotification);
     branchName.setColour (juce::Label::textColourId, branch.has_value() ? branch->colour : getPalette (*this).textMuted);
 
+    // The changes since the last version, or what differs from the version taken from (Take from This Version...).
     const auto last = getLastVersion (context);
-    changesHeading.setText (last.has_value() ? "CHANGES SINCE \"" + last->name + "\"  " + juce::String ((int) changes.size())
-                                             : juce::String ("CHANGES"),
+    const auto compared = getComparedVersion (context);
+    juce::String comparedName;
+
+    for (const auto& version : versions)
+        if (version.id == compared)
+            comparedName = version.name;
+
+    const auto count = "  " + juce::String ((int) changes.size());
+    changesHeading.setText (compared.isNotEmpty() ? "TAKE FROM \"" + comparedName + "\"" + count
+                            : last.has_value()    ? "CHANGES SINCE \"" + last->name + "\"" + count
+                                                  : juce::String ("CHANGES"),
                             juce::dontSendNotification);
+    doneButton.setVisible (compared.isNotEmpty());
 
     // What there is to say while there is nothing to list.
-    emptyText.setText (! keeps           ? juce::String ("Versions are kept for a project, once it has been saved.")
-                       : reading         ? juce::String ("Reading the versions...")
-                       : ! last          ? juce::String ("No versions yet. Save Version keeps the song as it is now, to come back to.")
-                       : changes.empty() ? juce::String ("No changes since the last version.")
-                                         : juce::String(),
+    emptyText.setText (! keeps   ? juce::String ("Versions are kept for a project, once it has been saved.")
+                       : reading ? juce::String ("Reading the versions...")
+                       : ! last  ? juce::String ("No versions yet. Save Version keeps the song as it is now, to come back to.")
+                       : changes.empty() && compared.isNotEmpty() ? juce::String ("The song is as that version was.")
+                       : changes.empty()                          ? juce::String ("No changes since the last version.")
+                                                                  : juce::String(),
                        juce::dontSendNotification);
     emptyText.setVisible (emptyText.getText().isNotEmpty());
 
@@ -394,7 +444,12 @@ void VersionsView::resized()
     area.removeFromTop (Space::s);
 
     // The changes, as many rows as they have (up to half of what is left), then the history.
-    changesHeading.setBounds (area.removeFromTop (controlHeight));
+    auto heading = area.removeFromTop (controlHeight);
+
+    if (doneButton.isVisible())
+        doneButton.setBounds (heading.removeFromRight (juce::jmin (heading.getWidth() / 3, 72)));
+
+    changesHeading.setBounds (heading);
     const auto changesHeight = juce::jmin (area.getHeight() / 2, juce::jmax (1, (int) changes.size()) * History::changeRowHeight);
 
     if (emptyText.isVisible())

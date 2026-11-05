@@ -36,6 +36,7 @@ public:
     juce::TextEditor& getNameField() noexcept { return nameField; }
     juce::TextEditor& getNoteField() noexcept { return noteField; }
     juce::Button& getSaveButton() noexcept { return saveButton; }
+    juce::Button& getDoneButton() noexcept { return doneButton; }
     juce::ListBox& getChangesList() noexcept { return changesList; }
     juce::String getChangesHeading() const { return changesHeading.getText(); }
 
@@ -51,7 +52,7 @@ private:
 
     juce::Label title, branchName, changesHeading, historyHeading, emptyText;
     juce::TextEditor nameField, noteField;
-    juce::TextButton saveButton;
+    juce::TextButton saveButton, doneButton; // doneButton: back to the changes since the last version, from another's
     std::unique_ptr<ChangesModel> changesModel;
     std::unique_ptr<HistoryModel> historyModel;
     juce::ListBox changesList, historyList;
@@ -60,7 +61,8 @@ private:
     std::vector<VersionInfo> versions;
     std::vector<BranchInfo> branches;
 
-    void refresh(); // what the model holds now
+    void refresh();                                                // what the model holds now
+    void showMenu (std::initializer_list<const char*> commandIDs); // for the row under the pointer, which is selected
     juce::Colour getBranchColour (const juce::String& branchID) const;
     juce::String getBranchName (const juce::String& branchID) const;
 
