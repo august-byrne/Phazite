@@ -611,3 +611,43 @@ If the owner wants versions to be v1's headline instead, V1 to V3 are the part t
 | Git's words leak into the window | The list of words above; the texts kept in one place (phase A4's strings table) |
 | A merge that is clean but sounds wrong | It is one undo step, heard at once; the window warns where both sides changed the same bars of a track |
 | Audio files deleted by hand | The version names what is missing and plays the rest |
+
+## As built
+
+Every step above is built on the local branch `versions` (2026-11-04), in this order: the project file one property per
+line, V1, V2, V4, V3, V5, Clean Up Unused Audio, then D1 and D2. Where the build differs from the plan:
+
+- **The store** keeps pieces in packs, one file per saved version (`Versions/pieces/<sha>.pack`: the pieces it adds, then
+  an index), not one file per piece: thousands of tiny files are slow on Windows and in sync tools. Pieces keep their
+  children in their order, so a song comes back exactly; the differences and the merge match children without an order by
+  their keys. Sections stay inside the song's piece: they are small. Pieces hold the whole song as it was saved, view
+  state too; the differences, Bring Back and the merge leave out what isn't counted.
+- **A plug-in's knobs** are read from its instance as a version is saved, and kept beside its state, so the changes can
+  name them.
+- **Merging** is a mode of the Versions view's list (Merge and Cancel under its heading), not a window of its own. A
+  merge's notes (what it couldn't decide, where both sides changed a track's clips over the same beats) show while it waits
+  for its version.
+- **Bounces** are `Versions/bounces/<version id>.flac`, FLAC of 16 bits, dithered, at the rate the song plays at. The
+  version the song is now renders as Export Song does, in its progress window; an older one renders its own song in the
+  background, with plug-in instances of its own, beside the song playing.
+- **Hearing** a version is a play mark on its row (Now's plays the song again) and Hear It in its menu. The engine plays
+  the bounce after the master (`engine/nodes/Comparison.h`) and measures both. At each switch the louder one is turned
+  down to the other's loudness so far, or as soon as both have one. The gains move over one block.
+- **DAWproject:**
+  - A VST3's state goes in as its `.vstpreset`, which the helper writes through JUCE.
+  - What another DAW can't play is bounced beside its track ("Bass (bounce)"), the track itself muted with its notes
+    kept.
+  - Imported back into a branch, a file takes notes, faders, mutes and tracks added or taken away. Values are compared
+    within what the file's numbers keep. Its devices, automation and audio clips stay the version's.
+
+Not built yet:
+
+- the playlist marking what changed since the last version;
+- Name and Note… for a saved version, whose record is a piece and doesn't change;
+- the branch menu's Name and Color… (the model can rename a branch);
+- switching branches from the status bar's branch name;
+- the benchmark of Save Version and the changes list on the 100-track song;
+- importing a DAWproject's plug-ins and sends into a new project.
+
+**To check by hand:** an export opening in Bitwig Studio and Studio One, and a real VST3's preset going both ways. The
+tests' plug-in is of a format of its own, so the tests bounce it rather than write its preset.
