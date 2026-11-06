@@ -110,8 +110,10 @@ public:
                 device->process (buffer);
                 const auto before = juce::Time::getMillisecondCounterHiRes();
                 playNote();
-                const auto played = (before + juce::Time::getMillisecondCounterHiRes()) / 2.0;
+                const auto after = juce::Time::getMillisecondCounterHiRes();
+                const auto played = (before + after) / 2.0;
                 const auto intoBlock = std::clamp (juce::roundToInt ((played - blockStarted) * sampleRate / 1000.0), 0, blockSize - 1);
+                uncertainty = (int) std::ceil ((after - before) * sampleRate / 2000.0);
 
                 for (int b = 0; b < 40 && found < 0; ++b)
                 {
@@ -127,7 +129,12 @@ public:
         return found;
     }
 
+    // How many samples the last delay may be off by: half the time playing the note took, which it was played somewhere in
+    // (a sanitizer's build makes that time long, so that delays measured to the sample jitter by more than one).
+    int getUncertainty() const noexcept { return uncertainty; }
+
 private:
     TestAudioDevice* device;
+    int uncertainty = 0;
 };
 } // namespace phazite::test

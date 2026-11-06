@@ -45,10 +45,11 @@ void playLive (const juce::MidiMessage& message)
     phazite::getAudioIO (phazite::test::getEngineContext()).playLive (message);
 }
 
-// Whether a note's delay is the one expected, to within the time the test reads of when it was played.
-bool isNear (int samples, int expected)
+// Whether a note's delay is the one expected, to within the time the test reads of when it was played, and as much more as
+// the measurements may be off by (HostedDevice::getUncertainty()).
+bool isNear (int samples, int expected, int slack = 0)
 {
-    return std::abs (samples - expected) <= 2;
+    return std::abs (samples - expected) <= 2 + slack;
 }
 
 void addInstrument (phazite::Song& song, phazite::TrackID track)
@@ -337,11 +338,19 @@ TEST_CASE ("Every live note sounds, however long the message thread was busy")
     // Once the engine plays the note, in the block it came in (after the master's look-ahead), every note after it sounds
     // as soon.
     const auto first = playUntil (playNote, [] (int samples) { return samples >= 0; });
+    const auto firstSlack = device.getUncertainty();
     REQUIRE (first >= 0);
     CHECK (first < phazite::test::HostedDevice::blockSize + lookAhead);
 
+    // Each to the sample, as near as the times of playing them are known (to within two samples alone, a note failed on
+    // linux-tsan on 2026-11-06, and passed when run again).
     for (int i = 0; i < 12; ++i)
-        CHECK (isNear (playNote(), first));
+    {
+        const auto samples = playNote();
+        const auto slack = firstSlack + device.getUncertainty();
+        INFO ("note " << i << ": " << samples << " samples, the first " << first << ", give or take " << slack);
+        CHECK (isNear (samples, first, slack));
+    }
 }
 
 TEST_CASE ("Low latency leaves what renders play as the song has it")
