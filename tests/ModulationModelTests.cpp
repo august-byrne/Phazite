@@ -134,7 +134,7 @@ TEST_CASE ("Modulators and macros are the song's, with what they modulate")
     const auto element = phazite::findModulatorState (s, lfo);
     REQUIRE (element.isValid());
     CHECK (element[schema::modulatorType].toString() == juce::String ("lfo"));
-    CHECK ((float) element.getChildWithName (schema::VALUES)["biopolar"] == doctest::Approx (1.0f));
+    CHECK ((float) element.getChildWithName (schema::VALUES)["bipolar"] == doctest::Approx (1.0f));
     CHECK (phazite::isBipolar (context, lfo));
 
     phazite::getModulatorParameter (context, lfo, "rate").setValue (4.0f);

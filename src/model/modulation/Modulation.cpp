@@ -283,7 +283,7 @@ ModulatorID addModulator (Song& song, TrackID track, ModulatorType type)
     juce::ValueTree values (schema::VALUES);
 
     if (type == ModulatorType::lfo || type == ModulatorType::random)
-        values.setProperty ("biopolar", 1.0f, nullptr);
+        values.setProperty ("bipolar", 1.0f, nullptr);
     else if (type == ModulatorType::envelopeFollower || type == ModulatorType::steps)
         values.setProperty ("depth", 1.0f, nullptr);
 
@@ -348,7 +348,7 @@ bool isBipolar (const Song& song, ModulatorID id)
         case devices::ModulatorKind::lfo:
         case devices::ModulatorKind::random:
         case devices::ModulatorKind::breakpoints:
-            return getValue (state, *kind, "biopolar") >= 0.5f;
+            return getValue (state, *kind, "bipolar") >= 0.5f;
         case devices::ModulatorKind::steps:
             return true; // steps go from -1 to 1
         case devices::ModulatorKind::envelopeFollower:

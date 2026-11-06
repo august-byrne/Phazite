@@ -52,7 +52,7 @@ namespace
     constexpr ParameterInfo syncParameter { "syncType", "Sync", 0.0f, 2.0f, 0.0f, Unit::choice, {}, syncChoices };
     constexpr ParameterInfo rateParameter { "rate", "Rate", 0.01f, 50.0f, 1.0f, Unit::hertz, 1.0f };
     constexpr ParameterInfo rateTypeParameter { "rateType", "Rate Type", 0.0f, 21.0f, 3.0f, Unit::choice, {}, rateTypeChoices };
-    constexpr ParameterInfo polarityParameter { "biopolar", "Polarity", 0.0f, 1.0f, 0.0f, Unit::choice, {}, polarityChoices };
+    constexpr ParameterInfo polarityParameter { "bipolar", "Polarity", 0.0f, 1.0f, 0.0f, Unit::choice, {}, polarityChoices };
 
     // clang-format off
     constexpr ParameterInfo lfoParameters[] = {

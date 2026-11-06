@@ -1716,7 +1716,7 @@ TEST_CASE ("A modulator moves a fader on the song's control points, the same at 
         auto lfo = std::make_shared<engine::ModulatorNode> (dev::ModulatorKind::lfo);
         lfo->prepare (rate, samplesInBlock, 1);
 
-        for (const auto& [id, value] : { std::pair ("rateType", 0.0f), std::pair ("rate", 3.0f), std::pair ("biopolar", 1.0f) })
+        for (const auto& [id, value] : { std::pair ("rateType", 0.0f), std::pair ("rate", 3.0f), std::pair ("bipolar", 1.0f) })
             lfo->setParameter (dev::findModulatorParameter (dev::ModulatorKind::lfo, id), value);
 
         track.modulators.push_back (lfo);
