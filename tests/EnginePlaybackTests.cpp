@@ -547,7 +547,7 @@ TEST_CASE ("Phazite's engine plays a plug-in from its instance in its helper, as
     const auto track = addToneTrack (song, song.firstTrack, "Tone");
     const auto effect = song.addEffect (track, "PhaziteTestEffect");
     auto& state = *phazite::findSong (song.context);
-    EnginePlayback playback;
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     phazite::test::dispatchPendingMessages();
     REQUIRE (phazite::findPluginInstance (state, effect) != nullptr);
 

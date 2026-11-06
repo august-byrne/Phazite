@@ -625,7 +625,7 @@ DeviceRunner::Block Engine::getDeviceBlock (const Span& span, const Plan::Strip&
     block.tempo = span.tempo;
     block.beat = span.beat;
     block.isPlaying = transport.playing;
-    block.isRendering = rendering;
+    block.isRendering = rendering || playingAsRender;
     block.beatsPerSample = span.beatsPerSample;
     block.sample = span.gridSample;
     block.automationBeat = transport.playing && device.latency > 0 && ! device.automation.empty()
@@ -708,7 +708,7 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
             {
                 if (transport.playing)
                     for (const auto& region : strip.audio)
-                        region.play (channels, transport.sample, numSamples, sampleRate, rendering, state.scratch);
+                        region.play (channels, transport.sample, numSamples, sampleRate, rendering || playingAsRender, state.scratch);
             };
 
             if (! strip.hasInstrument)

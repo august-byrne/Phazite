@@ -132,6 +132,12 @@ public:
     void renderPart (float* const* channels, int numSamples);
     void endRender();
 
+    // Whether the blocks process() plays wait for what they play, as a render's do (a plug-in's block in its helper, with no
+    // deadline; devices awake; audio clips read as they play), rather than keep to real time: for a test that plays blocks
+    // faster than real time and must hear the same every time, however busy the machine is (tests/EnginePlayback.h). Never
+    // on an audio device. Only while no block plays.
+    void setPlayingAsRender (bool shouldWait) noexcept { playingAsRender = shouldWait; }
+
     // How late the master's sound comes out, in samples, for a plan: its devices' and its tracks' latency (delay
     // compensation), which a render plays ahead of so that its sound starts on time.
     static int getOutputLatency (const Plan&) noexcept;
@@ -191,8 +197,8 @@ private:
         CountIn countIn;
     } transport;
 
-    bool rendering = false;
-    juce::AudioBuffer<float> renderBlock; // the render's last block, of which the next part takes what is left
+    bool rendering = false, playingAsRender = false; // a render's blocks, and a test's that wait as they do
+    juce::AudioBuffer<float> renderBlock;            // the render's last block, of which the next part takes what is left
     int renderSkip = 0, renderTaken = 0, renderFilled = 0;
 
     // What comes into the audio device's inputs for the part of the block played, by their channels.

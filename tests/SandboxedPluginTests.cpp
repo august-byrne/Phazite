@@ -96,7 +96,7 @@ TEST_CASE ("A plug-in in a helper plays in Phazite's engine as it is set, with i
     const auto effect = song.addEffect (track, "PhaziteTestEffect");
     CHECK (getSandboxed (song, effect).getRemote().getInfo().parameters.size() == 2);
     CHECK (SandboxedPlugins::getHost().getNumHelpers() == 1);
-    EnginePlayback playback;
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
 
     // Its gain at 1: the tone as it is.
     song.run ("transport.playStop");
@@ -149,7 +149,7 @@ TEST_CASE ("A plug-in in a helper keeps its settings as the project saves, and t
     REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, 60000));
     REQUIRE (host.finished.size() == 1);
     CHECK (host.finished[0].endsWith (": ok"));
-    EnginePlayback playback;
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
     const auto audio = playback.play (0.6);
     CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel - 6.02f).epsilon (0.01));
@@ -167,7 +167,7 @@ TEST_CASE ("A plug-in in a helper follows its automation and its modulators on P
 
     // Automated from 1 down to 0 over two seconds (four beats at 120): on its curve as it plays.
     song.addAutomation (gain, { { phazite::BeatPosition(), 1.0f }, { phazite::BeatPosition::fromBeats (4.0), 0.0f } });
-    EnginePlayback playback;
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
     auto audio = playback.play (1.8);
 
@@ -219,7 +219,7 @@ TEST_CASE ("Plug-in instruments in helpers, handed their blocks as the engine's 
                                 { { phazite::BeatPosition(), 0.5f }, { phazite::BeatPosition::fromBeats (8.0), 0.5f } });
     }
 
-    EnginePlayback playback;
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
     const auto audio = playback.play (3.2);
     CHECK (levelOf (audio, 0, 0.1, 0.9) == doctest::Approx (toneLevel).epsilon (0.002));
@@ -280,7 +280,7 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
     song.setTempo (120.0);
     const auto track = addToneTrack (song, song.firstTrack, "Tone", 30.0);
     const auto effect = song.addEffect (track, "PhaziteTestEffect");
-    auto playback = std::make_unique<EnginePlayback>();
+    auto playback = std::make_unique<EnginePlayback> (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
     const auto levelNow = [&playback] { return levelOf (playback->play (0.6), 0, 0.2, 0.5); };
     const auto half = toneLevel - 6.02f;
@@ -303,7 +303,8 @@ TEST_CASE ("A plug-in in a helper keeps its settings and program through copies,
 
     // The old helper goes with the old instance, once nothing that played the old project holds it.
     CHECK (phazite::test::dispatchMessagesUntil ([] { return SandboxedPlugins::getHost().getNumHelpers() == 1; }, 10000));
-    playback = std::make_unique<EnginePlayback>();
+    playback.reset(); // before the next one, whose timing its going would undo
+    playback = std::make_unique<EnginePlayback> (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
     CHECK (levelNow() == doctest::Approx (half).epsilon (0.002));
 
@@ -436,7 +437,7 @@ TEST_CASE ("A plug-in in a helper that listens to another track hears it on its 
     const auto listening = song.addTrack ("Listens");
     const auto effect = song.addEffect (listening, "PhaziteTestSidechain"); // plays its sidechain in place of its sound
     REQUIRE (phazite::hasSidechain (song.context, effect));
-    EnginePlayback playback;
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
     song.run ("transport.playStop");
 
     // Listening to nothing: silence from it, the tone alone.

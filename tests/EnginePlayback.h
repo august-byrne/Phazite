@@ -30,19 +30,31 @@ public:
         tone
     };
 
-    explicit EnginePlayback (Input in = Input::silence)
+    // How its blocks keep time: as an audio device's do, a plug-in's block in its helper silent once its deadline passes (for
+    // what a late or hanging plug-in does); or as a render's, each waiting for what it plays, so that what plug-ins in helpers
+    // play is the same however busy the machine is (known bug 7 until 2026-11-06: a block late under load lowered a level).
+    enum class Timing
+    {
+        realTime,
+        asRender
+    };
+
+    explicit EnginePlayback (Input in = Input::silence, Timing timing = Timing::realTime)
         : input (in)
     {
-        getPlaybackHost (getEngineContext()).prepare (sampleRate, blockSize, 2, input == Input::loopback ? blockSize : 0);
+        auto& host = getPlaybackHost (getEngineContext());
+        host.prepare (sampleRate, blockSize, 2, input == Input::loopback ? blockSize : 0);
+        host.getEngine().setPlayingAsRender (timing == Timing::asRender);
         previous.clear();
         nextInput();
     }
 
-    // Stopped, and on a device without inputs again.
+    // Stopped, keeping to real time, and on a device without inputs again.
     ~EnginePlayback()
     {
         auto& host = getPlaybackHost (getEngineContext());
         host.getEngine().stop();
+        host.getEngine().setPlayingAsRender (false);
         host.prepare (sampleRate, blockSize);
     }
 
