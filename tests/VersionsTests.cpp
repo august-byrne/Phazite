@@ -3,7 +3,9 @@
 // last one, by track, in Phazite's own words.
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/dynamics/Compressor.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/modulation/Modulators.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -162,6 +164,68 @@ TEST_CASE ("View state and how the song plays are no change since the last versi
     CHECK (phazite::hasChangesSinceLastVersion (s.context));
     phazite::undo (song);
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+}
+
+TEST_CASE ("A knob turned and set back to its default, or a modulator's, is no change since the last version, nor unsaved")
+{
+    // As a double-click sets a knob back (known bug 9 until 2026-11-06: the default stayed in the device's values).
+    TestSong s;
+    const auto track = s.addTrack ("Keys");
+    const auto compressor = s.addEffect (track, phazite::devices::Compressor::typeID);
+    const auto lfo = s.addModulator (track, phazite::ModulatorType::lfo);
+    const auto follower = s.addModulator (track, phazite::ModulatorType::envelopeFollower);
+    const auto defaultOf = [] (const auto& parameters, std::string_view parameter)
+    {
+        for (const auto& info : parameters)
+            if (info.id == parameter)
+                return info.defaultValue;
+
+        FAIL ("no parameter " << parameter);
+        return 0.0f;
+    };
+    const auto& compressorParameters = phazite::devices::Compressor::info.parameters;
+    s.setParameter (compressor, "attack", 30.0f); // a value set before the version, which stays as it was
+    keepVersion (s.context);
+    REQUIRE (s.getProject().save().wasOk());
+    dispatchPendingMessages();
+    REQUIRE_FALSE (s.getProject().hasUnsavedChanges());
+    auto& song = *phazite::findSong (s.context);
+    const auto values = [&song, compressor] { return phazite::findDeviceState (song, compressor).getChildWithName (schema::VALUES); };
+    REQUIRE (values().getNumProperties() == 1);
+
+    s.setParameter (compressor, "inputGain", 6.0f);
+    CHECK (describeChanges (s.context) == "Keys: Compressor");
+    s.setParameter (compressor, "inputGain", defaultOf (compressorParameters, "inputGain"));
+    CHECK (describeChanges (s.context).isEmpty());
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (s.getProject().hasUnsavedChanges());
+    CHECK (values().getNumProperties() == 1);
+
+    // Its mix too; and the value set before the version set back, which leaves the device no values at all, as it was made.
+    phazite::setMix (song, compressor, 0.5f);
+    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    phazite::setMix (song, compressor, 1.0f);
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    s.setParameter (compressor, "attack", defaultOf (compressorParameters, "attack"));
+    CHECK_FALSE (values().isValid());
+    CHECK (describeChanges (s.context) == "Keys: Compressor");
+    phazite::undo (song);
+    CHECK ((float) values()["attack"] == doctest::Approx (30.0f));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+
+    // A modulator's parameter: an LFO's rate, and back; and an envelope follower's depth, which it starts at, its default.
+    s.setModulatorParameter (lfo, "rate", 5.0f);
+    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    s.setModulatorParameter (lfo, "rate",
+                             defaultOf (phazite::devices::getModulatorParameters (phazite::devices::ModulatorKind::lfo), "rate"));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    s.setModulatorParameter (follower, "depth", 0.5f);
+    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    s.setModulatorParameter (
+        follower, "depth",
+        defaultOf (phazite::devices::getModulatorParameters (phazite::devices::ModulatorKind::envelopeFollower), "depth"));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (s.getProject().hasUnsavedChanges());
 }
 
 TEST_CASE ("A track muted and unmuted again, soloed and unsoloed, or a clip muted and unmuted, is no change since the last version")

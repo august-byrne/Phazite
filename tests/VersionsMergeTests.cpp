@@ -10,6 +10,7 @@
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
@@ -171,6 +172,39 @@ TEST_CASE ("A knob changed on both sides is a clash, this side's value kept, wit
     phazite::setChannelVolume (*same.ours, same.tracks[0], -6.0f);
     phazite::setChannelVolume (*same.theirs, same.tracks[0], -6.0f);
     CHECK (same.merge().clashes.empty());
+}
+
+TEST_CASE ("Values set back to their defaults, one on each side, leave a device no values, as it was made")
+{
+    // The song keeps no value at its default, nor values without any (model/devices/internal/Parameters.h:
+    // keepValueSetByHand()), and a merge leaves none either.
+    Sides sides;
+    const auto device = phazite::insertDeviceState (*sides.base, sides.tracks[1],
+                                                    phazite::makeOwnDeviceState (*sides.base, phazite::devices::Synth::typeID));
+    const auto defaultOf = [] (std::string_view parameter)
+    {
+        for (const auto& info : phazite::devices::Synth::info.parameters)
+            if (info.id == parameter)
+                return info.defaultValue;
+
+        FAIL ("no parameter " << parameter);
+        return 0.0f;
+    };
+
+    phazite::setValueSetByHand (*sides.base, { device, "cutoff" }, 800.0f);
+    phazite::setValueSetByHand (*sides.base, { device, "resonance" }, 0.5f);
+    sides.ours = phazite::makeSong (sides.base->getState().createCopy());
+    sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+    phazite::setValueSetByHand (*sides.ours, { device, "cutoff" }, defaultOf ("cutoff"));
+    phazite::setValueSetByHand (*sides.theirs, { device, "resonance" }, defaultOf ("resonance"));
+    REQUIRE (phazite::findDeviceState (*sides.ours, device).getChildWithName (schema::VALUES).getNumProperties() == 1);
+
+    auto merged = sides.merge();
+    CHECK (merged.clashes.empty());
+    const auto song = phazite::makeSong (merged.song.createCopy());
+    const auto state = phazite::findDeviceState (*song, device);
+    REQUIRE (state.isValid());
+    CHECK_FALSE (state.getChildWithName (schema::VALUES).isValid());
 }
 
 TEST_CASE ("What both sides added gets IDs of its own: tracks, devices, clips and notes never collide")

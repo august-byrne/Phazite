@@ -200,11 +200,16 @@ namespace
 
         void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
         {
-            // A device's first value set by hand, as its other values, is no change that views show.
+            // A device's first value set by hand, as its other values, is no change that views show; nor its last one set back
+            // to its default, which takes its VALUES away (keepValueSetByHand()).
             if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE))
                 mark (child);
         }
-        void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { markRemoved (parent, child); }
+        void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override
+        {
+            if (! child.hasType (schema::VALUES) && ! child.hasType (schema::VALUE))
+                markRemoved (parent, child);
+        }
         void valueTreeChildOrderChanged (juce::ValueTree& parent, int oldIndex, int newIndex) override
         {
             markMoved (parent, oldIndex, newIndex);

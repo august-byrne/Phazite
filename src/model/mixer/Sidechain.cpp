@@ -7,6 +7,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/plugins/internal/PluginInstances.h"
 
 #include <algorithm>
@@ -90,8 +91,11 @@ namespace
                 return;
 
         auto* undo = &song.getUndoManager();
-        auto values = juce::ValueTree (state).getOrCreateChildWithName (schema::VALUES, undo);
-        const auto setValue = [&] (std::string_view parameter, float value) { values.setProperty (nameOf (parameter), value, undo); };
+        const auto setValue = [&] (std::string_view parameter, float value)
+        {
+            if (const auto index = devices::findParameter (Compressor::info, parameter); index >= 0)
+                keepValueSetByHand (state, Compressor::info.parameters[(size_t) index], value, undo);
+        };
 
         // Its curve: 8:1 over -30 dB, its last point in the places the others leave.
         namespace curves = devices::curves;

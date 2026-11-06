@@ -547,6 +547,14 @@ namespace
                 if (ours.isValid() && theirs.isValid())
                 {
                     merge (inBase, ours, theirs);
+
+                    // Values set back to their defaults, some on each side, can leave none: the song keeps no VALUES without
+                    // values (model/devices/internal/Parameters.h: keepValueSetByHand()).
+                    if (ours.hasType (schema::VALUES) && ours.getNumProperties() == 0 && ours.getNumChildren() == 0)
+                    {
+                        r.removeChild (ours, nullptr);
+                        keyed.erase (name);
+                    }
                 }
                 else if (ours.isValid())
                 {

@@ -189,9 +189,7 @@
         <DEVICE id="15"
                 type="phaziteSynth"/>
         <DEVICE id="16"
-                type="phaziteReverb">
-          <VALUES mix="0.25"/>
-        </DEVICE>
+                type="phaziteReverb"/>
         <SEND id="35"
               level="-6"
               preFader="1"
@@ -424,8 +422,7 @@
       </CLIP>
       <DEVICE id="39"
               type="phaziteSynth">
-        <VALUES attack="2"
-                cutoff="600"
+        <VALUES cutoff="600"
                 decay="250"
                 filterDecay="180"
                 filterEnvelope="18"

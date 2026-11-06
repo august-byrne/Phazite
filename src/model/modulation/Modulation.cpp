@@ -278,17 +278,14 @@ ModulatorID addModulator (Song& song, TrackID track, ModulatorType type)
     modulator.setProperty (schema::modulatorID, (juce::int64) id.getRaw(), nullptr);
     modulator.setProperty (schema::modulatorType, schema::preset::modulatorTypeNames[(size_t) type], nullptr);
 
-    // LFOs and random sources start going both ways, and step sequencers and envelope followers at full depth, where their
-    // parameters' defaults would have them going one way only, or moving nothing.
-    juce::ValueTree values (schema::VALUES);
-
+    // LFOs and random sources start going both ways, where their polarity's default has them going one way only. Step
+    // sequencers and envelope followers start at full depth, their default, which the song keeps no value for.
     if (type == ModulatorType::lfo || type == ModulatorType::random)
-        values.setProperty ("bipolar", 1.0f, nullptr);
-    else if (type == ModulatorType::envelopeFollower || type == ModulatorType::steps)
-        values.setProperty ("depth", 1.0f, nullptr);
-
-    if (values.getNumProperties() > 0)
-        modulator.appendChild (values, nullptr);
+    {
+        const auto kind = type == ModulatorType::lfo ? devices::ModulatorKind::lfo : devices::ModulatorKind::random;
+        const auto& polarity = devices::getModulatorParameters (kind)[(size_t) devices::findModulatorParameter (kind, "bipolar")];
+        keepValueSetByHand (modulator, polarity, 1.0f, nullptr);
+    }
 
     // A step sequencer's steps rise across as many steps as it starts with.
     if (type == ModulatorType::steps)

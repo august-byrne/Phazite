@@ -85,4 +85,11 @@ juce::String getParameterText (const Song&, const FoundParameter&, float value);
 float getValueSetByHand (const Song&, const FoundParameter&);
 void setValueSetByHand (Song&, const FoundParameter&, float value);
 float getCurrentValue (const Song&, const FoundParameter&, bool withModulation);
+
+//==============================================================================
+// A value of a parameter of one of Phazite's own devices or of a modulator, kept in its element's VALUES (Schema.h), in that
+// undo history: none at the parameter's default, and no VALUES left without values, so that a value set back to its default
+// leaves the song as it was, no change in source control nor unsaved. Every writer of VALUES goes through it.
+bool isDefaultValue (const devices::ParameterInfo&, float value);
+void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo&, float value, juce::UndoManager*);
 } // namespace phazite

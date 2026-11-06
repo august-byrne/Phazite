@@ -290,7 +290,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         {
             told = juce::jlimit (parameter.info->minimum, parameter.info->maximum, value);
             moveOnePoint (song, ref, told);
-            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (ref.parameter), told, undo);
+            keepValueSetByHand (state, *parameter.info, told, undo);
             break;
         }
 
@@ -298,7 +298,7 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
         {
             // Nothing moves a modulator's parameters: no curve of one point follows them.
             told = devices::constrain (*parameter.info, value);
-            state.getOrCreateChildWithName (schema::VALUES, undo).setProperty (juce::Identifier (ref.parameter), told, undo);
+            keepValueSetByHand (state, *parameter.info, told, undo);
             break;
         }
 
@@ -405,5 +405,31 @@ float getCurrentValue (const Song& song, const ParameterRef& ref, bool withModul
 {
     const auto parameter = locateParameter (song, ref);
     return parameter.has_value() ? getCurrentValue (song, *parameter, withModulation) : 0.0f;
+}
+
+//==============================================================================
+bool isDefaultValue (const devices::ParameterInfo& info, float value)
+{
+    // To a millionth of its size: a value back from a control's range can be a little off.
+    return std::abs (value - info.defaultValue) <= 1.0e-6f * std::max (1.0f, std::abs (info.defaultValue));
+}
+
+void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& info, float value, juce::UndoManager* undo)
+{
+    const juce::Identifier parameter (toString (info.id));
+
+    if (! isDefaultValue (info, value))
+    {
+        element.getOrCreateChildWithName (schema::VALUES, undo).setProperty (parameter, value, undo);
+        return;
+    }
+
+    if (auto values = element.getChildWithName (schema::VALUES); values.isValid())
+    {
+        values.removeProperty (parameter, undo);
+
+        if (values.getNumProperties() == 0 && values.getNumChildren() == 0)
+            element.removeChild (values, undo);
+    }
 }
 } // namespace phazite

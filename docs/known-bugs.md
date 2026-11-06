@@ -31,20 +31,3 @@ commit that fixes it. Races and allocations on the audio thread in code Phazite 
 - **How to fix:** in each component that sets colours from the palette, set them again in `lookAndFeelChanged()` (as
   `TopBar` does); and in fields that hold text, call `applyColourToAllText (findColour (juce::TextEditor::textColourId))`
   there. A test switches the theme and checks a field's text and the instrument button's colour.
-
-## 9. A knob set back to its default still counts as a change in source control
-
-- **How it shows:** turn a knob of one of Phazite's own devices (the compressor's Input Gain) and double-click it back to
-  its default: the Versions view still lists the device as changed since the last version ("Keys: Compressor"), though
-  it plays as it did. Found on 2026-11-06 with a test, while fixing the same for a track's mute and solo and a clip's
-  mute, which the owner had found; a track's volume and pan set back are no change.
-- **Why:** a device's and a modulator's values set by hand are kept in their VALUES element, a property for each value
-  set and none for one never set (`schema::VALUES`; `setValueSetByHand()` in `src/model/devices/Parameters.cpp`). Set
-  back to its default, the value stays, as a property, and the song's comparisons (`findChangedProperties()` in
-  `src/model/versions/SongDiff.cpp`, which the merge and the comparison with the saved copy share in kind) count a
-  property one side has and the other hasn't as a change, as they did the switches kept as "0".
-- **How to fix:** keep no value at its default in the song: every place that writes VALUES (a value set by hand, a
-  device's mix, its sidechain's values, a preset loaded into a device) removes a value at its default, and a VALUES
-  element left without values, so that a song set back by hand holds what it held before, as the switches now do. Preset
-  files can keep their defaults. There is no backward compatibility to keep; regenerate the goldens and say why. A test
-  in `tests/VersionsTests.cpp` turns a knob and sets it back, as the one for the switches does.

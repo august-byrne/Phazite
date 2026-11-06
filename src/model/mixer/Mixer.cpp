@@ -8,6 +8,7 @@
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
 
@@ -282,15 +283,11 @@ juce::ValueTree makeOwnDeviceState (Song& song, std::string_view typeID, const s
     state.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
     state.setProperty (schema::deviceType, juce::String (typeID.data(), typeID.size()), nullptr);
 
-    if (! values.empty())
-    {
-        juce::ValueTree set (schema::VALUES);
-
+    // Its values, but for those at their defaults, which the song keeps none of (keepValueSetByHand()).
+    if (const auto* own = findOwnInfo (state))
         for (const auto& [parameter, value] : values)
-            set.setProperty (juce::Identifier (parameter), value, nullptr);
-
-        state.appendChild (set, nullptr);
-    }
+            if (const auto index = devices::findParameter (*own, parameter.toStdString()); index >= 0)
+                keepValueSetByHand (state, own->parameters[(size_t) index], value, nullptr);
 
     return state;
 }
@@ -448,8 +445,8 @@ void setMix (Song& song, DeviceID id, float mix)
     auto state = findDeviceState (song, id);
     const auto wet = juce::jlimit (0.0f, 1.0f, mix);
 
-    if (findOwnInfo (state) != nullptr)
-        state.getOrCreateChildWithName (schema::VALUES, getUndo (song)).setProperty (juce::Identifier (getMixID()), wet, getUndo (song));
+    if (const auto* own = findOwnInfo (state))
+        keepValueSetByHand (state, own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)], wet, getUndo (song));
     else if (wet < 1.0f)
         state.setProperty (schema::deviceMix, wet, getUndo (song));
     else
