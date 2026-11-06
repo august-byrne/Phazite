@@ -345,8 +345,12 @@ TEST_CASE ("Tooltips: inside the main window on frosted glass; on the desktop, t
     CHECK (FrostedGlass::findBehind (inside) != nullptr);
     CHECK (outside.getParentComponent() == nullptr);
 
-    CHECK (inside.getTipFor (inWindow) == "In the main window");
+    // Each gives the tip that JUCE's own tooltip window gives, or leaves it to the other. JUCE gives one only while the
+    // process is in the foreground, or for a window it can't tell (as the tests' window is on Windows), which a headless
+    // Linux runner never is: there, none.
+    juce::TooltipWindow plain;
+    CHECK (inside.getTipFor (inWindow) == plain.getTipFor (inWindow));
     CHECK (outside.getTipFor (inWindow).isEmpty());
-    CHECK (outside.getTipFor (elsewhere) == "Somewhere else");
+    CHECK (outside.getTipFor (elsewhere) == plain.getTipFor (elsewhere));
     window.setLookAndFeel (nullptr);
 }
