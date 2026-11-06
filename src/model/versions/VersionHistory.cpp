@@ -469,12 +469,12 @@ const std::vector<SongChange>& VersionHistory::getStagedChanges()
 void VersionHistory::takeLine (const SongChange& line, const juce::ValueTree& from, const PluginParameterValues& fromParameters)
 {
     // The line's part of the staged song made what it is in from, and its plug-ins' knobs taken with it.
-    const auto findIn = [&line] (const juce::ValueTree& song)
+    const auto findIn = [&line] (const juce::ValueTree& songTree)
     {
         if (line.where == SongChange::Where::master)
-            return song.getChildWithName (schema::MASTER);
+            return songTree.getChildWithName (schema::MASTER);
 
-        for (const auto& track : getTrackElements (song))
+        for (const auto& track : getTrackElements (songTree))
             if (readID (track[schema::trackID]) == line.trackID)
                 return track;
 

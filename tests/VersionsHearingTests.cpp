@@ -280,10 +280,13 @@ TEST_CASE ("The song plays in real time while an old version renders in the back
     engine.takeBlockTimes(); // from here on
 
     REQUIRE (phazite::startBackgroundBounce (s.context, old));
-    RealTimePlayback::wait (1500);
+
+    // A second and a half of the render, or all of it where it ends sooner: an optimised build renders the song faster than
+    // it plays (CI's windows-release did, 2026-11-06).
+    const auto done = dispatchMessagesUntil ([&s, &old] { return hasBounceOf (s.context, old); }, 1500);
     const auto times = engine.takeBlockTimes();
     INFO ("longest gap " << times.longestGap * 1000.0 << " ms, longest block " << times.longestBlock * 1000.0 << " ms");
-    CHECK (phazite::getBounceProgress (s.context, old).has_value()); // still rendering, all the while
+    CHECK ((done || phazite::getBounceProgress (s.context, old).has_value())); // rendering all the while, or done
     CHECK (times.late == 0);
     phazite::stopAndReturn (*phazite::findSong (s.context));
     REQUIRE (phazite::deleteBounce (s.context, old)); // stops it

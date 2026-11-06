@@ -70,6 +70,7 @@ namespace
             showState();
         }
 
+        using PowerSwitch::clicked;              // the overload with the keys held, which this leaves as it is
         void clicked() override { showState(); } // as it switches, before the parameter has
 
     private:

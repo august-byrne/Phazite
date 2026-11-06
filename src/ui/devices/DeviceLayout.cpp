@@ -502,7 +502,7 @@ void DeviceLayout::setPages (std::vector<std::vector<size_t>> newPages)
     pageTabs.clear();
     shownPage = juce::jlimit (0, std::max (0, (int) pages.size() - 1), shownPage);
 
-    static int nextRadioGroup = 0x9a6e0000;
+    static int nextRadioGroup = 0x1a6e0000; // each layout's page tabs a group of their own
     const auto group = ++nextRadioGroup;
 
     for (int i = 0; i < (int) pages.size(); ++i)

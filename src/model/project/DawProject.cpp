@@ -123,10 +123,10 @@ namespace
         const Song& song;
         PluginInstances* plugins;
         DawProjectContent& content;
-        engine::TempoMap tempo { getTempoMap (song) };   // in seconds
-        juce::StringArray leftOut;                       // what couldn't go in
-        std::map<juce::String, juce::String> audioFiles; // each file's full path: its path in the zip
-        juce::XmlElement* lanes = nullptr;               // the arrangement's
+        engine::TempoMap tempo { getTempoMap (song) };      // in seconds
+        juce::StringArray leftOut {};                       // what couldn't go in
+        std::map<juce::String, juce::String> audioFiles {}; // each file's full path: its path in the zip
+        juce::XmlElement* lanes = nullptr;                  // the arrangement's
 
         juce::String channelID (std::uint64_t track) const
         {
@@ -976,7 +976,7 @@ namespace
     {
         Song& song;
         const DawProjectFile& in;
-        juce::StringArray notTaken;
+        juce::StringArray notTaken {};
 
         void take()
         {

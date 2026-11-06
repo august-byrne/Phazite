@@ -530,6 +530,15 @@ if(NOT MSVC)
     set_source_files_properties(src/devices/stretch/RubberBandLibrary.cpp PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
+# GCC 13 and later read `const auto& button = opt.getButtons().front();` in JUCE 9.0.5's juce_LookAndFeel_V2.cpp as a
+# reference to a temporary (-Wdangling-reference, in -Wall): getButtons() returns a Span by value, but the button is in the
+# options' own list, which outlives the line. Nothing dangles and JUCE's code is read-only here, so the warning is off for
+# the one unit of JUCE's that includes that file, as JUCE's own hb.hh turns it off for HarfBuzz.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+    set_source_files_properties(external/JUCE/modules/juce_gui_basics/juce_gui_basics_2.cpp
+        PROPERTIES COMPILE_OPTIONS "-Wno-dangling-reference")
+endif()
+
 target_compile_definitions(phazite_core PRIVATE
     PHAZITE_VERSION_STRING="${PROJECT_VERSION}"
     JUCE_PLUGINHOST_VST3=1
