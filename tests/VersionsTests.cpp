@@ -7,6 +7,7 @@
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -191,6 +192,35 @@ TEST_CASE ("A track muted and unmuted again, soloed and unsoloed, or a clip mute
     CHECK (phazite::hasChangesSinceLastVersion (s.context));
     phazite::toggleClipsMuted (song, { clip });
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+}
+
+TEST_CASE ("Collapse All and Expand All, the master's row and lanes with the rest, are no change since the last version, nor unsaved")
+{
+    // The owner, 2026-11-06: Alt+U (Collapse All) in the playlist left a change of the master's, which Expand All didn't
+    // take away.
+    TestSong s;
+    s.addTrack ("Keys");
+    auto& song = *phazite::findSong (s.context);
+    const auto master = phazite::getMasterID (song);
+    phazite::showLane (song, master, { phazite::getFader (song, master), phazite::getVolumeParameterID (song, master) });
+    keepVersion (s.context);
+    REQUIRE (s.getProject().save().wasOk());
+    dispatchPendingMessages();
+    REQUIRE_FALSE (s.getProject().hasUnsavedChanges());
+
+    s.run ("track.collapseAll");
+    REQUIRE (phazite::isCollapsed (song, master));
+    REQUIRE_FALSE (phazite::isAnyRowExpanded (song));
+    dispatchPendingMessages();
+    CHECK (describeChanges (s.context).isEmpty());
+    CHECK_FALSE (s.getProject().hasUnsavedChanges());
+
+    s.run ("track.collapseAll");
+    REQUIRE_FALSE (phazite::isCollapsed (song, master));
+    dispatchPendingMessages();
+    CHECK (describeChanges (s.context).isEmpty());
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    CHECK_FALSE (s.getProject().hasUnsavedChanges());
 }
 
 TEST_CASE ("A project's versions are read again as it opens, with the song each one kept")

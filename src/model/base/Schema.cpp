@@ -114,7 +114,8 @@ namespace schema
 {
     bool isUncountedProperty (const juce::ValueTree& tree, const juce::Identifier& property)
     {
-        return (tree.hasType (TRACK) && isTrackViewProperty (property)) || (tree.hasType (DEVICE) && isDeviceViewProperty (property))
+        return ((tree.hasType (TRACK) || tree.hasType (MASTER)) && isTrackViewProperty (property))
+               || (tree.hasType (DEVICE) && isDeviceViewProperty (property))
                || (tree.hasType (PHAZITE)
                    && (isGridProperty (property) || property == nextID || property == loopFollowsSong || property == punch
                        || property == lastInput || property == loop || property == loopStart || property == loopEnd || property == playStart

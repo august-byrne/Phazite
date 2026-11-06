@@ -361,9 +361,10 @@ inline const juce::Identifier pointValue { "value" };
 inline const juce::Identifier pointCurve { "curve" };
 
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; isUncountedProperty() and
-// isUncountedElement(), below): on tracks, their heights, collapsed and pinned, drum mode and rows, and their automation
-// lanes (the master's too); on PHAZITE, the playlist's grid; on devices (DEVICE), where their windows were. PIANOROLL and
-// LANE hold view settings only. Keep these lists exact: anything else a project holds is song or state.
+// isUncountedElement(), below): on tracks and the master (whose row Collapse All collapses), their heights, collapsed and
+// pinned, drum mode and rows, and their automation lanes; on PHAZITE, the playlist's grid; on devices (DEVICE), where their
+// windows were. PIANOROLL and LANE hold view settings only. Keep these lists exact: anything else a project holds is song
+// or state.
 inline bool isTrackViewProperty (const juce::Identifier& p)
 {
     return p == trackHeight || p == trackCollapsed || p == trackPinned || p == drumMode || p == drumOrder || p == drumHidden;
