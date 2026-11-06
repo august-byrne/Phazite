@@ -39,10 +39,10 @@ struct TimelineEditor::Overview : public juce::Component
         return whole.getLength() > 0.0 ? (float) ((beat - whole.getStart()) / whole.getLength() * getWidth()) : 0.0f;
     }
 
-    double beatAt (float x) const
+    // The beat at an x over a range: the time line's now, or the one a drag began over.
+    double beatAt (float x, juce::Range<double> over) const
     {
-        const auto whole = getRange();
-        return whole.getStart() + (double) x / std::max (1, getWidth()) * whole.getLength();
+        return over.getStart() + (double) x / std::max (1, getWidth()) * over.getLength();
     }
 
     juce::Rectangle<float> getThumbArea() const
@@ -143,20 +143,24 @@ struct TimelineEditor::Overview : public juce::Component
         if (! editor.timelineContext.hasProject())
             return;
 
-        // Away from the thumb, that part comes into view, centred, and the drag goes on from there.
+        // Away from the thumb, that part comes into view, centred where the time line has room, and the drag goes on from
+        // there.
         drag = getDragAt (e.position);
 
         if (drag == Drag::none)
         {
-            const auto shown = getViewRange();
+            const auto whole = getRange();
+            const auto length = getViewRange().getLength();
+            const auto latest = std::max (whole.getStart(), whole.getEnd() - length);
             editor.pauseFollowing();
             editor.setViewStart (
-                BeatPosition::fromBeats (std::max (getRange().getStart(), beatAt (e.position.x) - shown.getLength() / 2.0)));
+                BeatPosition::fromBeats (juce::jlimit (whole.getStart(), latest, beatAt (e.position.x, whole) - length / 2.0)));
             drag = Drag::move;
         }
 
+        rangeAtDragStart = getRange();
         viewAtDragStart = getViewRange();
-        beatAtDragStart = beatAt (e.position.x);
+        beatAtDragStart = beatAt (e.position.x, rangeAtDragStart);
         repaint();
     }
 
@@ -165,23 +169,27 @@ struct TimelineEditor::Overview : public juce::Component
         if (drag == Drag::none)
             return;
 
-        const auto moved = beatAt (e.position.x) - beatAtDragStart;
-        const auto whole = getRange();
+        // Over the time line as the drag began, and within it. The view grows the time line as it moves past its end, so a
+        // pointer read over the time line as it is now went further with each move: carried far past the strip's end, it
+        // took the view out to beats too far to draw, and Phazite froze (the owner, 2026-11-06).
+        const auto whole = rangeAtDragStart;
+        const auto moved = beatAt (e.position.x, whole) - beatAtDragStart;
         editor.pauseFollowing();
 
         if (drag == Drag::move)
         {
-            editor.setViewStart (BeatPosition::fromBeats (std::max (whole.getStart(), viewAtDragStart.getStart() + moved)));
+            const auto latest = std::max (whole.getStart(), whole.getEnd() - viewAtDragStart.getLength());
+            editor.setViewStart (BeatPosition::fromBeats (juce::jlimit (whole.getStart(), latest, viewAtDragStart.getStart() + moved)));
             return;
         }
 
-        // An end dragged zooms, the other end staying where it was.
+        // An end dragged zooms, the other end staying where it was, as far as the time line's ends.
         auto start = viewAtDragStart.getStart(), end = viewAtDragStart.getEnd();
 
         if (drag == Drag::start)
-            start = juce::jlimit (whole.getStart(), end - leastBeats, start + moved);
+            start = juce::jlimit (whole.getStart(), std::max (whole.getStart(), end - leastBeats), start + moved);
         else
-            end = std::max (start + leastBeats, end + moved);
+            end = juce::jlimit (start + leastBeats, std::max (start + leastBeats, whole.getEnd()), end + moved);
 
         editor.zoomTo ({ BeatPosition::fromBeats (start), BeatPosition::fromBeats (end) });
     }
@@ -203,7 +211,7 @@ struct TimelineEditor::Overview : public juce::Component
     juce::Range<double> drawnRange; // that range
     float drawnScale = 0.0f;
     Drag drag = Drag::none, hovered = Drag::none;
-    juce::Range<double> viewAtDragStart;
+    juce::Range<double> rangeAtDragStart, viewAtDragStart; // the time line's and the part in view, as the drag began
     double beatAtDragStart = 0.0;
 };
 

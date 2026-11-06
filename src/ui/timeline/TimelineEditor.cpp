@@ -147,10 +147,13 @@ void TimelineRuler::paint (juce::Graphics& g)
     const BeatRange visible (view.xToBeat (clip.getX() - 1) - origin, view.xToBeat (clip.getRight() + 1) - origin);
     const auto xOf = [&view, origin] (BeatPosition beat) { return view.beatToX (beat + origin); };
 
-    // The loop's lane along the top, and the loop in it, over a wash of the part that loops, under the ticks: song beats,
-    // not counted from the origin.
-    g.setColour (p.text.withAlpha (LoopTint::lane));
-    g.fillRect (getLoopLane());
+    // The loop's lane along the top, washed under the pointer, and the loop in it, over a wash of the part that loops, under
+    // the ticks: song beats, not counted from the origin.
+    if (laneHovered)
+    {
+        g.setColour (p.hover);
+        g.fillRect (getLoopLane());
+    }
 
     if (const auto loop = getLoop (context); loop.has_value() && ! loop->isEmpty())
     {
@@ -164,43 +167,49 @@ void TimelineRuler::paint (juce::Graphics& g)
         g.fillRect (area.withHeight ((float) LoopTint::laneHeight));
     }
 
-    // Ticks: tall for bars, shorter for beats, shortest between them.
-    const auto tickStep = getAdaptiveGridStep (context, visible.getStart(), view.pixelsPerBeat, false, minLineSpacing);
+    // Bar numbers, as far apart as they need to be to read: every bar, or every 2nd, 4th, ...
+    const auto barWidth = view.pixelsPerBeat * getBeatsPerBar (context, visible.getStart());
+    auto every = 1;
+
+    while (every * barWidth < RulerTint::numberSpacing && every < (1 << 20))
+        every *= 2;
+
+    // Short ticks up from the foot for the other bars and the beats, where they are far enough apart, and nothing finer: the
+    // grid under the ruler shows that. A numbered bar's tick comes with its number.
+    const auto foot = getHeight() - 1;
+    const auto tickStep = getAdaptiveGridStep (context, visible.getStart(), view.pixelsPerBeat, false, RulerTint::tickSpacing);
 
     forEachGridLine (context, tickStep, visible,
                      [&] (BeatPosition beat, GridLineType type)
                      {
                          const auto isBar = type == GridLineType::bar;
-                         const auto tick = isBar ? getHeight() / 2 : (type == GridLineType::beat ? getHeight() / 4 : getHeight() / 8);
-                         g.setColour (isBar ? p.textMuted : p.textMuted.withAlpha (0.4f));
-                         g.fillRect (juce::roundToInt (xOf (beat)), getHeight() - 1 - tick, 1, tick);
+
+                         if (type == GridLineType::subdivision || (isBar && getBarAt (context, beat) % every == 0))
+                             return;
+
+                         const auto tick = isBar ? RulerTint::barTick : RulerTint::beatTick;
+                         g.setColour (p.textMuted.withAlpha (isBar ? RulerTint::bar : RulerTint::beat));
+                         g.fillRect (juce::roundToInt (xOf (beat)), foot - tick, 1, tick);
                      });
 
-    // Bar numbers, as far apart as they need to be to read: every bar, or every 2nd, 4th, ...
-    const auto barWidth = view.pixelsPerBeat * getBeatsPerBar (context, visible.getStart());
-    auto every = 1;
-
-    while (every * barWidth < 32.0 && every < (1 << 20))
-        every *= 2;
-
-    // From a little before the area being drawn, so a number its edge cuts is drawn whole.
-    auto bar = std::max (0, getBarAt (context, view.xToBeat (clip.getX() - 48) - origin));
+    // The numbered bars, each a tick from the loop's lane down to the foot with its number beside it: from a little before
+    // the area being drawn, so a number its edge cuts is drawn whole, to the bar its end is in, so that the loop ends however
+    // far along the view is.
+    constexpr int numberWidth = 48;
+    const auto top = LoopTint::laneHeight;
+    auto bar = std::max (0, getBarAt (context, view.xToBeat (clip.getX() - numberWidth) - origin));
     bar -= bar % every;
-
-    g.setColour (p.textMuted);
+    const auto lastBar = getBarAt (context, view.xToBeat (clip.getRight() + 1) - origin);
     g.setFont (LookAndFeel::getNumberFont (TextSize::small));
 
-    for (;; bar += every)
+    for (; bar <= lastBar; bar += every)
     {
-        const auto x = (float) xOf (getBarStart (context, bar));
-
-        if (x > (float) clip.getRight())
-            break;
-
-        g.drawText (
-            juce::String (bar + 1),
-            juce::Rectangle<float> (x + 4.0f, (float) LoopTint::laneHeight, 48.0f, (float) (getHeight() - LoopTint::laneHeight) / 2.0f),
-            juce::Justification::centredLeft, false);
+        const auto x = juce::roundToInt (xOf (getBarStart (context, bar)));
+        g.setColour (p.textMuted.withAlpha (RulerTint::numberTick));
+        g.fillRect (x, top, 1, foot - top);
+        g.setColour (p.textMuted);
+        g.drawText (juce::String (bar + 1), juce::Rectangle<int> (x + RulerTint::numberGap, top, numberWidth, foot - top),
+                    juce::Justification::centredLeft, false);
     }
 }
 
@@ -242,6 +251,13 @@ TimelineRuler::LoopDrag TimelineRuler::getLoopDragAt (const juce::MouseEvent& e)
 
 void TimelineRuler::mouseMove (const juce::MouseEvent& e)
 {
+    // The loop's lane washed under the pointer, where a drag loops.
+    if (const auto inLane = editor.hasProject() && getLoopLane().contains (e.getPosition()); inLane != laneHovered)
+    {
+        laneHovered = inLane;
+        repaint (getLoopLane());
+    }
+
     switch (getLoopDragAt (e))
     {
         case LoopDrag::moveStart:
@@ -255,6 +271,15 @@ void TimelineRuler::mouseMove (const juce::MouseEvent& e)
         case LoopDrag::none:
             setMouseCursor (juce::MouseCursor::NormalCursor);
             break;
+    }
+}
+
+void TimelineRuler::mouseExit (const juce::MouseEvent&)
+{
+    if (laneHovered)
+    {
+        laneHovered = false;
+        repaint (getLoopLane());
     }
 }
 
@@ -567,7 +592,8 @@ void TimelineEditor::showProject()
 //==============================================================================
 void TimelineEditor::setViewStart (BeatPosition start)
 {
-    view.start = std::max (timeOrigin, start);
+    // From the time origin, and no later than a view goes, however it is scrolled.
+    view.start = std::clamp (start, timeOrigin, std::max (timeOrigin, BeatPosition::fromBeats (TimelineView::latestStart)));
     ruler.repaint();
     timelineChanged();
     updatePlayhead();

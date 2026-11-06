@@ -179,9 +179,9 @@ namespace ScrollTint
     inline constexpr float overlayThumb = 0.6f, overlayTrack = 0.06f;
 } // namespace ScrollTint
 
-// The playlist's overview of the whole song (ui/playlist/PlaylistParts.h: Playlist::Overview): its clips this opaque, muted
-// ones this, under the see-through thumb of the part in view, in the text colour this opaque, brighter under the pointer, and
-// its edge.
+// The overview of the whole time line along the playlist's and the piano roll's time bars (ui/timeline/TimelineOverview.cpp:
+// TimelineEditor::Overview): its marks, the clips or the notes, this opaque, muted ones this, under the see-through thumb of
+// the part in view, in the text colour this opaque, brighter under the pointer, and its edge.
 namespace OverviewTint
 {
     inline constexpr float clip = 0.85f, muted = 0.3f;
@@ -744,17 +744,27 @@ namespace RenderingTint
     inline constexpr float barHeight = 3.0f;
 } // namespace RenderingTint
 
-// How the loop shows in a ruler: its lane along the top, which a drag loops (a shade of the text color), a bar of
-// the loop color in that lane over the part that loops, and a wash of it below (alphas); the lane's height, and how
-// near the loop's edge a press takes the edge (pixels).
+// How the loop shows in a ruler: its lane along the top, which a drag loops, in the hover wash under the pointer and
+// otherwise as the rest of the ruler, a bar of the loop color in that lane over the part that loops, and a wash of it below
+// (alphas); the lane's height, and how near the loop's edge a press takes the edge (pixels).
 namespace LoopTint
 {
-    inline constexpr float lane = 0.06f;
     inline constexpr float bar = 0.9f;
     inline constexpr float wash = 0.14f;
     inline constexpr int laneHeight = 8;
     inline constexpr int edgeGrab = 4;
 } // namespace LoopTint
+
+// How a ruler marks the time (ui/timeline/TimelineEditor.h: TimelineRuler), in the muted text colour, kept quiet (the owner,
+// 2026-11-06: "less busy"): a numbered bar's tick up from the foot to the loop's lane, its number this far right of it; the
+// other bars' and the beats' ticks shorter and fainter, and none between the beats, which the grid under the ruler shows
+// (pixels, and alphas). Ticks show only where they are so far apart, and numbers where they are so far apart (pixels).
+namespace RulerTint
+{
+    inline constexpr int barTick = 5, beatTick = 3, numberGap = 4;
+    inline constexpr float numberTick = 0.4f, bar = 0.3f, beat = 0.2f;
+    inline constexpr double tickSpacing = 10.0, numberSpacing = 36.0;
+} // namespace RulerTint
 
 // How the wavetable synth's editor draws an oscillator's table (ui/devices/WavetableEditor.h): its frames one behind
 // another in the muted text color, the further back the higher and further right (by these parts of the drawing's height

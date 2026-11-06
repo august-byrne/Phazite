@@ -772,6 +772,60 @@ TEST_CASE (
     CHECK (shown.contains (beatThere));
 }
 
+TEST_CASE ("The overview's thumb or its end, dragged far past the strip's end, stops at the time line's end")
+{
+    // The owner, 2026-11-06: dragged off the screen, the view ran on, each move of the mouse further than the one before,
+    // until its beats were so far out that the ruler's loop never ended, and Phazite froze.
+    PlaylistScreen screen;
+    REQUIRE (screen.addClip (0, 0.0, 4.0).isValid());
+    REQUIRE (screen.addClip (2, 32.0, 4.0).isValid());
+    phazite::test::dispatchPendingMessages();
+
+    auto* overview = phazite::test::findComponentWithTitle (screen.playlist, "Overview");
+    REQUIRE (overview != nullptr);
+    juce::ScrollBar* timeline = nullptr;
+
+    for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
+        if (! bar->isVertical())
+            timeline = bar;
+
+    REQUIRE (timeline != nullptr);
+    const auto whole = timeline->getRangeLimit();
+    const auto xFor = [&] (double beat) { return juce::roundToInt ((beat - whole.getStart()) / whole.getLength() * overview->getWidth()); };
+
+    // The thumb, carried as far as forty strips past the strip's end, a step at a time, as a pointer dragged off the screen
+    // goes: the part in view ends where the time line does, which doesn't grow.
+    phazite::test::Mouse mouse (*overview);
+    const auto view = timeline->getCurrentRange();
+    const juce::Point<int> thumb (xFor (view.getStart() + view.getLength() / 2.0), overview->getHeight() / 2);
+    mouse.press (thumb);
+
+    for (int step = 1; step <= 40; ++step)
+        mouse.dragTo (thumb + juce::Point<int> (step * overview->getWidth(), 0));
+
+    REQUIRE (screen.playlist.getView().start.inBeats() < whole.getEnd());
+    mouse.release();
+    CHECK (timeline->getCurrentRange().getEnd() == doctest::Approx (whole.getEnd()));
+    CHECK (timeline->getRangeLimit().getEnd() == doctest::Approx (whole.getEnd()));
+
+    // Back at the start, its right end carried as far: it zooms out as far as the whole time line, no further.
+    mouse.click ({ 1, overview->getHeight() / 2 });
+    REQUIRE (timeline->getCurrentRange().getStart() == doctest::Approx (whole.getStart()));
+    const juce::Point<int> end (xFor (timeline->getCurrentRange().getEnd()), overview->getHeight() / 2);
+    mouse.press (end);
+
+    for (int step = 1; step <= 40; ++step)
+        mouse.dragTo (end + juce::Point<int> (step * overview->getWidth(), 0));
+
+    REQUIRE (screen.playlist.getView().pixelsPerBeat >= phazite::ui::TimelineView::minPixelsPerBeat);
+    mouse.release();
+    CHECK (timeline->getCurrentRange().getEnd() <= whole.getEnd() + 1.0e-6);
+    CHECK (timeline->getRangeLimit().getEnd() == doctest::Approx (whole.getEnd()));
+
+    // And the window paints, its rulers too.
+    CHECK (screen.window.paintEverything().isValid());
+}
+
 TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren't colored")
 {
     PlaylistScreen screen;
@@ -1154,6 +1208,75 @@ TEST_CASE ("The playhead is a marker at the foot of the ruler with a line from i
     CHECK (isFocus (image.getPixelAt (1, 3)));
     CHECK (isFocus (image.getPixelAt (centre, playhead->getHeight() - 2)));
     CHECK (image.getPixelAt (1, playhead->getHeight() - 2).getAlpha() == 0);
+}
+
+TEST_CASE ("The ruler is quiet: a numbered bar's tick reaches its lane, short ticks for bars and beats far enough apart, none finer")
+{
+    // The owner, 2026-11-06: "clean up the timeline rulers to be less busy and fit well with our design".
+    PlaylistScreen screen;
+    phazite::test::dispatchPendingMessages();
+    auto* found = dynamic_cast<phazite::ui::TimelineRuler*> (phazite::test::findComponentWithTitle (screen.playlist, "Timeline"));
+    REQUIRE (found != nullptr);
+    auto& ruler = *found;
+    phazite::ui::LookAndFeel lookAndFeel;
+    ruler.setLookAndFeel (&lookAndFeel);
+    const auto background = phazite::ui::getPalette (ruler).surfaceRaised;
+    const auto foot = ruler.getHeight() - 1;
+
+    const auto paintRuler = [&ruler]
+    {
+        juce::Image image (juce::Image::ARGB, ruler.getWidth(), ruler.getHeight(), true, juce::SoftwareImageType());
+        juce::Graphics g (image);
+        ruler.paintEntireComponent (g, false);
+        return image;
+    };
+
+    // The columns a row has ticks in: just above the line along the ruler's foot, under the numbers.
+    const auto ticksIn = [&background] (const juce::Image& image, int y)
+    {
+        std::vector<int> columns;
+
+        for (int x = 0; x < image.getWidth(); ++x)
+            if (image.getPixelAt (x, y) != background)
+                columns.push_back (x);
+
+        return columns;
+    };
+
+    // Two bars across, after the song's loop (its first bar): ticks at its bars and beats only, though eighths would be far
+    // enough apart to tick, and a bar's number by a tick that reaches up to the loop's lane, a beat's short.
+    screen.playlist.zoomTo ({ phazite::BeatPosition::fromBeats (8.0), phazite::BeatPosition::fromBeats (16.0) });
+    auto image = paintRuler();
+    const auto beatWidth = screen.playlist.getView().pixelsPerBeat;
+    REQUIRE (beatWidth / 8.0 >= phazite::ui::RulerTint::tickSpacing);
+    const auto ticks = ticksIn (image, foot - 1);
+    CHECK (ticks.size() >= 8);
+    CHECK (ticks.size() <= 9);
+    const auto xOf = [&screen] (double beat)
+    { return juce::roundToInt (screen.playlist.getView().beatToX (phazite::BeatPosition::fromBeats (beat))); };
+    CHECK (image.getPixelAt (xOf (12.0), phazite::ui::LoopTint::laneHeight + 1) != background);
+    CHECK (image.getPixelAt (xOf (13.0), foot - phazite::ui::RulerTint::beatTick - 1) == background);
+
+    // Zoomed far out, the ticks are as far apart as they need to be, wherever the view is.
+    screen.playlist.zoomTo ({ phazite::BeatPosition::fromBeats (64.0), phazite::BeatPosition::fromBeats (64.0 + 2048.0) });
+    image = paintRuler();
+    const auto farTicks = ticksIn (image, foot - 1);
+    REQUIRE (farTicks.size() >= 2);
+
+    for (size_t i = 1; i < farTicks.size(); ++i)
+        CHECK (farTicks[i] - farTicks[i - 1] >= phazite::ui::RulerTint::tickSpacing - 1.0);
+
+    // The loop's lane is the ruler's colour, but washed under the pointer, where a drag loops.
+    screen.playlist.zoomTo ({ phazite::BeatPosition::fromBeats (8.0), phazite::BeatPosition::fromBeats (16.0) });
+    const juce::Point<int> inLane (xOf (10.5), phazite::ui::LoopTint::laneHeight / 2);
+    CHECK (paintRuler().getPixelAt (inLane.x, inLane.y) == background);
+    phazite::test::Mouse mouse (ruler);
+    mouse.moveTo (inLane);
+    CHECK (ruler.isLoopLaneLit());
+    CHECK (paintRuler().getPixelAt (inLane.x, inLane.y) != background);
+    mouse.moveTo ({ inLane.x, ruler.getHeight() + 40 });
+    CHECK_FALSE (ruler.isLoopLaneLit());
+    ruler.setLookAndFeel (nullptr);
 }
 
 TEST_CASE ("The sections strip adds, selects, resizes, moves and copies sections with the mouse")

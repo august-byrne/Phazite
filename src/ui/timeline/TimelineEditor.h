@@ -18,7 +18,9 @@ namespace phazite::ui
 class TimelineEditor;
 
 //==============================================================================
-// The ruler over a time line, with the bar numbers. Its lane along the top holds the loop, as Logic Pro's cycle strip does:
+// The ruler over a time line: the bar numbers, each by a tick from its foot, and shorter ticks for the other bars and the
+// beats where they are far enough apart to read, nothing finer (the owner, 2026-11-06: "less busy"; the grid under the
+// ruler shows the rest). Its lane along the top holds the loop, as Logic Pro's cycle strip does, washed under the pointer:
 // a drag there loops what it covers, a drag on the loop's edges or middle changes or moves it, a click turns looping on or
 // off and a double-click loops the whole song. Ctrl+drag anywhere makes a loop too, as FL Studio's does. Lower down, a
 // press takes the playhead there and a drag takes it along; the song is silent meanwhile and plays on from where it is let
@@ -30,13 +32,15 @@ public:
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
-    juce::Rectangle<int> getLoopLane() const; // along the top
+    juce::Rectangle<int> getLoopLane() const;                   // along the top
+    bool isLoopLaneLit() const noexcept { return laneHovered; } // under the pointer (for tests)
 
 private:
     // What a press in the loop's lane does once it drags.
@@ -54,6 +58,7 @@ private:
     bool loopDragged = false;      // past the threshold: not a click
     bool draggingPlayhead = false; // a press below the loop's lane, until it is let go
     bool pausedForDrag = false;    // and whether it paused playback, to play on at its end
+    bool laneHovered = false;      // the loop's lane, under the pointer
     double loopAnchor = 0.0;       // the beat where the press was, snapped
     double loopStartAtPress = 0.0, loopEndAtPress = 0.0;
 

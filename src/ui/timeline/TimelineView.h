@@ -13,6 +13,11 @@ struct TimelineView
     static constexpr double maxPixelsPerBeat = 1024.0; // a 1/64 beat is 16 pixels wide
     static constexpr double defaultPixelsPerBeat = 24.0;
 
+    // The latest beat a view starts at, however it is scrolled: far past any song (about 140 hours at 120 BPM), and where a
+    // beat's place is still exact to well under a sample, so that what draws the time line from there ends (the owner,
+    // 2026-11-06: a view carried to beats beyond that froze Phazite).
+    static constexpr double latestStart = 1.0e6;
+
     BeatPosition start;
     double pixelsPerBeat = defaultPixelsPerBeat;
 
