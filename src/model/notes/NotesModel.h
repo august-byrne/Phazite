@@ -132,6 +132,7 @@ void stopAuditioning (ProjectContext&, TrackID);
 
 //==============================================================================
 // The note commands (Notes.h), for the notes selected in the open project: getGridStepInBeats gives the piano roll's
-// grid.
-void addNoteCommands (CommandRegistry&, ProjectContext&, std::function<double()> getGridStepInBeats);
+// grid, and getLegatoGapBeats the gap its Legato... was given last, which Legato leaves too.
+void addNoteCommands (CommandRegistry&, ProjectContext&, std::function<double()> getGridStepInBeats,
+                      std::function<double()> getLegatoGapBeats = {});
 } // namespace phazite

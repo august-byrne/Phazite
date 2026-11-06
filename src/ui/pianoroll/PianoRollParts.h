@@ -19,8 +19,8 @@ namespace phazite::ui
 std::map<ClipID, juce::Colour> getNoteColours (const ProjectContext&, const std::vector<NoteData>&);
 
 //==============================================================================
-// Down the left: the piano keys, which play their note while held, or in drum mode the drums' names, which
-// can be dragged into another order or hidden.
+// Down the left: the piano keys, which play their note while held and select its notes, as in Live and Logic Pro, or
+// in drum mode the drums' names, which can be dragged into another order or hidden.
 struct PianoRoll::Keys : public juce::Component
 {
     explicit Keys (PianoRoll&);
@@ -31,9 +31,14 @@ struct PianoRoll::Keys : public juce::Component
     void mouseUp (const juce::MouseEvent&) override;
 
     PianoRoll& roll;
-    int playingPitch = -1; // the key held down
-    int draggedRow = -1;   // drum mode: the row being moved
-    int dropRow = -1;      // and where it would go
+    int playingPitch = -1;                // the key held down
+    int pressedPitch = -1;                // where the press began: a drag selects the notes of the pitches between
+    bool addsToSelection = false;         // Ctrl or Shift was held: to the notes selected before
+    std::vector<NoteRef> selectionBefore; // with it
+    int draggedRow = -1;                  // drum mode: the row being moved
+    int dropRow = -1;                     // and where it would go
+
+    void selectPitches (int from, int to); // the shown notes of these pitches and those between
 };
 
 //==============================================================================
@@ -78,6 +83,7 @@ struct PianoRoll::NoteGrid : public juce::Component
     std::optional<DrawnGhosts> drawnGhosts;
 
     std::optional<NoteData> getNoteAt (juce::Point<float>) const;
+    std::optional<NoteData> getNoteToEditAt (juce::Point<float>) const; // that, or a short note whose edge is just beside it
     Zone getZone (const NoteData&, juce::Point<float>) const;
     ClipID getGhostClipAt (juce::Point<float>) const;
     std::vector<NoteData> getGhostNotes() const; // other tracks' notes in view, as they are now
@@ -91,10 +97,15 @@ struct PianoRoll::NoteGrid : public juce::Component
     void dragNotes (const juce::MouseEvent&);
     void addNoteAt (const juce::MouseEvent&); // or a chord, with a chord stamp chosen
     void eraseOrMuteAt (juce::Point<float>, bool erase);
+    void beginPaint (const juce::MouseEvent&);
     void paintAt (const juce::MouseEvent&);
     void showMenu (juce::Component* target = nullptr); // the notes' menu, at the pointer or under the toolbar's button
     void updateHint (juce::Point<float>);
-    void cancelGesture(); // when the tool changes mid-drag
+    void cancelGesture(); // when the tool changes mid-drag: what it did stays
+
+    // While the mouse is down; Escape takes back what it did, and the selection is as it was before.
+    bool isDragging() const noexcept { return gesture != nullptr; }
+    void cancelDrag();
 };
 
 //==============================================================================
@@ -104,6 +115,7 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
     enum class Kind
     {
         pending, // not dragging yet
+        none,    // a drag that does nothing
         move,
         resizeStart,
         resizeEnd,
@@ -111,7 +123,8 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
         paint,
         erase,
         mute,
-        zoom
+        zoom,
+        pan // the middle button: moves the view
     };
 
     // A note as it was when the drag began, and where its clip starts (no note goes before it).
@@ -140,6 +153,8 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
             case Kind::zoom:
                 return TimelineEditor::ScrollDirections::sideways;
             case Kind::pending:
+            case Kind::none:
+            case Kind::pan:
             default:
                 return std::nullopt;
         }
@@ -152,13 +167,25 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
     std::vector<Original> originals;
     Original anchor;                            // the note the mouse went down on, as it was
     std::unordered_set<NoteRef> selectedBefore; // a rectangle with Ctrl adds to these
-    int paintPitch = -1;
+    std::vector<NoteRef> selectionBefore;       // what was selected when the mouse went down, for Escape
+    bool deselectIfNothingDeleted = false;      // a right-click on empty grid
+    BeatPosition panViewStart;                  // the middle button: where the view started
+
+    // Paint: the notes (a chord, with a chord stamp) laid at each step of the grid from the step the drag began on, and the
+    // steps painted so far, counted from there either way.
+    std::vector<int> paintPitches;
+    BeatPosition paintOrigin;
+    int paintedFrom = 1, paintedTo = 0; // none yet
+    bool paintedAny = false;
+
     int auditionedPitch = -1;
 };
 
 //==============================================================================
-// Under the notes: each note's velocity as a bar. Dragging across the lane sets the velocities of the notes
-// under the mouse, of the selected ones if any are there.
+// Under the notes: each note's velocity as a bar. Dragging across the lane sets the velocities of the notes under the
+// mouse, of the selected ones if any are there; a drag from a selected note's bar moves every selected note's velocity by
+// as much, as Logic Pro's Velocity tool does; a right drag draws a straight ramp, as in FL Studio; and the wheel raises
+// or lowers them.
 struct PianoRoll::VelocityLane : public juce::Component
 {
     explicit VelocityLane (PianoRoll&);
@@ -167,13 +194,31 @@ struct PianoRoll::VelocityLane : public juce::Component
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+    enum class Drag
+    {
+        none,
+        draw,  // sets the velocities under the mouse
+        shift, // moves every selected note's by as much
+        ramp   // a straight line, with the right button
+    };
 
     PianoRoll& roll;
-    bool dragging = false;
+    Drag drag = Drag::none;
     std::unique_ptr<SongGesture> step; // a drag's undo step, from mouse down to mouse up
+    std::vector<NoteData> before;      // the notes as they were when it began
+    float pressY = 0.0f;
+    juce::Point<float> rampStart, rampEnd;
+
+    bool isDragging() const noexcept { return drag != Drag::none; }
+    void cancelDrag(); // Escape: as it was before the mouse went down
 
     int velocityAt (float y) const;
+    std::vector<NoteRef> getNotesAt (float x) const; // whose bars the pointer is on: the selected ones, if it is on any
     void setVelocitiesAt (const juce::MouseEvent&);
+    void shiftVelocities (const juce::MouseEvent&);
+    void drawRamp (const juce::MouseEvent&);
 };
 
 //==============================================================================

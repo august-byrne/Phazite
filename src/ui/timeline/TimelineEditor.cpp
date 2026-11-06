@@ -841,7 +841,7 @@ void TimelineEditor::showGridMenu()
 //==============================================================================
 void TimelineEditor::setTool (Tool newTool)
 {
-    if (! canUseTool (newTool))
+    if (! canUseTool (newTool) || usesSmartToolFor (newTool))
         newTool = Tool::smart;
 
     // A held key repeats its command: choosing the tool in use again must not end what the mouse is doing.
@@ -888,7 +888,7 @@ juce::Rectangle<int> TimelineEditor::layOutToolbarControls (juce::Rectangle<int>
     for (size_t i = 0; i < std::size (allTools); ++i)
     {
         auto* button = toolButtons[(int) i];
-        button->setVisible (canUseTool (allTools[i]));
+        button->setVisible (canUseTool (allTools[i]) && ! usesSmartToolFor (allTools[i]));
 
         if (button->isVisible())
             button->setBounds (toolbar.removeFromLeft (controlHeight + Space::s));
@@ -1253,6 +1253,11 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .synonyms = { "snap", "align", "grid", "timing" },
                     .perform = withEditor ([] (TimelineEditor& editor) { editor.quantizeSelection(); }),
                     .isEnabled = ticked ([] (const TimelineEditor& editor) { return editor.canQuantizeSelection(); }),
-                    .undoTarget = getUndoTarget });
+                    .undoTarget = getUndoTarget,
+                    .currentName = [getActiveEditor]
+                    {
+                        auto* editor = getActiveEditor();
+                        return editor != nullptr ? editor->getQuantizeName() : juce::String();
+                    } });
 }
 } // namespace phazite::ui

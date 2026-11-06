@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The piano roll's transforms (quantize, legato, chop and transpose, with a preview), its toolbar's menus, and its commands.
+// The piano roll's transforms (quantize, legato, chop, transpose, strum, humanize and arpeggiate, with a preview), its
+// toolbar's menus, and its commands.
 #include "PianoRollParts.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/mixer/MixerModel.h"
@@ -22,6 +23,7 @@ std::vector<NoteData> PianoRoll::getPreview() const
         {
             auto settings = transform.quantize;
             settings.gridBeats = getGridStepInBeats(); // the grid as it is now
+            settings.origin = getTimeOrigin();         // counted from bar 1, as the grid is
             return quantize (notes, settings);
         }
 
@@ -30,6 +32,19 @@ std::vector<NoteData> PianoRoll::getPreview() const
 
         case Transform::Kind::chop:
             return chop (notes, getGridStepInBeats());
+
+        case Transform::Kind::strum:
+            return strum (notes, transform.strum);
+
+        case Transform::Kind::humanize:
+            return humanize (notes, transform.humanize);
+
+        case Transform::Kind::arpeggiate:
+        {
+            auto settings = transform.arpeggio;
+            settings.stepBeats = getGridStepInBeats(); // a step of the grid apart
+            return arpeggiate (notes, settings);
+        }
 
         case Transform::Kind::transpose:
         default:
@@ -47,6 +62,12 @@ juce::String PianoRoll::describeTransform() const
             return "Legato";
         case Transform::Kind::chop:
             return "Chop Notes";
+        case Transform::Kind::strum:
+            return "Strum Notes";
+        case Transform::Kind::humanize:
+            return "Humanize Notes";
+        case Transform::Kind::arpeggiate:
+            return "Arpeggiate Notes";
         case Transform::Kind::transpose:
         default:
             return "Transpose Notes";
@@ -58,6 +79,11 @@ void PianoRoll::openTransform (Transform::Kind kind)
     if (getSelectedNoteRefs().empty())
         return;
 
+    // The settings as they are now come back if the bar closes without Apply, so that a cancelled try changes nothing that
+    // Quantize or Legato use later.
+    if (! transformOpen)
+        transformBefore = transform;
+
     transform.kind = kind;
     transformOpen = true;
     transformBar->show (transform);
@@ -66,10 +92,13 @@ void PianoRoll::openTransform (Transform::Kind kind)
     grid->repaint();
 }
 
-void PianoRoll::closeTransform()
+void PianoRoll::closeTransform (bool keepSettings)
 {
     if (! transformOpen)
         return;
+
+    if (! keepSettings)
+        transform = transformBefore;
 
     transformOpen = false;
     transformBar->setVisible (false);
@@ -85,8 +114,46 @@ void PianoRoll::applyTransform()
         return;
 
     const auto added = replaceNotes (context, getRefs (notes), getPreview(), describeTransform());
-    closeTransform();
+    closeTransform (true);
     selectNotes (added, false);
+}
+
+//==============================================================================
+void PianoRoll::setNextNote (BeatDuration length, int velocity)
+{
+    lastLength = std::max (getMinimumNoteLength(), length);
+    lastVelocity = juce::jlimit (1, 127, velocity);
+    nextNoteButton.setButtonText (describeNextNote());
+}
+
+juce::String PianoRoll::describeNextNote() const
+{
+    // In drum mode a hit is a step of the grid long, whatever the length.
+    const auto length = drumMode && hasProject() ? BeatDuration::fromBeats (getGridStepInBeats()) : lastLength;
+    return describeNoteLength (length) + ", velocity " + juce::String (lastVelocity);
+}
+
+void PianoRoll::showNextNoteMenu()
+{
+    // The length and velocity a click gives a new note: those of the note touched last, until others are chosen here.
+    const auto step = BeatDuration::fromBeats (getGridStepInBeats());
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Length");
+    menu.addItem ("A step of the grid (" + describeNoteLength (step) + ")", [this, step] { setNextNote (step, lastVelocity); });
+
+    for (const auto beats : { 0.125, 0.25, 0.5, 1.0, 2.0, 4.0 })
+    {
+        const auto length = BeatDuration::fromBeats (beats);
+        menu.addItem (describeNoteLength (length), true, std::abs ((lastLength - length).inBeats()) < 1.0e-6,
+                      [this, length] { setNextNote (length, lastVelocity); });
+    }
+
+    menu.addSectionHeader ("Velocity");
+
+    for (const auto velocity : { 127, 100, 80, 64, 40 })
+        menu.addItem (juce::String (velocity), true, lastVelocity == velocity, [this, velocity] { setNextNote (lastLength, velocity); });
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&nextNoteButton));
 }
 
 //==============================================================================
@@ -106,7 +173,9 @@ void PianoRoll::updateToolbar()
     keyButton.setButtonText ("Key: " + (key.has_value() ? describeKey (*key) + (snapToKey ? " (snap)" : "") : juce::String ("Off")));
     ghostButton.setToggleState (showGhostNotes, juce::dontSendNotification);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &chordButton, &keyButton, &ghostButton, &transformButton })
+    nextNoteButton.setButtonText (describeNextNote());
+
+    for (auto* c : std::initializer_list<juce::Component*> { &nextNoteButton, &chordButton, &keyButton, &ghostButton, &transformButton })
         c->setEnabled (track.isValid());
 
     // The instrument that plays the notes, or a request for one: without it they make no sound.
@@ -229,7 +298,8 @@ void PianoRoll::showTransformMenu()
     juce::PopupMenu menu;
     menu.addSectionHeader ("Show what it does first");
     addCommandItems (menu, getCommands(),
-                     { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings" });
+                     { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings", "note.strumSettings",
+                       "note.humanizeSettings", "note.arpeggiateSettings" });
     menu.addSectionHeader ("Right away");
     addCommandItems (menu, getCommands(), { "edit.quantize", "note.legato", "note.chop" });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transformButton));
@@ -261,30 +331,73 @@ void PianoRoll::addCommands (CommandRegistry& registry)
                     .isEnabled = [this] { return isActive() && ! getClips().empty(); },
                     .keyPriority = Command::notePriority });
 
+    // Escape, as in Live: after a drag and a transform, which take it first (keyPressed(), note.cancelTransform), and before the
+    // Smart Tool.
+    registry.add ({ .id = "note.deselectAll",
+                    .name = "Deselect All Notes",
+                    .category = "Note",
+                    .description = "Clears the piano roll's selection of notes.",
+                    .synonyms = { "select none", "clear selection", "unselect" },
+                    .perform = [this] { selectNotes ({}, false); },
+                    .isEnabled = [this] { return isActive() && ! getSelectedNoteRefs().empty(); },
+                    .keyPriority = Command::notePriority });
+
     struct TransformCommand
     {
         Transform::Kind kind;
         const char* id;
         const char* name;
         const char* description;
+        juce::StringArray synonyms;
     };
 
     for (const auto& command :
-         { TransformCommand { Transform::Kind::quantize, "note.quantizeSettings", "Quantize...",
-                              "Shows how quantizing would move the selected notes, with its strength and swing, before you apply it." },
-           TransformCommand { Transform::Kind::legato, "note.legatoSettings", "Legato...",
-                              "Shows the selected notes lasting until the next ones start, with a gap you choose, before you apply it." },
-           TransformCommand { Transform::Kind::chop, "note.chopSettings", "Chop...",
-                              "Shows the selected notes cut into pieces of the grid's length before you apply it." },
-           TransformCommand { Transform::Kind::transpose, "note.transposeSettings", "Transpose...",
-                              "Shows the selected notes moved up or down, in semitones or steps of the key, before you apply it." } })
+         { TransformCommand { Transform::Kind::quantize,
+                              "note.quantizeSettings",
+                              "Quantize...",
+                              "Shows how quantizing would move the selected notes, with its strength and swing, before you apply it.",
+                              {} },
+           TransformCommand { Transform::Kind::legato,
+                              "note.legatoSettings",
+                              "Legato...",
+                              "Shows the selected notes lasting until the next ones start, with a gap you choose, before you apply it.",
+                              {} },
+           TransformCommand { Transform::Kind::chop,
+                              "note.chopSettings",
+                              "Chop...",
+                              "Shows the selected notes cut into pieces of the grid's length before you apply it.",
+                              {} },
+           TransformCommand { Transform::Kind::transpose,
+                              "note.transposeSettings",
+                              "Transpose...",
+                              "Shows the selected notes moved up or down, in semitones or steps of the key, before you apply it.",
+                              {} },
+           TransformCommand { Transform::Kind::strum,
+                              "note.strumSettings",
+                              "Strum...",
+                              "Shows the selected chords' notes starting one after another, as a guitar's strings sound, before you "
+                              "apply it.",
+                              { "guitar", "spread", "roll chord" } },
+           TransformCommand { Transform::Kind::humanize,
+                              "note.humanizeSettings",
+                              "Humanize...",
+                              "Shows the selected notes' timing and velocity varied a little, as a player's are, before you apply it.",
+                              { "random", "feel", "loose", "groove" } },
+           TransformCommand { Transform::Kind::arpeggiate,
+                              "note.arpeggiateSettings",
+                              "Arpeggiate...",
+                              "Shows the selected chords played a note at a time, a step of the grid apart, before you apply it.",
+                              { "arp", "broken chord", "arpeggio" } } })
     {
         const auto kind = command.kind;
+        auto synonyms = juce::StringArray { "transform", "preview", "midi tools" };
+        synonyms.addArray (command.synonyms);
+
         registry.add ({ .id = command.id,
                         .name = command.name,
                         .category = "Note",
                         .description = command.description,
-                        .synonyms = { "transform", "preview", "midi tools" },
+                        .synonyms = synonyms,
                         .perform = [this, kind] { openTransform (kind); },
                         .isEnabled = hasNotes,
                         .keyPriority = Command::notePriority });
@@ -306,7 +419,7 @@ void PianoRoll::addCommands (CommandRegistry& registry)
                     .synonyms = { "close", "discard" },
                     .perform = [this] { closeTransform(); },
                     .isEnabled = [this] { return transformOpen; },
-                    .keyPriority = Command::notePriority });
+                    .keyPriority = Command::notePriority + 1 }); // Escape: before Deselect All Notes
 
     // View settings: changing them isn't an edit of the song.
     registry.add ({ .id = "pianoRoll.drumMode",
@@ -360,9 +473,12 @@ void PianoRoll::addCommands (CommandRegistry& registry)
 void PianoRoll::refreshShortcutTexts()
 {
     TimelineEditor::refreshShortcutTexts();
+    nextNoteButton.setTooltip ("What a click adds: the length and velocity of the note you touched last. Click to choose others, or "
+                               "a step of the grid");
     chordButton.setTooltip ("Chord stamp: a click places a whole chord of this kind instead of one note");
     keyButton.setTooltip ("The track's key, if you choose one: rows outside it are shaded, and notes can snap to it");
     ghostButton.setTooltip (withShortcut (getCommands(), "Ghost notes: other tracks' notes, shown faintly", "pianoRoll.ghostNotes"));
-    transformButton.setTooltip ("Quantize, legato, chop and transpose the selected notes, with a preview first");
+    transformButton.setTooltip ("Quantize, legato, chop, transpose, strum, humanize or arpeggiate the selected notes, with a preview "
+                                "first");
 }
 } // namespace phazite::ui

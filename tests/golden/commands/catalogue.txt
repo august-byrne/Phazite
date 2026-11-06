@@ -91,7 +91,7 @@ note.octaveUp | Octave Up | Note | Moves the selected notes up an octave. | tran
 note.octaveDown | Octave Down | Note | Moves the selected notes down an octave. | transpose, pitch down, lower | enabled-when undo priority=1 repeats
 note.lengthen | Lengthen Notes | Note | Makes the selected notes a step of the grid longer. | longer, extend, length | enabled-when undo priority=1 repeats
 note.shorten | Shorten Notes | Note | Makes the selected notes a step of the grid shorter. | shorter, length | enabled-when undo priority=1 repeats
-note.legato | Legato | Note | Makes each selected note last until the next one starts. | connect, glue, smooth, length | enabled-when undo priority=1
+note.legato | Legato | Note | Makes each selected note last until the next one starts, less the gap Legato... was given last. | connect, glue, smooth, length | enabled-when undo current-name priority=1
 note.slide | Slide Note | Note | Makes the selected notes slide notes, which play nothing themselves but glide the notes sounding as they start to their pitch over their length, as an 808 glides; or plain notes again. Phazite's own instruments play them. | glide, 808, pitch slide, bend | enabled-when undo ticked priority=1
 note.portamento | Portamento | Note | Makes the selected notes glide in from the note played before each, or start on their own pitch again. Phazite's own instruments play the glide, over their Glide time. | porta, glide, legato, slide in | enabled-when undo ticked priority=1
 note.chop | Chop | Note | Cuts the selected notes into pieces a step of the grid long. | slice, cut, split, stutter | enabled-when undo priority=1

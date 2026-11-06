@@ -187,10 +187,14 @@ note.slide
 note.portamento
 note.chop | ctrl + E
 note.selectAll | ctrl + A
+note.deselectAll | escape
 note.quantizeSettings | ctrl + shift + U
 note.legatoSettings
 note.chopSettings
 note.transposeSettings
+note.strumSettings
+note.humanizeSettings
+note.arpeggiateSettings
 note.applyTransform | return
 note.cancelTransform | escape
 pianoRoll.drumMode

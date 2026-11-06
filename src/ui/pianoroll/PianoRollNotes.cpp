@@ -11,15 +11,24 @@ namespace
 {
     constexpr float noteCorner = 2.0f;
 
+    // A note's edges: a drag this close to one, inside the note, makes it longer or shorter. A note too short for that keeps
+    // its inside for moving, and its edges are grabbed just outside it, as Live 12.4 grabs a note's start slightly before it.
+    constexpr float edgeGrab = 6.0f, outsideGrab = 4.0f;
+    constexpr float shortNoteWidth = 3.0f * edgeGrab;
+
+    // How much paler a note's colour gets as its velocity falls, toward the background: the quietest notes this much.
+    constexpr float quietPaleness = 0.45f;
+
     const juce::String
-        emptyHint ("Click to add a note with the last length and velocity, and drag to move it; Ctrl+drag selects notes in a "
-                   "rectangle. Right-click deletes, Shift+right-click opens the menu. Ctrl+wheel zooms, Ctrl+Shift+wheel "
-                   "makes the rows taller, Alt+wheel changes the selected notes' velocity.");
+        emptyHint ("Click to add a note with the length and velocity the toolbar shows, and drag to move it; Ctrl+drag selects notes "
+                   "in a rectangle. Right-click deletes notes, or on empty grid clears the selection; Shift+right-click opens the "
+                   "menu. Ctrl+wheel zooms, Alt+wheel makes the rows taller, and a middle drag moves the view.");
     const juce::String
-        bodyHint ("Drag to move the note, and the selected notes with it; Shift+drag copies them, Alt places them off the grid. "
-                  "Ctrl+click adds it to the selection; right-click deletes it.");
+        bodyHint ("Drag to move the note, and the selected notes with it; Ctrl+drag copies them, Alt places them off the grid, and "
+                  "Escape puts them back. Ctrl+click or Shift+click adds it to the selection or takes it out; right-click deletes it.");
     const juce::String endHint ("Drag to make the note longer or shorter, and the selected notes with it. Hold Alt to leave the grid.");
-    const juce::String startHint ("Drag to move the note's start, keeping its end. Hold Alt to leave the grid.");
+    const juce::String startHint ("Drag to move the note's start, and the selected notes' with it, keeping their ends. Hold Alt to "
+                                  "leave the grid.");
     const juce::String noClipsHint ("Select a MIDI clip or a track in the playlist, or double-click a clip, to edit its notes here.");
     const juce::String emptyTrackHint ("This track has no MIDI clip yet. Draw a note to start one here.");
 
@@ -56,7 +65,8 @@ juce::String PianoRoll::describeNoteTool (Tool toolToDescribe)
     switch (toolToDescribe)
     {
         case Tool::paint:
-            return "Drag along a row to lay notes one after another, a step of the grid each.";
+            return "Drag along a row, either way, to lay notes one after another, a step of the grid each: in the key with Snap to "
+                   "Key, and as chords with a chord stamp.";
         case Tool::slice:
             return "Click a note to split it there. Hold Alt to split off the grid.";
         case Tool::mute:
@@ -110,19 +120,60 @@ std::optional<NoteData> PianoRoll::NoteGrid::getNoteAt (juce::Point<float> posit
     return {};
 }
 
+std::optional<NoteData> PianoRoll::NoteGrid::getNoteToEditAt (juce::Point<float> position) const
+{
+    if (auto note = getNoteAt (position); note.has_value() || roll.drumMode)
+        return note;
+
+    // Just outside a short note's edge, in the row the mouse is in: the nearest such edge.
+    const auto row = roll.getRowAt (juce::roundToInt (std::floor (position.y)));
+    std::optional<NoteData> nearest;
+    auto nearestDistance = outsideGrab;
+
+    if (row < 0)
+        return {};
+
+    for (const auto& note : roll.getAllNotes())
+    {
+        const auto bounds = roll.getNoteBounds (note);
+
+        if (roll.getRowForPitch (note.pitch) != row || bounds.getWidth() >= shortNoteWidth)
+            continue;
+
+        const auto distance = position.x >= bounds.getRight() ? position.x - bounds.getRight() : bounds.getX() - position.x;
+
+        if (distance >= 0.0f && distance < nearestDistance)
+        {
+            nearest = note;
+            nearestDistance = distance;
+        }
+    }
+
+    return nearest;
+}
+
 PianoRoll::NoteGrid::Zone PianoRoll::NoteGrid::getZone (const NoteData& note, juce::Point<float> position) const
 {
     if (roll.drumMode)
         return Zone::body; // hits have no length to change
 
+    // Just outside a short note (getNoteToEditAt()), or inside a note long enough to have its edges inside it.
     const auto bounds = roll.getNoteBounds (note);
-    const auto edge = std::min (5.0f, bounds.getWidth() / 4.0f);
 
-    if (position.x >= bounds.getRight() - edge)
+    if (position.x >= bounds.getRight())
         return Zone::end;
 
-    if (bounds.getWidth() > 16.0f && position.x <= bounds.getX() + 3.0f)
+    if (position.x < bounds.getX())
         return Zone::start;
+
+    if (bounds.getWidth() >= shortNoteWidth)
+    {
+        if (position.x >= bounds.getRight() - edgeGrab)
+            return Zone::end;
+
+        if (position.x < bounds.getX() + edgeGrab)
+            return Zone::start;
+    }
 
     return Zone::body;
 }
@@ -325,10 +376,14 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
         if (bounds.isEmpty() || ! bounds.intersects (area))
             continue;
 
+        // Its velocity shows on the note itself, as in Logic Pro and Live: quieter notes paler, toward the background, and a bar
+        // along its foot as long as its velocity's part of the most (drawn below).
         const auto isSelected = selected.contains (note.getRef());
         const auto found = colours.find (note.clip);
         const auto colour = found != colours.end() ? found->second : p.textMuted;
-        auto fill = isSelected ? colour.brighter (0.35f) : colour;
+        const auto loudness = (float) juce::jlimit (1, 127, note.velocity) / 127.0f;
+        const auto shaded = colour.interpolatedWith (p.background, (1.0f - loudness) * quietPaleness);
+        auto fill = isSelected ? shaded.brighter (0.35f) : shaded;
 
         if (note.muted)
             fill = fill.withMultipliedSaturation (0.2f).withAlpha (0.45f);
@@ -358,6 +413,13 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
 
         // A slide note's triangle or a portamento note's rising stroke at its start, where it fits; then its name.
         const auto ink = getInkFor (fill).withAlpha (0.85f);
+
+        // The velocity's bar, inside the outline along the note's foot, where the note is large enough for one.
+        if (auto inside = shape.reduced (stroke + 1.0f); inside.getWidth() >= 4.0f && inside.getHeight() >= 5.0f)
+        {
+            g.setColour (ink.withMultipliedAlpha (0.6f));
+            g.fillRect (inside.removeFromBottom (VelocityTint::stem).withWidth (inside.getWidth() * loudness));
+        }
         auto text = bounds.reduced (3.0f, 0.0f);
 
         if (const auto size = std::min ({ NoteMarkTint::size, bounds.getHeight() - 4.0f, bounds.getWidth() - 2.0f * NoteMarkTint::inset });
@@ -426,9 +488,9 @@ void PianoRoll::NoteGrid::updateHint (juce::Point<float> position)
 
     const auto currentTool = roll.getTool();
 
-    if (currentTool == Tool::smart || currentTool == Tool::draw)
+    if (currentTool == Tool::smart)
     {
-        if (const auto note = getNoteAt (position))
+        if (const auto note = getNoteToEditAt (position))
         {
             const auto zone = getZone (*note, position);
             setMouseCursor (zone == Zone::body ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::LeftRightResizeCursor);
@@ -444,8 +506,7 @@ void PianoRoll::NoteGrid::updateHint (juce::Point<float> position)
         }
     }
 
-    setMouseCursor (currentTool == Tool::smart || currentTool == Tool::draw ? juce::MouseCursor::NormalCursor
-                                                                            : juce::MouseCursor::CrosshairCursor);
+    setMouseCursor (currentTool == Tool::smart ? juce::MouseCursor::NormalCursor : juce::MouseCursor::CrosshairCursor);
     setDescription (describeNoteTool (currentTool));
 }
 } // namespace phazite::ui

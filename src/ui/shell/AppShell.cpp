@@ -1339,8 +1339,9 @@ void AppShell::addCommands (CommandRegistry& registry)
     addTimelineCommands (registry, [this] { return getTimelineEditorInUse(); });
     playlist.addCommands (registry);
 
-    // The note commands use the piano roll's grid.
-    addNoteCommands (registry, projectContext, [this] { return pianoRoll.getGridStepInBeats(); });
+    // The note commands use the piano roll's grid, and Legato the gap its Legato... was given last.
+    addNoteCommands (
+        registry, projectContext, [this] { return pianoRoll.getGridStepInBeats(); }, [this] { return pianoRoll.getLegatoGapBeats(); });
     pianoRoll.addCommands (registry);
     guide.addCommands (registry);
     lessons.addCommands (registry);

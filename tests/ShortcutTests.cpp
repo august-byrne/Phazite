@@ -326,17 +326,22 @@ TEST_CASE ("Every key in the built-in keymaps is valid, and used once per keymap
     { return id.startsWith ("automation.raise") || id.startsWith ("automation.lower"); };
     const auto isDeviceCommand = [] (const juce::String& id) { return id == "device.group" || id == "device.ungroup"; };
 
+    // Escape closes a transform being previewed, and otherwise deselects the notes (note.cancelTransform comes first), as
+    // Escape backs out of one thing at a time.
+    const auto isDeselectCommand = [] (const juce::String& id) { return id == "note.deselectAll"; };
+
     for (const auto& keymap : phazite::ui::Keymap::getBuiltIn())
     {
         CAPTURE (keymap.name.toStdString());
-        juce::Array<juce::KeyPress> used, usedByNotes, usedByPoints, usedByDevices;
+        juce::Array<juce::KeyPress> used, usedByNotes, usedByPoints, usedByDevices, usedByDeselecting;
 
         for (const auto& entry : keymap.keys)
         {
-            auto& keys = entry.first.startsWith ("note.") ? usedByNotes
-                         : isPointCommand (entry.first)   ? usedByPoints
-                         : isDeviceCommand (entry.first)  ? usedByDevices
-                                                          : used;
+            auto& keys = isDeselectCommand (entry.first)    ? usedByDeselecting
+                         : entry.first.startsWith ("note.") ? usedByNotes
+                         : isPointCommand (entry.first)     ? usedByPoints
+                         : isDeviceCommand (entry.first)    ? usedByDevices
+                                                            : used;
 
             for (const auto& description : entry.second)
             {

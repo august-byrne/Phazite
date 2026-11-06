@@ -280,6 +280,160 @@ TEST_CASE ("Legato and chop")
     CHECK (pieces[4].velocity == 90);
 }
 
+TEST_CASE ("Quantize counts the grid from the piano roll's bar 1, as its snapping does")
+{
+    // A clip that starts a third of a beat into the song: the grid's lines are a beat apart from there.
+    phazite::QuantizeSettings settings;
+    settings.gridBeats = 1.0;
+    settings.origin = beats (1.0 / 3.0);
+
+    const auto result = phazite::quantize ({ noteData (60, 1.4, 0.5, 100), noteData (62, 2.2, 0.5, 100) }, settings);
+    CHECK (result[0].start.inBeats() == doctest::Approx (1.0 + 1.0 / 3.0));
+    CHECK (result[1].start.inBeats() == doctest::Approx (2.0 + 1.0 / 3.0));
+}
+
+TEST_CASE ("Strum starts a chord's notes one after another and keeps their ends; single notes stay")
+{
+    using phazite::NoteData;
+    const std::vector<NoteData> notes { noteData (64, 0.0, 1.0, 100), noteData (60, 0.0, 1.0, 100), noteData (67, 0.0, 1.0, 100),
+                                        noteData (72, 2.0, 1.0, 100) };
+
+    auto result = phazite::strum (notes, { .stepBeats = 0.125 });
+    CHECK (result[1].start.inBeats() == doctest::Approx (0.0)); // the lowest first
+    CHECK (result[0].start.inBeats() == doctest::Approx (0.125));
+    CHECK (result[2].start.inBeats() == doctest::Approx (0.25));
+    CHECK (result[2].getEnd().inBeats() == doctest::Approx (1.0)); // its end stays
+    CHECK (result[3].start.inBeats() == doctest::Approx (2.0));    // alone: not a chord
+
+    result = phazite::strum (notes, { .stepBeats = 0.125, .down = true });
+    CHECK (result[2].start.inBeats() == doctest::Approx (0.0)); // the highest first
+    CHECK (result[1].start.inBeats() == doctest::Approx (0.25));
+
+    // A step longer than a note leaves it the shortest a note can be, ending where it did.
+    result = phazite::strum ({ noteData (60, 0.0, 0.25, 100), noteData (64, 0.0, 0.25, 100) }, { .stepBeats = 1.0 });
+    CHECK (result[1].length == phazite::getMinimumNoteLength());
+    CHECK (result[1].getEnd().inBeats() == doctest::Approx (0.25));
+}
+
+TEST_CASE ("Humanize moves starts and velocities within its limits, the same way each time")
+{
+    using phazite::NoteData;
+    std::vector<NoteData> notes;
+
+    for (int i = 0; i < 32; ++i)
+        notes.push_back (noteData (60, 1.0 + i, 0.5, 100));
+
+    const phazite::HumanizeSettings settings { .timingBeats = 0.1, .velocity = 20, .seed = 7 };
+    const auto result = phazite::humanize (notes, settings);
+    auto moved = false;
+
+    for (size_t i = 0; i < notes.size(); ++i)
+    {
+        CHECK (std::abs (result[i].start.inBeats() - notes[i].start.inBeats()) <= 0.1 + 1.0e-9);
+        CHECK (std::abs (result[i].velocity - notes[i].velocity) <= 20);
+        CHECK (result[i].length.inBeats() == doctest::Approx (0.5));
+        moved = moved || std::abs (result[i].start.inBeats() - notes[i].start.inBeats()) > 1.0e-6;
+    }
+
+    CHECK (moved);
+
+    // The same settings, the same result: what the piano roll previews is what it applies.
+    const auto again = phazite::humanize (notes, settings);
+
+    for (size_t i = 0; i < notes.size(); ++i)
+    {
+        CHECK (again[i].start.inBeats() == doctest::Approx (result[i].start.inBeats()));
+        CHECK (again[i].velocity == result[i].velocity);
+    }
+
+    // No timing leaves the starts; changing the velocity's amount keeps what the timing does.
+    const auto velocityOnly = phazite::humanize (notes, { .timingBeats = 0.0, .velocity = 20, .seed = 7 });
+    const auto timingOnly = phazite::humanize (notes, { .timingBeats = 0.1, .velocity = 0, .seed = 7 });
+
+    for (size_t i = 0; i < notes.size(); ++i)
+    {
+        CHECK (velocityOnly[i].start.inBeats() == doctest::Approx (notes[i].start.inBeats()));
+        CHECK (velocityOnly[i].velocity == result[i].velocity);
+        CHECK (timingOnly[i].start.inBeats() == doctest::Approx (result[i].start.inBeats()));
+        CHECK (timingOnly[i].velocity == notes[i].velocity);
+    }
+}
+
+TEST_CASE ("Arpeggiate plays a chord's notes one after another for as long as it lasts")
+{
+    using phazite::NoteData;
+
+    // A C major chord a beat long, as loud as each note was, and a single note after it.
+    const std::vector<NoteData> notes { noteData (64, 0.0, 1.0, 80), noteData (60, 0.0, 1.0, 100), noteData (67, 0.0, 0.5, 60),
+                                        noteData (72, 2.0, 1.0, 90) };
+
+    const auto pitchesOf = [] (const std::vector<NoteData>& result)
+    {
+        std::vector<int> pitches;
+
+        for (const auto& note : result)
+            if (note.start.inBeats() < 1.5)
+                pitches.push_back (note.pitch);
+
+        return pitches;
+    };
+
+    auto result = phazite::arpeggiate (notes, { .stepBeats = 0.25 });
+    CHECK (pitchesOf (result) == std::vector { 60, 64, 67, 60 }); // up, until the longest note's end
+    REQUIRE (result.size() == 5);
+    CHECK (result[1].start.inBeats() == doctest::Approx (0.25));
+    CHECK (result[1].length.inBeats() == doctest::Approx (0.25));
+    CHECK (result[1].velocity == 80);
+    CHECK (result[4].pitch == 72); // alone: not a chord
+    CHECK (result[4].start.inBeats() == doctest::Approx (2.0));
+
+    CHECK (pitchesOf (phazite::arpeggiate (notes, { .stepBeats = 0.25, .order = phazite::ArpeggioOrder::down }))
+           == std::vector { 67, 64, 60, 67 });
+    CHECK (pitchesOf (phazite::arpeggiate (notes, { .stepBeats = 0.125, .order = phazite::ArpeggioOrder::upAndDown }))
+           == std::vector { 60, 64, 67, 64, 60, 64, 67, 64 });
+
+    // The gate shortens each note within its step.
+    result = phazite::arpeggiate (notes, { .stepBeats = 0.25, .gate = 0.5f });
+    CHECK (result[0].length.inBeats() == doctest::Approx (0.125));
+}
+
+TEST_CASE ("Lengths read as the grid names its steps, and Legato's name shows its gap")
+{
+    CHECK (phazite::describeNoteLength (length (0.25)) == "1/4 beat");
+    CHECK (phazite::describeNoteLength (length (0.75)) == "3/4 beat");
+    CHECK (phazite::describeNoteLength (length (1.0 / 3.0)) == "1/3 beat");
+    CHECK (phazite::describeNoteLength (length (1.0)) == "1 beat");
+    CHECK (phazite::describeNoteLength (length (4.0)) == "4 beats");
+    CHECK (phazite::describeNoteLength (length (1.5)) == "1.5 beats");
+    CHECK (phazite::describeNoteLength (length (0.37)) == "0.37 beat");
+
+    CHECK (phazite::describeLegato (0.0) == "Legato");
+    CHECK (phazite::describeLegato (0.0625) == "Legato (1/16 beat gap)");
+}
+
+TEST_CASE ("Legato leaves the gap the piano roll gave it last, and says so in its name")
+{
+    Notes n;
+    phazite::CommandRegistry registry; // with a gap, beside the commands without one that Notes has
+    auto gap = 0.25;
+    phazite::addNoteCommands (registry, n.selection, [] { return 0.25; }, [&gap] { return gap; });
+
+    const auto first = n.add (60, 4.0, 0.25), second = n.add (62, 5.0, 0.25);
+    n.select ({ first, second });
+
+    const auto* legatoCommand = registry.find ("note.legato");
+    REQUIRE (legatoCommand != nullptr);
+    CHECK (phazite::getCurrentName (*legatoCommand) == "Legato (1/4 beat gap)");
+
+    REQUIRE (registry.invoke ("note.legato"));
+    REQUIRE (n.numNotesIn (n.clip) == 2);
+    CHECK (phazite::getClipNotes (n.song, n.clip)[0].length.inBeats() == doctest::Approx (0.75));
+    CHECK (phazite::describeUndo (&n.song) == juce::String ("Undo Legato (1/4 beat gap)"));
+
+    gap = 0.0;
+    CHECK (phazite::getCurrentName (*legatoCommand) == "Legato");
+}
+
 TEST_CASE ("Keys: shading, snapping and transposing in the key")
 {
     const phazite::Key cMajor { 0, phazite::Scale::major };

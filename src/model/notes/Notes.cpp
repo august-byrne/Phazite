@@ -16,6 +16,7 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <numeric>
 #include <set>
 #include <unordered_map>
 
@@ -110,6 +111,60 @@ namespace
 
     const auto tinyBeats = BeatDuration::fromBeats (1.0e-6);
     constexpr int maxPiecesPerNote = 256; // chopping into tinier pieces than this makes no musical sense
+
+    // Notes of one clip that start this close together are a chord (NoteValues.h).
+    constexpr double chordTolerance = 1.0 / 128.0;
+
+    // The indices of the chords' notes: the notes of each clip that start together, each chord's from its lowest note up,
+    // the chords in the order they start. A note alone is a chord of one.
+    std::vector<std::vector<size_t>> findChords (const std::vector<NoteData>& notes)
+    {
+        std::vector<size_t> order;
+
+        for (size_t i = 0; i < notes.size(); ++i)
+            order.push_back (i);
+
+        std::stable_sort (order.begin(), order.end(),
+                          [&notes] (size_t a, size_t b)
+                          {
+                              const auto& first = notes[a];
+                              const auto& second = notes[b];
+
+                              if (first.clip != second.clip)
+                                  return first.clip.getRaw() < second.clip.getRaw();
+
+                              return first.start < second.start;
+                          });
+
+        std::vector<std::vector<size_t>> groups;
+
+        for (const auto index : order)
+        {
+            const auto& note = notes[index];
+
+            if (groups.empty() || notes[groups.back().front()].clip != note.clip
+                || (note.start - notes[groups.back().front()].start).inBeats() > chordTolerance)
+                groups.emplace_back();
+
+            groups.back().push_back (index);
+        }
+
+        for (auto& chord : groups)
+            std::stable_sort (chord.begin(), chord.end(), [&notes] (size_t a, size_t b) { return notes[a].pitch < notes[b].pitch; });
+
+        return groups;
+    }
+
+    // Where a chord starts: its earliest note's start.
+    BeatPosition getChordStart (const std::vector<NoteData>& notes, const std::vector<size_t>& chord)
+    {
+        auto start = notes[chord.front()].start;
+
+        for (const auto index : chord)
+            start = std::min (start, notes[index].start);
+
+        return start;
+    }
 
     // A MIDI clip's element, or invalid.
     juce::ValueTree findMidiClipState (const Song& song, ClipID clip)
@@ -696,12 +751,15 @@ std::vector<NoteData> quantize (std::vector<NoteData> notes, const QuantizeSetti
     if (grid <= 0.0)
         return notes;
 
-    // The nearest grid line, with every other one late by up to a third of a step: at full swing, the second
-    // of each pair of steps lands two-thirds of the way through the pair, as in a triplet.
+    // The nearest grid line, counted from the origin as the piano roll's grid is, with every other one late by up to a third
+    // of a step: at full swing, the second of each pair of steps lands two-thirds of the way through the pair, as in a
+    // triplet.
+    const auto origin = settings.origin.inBeats();
+
     const auto quantizeBeat = [=] (double beat)
     {
-        const auto index = std::round (beat / grid);
-        auto target = index * grid;
+        const auto index = std::round ((beat - origin) / grid);
+        auto target = origin + index * grid;
 
         if (std::fmod (std::abs (index), 2.0) > 0.5)
             target += swing * grid / 3.0;
@@ -744,6 +802,14 @@ std::vector<NoteData> legato (std::vector<NoteData> notes, double gapBeats)
     return notes;
 }
 
+juce::String describeLegato (double gapBeats)
+{
+    if (gapBeats < 1.0e-6)
+        return "Legato";
+
+    return "Legato (" + describeNoteLength (BeatDuration::fromBeats (gapBeats)) + " gap)";
+}
+
 std::vector<NoteData> chop (std::vector<NoteData> notes, double pieceBeats)
 {
     if (pieceBeats <= getMinimumNoteLength().inBeats() / 2.0)
@@ -766,6 +832,138 @@ std::vector<NoteData> chop (std::vector<NoteData> notes, double pieceBeats)
     }
 
     return pieces;
+}
+
+std::vector<NoteData> strum (std::vector<NoteData> notes, const StrumSettings& settings)
+{
+    const auto step = BeatDuration::fromBeats (std::max (0.0, settings.stepBeats));
+
+    for (auto chord : findChords (notes))
+    {
+        if (chord.size() < 2)
+            continue;
+
+        if (settings.down)
+            std::reverse (chord.begin(), chord.end());
+
+        // Each note starts a step after the one before it, and ends where it did, so that the chord still ends together.
+        const auto chordStart = getChordStart (notes, chord);
+
+        for (size_t i = 0; i < chord.size(); ++i)
+        {
+            auto& note = notes[chord[i]];
+            const auto end = note.getEnd();
+            note.start = std::min (chordStart + step * (double) i, end - getMinimumNoteLength());
+            note.length = end - note.start;
+        }
+    }
+
+    return notes;
+}
+
+std::vector<NoteData> humanize (std::vector<NoteData> notes, const HumanizeSettings& settings)
+{
+    // Two draws for each note whatever the amounts, so that changing one amount keeps what the other does.
+    juce::Random random (settings.seed);
+    const auto timing = std::max (0.0, settings.timingBeats);
+    const auto velocity = std::max (0, settings.velocity);
+
+    for (auto& note : notes)
+    {
+        const auto timingDraw = random.nextDouble() * 2.0 - 1.0;
+        const auto velocityDraw = random.nextDouble() * 2.0 - 1.0;
+        note.start = BeatPosition::fromBeats (std::max (0.0, note.start.inBeats() + timing * timingDraw));
+        note.velocity = juce::jlimit (1, 127, note.velocity + juce::roundToInt (velocity * velocityDraw));
+    }
+
+    return notes;
+}
+
+std::vector<NoteData> arpeggiate (std::vector<NoteData> notes, const ArpeggioSettings& settings)
+{
+    const auto step = settings.stepBeats;
+
+    if (step <= getMinimumNoteLength().inBeats() / 2.0)
+        return notes;
+
+    const auto gate = (double) juce::jlimit (0.1f, 1.0f, settings.gate);
+    std::vector<NoteData> result;
+
+    for (const auto& chord : findChords (notes))
+    {
+        if (chord.size() < 2)
+        {
+            result.push_back (notes[chord.front()]);
+            continue;
+        }
+
+        // The order the chord's notes play in: indices into the chord, which goes from its lowest note up.
+        std::vector<size_t> order;
+
+        for (size_t i = 0; i < chord.size(); ++i)
+            order.push_back (i);
+
+        if (settings.order == ArpeggioOrder::down)
+            std::reverse (order.begin(), order.end());
+
+        if (settings.order == ArpeggioOrder::upAndDown)
+            for (auto i = chord.size() - 2; i > 0; --i)
+                order.push_back (i);
+
+        // A note at each step for as long as the chord lasts, each a piece of the note it plays: the first piece of each
+        // note replaces it (replaceNotes() keeps its ID), and the rest are new.
+        const auto chordStart = getChordStart (notes, chord);
+        auto chordEnd = notes[chord.front()].getEnd();
+
+        for (const auto index : chord)
+            chordEnd = std::max (chordEnd, notes[index].getEnd());
+
+        const auto maxSteps = maxPiecesPerNote * (int) chord.size();
+
+        for (int i = 0; i < maxSteps; ++i)
+        {
+            const auto start = chordStart + BeatDuration::fromBeats (step * i);
+
+            if ((chordEnd - start).inBeats() < 1.0e-6)
+                break;
+
+            auto piece = notes[chord[order[(size_t) i % order.size()]]];
+            piece.start = start;
+            piece.length = std::max (getMinimumNoteLength(), std::min (BeatDuration::fromBeats (step * gate), chordEnd - start));
+            result.push_back (piece);
+        }
+    }
+
+    return result;
+}
+
+juce::String describeNoteLength (BeatDuration length)
+{
+    const auto beats = length.inBeats();
+    const auto trimmed = [] (double value, int decimals)
+    { return juce::String (value, decimals).trimCharactersAtEnd ("0").trimCharactersAtEnd ("."); };
+
+    // A part of a beat, as the grid names its steps ("1/4 beat"), if it is one; then whole beats, then decimals.
+    if (beats < 1.0 - 1.0e-9)
+    {
+        for (const auto parts : { 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64 })
+        {
+            const auto count = beats * parts;
+
+            if (const auto whole = juce::roundToInt (count); whole > 0 && std::abs (count - whole) < 1.0e-6)
+            {
+                const auto divisor = std::gcd (whole, parts);
+                return juce::String (whole / divisor) + "/" + juce::String (parts / divisor) + " beat";
+            }
+        }
+
+        return trimmed (beats, 3) + " beat";
+    }
+
+    if (const auto whole = juce::roundToInt (beats); std::abs (beats - whole) < 1.0e-6)
+        return juce::String (whole) + (whole == 1 ? " beat" : " beats");
+
+    return trimmed (beats, 2) + " beats";
 }
 
 //==============================================================================
@@ -1040,7 +1238,8 @@ void showAllDrumRows (Song& song, TrackID track)
 }
 
 //==============================================================================
-void addNoteCommands (CommandRegistry& registry, Selection& selection, std::function<double()> getGridStepInBeats)
+void addNoteCommands (CommandRegistry& registry, Selection& selection, std::function<double()> getGridStepInBeats,
+                      std::function<double()> getLegatoGapBeats)
 {
     const auto undoTarget = undoTargetOf (selection);
 
@@ -1101,15 +1300,23 @@ void addNoteCommands (CommandRegistry& registry, Selection& selection, std::func
                         .repeatsWhileHeld = true });
     }
 
+    // With the gap Legato... was given last, which its name shows, so that what it does is never a surprise.
+    const auto legatoGap = [getLegatoGapBeats] { return getLegatoGapBeats != nullptr ? std::max (0.0, getLegatoGapBeats()) : 0.0; };
+
     registry.add ({ .id = "note.legato",
                     .name = "Legato",
                     .category = "Note",
-                    .description = "Makes each selected note last until the next one starts.",
+                    .description = "Makes each selected note last until the next one starts, less the gap Legato... was given last.",
                     .synonyms = { "connect", "glue", "smooth", "length" },
-                    .perform = [&selection]
-                    { replaceSelectedNotes (selection, [] (std::vector<NoteData> notes) { return legato (std::move (notes)); }); },
+                    .perform =
+                        [&selection, legatoGap]
+                    {
+                        replaceSelectedNotes (selection, [gap = legatoGap()] (std::vector<NoteData> notes)
+                                              { return legato (std::move (notes), gap); });
+                    },
                     .isEnabled = [&selection] { return hasSelectedNotes (selection); },
                     .undoTarget = undoTarget,
+                    .currentName = [legatoGap] { return describeLegato (legatoGap()); },
                     .keyPriority = Command::notePriority });
 
     // Slide and portamento notes, as FL Studio has them.

@@ -136,6 +136,8 @@ void showAllDrumRows (Song&, TrackID);
 //==============================================================================
 // The note commands, for the selected notes (Command::notePriority, so the arrow keys move notes while
 // notes are selected): transpose by a semitone or an octave, lengthen and shorten by a step of the grid,
-// legato, and chop on the grid. getGridStepInBeats gives the piano roll's grid.
-void addNoteCommands (CommandRegistry&, Selection&, std::function<double()> getGridStepInBeats);
+// legato, and chop on the grid. getGridStepInBeats gives the piano roll's grid, and getLegatoGapBeats the gap its
+// Legato... was given last (none without it).
+void addNoteCommands (CommandRegistry&, Selection&, std::function<double()> getGridStepInBeats,
+                      std::function<double()> getLegatoGapBeats = {});
 } // namespace phazite

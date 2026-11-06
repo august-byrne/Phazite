@@ -39,6 +39,7 @@
     "note.quantizeSettings": [ "command + shift + U" ],
     "note.applyTransform": [ "return", "command + return" ],
     "note.cancelTransform": [ "escape" ],
+    "note.deselectAll": [ "escape" ],
     "automation.showLanes": [ "A" ],
     "automation.raisePoints": [ "cursor up" ],
     "automation.lowerPoints": [ "cursor down" ],

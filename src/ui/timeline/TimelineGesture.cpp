@@ -17,6 +17,14 @@ void TimelineGesture::beginStep (ProjectContext& context, const juce::String& na
         step = std::make_unique<SongGesture> (context, name);
 }
 
+void TimelineGesture::rollBack()
+{
+    if (step != nullptr)
+        step->rollBack();
+
+    step = nullptr;
+}
+
 bool TimelineGesture::doOnce (NoteRef note)
 {
     if (std::find (doneNotes.begin(), doneNotes.end(), note) != doneNotes.end())

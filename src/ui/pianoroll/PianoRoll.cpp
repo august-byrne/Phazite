@@ -11,7 +11,11 @@ namespace
     constexpr int velocityLaneHeight = 72;
     constexpr int transformBarHeight = 40;
     constexpr int minRowHeight = 6, maxRowHeight = 32;
-    constexpr int velocityPerNotch = 4; // Alt+wheel
+
+    // A clip opens zoomed to show it with a quarter of its length after it to draw on, and at least two bars of 4/4, but
+    // never smaller than the editors' usual zoom, so that a quarter-beat note is wide enough to grab.
+    constexpr double minimumBeatsShown = 8.0, roomAfterClips = 0.25;
+    constexpr int minimumWidthToFit = 100; // pixels: narrower, the editor isn't laid out yet
 } // namespace
 
 //==============================================================================
@@ -34,6 +38,8 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
 
     instrumentButton.setTitle ("Instrument");
     instrumentButton.onClick = [this] { instrumentClicked(); };
+    nextNoteButton.setTitle ("Next note");
+    nextNoteButton.onClick = [this] { showNextNoteMenu(); };
     chordButton.setTitle ("Chord stamp");
     chordButton.onClick = [this] { showChordMenu(); };
     keyButton.setTitle ("Key");
@@ -51,9 +57,9 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     clipLabel.setJustificationType (juce::Justification::centredRight);
     clipLabel.setFont (juce::FontOptions (TextSize::small));
 
-    for (auto* c : std::initializer_list<juce::Component*> { &instrumentButton, &chordButton, &keyButton, &ghostButton, &transformButton,
-                                                             &notesMenuButton, &clipLabel, keys.get(), grid.get(), velocityLane.get(),
-                                                             &getOverview() })
+    for (auto* c : std::initializer_list<juce::Component*> { &instrumentButton, &nextNoteButton, &chordButton, &keyButton, &ghostButton,
+                                                             &transformButton, &notesMenuButton, &clipLabel, keys.get(), grid.get(),
+                                                             velocityLane.get(), &getOverview() })
         addAndMakeVisible (c);
 
     // The overview of the clips' notes along the time bar's top scrolls and zooms the time line, as the playlist's does, as FL
@@ -85,6 +91,7 @@ void PianoRoll::projectChanged()
     stopAudition();
     closeTransform();
     setClips ({});
+    clipViews.clear(); // another project's clips can have the same IDs
     emptyTrack = {};
     shownProject = context.getProjectNumber();
     showProject();
@@ -171,6 +178,9 @@ void PianoRoll::setClips (const std::vector<ClipID>& newClips, bool keepView)
     if (newClips == clips && ! newClips.empty())
         return;
 
+    if (! keepView)
+        rememberView();
+
     stopAudition();
     clips = newClips;
     selection.setNoteClips (clips); // the notes of the clips shown before are no longer selected
@@ -188,7 +198,45 @@ void PianoRoll::setClips (const std::vector<ClipID>& newClips, bool keepView)
     clipsChanged();
 
     if (! keepView)
-        scrollToNotes();
+        showNewClips();
+}
+
+void PianoRoll::rememberView()
+{
+    // A clip shown alone opens again as it was left (several shown at once open zoomed to fit).
+    if (clips.size() == 1 && hasProject())
+        clipViews[clips.front()] = { getView().pixelsPerBeat, (getView().start - getTimeOrigin()).inBeats(), scrollY };
+}
+
+void PianoRoll::showNewClips()
+{
+    if (clips.size() == 1)
+    {
+        if (const auto found = clipViews.find (clips.front()); found != clipViews.end())
+        {
+            const auto& left = found->second;
+            const auto start = getTimeOrigin() + BeatDuration::fromBeats (left.offsetBeats);
+            zoomTo ({ start, start + BeatDuration::fromBeats (std::max (1, getTimelineArea().getWidth()) / left.pixelsPerBeat) });
+            setScrollY (left.scrollY);
+            return;
+        }
+    }
+
+    zoomToClips();
+    scrollToNotes();
+}
+
+void PianoRoll::zoomToClips()
+{
+    const auto width = getTimelineArea().getWidth();
+    const auto content = getContentRange();
+
+    if (getShownClips().empty() || width < minimumWidthToFit)
+        return;
+
+    const auto beats = std::max (minimumBeatsShown, (content.getEnd() - getTimeOrigin()).inBeats() * (1.0 + roomAfterClips));
+    const auto pixelsPerBeat = juce::jlimit (TimelineView::defaultPixelsPerBeat, TimelineView::maxPixelsPerBeat, width / beats);
+    zoomTo ({ getTimeOrigin(), getTimeOrigin() + BeatDuration::fromBeats (width / pixelsPerBeat) });
 }
 
 void PianoRoll::updateTimeOrigin (bool scrollToStart)
@@ -397,6 +445,11 @@ bool PianoRoll::canUseTool (Tool toolToUse) const
     return toolToUse != Tool::slip; // notes have nothing inside to slip
 }
 
+bool PianoRoll::usesSmartToolFor (Tool toolToUse) const
+{
+    return toolToUse == Tool::draw;
+}
+
 bool PianoRoll::canNudgeSelection() const
 {
     return ! getSelectedNoteRefs().empty();
@@ -414,11 +467,31 @@ bool PianoRoll::canQuantizeSelection() const
 
 void PianoRoll::quantizeSelection()
 {
-    // With the strength and swing used last, to the grid as it is now.
+    // With the strength and swing used last, which its name shows (getQuantizeName()), to the grid as it is now, counted from
+    // bar 1 as the grid is.
     auto settings = transform.quantize;
     settings.gridBeats = getGridStepInBeats();
+    settings.origin = getTimeOrigin();
     const auto notes = getSelectedNotesHere();
     selectNotes (replaceNotes (context, getRefs (notes), quantize (notes, settings)), false);
+}
+
+juce::String PianoRoll::getQuantizeName() const
+{
+    // What Quantize... was given last, which Quantize uses too, unless it is the plain strength and no swing.
+    const auto& settings = transform.quantize;
+    juce::StringArray parts;
+
+    if (settings.strength < 0.995f)
+        parts.add (juce::String (juce::roundToInt (settings.strength * 100.0f)) + "%");
+
+    if (settings.swing > 0.005f)
+        parts.add ("swing " + juce::String (juce::roundToInt (settings.swing * 100.0f)) + "%");
+
+    if (settings.ends)
+        parts.add ("ends too");
+
+    return parts.isEmpty() ? juce::String ("Quantize") : "Quantize (" + parts.joinIntoString (", ") + ")";
 }
 
 juce::Rectangle<int> PianoRoll::getTimelineArea() const
@@ -461,6 +534,7 @@ void PianoRoll::toolChanged()
 void PianoRoll::gridChanged()
 {
     grid->repaint();
+    nextNoteButton.setButtonText (describeNextNote()); // in drum mode, a hit is a step of the grid long
 
     if (transformOpen)
         transformBar->show (transform); // its text names the grid
@@ -498,8 +572,8 @@ void PianoRoll::resized()
     auto area = getLocalBounds();
     auto toolbar = layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
 
-    for (auto [button, width] : { std::pair { &instrumentButton, 140 }, std::pair { &chordButton, 120 }, std::pair { &keyButton, 150 },
-                                  std::pair { &ghostButton, 64 }, std::pair { &transformButton, 96 } })
+    for (auto [button, width] : { std::pair { &instrumentButton, 140 }, std::pair { &nextNoteButton, 150 }, std::pair { &chordButton, 120 },
+                                  std::pair { &keyButton, 150 }, std::pair { &ghostButton, 64 }, std::pair { &transformButton, 96 } })
     {
         button->setBounds (toolbar.removeFromLeft (width));
         toolbar.removeFromLeft (Space::xs);
@@ -530,33 +604,23 @@ void PianoRoll::resized()
 
 void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
-    const auto notches = getWheelNotches (wheel.deltaY);
-
-    // Ctrl+Shift+wheel makes the rows taller or shorter; Ctrl+wheel zooms around the pointer, as in FL Studio.
-    if (e.mods.isCommandDown() && e.mods.isShiftDown())
-    {
-        const auto row = getRowAt (e.getEventRelativeTo (grid.get()).y);
-        rowHeight = juce::jlimit (minRowHeight, maxRowHeight, rowHeight + (notches > 0.0 ? 1 : -1));
-
-        if (row >= 0)
-            setScrollY (row * getRowHeight() - e.getEventRelativeTo (grid.get()).y);
-        else
-            setScrollY (scrollY);
-
-        return;
-    }
-
+    // As in the playlist: Ctrl+wheel zooms around the pointer, as in FL Studio, and Alt+wheel makes the rows taller or
+    // shorter, as it makes the playlist's tracks. (Over the velocity lane, the wheel changes velocities.)
     if (e.mods.isCommandDown())
     {
         zoomByWheel (e.getEventRelativeTo (grid.get()).position.x, wheel.deltaY);
         return;
     }
 
-    // Alt+wheel changes the selected notes' velocity, as in FL Studio.
     if (e.mods.isAltDown())
     {
-        if (const auto notes = getSelectedRefsHere(); ! notes.empty())
-            changeNoteVelocities (context, notes, notches > 0.0 ? velocityPerNotch : -velocityPerNotch);
+        if (const auto notches = getWheelNotches (wheel.deltaY); ! juce::exactlyEqual (notches, 0.0))
+        {
+            const auto y = e.getEventRelativeTo (grid.get()).y;
+            const auto row = getRowAt (y);
+            rowHeight = juce::jlimit (minRowHeight, maxRowHeight, rowHeight + (notches > 0.0 ? 1 : -1));
+            setScrollY (row >= 0 ? row * getRowHeight() - y : scrollY);
+        }
 
         return;
     }
@@ -569,6 +633,20 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
 
     if (! juce::exactlyEqual (upDown, 0.0f))
         setScrollY (scrollY - juce::roundToInt (getWheelNotches (upDown) * scrollPerNotch));
+}
+
+bool PianoRoll::keyPressed (const juce::KeyPress& key)
+{
+    // Escape during a drag takes back what it did, as a part of the drag, as Alt and Shift are: with the mouse down, no
+    // command runs. Otherwise the key is the commands' (KeyDispatcher), Escape among them.
+    if (key == juce::KeyPress::escapeKey && (grid->isDragging() || velocityLane->isDragging()))
+    {
+        grid->cancelDrag();
+        velocityLane->cancelDrag();
+        return true;
+    }
+
+    return false;
 }
 
 //==============================================================================

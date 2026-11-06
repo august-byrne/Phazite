@@ -32,6 +32,9 @@ struct TimelineGesture
     void beginStep (ProjectContext&, const juce::String& name);
     void endStep() { step = nullptr; }
 
+    // Takes back all the step changed, leaving nothing to redo: Escape during a drag.
+    void rollBack();
+
     // For tools that act once on each thing the mouse passes over (Delete and Mute): true the first time for each
     // thing, which then counts as done.
     bool doOnce (NoteRef);
@@ -44,6 +47,9 @@ struct TimelineGesture
         doneIDs.push_back (thing.getRaw());
         return true;
     }
+
+    // Whether doOnce() let anything through: a Delete drag that met no note did nothing.
+    bool hasDoneAny() const noexcept { return ! doneNotes.empty() || ! doneIDs.empty(); }
 
     juce::Point<int> startPosition; // where the mouse went down, in the component it went down in
     BeatPosition startBeat;         // the beat under it then

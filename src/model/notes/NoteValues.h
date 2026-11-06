@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Notes as plain values, as the piano roll shows them and the transforms change them, with keys and scales, the chords
 // the piano roll stamps, and drums' names (docs/design.md, section 7). Positions are song beats (a clip's content start
-// plus the note's own beat), so the notes of several clips line up. The transforms (quantize, legato, chop, transpose)
-// work on copies of the notes, so that the piano roll can show what one would do before it is applied. Notes.h holds
-// them in the song.
+// plus the note's own beat), so the notes of several clips line up. The transforms (quantize, legato, chop, transpose,
+// strum, humanize, arpeggiate) work on copies of the notes, so that the piano roll can show what one would do before it
+// is applied. Notes.h holds them in the song.
 #pragma once
 
 #include "model/base/Beats.h"
@@ -50,8 +50,13 @@ inline std::vector<NoteRef> getRefs (const std::vector<NoteData>& notes)
 // Notes are at least this long.
 BeatDuration getMinimumNoteLength();
 
+// A length as the piano roll's toolbar and menus show it, in beats as the grid names its steps: "1/4 beat", "3/4 beat",
+// "1 beat", "2 beats", "1.5 beats".
+juce::String describeNoteLength (BeatDuration);
+
 //==============================================================================
-// Transforms: what a change would make of some notes.
+// Transforms: what a change would make of some notes. The notes of a chord are those of one clip that start together
+// (within a 128th of a beat).
 
 struct QuantizeSettings
 {
@@ -59,6 +64,7 @@ struct QuantizeSettings
     float strength = 1.0f;   // how far toward the grid line each note moves, from 0 to 1
     float swing = 0.0f;      // how late every other grid line is, from 0 to 1, where 1 is a triplet feel
     bool ends = false;       // the ends too, not only the starts
+    BeatPosition origin {};  // where the grid's lines count from: the piano roll's bar 1, the start of its clip
 };
 
 std::vector<NoteData> quantize (std::vector<NoteData>, const QuantizeSettings&);
@@ -67,8 +73,50 @@ std::vector<NoteData> quantize (std::vector<NoteData>, const QuantizeSettings&);
 // gap. Notes with nothing after them keep their length.
 std::vector<NoteData> legato (std::vector<NoteData>, double gapBeats = 0.0);
 
+// The Legato command's name with the gap it leaves: "Legato", or "Legato (1/16 beat gap)".
+juce::String describeLegato (double gapBeats);
+
 // Cuts each note into pieces of a length; the last piece is shorter if the note doesn't divide evenly.
 std::vector<NoteData> chop (std::vector<NoteData>, double pieceBeats);
+
+// Strums each chord, as a guitar's strings sound one after another: its notes start a step apart, from the lowest up or
+// from the highest down, and each keeps its end. Single notes stay as they are.
+struct StrumSettings
+{
+    double stepBeats = 1.0 / 32.0; // how much later each note of a chord starts than the one before it
+    bool down = false;             // from the highest note down, rather than from the lowest up
+};
+
+std::vector<NoteData> strum (std::vector<NoteData>, const StrumSettings&);
+
+// Moves each note's start earlier or later, and its velocity up or down, by a random amount up to a limit, as a player's
+// timing and touch vary. The same settings give the same result, so that what the piano roll previews is what it applies.
+struct HumanizeSettings
+{
+    double timingBeats = 1.0 / 64.0; // the most a note's start moves, either way
+    int velocity = 10;               // the most its velocity changes, either way
+    int seed = 1;
+};
+
+std::vector<NoteData> humanize (std::vector<NoteData>, const HumanizeSettings&);
+
+// Plays each chord's notes one after another instead of together, a step apart, for as long as the chord lasts (until its
+// longest note ends), each note as loud as it was. Single notes stay as they are.
+enum class ArpeggioOrder
+{
+    up,       // from the lowest note
+    down,     // from the highest
+    upAndDown // up, then down again
+};
+
+struct ArpeggioSettings
+{
+    double stepBeats = 0.25; // how far apart the notes start: the piano roll gives the grid's step
+    ArpeggioOrder order = ArpeggioOrder::up;
+    float gate = 1.0f; // how long each note lasts, as a part of the step, from 0.1 to 1
+};
+
+std::vector<NoteData> arpeggiate (std::vector<NoteData>, const ArpeggioSettings&);
 
 //==============================================================================
 // Keys and scales.

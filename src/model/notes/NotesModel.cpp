@@ -466,8 +466,9 @@ void stopAuditioning (ProjectContext& context, TrackID id)
 }
 
 //==============================================================================
-void addNoteCommands (CommandRegistry& registry, ProjectContext& context, std::function<double()> getGridStepInBeats)
+void addNoteCommands (CommandRegistry& registry, ProjectContext& context, std::function<double()> getGridStepInBeats,
+                      std::function<double()> getLegatoGapBeats)
 {
-    addNoteCommands (registry, getSelection (context), std::move (getGridStepInBeats));
+    addNoteCommands (registry, getSelection (context), std::move (getGridStepInBeats), std::move (getLegatoGapBeats));
 }
 } // namespace phazite

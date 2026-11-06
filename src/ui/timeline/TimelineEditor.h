@@ -142,6 +142,10 @@ public:
     virtual bool canUseTool (Tool) const { return true; }
     void setTool (Tool);
 
+    // Whether a tool's key and command pick the Smart Tool here instead, the tool's button hidden: in the piano roll the Draw
+    // Tool would do just what the Smart Tool does (one way to do one thing).
+    virtual bool usesSmartToolFor (Tool) const { return false; }
+
     // The tool commands. Tool keys spring back, as in Bitwig and Live: tapping a tool's key switches to the
     // tool, but holding the key while using the mouse keeps the tool only until the key is let go (or, if a
     // drag is still going on then, until it ends). Buttons and the palette switch for good.
@@ -154,6 +158,10 @@ public:
     virtual void nudgeSelection (int direction) = 0; // by a step of the grid: earlier (-1) or later (1)
     virtual bool canQuantizeSelection() const = 0;
     virtual void quantizeSelection() = 0;
+
+    // The Quantize command's name here, naming what it uses beyond the grid (the piano roll's strength and swing), or
+    // nothing for the plain name.
+    virtual juce::String getQuantizeName() const { return {}; }
 
     // Puts the current shortcuts into the toolbar's tooltips; call after the keymap changed.
     virtual void refreshShortcutTexts();
