@@ -15,7 +15,11 @@ namespace phazite::ui
 class LookAndFeel : public juce::LookAndFeel_V4
 {
 public:
-    LookAndFeel();
+    LookAndFeel(); // with Inter from fonts/Inter next to the app, where the build copies it
+
+    // With Inter's files from that folder: the tests have none next to them, so the README's picture
+    // (tests/ReadmePicture.cpp) takes the source tree's.
+    explicit LookAndFeel (const juce::File& interFolder);
 
     void setTheme (ThemeName);
     ThemeName getTheme() const noexcept { return theme; }
@@ -24,7 +28,7 @@ public:
     // A font for numbers that change (tempo, time, levels): fixed-width digits, so they don't jitter.
     static juce::Font getNumberFont (float height);
 
-    // True if Inter's files were found next to the app; otherwise the system font is used.
+    // True if Inter's files were found; otherwise the system font is used.
     bool hasInter() const noexcept { return regular != nullptr; }
 
     juce::Typeface::Ptr getTypefaceForFont (const juce::Font&) override;

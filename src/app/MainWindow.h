@@ -103,4 +103,7 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
 };
+
+// The window's menus, as its title bar names them (MainWindow's, and the README's picture's: tests/ReadmePicture.cpp).
+juce::StringArray getMainMenuNames();
 } // namespace phazite

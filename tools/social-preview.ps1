@@ -5,9 +5,9 @@
     picture of the window in the README (docs/images/phazite.png).
 
 .DESCRIPTION
-    A 1280 x 640 card in the dark theme's colours (src/ui/theme/DesignTokens.h) and Inter: the tracks'
+    A 1280 x 640 card in the dark theme's colours (src/ui/theme/DesignTokens.h) and Inter: the parts'
     colours, the name, what Phazite is, and the window bleeding off the right edge. Run it after a new
-    docs/images/phazite.png, from the repository root:
+    docs/images/phazite.png (tests/ReadmePicture.cpp makes it), from the repository root:
 
         powershell -NoProfile -ExecutionPolicy Bypass -File tools\social-preview.ps1
 
@@ -51,8 +51,8 @@ function Text([string] $s, $face, [double] $size, [string] $colour, [double] $ma
     $ft
 }
 
-# The dark palette's background, border, text, dimmed text and accent, and the tracks' part colours.
-$background = '#15171a'; $border = '#343a42'; $textColour = '#e8eaed'; $dimText = '#a5adb8'; $accent = '#5b9dff'
+# The dark palette's background, border, bright text, text and focus colour (VS Code's 2026 Dark), and the parts' colours.
+$background = '#121314'; $border = '#2a2b2c'; $textColour = '#ededed'; $dimText = '#bfbfbf'; $accent = '#3994bc'
 $parts = '#e5534b', '#f0883e', '#d4a72c', '#57ab5a', '#39c5cf', '#539bf5', '#986ee2', '#e275ad'
 
 $shot = New-Object System.Windows.Media.Imaging.BitmapImage
@@ -66,7 +66,7 @@ $visual = New-Object System.Windows.Media.DrawingVisual
 $dc = $visual.RenderOpen()
 $dc.DrawRectangle((Brush $background), $null, (New-Object System.Windows.Rect 0, 0, $W, $H))
 
-# The window, at 1008 pixels wide for a 2400-pixel picture, bleeding off the right and bottom edges.
+# The window, 1008 pixels wide, bleeding off the right and bottom edges.
 $left = 64; $top = 150
 $scale = 1008 / $shot.PixelWidth
 $shotRect = New-Object System.Windows.Rect 548, $top, ($shot.PixelWidth * $scale), ($shot.PixelHeight * $scale)

@@ -1054,6 +1054,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp
         tests/ProjectViewTests.cpp
+        tests/ReadmePicture.cpp
         tests/RealTimePlayback.h
         tests/RealtimeAuditTests.cpp
         tests/RenderHarness.cpp

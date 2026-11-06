@@ -54,7 +54,7 @@ body:
     id: system
     attributes:
       label: System
-      description: Your operating system, your audio device and driver (Options > Audio Settings), and any plug-in involved, with its version.
+      description: Your operating system, your audio device and driver (Audio Settings, in the menu of the gear at the bottom left), and any plug-in involved, with its version.
       placeholder: Windows 11 24H2; Focusrite Scarlett 2i2, ASIO; Serum 2.0.17
   - type: textarea
     id: log

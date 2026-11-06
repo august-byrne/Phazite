@@ -861,12 +861,17 @@ void MainWindow::updateTitle()
 }
 
 //==============================================================================
-juce::StringArray MainWindow::getMenuBarNames()
+juce::StringArray getMainMenuNames()
 {
     // As in FL Studio, Live and Bitwig: no Track, Song or Transport menu. Their commands are in Add, Edit and
     // View, as well as on the top bar, the keys, the right-click menus and the command palette. And, as in VS Code, no
     // Options menu: the settings are in the menu of the gear at the activity bar's foot (ui/shell/ActivityBar.h).
     return { "File", "Edit", "Add", "View", "Help" };
+}
+
+juce::StringArray MainWindow::getMenuBarNames()
+{
+    return getMainMenuNames();
 }
 
 juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)

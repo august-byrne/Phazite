@@ -119,9 +119,9 @@ juce::String Guide::getHint() const
         case Step::playNotes:
             if (isComputerKeyboardOff (commands))
                 return "Try this: " + pressOr (commands, "input.computerKeyboard", "click the keyboard button at the top")
-                       + " to play notes on your computer keyboard, then A S D F G H J K L on a track with an instrument.";
+                       + " to play notes on your computer keyboard, then A S D F G H J K L ; on a track with an instrument.";
 
-            return "Try this: select a track with an instrument and play it on your computer keyboard: A S D F G H J K L are the "
+            return "Try this: select a track with an instrument and play it on your computer keyboard: A S D F G H J K L ; are the "
                    "white keys, W E T Y U O P the black ones.";
 
         case Step::addSound:

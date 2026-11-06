@@ -9,13 +9,9 @@ namespace phazite::ui
 namespace
 {
     // Inter ships as separate files next to the app (fonts/Inter), under the SIL Open Font License.
-    juce::Typeface::Ptr loadInter (const char* fileName)
+    juce::Typeface::Ptr loadInter (const juce::File& folder, const char* fileName)
     {
-        const auto file = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
-                              .getSiblingFile ("fonts")
-                              .getChildFile ("Inter")
-                              .getChildFile (fileName);
-
+        const auto file = folder.getChildFile (fileName);
         juce::MemoryBlock data;
 
         if (! file.loadFileAsData (data) || data.isEmpty())
@@ -81,9 +77,14 @@ namespace
 } // namespace
 
 LookAndFeel::LookAndFeel()
-    : regular (loadInter ("Inter-Regular.ttf")),
-      medium (loadInter ("Inter-Medium.ttf")),
-      semiBold (loadInter ("Inter-SemiBold.ttf"))
+    : LookAndFeel (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("fonts").getChildFile ("Inter"))
+{
+}
+
+LookAndFeel::LookAndFeel (const juce::File& interFolder)
+    : regular (loadInter (interFolder, "Inter-Regular.ttf")),
+      medium (loadInter (interFolder, "Inter-Medium.ttf")),
+      semiBold (loadInter (interFolder, "Inter-SemiBold.ttf"))
 {
     setTheme (ThemeName::dark);
 
