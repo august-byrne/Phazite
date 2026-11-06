@@ -58,6 +58,12 @@ bool isReadingVersions (const ProjectContext& context)
     return history != nullptr && history->isReading();
 }
 
+void waitForVersionsWritten (const ProjectContext& context)
+{
+    if (const auto* history = findHistory (context))
+        history->waitForThread();
+}
+
 std::vector<VersionInfo> getVersions (const ProjectContext& context)
 {
     std::vector<VersionInfo> infos;

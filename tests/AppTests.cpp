@@ -25,6 +25,8 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
+#include "model/versions/VersionsModel.h"
+#include "model/versions/internal/VersionHistory.h"
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
 
@@ -389,6 +391,70 @@ TEST_CASE ("A new project is untitled until its first save asks what to call it 
     REQUIRE (errors.size() == 1);
     CHECK (errors[0].contains ("already"));
     CHECK (session.isUntitled());
+}
+
+TEST_CASE ("A first save and Save As wait for the versions being written, which go with the project, every one of them")
+{
+    // CI's linux-debug, 2026-11-06: a first save just as a new project opened couldn't copy its versions, as the initial
+    // commit was being written into them on the history's thread; and a version written meanwhile went into the folder left
+    // behind.
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto projects = temp.folder.getChildFile ("Projects");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, recent, projects, temp.folder.getChildFile ("Unsaved"));
+    phazite::CommandRegistry registry;
+    phazite::test::RenderHost renders;
+    session.addCommands (registry, renders);
+
+    auto answer = projects.getChildFile ("Beat.phazite");
+    session.chooseSaveFile = [&answer] (const juce::File&, std::function<void (const juce::File&)> callback) { callback (answer); };
+    juce::StringArray errors;
+    session.onError = [&errors] (const juce::String&, const juce::String& message) { errors.add (message); };
+
+    auto& context = session.getContext();
+    const auto settled = [&context]
+    {
+        const auto* history = phazite::getVersionHistory (context);
+        return history != nullptr && ! history->isBusy() && ! phazite::getVersions (context).empty();
+    };
+
+    const auto names = [&context]
+    {
+        juce::StringArray all;
+
+        for (const auto& version : phazite::getVersions (context))
+            all.add (version.name);
+
+        return all;
+    };
+
+    // Saved as soon as its versions are read, which is when its initial commit starts on its way to the disk.
+    REQUIRE (session.createProject ({}).wasOk());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); }));
+    REQUIRE (registry.invoke ("project.save"));
+    CHECK (errors.isEmpty());
+    REQUIRE (phazite::test::dispatchMessagesUntil (settled));
+    CHECK (names() == juce::StringArray ("Initial commit"));
+
+    // A copy saved as a version is being written: the copy has it, and goes on in its own folder.
+    phazite::setVersionDraft (context, "Sketch", {});
+    REQUIRE (phazite::saveVersion (context));
+    answer = projects.getChildFile ("Beat copy.phazite");
+    REQUIRE (registry.invoke ("project.saveAs"));
+    CHECK (errors.isEmpty());
+    REQUIRE (session.getProject()->getFile() == projects.getChildFile ("Beat copy").getChildFile ("Beat copy.phazite"));
+    REQUIRE (phazite::test::dispatchMessagesUntil (settled));
+    CHECK (names() == juce::StringArray ("Sketch", "Initial commit"));
+
+    // The first has both, as written there, when it opens again.
+    const auto first = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
+    session.openProject (first);
+    REQUIRE (session.getProject()->getFile() == first);
+    REQUIRE (phazite::test::dispatchMessagesUntil (settled));
+    CHECK (names() == juce::StringArray ("Sketch", "Initial commit"));
+    CHECK (errors.isEmpty());
 }
 
 namespace

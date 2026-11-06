@@ -2,7 +2,8 @@
 // The main window's content built as the app builds it (Main.cpp and MainWindow), without a screen: the services, the
 // session, AppShell and the commands, in the app's order, in a TestWindow. For the tests and benchmarks that need the
 // whole window (AppShellTests.cpp, Benchmarks.cpp). Nothing in it opens a dialog: the save dialog answers with what it
-// suggests, and the question about restoring an autosave with no.
+// suggests, the question about restoring an autosave with no, and an error (a save that failed) fails the test, as a
+// message box can't show without a display.
 #pragma once
 
 #include "TestHelpers.h"
@@ -31,6 +32,8 @@ struct AppScreen
         session.chooseSaveFile = [] (const juce::File& suggested, std::function<void (const juce::File&)> callback)
         { callback (suggested); };
         session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (false); };
+        session.onError = [] (const juce::String& title, const juce::String& message)
+        { FAIL_CHECK ((title + ": " + message).toStdString()); };
         dispatchPendingMessages();
     }
 

@@ -38,6 +38,11 @@ public:
     bool isBusy() const noexcept { return pendingJobs > 0; }
     bool isReading() const noexcept { return ! hasRead; }
 
+    // Waits until the history's thread has done what it was given (a version written, the store read), so that the Versions
+    // folder can be copied whole and nothing is written into the old one after it: before a new project's first save moves
+    // it, and before Save As copies it. What the thread did still reaches the message thread later. Message thread.
+    void waitForThread() const;
+
     // The branches, in the order they were made; the current one (none before the first version); every branch's versions,
     // newest first; one by its id; and the current branch's last.
     std::vector<BranchRecord> getBranches() const;

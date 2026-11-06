@@ -62,6 +62,11 @@ struct VersionChange
 bool keepsVersions (const ProjectContext&);
 bool isReadingVersions (const ProjectContext&);
 
+// Waits until the versions being written are written (each on the history's thread, the initial commit too), so that the
+// project's folder can be copied whole, its versions with it: before a new project's first save moves it, and before Save
+// As copies it.
+void waitForVersionsWritten (const ProjectContext&);
+
 // Every branch's versions, newest first; the branches, in the order they were made; the current one, which the project
 // file is (none before the first version); and its last version.
 std::vector<VersionInfo> getVersions (const ProjectContext&);

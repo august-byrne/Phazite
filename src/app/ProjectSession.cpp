@@ -337,6 +337,7 @@ void ProjectSession::saveProjectAs()
                                return;
 
                            juce::String error;
+                           waitForVersionsWritten (context); // the copy takes them whole
                            const auto newFile = project->saveCopyAs (chosen.getParentDirectory(), getChosenName (chosen), error);
 
                            if (newFile == juce::File())
@@ -388,6 +389,9 @@ bool ProjectSession::moveUntitledTo (const juce::File& chosen)
 {
     if (! isUntitled())
         return false;
+
+    // Its versions move with it, whole: the initial commit is written on the history's thread as a new project opens.
+    waitForVersionsWritten (context);
 
     if (const auto result = project->moveTo (chosen.getParentDirectory(), getChosenName (chosen)); result.failed())
     {

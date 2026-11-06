@@ -83,6 +83,18 @@ void VersionHistory::run (std::function<void()> job)
     thread.addJob (std::move (job));
 }
 
+void VersionHistory::waitForThread() const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // Its jobs tell the message thread what they did with callAsync and never wait for it, so it can wait for them, as long
+    // as the destructor does at most.
+    const auto until = juce::Time::getMillisecondCounter() + 30000;
+
+    while (thread.getNumJobs() > 0 && juce::Time::getMillisecondCounter() < until)
+        juce::Thread::sleep (1);
+}
+
 void VersionHistory::open()
 {
     ++generation;
