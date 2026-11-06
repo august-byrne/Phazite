@@ -742,7 +742,7 @@ TEST_CASE ("Velocity shows on the notes; in the lane, a selected note's bar move
     NotesScreen screen;
     std::vector<phazite::NoteRef> notes;
 
-    for (const auto [beat, velocity] : { std::pair { 1.0, 100 }, std::pair { 3.0, 80 }, std::pair { 5.0, 60 } })
+    for (const auto& [beat, velocity] : { std::pair { 1.0, 100 }, std::pair { 3.0, 80 }, std::pair { 5.0, 60 } })
         notes.push_back (
             phazite::addNote (screen.context, screen.clip, 60, beats (beat), phazite::BeatDuration::fromBeats (1.0), velocity));
 
