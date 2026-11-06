@@ -290,6 +290,8 @@ target_sources(phazite_core PRIVATE
     src/model/engine/Preview.cpp
     src/model/engine/Preview.h
     src/model/engine/PreviewLoop.cpp
+    src/model/engine/StartupSound.cpp
+    src/model/engine/StartupSound.h
     src/model/engine/internal/AudioIO.h
     src/model/engine/internal/EngineContext.h
     src/model/engine/internal/LiveInput.h
@@ -454,6 +456,8 @@ juce_add_binary_data(phazite_data
         resources/outlines/techno.outline.json
         # Chord progressions (src/model/chords/Progressions.h)
         resources/progressions/progressions.json
+        # Phazite's logo, its own drawing (ui::createLogo()), from which the app's icon is made too (juce_add_gui_app below)
+        resources/logo/phazite.svg
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
         resources/icons/lucide/audio-lines.svg
@@ -824,10 +828,15 @@ phazite_use_core(phazite_app)
 target_link_libraries(phazite_app PRIVATE phazite_ui)
 
 # --- The app ---
+# Its icon (Windows' .ico, macOS's .icns) is made from Phazite's logo by JUCE's juceaide as CMake configures, so a change to
+# the logo configures again.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS resources/logo/phazite.svg)
+
 juce_add_gui_app(Phazite
     PRODUCT_NAME "Phazite"
     COMPANY_NAME "Phazite"
     BUNDLE_ID "io.github.august-byrne.phazite"
+    ICON_BIG resources/logo/phazite.svg
     MICROPHONE_PERMISSION_ENABLED TRUE
     NEEDS_CURL FALSE
     NEEDS_WEB_BROWSER FALSE
@@ -861,6 +870,7 @@ juce_add_gui_app(PhaziteHost
     PRODUCT_NAME "PhaziteHost"
     COMPANY_NAME "Phazite"
     BUNDLE_ID "io.github.august-byrne.phazite.host"
+    ICON_BIG resources/logo/phazite.svg # the app's, so that Task Manager shows the helper as Phazite's
     NEEDS_CURL FALSE
     NEEDS_WEB_BROWSER FALSE
     PLUGINHOST_AU TRUE)
@@ -1055,6 +1065,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SidechainTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
+        tests/StartupSoundTests.cpp
         tests/StatusBarTests.cpp
         tests/StereoExpanderTests.cpp
         tests/StretchTests.cpp

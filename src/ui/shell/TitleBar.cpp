@@ -208,6 +208,7 @@ struct TitleBar::PanelSwitch : public juce::Button
 //==============================================================================
 TitleBar::TitleBar (CommandBridge& bridge)
     : commands (bridge),
+      logo (createLogo()),
       searchBox (std::make_unique<SearchBox> (bridge)),
       leftSwitch (std::make_unique<PanelSwitch> (bridge, Panel::left)),
       editorSwitch (std::make_unique<PanelSwitch> (bridge, Panel::editor)),
@@ -215,6 +216,10 @@ TitleBar::TitleBar (CommandBridge& bridge)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Title bar");
+
+#if JUCE_MAC
+    logoShown = false; // VS Code shows no logo there, where the menus are at the top of the screen
+#endif
 
     // Lessons point at controls by the commands they run (Lessons::Step::target).
     searchBox->setComponentID ("view.commandPalette");
@@ -344,6 +349,16 @@ void TitleBar::setWindowActions (std::optional<WindowActions> actions)
 
     timerCallback();
     resized();
+}
+
+void TitleBar::setLogoShown (bool shouldShow)
+{
+    if (logoShown == shouldShow)
+        return;
+
+    logoShown = shouldShow;
+    resized();
+    repaint();
 }
 
 void TitleBar::setProjectName (const juce::String& name, bool unsavedChanges)
@@ -477,6 +492,11 @@ void TitleBar::paint (juce::Graphics& g)
 {
     // On the window's frame, as VS Code's title bar in its Modern UI.
     g.fillAll (getPalette (*this).surface);
+
+    // The logo, unless only a control's part of the bar repaints.
+    if (isLogoShown() && g.clipRegionIntersects (logoArea))
+        logo->drawWithin (g, logoArea.withSizeKeepingCentre (Shell::logoSize, Shell::logoSize).toFloat(), juce::RectanglePlacement::centred,
+                          active ? 1.0f : Shell::inactiveAlpha);
 }
 
 void TitleBar::resized()
@@ -502,8 +522,12 @@ void TitleBar::resized()
 
     area.removeFromRight (Space::m);
 
-    // Left: the menus, folded into one button where there isn't room for them beside the search.
-    area.removeFromLeft (Space::xs);
+    // Left: the logo, then the menus, folded into one button where there isn't room for them beside the search.
+    logoArea = isLogoShown() ? area.removeFromLeft (Shell::logoSlotWidth) : juce::Rectangle<int>();
+
+    if (logoArea.isEmpty())
+        area.removeFromLeft (Space::xs);
+
     const auto middleWidth = 2 * buttonSize + Space::xs + Space::s + Shell::searchMinimumWidth;
     const auto menusWidth = getMenusWidth();
     const auto foldMenus = menuBar != nullptr && menusWidth + Space::m + middleWidth > area.getWidth();

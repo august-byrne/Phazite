@@ -134,32 +134,56 @@ namespace
 
         return "";
     }
+
+    // A file compiled into the app (PhaziteData), by its name, as text; empty if there is none.
+    juce::String getResourceText (const juce::String& fileName)
+    {
+        for (int i = 0; i < PhaziteData::namedResourceListSize; ++i)
+        {
+            if (fileName != PhaziteData::originalFilenames[i])
+                continue;
+
+            int size = 0;
+
+            if (const auto* data = PhaziteData::getNamedResource (PhaziteData::namedResourceList[i], size))
+                return juce::String::fromUTF8 (data, size);
+        }
+
+        return {};
+    }
 } // namespace
 
 std::unique_ptr<juce::Drawable> createIcon (Icon icon, bool filled)
 {
-    const juce::String fileName (getFileName (icon));
+    // Lucide draws in "currentColor": read as black, the colour that the icons' tints replace.
+    auto text = getResourceText (getFileName (icon)).replace ("currentColor", "#000000");
 
-    for (int i = 0; i < PhaziteData::namedResourceListSize; ++i)
-    {
-        if (fileName != PhaziteData::originalFilenames[i])
-            continue;
+    if (text.isEmpty())
+        return {};
 
-        int size = 0;
+    if (filled)
+        text = text.replace ("fill=\"none\"", "fill=\"#000000\"");
 
-        // Lucide draws in "currentColor": read as black, the colour that the icons' tints replace.
-        if (const auto* data = PhaziteData::getNamedResource (PhaziteData::namedResourceList[i], size))
-        {
-            auto text = juce::String::fromUTF8 (data, size).replace ("currentColor", "#000000");
+    return juce::Drawable::createFromSVGString (text);
+}
 
-            if (filled)
-                text = text.replace ("fill=\"none\"", "fill=\"#000000\"");
+std::unique_ptr<juce::Drawable> createLogo()
+{
+    const auto text = getResourceText ("phazite.svg");
+    return text.isEmpty() ? nullptr : juce::Drawable::createFromSVGString (text);
+}
 
-            return juce::Drawable::createFromSVGString (text);
-        }
-    }
+juce::Image createLogoImage (int size)
+{
+    const auto logo = createLogo();
 
-    return {};
+    if (logo == nullptr || size <= 0)
+        return {};
+
+    juce::Image image (juce::Image::ARGB, size, size, true);
+    juce::Graphics g (image);
+    logo->drawWithin (g, image.getBounds().toFloat(), juce::RectanglePlacement::centred, 1.0f);
+    return image;
 }
 
 //==============================================================================

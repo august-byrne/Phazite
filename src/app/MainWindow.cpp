@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/engine/StartupSound.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/plugins/internal/PluginHost.h"
@@ -13,6 +14,7 @@
 #include "ui/shell/ExportPanel.h"
 #include "ui/shell/ProgressionsPanel.h"
 #include "ui/shell/RenderPanel.h"
+#include "ui/theme/Icons.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
 
@@ -98,6 +100,12 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     setUsingNativeTitleBar (false);
 #else
     setUsingNativeTitleBar (true);
+#endif
+
+    // Phazite's logo as the window's icon, where the system takes it from the window; Windows and macOS take the app's
+    // own, which is made from the same drawing (CMakeLists.txt).
+#if JUCE_LINUX || JUCE_BSD
+    setIcon (ui::createLogoImage (ui::Shell::windowIconSize));
 #endif
     setInterfaceScale ((float) services.settings.get (Settings::interfaceScale));
 
@@ -406,6 +414,15 @@ void MainWindow::addCommands()
                         .perform = [this, theme] { setTheme (theme); },
                         .isTicked = [this, theme] { return lookAndFeel.getTheme() == theme; } });
     }
+
+    registry.add ({ .id = "options.startupSound",
+                    .name = "Startup Sound",
+                    .category = "Options",
+                    .description = "Plays Phazite's sound once it has opened: a quick blip with echoes, at the browser's preview "
+                                   "volume.",
+                    .synonyms = { "chime", "jingle", "launch sound", "opening sound", "intro", "sound at start" },
+                    .perform = [this] { setStartupSound (! services.settings.get (Settings::startupSound)); },
+                    .isTicked = [this] { return services.settings.get (Settings::startupSound); } });
 
     registry.add ({ .id = "view.interfaceLarger",
                     .name = "Larger Interface",
@@ -805,6 +822,20 @@ void MainWindow::setFullScreenMode (bool on)
 #if JUCE_WINDOWS
     shell->getTitleBar().setWindowActions (on ? std::nullopt : std::optional (getWindowActions()));
 #endif
+
+    // Nor the logo, as VS Code hides its own there (none on macOS: ui/shell/TitleBar.h).
+#if ! JUCE_MAC
+    shell->getTitleBar().setLogoShown (! on);
+#endif
+}
+
+void MainWindow::setStartupSound (bool on)
+{
+    services.settings.set (Settings::startupSound, on);
+
+    // Turned on, it plays, so that what it turns on is heard.
+    if (on)
+        playStartupSound (*services.previewer);
 }
 
 void MainWindow::updateTitle()

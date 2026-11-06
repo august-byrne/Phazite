@@ -1,4 +1,4 @@
-# Phazite
+# <img src="resources/logo/phazite.svg" alt="" width="32" height="32"> Phazite
 
 [![CI](https://github.com/august-byrne/Phazite/actions/workflows/ci.yml/badge.svg)](https://github.com/august-byrne/Phazite/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)

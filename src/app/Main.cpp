@@ -8,6 +8,7 @@
 #include "RunMarker.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/engine/EngineContext.h"
+#include "model/engine/StartupSound.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/UnsavedProjects.h"
@@ -76,6 +77,12 @@ public:
             peer->performAnyPendingRepaintsNow();
 
         session->openAtStartup (runMarker->didLastRunEndBadly());
+
+        // Phazite's sound, now that it has opened (model/engine/StartupSound.h), unless the settings turn it off: after the
+        // project, whose opening stops what the previews play, and only through an audio output that opened.
+        if (services->settings.get (Settings::startupSound) && engineContext->getAudioDeviceManager().getCurrentAudioDevice() != nullptr)
+            playStartupSound (*services->previewer);
+
         mainWindow->showWelcomeOnFirstRun();
     }
 

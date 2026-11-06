@@ -249,7 +249,8 @@ juce::Button& ActivityBar::getSettingsButton()
 
 juce::PopupMenu ActivityBar::makeSettingsMenu()
 {
-    // As VS Code's Manage menu: the command search, then the settings' windows, then the looks and the keys.
+    // As VS Code's Manage menu: the command search, then the settings' windows, then the looks and the keys; and whether
+    // Phazite plays its sound as it opens.
     juce::PopupMenu menu;
     addCommandItems (menu, commands, { "view.commandPalette" });
     menu.addSeparator();
@@ -270,6 +271,7 @@ juce::PopupMenu ActivityBar::makeSettingsMenu()
 
     menu.addSubMenu ("Theme", themes, themes.containsAnyActiveItems());
     menu.addSubMenu ("Keymap", keymaps, keymaps.containsAnyActiveItems());
+    addCommandItems (menu, commands, { "options.startupSound" });
     return menu;
 }
 

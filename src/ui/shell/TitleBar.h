@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The bar along the top of the window (docs/design.md, section 4), as VS Code's: the menus and the project's name on the
-// left, Undo and Redo beside the command search in the middle, and the panels' switches and the Layout menu on the right;
+// The bar along the top of the window (docs/design.md, section 4), as VS Code's: Phazite's logo, the menus and the project's
+// name on the left, Undo and Redo beside the command search in the middle, and the panels' switches and the Layout menu on the right;
 // and, where it is the window's own title bar (Windows), the window's buttons, its empty parts dragging the window
 // (app/MainWindow.h asks getControlAt()). On Linux the system's title bar stays above it, and on macOS the menus are in
 // the menu bar at the top of the screen. In a narrow window the menus fold into one button, then the project's name
@@ -41,6 +41,13 @@ public:
     void setWindowActions (std::optional<WindowActions>);
     bool hasWindowButtons() const noexcept { return windowActions.has_value(); }
 
+    // Phazite's logo at the bar's left end, as VS Code's: faint with the rest of the bar while another window is in front, and
+    // dragging the window as the bar's empty parts do. Not on macOS, where VS Code shows none, nor while the window fills the
+    // screen, where VS Code hides its own.
+    void setLogoShown (bool);
+    bool isLogoShown() const noexcept { return logoShown && logo != nullptr; }
+    juce::Rectangle<int> getLogoArea() const noexcept { return logoArea; } // its slot, empty while it doesn't show
+
     void setProjectName (const juce::String& name, bool unsavedChanges);
     juce::String getProjectName() const { return projectName.getText(); } // with its dot, while it has unsaved changes
     void setWindowActive (bool);                                          // dims it while another window is in front
@@ -63,6 +70,9 @@ private:
     struct PanelSwitch;
 
     CommandBridge& commands;
+    std::unique_ptr<juce::Drawable> logo;
+    juce::Rectangle<int> logoArea;
+    bool logoShown = true;
     juce::MenuBarModel* menuModel = nullptr;
     std::unique_ptr<juce::MenuBarComponent> menuBar;
     IconButton menuButton { "Menus", Icon::menu }; // the menus, folded, in a narrow window

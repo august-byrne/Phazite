@@ -66,6 +66,36 @@ namespace
         std::stable_sort (notes.begin(), notes.end(), [] (const auto& a, const auto& b) { return a.start < b.start; });
         return notes;
     }
+
+    // A sound made in memory, read as a file's samples are (engine/audio/AudioFile.h).
+    class MemoryReader final : public engine::SampleReader
+    {
+    public:
+        MemoryReader (juce::AudioBuffer<float> madeSound, double rate)
+            : sound (std::move (madeSound)),
+              sampleRate (rate)
+        {
+        }
+
+        int getNumChannels() const override { return sound.getNumChannels(); }
+        double getSampleRate() const override { return sampleRate; }
+        std::int64_t getLength() const override { return sound.getNumSamples(); }
+
+        bool read (juce::AudioBuffer<float>& buffer, std::int64_t start, int numSamples) override
+        {
+            if (start < 0 || start + numSamples > sound.getNumSamples())
+                return false;
+
+            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                buffer.copyFrom (channel, 0, sound, std::min (channel, sound.getNumChannels() - 1), (int) start, numSamples);
+
+            return true;
+        }
+
+    private:
+        juce::AudioBuffer<float> sound;
+        double sampleRate;
+    };
 } // namespace
 
 struct Previewer::Impl : private juce::Timer
@@ -135,14 +165,44 @@ struct Previewer::Impl : private juce::Timer
         return master;
     }
 
+    // The strip a sound plays on, into the master, made for the rate and block size the previews play at.
+    engine::Plan::Strip makeSoundStrip() const
+    {
+        engine::Plan::Strip sound;
+        sound.id = soundStrip;
+        sound.state = std::make_shared<engine::StripState>();
+        sound.state->prepare (previews.getSampleRate(), previews.getMaximumBlockSize());
+        return sound;
+    }
+
+    // Hands the sound's strip to the previews' engine, from its start: into the master, at a tempo, over and over from its
+    // start to lengthBeats while it repeats.
+    void setPlan (engine::Plan::Strip sound, double bpm)
+    {
+        auto plan = std::make_unique<engine::Plan>();
+        plan->tempo = engine::TempoMap ({ { 0.0, bpm } }, { { 0.0, 4, 4 } }, previews.getSampleRate());
+
+        if (repeating)
+            plan->loop = engine::Plan::BeatRange { 0.0, lengthBeats };
+
+        plan->strips.push_back (std::move (sound));
+        engine::Plan::Strip toMaster;
+        toMaster.state = getMaster();
+        toMaster.inputs.push_back ({ 0 });
+        plan->strips.push_back (std::move (toMaster));
+        previews.setPlan (std::move (plan));
+        previews.locate (0.0);
+    }
+
     PlaybackHost& host;
     engine::Engine& previews;
     std::shared_ptr<engine::StripState> master;
     double masterRate = 0.0;
     int masterBlockSize = 0;
     std::shared_ptr<const StretchedLoop> loop; // a loop's sound, stretched to the project's tempo, which its plan reads
-    juce::File file;
-    double lengthBeats = 0.0; // where the sound ends, in its plan's beats: a loop's length
+    juce::File file;                           // the file it plays, or none for a sound made in memory
+    bool hasSound = false;                     // from play() or playSound() until stop()
+    double lengthBeats = 0.0;                  // where the sound ends, in its plan's beats: a loop's length
     bool inTime = false;
     bool repeating = false;
     bool starting = false;   // a loop waiting for its start to be stretched
@@ -181,10 +241,7 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
     const auto bpm = project != nullptr ? getTempo (*project) : 120.0;
 
     // The sound on a strip of its own.
-    engine::Plan::Strip sound;
-    sound.id = soundStrip;
-    sound.state = std::make_shared<engine::StripState>();
-    sound.state->prepare (rate, blockSize);
+    auto sound = impl->makeSoundStrip();
     auto inTime = false;
     auto lengthBeats = 0.0;
     std::shared_ptr<const StretchedLoop> loop;
@@ -254,25 +311,14 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
 
     // Its plan: the sound into the master, at the project's tempo, a loop over and over unless repeat is false (a riser
     // made for some bars plays once, in time); a one-shot once.
-    auto plan = std::make_unique<engine::Plan>();
-    plan->tempo = engine::TempoMap ({ { 0.0, bpm } }, { { 0.0, 4, 4 } }, rate);
     impl->repeating = inTime && repeat;
-
-    if (impl->repeating)
-        plan->loop = engine::Plan::BeatRange { 0.0, lengthBeats };
-
-    plan->strips.push_back (std::move (sound));
-    engine::Plan::Strip master;
-    master.state = impl->getMaster();
-    master.inputs.push_back ({ 0 });
-    plan->strips.push_back (std::move (master));
-    previews.setPlan (std::move (plan));
-    previews.locate (0.0);
+    impl->lengthBeats = lengthBeats;
+    impl->setPlan (std::move (sound), bpm);
 
     impl->file = newFile;
+    impl->hasSound = true;
     impl->inTime = inTime;
     impl->loop = std::move (loop);
-    impl->lengthBeats = lengthBeats;
     impl->synced = false;
     impl->songPlayed = project != nullptr && isSongPlaying (*project);
 
@@ -283,6 +329,43 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
 
     keepInTime (context);
     return true;
+}
+
+bool Previewer::playSound (juce::AudioBuffer<float> sound, double soundRate)
+{
+    stop();
+
+    if (sound.getNumChannels() == 0 || sound.getNumSamples() == 0 || soundRate <= 0.0)
+        return false;
+
+    // Read whole before it plays (a part not read yet would play as silence), then at the previews' rate, once, at the tempo
+    // of a sound that isn't in time; the transport leaves it be (keepInTime()).
+    constexpr double bpm = 120.0;
+    auto& previews = impl->previews;
+    const auto seconds = sound.getNumSamples() / soundRate;
+    auto audio =
+        std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (std::move (sound), soundRate), &previews.getBlocksPlayed());
+    audio->readNow (0, audio->getLength());
+    impl->host.getPreviewFileReader().add (audio);
+
+    engine::AudioRegion region;
+    region.length = (std::int64_t) std::llround (seconds * previews.getSampleRate());
+    region.file = std::move (audio);
+    region.state = std::make_shared<engine::RegionState>();
+    auto strip = impl->makeSoundStrip();
+    strip.audio.push_back (std::move (region));
+
+    impl->repeating = false;
+    impl->lengthBeats = seconds * bpm / 60.0;
+    impl->setPlan (std::move (strip), bpm);
+    impl->hasSound = true;
+    impl->start();
+    return true;
+}
+
+double Previewer::getSampleRate() const noexcept
+{
+    return impl->previews.getSampleRate();
 }
 
 void Previewer::keepInTime (const ProjectContext& context)
@@ -317,6 +400,7 @@ void Previewer::stop()
 {
     impl->release();
     impl->file = juce::File();
+    impl->hasSound = false;
     impl->loop = nullptr;
     impl->inTime = false;
     impl->repeating = false;
@@ -328,7 +412,7 @@ bool Previewer::isPlaying() const
     if (impl->starting)
         return true;
 
-    if (impl->file == juce::File() || ! impl->previews.isPlaying())
+    if (! impl->hasSound || ! impl->previews.isPlaying())
         return false;
 
     // Anything that doesn't repeat has finished once the playhead passes its end.

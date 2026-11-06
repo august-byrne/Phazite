@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Phazite's logo, its own drawing: a hexagonal frame shaded as three faces of a cube, a pale top, a sky-blue left and a
+     steel-blue right, around a smaller cube in darker, blue-tinted faces, lit from the same side. The app's icon is made
+     from it (CMakeLists.txt), and the title bar draws it (ui::createLogo()). It is as tall as its square: JUCE fits a
+     drawing by what it draws, and makes the icon's largest size only from one at least that big. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Under the faces, so that no seam between two of them shows what is behind the logo. -->
+  <polygon fill="#4b7387" points="128,0 238.851,64 238.851,192 128,256 17.149,192 17.149,64"/>
+  <!-- The frame's faces: the top, the left and the right. -->
+  <polygon fill="#a8f7fd" points="17.149,64 128,0 238.851,64 191.22,91.5 128,55 64.78,91.5"/>
+  <polygon fill="#62c6ec" points="128,256 17.149,192 17.149,64 64.78,91.5 64.78,164.5 128,201"/>
+  <polygon fill="#4b7387" points="238.851,64 238.851,192 128,256 128,201 191.22,164.5 191.22,91.5"/>
+  <!-- The cube in the frame: its top, its left and its right, meeting in the middle. -->
+  <polygon fill="#3c6d95" points="128,55 191.22,91.5 128,128 64.78,91.5"/>
+  <polygon fill="#374049" points="64.78,91.5 128,128 128,201 64.78,164.5"/>
+  <polygon fill="#292b33" points="128,128 191.22,91.5 191.22,164.5 128,201"/>
+</svg>

@@ -89,6 +89,7 @@ private:
     void stepInterfaceScale (int direction); // to the next larger (1) or smaller (-1) size
     bool isFullScreenMode() const;           // the window fills the screen ("view.fullScreen")
     void setFullScreenMode (bool);
+    void setStartupSound (bool); // whether Phazite plays its sound once it has opened ("options.startupSound")
     void setKeymap (const juce::String& name);
     void updateTitle();
     ui::TitleBar::WindowActions getWindowActions(); // what the title bar's own window buttons do

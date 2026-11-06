@@ -158,6 +158,46 @@ TEST_CASE ("The title bar's menus fold into one button in a narrow window, and i
     screen.window.setLookAndFeel (nullptr);
 }
 
+TEST_CASE ("Phazite's logo is at the title bar's left end, as VS Code's, drags the window, and goes while the window fills the screen")
+{
+    Menus menus;                          // before the window, which shows them, so that they outlive it
+    phazite::ui::LookAndFeel lookAndFeel; // the app's, which sizes the menus
+    Screen screen;
+    screen.window.setLookAndFeel (&lookAndFeel);
+    auto& bar = screen.shell.getTitleBar();
+    bar.setMenus (&menus);
+    auto* menuBar = phazite::test::findAll<juce::MenuBarComponent> (bar).getFirst();
+    REQUIRE (menuBar != nullptr);
+
+    // In a slot as wide as the bar is tall at its left end, the menus right after it; it drags the window.
+    REQUIRE (bar.isLogoShown());
+    const auto slot = bar.getLogoArea();
+    CHECK (slot == juce::Rectangle<int> (0, 0, phazite::ui::Shell::logoSlotWidth, bar.getHeight()));
+    CHECK (menuBar->getX() == slot.getRight());
+    CHECK (bar.getControlAt (slot.getCentre()) == Kind::caption);
+    phazite::test::checkChildrenApart (bar);
+
+    // Drawn in its own colours in the middle of the slot, whatever the theme: a frame of blue faces, and a smaller cube in it,
+    // its top blue.
+    const auto drawn = bar.createComponentSnapshot (slot);
+    const auto cubeTop = drawn.getPixelAt (slot.getCentreX(), slot.getCentreY() - 4);
+    CHECK (cubeTop.getBlue() > cubeTop.getRed() + 60);
+    const auto face = drawn.getPixelAt (slot.getCentreX() - phazite::ui::Shell::logoSize / 2 + 3, slot.getCentreY());
+    CHECK (face.getBlue() > face.getRed() + 100); // the frame's left face, in blue
+    CHECK (drawn.getPixelAt (2, 2) == phazite::ui::getPalette (bar).surface);
+
+    // While the window fills the screen it goes, as VS Code's does, and the menus move to the bar's edge.
+    bar.setLogoShown (false);
+    CHECK_FALSE (bar.isLogoShown());
+    CHECK (bar.getLogoArea().isEmpty());
+    CHECK (menuBar->getX() == phazite::ui::Space::xs);
+    bar.setLogoShown (true);
+    CHECK (menuBar->getX() == slot.getRight());
+
+    bar.setMenus (nullptr);
+    screen.window.setLookAndFeel (nullptr);
+}
+
 TEST_CASE ("The panels keep out of the band along a restored window's sides, and the bars reach them")
 {
     using phazite::ui::Panel;

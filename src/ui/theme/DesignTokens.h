@@ -265,6 +265,12 @@ namespace Shell
     inline constexpr float panelSwitchWidth = 16.0f, panelSwitchHeight = 12.0f, panelSwitchCorner = 2.0f;
     inline constexpr float panelSwitchSideShare = 0.35f, panelSwitchBottomShare = 0.4f; // of the little window, the panel's part
     inline constexpr float inactiveAlpha = 0.6f;
+
+    // Phazite's logo at the title bar's left end, as VS Code's is at its: in a slot as wide as the bar is tall, so big in its
+    // middle. And the window's icon, where the system takes it from the window (Linux), so many pixels across.
+    inline constexpr int logoSlotWidth = 35, logoSize = 16;
+    inline constexpr int windowIconSize = 128;
+
     inline constexpr int resizeBand = 5; // along the top and the title bar's sides
     inline constexpr int edgeInset = 8;  // the panels keep out of the band along a restored window's sides, which resizes it
 

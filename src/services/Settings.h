@@ -54,7 +54,8 @@ class Settings
 {
 public:
     // Every setting Phazite keeps, each by the key its file keeps it under.
-    static constexpr TextSetting theme { "phaziteTheme", "dark", SaveTiming::now }; // dark, light, highContrast
+    static constexpr TextSetting theme { "phaziteTheme", "dark", SaveTiming::now };             // dark, light, highContrast
+    static constexpr BoolSetting startupSound { "phaziteStartupSound", true, SaveTiming::now }; // model/engine/StartupSound.h
     static constexpr BoolSetting hoverHelp { "phaziteHoverHelp", true, SaveTiming::now };
     static constexpr BoolSetting scrollContinuously { "phaziteScrollContinuously", false, SaveTiming::now }; // or turn pages
     static constexpr BoolSetting computerKeyboard { "phaziteComputerKeyboard", false, SaveTiming::now };     // off at first (question 10)

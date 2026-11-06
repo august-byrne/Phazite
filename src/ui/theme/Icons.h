@@ -79,6 +79,13 @@ enum class Icon
 // filled as well as outlined, such as a favorite's star.
 std::unique_ptr<juce::Drawable> createIcon (Icon, bool filled = false);
 
+// Phazite's logo (resources/logo/phazite.svg), its own drawing in its own colours, which the theme doesn't tint: the title
+// bar's, and the window's icon where the system takes it from the window (Linux). Nullptr if it couldn't be read.
+std::unique_ptr<juce::Drawable> createLogo();
+
+// The logo drawn on a transparent square so many pixels across, or an invalid image if it couldn't be read.
+juce::Image createLogoImage (int size);
+
 // An icon drawn in any color, as a list's rows draw theirs: recolored only when the color changes.
 class TintedIcon
 {

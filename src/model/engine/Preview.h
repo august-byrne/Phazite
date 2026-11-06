@@ -5,10 +5,11 @@
 // 120 BPM") when it lasts whole bars at that tempo. Each sound plays as a plan of its own on Phazite's engine for
 // previews, whose sound is added to the song's (model/playback/internal/PlaybackHost.h);
 // while the project plays, a loop keeps in step with its bars, and starting or stopping the project stops it.
-// A MIDI file plays on Phazite's synth, in time, as a loop over whole bars. The app makes it (internal/Preview.h).
+// A MIDI file plays on Phazite's synth, in time, as a loop over whole bars. It also plays Phazite's startup sound
+// (StartupSound.h). The app makes it (internal/Preview.h).
 #pragma once
 
-#include <juce_core/juce_core.h>
+#include <juce_audio_basics/juce_audio_basics.h>
 
 #include <memory>
 
@@ -25,6 +26,14 @@ public:
     // loop over and over, unless repeat is false (a riser made for some bars plays once, in time). Returns false if the
     // file can't be played.
     bool play (const juce::File&, const ProjectContext&, bool repeat = true);
+
+    // Plays a sound made in memory, at a sample rate, once and as it is, in place of the sound playing before: Phazite's
+    // startup sound (StartupSound.h). Returns false if it is empty.
+    bool playSound (juce::AudioBuffer<float>, double sampleRate);
+
+    // The sample rate previews play at: the audio output's, once one has opened.
+    double getSampleRate() const noexcept;
+
     void stop();
 
     bool isPlaying() const;
