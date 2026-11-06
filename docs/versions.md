@@ -1,11 +1,11 @@
 # Versions
 
-*Status: draft plan for review, 2026-11-04, written at the owner's request, and revised the same day after a survey of [what others tried](#what-others-tried).* This draft covers three things:
+*Status: built (2026-11-04 and 2026-11-05) and on `main`. Written at the owner's request on 2026-11-04 as a plan, revised the same day after a survey of [what others tried](#what-others-tried), and kept as the design, with [what was built](#as-built) beside it.* It covers three things:
 - versions of a project that work as git's commits and branches do, each with a bounce or without;
 - a column of icons down the window's left side, as VS Code's activity bar, whose second icon opens the versions;
 - how DAWproject import and export fit with the versions.
 
-Each choice below is Claude's, for the owner to review. Once the owner agrees, the decisions go into [design.md](design.md), the steps into the [roadmap](roadmap.md), and an issue for each step onto GitHub. Sizes are relative effort, S < M < L < XL, as in the roadmap; they are not dates.
+Each choice below was Claude's, for the owner to review. The owner had every step built, so the [roadmap](roadmap.md#status) records them as done and [design.md](design.md#4-the-window) points here; no step waits for an issue on GitHub. Sizes are relative effort, S < M < L < XL, as in the roadmap; they are not dates.
 
 ## Why
 
@@ -644,8 +644,8 @@ If the owner wants versions to be v1's headline instead, V1 to V3 are the part t
 
 ## As built
 
-Every step above is built on the local branch `versions` (2026-11-04), in this order: the project file one property per
-line, V1, V2, V4, V3, V5, Clean Up Unused Audio, then D1 and D2. Where the build differs from the plan:
+Every step above was built on 2026-11-04, and has been on `main` since 2026-11-05, in this order: the project file one
+property per line, V1, V2, V4, V3, V5, Clean Up Unused Audio, then D1 and D2. Where the build differs from the plan:
 
 - **The store** keeps pieces in packs, one file per saved version (`Versions/pieces/<sha>.pack`: the pieces it adds, then
   an index), not one file per piece: thousands of tiny files are slow on Windows and in sync tools. Pieces keep their

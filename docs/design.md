@@ -48,10 +48,9 @@ In one line: **FL Studio's speed without FL Studio's split.** Phazite keeps the 
 - built-in instruments and effects for electronic music;
 - automation and modulation;
 - song outlines and chord progressions;
-- chord suggestions and a drum sound generator;
 - VST®3 hosting on Windows.
 
-[Section 25](#25-open-questions) and the [roadmap](roadmap.md#after-v1) list what waits until after v1.
+Chord suggestions and the drum sound generator, first planned for v1, moved after it (the owner, 2026-11-04). Versions of a project, as git's commits and branches, with DAWproject import and export, were built ahead of v1 ([versions.md](versions.md), 2026-11-04 and 2026-11-05). [Section 25](#25-open-questions) and the [roadmap](roadmap.md#after-v1) list what waits until after v1.
 
 ## 2. Who Phazite is for
 
@@ -114,6 +113,7 @@ Why this audience:
   - **Audio Files:** each audio file the song plays (its audio clips' and its devices' sound files: a drum sampler's pads, a wavetable synth's tables), with the tracks that play it, the header counting them and saying how many are missing. A missing one shows in the warning colour, so said, with its Locate... (a magnifier, under the pointer, or a double-click): the file chosen, copied into the project's Audio folder as an import copies it, takes its place everywhere the song plays it, as one undo step, "Locate Audio File". Under the list, while the project's folder has audio files nothing plays (no version either), how many, with **Clean Up...**, which runs Clean Up Unused Audio: one way to do it, now where its files show;
   - **Plug-ins:** each plug-in the song holds, on its track or the master, the header saying how many crashed, aren't installed or are off. A crashed one has its Reload (an arrow, under the pointer); a click on one selects it and shows it in the Devices view.
   It reads the song again once a turn after it changes, and every five seconds while it shows, for files that came or went on the disk; it repaints only when what it shows changed.
+- **Source Control (left; built 2026-11-04 and 2026-11-05, [versions.md](versions.md); `src/ui/versions/VersionsView.h`):** the project's versions as git's commits and branches, in git's words as VS Code's Source Control view says them (the owner, 2026-11-05), its icon (Lucide's "git-branch") the third on the activity bar: the message and Commit, the staged changes and the changes since the last commit, by track, the graph of every branch's commits, branches made, switched in place and merged, a commit restored, and commits' bounces heard in place of the song; DAWproject export and import beside them.
 - **Centre: the whole song,** in one of two views, chosen by the tabs at its top, so that no key needs remembering (the owner asked for as few "magic key presses" as possible; F5 and F9 do the same, as in FL Studio):
   - **Playlist:** the time bar (the song's sections over the bar numbers, with the button that adds a track beside it), then global lanes (chords, tempo, markers), then the tracks, with the sections drawn faintly behind them ([section 6](#6-the-playlist));
   - **Mixer:** every channel side by side ([section 8](#8-the-mixer)).
@@ -767,12 +767,12 @@ v1 should have about 40, tagged by mood and genre, in a data file that is easy t
 - **History** steps back and forth through earlier batches.
 - **Every sound keeps its recipe** (engine version, seed and parameters), so it can be reopened and tweaked in the drum synth or re-rendered at any sample rate.
 
-**v1 engine: a drum synthesizer plus evolution.**
+**The first engine (after v1, since 2026-11-04): a drum synthesizer plus evolution.**
 - **Each drum type is a synthesis patch.** A kick, for example, is a pitched oscillator with a pitch envelope, a click transient and saturation. A snare is a tuned body plus filtered noise. Hats are metallic oscillators or FM through filters.
 - **Generate** samples the patch's parameters from musically tuned ranges for each character word. It then measures the results (loudness, length, brightness) and discards weak ones.
 - **More like this** mutates the chosen sound's parameters. Later, "breed" combines two favorites, as Synplant does.
 - **The drum synth is also a built-in instrument,** so a generated kick can stay live and editable on a track.
-- **Why not a neural model in v1:** no suitably licensed model exists (see the licence table in [section 16](#16-ai-and-generative-features)). Synthesized drums are a staple of electronic music anyway. Realistic acoustic drums are where a trained model would add the most, later.
+- **Why not a neural model first:** no suitably licensed model exists (see the licence table in [section 16](#16-ai-and-generative-features)). Synthesized drums are a staple of electronic music anyway. Realistic acoustic drums are where a trained model would add the most, later.
 
 **Prior art** ([B14](#appendix-b-sources), [B15](#appendix-b-sources), [B16](#appendix-b-sources)):
 - **Audialab Emergent Drums 2:** generates drums from scratch, and variations of a sample with a similarity slider.
@@ -793,9 +793,9 @@ v1 should have about 40, tagged by mood and genre, in a data file that is easy t
    - text-to-song generation; 82% of producers oppose it in Tracklib's 2025 survey ([B18](#appendix-b-sources));
    - stem separation, because many tools already do it (decided).
 
-**v1 features (decided):** chord suggestions and sound generation ([section 15](#15-sound-generator)). The assistant comes later.
+**The first features (decided):** chord suggestions and sound generation ([section 15](#15-sound-generator)), first planned for v1 and since 2026-11-04 among the first steps after it ([roadmap](roadmap.md#after-v1)). The assistant comes later.
 
-**v1 engines (decided):** algorithmic. The chord engine is built on music theory, and the sound generator on synthesis and evolution. Trained models can come later, behind the same interface.
+**Their engines (decided):** algorithmic. The chord engine is built on music theory, and the sound generator on synthesis and evolution. Trained models can come later, behind the same interface.
 
 ### Chord suggestions
 
@@ -918,7 +918,7 @@ No permissively licensed drum-generation model was found. This table summarizes 
 - **The frozen sound is kept in the project's Cache folder,** so a frozen track opens frozen the next time, as Ableton Live and Logic Pro keep theirs in the project. Without its file (if the Cache folder was deleted), the track opens unfrozen. Closing a project deletes what nothing in it uses any more.
 - Returns, buses and folders aren't frozen, as in Ableton Live.
 
-**After v1:** DAWproject import and export, and archives that include the media.
+**After v1:** archives that include the media. DAWproject import and export were built ahead of v1, with the versions ([versions.md](versions.md), D1 and D2, 2026-11-04), but for a DAWproject's plug-ins and sends imported into a new project.
 
 ## 19. Plug-in hosting and stability
 
