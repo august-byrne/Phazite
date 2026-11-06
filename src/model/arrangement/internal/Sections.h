@@ -25,7 +25,7 @@ struct SectionInfo
     BeatDuration length = BeatDuration::fromBeats (32.0);
     juce::String role {};                  // "intro", "verse", "drop"...: what the section does in the song
     juce::String tip {};                   // a one-line suggestion of what to put in it
-    float energy = 0.5f;                   // how intense it is, from 0 to 1, for the energy curve
+    float energy = 0.5f;                   // how intense it is, from 0 to 1, as the inspector shows it
     std::optional<juce::Colour> colour {}; // the role's color if not given
 };
 

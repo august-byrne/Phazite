@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song's sections in the playlist's time bar (docs/design.md, section 6): a thin band above the bar
-// numbers, with each section's name over its time and the energy curve faintly behind. The playlist draws
+// numbers, each section a block in its colour with its name, over its time, without lines. The playlist draws
 // the sections as ghosts behind the tracks too. Dragging a section moves it with everything in it, across
 // every track; Ctrl copies it and Ctrl+Shift copies it as aliases. Dragging its right edge makes it longer or
 // shorter, and the rest of the song moves along. Double-clicking adds or renames one, and right-clicking here
@@ -77,7 +77,6 @@ private:
     std::optional<SongSection> getSectionAt (juce::Point<int>) const;
     bool isOnRightEdge (const SongSection&, juce::Point<int>) const;
     BeatPosition findNearestBoundary (const SongSection&, double x) const;
-    void paintEnergyCurve (juce::Graphics&, const std::vector<SongSection>&);
     void showMenu (const std::optional<SongSection>&, BeatPosition where);
     void addSectionAt (BeatPosition);
     void renamed(); // the name field closed

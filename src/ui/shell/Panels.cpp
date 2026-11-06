@@ -26,7 +26,7 @@ namespace
     void leaveCorner (juce::TabbedComponent& tabs, int buttons)
     {
         auto& bar = tabs.getTabbedButtonBar();
-        bar.setBounds (bar.getBounds().withTrimmedRight (Shell::getPanelCornerWidth (buttons) + Space::xs));
+        bar.setBounds (bar.getBounds().withTrimmedRight (buttons > 0 ? Shell::getPanelCornerWidth (buttons) + Space::xs : 0));
     }
 
     // The command that shows a tab, which lessons also name its button by (Lessons::Step::target).
@@ -541,7 +541,7 @@ void ViewArea::popupMenuClickOnTab (int index, const juce::String&)
 void ViewArea::resized()
 {
     juce::TabbedComponent::resized();
-    leaveCorner (*this, cornerButtons); // the row's maximize and hide, and the lower row's own window, in its right area
+    leaveCorner (*this, cornerButtons); // the lower row's maximize, own window and hide, in its right area
 
     for (auto& holder : holders)
         holder.resized();
@@ -727,13 +727,22 @@ ViewRow::ViewRow (Panel which, const ViewArea::Views& views)
         addChildComponent (*areas[(size_t) column]);
     }
 
-    // Dragged, the line gives one area more of the row and the other less, each keeping its least.
+    // Dragged, the line gives one area more of the row and the other less, each keeping its least; double-clicked, each
+    // area has half again.
     divider.onDragStart = [this] { shareAtDragStart = share; };
     divider.onDrag = [this] (int distance)
     {
         const auto room = std::max (1, getWidth() - Shell::dividerSize);
         const auto least = std::min (0.5, (double) Shell::minimumAreaWidth / room);
         share = juce::jlimit (least, 1.0 - least, shareAtDragStart + (double) distance / room);
+        resized();
+
+        if (onShareChanged != nullptr)
+            onShareChanged();
+    };
+    divider.onDoubleClick = [this]
+    {
+        share = 0.5;
         resized();
 
         if (onShareChanged != nullptr)
@@ -771,10 +780,10 @@ ViewArea& ViewRow::getAreaOf (ViewTab tab)
 
 void ViewRow::resized()
 {
-    // Two areas side by side at their shares, with the line between them; or one, the whole row. The row's panel buttons
-    // are in the right one's corner: the upper row's maximize and hide, the lower one's its own window too.
+    // Two areas side by side at their shares, with the line between them; or one, the whole row. The lower row's panel
+    // buttons are in the right one's corner; the upper row has none.
     const auto both = ! areas[0]->isEmpty() && ! areas[1]->isEmpty();
-    const auto buttons = row == Panel::song ? 2 : 3;
+    const auto buttons = row == Panel::song ? 0 : Shell::panelCornerButtons;
     auto area = getLocalBounds();
     divider.setVisible (both);
 

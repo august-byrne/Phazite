@@ -116,7 +116,9 @@ TEST_CASE ("Each place holds its items, or says what it is for while it holds no
     // The instruments are Phazite's own until a scan finds plug-ins, and say so.
     const auto instruments = model.getContents (libraries.find (Kind::instruments));
     CHECK (getNames (instruments.items).contains ("Synth"));
-    CHECK (instruments.messages == juce::StringArray { "Your plug-ins show here once Options > Scan for Plug-ins has found them" });
+    CHECK (
+        instruments.messages
+        == juce::StringArray { "Your plug-ins show here once Scan for Plug-ins, in the gear's menu at the bottom left, has found them" });
 
     // A folder of the user's that has gone says so.
     const auto folder = libraries.find (Kind::folder);

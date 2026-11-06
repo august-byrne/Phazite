@@ -167,14 +167,15 @@ It found seven ways of keeping versions. Two findings stand out:
 | Play  Rec   140 BPM   4/4                   master level   keyboard   |
 +--+----------+------------------------------------------+-------------+
 |Lb| Browser  | [Playlist] [Mixer]                       | Inspector   |
-|  |  (or     |                                          |             |
-|Vr| Versions)|                                          |             |
+|Pr|  (or     |                                          |             |
+|Vr| Project, |                                          |             |
+|  | Versions)|                                          |             |
 |  |          +------------------------------------------+             |
 |  |          | [Piano roll] [Instrument] [Effects]      |             |
 +--+----------+------------------------------------------+-------------+
 | Saved  Main | hint: what the mouse and keys do here | 48 kHz | CPU 12% |
 +-----------------------------------------------------------------------+
-  Lb = Browser (Lucide "library")    Vr = Versions (Lucide "git-branch")
+  Lb = Browser (Lucide "library")   Pr = Project (Lucide "clipboard-list")   Vr = Versions (Lucide "git-branch")
 ```
 
 The bar is a column of icons along the window's left edge, from under the transport bar to the status bar. It behaves as VS Code's activity bar does.
@@ -186,8 +187,9 @@ The bar is a column of icons along the window's left edge, from under the transp
 - on any other icon, or while the panel is hidden: shows that view in it;
 - while the left panel is in a window of its own: switches what that window shows, and brings it to the front.
 
-**Its two icons:**
+**Its icons,** from what is outside the song, to what is in it, to its history:
 - **Browser**, the browser as it is now ([design section 11](design.md#11-the-browser)).
+- **Project** (2026-11-06, the owner: "add the Project view to the left wing with its own icon"; [design section 4](design.md#4-the-window)): what the song holds, its notes, its audio files and its plug-ins.
 - **Versions** (below).
 
 **At its foot,** as VS Code's Accounts and Manage icons:
@@ -196,6 +198,7 @@ The bar is a column of icons along the window's left edge, from under the transp
 
 Each view is a command, so it can have a key, its tooltip names that key, and it is in the View menu and the command palette:
 - `view.browser`, Browser;
+- `view.project`, Project;
 - `view.versions`, Versions.
 
 Showing a view gives it the keyboard, as F5 to F9 do for the views in the centre ([design section 21](design.md#21-accessibility)).

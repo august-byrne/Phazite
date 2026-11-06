@@ -1,21 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The multiband's editor (devices/dynamics/Multiband.h), in Maximus's layout (the owner, 2026-11-01: "the same layout, the
-// same abilities ... all of the drag points should be the same (same interactions)"; its colours and drawing are Phazite's):
+// The multiband's editor (devices/dynamics/Multiband.h), with Maximus's parts and interactions (the owner, 2026-11-01: "the
+// same layout, the same abilities ... all of the drag points should be the same (same interactions)"; its colours and
+// drawing are Phazite's), laid out to fit the dock without scrolling (the owner, 2026-11-06):
 //
-// - Top left, the selected band's compression curve, in the band's colour, as Maximus's envelope editor draws and edits it
+// - The band tabs (Low, Mid, High, Master) with the selected band's Solo, which lead every page in the dock.
+// - The selected band's compression curve, in the band's colour, as Maximus's envelope editor draws and edits it
 //   (DynamicsCurve.h, which the compressor's editor shares): level in across against level out up, lit up to the level the
 //   band's compressor hears; under it, its menu, Freeze and Snap.
-// - Top right, the analysis display: Monitor, the last seconds of the selected band (what comes in, what goes out, what its
-//   compressor hears, its gain and its pre and post levels, each shown by its switch below, every band's gain too), scrolling
-//   at the speed set, paused by a click; or Bands, the three bands across the spectrum in their colours, as high as their pre
-//   gains, the spectrum of what it plays over them: drag a band's edge for its crossover, a band up or down for its pre gain.
-//   A crossover or pre gain changed while Monitor shows brings Bands up for a moment.
-// - Below, the band tabs (Low, Mid, High, Master) with Solo; the selected band's mode (On, Comp Off, Muted, Off) and stereo
-//   separation; its pre and post gains; its saturation and ceiling; its attack, release and sustain, its curve boxes, peak
-//   or RMS, and its second release; then LMH Delay and LMH Mix; and the crossovers with their slopes, the low cut and the
-//   mid band driving the master.
+// - The band's mode (On, Comp Off, Muted, Off) and stereo separation; its pre and post gains, its saturation and ceiling.
+// - The analysis display: Monitor, the last seconds of the selected band (what comes in, what goes out, what its compressor
+//   hears, its gain and its pre and post levels, each shown as its Traces menu says, every band's gain too), scrolling at the
+//   speed set, paused by a click; or Bands, the three bands across the spectrum in their colours, as high as their pre gains,
+//   the spectrum of what it plays over them: drag a band's edge for its crossover, a band up or down for its pre gain. A
+//   crossover or pre gain changed while Monitor shows brings Bands up for a moment.
+// - The band's attack, release, sustain and second release, its curve boxes and peak or RMS.
+// - The crossovers with their slopes; LMH Delay and LMH Mix, the low cut and the mid band driving the master.
 //
-// Which band shows, the display's view and its switches, Freeze and Snap are the editor's for the session, not the project's.
+// In a window of its own, or a tall dock, the curve, the band's controls and the display across, the rest under them, as
+// Maximus lays them out; in the dock, as many parts on each page as fit beside the band tabs. Which band shows, the
+// display's view and its traces, Freeze and Snap are the editor's for the session, not the project's.
 #pragma once
 
 #include "DeviceEditorBase.h"
@@ -53,9 +56,15 @@ public:
     // Takes the meters into the display, shows the selected band's controls and repaints what moved; the ticker does it.
     void refresh();
 
+    // The menu of the traces Monitor shows, each ticked while it shows; an item switches it.
+    juce::PopupMenu getTracesMenu();
+
 private:
     class Analysis;
-    class Panel;
+    class BandPart;
+    class BandsPart;
+    class CurvePart;
+    class DisplayPart;
 
     int selectedBand = 3;                    // the master at first, as Maximus opens on it
     std::vector<ParameterHandle> parameters; // every parameter, in the multiband's order, for the curves and the bands
@@ -64,7 +73,11 @@ private:
     DrawnNumbers drawnCurve;
     DynamicsCurve* curve = nullptr;
     Analysis* analysis = nullptr;
-    Panel* panel = nullptr;
+    BandsPart* bandTabs = nullptr;
+    DisplayPart* display = nullptr;
+    std::vector<BandPart*> bandParts; // those that show the selected band's controls
+
+    void showBandControls();
 
     void tick() override { refresh(); }
 };

@@ -120,6 +120,7 @@ view.commandPalette | ctrl + K
 view.menus | F10
 view.searchBrowser | ctrl + F
 view.browser
+view.project
 view.versions
 version.pickBranch
 version.renameBranch

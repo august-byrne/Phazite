@@ -6,8 +6,8 @@
 // hears, with its menu's shapes to start from (4:1 over -18 dB, a limiter, a gate, upward compression...), and a meter beside
 // it of how far it turns the sound down (from its middle down) or up (from its middle up); its attack and release; its
 // input gain, drive and makeup; and its sidechain's key cuts with Listen, which plays the key instead of the sound while the
-// editor shows (the track its sidechain listens to is chosen in its header: SidechainMenus.h; its mix, for parallel
-// compression, is its header's too). On a folded card it shows nothing of its own.
+// editor shows (the track its sidechain listens to is chosen in its row in the Devices view: SidechainMenus.h; its mix, for
+// parallel compression, is its row's too).
 #pragma once
 
 #include "DeviceEditorBase.h"

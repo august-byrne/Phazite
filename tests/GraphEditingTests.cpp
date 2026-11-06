@@ -148,12 +148,13 @@ TEST_CASE ("An LFO's picture sets its depth with a drag up or down, and its rate
     phazite::test::Mouse mouse (lfo);
     const auto centre = lfo.getLocalBounds().getCentre();
 
-    // Half the picture's height up: half the depth.
-    CHECK (valueOf (song, synth, "lfoDepth") == doctest::Approx (0.0f));
+    // Half the picture's height up: half the depth more, from the quarter a new synth's LFO has, ready for when it is
+    // switched on.
+    CHECK (valueOf (song, synth, "lfoDepth") == doctest::Approx (0.25f));
     mouse.press (centre);
     mouse.dragTo (centre - juce::Point<int> (0, lfo.getHeight() / 2));
     mouse.release();
-    CHECK (valueOf (song, synth, "lfoDepth") == doctest::Approx (0.5f).epsilon (0.05));
+    CHECK (valueOf (song, synth, "lfoDepth") == doctest::Approx (0.75f).epsilon (0.05));
     CHECK (describeUndo (song).startsWith ("Undo Change"));
 
     // A notch of the wheel up: a tenth faster.

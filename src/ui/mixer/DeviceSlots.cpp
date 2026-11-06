@@ -5,6 +5,7 @@
 #include "model/automation/AutomationModel.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/project/ProjectContext.h"
+#include "ui/components/PowerSwitch.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -79,10 +80,7 @@ struct DeviceSlots::Slot : public juce::Component
                 showDevice (owner.context, owner.commands, shown);
         };
 
-        power.setButtonText ("On");
-        power.setTitle ("On");
         power.setTooltip ("Turns the device on or off");
-        power.setClickingTogglesState (true);
         power.onClick = [this] { setDeviceOn (owner.context, shown.id, power.getToggleState()); };
 
         // An effect moves by a drag on its name, up or down among the channel's effects.
@@ -195,7 +193,7 @@ struct DeviceSlots::Slot : public juce::Component
     DeviceSlot shown;
     bool dragged = false; // its name dragged since the mouse went down: the click that ends it isn't one
     MenuButton nameButton;
-    juce::TextButton power;
+    PowerSwitch power;                              // an effect's
     std::unique_ptr<ReductionMeter> reductionMeter; // a device's that turns the sound down
 };
 

@@ -407,13 +407,23 @@ EqEditor::EqEditor (const DeviceHandle& handle)
     applyDeviceTint (*this, device);
 
     selectBand (selectedBand);
-    setSize (2 * Space::s + graphWidth + Space::m + getControlsWidth(), 2 * Space::s + std::max (GraphTint::height, getControlsHeight()));
+    setSize (getWidthForHeight (0), 2 * Space::xs + std::max (GraphTint::height, getControlsHeight()));
     refresh();
 }
 
 int EqEditor::getMinimumHeight() const
 {
-    return 2 * Space::s + std::max (GraphTint::minimumHeight, getControlsHeight());
+    return 2 * Space::xs + std::max (GraphTint::minimumHeight, getControlsHeight());
+}
+
+int EqEditor::getWidthForHeight (int) const
+{
+    return 2 * Space::s + graphWidth + Space::m + getControlsWidth();
+}
+
+int EqEditor::getMinimumWidth() const
+{
+    return 2 * Space::s + GraphTint::minimumWidth + Space::m + getControlsWidth();
 }
 
 EqEditor::~EqEditor()
@@ -548,8 +558,9 @@ void EqEditor::paint (juce::Graphics& g)
 
 void EqEditor::resized()
 {
-    // The graph on the left, as tall as the editor; the band's controls beside it.
-    auto area = getLocalBounds().reduced (Space::s);
+    // The graph on the left, as tall as the editor; the band's controls beside it. Its edge is less at its top and bottom, as
+    // the dock is short (DeviceEditorBase::marginY).
+    auto area = getLocalBounds().reduced (Space::s, Space::xs);
     graph->setBounds (area.removeFromLeft (area.getWidth() - getControlsWidth() - Space::m));
     area.removeFromLeft (Space::m);
 

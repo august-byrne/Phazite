@@ -5,6 +5,7 @@
 #include "ui/components/ModulatorDrag.h"
 #include "ui/devices/ModulatorEditor.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/theme/Popups.h"
 
 namespace phazite::ui
 {
@@ -13,6 +14,7 @@ using namespace strip;
 namespace
 {
     constexpr int outputMeterWidth = 28;
+    constexpr int chipHeight = 24, chipGap = Space::xs;
 
     // A modulator's output now: a bar from the middle (bipolar) or from the left, faint while it is switched off.
     struct Meter : public juce::Component
@@ -91,14 +93,6 @@ struct ModulatorSlots::Slot : public juce::Component
         }
         else
         {
-            // Its switch: off, it moves nothing, to hear the sound without it.
-            power.setButtonText ("On");
-            power.setTitle ("On");
-            power.setTooltip ("Turns " + info.name + " on or off, to hear the sound with and without it");
-            power.setClickingTogglesState (true);
-            power.setToggleState (info.isOn, juce::dontSendNotification);
-            power.onClick = [this] { setModulatorOn (owner.context, shown.id, power.getToggleState()); };
-            addAndMakeVisible (power);
             addAndMakeVisible (meter);
         }
     }
@@ -111,9 +105,10 @@ struct ModulatorSlots::Slot : public juce::Component
             return;
         }
 
+        // Off, it moves nothing: its meter and its name faint, to tell it from those that play.
         const auto on = isModulatorOn (owner.context, shown.id);
-        power.setToggleState (on, juce::dontSendNotification);
         meter.show (getModulatorValue (owner.context, shown.id), isBipolar (owner.context, shown.id), on);
+        nameButton.setAlpha (on ? 1.0f : ModulationRing::offAlpha);
     }
 
     void paintOverChildren (juce::Graphics& g) override
@@ -129,24 +124,18 @@ struct ModulatorSlots::Slot : public juce::Component
         auto right = area.removeFromRight (outputMeterWidth);
 
         if (macroKnob != nullptr)
-        {
             macroKnob->setBounds (right.reduced (2, 0));
-        }
         else
-        {
             meter.setBounds (right);
-            power.setBounds (area.removeFromRight (slotPowerWidth));
-        }
 
-        nameButton.setBounds (area.withTrimmedRight (2));
+        nameButton.setBounds (area.withTrimmedRight (Space::xs));
     }
 
     ModulatorSlots& owner;
     ModulatorInfo shown;
     ModulatorGrip grip;
-    MenuButton nameButton;
-    juce::TextButton power; // a modulator's, not a macro's
-    Meter meter;
+    MenuButton nameButton; // lit while its editor shows
+    Meter meter;           // a modulator's, not a macro's
     std::unique_ptr<Knob> macroKnob;
     std::unique_ptr<ParameterAttachment> macroAttachment;
 };
@@ -163,10 +152,14 @@ ModulatorSlots::ModulatorSlots (ProjectContext& projectContext)
     addAndMakeVisible (addButton);
 }
 
-ModulatorSlots::~ModulatorSlots() = default;
+ModulatorSlots::~ModulatorSlots()
+{
+    closeEditor();
+}
 
 void ModulatorSlots::setTrack (TrackID newTrack)
 {
+    closeEditor(); // another channel's modulators, or another project's
     track = newTrack;
     addButton.setEnabled (track.isValid());
     rebuild (getModulators (context, track));
@@ -180,7 +173,11 @@ void ModulatorSlots::refresh()
     for (const auto& modulator : modulators)
         ids.push_back (modulator.id);
 
-    // Added, removed or renamed (their places among their kind): new slots.
+    // The one whose editor shows is gone (removed, or its adding undone): its editor goes with its chip.
+    if (openModulator.isValid() && std::find (ids.begin(), ids.end(), openModulator) == ids.end())
+        closeEditor();
+
+    // Added, removed or renamed (their places among their kind): new chips.
     const auto sameNames = std::equal (modulators.begin(), modulators.end(), slots.begin(), slots.end(),
                                        [] (const ModulatorInfo& m, const Slot* slot) { return m.name == slot->shown.name; });
 
@@ -192,6 +189,13 @@ void ModulatorSlots::updateValues()
 {
     for (auto* slot : slots)
         slot->updateValues();
+
+    // Its editor closed itself (a click elsewhere, Escape): its chip is lit no more.
+    if (openModulator.isValid() && openBox == nullptr)
+    {
+        openModulator = {};
+        showOpenEditor();
+    }
 }
 
 void ModulatorSlots::rebuild (const std::vector<ModulatorInfo>& modulators)
@@ -205,12 +209,13 @@ void ModulatorSlots::rebuild (const std::vector<ModulatorInfo>& modulators)
         shown.push_back (modulator.id);
     }
 
+    showOpenEditor();
     resized();
 }
 
 int ModulatorSlots::getPreferredHeight() const
 {
-    return slots.size() * (slotNameHeight + Space::xs) + buttonHeight;
+    return slots.size() * (chipHeight + chipGap) + buttonHeight;
 }
 
 void ModulatorSlots::resized()
@@ -219,8 +224,8 @@ void ModulatorSlots::resized()
 
     for (auto* slot : slots)
     {
-        slot->setBounds (area.removeFromTop (slotNameHeight));
-        area.removeFromTop (Space::xs);
+        slot->setBounds (area.removeFromTop (chipHeight));
+        area.removeFromTop (chipGap);
     }
 
     addButton.setBounds (area.removeFromTop (buttonHeight));
@@ -236,22 +241,62 @@ void ModulatorSlots::dragOperationEnded (const juce::DragAndDropTarget::SourceDe
     Knob::showModulatorTargets ({});
 }
 
+juce::Component* ModulatorSlots::getOpenEditor() const
+{
+    return openBox != nullptr && openBox->isVisible() ? openBox->getChildComponent (0) : nullptr;
+}
+
+void ModulatorSlots::closeEditor()
+{
+    if (auto* box = openBox.getComponent())
+        box->dismiss();
+
+    openBox = nullptr;
+    openModulator = {};
+    showOpenEditor();
+}
+
+void ModulatorSlots::showOpenEditor()
+{
+    for (auto* slot : slots)
+        slot->nameButton.setToggleState (openBox != nullptr && slot->shown.id == openModulator, juce::dontSendNotification);
+}
+
 void ModulatorSlots::openEditor (ModulatorID id)
 {
-    if (onOpenEditor != nullptr)
+    // Its own again: closed, as a click on its chip closes it (the call-out, which takes the click, closes itself then).
+    if (openBox != nullptr && openModulator == id)
     {
-        onOpenEditor (id);
+        closeEditor();
         return;
     }
 
+    closeEditor(); // one at a time
+    auto* window = getTopLevelComponent();
+    Slot* chip = nullptr;
+
     for (auto* slot : slots)
-    {
         if (slot->shown.id == id)
-        {
-            juce::CallOutBox::launchAsynchronously (std::make_unique<ModulatorEditor> (context, id), slot->getScreenBounds(), nullptr);
-            return;
-        }
-    }
+            chip = slot;
+
+    if (chip == nullptr || window == nullptr || ! isShowing())
+        return;
+
+    // Over the window, as its other pop-ups are (Popups.h), beside its chip: above, away from the dock, where the knobs it
+    // moves are, if there is room; else wherever there is.
+    const auto anchor = window->getLocalArea (chip, chip->getLocalBounds());
+    auto& box = juce::CallOutBox::launchAsynchronously (std::make_unique<ModulatorEditor> (context, id), anchor, window);
+    const auto above = window->getLocalBounds().withBottom (anchor.getY());
+
+    if (above.getHeight() >= box.getHeight())
+        box.updatePosition (anchor, above);
+
+    if (findWindowForPopups (*this) != nullptr)
+        FrostedGlass::putBehind (box, FrostedGlass::Shape::outlined, false); // on frosted glass, as the window's other pop-ups
+
+    openBox = &box;
+    openModulator = id;
+    showOpenEditor();
 }
 
 void ModulatorSlots::showAddMenu()
@@ -274,7 +319,7 @@ void ModulatorSlots::showAddMenu()
                       {
                           const auto added = addModulator (projectContext, id, type);
 
-                          // A new modulator's editor opens, to set it up; a macro shows its knob in its slot.
+                          // A new modulator's editor opens, to set it up; a macro shows its knob in its chip.
                           if (safeThis != nullptr && added.isValid())
                           {
                               safeThis->refresh();

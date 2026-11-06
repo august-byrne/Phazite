@@ -52,8 +52,15 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     clipLabel.setFont (juce::FontOptions (TextSize::small));
 
     for (auto* c : std::initializer_list<juce::Component*> { &instrumentButton, &chordButton, &keyButton, &ghostButton, &transformButton,
-                                                             &notesMenuButton, &clipLabel, keys.get(), grid.get(), velocityLane.get() })
+                                                             &notesMenuButton, &clipLabel, keys.get(), grid.get(), velocityLane.get(),
+                                                             &getOverview() })
         addAndMakeVisible (c);
+
+    // The overview of the clips' notes along the time bar's top scrolls and zooms the time line, as the playlist's does, as FL
+    // Studio's piano roll has it: no scroll bar under the notes. The rows' scroll bar lies over the notes' right edge, thin and
+    // see-through.
+    horizontalScrollBar.setVisible (false);
+    makeSeeThrough (verticalScrollBar);
 
     addChildComponent (*transformBar);
     selection.addChangeListener (this);
@@ -227,6 +234,7 @@ ClipID PianoRoll::makeClipForNewNotes()
 void PianoRoll::clipsChanged()
 {
     drawnNotes.reset();
+    overviewContentChanged();
 
     if (const auto track = getTrack(); drumMode && track.isValid())
         drumRows = getDrumRows (getSamplerSounds (context, track), getNoteNumbersPlayed (context, clips), getDrumRowOrder (context, track),
@@ -243,6 +251,36 @@ void PianoRoll::clipsChanged()
 std::vector<NoteData> PianoRoll::getAllNotes() const
 {
     return getNotes (context, clips);
+}
+
+std::vector<TimelineEditor::OverviewMark> PianoRoll::getOverviewMarks() const
+{
+    // The clips' notes, each at its pitch between the lowest and the highest of them, in its clip's colour, faint while muted.
+    std::vector<OverviewMark> marks;
+    const auto& drawn = getDrawnNotes();
+
+    if (drawn.notes.empty())
+        return marks;
+
+    auto lowest = 127, highest = 0;
+
+    for (const auto& note : drawn.notes)
+    {
+        lowest = std::min (lowest, note.pitch);
+        highest = std::max (highest, note.pitch);
+    }
+
+    const auto rows = (float) (highest - lowest + 1);
+
+    for (const auto& note : drawn.notes)
+    {
+        const auto found = drawn.colours.find (note.clip);
+        const auto top = (float) (highest - note.pitch) / rows;
+        marks.push_back ({ note.start.inBeats(), (note.start + note.length).inBeats(), top, top + 1.0f / rows,
+                           found != drawn.colours.end() ? found->second : juce::Colours::grey, note.muted });
+    }
+
+    return marks;
 }
 
 const PianoRoll::DrawnNotes& PianoRoll::getDrawnNotes() const
@@ -470,19 +508,21 @@ void PianoRoll::resized()
     notesMenuButton.setBounds (toolbar.removeFromLeft (toolbar.getHeight()));
     clipLabel.setBounds (toolbar.withTrimmedLeft (Space::s));
 
-    const auto verticalBarWidth = getVerticalScrollBarWidth();
-    horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (keysWidth).withTrimmedRight (verticalBarWidth));
-
     if (transformOpen)
         transformBar->setBounds (area.removeFromBottom (transformBarHeight));
 
+    // The overview of the notes over the bar numbers, over the notes; the velocities under them.
     auto velocityArea = area.removeFromBottom (velocityLaneHeight);
+    getOverview().setBounds (area.removeFromTop (overviewHeight).withTrimmedLeft (keysWidth));
     auto rulerArea = area.removeFromTop (rulerHeight);
-    verticalScrollBar.setBounds (area.removeFromRight (verticalBarWidth));
     keys->setBounds (area.removeFromLeft (keysWidth));
     grid->setBounds (area);
-    ruler.setBounds (rulerArea.withTrimmedLeft (keysWidth).withTrimmedRight (verticalBarWidth));
-    velocityLane->setBounds (velocityArea.withTrimmedLeft (keysWidth).withTrimmedRight (verticalBarWidth));
+    ruler.setBounds (rulerArea.withTrimmedLeft (keysWidth));
+    velocityLane->setBounds (velocityArea.withTrimmedLeft (keysWidth));
+
+    // The rows' scroll bar over the notes' right edge, thin and see-through: it takes no room of their own.
+    verticalScrollBar.setBounds (area.removeFromRight (ScrollTint::overlayWidth));
+    verticalScrollBar.toFront (false);
 
     setScrollY (scrollY);
     setViewStart (getView().start);

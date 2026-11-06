@@ -454,9 +454,14 @@ SandboxedInstance* findPluginInstance (const Song& song, DeviceID id)
 
 bool hasCrashed (const Song& song, DeviceID id)
 {
-    auto* session = findSession (song);
-    const auto status = session != nullptr ? session->getPlugins().getStatus (id) : std::nullopt;
+    const auto status = getPluginStatus (song, id);
     return status == PluginInstances::Status::crashed || status == PluginInstances::Status::crashedWhileLoading;
+}
+
+std::optional<PluginInstances::Status> getPluginStatus (const Song& song, DeviceID id)
+{
+    auto* session = findSession (song);
+    return session != nullptr ? session->getPlugins().getStatus (id) : std::nullopt;
 }
 
 bool reloadPlugin (Song& song, DeviceID id, juce::String& error)

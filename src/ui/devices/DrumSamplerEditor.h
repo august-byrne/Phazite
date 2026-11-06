@@ -29,6 +29,7 @@ public:
 
     int getMinimumHeight() const override;
     int getWidthForHeight (int height) const override;
+    int getMinimumWidth() const override; // its pads at their smallest beside its controls
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -60,6 +61,7 @@ private:
     std::unique_ptr<Waveform> waveform;
 
     juce::Label padName;
+    juce::Rectangle<int> padsTitle, outputLine; // the pads' title, and the line before the output, as laid out
     juce::TextButton loadButton { "Load..." }, resetButton { "Reset" };
     std::unique_ptr<juce::FileChooser> chooser;
 
@@ -70,7 +72,7 @@ private:
     ChoiceAttachment chokeAttachment { chokeBox };
     juce::OwnedArray<juce::Label> names, texts; // the knobs' and the choke group's names, and the knobs' values
 
-    int getGridSize (int height) const; // the pads' square, at a height
+    int getGridSize (int width, int height) const; // the pads' square, at a size
     void play (int pad);
     void chooseFile();
     void tick() override { refresh(); }

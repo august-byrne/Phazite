@@ -7,7 +7,7 @@
 // the editor dock or both, so hiding the one of them that shows shows the other. A panel in a window of its own
 // (detached) takes no room in the main window and can't be maximized; the song's views always stay in it. Plain values,
 // which AppShell lays out and the settings keep, so the window opens as it was left (detached panels come back docked).
-// And the buttons in a panel's top right corner that change how it shows, and the dividers between panels.
+// And the buttons in the lower panel's top right corner that change how it shows, and the dividers between panels.
 #pragma once
 
 #include "ui/input/CommandBridge.h"
@@ -29,12 +29,18 @@ enum class Panel
     inspector
 };
 
-// What the left panel shows: the browser, or the project's versions (docs/versions.md).
+// What the left panel shows: the browser, what the project holds (its notes, audio files and plug-ins), or the project's
+// versions (docs/versions.md), in that order down the activity bar.
 enum class LeftView
 {
     browser,
+    project,
     versions
 };
+
+// How the settings name a view of the left panel ("browser", "project", "versions"), and back.
+juce::String getLeftViewKey (LeftView);
+std::optional<LeftView> findLeftViewByKey (const juce::String&);
 
 class PanelLayout
 {
@@ -115,8 +121,9 @@ juce::String getPanelName (Panel);
 juce::String describePanel (Panel);
 
 //==============================================================================
-// The buttons in a panel's top right corner, which run its commands: Maximize (or Restore the Panels), a window of its
-// own (not for the song's views, which stay in the main window) and Hide.
+// The buttons in the lower panel's top right corner, as in the corner of VS Code's panel, which run its commands: Maximize
+// (or Restore the Panels), a window of its own, and Hide, an X. The side panels and the upper one have none: the activity
+// bar, the title bar's switches and their edges, dragged shut, hide them.
 class PanelButtons : public juce::Component
 {
 public:
@@ -138,7 +145,8 @@ private:
 
 //==============================================================================
 // The line between two panels, which a drag moves: across the window for one between columns, up and down for the one
-// over the editor dock. It lights while the pointer is on it.
+// over the editor dock. It lights while the pointer is on it. A double-click puts the panel beside it back at the size it
+// starts at, as VS Code's sashes do.
 class PanelDivider : public juce::Component
 {
 public:
@@ -146,13 +154,16 @@ public:
 
     std::function<void()> onDragStart;
     std::function<void (int distance)> onDrag; // from where the drag began, right or down
+    std::function<void()> onDragEnd;
+    std::function<void()> onDoubleClick;
 
     void paint (juce::Graphics&) override;
     void mouseEnter (const juce::MouseEvent&) override { repaint(); }
     void mouseExit (const juce::MouseEvent&) override { repaint(); }
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override { repaint(); }
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
 private:
     bool betweenColumns;

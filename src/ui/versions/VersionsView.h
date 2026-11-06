@@ -5,6 +5,8 @@
 //   (version.pickBranch);
 // - the commit's message, whose first line is its name and the lines after it its note, both optional (Ctrl+Enter commits),
 //   then Commit across the view, whose menu's part holds Bounce Each Commit;
+// (in VS Code's sizes: the title as its side bar's, the message and Commit in rows as its own, the groups as rows of a tree, the
+// Graph under a pane's header, the lists as wide as the panel, their rows inset)
 // - Staged Changes, while any is staged: what the next commit records, each line's Unstage under the pointer;
 // - Changes: what changed in the working tree, a row for each track (the master, the song's own), each with its icon, what
 //   changed in it, and its letter at its end as git marks it, U untracked, A added, M modified, D deleted (its name struck
@@ -20,6 +22,9 @@
 #include "model/project/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
 #include "services/Settings.h"
+#include "ui/components/ListRowHover.h"
+#include "ui/components/SectionHeader.h"
+#include "ui/components/ViewTitle.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
 
@@ -98,25 +103,24 @@ private:
     class HistoryModel;
     class MessageField;
     class BranchButton;
-    class Section;
-    struct RowHover;
 
     CommandBridge& commands;
     ProjectContext& context;
     Settings& settings;
 
-    juce::Label title, emptyText, roomText;
+    ViewTitle title { "Source Control" }; // with the view's menu
+    juce::Label emptyText, roomText;
     std::unique_ptr<BranchButton> branchButton;
     IconButton moreButton { "More Actions", Icon::moreActions };
     std::unique_ptr<MessageField> messageField;
     IconButton saveButton { "Commit", Icon::check }, saveMenuButton { "Commit's choices", Icon::expanded };
-    std::unique_ptr<Section> stagedSection, changesSection, historySection;
+    std::unique_ptr<SectionHeader> stagedSection, changesSection, historySection;
     juce::TextButton doneButton;                // from another commit's differences back to the changes
     juce::TextButton mergeButton, cancelButton; // a merge's list's
     std::unique_ptr<ChangesModel> stagedModel, changesModel;
     std::unique_ptr<HistoryModel> historyModel;
     juce::ListBox stagedList, changesList, historyList;
-    std::unique_ptr<RowHover> stagedHover, changesHover;
+    std::unique_ptr<ListRowHover> stagedHover, changesHover;
 
     Lines lines = Lines::changes;
     std::vector<VersionChange> staged, changes;

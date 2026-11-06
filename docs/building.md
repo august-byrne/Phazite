@@ -111,8 +111,8 @@ Configure has worked when its last line is `-- Build files have been written to:
 
 Start it from File Explorer or PowerShell, or with F5 in [VS Code](../CONTRIBUTING.md#vs-code). The Welcome window opens at the first start, and the README's [First steps](../README.md#first-steps) say what to try. Your settings (audio and MIDI devices, the plug-in list, the theme and the shortcuts) are kept in `%APPDATA%\Phazite\Phazite.settings`.
 
-- **Sound:** Phazite opens your default audio output. With an audio interface, choose **ASIO**® under **Options > Audio Settings** for the lowest delay; without an ASIO driver, [FlexASIO](https://github.com/dechamps/FlexASIO) (MIT) gives you one that plays through Windows' normal audio. Audio inputs are off until you turn them on there.
-- **Plug-ins:** **Options > Scan for Plug-ins** scans the standard VST3 folders. The scan runs in Phazite's helper program (`PhaziteHost`, next to the app), a file at a time with a time limit for each, so a plug-in that crashes or hangs while being scanned doesn't take Phazite down; plug-ins play in helpers too. With no plug-ins installed, `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT to try it with.
+- **Sound:** Phazite opens your default audio output. With an audio interface, choose **ASIO**® under **Audio Settings** (in the menu of the gear at the bottom left) for the lowest delay; without an ASIO driver, [FlexASIO](https://github.com/dechamps/FlexASIO) (MIT) gives you one that plays through Windows' normal audio. Audio inputs are off until you turn them on there.
+- **Plug-ins:** **Scan for Plug-ins** (in the gear's menu) scans the standard VST3 folders. The scan runs in Phazite's helper program (`PhaziteHost`, next to the app), a file at a time with a time limit for each, so a plug-in that crashes or hangs while being scanned doesn't take Phazite down; plug-ins play in helpers too. With no plug-ins installed, `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT to try it with.
 - **Crashes:** a crash leaves `Phazite.exe.<number>.dmp` in `%LOCALAPPDATA%\CrashDumps`. Only `windows-profile` and `windows-debug` builds have the symbols that make one readable. A dump holds Phazite's whole memory, so never attach one to a public issue: describe what you did instead.
 
 ## Troubleshooting
@@ -127,7 +127,7 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](../CONTRIBUTI
 | `fatal error C1081` (file name too long) | The repository path is too long: clone again into a short one such as `C:\src\Phazite`. |
 | `LNK1104` on `Phazite.exe` | Phazite or a debug session is still running. Close it and build again. |
 | Errors after a Build Tools update (new MSVC) or a toolchain change | Run `cmake --preset <preset> --fresh` (the setup script prints this when MSVC changes). If it still fails, delete `build\<preset>` and configure again. |
-| No sound | Choose an output in **Options > Audio Settings**. |
+| No sound | Choose an output in **Audio Settings**, in the menu of the gear at the bottom left. |
 | A message from `pre-commit` or `pre-push` | See [the git hooks](../CONTRIBUTING.md#when-a-hook-stops-you) in CONTRIBUTING.md. |
 | Anything else | The first line containing `error`, `fatal` or `FAILED` usually names the cause. If you're stuck, [open an issue](https://github.com/august-byrne/Phazite/issues) with that line and the command you ran. |
 

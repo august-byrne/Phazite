@@ -805,7 +805,10 @@ void toggleClipsMuted (Song& song, const std::vector<ClipID>& clips)
         {
             if (auto clipState = findClipState (song, id); clipState.isValid())
             {
-                clipState.setProperty (schema::clipMute, on, &song.getUndoManager());
+                if (on) // off is no property at all, as it is at first
+                    clipState.setProperty (schema::clipMute, true, &song.getUndoManager());
+                else
+                    clipState.removeProperty (schema::clipMute, &song.getUndoManager());
             }
         });
 }

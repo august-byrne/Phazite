@@ -8,23 +8,30 @@ namespace phazite::ui
 namespace
 {
     constexpr std::array<Panel, 4> allPanels { Panel::left, Panel::song, Panel::editor, Panel::inspector };
-
-    Icon getHideIcon (Panel panel)
-    {
-        switch (panel)
-        {
-            case Panel::left:
-                return Icon::hidePanelLeft;
-            case Panel::song:
-                return Icon::hidePanelTop;
-            case Panel::editor:
-                return Icon::hidePanelBottom;
-            case Panel::inspector:
-            default:
-                return Icon::hidePanelRight;
-        }
-    }
 } // namespace
+
+juce::String getLeftViewKey (LeftView view)
+{
+    switch (view)
+    {
+        case LeftView::project:
+            return "project";
+        case LeftView::versions:
+            return "versions";
+        case LeftView::browser:
+        default:
+            return "browser";
+    }
+}
+
+std::optional<LeftView> findLeftViewByKey (const juce::String& key)
+{
+    for (const auto view : { LeftView::browser, LeftView::project, LeftView::versions })
+        if (getLeftViewKey (view) == key)
+            return view;
+
+    return std::nullopt;
+}
 
 juce::String getPanelKey (Panel panel)
 {
@@ -246,9 +253,9 @@ juce::String PanelLayout::toText() const
     if (maximized.has_value())
         text << " maximized=" << getPanelKey (*maximized);
 
-    text << " left=" << leftWidth << " leftView=" << (leftView == LeftView::versions ? "versions" : "browser")
-         << " inspector=" << inspectorWidth << " editor=" << juce::String (editorShare, 3)
-         << " upperSplit=" << juce::String (rowShares[0], 3) << " lowerSplit=" << juce::String (rowShares[1], 3);
+    text << " left=" << leftWidth << " leftView=" << getLeftViewKey (leftView) << " inspector=" << inspectorWidth
+         << " editor=" << juce::String (editorShare, 3) << " upperSplit=" << juce::String (rowShares[0], 3)
+         << " lowerSplit=" << juce::String (rowShares[1], 3);
     return text;
 }
 
@@ -280,9 +287,9 @@ void PanelLayout::setFromText (const juce::String& text)
         {
             leftWidth = juce::jlimit (Shell::minimumLeftPanelWidth, Shell::maximumLeftPanelWidth, value.getIntValue());
         }
-        else if (key == "leftView" && (value == "browser" || value == "versions"))
+        else if (key == "leftView")
         {
-            leftView = value == "versions" ? LeftView::versions : LeftView::browser;
+            leftView = findLeftViewByKey (value).value_or (leftView);
         }
         else if (key == "inspector" && value.getIntValue() > 0)
         {
@@ -311,7 +318,7 @@ PanelButtons::PanelButtons (CommandBridge& bridge, Panel shownPanel)
       panel (shownPanel),
       maximizeButton ("Maximize", Icon::maximizePanel),
       detachButton ("Its own window", Icon::detach),
-      hideButton ("Hide", getHideIcon (shownPanel))
+      hideButton ("Hide", Icon::close) // VS Code's X, which hides its panel
 {
     setTitle ("Panel buttons");
     maximizeButton.onClick = [this] { commands.invoke (getPanelCommandID ("maximize", panel)); };
@@ -325,7 +332,6 @@ PanelButtons::PanelButtons (CommandBridge& bridge, Panel shownPanel)
         addAndMakeVisible (button);
     }
 
-    detachButton.setVisible (panel != Panel::song);
     refreshTooltips();
 }
 
@@ -361,17 +367,13 @@ void PanelButtons::refreshTooltips()
                                                + " to a window of its own, for example on a second monitor. Close that "
                                                  "window to put it back",
                                            getPanelCommandID ("detach", panel)));
-    hideButton.setTooltip (withShortcut (commands,
-                                         panel == Panel::song
-                                             ? juce::String ("Hides the upper panel: the lower panel takes its place. The Layout "
-                                                             "menu at the top of the window shows it again")
-                                             : "Hides " + name + ". Its switch at the top of the window shows it again",
+    hideButton.setTooltip (withShortcut (commands, "Hides " + name + ". Its switch at the top of the window shows it again",
                                          getPanelCommandID ("toggle", panel)));
 }
 
 int PanelButtons::getPreferredWidth() const noexcept
 {
-    return Shell::getPanelCornerWidth (panel == Panel::song ? 2 : 3) - Space::xs / 2; // its margin from the panel's edge aside
+    return Shell::getPanelCornerWidth (Shell::panelCornerButtons) - Space::xs / 2; // its margin from the panel's edge aside
 }
 
 void PanelButtons::resized()
@@ -415,6 +417,20 @@ void PanelDivider::mouseDrag (const juce::MouseEvent& e)
 {
     if (onDrag != nullptr)
         onDrag (betweenColumns ? e.getScreenX() - e.getMouseDownScreenX() : e.getScreenY() - e.getMouseDownScreenY()); // it moves meanwhile
+}
+
+void PanelDivider::mouseUp (const juce::MouseEvent&)
+{
+    repaint();
+
+    if (onDragEnd != nullptr)
+        onDragEnd();
+}
+
+void PanelDivider::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onDoubleClick != nullptr)
+        onDoubleClick();
 }
 
 //==============================================================================

@@ -166,7 +166,7 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle)
     keyPart = &shownKey;
 
     const auto width = std::max (260, shownCharacters.getPreferredWidth());
-    setParts ({ { { "Character", &shownCharacters, width, controlHeight, controlHeight }, { "Curve", &shownCurve, width, 300, 160, true } },
+    setParts ({ { { "Character", &shownCharacters, width, controlHeight, controlHeight }, { "Curve", &shownCurve, width, 300, 150, true } },
                 { timing, gains },
                 { { "Sidechain", &shownKey, shownKey.getPreferredWidth(), cuts.getPreferredHeight(), cuts.getPreferredHeight() } } });
 }

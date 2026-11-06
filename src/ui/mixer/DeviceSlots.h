@@ -81,7 +81,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection changed
 };
 
-// What an effect dragged by its name carries, from a mixer slot or a card in the Devices view, which a drop among its
+// What an effect dragged by its name carries, from a mixer slot or a row of the Devices view's stack, which a drop among its
 // neighbours moves it to; and how many places a drop moves it, from where it is in an order to before the device at an
 // insertion index (the order's size: after the last), 0 for none.
 juce::var describeEffectDrag (DeviceID);

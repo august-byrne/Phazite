@@ -72,7 +72,11 @@ public:
         glide,
         bendRange,
         velocity,
-        level
+        level,
+        filterOn, // the parts that switch on and off: the filter and its envelope, at first on; the LFO and the unison, off
+        filterEnvelopeOn,
+        lfoOn,
+        unisonOn
     };
 
     enum class LfoTarget

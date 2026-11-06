@@ -12,8 +12,10 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/components/PeakBar.h"
 #include "ui/components/TrackSwitch.h"
 #include "ui/components/ValueText.h"
+#include "ui/theme/DesignTokens.h"
 
 TEST_CASE ("A slider linked to a track's volume sets it, one undo step per change")
 {
@@ -143,6 +145,53 @@ TEST_CASE ("A level meter repaints only while what it shows moves: a silent one 
     CHECK_FALSE (window.takeRepaintedArea().isEmpty());
     tick (30);
     CHECK (window.takeRepaintedArea().isEmpty());
+}
+
+TEST_CASE ("A track's peak bar shows its louder channel at once, falls 20 dB in half a second, and lights a clip for two seconds")
+{
+    phazite::engine::LevelMeter measured;
+    phazite::ui::PeakBar bar;
+    bar.setSource (phazite::makeLevelSource ([&measured] { return &measured; }));
+    phazite::test::TestWindow window (bar, phazite::ui::PeakBarTint::width, 60);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+    const auto tick = [&ticker] (int times)
+    {
+        for (int i = 0; i < times; ++i)
+            ticker->tickNow();
+    };
+
+    const auto play = [&measured] (float left, float right)
+    {
+        juce::AudioBuffer<float> sound (2, 480);
+        juce::FloatVectorOperations::fill (sound.getWritePointer (0), left, 480);
+        juce::FloatVectorOperations::fill (sound.getWritePointer (1), right, 480);
+        measured.measure (sound.getArrayOfReadPointers(), 2, 480);
+    };
+
+    // Silence, however long it shows: nothing repaints. It never takes a click: the header has them.
+    tick (1);
+    window.takeRepaintedArea();
+    tick (30);
+    CHECK (window.takeRepaintedArea().isEmpty());
+    CHECK_FALSE (bar.hitTest (2, 30));
+
+    // A sound: the louder channel shows at once, then falls 20 dB in half a second, repainting as it goes.
+    play (0.5f, 0.1f);
+    tick (1);
+    CHECK (bar.getLevel() == doctest::Approx (juce::Decibels::gainToDecibels (0.5f)).epsilon (0.01));
+    CHECK_FALSE (window.takeRepaintedArea().isEmpty());
+    tick (phazite::ui::DisplayTicker::ticksPerSecond / 2);
+    CHECK (bar.getLevel() == doctest::Approx (juce::Decibels::gainToDecibels (0.5f) - 20.0f).epsilon (0.02));
+
+    // Over 0 dB: its top lights, for two seconds from the last clip, and goes out by itself.
+    play (1.5f, 0.0f);
+    tick (1);
+    CHECK (bar.isClipLit());
+    tick (2 * phazite::ui::DisplayTicker::ticksPerSecond - 2);
+    CHECK (bar.isClipLit());
+    tick (2);
+    CHECK_FALSE (bar.isClipLit());
+    CHECK_FALSE (bar.hitTest (2, 1));
 }
 
 TEST_CASE ("A track's one switch mutes it with a click and solos it with a right-click, each leaving the other as it is")

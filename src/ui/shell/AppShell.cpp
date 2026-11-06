@@ -76,6 +76,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
       titleBar (bridge),
       topBar (bridge, keyboard, context),
       browser (library, previewer, pack, s, context),
+      projectView (bridge, context),
       versionsView (bridge, context, s),
       playlist (bridge, context),
       inspector (bridge, context),
@@ -155,21 +156,23 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     { browser.showDevicePresetMenu (device, name, target); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &titleBar, &topBar, &activityBar, &leftPanel, &leftDivider, &centre,
-                                                             &inspectorDivider, &inspector, &statusBar, &leftButtons, &inspectorButtons })
+                                                             &inspectorDivider, &inspector, &statusBar })
         addAndMakeVisible (c);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &upperRow, &editorDivider, &lowerRow, &songButtons, &editorButtons })
+    for (auto* c : std::initializer_list<juce::Component*> { &upperRow, &editorDivider, &lowerRow, &editorButtons })
         centre.addAndMakeVisible (c);
 
     centre.onResize = [this] { layOutCentre(); };
 
-    // Dragged, the dividers size the panels beside them.
-    leftDivider.onDragStart = [this] { sizeAtDragStart = leftPanel.getWidth(); };
-    leftDivider.onDrag = [this] (int distance) { dragDivider (Panel::left, distance); };
-    inspectorDivider.onDragStart = [this] { sizeAtDragStart = inspector.getWidth(); };
-    inspectorDivider.onDrag = [this] (int distance) { dragDivider (Panel::inspector, distance); };
-    editorDivider.onDragStart = [this] { sizeAtDragStart = lowerRow.getHeight(); };
-    editorDivider.onDrag = [this] (int distance) { dragDivider (Panel::editor, distance); };
+    // Dragged, the dividers size the panels beside them, or close them; double-clicked, they put them back at their sizes.
+    for (const auto& [divider, panel] : { std::pair { &leftDivider, Panel::left }, std::pair { &inspectorDivider, Panel::inspector },
+                                          std::pair { &editorDivider, Panel::editor } })
+    {
+        divider->onDragStart = [this, which = panel] { startDividerDrag (which); };
+        divider->onDrag = [this, which = panel] (int distance) { dragDivider (which, distance); };
+        divider->onDragEnd = [this] { endDividerDrag(); };
+        divider->onDoubleClick = [this, which = panel] { resetPanelSize (which); };
+    }
 
     // Clicking in an editor makes it the one the time line's commands act on; so does the keyboard focus
     // moving into it.
@@ -201,6 +204,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     // How the editors follow playback, as it was left; the panels as they were left, or every panel, and the views where
     // they were left.
     playlist.setScrollingContinuously (settings.get (Settings::scrollContinuously));
+    playlist.setHeaderWidth (juce::roundToInt (settings.get (Settings::playlistHeaderWidth)));
+    playlist.onHeaderWidthChanged = [this] (int width) { settings.set (Settings::playlistHeaderWidth, (double) width); };
     pianoRoll.setScrollingContinuously (settings.get (Settings::scrollContinuously));
     panels.setFromText (settings.get (Settings::panelLayout));
     upperRow.share = panels.rowShares[0];
@@ -212,6 +217,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
 
 AppShell::~AppShell() // here, where PanelWindow is complete
 {
+    beingDeleted = true;
     engineContext.removeChangeListener (this);
     projectContext.removeListener (this);
     computerKeyboard.onNotePlayed = nullptr; // the keyboard is the main window's, and outlives this
@@ -482,35 +488,41 @@ void AppShell::showLeftView (LeftView view)
 
     updateLayout();
 
-    // Showing a view gives it the keys, as the views in the centre get them.
+    // Showing a view gives it the keys, as the views in the centre get them: the browser's search, the commit's message, or
+    // the project's view itself (its notes are typed into once clicked, so that the keys' shortcuts work on meanwhile).
     if (leftPanel.isShowing())
     {
         if (view == LeftView::versions)
             versionsView.focusMessage();
+        else if (view == LeftView::project)
+            projectView.grabKeyboardFocus();
         else
             browser.focusSearch();
     }
 }
 
-AppShell::LeftPanel::LeftPanel (juce::Component& browserToShow, juce::Component& versionsToShow)
+AppShell::LeftPanel::LeftPanel (juce::Component& browserToShow, juce::Component& projectToShow, juce::Component& versionsToShow)
     : browserView (browserToShow),
+      projectView (projectToShow),
       versionsView (versionsToShow)
 {
     setTitle ("Left panel");
     addChildComponent (browserView);
+    addChildComponent (projectView);
     addChildComponent (versionsView);
 }
 
 void AppShell::LeftPanel::show (LeftView view)
 {
     browserView.setVisible (view == LeftView::browser);
+    projectView.setVisible (view == LeftView::project);
     versionsView.setVisible (view == LeftView::versions);
 }
 
 void AppShell::LeftPanel::resized()
 {
-    browserView.setBounds (getLocalBounds());
-    versionsView.setBounds (getLocalBounds());
+    for (auto* view : { &browserView, &projectView, &versionsView })
+        view->setBounds (getLocalBounds());
 }
 
 void AppShell::showCommandPalette()
@@ -606,7 +618,7 @@ void AppShell::setDetached (Panel which, bool detached)
         window = nullptr; // gives the panel back
         auto& parent = which == Panel::editor ? static_cast<juce::Component&> (centre) : static_cast<juce::Component&> (*this);
         parent.addChildComponent (panel);
-        getButtons (which).toFront (false);
+        editorButtons.toFront (false);
         keepOverlaysInFront();
     }
 
@@ -632,22 +644,6 @@ juce::Component& AppShell::getPanel (Panel which)
         case Panel::editor:
         default:
             return lowerRow;
-    }
-}
-
-PanelButtons& AppShell::getButtons (Panel which)
-{
-    switch (which)
-    {
-        case Panel::left:
-            return leftButtons;
-        case Panel::song:
-            return songButtons;
-        case Panel::inspector:
-            return inspectorButtons;
-        case Panel::editor:
-        default:
-            return editorButtons;
     }
 }
 
@@ -761,17 +757,13 @@ void AppShell::updateLayout()
 
     upperRow.setVisible (songDocked);
     centre.setVisible (centreDocked);
-    leftDivider.setVisible (leftDocked && centreDocked);
-    inspectorDivider.setVisible (inspectorDocked && centreDocked);
-    editorDivider.setVisible (songDocked && editorDocked);
 
-    for (const auto panel : allPanels)
-    {
-        auto& buttons = getButtons (panel);
-        buttons.setVisible (takesRoom (panel));
-        buttons.update (panels);
-    }
-
+    // A divider whose drag closed its panel stays until the drag ends, to open it again.
+    leftDivider.setVisible ((leftDocked || dividerDragged == Panel::left) && centreDocked);
+    inspectorDivider.setVisible ((inspectorDocked || dividerDragged == Panel::inspector) && centreDocked);
+    editorDivider.setVisible ((songDocked && editorDocked) || (centreDocked && dividerDragged == Panel::editor));
+    editorButtons.setVisible (editorDocked);
+    editorButtons.update (panels);
     titleBar.showPanels (panels);
 
     // (A sound the browser previews stops as the browser goes out of sight: Browser::visibilityChanged().)
@@ -780,37 +772,110 @@ void AppShell::updateLayout()
     settings.set (Settings::panelLayout, panels.toText());
 }
 
+void AppShell::startDividerDrag (Panel panel)
+{
+    dividerDragged = panel;
+    panelsAtDragStart = panels;
+    sizeAtDragStart = panel == Panel::left ? leftPanel.getWidth() : panel == Panel::inspector ? inspector.getWidth() : lowerRow.getHeight();
+}
+
 void AppShell::dragDivider (Panel panel, int distance)
 {
     // Where the drag began, moved by the distance, as far as the window has room: the centre keeps its least, and the
-    // panels keep what is shown.
-    const auto roomBeside = [this] (Panel other)
+    // panels keep what is shown. As VS Code's sashes: dragged until the panel would be under half its least, the panel
+    // closes, keeping the size it had for when it opens again (Shell::dividerSnap); dragged back, it opens again.
+    const auto snapsShut = [] (int wanted, int least) { return wanted < juce::roundToInt (least * Shell::dividerSnap); };
+
+    // Closes a panel the drag took past its least (it is shown at the size it had), or opens it again: whether it changed.
+    const auto close = [this] (Panel which, bool shut)
     {
-        const auto otherWidth = panels.takesRoom (other) ? getPanel (other).getWidth() + Shell::dividerSize : 0;
-        return getWidth() - otherWidth - Shell::dividerSize - Shell::minimumCentreWidth;
+        if (shut == ! takesRoom (which))
+            return false;
+
+        if (shut)
+            panels.hide (which);
+        else
+            panels.show (which);
+
+        return true;
     };
 
-    if (panel == Panel::left)
+    if (panel == Panel::left || panel == Panel::inspector)
     {
-        const auto most = juce::jlimit (Shell::minimumLeftPanelWidth, Shell::maximumLeftPanelWidth, roomBeside (Panel::inspector));
-        panels.leftWidth = juce::jlimit (Shell::minimumLeftPanelWidth, most, sizeAtDragStart + distance);
-    }
-    else if (panel == Panel::inspector)
-    {
-        const auto most = juce::jlimit (Shell::minimumInspectorWidth, Shell::maximumInspectorWidth, roomBeside (Panel::left));
-        panels.inspectorWidth = juce::jlimit (Shell::minimumInspectorWidth, most, sizeAtDragStart - distance);
+        const auto isLeft = panel == Panel::left;
+        const auto least = isLeft ? Shell::minimumLeftPanelWidth : Shell::minimumInspectorWidth;
+        const auto wanted = sizeAtDragStart + (isLeft ? distance : -distance);
+        auto& width = isLeft ? panels.leftWidth : panels.inspectorWidth;
+        const auto shut = snapsShut (wanted, least);
+
+        if (shut)
+        {
+            width = isLeft ? panelsAtDragStart.leftWidth : panelsAtDragStart.inspectorWidth;
+        }
+        else
+        {
+            // As far as the window has room beside the other side panel and the centre at its least.
+            const auto other = isLeft ? Panel::inspector : Panel::left;
+            const auto otherWidth = panels.takesRoom (other) ? getPanel (other).getWidth() + Shell::dividerSize : 0;
+            const auto room = getWidth() - otherWidth - Shell::dividerSize - Shell::minimumCentreWidth;
+            const auto most = juce::jlimit (least, isLeft ? Shell::maximumLeftPanelWidth : Shell::maximumInspectorWidth, room);
+            width = juce::jlimit (least, most, wanted);
+        }
+
+        if (close (panel, shut))
+        {
+            updateLayout();
+            return;
+        }
     }
     else if (centre.getHeight() > 0)
     {
+        // The lower panel's height, each panel keeping its least; past either least, that panel closes.
         const auto height = centre.getHeight();
-        const auto most = juce::jmax (Shell::minimumCentreHeight, height - Shell::dividerSize - Shell::minimumCentreHeight);
-        panels.editorShare = juce::jlimit (Shell::minimumEditorShare, Shell::maximumEditorShare,
-                                           juce::jlimit (Shell::minimumCentreHeight, most, sizeAtDragStart - distance) / (double) height);
+        const auto wanted = sizeAtDragStart - distance;
+        const auto lowest = juce::jmax (Shell::minimumCentreHeight, juce::roundToInt (std::ceil (height * Shell::minimumEditorShare)));
+        const auto highest = juce::jmax (lowest, juce::jmin (height - Shell::dividerSize - Shell::minimumCentreHeight,
+                                                             juce::roundToInt (std::floor (height * Shell::maximumEditorShare))));
+        const auto lowerShut = snapsShut (wanted, lowest);
+        const auto upperShut = snapsShut (height - Shell::dividerSize - wanted, height - Shell::dividerSize - highest);
+
+        panels.editorShare = lowerShut || upperShut ? panelsAtDragStart.editorShare
+                                                    : juce::jlimit (Shell::minimumEditorShare, Shell::maximumEditorShare,
+                                                                    juce::jlimit (lowest, highest, wanted) / (double) height);
+
+        // Shown again before the other closes, so that the centre always shows one.
+        auto changed = close (lowerShut ? Panel::song : Panel::editor, false);
+        changed = (lowerShut ? close (Panel::editor, true) : close (Panel::song, upperShut)) || changed;
+
+        if (changed)
+        {
+            updateLayout();
+            return;
+        }
     }
 
     resized();
     layOutCentre();
     settings.set (Settings::panelLayout, panels.toText());
+}
+
+void AppShell::endDividerDrag()
+{
+    // The divider of a panel the drag closed goes with it.
+    dividerDragged.reset();
+    updateLayout();
+}
+
+void AppShell::resetPanelSize (Panel panel)
+{
+    if (panel == Panel::left)
+        panels.leftWidth = Shell::leftPanelWidth;
+    else if (panel == Panel::inspector)
+        panels.inspectorWidth = Shell::inspectorWidth;
+    else
+        panels.editorShare = Shell::editorShare;
+
+    updateLayout();
 }
 
 void AppShell::paint (juce::Graphics& g)
@@ -917,7 +982,11 @@ void AppShell::resized()
     }
     else if (centreDocked)
     {
-        area.removeFromLeft (Shell::cardGap); // the activity bar's card apart from the centre's
+        // The activity bar's card apart from the centre's: the divider there while its drag has closed the panel.
+        const auto gap = area.removeFromLeft (Shell::cardGap);
+
+        if (dividerDragged == Panel::left)
+            leftDivider.setBounds (gap.withWidth (Shell::dividerSize));
     }
 
     if (panels.takesRoom (Panel::inspector))
@@ -926,6 +995,10 @@ void AppShell::resized()
 
         if (centreDocked)
             inspectorDivider.setBounds (area.removeFromRight (Shell::dividerSize));
+    }
+    else if (centreDocked && dividerDragged == Panel::inspector)
+    {
+        inspectorDivider.setBounds (area.removeFromRight (Shell::dividerSize));
     }
 
     if (centreDocked)
@@ -940,6 +1013,33 @@ void AppShell::resized()
     const auto cardWidth = juce::jmin (LessonTint::width + 2 * LessonTint::shadow, getWidth() - 2 * edgeInset);
     const auto cardHeight = lessonCard.getHeightFor (cardWidth);
     lessonCard.setBounds (getWidth() - edgeInset - cardWidth, statusBar.getY() - cardHeight, cardWidth, cardHeight);
+}
+
+std::unique_ptr<juce::ComponentTraverser> AppShell::createKeyboardFocusTraverser()
+{
+    struct Traverser : public juce::KeyboardFocusTraverser
+    {
+        explicit Traverser (AppShell& s)
+            : shell (s)
+        {
+        }
+
+        juce::Component* getDefaultComponent (juce::Component* parent) override
+        {
+            // (Not while the shell's parts are being deleted: a part deleted with the keys asks for this too.)
+            if (parent == &shell && ! shell.beingDeleted)
+                for (auto* view : std::initializer_list<juce::Component*> { shell.getTimelineEditorInUse(), &shell.playlist, &shell.mixer,
+                                                                            &shell.clipEditor.getEditor(), &shell.devices })
+                    if (view != nullptr && view->isShowing() && view->getWantsKeyboardFocus())
+                        return view;
+
+            return juce::KeyboardFocusTraverser::getDefaultComponent (parent);
+        }
+
+        AppShell& shell;
+    };
+
+    return std::make_unique<Traverser> (*this);
 }
 
 juce::Component* AppShell::findLessonTarget (const juce::String& target)
@@ -975,6 +1075,9 @@ void AppShell::layOutCentre()
     auto area = centre.getLocalBounds();
     const auto songDocked = takesRoom (Panel::song), editorDocked = takesRoom (Panel::editor);
 
+    // The divider between them stays, at the edge, while its drag has closed either.
+    const auto keepsDivider = dividerDragged == Panel::editor;
+
     if (songDocked && editorDocked)
     {
         lowerRow.setBounds (area.removeFromBottom (panels.getEditorHeight (area.getHeight())));
@@ -982,7 +1085,14 @@ void AppShell::layOutCentre()
     }
     else if (editorDocked)
     {
+        if (keepsDivider)
+            editorDivider.setBounds (area.removeFromTop (Shell::dividerSize));
+
         lowerRow.setBounds (area);
+    }
+    else if (songDocked && keepsDivider)
+    {
+        editorDivider.setBounds (area.removeFromBottom (Shell::dividerSize));
     }
 
     if (songDocked)
@@ -994,18 +1104,13 @@ void AppShell::layOutCentre()
 
 void AppShell::placePanelButtons()
 {
-    // In each docked panel's top right corner, in its parent's coordinates (the centre's, for the song's views and the
-    // editor dock).
-    for (const auto panel : allPanels)
-    {
-        if (panel != Panel::song && getWindow (panel) != nullptr)
-            continue;
+    // In the lower panel's top right corner while it is docked, in the centre's coordinates.
+    if (editorWindow != nullptr)
+        return;
 
-        auto& buttons = getButtons (panel);
-        const auto bounds = getPanel (panel).getBounds();
-        const auto width = buttons.getPreferredWidth();
-        buttons.setBounds (bounds.getRight() - width - Space::xs, bounds.getY() + Space::xs / 2, width, Shell::panelButtonSize);
-    }
+    const auto bounds = lowerRow.getBounds();
+    const auto width = editorButtons.getPreferredWidth();
+    editorButtons.setBounds (bounds.getRight() - width - Space::xs, bounds.getY() + Space::xs / 2, width, Shell::panelButtonSize);
 }
 
 //==============================================================================
@@ -1050,6 +1155,12 @@ void AppShell::addCommands (CommandRegistry& registry)
     add ("view.browser", "Browser",
          "Shows the browser in the left panel: sounds, instruments, effects and presets; or hides the panel if it shows it.",
          { "library", "sounds", "samples", "plugins", "presets", "sidebar" }, [this] { showLeftView (LeftView::browser); });
+
+    add ("view.project", "Project",
+         "Shows what the project holds in the left panel: its notes, the audio files the song plays and its plug-ins, with any "
+         "that are missing or crashed; or hides the panel if it shows them.",
+         { "notes", "files", "audio files", "missing", "plug-ins used", "pool", "contents", "sidebar" },
+         [this] { showLeftView (LeftView::project); });
 
     add ("view.versions", "Source Control",
          "Shows the project's source control in the left panel: its changes, staged or not, the commit and the graph of its "
@@ -1106,7 +1217,7 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     for (const auto& command :
          { PanelCommands { Panel::left,
-                           "Shows or hides the left panel, with the browser or source control; the icons beside it stay.",
+                           "Shows or hides the left panel, with the browser, the project or source control; the icons beside it stay.",
                            { "browser", "versions", "sidebar", "files", "samples", "plugins", "sounds" } },
            PanelCommands { Panel::song,
                            "Shows or hides the upper panel, by default the playlist and the mixer; the lower panel takes its place.",
@@ -1241,13 +1352,12 @@ void AppShell::refreshShortcutTexts()
     titleBar.refreshTooltips();
     topBar.refreshTooltips();
     activityBar.refreshTooltips();
+    projectView.refreshTooltips();
     versionsView.refreshTooltips();
     for (auto* area : getAreas())
         area->refreshTooltips (commands);
 
-    for (const auto panel : allPanels)
-        getButtons (panel).refreshTooltips();
-
+    editorButtons.refreshTooltips();
     playlist.refreshShortcutTexts();
     pianoRoll.refreshShortcutTexts();
     audioClipEditor.refreshShortcutTexts();

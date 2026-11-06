@@ -63,7 +63,7 @@ namespace
         { .id = "pulseWidth", .name = "Pulse Width", .minimum = 0.05f, .maximum = 0.95f, .defaultValue = 0.5f, .unit = Unit::percent },
         makePercent ("subLevel", "Sub", 0.0f),
         makePercent ("noiseLevel", "Noise", 0.0f),
-        makeChoice ("unisonVoices", "Unison", unisonCounts, 0.0f),
+        makeChoice ("unisonVoices", "Unison", unisonCounts, 2.0f), // three, heard at once, as the unison is switched on
         { .id = "unisonDetune", .name = "Unison Detune", .maximum = 100.0f, .defaultValue = 25.0f, .unit = Unit::cents },
         { .id = "unisonSpread", .name = "Unison Spread", .defaultValue = 0.8f, .unit = Unit::percent },
         makeChoice ("filterType", "Filter Type", dsp::filterModeNames, 0.0f),
@@ -106,7 +106,7 @@ namespace
           .defaultValue = 5.0f,
           .unit = Unit::hertz,
           .midpoint = 1.0f },
-        makePercent ("lfoDepth", "LFO Depth", 0.0f),
+        makePercent ("lfoDepth", "LFO Depth", 0.25f), // heard at once, as the LFO is switched on
         makeChoice ("voiceMode", "Voices", voiceModes, 0.0f),
         { .id = "glide",
           .name = "Glide",
@@ -118,9 +118,13 @@ namespace
         { .id = "bendRange", .name = "Bend Range", .minimum = 0.0f, .maximum = 24.0f, .defaultValue = 2.0f, .unit = Unit::semitones },
         makePercent ("velocity", "Velocity", 0.6f),
         { .id = "level", .name = "Level", .minimum = -36.0f, .maximum = 6.0f, .defaultValue = -6.0f, .unit = Unit::decibels },
+        { .id = "filterOn", .name = "Filter On", .maximum = 1.0f, .defaultValue = 1.0f, .unit = Unit::toggle },
+        { .id = "filterEnvelopeOn", .name = "Filter Envelope On", .maximum = 1.0f, .defaultValue = 1.0f, .unit = Unit::toggle },
+        { .id = "lfoOn", .name = "LFO On", .maximum = 1.0f, .unit = Unit::toggle },
+        { .id = "unisonOn", .name = "Unison On", .maximum = 1.0f, .unit = Unit::toggle },
     };
 
-    static_assert (std::size (parameters) == (size_t) Synth::level + 1);
+    static_assert (std::size (parameters) == (size_t) Synth::unisonOn + 1);
 
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
     constexpr std::uint32_t noiseSeed = 0x51a7e5u, unisonSeed = 0x0715e5u;
@@ -484,7 +488,10 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
     const auto q = 0.5 * std::pow (50.0, (double) values[resonance]); // a 12 dB section's, the synth's own: 0.5, soft, to 25
     const auto outputGain = dsp::decibelsToGain (values[level]);
     const auto lfoAim = choiceOf<LfoTarget> (values[lfoTarget]);
-    const auto depth = std::clamp (values[lfoDepth] + modWheel, 0.0f, 1.0f);
+    // The parts switched off do nothing: the LFO (the mod wheel's depth too), the filter envelope, the unison, the filter.
+    const auto depth = values[lfoOn] > 0.5f ? std::clamp (values[lfoDepth] + modWheel, 0.0f, 1.0f) : 0.0f;
+    const auto envelopeAmount = values[filterEnvelopeOn] > 0.5f ? values[filterEnvelope] : 0.0f;
+    const auto filtered = values[filterOn] > 0.5f;
     const auto lfoWave = choiceOf<dsp::LfoShape> (values[lfoShape]);
     const auto glideSamples = (double) values[glide] * 0.001 * sampleRate;
     const auto bent = bend * values[bendRange];
@@ -493,7 +500,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 
     // Unison: each oscillator's detune (in semitones) and its place between the speakers, spread evenly from one side to
     // the other, at a level that keeps the voice's loudness (each the square root of their number down).
-    const auto numUnison = std::clamp (choiceOf<int> (values[unisonVoices]) + 1, 1, maxUnison);
+    const auto numUnison = values[unisonOn] > 0.5f ? std::clamp (choiceOf<int> (values[unisonVoices]) + 1, 1, maxUnison) : 1;
     const auto stereo = numUnison > 1 && right != nullptr;
     const auto unisonNorm = 1.0f / std::sqrt ((float) numUnison);
     std::array<float, maxUnison> detunes {}, lefts {}, rights {};
@@ -559,8 +566,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
 
             voice.sub.setFrequency (0.5 * frequency, sampleRate);
 
-            const auto moves =
-                values[filterEnvelope] * voice.filterEnvelopeLevel + values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
+            const auto moves = envelopeAmount * voice.filterEnvelopeLevel + values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
             const auto filterFrequency = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
 
             // The same filter on both sides; a comb's delay glides to its new length over the step. Made again only when its
@@ -636,7 +642,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                 if (! stereo)
                 {
                     // One filter, the same sound on both sides, as before unison.
-                    const auto out = voice.filters[0].process (mono) * gain;
+                    const auto out = (filtered ? voice.filters[0].process (mono) : mono) * gain;
                     left[start + i] += out;
 
                     if (right != nullptr)
@@ -645,8 +651,8 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                     continue;
                 }
 
-                left[start + i] += voice.filters[0].process (soundLeft) * gain;
-                right[start + i] += voice.filters[1].process (soundRight) * gain;
+                left[start + i] += (filtered ? voice.filters[0].process (soundLeft) : soundLeft) * gain;
+                right[start + i] += (filtered ? voice.filters[1].process (soundRight) : soundRight) * gain;
             }
 
             if (! voice.amp.isActive())

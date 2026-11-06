@@ -123,7 +123,7 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 }
 
-TEST_CASE ("Each panel hides, and fills the window until the others are restored, from its corner or its commands")
+TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel's; the other panels have no buttons there")
 {
     using phazite::ui::Panel;
     Screen screen;
@@ -136,20 +136,26 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     auto& editor = screen.shell.getPanel (Panel::editor);
     auto& inspector = screen.shell.getPanel (Panel::inspector);
 
-    // The buttons in a panel's top right corner.
-    const auto cornerOf = [&screen] (juce::Component& panel) -> juce::Component&
+    // The buttons in a panel's top right corner: the lower panel's only.
+    const auto cornerOf = [&screen] (juce::Component& panel) -> juce::Component*
     {
         for (auto* buttons : phazite::test::findAll<phazite::ui::PanelButtons> (screen.shell))
             if (buttons->isVisible() && panel.getScreenBounds().contains (buttons->getScreenBounds()))
-                return *buttons;
+                return buttons;
 
-        FAIL ("no buttons in the panel's corner");
-        return panel;
+        return nullptr;
     };
 
-    const auto click = [] (juce::Component& corner, const juce::String& title)
+    for (auto* panel : { &browser, &song, &inspector })
+        CHECK (cornerOf (*panel) == nullptr);
+
+    REQUIRE (cornerOf (editor) != nullptr);
+
+    const auto click = [&cornerOf, &editor] (const juce::String& title)
     {
-        auto* button = phazite::test::findComponentWithTitle (corner, title);
+        auto* corner = cornerOf (editor);
+        REQUIRE (corner != nullptr);
+        auto* button = phazite::test::findComponentWithTitle (*corner, title);
         REQUIRE (button != nullptr);
         phazite::test::Mouse mouse (*button);
         mouse.click (button->getLocalBounds().getCentre());
@@ -159,40 +165,40 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     for (auto* panel : { &browser, &song, &editor, &inspector })
         CHECK (panel->isShowing());
 
-    const auto browserWidth = browser.getWidth(), editorHeight = editor.getHeight();
+    const auto browserWidth = browser.getWidth(), editorHeight = editor.getHeight(), songHeight = song.getHeight();
 
-    // The playlist's Maximize: it fills the window between the bars, the other panels out of sight, and its first button
-    // restores them, as they were.
-    click (cornerOf (song), "Maximize");
+    // Its Maximize: it fills the window between the bars, the other panels out of sight, and its first button restores
+    // them, as they were.
+    click ("Maximize");
     // Beside the activity bar's card, with the cards' gaps from the window's sides and between them.
-    CHECK (song.getWidth() == screen.shell.getWidth() - phazite::ui::Shell::activityBarWidth - 3 * phazite::ui::Shell::cardGap);
+    CHECK (editor.getWidth() == screen.shell.getWidth() - phazite::ui::Shell::activityBarWidth - 3 * phazite::ui::Shell::cardGap);
     CHECK_FALSE (browser.isShowing());
-    CHECK_FALSE (editor.isShowing());
+    CHECK_FALSE (song.isShowing());
     CHECK_FALSE (inspector.isShowing());
-    CHECK (phazite::getCurrentName (*screen.registry.find ("view.maximizeSong")) == juce::String ("Restore the Panels"));
+    CHECK (phazite::getCurrentName (*screen.registry.find ("view.maximizeEditor")) == juce::String ("Restore the Panels"));
     checkPartsApart (screen.shell);
-    click (cornerOf (song), "Restore the panels");
+    click ("Restore the panels");
     CHECK (browser.isShowing());
-    CHECK (editor.isShowing());
+    CHECK (song.isShowing());
     CHECK (inspector.isShowing());
     CHECK (browser.getWidth() == browserWidth);
     CHECK (editor.getHeight() == editorHeight);
 
-    // The inspector's Hide, and its command, which shows it again and names what it does.
-    click (cornerOf (inspector), "Hide");
+    // Its X hides it, giving the upper panel the centre; its command shows it again and names what it does.
+    click ("Hide");
+    CHECK_FALSE (editor.isShowing());
+    CHECK (song.getHeight() > songHeight);
+    CHECK (phazite::getCurrentName (*screen.registry.find ("view.toggleEditor")) == juce::String ("Show the Lower Panel"));
+    REQUIRE (screen.registry.invoke ("view.toggleEditor"));
+    CHECK (editor.isShowing());
+    CHECK (editor.getHeight() == editorHeight);
+
+    // The inspector hides by its command (or its switch in the title bar).
+    REQUIRE (screen.registry.invoke ("view.toggleInspector"));
     CHECK_FALSE (inspector.isShowing());
     CHECK (phazite::getCurrentName (*screen.registry.find ("view.toggleInspector")) == juce::String ("Show the Inspector"));
     REQUIRE (screen.registry.invoke ("view.toggleInspector"));
     CHECK (inspector.isShowing());
-    CHECK (phazite::getCurrentName (*screen.registry.find ("view.toggleInspector")) == juce::String ("Hide the Inspector"));
-
-    // Hiding the playlist gives the editor the centre; Show the Playlist brings it back.
-    click (cornerOf (song), "Hide");
-    CHECK_FALSE (song.isShowing());
-    CHECK (editor.isShowing());
-    CHECK (editor.getHeight() > editorHeight);
-    REQUIRE (screen.registry.invoke ("view.playlist"));
-    CHECK (song.isShowing());
 
     // A divider dragged sizes the left panel, which keeps that width while it hides and shows, in the settings too.
     auto* divider = phazite::test::findComponentWithTitle (screen.shell, "Left panel's edge");
@@ -231,6 +237,106 @@ TEST_CASE ("Each panel hides, and fills the window until the others are restored
     REQUIRE (screen.registry.invoke ("view.maximizePanel"));
     CHECK (screen.shell.getPanelLayout().isMaximized (Panel::song));
     CHECK_FALSE (browser.isShowing());
+}
+
+TEST_CASE ("A divider dragged far enough closes its panel, as VS Code's sashes do, and a double-click puts its size back")
+{
+    using phazite::ui::Panel, phazite::ui::Shell::minimumLeftPanelWidth;
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    phazite::test::settle();
+
+    auto& browser = screen.shell.getPanel (Panel::left);
+    auto& song = screen.shell.getPanel (Panel::song);
+    auto& editor = screen.shell.getPanel (Panel::editor);
+    auto& inspector = screen.shell.getPanel (Panel::inspector);
+    phazite::test::Mouse mouse (screen.shell);
+
+    // A divider by its title, and its middle in the shell (the one over the lower panel is in the centre).
+    const auto findDivider = [&screen] (const char* title)
+    {
+        auto* divider = phazite::test::findComponentWithTitle (screen.shell, title);
+        REQUIRE (divider != nullptr);
+        return divider;
+    };
+
+    const auto middleOf = [&screen] (juce::Component& divider)
+    { return screen.shell.getLocalArea (divider.getParentComponent(), divider.getBounds()).getCentre(); };
+
+    const auto drag = [&mouse] (juce::Point<int> from, std::initializer_list<juce::Point<int>> by, bool release = true)
+    {
+        mouse.press (from);
+
+        for (const auto distance : by)
+            mouse.dragTo (from + distance);
+
+        if (release)
+        {
+            mouse.release();
+            mouse.pause();
+        }
+    };
+
+    // The left panel's edge: dragged until the panel would be under half its least, the panel closes; the edge stays while
+    // the drag goes on, and dragged back, it opens again. Let go there, it stays closed.
+    auto* left = findDivider ("Left panel's edge");
+    const auto width = browser.getWidth();
+    const auto start = middleOf (*left);
+    drag (start, { { -1, 0 }, { minimumLeftPanelWidth / 2 - 4 - width, 0 } }, false);
+    CHECK_FALSE (browser.isShowing());
+    CHECK (left->isShowing());
+    mouse.dragTo (start + juce::Point<int> (-20, 0));
+    CHECK (browser.isShowing());
+    CHECK (browser.getWidth() == width - 20);
+    mouse.dragTo (start + juce::Point<int> (-width, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK_FALSE (browser.isShowing());
+    CHECK_FALSE (left->isVisible());
+
+    // Shown again by its switch, at the width it had before that drag.
+    REQUIRE (screen.registry.invoke ("view.toggleLeftPanel"));
+    CHECK (browser.getWidth() == width);
+
+    // Double-clicked, the edge puts the panel back at the width it starts at.
+    drag (middleOf (*left), { { 1, 0 }, { 40, 0 } });
+    CHECK (browser.getWidth() == width + 40);
+    mouse.doubleClick (middleOf (*left));
+    CHECK (browser.getWidth() == phazite::ui::Shell::leftPanelWidth);
+
+    // The inspector's edge, dragged right past it, closes it.
+    auto* right = findDivider ("Inspector's edge");
+    const auto inspectorWidth = inspector.getWidth();
+    drag (middleOf (*right), { { 1, 0 }, { inspectorWidth, 0 } });
+    CHECK_FALSE (inspector.isShowing());
+    REQUIRE (screen.registry.invoke ("view.toggleInspector"));
+    CHECK (inspector.getWidth() == inspectorWidth);
+
+    // The edge between the upper and lower panels: dragged down, the lower panel closes; dragged on up, past the upper one's
+    // least, the lower one opens again and the upper one closes. Shown again, each has the height it had.
+    auto* between = findDivider ("Editor's edge");
+    const auto editorHeight = editor.getHeight(), songHeight = song.getHeight();
+    const auto middle = middleOf (*between);
+    drag (middle, { { 0, 1 }, { 0, editorHeight } }, false);
+    CHECK_FALSE (editor.isShowing());
+    CHECK (song.isShowing());
+    CHECK (between->isShowing());
+    mouse.dragTo (middle - juce::Point<int> (0, songHeight));
+    CHECK (editor.isShowing());
+    CHECK_FALSE (song.isShowing());
+    mouse.release();
+    mouse.pause();
+    CHECK_FALSE (song.isShowing());
+    REQUIRE (screen.registry.invoke ("view.toggleSong"));
+    CHECK (song.getHeight() == songHeight);
+    CHECK (editor.getHeight() == editorHeight);
+
+    // Double-clicked, it gives the lower panel its first share of the height again.
+    drag (middleOf (*between), { { 0, 1 }, { 0, 30 } });
+    CHECK (editor.getHeight() == editorHeight - 30);
+    mouse.doubleClick (middleOf (*between));
+    CHECK (editor.getHeight() == editorHeight);
 }
 
 TEST_CASE ("The panels are cards, as VS Code's Modern UI's: apart on the window's frame, the activity bar one with the left panel")

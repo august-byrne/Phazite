@@ -133,6 +133,14 @@ TEST_CASE ("The panels' layout goes into the settings as text, and back")
     CHECK_FALSE (read.isShown (Panel::left));
     CHECK (read.leftView == phazite::ui::LeftView::versions);
 
+    // Each of the left panel's views, by its name.
+    for (const auto view : { phazite::ui::LeftView::browser, phazite::ui::LeftView::project, phazite::ui::LeftView::versions })
+    {
+        PanelLayout shown;
+        shown.setFromText ("leftView=" + phazite::ui::getLeftViewKey (view));
+        CHECK (shown.leftView == view);
+    }
+
     // What a text doesn't say, or says wrongly, stays as it was; the centre keeps one of its panels.
     PanelLayout odd;
     odd.setFromText ("shown=leftPanel left=9999 leftView=elsewhere editor=7 maximized=nothing nonsense");

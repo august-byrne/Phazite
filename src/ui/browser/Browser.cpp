@@ -10,9 +10,20 @@ namespace phazite::ui
 namespace
 {
     constexpr int iconSize = 16;
-    constexpr int starWidth = 24;
+    constexpr int starWidth = 22;
     constexpr int statusHeight = 20;
     constexpr int soundViewHeight = 64; // a waveform, and a line of what the sound is
+
+    // How deep a row is: 0 for the first level (the hidden root's rows).
+    int getDepth (const juce::TreeViewItem& item)
+    {
+        auto depth = -1;
+
+        for (auto* parent = item.getParentItem(); parent != nullptr; parent = parent->getParentItem())
+            ++depth;
+
+        return juce::jmax (0, depth);
+    }
 
     Icon getIconFor (const LibraryItem& item)
     {
@@ -46,6 +57,7 @@ struct Browser::Node : public juce::TreeViewItem
     explicit Node (Browser& b)
         : browser (b)
     {
+        setDrawsInLeftMargin (true); // its row's wash, and its levels' guides, from the tree's left edge
     }
 
     virtual juce::String getText() const = 0;
@@ -158,26 +170,47 @@ struct Browser::Node : public juce::TreeViewItem
         const auto& p = getPalette (*owner);
         const auto* item = getItem();
         const auto focused = owner->hasKeyboardFocus (true);
-        auto area = juce::Rectangle<int> (width, height);
+        const auto depth = getDepth (*this);
 
-        // The selected row as VS Code's lists show theirs: in the selection's wash, outlined in the focus colour, while the
-        // tree has the keyboard focus, else in the inactive selection's; its text bright.
+        // The whole row, from the tree's left edge (it draws in its left margin, its own level's indent), as VS Code's rows:
+        // the selected one in the selection's wash, while the tree has the keys, else in the inactive selection's, outlined
+        // in the focus colour while the keys moved to it (not after a click); the one under the pointer in the hover wash.
+        const auto row = juce::Rectangle<int> (-depth * SideBar::indent, 0, width + depth * SideBar::indent, height)
+                             .toFloat()
+                             .reduced (ListRow::inset, 0.0f);
+
         if (isSelected())
         {
-            const auto row = area.toFloat().withTrimmedRight (ListRow::inset);
             g.setColour (focused ? p.selected : p.selectedInactive);
             g.fillRoundedRectangle (row, cornerRadius);
 
-            if (focused)
+            if (focused && browser.keysMovedSelection)
             {
                 g.setColour (p.focus);
                 g.drawRoundedRectangle (row.reduced (0.5f), cornerRadius, 1.0f);
             }
         }
+        else if (getRowNumberInTree() == browser.hoveredRow)
+        {
+            g.setColour (p.hover);
+            g.fillRoundedRectangle (row, cornerRadius);
+        }
+
+        paintGuides (g, depth, height);
 
         const auto textColour = isSelected() ? p.textBright : p.text;
         const auto mutedColour = p.textMuted;
-        area.reduce (Space::xs, 0);
+        auto area = juce::Rectangle<int> (width, height).withTrimmedLeft (SideBar::rowChevron).withTrimmedRight ((int) ListRow::inset);
+
+        // Its chevron, a folder's, pointing down while it is open; a row without one leaves its column empty, so that the
+        // icons of a level line up.
+        const auto chevron = area.removeFromLeft (SideBar::chevronSize).toFloat();
+
+        if (mightContainSubItems())
+            browser.drawIcon (g, isOpen() ? Icon::expanded : Icon::folded,
+                              chevron.withSizeKeepingCentre ((float) SideBar::chevronSize, (float) SideBar::chevronSize), p.text);
+
+        area.removeFromLeft (SideBar::gap);
 
         // Its icon: in the focus colour while it plays.
         if (const auto icon = getIcon())
@@ -185,7 +218,7 @@ struct Browser::Node : public juce::TreeViewItem
             const auto playing = item != nullptr && browser.isPreviewing (*item);
             browser.drawIcon (g, *icon, area.removeFromLeft (iconSize).toFloat().withSizeKeepingCentre ((float) iconSize, (float) iconSize),
                               playing ? p.focus : mutedColour);
-            area.removeFromLeft (Space::s);
+            area.removeFromLeft (SideBar::gap);
         }
 
         if (item != nullptr)
@@ -211,6 +244,32 @@ struct Browser::Node : public juce::TreeViewItem
         g.setFont (juce::FontOptions (TextSize::body));
         g.setColour (canBeSelected() ? textColour : mutedColour);
         g.drawText (getText(), area, juce::Justification::centredLeft, true);
+    }
+
+    // A line down each level the row is in, under the chevron of the folder it is in, as VS Code draws its trees' indent
+    // guides: the selected row's folder's (and an open folder's own, while it is selected) always; the others only while the
+    // pointer is over the tree, fainter.
+    void paintGuides (juce::Graphics& g, int depth, int height)
+    {
+        const auto& p = getPalette (*getOwnerView());
+        auto* selectedRow = getOwnerView()->getSelectedItem (0);
+        const auto* selectedFolder = selectedRow == nullptr                                         ? nullptr
+                                     : selectedRow->isOpen() && selectedRow->mightContainSubItems() ? selectedRow
+                                                                                                    : selectedRow->getParentItem();
+        auto level = depth;
+
+        for (const auto* folder = getParentItem(); folder != nullptr && --level >= 0; folder = folder->getParentItem())
+        {
+            const auto active = folder == selectedFolder;
+
+            if (! active && ! browser.pointerOverTree)
+                continue;
+
+            // In the row's own coordinates, which start at its level's indent.
+            const auto x = SideBar::rowChevron + SideBar::chevronSize / 2 + (level - depth) * SideBar::indent;
+            g.setColour (active ? p.indentGuide : p.indentGuide.withMultipliedAlpha (ListRow::inactiveGuide));
+            g.fillRect (x, 0, 1, height);
+        }
     }
 
     Browser& browser;
@@ -383,6 +442,10 @@ struct Browser::Tree : public juce::TreeView
 
     bool keyPressed (const juce::KeyPress& key) override
     {
+        // The keys in use: the selection's outline shows.
+        if (! std::exchange (browser.keysMovedSelection, true))
+            repaint();
+
         auto* before = dynamic_cast<Node*> (getSelectedItem (0));
 
         // Enter puts an item into the song; on a folder, it opens or closes it.
@@ -423,8 +486,58 @@ struct Browser::Tree : public juce::TreeView
         return true;
     }
 
-    void focusGained (FocusChangeType) override { repaint(); }
+    void focusGained (FocusChangeType cause) override
+    {
+        // Given the keys by the keys (Tab, or Down from the search), the selection's outline shows; by a click, not.
+        if (cause != focusChangedByMouseClick)
+            browser.keysMovedSelection = true;
+
+        repaint();
+    }
+
     void focusLost (FocusChangeType) override { repaint(); }
+
+    Browser& browser;
+};
+
+//==============================================================================
+// Hears the pointer over the tree and its rows: the row it is on, and whether it is over the tree at all; and a press, after
+// which the selection's outline hides until the keys are used again.
+struct Browser::TreeHover : public juce::MouseListener
+{
+    explicit TreeHover (Browser& b)
+        : browser (b)
+    {
+        browser.tree->addMouseListener (this, true);
+    }
+
+    ~TreeHover() override { browser.tree->removeMouseListener (this); }
+
+    void mouseEnter (const juce::MouseEvent& e) override { update (e); }
+    void mouseMove (const juce::MouseEvent& e) override { update (e); }
+    void mouseExit (const juce::MouseEvent& e) override { update (e); }
+
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        if (std::exchange (browser.keysMovedSelection, false))
+            browser.tree->repaint();
+    }
+
+    void update (const juce::MouseEvent& e)
+    {
+        auto& view = *browser.tree;
+        const auto position = e.getEventRelativeTo (&view).getPosition();
+        const auto over = view.getLocalBounds().contains (position) && view.isMouseOver (true);
+        const auto* item = over ? view.getItemAt (position.y) : nullptr;
+        const auto row = item != nullptr ? item->getRowNumberInTree() : -1;
+
+        if (over != browser.pointerOverTree || row != browser.hoveredRow)
+        {
+            browser.pointerOverTree = over;
+            browser.hoveredRow = row;
+            view.repaint();
+        }
+    }
 
     Browser& browser;
 };
@@ -458,9 +571,11 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
         return true;
     };
 
+    // Each level so far in as VS Code's trees; the rows draw their own chevrons, in its sizes (Node::paintItem()).
     tree->setTitle ("Sounds, instruments and effects");
     tree->setRootItemVisible (false);
-    tree->setIndentSize (14);
+    tree->setIndentSize (SideBar::indent);
+    tree->setOpenCloseButtonsVisible (false);
     tree->setDefaultOpenness (false);
     tree->setMultiSelectEnabled (false);
     tree->setColour (juce::TreeView::selectedItemBackgroundColourId, juce::Colours::transparentBlack); // the rows paint it
@@ -490,8 +605,10 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     };
     previewer.setVolume ((float) volumeFader.getValue());
 
-    for (auto* c : std::initializer_list<juce::Component*> { &searchField, tree.get(), &previewButton, &volumeFader })
+    for (auto* c : std::initializer_list<juce::Component*> { &title, &searchField, tree.get(), &previewButton, &volumeFader })
         addAndMakeVisible (c);
+
+    treeHover = std::make_unique<TreeHover> (*this);
 
     addChildComponent (soundView); // while a sound is selected
 
@@ -1128,28 +1245,32 @@ void Browser::paint (juce::Graphics& g)
 
 void Browser::resized()
 {
-    auto area = getLocalBounds().reduced (Space::s);
+    // As VS Code's side bar lays out a view (SideBar): its title; the search in a row of its own, as its search view's field;
+    // the tree as wide as the panel, its rows inset; and the fields and buttons at the foot from the panel's sides.
+    auto area = getLocalBounds();
+    const auto fromSides = [] (juce::Rectangle<int> row)
+    { return row.withTrimmedLeft (SideBar::fieldLeft).withTrimmedRight (SideBar::fieldRight); };
 
-    auto top = area.removeFromTop (controlHeight);
-    top.removeFromRight (Shell::getPanelCornerWidth (3) + Space::xs - Space::s); // the panel's buttons, in its top right corner
-    searchField.setBounds (top);
-    area.removeFromTop (Space::s);
+    title.setBounds (area.removeFromTop (SideBar::titleHeight));
+    const auto search = fromSides (area.removeFromTop (SideBar::inputRowHeight));
+    searchField.setBounds (search.withSizeKeepingCentre (search.getWidth(), SideBar::controlHeight));
 
-    auto footer = area.removeFromBottom (controlHeight);
-    previewButton.setBounds (footer.removeFromLeft (controlHeight));
+    auto footer = fromSides (area.removeFromBottom (SideBar::buttonRowHeight));
+    footer = footer.withSizeKeepingCentre (footer.getWidth(), SideBar::controlHeight);
+    previewButton.setBounds (footer.removeFromLeft (SideBar::controlHeight));
     footer.removeFromLeft (Space::s);
     volumeFader.setBounds (footer);
 
-    statusArea = area.removeFromBottom (statusHeight);
-    area.removeFromBottom (Space::xs);
+    statusArea = fromSides (area.removeFromBottom (statusHeight));
 
     // The sound selected, under the tree, while one is.
     if (soundView.showsSound())
     {
-        soundView.setBounds (area.removeFromBottom (soundViewHeight));
-        area.removeFromBottom (Space::s);
+        area.removeFromBottom (Space::xs);
+        soundView.setBounds (fromSides (area.removeFromBottom (soundViewHeight)));
     }
 
+    area.removeFromBottom (Space::xs);
     tree->setBounds (area);
 }
 

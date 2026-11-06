@@ -16,6 +16,12 @@ class ProjectContext;
 bool isPlaying (const ProjectContext&);
 bool isLoopOn (const ProjectContext&); // the loop button's switch (Playback.h)
 
+// While the playhead is dragged along a ruler, the song is silent: playback pauses where it is (not back where it started,
+// as stopping goes), unless it records, and plays on from where the playhead is let go. pausePlayback() says whether it
+// paused, for resumePlayback() at the drag's end. Neither is an undo step.
+bool pausePlayback (ProjectContext&);
+void resumePlayback (ProjectContext&);
+
 std::optional<TimeSignature> getTimeSignature (const ProjectContext&);
 void setTimeSignature (ProjectContext&, TimeSignature);
 

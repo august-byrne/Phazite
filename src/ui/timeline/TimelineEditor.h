@@ -18,11 +18,11 @@ namespace phazite::ui
 class TimelineEditor;
 
 //==============================================================================
-// The bar numbers above an editor's time line. Clicking or dragging there moves the playhead.
-// The ruler over a time line. Its lane along the top holds the loop, as Logic Pro's cycle strip does: a drag there
-// loops what it covers, a drag on the loop's edges or middle changes or moves it, a click turns looping on or off and
-// a double-click loops the whole song. Ctrl+drag anywhere makes a loop too, as FL Studio's does. Lower down, a click or
-// a drag moves the playhead.
+// The ruler over a time line, with the bar numbers. Its lane along the top holds the loop, as Logic Pro's cycle strip does:
+// a drag there loops what it covers, a drag on the loop's edges or middle changes or moves it, a click turns looping on or
+// off and a double-click loops the whole song. Ctrl+drag anywhere makes a loop too, as FL Studio's does. Lower down, a
+// press takes the playhead there and a drag takes it along; the song is silent meanwhile and plays on from where it is let
+// go, if it played.
 class TimelineRuler : public juce::Component
 {
 public:
@@ -51,8 +51,10 @@ private:
 
     TimelineEditor& editor;
     LoopDrag loopDrag = LoopDrag::none;
-    bool loopDragged = false; // past the threshold: not a click
-    double loopAnchor = 0.0;  // the beat where the press was, snapped
+    bool loopDragged = false;      // past the threshold: not a click
+    bool draggingPlayhead = false; // a press below the loop's lane, until it is let go
+    bool pausedForDrag = false;    // and whether it paused playback, to play on at its end
+    double loopAnchor = 0.0;       // the beat where the press was, snapped
     double loopStartAtPress = 0.0, loopEndAtPress = 0.0;
 
     void movePlayhead (const juce::MouseEvent&);
@@ -221,9 +223,36 @@ protected:
     void updateScrollBar();
     void updateGridControls();
 
+    // The view scrolled or zoomed sideways by the user, as a scroll bar does it: following the playhead pauses (the playlist's
+    // overview of the song does it too).
+    void pauseFollowing();
+
+    // What the editor shows, the whole of it, in miniature along its time bar's top, as FL Studio's playlist and piano roll show it
+    // under their scroll bar there, and code editors' minimaps a file (the owner, 2026-11-06): each mark a clip or a note, from
+    // beat to beat, across a share of its height, in its colour; the part in view a see-through thumb over them, which drags to
+    // scroll the editor, either of its ends to zoom it; a press elsewhere brings that part into view, centred, and drags on from
+    // there; the wheel scrolls. It takes the place of a scroll bar under the editor: the derived class shows it (getOverview()),
+    // hides horizontalScrollBar, and calls overviewContentChanged() when what it gives changes.
+    struct OverviewMark
+    {
+        double start = 0.0, end = 0.0;   // in beats, from the song's start
+        float top = 0.0f, bottom = 1.0f; // its share of the overview's height, from the top
+        juce::Colour colour;
+        bool faint = false; // muted
+    };
+
+    virtual std::vector<OverviewMark> getOverviewMarks() const { return {}; }
+    void overviewContentChanged();
+    juce::Component& getOverview() noexcept;
+    static constexpr int overviewHeight = 20;
+
+    // A scroll bar over what it scrolls, thin and see-through, as FL Studio's are: its colours, again for another theme.
+    static void makeSeeThrough (juce::ScrollBar&);
+
 private:
     struct Playhead;
     struct UseListener;
+    struct Overview;
 
     CommandBridge& commands;
     const GridOwner gridOwner;
@@ -238,14 +267,14 @@ private:
     bool mouseIsDown = false;
     bool followPlayback = true, active = false, scrollContinuously = false;
     bool followPaused = false, playedWhenFollowed = false; // by a scroll while playing; and whether it played last time
-    void pauseFollowing();                                 // the view scrolled sideways by the user
     bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;
     double contentEnd = 0.0;            // in beats, as the scroll bar knows it
     std::optional<BeatRange> shownLoop; // the loop the ruler shows (none while playback doesn't loop), to repaint it on changes
     bool shownPunch = false;            // whether it shows the loop red, Record punching into it (RecordingModel.h)
     double lastAutoScrollTime = 0.0;    // milliseconds (juce::Time::getMillisecondCounterHiRes())
     std::unique_ptr<Playhead> playhead;
-    juce::VBlankAttachment playheadFrames; // while playing where it shows: followPlayhead() at each frame of the display
+    std::unique_ptr<juce::Component> overview; // an Overview (TimelineOverview.cpp), made as the derived class first asks for it
+    juce::VBlankAttachment playheadFrames;     // while playing where it shows: followPlayhead() at each frame of the display
     std::unique_ptr<UseListener> useListener;
 
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;

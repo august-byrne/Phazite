@@ -94,6 +94,44 @@ TEST_CASE ("The piano roll keeps the notes being edited in view while the song p
     CHECK (screen.pianoRoll.isFollowingPlayback());
 }
 
+TEST_CASE ("The piano roll's overview of its notes runs along its time bar's top, and its rows' scroll bar lies thin over the notes")
+{
+    // As the playlist's (the owner, 2026-11-06): FL Studio's scroll bars, see-through, the horizontal one on top over a
+    // miniature of what the editor shows.
+    PianoRollScreen screen;
+    const auto clip = screen.addClip (0, 0.0, 16.0);
+    phazite::addNote (screen.song, clip, 48, beats (0.0), phazite::BeatDuration::fromBeats (1.0), 100);
+    phazite::addNote (screen.song, clip, 84, beats (8.0), phazite::BeatDuration::fromBeats (2.0), 100);
+    screen.select (clip);
+
+    auto* overview = phazite::test::findComponentWithTitle (screen.pianoRoll, "Overview");
+    REQUIRE (overview != nullptr);
+    CHECK (overview->isVisible());
+    CHECK (overview->getBottom() <= screen.notes->getY());
+    CHECK (overview->getX() == screen.notes->getX());
+
+    // No scroll bar under the notes: the overview scrolls them sideways. The rows' bar, while they don't fit, over the notes'
+    // right edge, thin and see-through.
+    for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.pianoRoll))
+    {
+        if (! bar->isVertical())
+        {
+            CHECK_FALSE (bar->isVisible());
+            continue;
+        }
+
+        CHECK (bar->getWidth() == phazite::ui::ScrollTint::overlayWidth);
+        CHECK (bar->getRight() == screen.notes->getRight());
+        CHECK_FALSE (bar->findColour (juce::ScrollBar::trackColourId).isTransparent());
+    }
+
+    // A press on the overview's right end brings the end of the time line into view.
+    const auto before = screen.pianoRoll.getView().start.inBeats();
+    phazite::test::Mouse mouse (*overview);
+    mouse.click ({ overview->getWidth() - 3, overview->getHeight() / 2 });
+    CHECK (screen.pianoRoll.getView().start.inBeats() > before);
+}
+
 TEST_CASE ("A note fills its row from the line above it to the line below it, as tall above its middle as below")
 {
     PianoRollScreen screen;

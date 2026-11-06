@@ -276,7 +276,7 @@ StereoExpanderEditor::StereoExpanderEditor (const DeviceHandle& handle)
     const auto widthPart = makeControlsPart ("Width", { "width", "spread" }, 2, ParameterControls::Size::large);
     const auto rest = makeControlsPart ("Bass and Polarity", { "bassMono", "bassMonoFrequency", "gain", "invertLeft", "invertRight" }, 3,
                                         ParameterControls::Size::compact, { "Bass Mono", "Frequency", "Gain", "Flip Left", "Flip Right" });
-    setParts ({ { { "Image", &shown, 240, 196, 120, true } }, { widthPart }, { rest } });
+    setParts ({ { { "Image", &shown, 240, 196, 120, true, 160 } }, { widthPart }, { rest } });
 }
 
 StereoExpanderEditor::~StereoExpanderEditor() = default;

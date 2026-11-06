@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TransportModel.h"
 #include "internal/Playback.h"
+#include "internal/Recording.h"
 #include "internal/Tempo.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/LiveInput.h"
@@ -19,6 +20,23 @@ bool isLoopOn (const ProjectContext& context)
 {
     auto* song = findSong (context);
     return song != nullptr && isLoopOn (*song);
+}
+
+bool pausePlayback (ProjectContext& context)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr || ! isSongPlaying (*song) || isRecording (*song))
+        return false;
+
+    stopPlaying (*song);
+    return true;
+}
+
+void resumePlayback (ProjectContext& context)
+{
+    if (auto* song = findSong (context); song != nullptr && ! isSongPlaying (*song))
+        playOrPause (*song); // from where the playhead is
 }
 
 std::optional<TimeSignature> getTimeSignature (const ProjectContext& context)

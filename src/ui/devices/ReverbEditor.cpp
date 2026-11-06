@@ -290,7 +290,7 @@ ReverbEditor::ReverbEditor (const DeviceHandle& handle)
 
     const auto space = makeControlsPart ("Space", { "decay", "size" }, 2, ParameterControls::Size::large);
     const auto tone = makeControlsPart ("Tone", { "predelay", "damping", "lowCut", "highCut", "width" }, 5);
-    setParts ({ { { "Decay", &shown, 300, 196, 110, true } }, { space, tone } });
+    setParts ({ { { "Decay", &shown, 300, 196, 110, true, GraphTint::minimumWidth } }, { space, tone } });
 }
 
 ReverbEditor::~ReverbEditor() = default;

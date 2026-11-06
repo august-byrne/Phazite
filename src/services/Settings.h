@@ -93,6 +93,7 @@ public:
     static constexpr ListSetting lessonsDone { "phaziteLessonsDone", SaveTiming::now };       // the lessons finished, by id
     static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon };  // ui/shell/PanelLayout.h
     static constexpr TextSetting viewPlaces { "phaziteViewPlaces", "", SaveTiming::soon };    // ui/shell/Panels.h: ViewPlaces
+    static constexpr NumberSetting playlistHeaderWidth { "phazitePlaylistHeaderWidth", 200.0, SaveTiming::soon }; // ui/playlist/Playlist.h
 
     // Bounce Each Commit, in Commit's menu (ui/versions/VersionsView.h); and Auto Save (File > Auto Save, as VS Code's: a
     // saved project saves itself a moment after each change, app/ProjectSession.h).

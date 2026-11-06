@@ -2,6 +2,7 @@
 #include "TrackHeader.h"
 #include "TrackHeights.h"
 #include "model/mixer/FreezeModel.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -14,6 +15,7 @@ namespace
     constexpr int dragThreshold = 4;      // pixels the mouse moves before a press becomes a drag that moves the tracks
     constexpr float kindIconAlpha = 0.6f; // a folder's or a return's icon is drawn in the header's ink, a little muted
     constexpr float kindIconSize = 14.0f;
+    constexpr int kindIconRoom = 180; // a header narrower than this gives its folder's or return's icon's room to its name
 
     juce::Colour getHeaderTint (const juce::Component& component, juce::Colour colour, bool selected)
     {
@@ -79,7 +81,11 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
     frozenButton.setMouseClickGrabsKeyboardFocus (false);
     frozenButton.onClick = [this] { unfreezeTrack (context, row.id); };
 
-    for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &muteSolo })
+    // How loud it plays now, beside its switch; the master's row only names its lanes, and a plain folder has no sound of its own.
+    if (! isMaster())
+        peak.setSource (getLevel (context, row.id));
+
+    for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &muteSolo, &peak })
         addAndMakeVisible (c);
 
     addChildComponent (frozenButton);
@@ -162,6 +168,7 @@ void TrackHeader::updateColours()
 {
     // Black or white, whichever reads better on the track's color.
     nameLabel.setColour (juce::Label::textColourId, getInkFor (getBackground()));
+    peak.setFillColour (row.colour);
     repaint();
 }
 
@@ -211,7 +218,15 @@ void TrackHeader::paint (juce::Graphics& g)
 
 void TrackHeader::resized()
 {
-    auto area = getLocalBounds().withTrimmedLeft (getTrackStripsWidth (row) + Space::s).withTrimmedRight (Space::xs).withTrimmedBottom (1);
+    // Along the right edge, as tall as the row (above its border), how loud it plays now, as FL Studio shows it: on every row
+    // but the master's, collapsed ones' too.
+    peak.setVisible (! isMaster());
+    peak.setBounds (getLocalBounds().withTrimmedBottom (1).removeFromRight (PeakBarTint::width));
+
+    auto area = getLocalBounds()
+                    .withTrimmedLeft (getTrackStripsWidth (row) + Space::s)
+                    .withTrimmedRight (PeakBarTint::width + Space::xs)
+                    .withTrimmedBottom (1);
     auto top = area.removeFromTop (juce::jmin (area.getHeight(), controlHeight + Space::xs));
 
     // The switches shrink to fit a collapsed row. A row shorter than that has room only for the name. The master's row
@@ -245,7 +260,8 @@ void TrackHeader::resized()
         }
     }
 
-    kindIconArea = kindIcon != nullptr ? top.removeFromLeft ((int) kindIconSize + Space::xs) : juce::Rectangle<int>();
+    kindIconArea =
+        kindIcon != nullptr && getWidth() >= kindIconRoom ? top.removeFromLeft ((int) kindIconSize + Space::xs) : juce::Rectangle<int>();
     nameLabel.setBounds (top);
 
     // Under the name, while the track is armed and has room for it: what it records.

@@ -341,10 +341,23 @@ TEST_CASE ("A built-in device's editor in a window of its own wraps its parts to
             CHECK (editor->getLocalBounds().contains (child->getBounds()));
 }
 
-TEST_CASE ("A built-in device's editor that doesn't wrap keeps its window as wide as it is")
+TEST_CASE ("A built-in device's editor that doesn't wrap narrows its window only as far as its graph narrows, beside its controls")
 {
     Song song (phazite::devices::Equalizer::typeID);
     phazite::ui::DeviceWindowContent content (song.getDevice());
     REQUIRE (content.hasEditor());
-    CHECK (content.getMinimumWidth() == content.getWidth());
+    const auto wide = content.getWidth(), high = content.getHeight();
+    CHECK (content.getMinimumWidth() < wide);
+    CHECK (content.getMinimumWidth() > phazite::ui::GraphTint::minimumWidth);
+
+    // At its least, the graph narrowed beside the band's controls, each whole.
+    phazite::test::TestWindow window (content, wide, high);
+    content.setSize (content.getMinimumWidth(), high);
+    auto* editor = content.getEditor();
+    REQUIRE (editor != nullptr);
+    phazite::test::checkChildrenApart (*editor);
+
+    for (auto* child : editor->getChildren())
+        if (child->isVisible())
+            CHECK (editor->getLocalBounds().contains (child->getBounds()));
 }

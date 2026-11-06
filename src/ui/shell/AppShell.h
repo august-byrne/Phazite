@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The main window's content: the title bar, the transport bar, the activity bar down the left edge and the left panel beside
-// it (the browser or the versions), two areas of views one over the other (by default the playlist and the mixer over the
-// clip editor and the devices), the inspector and the status bar.
+// it (the browser, what the project holds, or the versions), two areas of views one over the other (by default the playlist
+// and the mixer over the clip editor and the devices), the inspector and the status bar.
 #pragma once
 
 #include "ActivityBar.h"
@@ -21,6 +21,7 @@
 #include "ui/mixer/MixerView.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/playlist/Playlist.h"
+#include "ui/project/ProjectView.h"
 #include "ui/theme/Icons.h"
 #include "ui/versions/BranchPicker.h"
 #include "ui/versions/VersionsView.h"
@@ -102,7 +103,15 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    // Where the keys go when what had them hides (a panel hidden with the keys in it): to the editor in use, or another view
+    // that shows, as VS Code gives its editor the keys when its side bar hides; never to the first button of the title bar,
+    // which would show its focus ring.
+    std::unique_ptr<juce::ComponentTraverser> createKeyboardFocusTraverser() override;
+
 private:
+    // Its parts going, one by one (it outlives them all): the keys go nowhere in particular meanwhile.
+    bool beingDeleted = false;
+
     EngineContext& engineContext;
     CommandBridge& commands;
     KeyDispatcher& shortcutKeys; // for the windows of detached panels
@@ -115,20 +124,21 @@ private:
     TitleBar titleBar;
     TopBar topBar;
     Browser browser;
+    ProjectView projectView;
     VersionsView versionsView;
 
-    // The left panel: the browser or the versions, as the activity bar picks (PanelLayout::leftView). What moves to a window
-    // of its own when the panel is detached, with whichever view it shows.
+    // The left panel: the browser, the project's view or the versions, as the activity bar picks (PanelLayout::leftView). What
+    // moves to a window of its own when the panel is detached, with whichever view it shows.
     struct LeftPanel : public juce::Component
     {
-        LeftPanel (juce::Component& browserToShow, juce::Component& versionsToShow);
+        LeftPanel (juce::Component& browserToShow, juce::Component& projectToShow, juce::Component& versionsToShow);
         void show (LeftView);
         void resized() override;
 
-        juce::Component &browserView, &versionsView;
+        juce::Component &browserView, &projectView, &versionsView;
     };
 
-    LeftPanel leftPanel { browser, versionsView };
+    LeftPanel leftPanel { browser, projectView, versionsView };
     Playlist playlist;
     Inspector inspector;
     PianoRoll pianoRoll;
@@ -164,15 +174,17 @@ private:
         }
     };
 
-    // Dragged, they size the panels beside them, which keep those sizes (PanelLayout).
+    // Dragged, they size the panels beside them, which keep those sizes (PanelLayout), or close them, dragged far enough;
+    // double-clicked, the panel is back at the size it starts at.
     PanelDivider leftDivider { "Left panel's edge", true }, inspectorDivider { "Inspector's edge", true },
         editorDivider { "Editor's edge", false };
     Centre centre;
-    int sizeAtDragStart = 0; // of the panel beside the divider dragged
+    std::optional<Panel> dividerDragged; // the panel beside the divider being dragged, which stays while its panel is closed
+    int sizeAtDragStart = 0;             // of that panel
+    PanelLayout panelsAtDragStart;       // their sizes then, which a panel closed by the drag keeps for when it opens
 
-    // In each docked panel's top right corner: Maximize, a window of its own, and Hide.
-    PanelButtons leftButtons { commands, Panel::left }, songButtons { commands, Panel::song }, editorButtons { commands, Panel::editor },
-        inspectorButtons { commands, Panel::inspector };
+    // In the lower panel's top right corner, as in VS Code's panel's: Maximize, a window of its own, and Hide.
+    PanelButtons editorButtons { commands, Panel::editor };
 
     // Over the panels, under the lesson's card: their corners and edges, each a card as VS Code's Modern UI's.
     PanelCards cards;
@@ -182,7 +194,10 @@ private:
 
     void updateLayout(); // after the panels changed: lays them out, and keeps the layout in the settings
     void layOutCentre(); // the song's views over the editor dock
+    void startDividerDrag (Panel);
     void dragDivider (Panel, int distance);
+    void endDividerDrag();
+    void resetPanelSize (Panel); // to the size it starts at: a double-click on its divider
     void togglePanel (Panel);
     void toggleMaximized (Panel);
     void maximizePanelInUse();            // or restores the panels
@@ -222,7 +237,6 @@ private:
     void globalFocusChanged (juce::Component*) override; // makes the editor that has the focus the active one
     void projectChanged() override;                      // stops a preview, which may be in time with the project
 
-    PanelButtons& getButtons (Panel);
     std::unique_ptr<PanelWindow>& getWindow (Panel); // a detachable panel's (not the song's views)
 };
 } // namespace phazite::ui

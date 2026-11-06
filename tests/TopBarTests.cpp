@@ -113,6 +113,19 @@ TEST_CASE ("While the tempo changes, the top bar shows what it stretches, with a
     CHECK_FALSE (patterns->getToggleState());
     CHECK (patterns->getDescription() == juce::String ("It keeps its speed"));
     CHECK_FALSE (phazite::doPatternsFollowTempo (*screen.song));
+
+    // A press anywhere else hides it at once, as a popup goes.
+    phazite::test::Mouse barMouse (screen.topBar);
+    const juce::Point<int> elsewhere (screen.topBar.getWidth() / 2, 2);
+    barMouse.click (elsewhere);
+    CHECK_FALSE (panel->isShowing());
+
+    // A click on the field, to type a tempo, shows it too; a press elsewhere hides it although the field keeps the keys.
+    mouse.click (centre);
+    phazite::test::dispatchPendingMessages();
+    CHECK (panel->isShowing());
+    barMouse.click (elsewhere);
+    CHECK_FALSE (panel->isShowing());
 }
 
 TEST_CASE ("The top bar's tempo field shows the song's tempo, and a drag on it is one undo step")

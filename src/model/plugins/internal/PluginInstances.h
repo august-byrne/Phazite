@@ -117,4 +117,8 @@ private:
 SandboxedInstance* findPluginInstance (const Song&, DeviceID);
 bool hasCrashed (const Song&, DeviceID);
 bool reloadPlugin (Song&, DeviceID, juce::String& error);
+
+// How a song's plug-in plays (PluginInstances::getStatus()), through its session: nothing without one, or for a device
+// that isn't a plug-in.
+std::optional<PluginInstances::Status> getPluginStatus (const Song&, DeviceID);
 } // namespace phazite

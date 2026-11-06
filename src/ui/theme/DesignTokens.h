@@ -38,6 +38,7 @@ struct Palette
     juce::Colour selected;         // a wash behind what is selected, translucent (list.activeSelectionBackground)
     juce::Colour selectedInactive; // the tab that shows, and the activity bar's view (list.inactiveSelectionBackground)
     juce::Colour scrollThumb;      // a scroll bar's thumb, translucent; lighter under the pointer (scrollbarSlider.background)
+    juce::Colour indentGuide;      // a tree's line down each level, under the selection's (tree.indentGuidesStroke)
     juce::Colour warning;          // (list.warningForeground)
     juce::Colour danger;           // (errorForeground)
     juce::Colour loop;             // where playback loops, in the rulers
@@ -70,6 +71,7 @@ inline Palette getPalette (ThemeName theme)
                      .selected = Colour (0x25000000),
                      .selectedInactive = Colour (0xffe7e7e8),
                      .scrollThumb = Colour (0xc0646464),
+                     .indentGuide = Colour (0xffa9a9a9),
                      .warning = Colour (0xff895503),
                      .danger = Colour (0xffad0707),
                      .loop = Colour (0xff1a7f5a),
@@ -95,6 +97,7 @@ inline Palette getPalette (ThemeName theme)
                      .selected = Colour (0x4dffffff),
                      .selectedInactive = Colour (0xff333333),
                      .scrollThumb = Colour (0x99ffffff),
+                     .indentGuide = Colour (0xffe6e6e6),
                      .warning = Colour (0xffffb000),
                      .danger = Colour (0xffff6b6b),
                      .loop = Colour (0xff00ff9c),
@@ -121,6 +124,7 @@ inline Palette getPalette (ThemeName theme)
                      .selected = Colour (0x22ffffff),
                      .selectedInactive = Colour (0xff2c2d2e),
                      .scrollThumb = Colour (0x85a8a9aa),
+                     .indentGuide = Colour (0xff585858),
                      .warning = Colour (0xffe5ba7d),
                      .danger = Colour (0xfff48771),
                      .loop = Colour (0xff3fbf8f),
@@ -162,13 +166,27 @@ inline constexpr float cornerRadius = 4.0f;
 inline constexpr float itemCornerRadius = 6.0f;
 inline constexpr float cardCornerRadius = 8.0f;
 
-// A scroll bar, as VS Code's: so wide, its thumb rounded and no track behind it; the thumb's colour (Palette::scrollThumb) this
-// much more opaque under the pointer and while it is dragged.
+// A scroll bar, as VS Code's Modern UI's: so wide, its thumb rounded and no track behind it; the thumb's colour
+// (Palette::scrollThumb) this much more opaque under the pointer and while it is dragged.
 namespace ScrollTint
 {
-    inline constexpr int width = 10;
+    inline constexpr int width = 8;
     inline constexpr float hoverAlpha = 1.08f, dragAlpha = 1.17f;
+
+    // One over what it scrolls, as the playlist's rows' is (as FL Studio's): thinner, its thumb this much fainter, over a
+    // track in the text colour this opaque.
+    inline constexpr int overlayWidth = 6;
+    inline constexpr float overlayThumb = 0.6f, overlayTrack = 0.06f;
 } // namespace ScrollTint
+
+// The playlist's overview of the whole song (ui/playlist/PlaylistParts.h: Playlist::Overview): its clips this opaque, muted
+// ones this, under the see-through thumb of the part in view, in the text colour this opaque, brighter under the pointer, and
+// its edge.
+namespace OverviewTint
+{
+    inline constexpr float clip = 0.85f, muted = 0.3f;
+    inline constexpr float thumb = 0.12f, thumbLit = 0.2f, thumbEdge = 0.3f;
+} // namespace OverviewTint
 
 // A list's rows, as VS Code's: so tall, and their hover and selection washes inset this far from the list's sides, rounded
 // (cornerRadius).
@@ -176,14 +194,37 @@ namespace ListRow
 {
     inline constexpr int height = 22;
     inline constexpr float inset = 4.0f;
+    inline constexpr float inactiveGuide = 0.4f; // a tree's other indent guides, shown while the pointer is over it (an alpha)
 } // namespace ListRow
 
+// The views of a side panel (the browser, Source Control), as VS Code's Modern UI lays out its side bar's views (docs/
+// vscode-look.md): the title along the top (ui/components/ViewTitle.h), so tall, its name this far from the panel's edge, its
+// actions so big, so far apart and the last so far from the edge; a section's header, as a pane's (the Graph's), so tall, its
+// chevron and its title this far in, under a line inset this far at each end; a tree's rows: the first level's chevron this
+// far in, each level this much further, a chevron so big, and the text (or an icon, then the text) this far after a chevron
+// or an icon, what a heading is about this far after its name; an action on a row or a heading this wide, and a count's
+// badge so tall (ui/components/SectionHeader.h); and the fields and buttons at the top (the commit's message and Commit, the
+// search), this far from the panel's sides, in rows so tall, themselves so tall.
+namespace SideBar
+{
+    inline constexpr int titleHeight = 32, titleInset = 12, titlePadding = 4;
+    inline constexpr int actionSize = 22, actionGap = 4;
+    inline constexpr int paneHeaderHeight = 28, paneChevron = 10, paneText = 28, paneLineInset = 8;
+    inline constexpr int rowChevron = 12, indent = 8, chevronSize = 16, gap = 6, detailGap = 10;
+    inline constexpr int rowActionWidth = 22;
+    inline constexpr float badgeHeight = 16.0f;
+    inline constexpr int fieldLeft = 12, fieldRight = 8;
+    inline constexpr int inputRowHeight = 34, buttonRowHeight = 36, controlHeight = 26;
+} // namespace SideBar
+
 // A view area's tabs (ui/shell/Panels.h), as VS Code's panels' in its Modern UI: pills so tall in the middle of the bar, so far
-// apart, their names this far from their ends.
+// apart, their names this far from their ends. A device editor's pages' tabs (ui/devices/DeviceLayout.h) are the same, smaller.
 namespace TabTint
 {
     inline constexpr float pillHeight = 24.0f, pillInset = 2.0f;
     inline constexpr int textInset = 10;
+    inline constexpr float pagePillHeight = 20.0f;
+    inline constexpr int pageTextInset = 8;
 } // namespace TabTint
 
 // A shortcut's keys as VS Code's command search shows them (drawKeyCaps()): each in a little box with these corners, so tall,
@@ -237,9 +278,15 @@ namespace Shell
 
     inline constexpr int dividerSize = cardGap; // between panels, dragged to size them
     inline constexpr float dividerLit = 0.5f;   // the focus colour's alpha on a divider under the pointer
-    inline constexpr int panelButtonSize = 26;  // in a panel's top right corner: maximize, detach and hide
 
-    // What a panel's buttons take of its top right corner, with their margins, so that what is there leaves them room.
+    // A divider dragged until its panel would be smaller than this part of the least it shrinks to closes the panel, as
+    // VS Code's sashes close its side bar and panel (at half their least); dragged back before the drag ends, it opens again.
+    inline constexpr double dividerSnap = 0.5;
+
+    // The buttons in the lower panel's top right corner: maximize, a window of its own and hide; and what they take of it,
+    // with their margins, so that what is there leaves them room.
+    inline constexpr int panelButtonSize = 26, panelCornerButtons = 3;
+
     constexpr int getPanelCornerWidth (int buttons)
     {
         return buttons * panelButtonSize + buttons * (Space::xs / 2);
@@ -313,14 +360,16 @@ namespace History
     inline constexpr int playWidth = 20;                       // a version's play mark's column, while any has a bounce
     inline constexpr float playSize = 8.0f;
 
-    // As VS Code's Source Control view lays out its parts: the message, at most so many lines tall as it grows; Commit across
-    // the view with its menu's part at its right end; a section's heading (its chevron and its count's badge); and a change's
-    // row: its icon, its name and what changed, its actions under the pointer and its letter (U, A, M, D, C) at its end.
+    // As VS Code's Source Control view lays out its parts (SideBar): the message, at most so many lines tall as it grows;
+    // Commit across the view with its menu's part at its right end; a section's count's badge; and a change's row, one level
+    // into its group: its icon where a chevron would be, its name and what changed after it, its actions under the pointer and
+    // its letter (U, A, M, D, C) at its end, so big.
     inline constexpr int messageLines = 6;
     inline constexpr int saveMenuWidth = 28;
-    inline constexpr float sectionChevronSize = 14.0f, badgeHeight = 16.0f;
     inline constexpr float rowIconSize = 14.0f;
-    inline constexpr int actionWidth = 22, letterWidth = 16;
+    inline constexpr int rowIcon = SideBar::rowChevron + SideBar::indent, rowText = rowIcon + SideBar::chevronSize + SideBar::gap;
+    inline constexpr int actionWidth = SideBar::rowActionWidth, letterWidth = 16;
+    inline constexpr float letterSize = 11.0f;
     inline constexpr float branchBadgeAlpha = 0.25f;      // a branch's color behind its name on its last commit, in the graph
     inline constexpr float strikethroughThickness = 1.0f; // through the name of what was taken away
 } // namespace History
@@ -408,6 +457,7 @@ namespace GraphTint
     inline constexpr float dotRadius = 8.0f;
     inline constexpr int height = 280;
     inline constexpr int minimumHeight = 120;     // the least a graph shrinks to, in a Devices view shorter than its editor
+    inline constexpr int minimumWidth = 200;      // and narrows to, in one narrower, before its editor shows its parts in pages
     inline constexpr float levelDotRadius = 5.0f; // a dot that rides a curve at a level, such as a synth's filter at its cutoff
     inline constexpr float curveWash = 0.15f;     // under a dynamics curve, as Maximus shades it
     inline constexpr float heardWash = 0.55f;     // and up to the level its compressor hears, which moves with the sound
@@ -430,8 +480,16 @@ inline constexpr float attentionTint = 0.2f;
 // hasn't the keyboard focus.
 inline constexpr float selectionWash = 0.3f;
 
-// The playhead's alpha while it shows the notes being edited playing in a linked clip elsewhere in the song, rather
-// than the song's own position.
+// The playhead (ui/timeline/TimelineEditor.h), in the focus colour, VS Code's light blue, so that it is easy to find: a marker
+// at the foot of the ruler, square at the top and coming to a point (its body this tall, its top corners this round), and a
+// line this wide from the point down over the time line; and its alpha while it shows the notes being edited playing in a
+// linked clip elsewhere in the song, rather than the song's own position.
+namespace PlayheadTint
+{
+    inline constexpr int markerWidth = 12, markerHeight = 12;
+    inline constexpr float body = 6.0f, corner = 2.0f, lineWidth = 2.0f;
+} // namespace PlayheadTint
+
 inline constexpr float linkedPlayheadAlpha = 0.5f;
 
 // Track colors are saved in projects, so their palette is in the model: phazite::getTrackColours().
@@ -453,6 +511,15 @@ namespace TrackStrip
     inline constexpr int width = 8;
     inline constexpr int indent = 12;
 } // namespace TrackStrip
+
+// A track's peak bar along its header's right edge (ui/components/PeakBar.h), as FL Studio's playlist shows that a track
+// sounds: so wide, as tall as the row; filled in the track's colour, this much brighter, over a trough of it this opaque; a
+// clip lit at its top this tall, for so many seconds.
+namespace PeakBarTint
+{
+    inline constexpr int width = 4, clipHeight = 3;
+    inline constexpr float brighter = 0.35f, trough = 0.3f, clipSeconds = 2.0f;
+} // namespace PeakBarTint
 
 // Tracks dragged in the playlist: the headers of those that move, this opaque while they move (an alpha); the accent line
 // where they would go, this thick, from a dot this wide at the depth in folders they would go to; and a folder they would
@@ -647,10 +714,11 @@ namespace ViewDropTint
     inline constexpr float line = 2.0f;
 } // namespace ViewDropTint
 
-// A track's mute and solo switch (ui/components/TrackSwitch.h): its light, as a part of the switch's size, with an edge in
-// the background colour that keeps it apart from a track's tinted header, and the ring of a muted one's light (its outline)
-// and of a soloed one's, this far outside it (pixels); and how faint the light is while other tracks' solos silence the
-// track (an alpha). A switch is this large to click, its light smaller.
+// A track's mute and solo switch (ui/components/TrackSwitch.h), and every on/off switch, drawn as it is (PowerSwitch.h):
+// its light, as a part of the switch's size, with an edge in the background colour that keeps it apart from a track's
+// tinted header, and the ring of a muted one's light (its outline, an off switch's too) and of a soloed one's, this far
+// outside it (pixels); and how faint the light is while other tracks' solos silence the track, or a switch is disabled
+// (an alpha). A switch is this large to click, its light smaller.
 namespace SwitchTint
 {
     inline constexpr float light = 0.5f;
@@ -658,6 +726,7 @@ namespace SwitchTint
     inline constexpr float ring = 1.5f, ringGap = 2.0f;
     inline constexpr float silenced = 0.3f;
     inline constexpr int size = 20;
+    inline constexpr float partOff = 0.45f; // a device's part while its switch is off (PowerSwitch.h), faint
 } // namespace SwitchTint
 
 // An audio clip in the playlist while its render is being made (roadmap step 2.18), silent until then: its waveform faint
@@ -692,7 +761,7 @@ namespace WavetableTint
     inline constexpr float dropWash = 0.2f;
     inline constexpr float lineWidth = 1.0f, playedWidth = 2.0f;
     inline constexpr int framesDrawn = 24;
-    inline constexpr int height = 120, minimumHeight = 72;
+    inline constexpr int height = 120, minimumHeight = 44;
 } // namespace WavetableTint
 
 // WCAG 2.2's contrast ratio between two colours, from 1 (none) to 21 (black on white). Text needs at

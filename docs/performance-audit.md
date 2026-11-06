@@ -36,7 +36,7 @@ With a wired output and a smaller buffer ("Windows Audio (Low Latency Mode)", or
 at 128 to 256 samples) it would be about 8 to 15 ms, which feels immediate (an estimate, to be measured).
 
 **What the owner can do today:** plug the headphones' AUX cable into the PC's headphone jack and choose "Speakers /
-Headphones (Realtek Audio)" in **Options > Audio Settings**. Then try "Windows Audio (Low Latency Mode)" there.
+Headphones (Realtek Audio)" in **Audio Settings** (the gear's menu, bottom left). Then try "Windows Audio (Low Latency Mode)" there.
 
 **What Phazite can do** (plan, part C): show each output's real latency, say when an output is Bluetooth, pick a
 low-latency setup on first run, and keep look-ahead devices from delaying what you play.

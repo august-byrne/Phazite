@@ -10,7 +10,6 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr int playheadWidth = 11;           // the marker in the ruler is this wide; the line runs down its middle
     constexpr double wheelNotch = 60.0 / 256.0; // one notch of a mouse wheel, as JUCE reports it on Windows
     constexpr double zoomPerNotch = 1.25;
     constexpr double scrollPerNotch = 48.0; // pixels
@@ -271,10 +270,13 @@ void TimelineRuler::mouseDown (const juce::MouseEvent& e)
     loopDrag = getLoopDragAt (e);
     loopDragged = false;
 
-    // A press below the loop's lane moves the playhead there, once, as in Logic Pro and FL Studio: the song plays on from
-    // there while the button is held or dragged (no scrubbing).
+    // A press below the loop's lane takes the playhead there, and a drag takes it along, snapping to the grid (Alt places it
+    // freely). While it is held the song is silent, paused where it was if it played, and it plays on from where the
+    // playhead is let go.
     if (loopDrag == LoopDrag::none)
     {
+        draggingPlayhead = true;
+        pausedForDrag = pausePlayback (editor.getContext());
         movePlayhead (e);
         return;
     }
@@ -292,6 +294,13 @@ void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu())
         return;
+
+    if (draggingPlayhead)
+    {
+        editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
+        movePlayhead (e);
+        return;
+    }
 
     if (loopDrag == LoopDrag::none)
         return;
@@ -341,6 +350,10 @@ void TimelineRuler::dragLoop (const juce::MouseEvent& e)
 
 void TimelineRuler::mouseUp (const juce::MouseEvent& e)
 {
+    // The playhead let go: the song plays on from there if the press paused it.
+    if (std::exchange (draggingPlayhead, false) && std::exchange (pausedForDrag, false))
+        resumePlayback (editor.getContext());
+
     // A click in the lane, without a drag, turns looping on or off, as Logic Pro's does.
     if (loopDrag != LoopDrag::none && ! loopDragged && ! e.mods.isCommandDown() && ! e.mods.isPopupMenu())
         toggleLoop (editor.getContext());
@@ -369,7 +382,9 @@ void TimelineRuler::movePlayhead (const juce::MouseEvent& e)
 }
 
 //==============================================================================
-// The playhead: a line over the time line, with a marker in the ruler. Clicks go through it.
+// The playhead, in the focus colour so that it is easy to find: a marker at the foot of the ruler pointing down at where
+// playback is, and a line from its point down over the time line (nothing above the marker). Clicks go through it to the
+// ruler, which a drag along moves it.
 struct TimelineEditor::Playhead : public juce::Component
 {
     Playhead()
@@ -393,14 +408,25 @@ struct TimelineEditor::Playhead : public juce::Component
 
     void paint (juce::Graphics& g) override
     {
-        const auto centre = (float) getWidth() / 2.0f;
-        g.setColour (getPalette (*this).text.withMultipliedAlpha (linked ? linkedPlayheadAlpha : 1.0f));
-        g.fillRect (juce::Rectangle<float> (centre - 0.75f, 0.0f, 1.5f, (float) getHeight()));
+        const auto width = (float) getWidth(), centre = width / 2.0f;
+        const auto tip = (float) PlayheadTint::markerHeight, body = PlayheadTint::body, corner = PlayheadTint::corner;
+        g.setColour (getPalette (*this).focus.withMultipliedAlpha (linked ? linkedPlayheadAlpha : 1.0f));
 
-        juce::Path marker; // a triangle pointing down, at the bottom of the ruler
-        marker.addTriangle (0.0f, (float) rulerHeight - 9.0f, (float) getWidth(), (float) rulerHeight - 9.0f, centre,
-                            (float) rulerHeight - 1.0f);
+        // The marker: square at the top, its corners rounded, its sides turning in to the point.
+        juce::Path marker;
+        marker.startNewSubPath (0.0f, body);
+        marker.lineTo (0.0f, corner);
+        marker.quadraticTo (0.0f, 0.0f, corner, 0.0f);
+        marker.lineTo (width - corner, 0.0f);
+        marker.quadraticTo (width, 0.0f, width, corner);
+        marker.lineTo (width, body);
+        marker.lineTo (centre, tip);
+        marker.closeSubPath();
         g.fillPath (marker);
+
+        // The line, from the point down.
+        g.fillRect (juce::Rectangle<float> (centre - PlayheadTint::lineWidth / 2.0f, tip - 1.0f, PlayheadTint::lineWidth,
+                                            (float) getHeight() - tip + 1.0f));
     }
 };
 
@@ -445,6 +471,10 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, 
       playhead (std::make_unique<Playhead>()),
       useListener (std::make_unique<UseListener> (*this))
 {
+    // The editor itself takes the keys it is given (a view's key, or a panel hiding with the keys in it), rather than
+    // passing them to its toolbar's first button, which would show its focus ring.
+    setWantsKeyboardFocus (true);
+
     snapButton.onClick = [this] { commands.invoke ("grid.snap"); };
     gridButton.setTitle ("Grid");
     gridButton.onClick = [this] { showGridMenu(); };
@@ -654,9 +684,13 @@ void TimelineEditor::updatePlayhead()
     playhead->setLinked (linkedBeat.has_value());
     playhead->setVisible (isInView);
 
+    // The marker's point at the foot of the ruler, the line under it.
     if (isInView)
-        playhead->setBounds (area.getX() + juce::roundToInt (x) - playheadWidth / 2, ruler.getY(), playheadWidth,
-                             area.getBottom() - ruler.getY());
+    {
+        const auto top = ruler.getBottom() - PlayheadTint::markerHeight;
+        playhead->setBounds (area.getX() + juce::roundToInt (x) - PlayheadTint::markerWidth / 2, top, PlayheadTint::markerWidth,
+                             area.getBottom() - top);
+    }
 }
 
 void TimelineEditor::updateScrollBar()
@@ -668,6 +702,9 @@ void TimelineEditor::updateScrollBar()
     horizontalScrollBar.setRangeLimits (timeOrigin.inBeats(), total, juce::dontSendNotification);
     horizontalScrollBar.setCurrentRange (view.start.inBeats(), visibleBeats, juce::dontSendNotification);
     horizontalScrollBar.setSingleStepSize (scrollPerNotch / view.pixelsPerBeat);
+
+    if (overview != nullptr)
+        overview->repaint(); // its thumb, where the part in view is now
 }
 
 double TimelineEditor::getWheelNotches (float wheelDelta)

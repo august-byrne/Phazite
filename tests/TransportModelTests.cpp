@@ -79,6 +79,33 @@ TEST_CASE ("The transport's switches and the time signature by the project's con
     setSong (context, nullptr);
 }
 
+TEST_CASE ("A drag of the playhead pauses playback where it is and plays on from where the playhead is let go")
+{
+    auto song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    CHECK_FALSE (phazite::pausePlayback (context)); // no project
+    setSong (context, song.get());
+    song->getUndoManager().clearUndoHistory();
+
+    // Stopped: nothing to pause, and nothing to play on afterwards.
+    CHECK_FALSE (phazite::pausePlayback (context));
+
+    // Playing from beat 2: paused, not back where playback started; the playhead moved meanwhile; then playing on from there.
+    phazite::movePlayhead (*song, phazite::BeatPosition::fromBeats (2.0));
+    phazite::playOrStop (*song);
+    REQUIRE (phazite::isPlaying (context));
+    CHECK (phazite::pausePlayback (context));
+    CHECK_FALSE (phazite::isPlaying (context));
+    phazite::movePlayhead (*song, phazite::BeatPosition::fromBeats (6.0));
+    phazite::resumePlayback (context);
+    CHECK (phazite::isPlaying (context));
+    CHECK (phazite::getPlayheadBeat (*song).inBeats() >= 6.0 - 1.0e-6);
+    CHECK (phazite::getPlayheadBeat (*song).inBeats() < 7.0);
+    phazite::playOrStop (*song);
+    CHECK_FALSE (song->getUndoManager().canUndo()); // none of it an undo step
+    setSong (context, nullptr);
+}
+
 TEST_CASE ("The engine as the UI reaches it: its audio devices, how busy it is, and the MIDI keyboards connected")
 {
     auto& engineContext = phazite::test::getEngineContext();

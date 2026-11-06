@@ -462,13 +462,22 @@ ModulatorEditor::ModulatorEditor (ProjectContext& projectContext, ModulatorID id
     : context (projectContext),
       modulator (id)
 {
-    setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
+    // Clear, over the frosted glass of the pop-up it shows in, as the window's other pop-ups are.
     const auto info = phazite::getModulator (context, modulator);
     const auto name = info.has_value() ? info->name : juce::String ("Modulator");
     setTitle (name);
     title.setText (name, juce::dontSendNotification);
     title.setFont (juce::FontOptions (TextSize::title));
     addAndMakeVisible (title);
+
+    // Its switch: off, it moves nothing, to hear the sound without it. A macro has none.
+    if (info.has_value() && info->type != ModulatorType::macro)
+    {
+        power.setTooltip ("Turns " + name + " on or off, to hear the sound with and without it");
+        power.setToggleState (info->isOn, juce::dontSendNotification);
+        power.onClick = [this] { setModulatorOn (context, modulator, power.getToggleState()); };
+        addAndMakeVisible (power);
+    }
 
     // A macro is a knob; a modulator moves, which its output shows.
     if (info.has_value() && info->type != ModulatorType::macro)
@@ -525,15 +534,12 @@ Knob* ModulatorEditor::findKnob (const juce::String& parameterID) const
     return nullptr;
 }
 
-void ModulatorEditor::paint (juce::Graphics& g)
-{
-    g.fillAll (getPalette (*this).surface);
-}
-
 void ModulatorEditor::resized()
 {
     auto area = getLocalBounds().reduced (Space::m);
-    title.setBounds (area.removeFromTop (titleHeight));
+    auto top = area.removeFromTop (titleHeight);
+    power.setBounds (top.removeFromRight (titleHeight));
+    title.setBounds (top);
 
     for (auto* graph : std::initializer_list<juce::Component*> { scope.get(), steps.get(), breakpoints.get() })
     {
@@ -573,5 +579,8 @@ void ModulatorEditor::refresh()
 
     for (auto* attachment : attachments)
         attachment->update();
+
+    if (power.isVisible())
+        power.setToggleState (isModulatorOn (context, modulator), juce::dontSendNotification);
 }
 } // namespace phazite::ui

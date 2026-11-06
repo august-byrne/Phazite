@@ -169,23 +169,32 @@ SynthEditor::SynthEditor (const DeviceHandle& handle)
         makePicturePart ("Oscillators", oscillatorView, 56, 32,
                          { "osc1Wave", "osc2Wave", "osc2Pitch", "osc2Detune", "oscMix", "pulseWidth", "subLevel", "noiseLevel" }, 4,
                          ParameterControls::Size::compact, { "Osc 1", "Osc 2", "Pitch 2", "Detune 2", "Mix", "Width", "Sub", "Noise" });
-    const auto unison = makeControlsPart ("Unison", { "unisonVoices", "unisonDetune", "unisonSpread" }, 3);
-    const auto voice = makeControlsPart ("Voice", { "voiceMode", "glide", "bendRange", "velocity", "level" }, 3,
+    auto unison = makeControlsPart ("Unison", { "unisonVoices", "unisonDetune", "unisonSpread" }, 3);
+    const auto voice = makeControlsPart ("Voice", { "voiceMode", "glide", "bendRange", "velocity", "level" }, 5,
                                          ParameterControls::Size::compact, { "Mode", "Glide", "Bend", "Velocity", "Level" });
-    const auto filterPart = makePicturePart (
-        "Filter", filterView, 70, 40, { "filterType", "cutoff", "resonance", "filterSlope", "filterEnvelope", "keyTracking" }, 3,
-        ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Slope", "Envelope", "Key" });
-    const auto filterEnvelopePart = makePicturePart (
+    auto filterPart = makePicturePart ("Filter", filterView, 70, 40,
+                                       { "filterType", "cutoff", "resonance", "filterSlope", "filterEnvelope", "keyTracking" }, 3,
+                                       ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Slope", "Envelope", "Key" });
+    auto filterEnvelopePart = makePicturePart (
         "Filter Envelope", filterEnvelopeView, 56, 32,
         { "filterAttack", "filterDecay", "filterSustain", "filterRelease", "filterAttackCurve", "filterDecayCurve", "filterReleaseCurve" },
         4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release", "A Curve", "D Curve", "R Curve" });
     const auto amp =
         makePicturePart ("Amp", ampView, 56, 32, { "attack", "decay", "sustain", "release", "attackCurve", "decayCurve", "releaseCurve" },
                          4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release", "A Curve", "D Curve", "R Curve" });
-    const auto lfoPart = makePicturePart ("LFO", lfoView, 56, 32, { "lfoShape", "lfoRate", "lfoTarget", "lfoDepth" }, 2,
-                                          ParameterControls::Size::compact, { "Shape", "Rate", "Target", "Depth" });
+    auto lfoPart = makePicturePart ("LFO", lfoView, 56, 32, { "lfoShape", "lfoRate", "lfoTarget", "lfoDepth" }, 2,
+                                    ParameterControls::Size::compact, { "Shape", "Rate", "Target", "Depth" });
 
-    setParts ({ { oscillatorsPart, unison, voice }, { filterPart, filterEnvelopePart }, { amp, lfoPart } });
+    // The parts that switch on and off, each by the switch at its title's right end: the filter and its envelope, on at first;
+    // the LFO and the unison, off (the owner, 2026-11-06: not every part need play from the start; they can be switched on).
+    filterPart.titleSwitch = &makePartSwitch ("filterOn", *filterPart.content);
+    filterEnvelopePart.titleSwitch = &makePartSwitch ("filterEnvelopeOn", *filterEnvelopePart.content);
+    lfoPart.titleSwitch = &makePartSwitch ("lfoOn", *lfoPart.content);
+    unison.titleSwitch = &makePartSwitch ("unisonOn", *unison.content);
+
+    // A part to a column, as tall as the dock is short, so that a column never needs tabs: in the dock, two or three side by
+    // side on each page, the sound (the oscillators and filter), then its envelopes, then its LFO and how it plays.
+    setParts ({ { oscillatorsPart }, { filterPart }, { amp }, { filterEnvelopePart }, { lfoPart }, { unison, voice } });
 }
 
 SynthEditor::~SynthEditor() = default;

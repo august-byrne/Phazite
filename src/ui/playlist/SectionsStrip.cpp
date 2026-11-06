@@ -111,11 +111,10 @@ void SectionsStrip::paint (juce::Graphics& g)
     if (sections.empty())
         return; // the hint bar says what to do here
 
-    paintEnergyCurve (g, sections);
-
     const auto clip = g.getClipBounds();
 
-    // Each section a light block in its color, solid where it starts, with its name.
+    // Each section a light block in its color, with its name: no lines (the owner, 2026-11-06), the gap between blocks marks
+    // where one ends.
     for (const auto& section : sections)
     {
         const auto block = getBlockArea (section);
@@ -128,8 +127,6 @@ void SectionsStrip::paint (juce::Graphics& g)
 
         g.setColour (section.colour.withAlpha (selected ? 0.6f : 0.3f));
         g.fillRoundedRectangle (body, corner);
-        g.setColour (section.colour);
-        g.fillRect (body.withWidth (2.0f));
 
         if (selected)
         {
@@ -161,42 +158,6 @@ void SectionsStrip::paint (juce::Graphics& g)
         g.setColour (p.accent);
         g.fillRect (x - 1, 0, 3, getHeight());
     }
-}
-
-void SectionsStrip::paintEnergyCurve (juce::Graphics& g, const std::vector<SongSection>& sections)
-{
-    // A smooth line through each section's energy at its middle, held flat to the outer ends: faint, behind
-    // the names.
-    const auto& p = getPalette (*this);
-    const auto top = 2.0f, bottom = (float) getHeight() - 2.0f;
-    const auto yFor = [=] (const SongSection& section) { return bottom - (bottom - top) * section.energy; };
-
-    juce::Path line;
-    const auto first = getBlockArea (sections.front()).toFloat();
-    line.startNewSubPath (first.getX(), yFor (sections.front()));
-    juce::Point<float> previous (first.getCentreX(), yFor (sections.front()));
-    line.lineTo (previous);
-
-    for (size_t i = 1; i < sections.size(); ++i)
-    {
-        const juce::Point<float> next (getBlockArea (sections[i]).toFloat().getCentreX(), yFor (sections[i]));
-        const auto midX = (previous.x + next.x) / 2.0f;
-        line.cubicTo (midX, previous.y, midX, next.y, next.x, next.y);
-        previous = next;
-    }
-
-    const auto end = (float) getBlockArea (sections.back()).getRight();
-    line.lineTo (end, previous.y);
-
-    auto area = line;
-    area.lineTo (end, bottom + 2.0f);
-    area.lineTo (first.getX(), bottom + 2.0f);
-    area.closeSubPath();
-
-    g.setColour (p.accent.withAlpha (0.08f));
-    g.fillPath (area);
-    g.setColour (p.accent.withAlpha (0.4f));
-    g.strokePath (line, juce::PathStrokeType (1.0f));
 }
 
 //==============================================================================

@@ -396,7 +396,7 @@ void TitleBar::refreshTooltips()
 {
     searchBox->setTooltip (
         withShortcut (commands, "Search commands: find and run any command by typing part of its name", "view.commandPalette"));
-    menuButton.setTooltip (withShortcut (commands, "The menus: File, Edit, Add, View, Options and Help", "view.menus"));
+    menuButton.setTooltip (withShortcut (commands, "The menus: File, Edit, Add, View and Help", "view.menus"));
     layoutButton.setTooltip ("Layout: arrange the panels, show or hide each, or fill the window with one");
 
     for (auto* panelSwitch : { leftSwitch.get(), editorSwitch.get(), inspectorSwitch.get() })

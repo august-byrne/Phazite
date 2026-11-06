@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // One timer for every display that changes while it shows (level meters, and device editors' meters, curves, scopes and
 // knobs' values), rather than one each (docs/performance-audit.md, U5 and section 8): it ticks 30 times a second, and only
-// the displays that show, so that one behind another tab, in a folded card or in a closed window costs nothing; and what
+// the displays that show, so that one behind another tab, of a device not shown or in a closed window costs nothing; and what
 // they repaint is painted together, in one pass of the window.
 #pragma once
 

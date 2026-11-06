@@ -96,16 +96,12 @@ namespace
                 return "maximize-2.svg";
             case Icon::restorePanels:
                 return "minimize-2.svg";
-            case Icon::hidePanelLeft:
-                return "panel-left-close.svg";
-            case Icon::hidePanelTop:
-                return "panel-top-close.svg";
-            case Icon::hidePanelBottom:
-                return "panel-bottom-close.svg";
-            case Icon::hidePanelRight:
-                return "panel-right-close.svg";
             case Icon::library:
                 return "library.svg";
+            case Icon::project:
+                return "clipboard-list.svg";
+            case Icon::reload:
+                return "rotate-cw.svg";
             case Icon::versions:
                 return "git-branch.svg";
             case Icon::account:

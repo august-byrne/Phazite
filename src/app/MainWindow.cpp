@@ -715,7 +715,7 @@ void MainWindow::showPluginList()
 
     pluginListWindow = o.launchAsync();
 
-    // Start a VST3 scan, as "Options... > Scan for new or updated VST3 plug-ins" would.
+    // Start a VST3 scan, as the list's "Options... > Scan for new or updated VST3 plug-ins" would.
     for (auto* format : host.getFormats().getFormats())
         if (format->getName() == "VST3")
             list->scanFor (*format);
@@ -833,8 +833,9 @@ void MainWindow::updateTitle()
 juce::StringArray MainWindow::getMenuBarNames()
 {
     // As in FL Studio, Live and Bitwig: no Track, Song or Transport menu. Their commands are in Add, Edit and
-    // View, as well as on the top bar, the keys, the right-click menus and the command palette.
-    return { "File", "Edit", "Add", "View", "Options", "Help" };
+    // View, as well as on the top bar, the keys, the right-click menus and the command palette. And, as in VS Code, no
+    // Options menu: the settings are in the menu of the gear at the activity bar's foot (ui/shell/ActivityBar.h).
+    return { "File", "Edit", "Add", "View", "Help" };
 }
 
 juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
@@ -937,7 +938,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             // The panels, each shown or hidden, and the two views used most; the rest in a submenu each, every command as
             // it was (and in the command palette, on its keys and in the right-click menus).
             add (menu, { "view.toggleLeftPanel", "view.toggleSong", "view.toggleEditor", "view.toggleInspector" });
-            add (menu, { "view.browser", "view.versions" });
+            add (menu, { "view.browser", "view.project", "view.versions" });
 
             // How the panels sit: one filling the window until the others are restored, one in a window of its own, or
             // a layout of them all.
@@ -988,30 +989,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             break;
         }
 
-        case 4: // Options
-        {
-            add (menu, { "options.settings", "options.audioSettings", "options.midiSettings", "options.keyboardShortcuts",
-                         "options.scanPlugins" });
-            menu.addSeparator();
-            add (menu, { "input.computerKeyboard" });
-            menu.addSeparator();
-
-            juce::PopupMenu keymaps, themes;
-
-            for (const auto* command : commands.getRegistry().getAll())
-            {
-                if (command->id.startsWith ("options.keymap."))
-                    addOne (keymaps, command->id);
-                else if (command->id.startsWith ("options.theme."))
-                    addOne (themes, command->id);
-            }
-
-            menu.addSubMenu ("Keymap", keymaps);
-            menu.addSubMenu ("Theme", themes);
-            break;
-        }
-
-        case 5: // Help: where to find things
+        case 4: // Help: where to find things
             add (menu, { "view.commandPalette", "options.keyboardShortcuts", "view.hoverHelp", "help.guide" });
 
             {

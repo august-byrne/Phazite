@@ -41,6 +41,13 @@ public:
     // selected track if it suits the file, or a new track after it. Returns false if nothing could be added.
     bool placeFile (const juce::File&);
 
+    // How wide the track headers' column is: its right edge drags it, from minHeaderWidth to maxHeaderWidth, and a
+    // double-click on it puts it back, as in Logic Pro and REAPER. The app keeps it in its settings (onHeaderWidthChanged).
+    int getHeaderWidth() const noexcept { return headerWidth; }
+    void setHeaderWidth (int);
+    std::function<void (int)> onHeaderWidthChanged; // as the drag ends
+    static constexpr int defaultHeaderWidth = 200, minHeaderWidth = 150, maxHeaderWidth = 360;
+
     // Adds the playlist's own commands: renaming and coloring tracks, and focus mode. The time line's
     // commands are addTimelineCommands()'s.
     void addCommands (CommandRegistry&);
@@ -56,13 +63,15 @@ public:
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override; // where dragged tracks would go
     void resized() override;
+    void lookAndFeelChanged() override { updateScrollBarColours(); } // another theme: its scroll bar's colours in it
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
-    static constexpr int headerWidth = 200;
+    int headerWidth = defaultHeaderWidth;
     static constexpr double scrollPerNotch = 48.0;
 
     // Its parts (PlaylistParts.h).
+    struct HeaderEdge; // the headers' column's right edge, which drags its width
     struct Lanes;
     struct Gesture;
     struct AddTrackRow;
@@ -111,6 +120,9 @@ private:
     juce::Component headerColumn, pinnedHeaders, scrollingHeaders, headerContent;
     std::unique_ptr<AddTrackRow> addTrackRow;
     std::unique_ptr<Lanes> lanes;
+    std::unique_ptr<HeaderEdge> headerEdge;
+    void keepHeaderWidth();        // tells the app the width the headers' edge was dragged to
+    void updateScrollBarColours(); // the rows' scroll bar's, see-through over the lanes
     juce::Component pinnedClips, scrollingClips;
 
     std::vector<Row> rows;
@@ -246,6 +258,7 @@ private:
 
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;
+    std::vector<OverviewMark> getOverviewMarks() const override; // each track's clips, a row each
     BeatRange getContentRange() const override;
     void timelineChanged() override;
     void toolChanged() override;

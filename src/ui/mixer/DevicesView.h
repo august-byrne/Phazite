@@ -1,21 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Devices view (docs/design.md, section 9; roadmap steps 2.5 and 2.17), the editor dock's Instrument and Effects tabs,
-// which it shows as two pages: the selected track's instrument, apart, and its effects, left to right as the sound goes
-// through them, as Ableton Live's Device View and Bitwig's Device panel show theirs. First, on both, a column with the
-// channel's name and its modulators and macros (the one whose name is clicked opens its editor beside them). The
-// Instrument page shows the instrument as wide as the dock, under a header in the track's colour, its editor wrapping into
-// rows where it is narrower and scrolling up and down, or a button that chooses one. The Effects page shows each effect as
-// a card: folded, narrow, with only what every effect has, one under another (an on/off switch, a chevron, its name: click
-// to select it, right-click for its menu, drag to move it; its sidechain, its mix and its window's button); one at a time
-// opened to its whole editor (a container's macros and devices, cards again; a plug-in's key knobs, its controls being in
-// its own window), so that a long chain stays short. A button after them adds an effect.
+// which it shows as two pages of the selected track's devices. Down its left side, a column with the channel's name, then
+// its devices, then its modulators' and macros' chips (a click on one pops its editor out over the window, beside it). On
+// the Instrument page the column holds the instrument's name, its Presets and its window's button (the owner, 2026-11-06:
+// they took the whole width as a header), or a button that chooses one; on the Effects page, the effects one under
+// another, as FL Studio's mixer stacks its slots, scrolled up and down when they are many (the owner, 2026-11-06: in a row,
+// the more there were, the less room each had): each an on/off switch, its name (click to show it, right-click for its
+// menu, drag to move it) and its mix; the one that shows, its Presets, its window's button and its sidechain under them;
+// a container's devices under it, indented, and a button after them that adds an effect. Beside the column, the whole
+// rest of the dock: the device that shows, whole (one of Phazite's own's editor; a container's macros, beside the editor
+// of the device inside it that shows; a plug-in's key knobs, its own controls being in its window), its editor's graphs
+// narrowing, then its parts in pages where the dock is narrower, so that it shows without scrolling.
 #pragma once
 
 #include "DeviceSlots.h"
 #include "ModulatorSlots.h"
 #include "StripParts.h"
 #include "model/project/ProjectContext.h"
+#include "ui/components/SectionHeader.h"
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -35,16 +39,19 @@ public:
     DevicesView (CommandBridge&, ProjectContext&);
     ~DevicesView() override;
 
-    // Shows a device's channel (MixerModel.h: getDeviceChannel()), with the device in view. Until another device or
-    // track is chosen, it follows the selection: the channel of the device selected, else the selected track's, or the
-    // track live MIDI plays (getInspectedChannel()).
+    // Shows a device's channel (MixerModel.h: getDeviceChannel()) on the device's page, the device beside the column. Until
+    // another device or track is chosen, it follows the selection: the channel of the device selected, else the selected
+    // track's, or the track live MIDI plays (getInspectedChannel()).
     void showDevice (DeviceID);
 
     // The channel shown: a track, or the master (an empty ID); nothing without a project.
     std::optional<TrackID> getChannel() const noexcept { return channel; }
 
-    // A device's panel, or nullptr if it isn't shown; for tests and to scroll to it.
+    // A device's slot in the column, or nullptr if it isn't shown there; for tests.
     juce::Component* findPanel (DeviceID) const;
+
+    // What shows the device beside the column (an editor, a container's macros, a plug-in's key knobs), or nullptr.
+    juce::Component* getShownBody() const;
 
     // The page shown: the instrument, or the effects (the editor dock's tab chooses it); and the one a device is on.
     enum class Page
@@ -57,52 +64,62 @@ public:
     Page getPage() const noexcept { return page; }
     Page getPageOf (DeviceID) const;
 
-    // Whether an effect's card is open, its whole editor showing; opening one folds the others beside it (in its channel,
-    // or in its container). Remembered for the session.
+    // Whether an effect shows beside the column, whole; one does at a time, in its channel (one in a container, beside the
+    // container's macros), remembered for the session. Shown, it opens the containers it is in; and none shows with false.
     bool isOpen (DeviceID) const;
     void setOpen (DeviceID, bool);
 
-    // A device's Presets button, in its header while its card is open (an instrument's always), was clicked: shows its
-    // presets' menu over the button (the app's browser does: Browser::showDevicePresetMenu()).
+    // A device's Presets button, under its name while it shows (an instrument's always), was clicked: shows its presets' menu
+    // over the button (the app's browser does: Browser::showDevicePresetMenu()).
     std::function<void (DeviceID, const juce::String& deviceName, juce::Component& target)> onShowPresets;
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void lookAndFeelChanged() override; // another theme: its colours in it
 
     // While a macro is dragged from a container here, the knobs it could modulate light up (Knob::showModulatorTargets()).
     void dragOperationStarted (const juce::DragAndDropTarget::SourceDetails&) override;
     void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override;
 
-    struct Panel;
-    struct Row;
+    struct Slot;
+    struct Chain;
+    struct Column;
+    struct ContainerFrame;
 
 private:
     CommandBridge& commands;
     ProjectContext& context;
     std::optional<TrackID> channel;
     Page page = Page::effects;
-    std::set<DeviceID> openCards; // one at most among a channel's effects, and one among each container's
-    juce::Label noInstrument;     // why a channel has none, on the Instrument page
+    std::map<TrackID, DeviceID> shownEffects; // the effect each channel shows, remembered for the session
+    std::set<DeviceID> foldedContainers;      // whose devices' slots are hidden under them
 
     juce::Label nameLabel, kindLabel; // the channel's
-    StripHeading modulatorsHeading { "Modulators" };
-    ModulatorSlots modulators;
-    juce::Viewport modulatorsView;
-    std::unique_ptr<juce::Component> modulatorEditor; // the one opened beside the modulators, or nothing
-    juce::Viewport rowView;                           // the devices, sideways
-    std::unique_ptr<Row> instrumentRow, effectsRow;   // each page's, kept while the channel shows, so that a page keeps its state
-    Row* getShownRow() const noexcept { return page == Page::instrument ? instrumentRow.get() : effectsRow.get(); }
+    juce::Viewport columnView;        // the column's devices and modulators, scrolled up and down when they don't fit
+    std::unique_ptr<Column> column;
+    juce::Viewport bodyView; // the device that shows, beside the column
+    std::unique_ptr<juce::Component> body;
+    DeviceID bodyDevice;       // whose it is
+    bool bodyInWindow = false; // what it showed: that the device is in its window,
+    bool bodyFrozen = false;   // that it is frozen
+    juce::Label hint;          // with nothing to show: why, or what to do
 
-    void followSelection(); // shows the channel the selection points to
+    DeviceID getShownDevice() const; // the instrument, or the effect that shows
+    void followSelection();          // shows the channel the selection points to
     void setChannel (std::optional<TrackID>);
-    void showWhyNoInstrument();
+    void refresh();  // the column's slots, and what shows beside it, as the song is now
+    void showBody(); // what shows the shown device, made again if that changed
     void showChannelName();
-    void toggleModulatorEditor (ModulatorID);
-    void layOutRow();
+    void layOutBody();
+    void showMenu (Slot&);
+    void popOut (const DeviceSlot&);
+    void select (const DeviceSlot&, const juce::ModifierKeys&);
+    void showInstrumentButton();
+    bool windowsChanged() const; // a device's window closed by itself since it showed
 
     void projectChanged() override;
     void songChanged (const SongChanges&) override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the selection changed
-    void timerCallback() override;                                   // the knobs' values and the modulators' meters
+    void timerCallback() override;                                   // the knobs' values and the windows
 };
 } // namespace phazite::ui

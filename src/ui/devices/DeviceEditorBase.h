@@ -2,8 +2,8 @@
 // What the editors of Phazite's own devices share (docs/design.md, section 9): their parts in a DeviceLayout (columns of
 // titled parts that stack, or show one at a time under tabs, so that the editor is as wide at any height), the controls of
 // their parameters (ParameterControls), found by ID, and the device's colour (DeviceTint), which their knobs and graphs
-// take. A device's mix, its switch and its sidechain are its card's header's in the Devices view, not its editor's: a window of
-// its own shows the editor, and the card stays, folded, with its header.
+// take. A device's mix, its switch and its sidechain are its row's in the Devices view's column, not its editor's: a window
+// of its own shows the editor, and the row keeps them.
 #pragma once
 
 #include "DeviceEditors.h"
@@ -38,13 +38,16 @@ public:
     int getWidthForHeight (int) const override;
     int getHeightForWidth (int) const override;
     int getMinimumWidth() const override;
+    int getMinimumHeightAtWidth (int) const override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
     void lookAndFeelChanged() override; // another theme: its device's colour in it
 
-    // Its edge, around its parts.
-    static constexpr int margin = Space::s;
+    // Its edge, around its parts: at its sides, and at its top and bottom, less, as the dock is short. And the widest it is at
+    // first, in a window of its own, its parts wrapped into rows where they are wider side by side.
+    static constexpr int margin = Space::s, marginY = Space::xs;
+    static constexpr int maximumWindowWidth = 1096;
 
 protected:
     DeviceHandle device;
@@ -61,6 +64,11 @@ protected:
 
     // A control the editor places itself (a knob in a graph), so that findControl() finds it too.
     void addControl (std::string_view parameterID, juce::Component&);
+
+    // A part's on/off switch, for its title's row (DeviceLayout::Part::titleSwitch): a PowerSwitch attached to the parameter
+    // that switches the part, which shows the part's content faint while it is off, as Serum greys a section that is off.
+    // findControl() finds it by the parameter's ID.
+    juce::Component& makePartSwitch (std::string_view parameterID, juce::Component& partContent);
 
     // A part showing a picture over its controls: the picture as tall as given (shrinking to its least, growing with what the
     // column has to spare), the controls under it at their own size.
@@ -79,7 +87,8 @@ protected:
     }
 
     // Lays the parts out: call once, at the end of the editor's constructor, with the columns that list their parts as side
-    // tabs (DeviceLayout::setSideTabs()). The editor's size is then its width at the height it wants.
+    // tabs (DeviceLayout::setSideTabs()). The editor's size is then its width at the height it wants, at most
+    // maximumWindowWidth wide.
     void setParts (std::vector<DeviceLayout::Column>, std::vector<int> sideTabColumns = {});
 
 private:

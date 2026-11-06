@@ -61,7 +61,7 @@ namespace
 void showInstrumentMenu (ProjectContext& context, TrackID track, juce::Component& target)
 {
     auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, true, "No instrument plug-ins yet: Options > Scan for Plug-ins finds them");
+    auto menu = makeMenu (types, true, "No instrument plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
 
     show (std::move (menu), target, std::move (types),
           [&context, track] (const DeviceType& type) { chooseInstrument (context, track, type); });
@@ -70,7 +70,7 @@ void showInstrumentMenu (ProjectContext& context, TrackID track, juce::Component
 void showEffectMenu (ProjectContext& context, TrackID track, juce::Component& target)
 {
     auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Options > Scan for Plug-ins finds them");
+    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
 
     // Effects change a sound. A track whose notes have no instrument makes none for them to change, so the menu
     // offers the instrument first, and the effects after it.
@@ -95,7 +95,7 @@ void showEffectMenu (ProjectContext& context, TrackID track, juce::Component& ta
 void showReplaceEffectMenu (ProjectContext& context, DeviceID effect, juce::Component& target)
 {
     auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Options > Scan for Plug-ins finds them");
+    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
 
     show (std::move (menu), target, std::move (types),
           [&context, effect] (const DeviceType& type) { replaceEffect (context, effect, type); });
@@ -104,7 +104,7 @@ void showReplaceEffectMenu (ProjectContext& context, DeviceID effect, juce::Comp
 void showNewReturnMenu (ProjectContext& context, TrackID sender, juce::Component& target)
 {
     auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Options > Scan for Plug-ins finds them");
+    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
 
     show (std::move (menu), target, std::move (types),
           [&context, sender] (const DeviceType& type) { addReturnWith (context, sender, type); });
@@ -113,7 +113,7 @@ void showNewReturnMenu (ProjectContext& context, TrackID sender, juce::Component
 void showContainerEffectMenu (ProjectContext& context, DeviceID container, juce::Component& target)
 {
     auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Options > Scan for Plug-ins finds them");
+    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
 
     show (std::move (menu), target, std::move (types),
           [&context, container] (const DeviceType& type) { addEffectToContainer (context, container, type); });

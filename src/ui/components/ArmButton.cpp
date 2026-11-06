@@ -95,7 +95,8 @@ void ArmButton::showMenu()
     menu.addSectionHeader ("Input");
 
     if (inputs.empty())
-        menu.addItem ("No audio inputs: choose an input device and its channels in Options > Audio Settings", false, false, nullptr);
+        menu.addItem ("No audio inputs: choose an input device and its channels in the audio settings (the gear at the bottom left)", false,
+                      false, nullptr);
 
     // Choosing an input arms the track, as choosing one in FL Studio's mixer does.
     for (const auto& input : inputs)

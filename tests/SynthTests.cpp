@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's synth (src/devices/synth/Synth.h): its pitch and velocity, its voices, filter and combs, pitch bend, mono
-// glide and sustain pedal, and that it plays the same every time.
+// Phazite's synth (src/devices/synth/Synth.h): its pitch and velocity, its voices, filter and combs, its parts switched
+// off, pitch bend, mono glide and sustain pedal, and that it plays the same every time.
 #include "TestHelpers.h"
 #include "devices/dsp/Math.h"
 #include "devices/synth/Synth.h"
@@ -159,11 +159,69 @@ TEST_CASE ("The synth's description holds together")
 {
     REQUIRE (devices::isValid (Synth::info));
     CHECK (Synth::info.kind == devices::DeviceKind::instrument);
-    CHECK (Synth::info.parameters.size() == (size_t) Synth::level + 1);
+    CHECK (Synth::info.parameters.size() == (size_t) Synth::unisonOn + 1);
     CHECK (devices::findParameter (Synth::info, "cutoff") == Synth::cutoff);
     CHECK (devices::findParameter (Synth::info, "voiceMode") == Synth::voiceMode);
     CHECK (devices::findParameter (Synth::info, "unisonVoices") == Synth::unisonVoices);
     CHECK (devices::findParameter (Synth::info, "filterSlope") == Synth::filterSlope);
+    CHECK (devices::findParameter (Synth::info, "lfoOn") == Synth::lfoOn);
+
+    // The parts that switch on and off (the owner, 2026-11-06: "the synth instrument doesn't have to have all blocks active
+    // to start out with"): a new synth's filter and its envelope on, its LFO and unison off, each set to be heard as soon as
+    // it is switched on.
+    CHECK (Synth::info.parameters[Synth::filterOn].defaultValue == doctest::Approx (1.0f));
+    CHECK (Synth::info.parameters[Synth::filterEnvelopeOn].defaultValue == doctest::Approx (1.0f));
+    CHECK (Synth::info.parameters[Synth::lfoOn].defaultValue == doctest::Approx (0.0f));
+    CHECK (Synth::info.parameters[Synth::unisonOn].defaultValue == doctest::Approx (0.0f));
+    CHECK (Synth::info.parameters[Synth::lfoDepth].defaultValue > 0.0f);
+    CHECK (Synth::info.parameters[Synth::unisonVoices].defaultValue > 0.0f);
+}
+
+TEST_CASE ("A part of the synth switched off does nothing: its filter, the filter's envelope, its LFO and its unison")
+{
+    const auto playSaw = [] (std::vector<float> values)
+    {
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        return play (synth, values, 24000, { noteOn (0, 69) });
+    };
+
+    // A saw at 440 Hz through a low-pass at 300 Hz.
+    auto values = getSineValues();
+    values[Synth::osc1Wave] = 2.0f; // saw
+    values[Synth::cutoff] = 300.0f;
+    const auto filtered = playSaw (values);
+
+    // The filter off: the whole saw, louder by far.
+    values[Synth::filterOn] = 0.0f;
+    const auto unfiltered = playSaw (values);
+    CHECK (measureLevelAt (unfiltered, 4800, 24000, 440.0) > 2.0 * measureLevelAt (filtered, 4800, 24000, 440.0));
+    values[Synth::filterOn] = 1.0f;
+
+    // Its envelope off: as if it moved the cutoff by nothing, however far it is set to.
+    values[Synth::filterEnvelope] = 48.0f;
+    values[Synth::filterSustain] = 0.0f;
+    const auto swept = playSaw (values);
+    CHECK (swept != filtered);
+    values[Synth::filterEnvelopeOn] = 0.0f;
+    CHECK (playSaw (values) == filtered);
+    values[Synth::filterEnvelopeOn] = 1.0f;
+    values[Synth::filterEnvelope] = 0.0f;
+
+    // The LFO off: its depth moves nothing, as at none.
+    values[Synth::lfoTarget] = 0.0f; // pitch
+    values[Synth::lfoDepth] = 1.0f;
+    values[Synth::lfoOn] = 1.0f;
+    CHECK (playSaw (values) != filtered);
+    values[Synth::lfoOn] = 0.0f;
+    CHECK (playSaw (values) == filtered);
+
+    // The unison off: one voice, however many it is set to.
+    values[Synth::unisonVoices] = 6.0f; // seven
+    values[Synth::unisonOn] = 1.0f;
+    CHECK (playSaw (values) != filtered);
+    values[Synth::unisonOn] = 0.0f;
+    CHECK (playSaw (values) == filtered);
 }
 
 TEST_CASE ("A synth note plays at its pitch, as loud as its velocity says")

@@ -123,7 +123,7 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place) const
         case Kind::effects:
             contents.items =
                 library.listDevices (place.kind == Kind::instruments ? LibraryItem::Kind::instrument : LibraryItem::Kind::effect);
-            hint = "Your plug-ins show here once Options > Scan for Plug-ins has found them";
+            hint = "Your plug-ins show here once Scan for Plug-ins, in the gear's menu at the bottom left, has found them";
             break;
         case Kind::factoryPresets:
             if (place.folder.isDirectory())

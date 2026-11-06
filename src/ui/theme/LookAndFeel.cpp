@@ -392,6 +392,13 @@ void LookAndFeel::drawScrollbar (juce::Graphics& g, juce::ScrollBar& bar, int x,
     if (thumbSize <= 0)
         return;
 
+    // No track behind the thumb, as VS Code's, but where a bar is given one (the playlist's, see-through over its lanes).
+    if (const auto track = bar.findColour (juce::ScrollBar::trackColourId); ! track.isTransparent())
+    {
+        g.setColour (track);
+        g.fillRoundedRectangle (juce::Rectangle<int> (x, y, width, height).toFloat(), cornerRadius);
+    }
+
     const auto thumb =
         isVertical ? juce::Rectangle<int> (x, thumbStart, width, thumbSize) : juce::Rectangle<int> (thumbStart, y, thumbSize, height);
     const auto colour = bar.findColour (juce::ScrollBar::thumbColourId);

@@ -50,18 +50,16 @@ enum class Icon
     close,      // closes something
     frozen,     // a frozen track: it plays a file of its sound
     lowLatency, // the Low Latency switch: a lightning bolt
-    // A panel's corner (ui/shell/PanelLayout.h)
+    // The lower panel's corner (ui/shell/PanelLayout.h), with detach and close
     maximizePanel,
     restorePanels,
-    hidePanelLeft, // the left panel
-    hidePanelTop,  // the song's views
-    hidePanelBottom,
-    hidePanelRight,
     // The activity bar (ui/shell/ActivityBar.h): the left panel's views, then the account and the settings at its foot
     library,  // the browser
+    project,  // what the project holds: a clipboard's list
     versions, // the project's versions: a branch
     account,
     settings,
+    reload, // a crashed plug-in loaded again (ui/project/ProjectView.h): an arrow going round
     // The Source Control view (ui/versions/VersionsView.h)
     check,       // Commit, and the branch the song is on
     moreActions, // a view's menu of what else it does: three dots

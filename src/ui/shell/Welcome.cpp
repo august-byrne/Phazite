@@ -61,7 +61,8 @@ ComingFromPage::ComingFromPage (const juce::String& keymapName, std::function<vo
 {
     setTitle ("Coming from another app?");
     makeTitle (title, "Coming from another music app?");
-    about.setText ("Phazite can use the shortcuts you know. Options > Keymap changes them later.", juce::dontSendNotification);
+    about.setText ("Phazite can use the shortcuts you know. Keymap, in the gear's menu at the bottom left, changes them later.",
+                   juce::dontSendNotification);
 
     for (const auto& choice : comingFromChoices)
     {

@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A track's header in the playlist: a rail in the color of each folder it is in (paintTrackStrips()), its own color, a
 // folder's or a return's icon (a folder, open while its tracks show, as most DAWs mark their folders and groups, or the
-// Return key's arrow), its name, its switch for mute and solo, an arm switch for a track that records audio (with what it
-// records under its name while armed), and a snowflake while it is frozen (a click unfreezes it). Clicking selects the
-// track, dragging it anywhere moves the selected tracks, as Bitwig, Logic Pro and Studio One move tracks by their headers,
-// double-clicking collapses it to a thin row or expands it (a folder hides its tracks or shows them), and dragging the
-// bottom edge resizes it.
+// Return key's arrow), its name, its switch for mute and solo with a bar beside it of how loud it plays now (as FL Studio's
+// playlist shows that a track sounds), an arm switch for a track that records audio (with what it records under its name
+// while armed), and a snowflake while it is frozen (a click unfreezes it). Clicking selects the track, dragging it anywhere
+// moves the selected tracks, as Bitwig, Logic Pro and Studio One move tracks by their headers, double-clicking collapses it
+// to a thin row or expands it (a folder hides its tracks or shows them), and dragging the bottom edge resizes it.
 #pragma once
 
 #include "model/arrangement/PlaylistModel.h"
 #include "ui/components/ArmButton.h"
+#include "ui/components/PeakBar.h"
 #include "ui/components/TrackSwitch.h"
 #include "ui/theme/Icons.h"
 
@@ -55,6 +56,9 @@ public:
     // The snowflake, which shows while the track is frozen (for tests).
     IconButton& getFrozenButton() noexcept { return frozenButton; }
 
+    // The bar of what it plays now, at its right edge (for tests).
+    PeakBar& getPeakBar() noexcept { return peak; }
+
     void paint (juce::Graphics&) override;
     void resized() override;
     void lookAndFeelChanged() override { updateColours(); } // the theme's colors
@@ -79,6 +83,7 @@ private:
     TrackRow row; // as it was shown last
     juce::Label nameLabel;
     TrackSwitch muteSolo;                                       // mute (a click) and solo (a right-click)
+    PeakBar peak;                                               // what it plays now, beside them
     ArmButton arm;                                              // a track that records audio's
     juce::Label inputLabel;                                     // what it records, while it is armed
     IconButton frozenButton { "Unfreeze track", Icon::frozen }; // while it is frozen

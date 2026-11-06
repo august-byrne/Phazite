@@ -1496,15 +1496,12 @@ void Inspector::paint (juce::Graphics& g)
 
 void Inspector::resized()
 {
-    // The page's title over its rows, which scroll under it; the panel's buttons beside the title, in its top right corner.
+    // The page's title over its rows, which scroll under it.
     auto area = getLocalBounds();
     auto header = area.removeFromTop (Space::m + titleHeight + Space::s);
 
     if (page != nullptr)
-        page->title.setBounds (header.reduced (Space::m, 0)
-                                   .withTrimmedTop (Space::m)
-                                   .withHeight (titleHeight)
-                                   .withTrimmedRight (Shell::getPanelCornerWidth (3) + Space::xs - Space::m));
+        page->title.setBounds (header.reduced (Space::m, 0).withTrimmedTop (Space::m).withHeight (titleHeight));
 
     view.setBounds (area);
     layOutPage();

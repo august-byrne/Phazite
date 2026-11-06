@@ -143,8 +143,10 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
         CHECK (types.insert (info->typeID).second);
     }
 
-    // The synth's unison plays one voice at first.
-    CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].defaultValue == doctest::Approx (0.0f));
+    // The synth's unison is off at first, one voice playing, and three once it is switched on (the owner, 2026-11-06: not
+    // every part need be on at first).
+    CHECK (devices::Synth::info.parameters[devices::Synth::unisonOn].defaultValue == doctest::Approx (0.0f));
+    CHECK (devices::Synth::info.parameters[devices::Synth::unisonVoices].defaultValue == doctest::Approx (2.0f));
 
     // The stereo expander changes nothing until turned, and has no mix; nor has the multiband, whose LMH Mix blends its bands
     // with the dry sound before its master band, so that the master still limits what comes out.
@@ -406,6 +408,7 @@ TEST_CASE ("The synth's unison: one voice the same on both sides; seven spread a
     for (size_t i = 4800; i < 24000; i += 101)
         CHECK (one.left[i] == doctest::Approx (one.right[i]));
 
+    set (values, devices::Synth::info, "unisonOn", 1.0f);
     set (values, devices::Synth::info, "unisonVoices", 6.0f); // seven
     const auto seven = playNote (values);
     auto difference = 0.0f;

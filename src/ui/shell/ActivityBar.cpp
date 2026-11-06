@@ -8,12 +8,21 @@ namespace phazite::ui
 {
 juce::String getLeftViewCommandID (LeftView view)
 {
-    return view == LeftView::versions ? "view.versions" : "view.browser";
+    return "view." + getLeftViewKey (view);
 }
 
 juce::String getLeftViewName (LeftView view)
 {
-    return view == LeftView::versions ? "Source Control" : "Browser";
+    switch (view)
+    {
+        case LeftView::project:
+            return "Project";
+        case LeftView::versions:
+            return "Source Control";
+        case LeftView::browser:
+        default:
+            return "Browser";
+    }
 }
 
 namespace
@@ -112,11 +121,13 @@ public:
 
     void refreshTooltip()
     {
-        const auto about =
-            view == LeftView::versions
-                ? juce::String ("Source Control: commit the song as it is now, see what changed since, and go back. Click again "
-                                "to hide the left panel")
-                : juce::String ("Browser: sounds, instruments, effects and presets. Click again to hide the left panel");
+        const auto about = view == LeftView::versions
+                               ? juce::String ("Source Control: commit the song as it is now, see what changed since, and go "
+                                               "back. Click again to hide the left panel")
+                           : view == LeftView::project
+                               ? juce::String ("Project: what the song holds, its notes, the audio files it plays and its "
+                                               "plug-ins, with any that are missing or crashed. Click again to hide the left panel")
+                               : juce::String ("Browser: sounds, instruments, effects and presets. Click again to hide the left panel");
         setTooltip (withShortcut (commands, about, getLeftViewCommandID (view)));
     }
 
@@ -156,6 +167,7 @@ ActivityBar::ActivityBar (CommandBridge& bridge, ProjectContext& projectContext)
     : commands (bridge),
       context (projectContext),
       browserItem (std::make_unique<Item> (bridge, LeftView::browser, Icon::library)),
+      projectItem (std::make_unique<Item> (bridge, LeftView::project, Icon::project)),
       versionsItem (std::make_unique<Item> (bridge, LeftView::versions, Icon::versions)),
       accountItem (std::make_unique<FootItem> ("Account", Icon::account)),
       settingsItem (std::make_unique<FootItem> ("Settings", Icon::settings))
@@ -167,8 +179,8 @@ ActivityBar::ActivityBar (CommandBridge& bridge, ProjectContext& projectContext)
     settingsItem->onClick = [this]
     { makeSettingsMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (settingsItem.get())); };
 
-    for (auto* item :
-         std::initializer_list<juce::Component*> { browserItem.get(), versionsItem.get(), accountItem.get(), settingsItem.get() })
+    for (auto* item : std::initializer_list<juce::Component*> { browserItem.get(), projectItem.get(), versionsItem.get(), accountItem.get(),
+                                                                settingsItem.get() })
         addAndMakeVisible (item);
 
     refreshTooltips();
@@ -183,18 +195,28 @@ ActivityBar::~ActivityBar()
 
 ActivityBar::Item& ActivityBar::getItem (LeftView view) const
 {
-    return view == LeftView::versions ? *versionsItem : *browserItem;
+    switch (view)
+    {
+        case LeftView::project:
+            return *projectItem;
+        case LeftView::versions:
+            return *versionsItem;
+        case LeftView::browser:
+        default:
+            return *browserItem;
+    }
 }
 
 void ActivityBar::showLeftPanel (bool shows, LeftView view)
 {
-    browserItem->setMarked (shows && view == LeftView::browser);
-    versionsItem->setMarked (shows && view == LeftView::versions);
+    for (const auto each : { LeftView::browser, LeftView::project, LeftView::versions })
+        getItem (each).setMarked (shows && view == each);
 }
 
 void ActivityBar::refreshTooltips()
 {
     browserItem->refreshTooltip();
+    projectItem->refreshTooltip();
     versionsItem->refreshTooltip();
     accountItem->setTooltip ("Account: none yet. Your projects and their history stay on this computer");
     settingsItem->setTooltip (withShortcut (commands, "Settings: audio, MIDI, keys, themes and the other settings", "options.settings"));
@@ -281,7 +303,7 @@ void ActivityBar::resized()
     // The views' icons from the top, the account's and the settings' up from the foot, so far apart as VS Code's.
     auto area = getLocalBounds().withTrimmedRight (1).reduced (0, Shell::activityItemGap / 2);
 
-    for (auto* item : { browserItem.get(), versionsItem.get() })
+    for (auto* item : { browserItem.get(), projectItem.get(), versionsItem.get() })
     {
         item->setBounds (area.removeFromTop (Shell::activityItemHeight));
         area.removeFromTop (Shell::activityItemGap);

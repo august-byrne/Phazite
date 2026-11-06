@@ -48,6 +48,10 @@ juce::Path makeCurve (juce::Rectangle<float> area, const std::function<float (fl
 // A short text in a corner of a graph, such as what the pointer is over ("1.2 kHz  +3.0 dB").
 void paintReadout (juce::Graphics&, const Palette&, juce::Rectangle<float> area, const juce::String&, juce::Justification);
 
+// Two readouts along a graph's top, at its left and its right: the right one only where both fit, so that on a graph narrowed to
+// its least they never overlap.
+void paintReadouts (juce::Graphics&, const Palette&, juce::Rectangle<float> area, const juce::String& left, const juce::String& right);
+
 // "1.2 kHz", "350 Hz"; "+3.0 dB", "-12 dB".
 juce::String formatFrequency (double hertz);
 juce::String formatDecibels (float decibels);

@@ -52,6 +52,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    void lookAndFeelChanged() override { makeSeeThrough (verticalScrollBar); } // another theme: its scroll bar's colours in it
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
 private:
@@ -178,6 +179,7 @@ private:
 
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;
+    std::vector<OverviewMark> getOverviewMarks() const override; // the clips' notes, at their pitches
     BeatRange getContentRange() const override;
     void timelineChanged() override;
     std::optional<double> getLinkedPlayheadBeat (double songBeat) const override; // a linked clip of a shown one plays

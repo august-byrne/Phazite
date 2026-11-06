@@ -303,7 +303,7 @@ public:
         return nullptr;
     }
 
-    static constexpr int rowHeight = 26;
+    static constexpr int rowHeight = 24;
     static int getPreferredHeight() { return WavetableSynth::numModSlots * rowHeight; }
     static int getPreferredWidth() { return 16 + 2 * 96 + rowHeight + 2 * Space::xs; }
 
@@ -370,12 +370,15 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
 
         std::vector<std::string_view> ids;
 
-        for (const auto field : { WavetableSynth::oscOn, WavetableSynth::oscPosition, WavetableSynth::oscPitch, WavetableSynth::oscFine,
-                                  WavetableSynth::oscLevel, WavetableSynth::oscWarp, WavetableSynth::oscWarpAmount })
+        for (const auto field : { WavetableSynth::oscPosition, WavetableSynth::oscPitch, WavetableSynth::oscFine, WavetableSynth::oscLevel,
+                                  WavetableSynth::oscWarp, WavetableSynth::oscWarpAmount })
             ids.push_back (getParameterID (osc, field));
 
-        oscillatorParts.push_back (makePicturePart (getOscillatorName (osc), picture, 120, 44, ids, 4, ParameterControls::Size::compact,
-                                                    { "On", "Position", "Pitch", "Fine", "Level", "Warp", "Amount" }));
+        // Its switch at its title's right end, as every part that switches on and off has.
+        auto part = makePicturePart (getOscillatorName (osc), picture, WavetableTint::height, WavetableTint::minimumHeight, ids, 3,
+                                     ParameterControls::Size::compact, { "Position", "Pitch", "Fine", "Level", "Warp", "Amount" });
+        part.titleSwitch = &makePartSwitch (getParameterID (osc, WavetableSynth::oscOn), *part.content);
+        oscillatorParts.push_back (part);
     }
 
     const auto subAndNoise = makeControlsPart ("Sub and Noise", { "subLevel", "subOctave", "subShape", "noiseLevel" }, 4,
@@ -406,9 +409,10 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
             return WavetableSynth::getFilterMagnitude (values, cutoffHertz, frequency, scope != nullptr ? scope->getSampleRate() : 48000.0);
         },
         [shown] { return shown() != nullptr ? shown()->cutoff.get() : 0.0f; }));
-    const auto filter = makePicturePart (
-        "Filter", filterView, 80, 40, { "filterOn", "filterType", "cutoff", "resonance", "filterSlope", "drive", "keyTracking" }, 4,
-        ParameterControls::Size::compact, { "On", "Type", "Cutoff", "Resonance", "Slope", "Drive", "Key" });
+    auto filter =
+        makePicturePart ("Filter", filterView, 80, 40, { "filterType", "cutoff", "resonance", "filterSlope", "drive", "keyTracking" }, 3,
+                         ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Slope", "Drive", "Key" });
+    filter.titleSwitch = &makePartSwitch ("filterOn", *filter.content);
 
     // The modulation: the envelopes, the LFOs, the matrix and how it plays.
     std::vector<DeviceLayout::Part> modulation;
@@ -467,9 +471,13 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
     modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "bendRange", "velocity", "level" }, 3,
                                             ParameterControls::Size::compact, { "Mode", "Glide", "Bend", "Velocity", "Level" }));
 
-    oscillatorParts.push_back (subAndNoise);
-    oscillatorParts.push_back (unison);
-    setParts ({ oscillatorParts, { filter }, modulation }, { 2 });
+    // A part to a column, as tall as the dock is short, so that only the list has tabs: in the dock, two side by side on each
+    // page: the oscillators; the filter and the amp's envelope; the sub, noise and unison, and how it plays; then the rest of
+    // the modulation, the list down its side.
+    const auto amp = modulation.front(), voice = modulation.back();
+    const std::vector<DeviceLayout::Part> rest (modulation.begin() + 1, modulation.end() - 1);
+    setParts ({ { oscillatorParts[0] }, { oscillatorParts[1] }, { filter }, { amp }, { subAndNoise, unison }, { voice }, rest }, { 6 });
+    getLayout().setColumnName (6, "Modulation");
     refresh();
 }
 

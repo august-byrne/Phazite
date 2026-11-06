@@ -129,9 +129,8 @@ protected:
         g.setColour (p.text);
         g.drawEllipse (dot, 1.5f);
 
-        graph::paintReadout (g, p, area, formatMilliseconds (values[Flanger::delay]) + "  Depth " + toPercent (values[Flanger::depth]),
-                             juce::Justification::topLeft);
-        graph::paintReadout (g, p, area, "Feedback " + toPercent (values[Flanger::feedback]), juce::Justification::topRight);
+        graph::paintReadouts (g, p, area, formatMilliseconds (values[Flanger::delay]) + "  Depth " + toPercent (values[Flanger::depth]),
+                              "Feedback " + toPercent (values[Flanger::feedback]));
 
         paintTape (g, p, tint);
     }
@@ -220,7 +219,7 @@ FlangerEditor::FlangerEditor (const DeviceHandle& handle)
     const auto lfo = makeControlsPart ("LFO", { "sync", "division", "rate", "shape" }, 4, ParameterControls::Size::compact,
                                        { "Sync", "Note", "Rate", "Shape" });
     const auto tone = makeControlsPart ("Tone", { "feedback", "stereo", "safeBass" }, 3);
-    setParts ({ { { "Comb", &shown, 320, 252, 166, true } }, { sweep, lfo }, { tone } });
+    setParts ({ { { "Comb", &shown, 320, 252, 166, true, GraphTint::minimumWidth } }, { sweep, lfo }, { tone } });
 }
 
 FlangerEditor::~FlangerEditor() = default;

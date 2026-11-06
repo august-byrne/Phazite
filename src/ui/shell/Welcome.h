@@ -14,7 +14,7 @@ namespace phazite::ui
 {
 //==============================================================================
 // "Coming from...?": FL Studio's keymap for FL Studio's users, Ableton Live's for Live's, Phazite's own for everyone else. A
-// choice takes effect at once; Options > Keymap changes it later.
+// choice takes effect at once; Keymap, in the menu of the gear at the activity bar's foot, changes it later.
 class ComingFromPage : public juce::Component
 {
 public:

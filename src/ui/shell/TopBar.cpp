@@ -6,15 +6,37 @@
 
 #include <algorithm>
 #include <array>
+#include <utility>
 
 namespace phazite::ui
 {
+// Hears every press in the app while what the tempo stretches shows: one anywhere but on it or on the tempo field hides it.
+struct TopBar::OutsideClick : public juce::MouseListener
+{
+    explicit OutsideClick (TopBar& b)
+        : bar (b)
+    {
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        for (auto* inside : std::initializer_list<juce::Component*> { &bar.tempoStretch, &bar.tempoField })
+            if (e.originalComponent == inside || inside->isParentOf (e.originalComponent))
+                return;
+
+        bar.hideTempoStretch();
+    }
+
+    TopBar& bar;
+};
+
 TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContext& context)
     : commands (bridge),
       computerKeyboard (keyboard),
       projectContext (context),
       tempoField ("Tempo", minTempo, maxTempo, 1.0, 120.0),
-      tempoStretch (bridge, context)
+      tempoStretch (bridge, context),
+      outsideClick (std::make_unique<OutsideClick> (*this))
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Transport");
@@ -112,6 +134,7 @@ void TopBar::versionsChanged()
 
 TopBar::~TopBar()
 {
+    hideTempoStretch();
     projectContext.removeListener (this);
 }
 
@@ -199,7 +222,7 @@ void TopBar::updateTempo()
         if (tempo.isInGesture() || typing || tempoStretch.isMouseOverOrDragging (true) || tempoField.isMouseOverOrDragging (true))
             tempoStretchShownAt = juce::Time::getMillisecondCounter();
         else if (juce::Time::getMillisecondCounter() - tempoStretchShownAt > (juce::uint32) Shell::tempoStretchSeconds * 1000)
-            tempoStretch.setVisible (false);
+            hideTempoStretch();
         else
             tempoStretch.update();
     }
@@ -225,6 +248,17 @@ void TopBar::showTempoStretch()
     tempoStretch.setVisible (true);
     tempoStretch.toFront (false);
     tempoStretchShownAt = juce::Time::getMillisecondCounter();
+
+    if (! std::exchange (hearsOutsideClicks, true))
+        juce::Desktop::getInstance().addGlobalMouseListener (outsideClick.get());
+}
+
+void TopBar::hideTempoStretch()
+{
+    tempoStretch.setVisible (false);
+
+    if (std::exchange (hearsOutsideClicks, false))
+        juce::Desktop::getInstance().removeGlobalMouseListener (outsideClick.get());
 }
 
 void TopBar::showRecordMenu()

@@ -359,6 +359,8 @@ target_sources(phazite_core PRIVATE
     src/model/project/NewProject.cpp
     src/model/project/NewProject.h
     src/model/project/Project.cpp
+    src/model/project/ProjectContents.cpp
+    src/model/project/ProjectContents.h
     src/model/project/ProjectContext.cpp
     src/model/project/ProjectContext.h
     src/model/project/UnsavedProjects.cpp
@@ -461,6 +463,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/chevrons-down-up.svg
         resources/icons/lucide/chevrons-up-down.svg
         resources/icons/lucide/circle.svg
+        resources/icons/lucide/clipboard-list.svg
         resources/icons/lucide/circle-user-round.svg
         resources/icons/lucide/clock-arrow-down.svg
         resources/icons/lucide/clock.svg
@@ -488,16 +491,13 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/move-horizontal.svg
         resources/icons/lucide/music.svg
         resources/icons/lucide/paintbrush.svg
-        resources/icons/lucide/panel-bottom-close.svg
-        resources/icons/lucide/panel-left-close.svg
-        resources/icons/lucide/panel-right-close.svg
-        resources/icons/lucide/panel-top-close.svg
         resources/icons/lucide/pencil.svg
         resources/icons/lucide/piano.svg
         resources/icons/lucide/play.svg
         resources/icons/lucide/plus.svg
         resources/icons/lucide/redo-2.svg
         resources/icons/lucide/repeat.svg
+        resources/icons/lucide/rotate-cw.svg
         resources/icons/lucide/scissors.svg
         resources/icons/lucide/search.svg
         resources/icons/lucide/settings.svg
@@ -597,11 +597,20 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/Controls.h
     src/ui/components/DisplayTicker.cpp
     src/ui/components/DisplayTicker.h
+    src/ui/components/ListRowHover.h
     src/ui/components/ModulatorDrag.h
+    src/ui/components/PeakBar.cpp
+    src/ui/components/PeakBar.h
+    src/ui/components/PowerSwitch.cpp
+    src/ui/components/PowerSwitch.h
+    src/ui/components/SectionHeader.cpp
+    src/ui/components/SectionHeader.h
     src/ui/components/TrackSwitch.cpp
     src/ui/components/TrackSwitch.h
     src/ui/components/ValueText.cpp
     src/ui/components/ValueText.h
+    src/ui/components/ViewTitle.cpp
+    src/ui/components/ViewTitle.h
     src/ui/devices/CompressorEditor.cpp
     src/ui/devices/CompressorEditor.h
     src/ui/devices/DelayEditor.cpp
@@ -724,6 +733,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/playlist/TrackHeader.h
     src/ui/playlist/TrackHeights.cpp
     src/ui/playlist/TrackHeights.h
+    src/ui/project/ProjectView.cpp
+    src/ui/project/ProjectView.h
     src/ui/shell/ActivityBar.cpp
     src/ui/shell/ActivityBar.h
     src/ui/shell/AppShell.cpp
@@ -777,6 +788,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/timeline/TimelineEditor.h
     src/ui/timeline/TimelineGesture.cpp
     src/ui/timeline/TimelineGesture.h
+    src/ui/timeline/TimelineOverview.cpp
     src/ui/timeline/TimelineView.cpp
     src/ui/timeline/TimelineView.h
     src/ui/versions/BranchPicker.cpp
@@ -1019,8 +1031,10 @@ if(PHAZITE_BUILD_TESTS)
         tests/PlaylistTests.cpp
         tests/PopupsTests.cpp
         tests/PresetTests.cpp
+        tests/ProjectContentsTests.cpp
         tests/ProjectContextTests.cpp
         tests/ProjectTests.cpp
+        tests/ProjectViewTests.cpp
         tests/RealTimePlayback.h
         tests/RealtimeAuditTests.cpp
         tests/RenderHarness.cpp

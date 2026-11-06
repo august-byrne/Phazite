@@ -74,31 +74,25 @@ namespace
     void drawLetter (juce::Graphics& g, juce::Rectangle<int>& area, const juce::String& letter, juce::Colour colour)
     {
         g.setColour (colour);
-        g.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
+        g.setFont (juce::FontOptions (History::letterSize, juce::Font::bold));
         g.drawText (letter, area.removeFromRight (History::letterWidth), juce::Justification::centred, false);
     }
 
-    // A badge's width, for a count or a branch's name, with the font set as drawBadge() sets it.
-    int getBadgeWidth (const juce::String& text)
+    // A change's row in its list, which is as wide as the panel: from its icon's column, one level into its group, to its
+    // letter's end, inside the row's inset (VS Code's Source Control, SideBar).
+    juce::Rectangle<int> getRowContent (int width, int height)
     {
-        const auto font = juce::Font (juce::FontOptions (TextSize::badge, juce::Font::bold));
-        return juce::roundToInt (juce::jmax (History::badgeHeight, juce::TextLayout::getStringWidth (font, text) + History::badgeHeight));
+        return juce::Rectangle<int> (width, height).withTrimmedLeft (History::rowIcon).withTrimmedRight (Space::s);
     }
 
-    // A pill with a text in it, as VS Code counts a section's rows and names a branch on its last commit: its width.
-    int drawBadge (juce::Graphics& g, juce::Rectangle<int> rightOf, const juce::String& text, juce::Colour fill, juce::Colour textColour)
+    // The column of a row's icon, where a chevron would be, and the gap after it.
+    juce::Rectangle<float> takeIconColumn (juce::Rectangle<int>& area, float iconSize)
     {
-        // The font set, then measured, as the headings are: measured first, a bold one came out in a serif face.
-        g.setFont (juce::FontOptions (TextSize::badge, juce::Font::bold));
-        const auto width = juce::roundToInt (
-            juce::jmax (History::badgeHeight, juce::TextLayout::getStringWidth (g.getCurrentFont(), text) + History::badgeHeight));
-        const auto pill = rightOf.removeFromRight (width).toFloat().withSizeKeepingCentre ((float) width, History::badgeHeight);
-        g.setColour (fill);
-        g.fillRoundedRectangle (pill, History::badgeHeight / 2.0f);
-        g.setColour (textColour);
-        g.drawText (text, pill, juce::Justification::centred, false);
-        return width;
+        const auto column = area.removeFromLeft (SideBar::chevronSize).toFloat().withSizeKeepingCentre (iconSize, iconSize);
+        area.removeFromLeft (SideBar::gap);
+        return column;
     }
+
 } // namespace
 
 juce::String VersionsView::describeWhen (juce::Time saved, juce::Time now)
@@ -169,7 +163,8 @@ public:
             g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
         }
 
-        auto area = getLocalBounds().reduced (Space::xs, 0);
+        // Its icon where a first level's chevron is (it sits in the row's inset).
+        auto area = getLocalBounds().withTrimmedLeft (SideBar::rowChevron - (int) ListRow::inset).withTrimmedRight (Space::xs);
         const auto iconArea = [&area]
         {
             return area.removeFromLeft ((int) History::rowIconSize)
@@ -195,177 +190,6 @@ private:
 };
 
 //==============================================================================
-// A section's heading, which folds it, as VS Code's: its chevron, its name and what it is about, its count's badge, and,
-// under the pointer, its actions, each a command's icon.
-class VersionsView::Section : public juce::Button
-{
-public:
-    explicit Section (const juce::String& name)
-        : juce::Button (name)
-    {
-        setTitle (name);
-        setClickingTogglesState (true);
-        setToggleable (true);
-        setToggleState (true, juce::dontSendNotification); // open
-        addMouseListener (&hover, false);
-    }
-
-    ~Section() override
-    {
-        removeMouseListener (&hover);
-
-        for (auto& action : actions)
-            action->removeMouseListener (&hover);
-    }
-
-    void set (const juce::String& newHeading, const juce::String& newDetail, int newCount)
-    {
-        if (heading == newHeading && detail == newDetail && count == newCount)
-            return;
-
-        heading = newHeading;
-        detail = newDetail;
-        count = newCount;
-        setDescription (count > 0 ? juce::String (count) : juce::String());
-        resized();
-        repaint();
-    }
-
-    void addAction (Icon icon, const juce::String& name, std::function<void()> run)
-    {
-        auto action = std::make_unique<IconButton> (name, icon);
-        action->setQuiet (true);
-        action->setTooltip (name);
-        action->onClick = std::move (run);
-        action->addMouseListener (&hover, false);
-        addChildComponent (*action);
-        actions.push_back (std::move (action));
-    }
-
-    juce::String getText() const { return detail.isEmpty() ? heading : heading + " " + detail; }
-
-    // Whether its actions show under the pointer: not while what it lists is a merge's or a comparison's.
-    void setActionsAllowed (bool allowed)
-    {
-        actionsAllowed = allowed;
-        showActions (isMouseOver (true));
-    }
-
-    void resized() override
-    {
-        // From the right: the count's badge, then the actions.
-        auto area = getLocalBounds();
-        area.removeFromRight (count > 0 ? getBadgeWidth (juce::String (count)) + Space::xs : 0);
-
-        for (auto& action : actions)
-            action->setBounds (area.removeFromRight (getHeight()).reduced (2));
-    }
-
-    void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
-    {
-        const auto& p = getPalette (*this);
-        auto area = getLocalBounds();
-        const auto lit = isHighlighted || isDown;
-
-        (getToggleState() ? open : folded)
-            .draw (g,
-                   area.removeFromLeft ((int) History::sectionChevronSize)
-                       .toFloat()
-                       .withSizeKeepingCentre (History::sectionChevronSize, History::sectionChevronSize),
-                   lit ? p.text : p.textMuted);
-        area.removeFromLeft (Space::xs);
-
-        if (count > 0)
-            area.removeFromRight (drawBadge (g, area, juce::String (count), p.accent, p.textOnAccent)
-                                  + Space::xs); // VS Code's badge colours
-
-        if (! actions.empty() && actions.front()->isVisible())
-            area.removeFromRight ((int) actions.size() * getHeight());
-
-        g.setColour (p.text);
-        g.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
-        const auto headingWidth =
-            juce::jmin (area.getWidth(), juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), heading)) + Space::s);
-        g.drawText (heading, area.removeFromLeft (headingWidth), juce::Justification::centredLeft, true);
-        g.setColour (p.textMuted);
-        g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText (detail, area, juce::Justification::centredLeft, true);
-    }
-
-private:
-    // The pointer on the heading or on an action shows the actions, as VS Code shows a group's.
-    struct Hover : public juce::MouseListener
-    {
-        explicit Hover (Section& s)
-            : section (s)
-        {
-        }
-
-        void mouseEnter (const juce::MouseEvent&) override { section.showActions (true); }
-        void mouseExit (const juce::MouseEvent&) override { section.showActions (section.isMouseOver (true)); }
-
-        Section& section;
-    };
-
-    juce::String heading, detail;
-    int count = 0;
-    TintedIcon open { Icon::expanded }, folded { Icon::folded };
-    std::vector<std::unique_ptr<IconButton>> actions;
-    bool actionsAllowed = true;
-    Hover hover { *this };
-
-    void showActions (bool shown)
-    {
-        for (auto& action : actions)
-            action->setVisible (shown && actionsAllowed);
-
-        repaint();
-    }
-};
-
-//==============================================================================
-// Which row of a list is under the pointer, for what shows there only then (a line's actions).
-struct VersionsView::RowHover : public juce::MouseListener
-{
-    RowHover (juce::ListBox& l, std::function<void (int previous, int row)> changed)
-        : list (l),
-          onChange (std::move (changed))
-    {
-        list.addMouseListener (this, true);
-    }
-
-    ~RowHover() override { list.removeMouseListener (this); }
-
-    void mouseMove (const juce::MouseEvent& e) override { update (e); }
-    void mouseEnter (const juce::MouseEvent& e) override { update (e); }
-    void mouseDrag (const juce::MouseEvent& e) override { update (e); }
-    void mouseExit (const juce::MouseEvent& e) override
-    {
-        // Out of a row's component into another's is a move; out of the list is none under the pointer.
-        if (! list.getLocalBounds().contains (e.getEventRelativeTo (&list).getPosition()))
-            setRow (-1);
-    }
-
-    int row = -1;
-
-private:
-    juce::ListBox& list;
-    std::function<void (int, int)> onChange;
-
-    void update (const juce::MouseEvent& e)
-    {
-        const auto position = e.getEventRelativeTo (&list).getPosition();
-        setRow (list.getRowContainingPosition (position.x, position.y));
-    }
-
-    void setRow (int newRow)
-    {
-        if (newRow != row)
-            onChange (std::exchange (row, newRow), newRow);
-    }
-};
-
-//==============================================================================
 // A list of lines: the staged changes, each to unstage; or the working tree's, each to discard or stage, a click selecting a
 // line's track; a merge's lines, a click ticking one; or a merge's conflicts, a click choosing a value.
 class VersionsView::ChangesModel : public juce::ListBoxModel
@@ -386,18 +210,15 @@ public:
 
         const auto& p = getPalette (view);
         const auto theme = getThemeOf (view);
-        auto area = juce::Rectangle<int> (width, height);
-
-        drawListRow (g, view, area.toFloat(), selected, row == getHover().row);
-
-        area.reduce (Space::s, 0);
+        drawListRow (g, view, juce::Rectangle<int> (width, height).toFloat(), selected, row == getHover().row);
+        auto area = getRowContent (width, height);
 
         if (! isStaged && view.lines == Lines::merge)
         {
             // A box ticked while the merge takes the line, its letter, and a word where it conflicts with this branch's change.
             const auto& line = view.mergeLines[(size_t) row];
             const auto colour = getChangeColour (getKind (line.change), theme);
-            const auto box = area.removeFromLeft (height).toFloat().withSizeKeepingCentre (History::tickSize, History::tickSize);
+            const auto box = takeIconColumn (area, History::tickSize);
             g.setColour (line.ticked ? p.accent : p.textMuted);
             g.drawRoundedRectangle (box.reduced (0.5f), cornerRadius / 2.0f, 1.0f);
 
@@ -423,6 +244,7 @@ public:
         {
             // A conflict, its letter C as VS Code marks a conflicting file.
             const auto& clash = view.clashes[(size_t) row];
+            takeIconColumn (area, History::rowIconSize);
             drawLetter (g, area, "C", p.warning);
             drawLine (g, area, p.text, p.textMuted, clash.line + ": " + clash.what, describeValue (clash, clash.chosen));
             return;
@@ -432,11 +254,7 @@ public:
         const auto& change = getLine (row);
         const auto colour = getChangeColour (getKind (change), theme);
         auto& icon = change.isSong ? view.songIcon : change.isMaster ? view.masterIcon : view.trackIcon;
-        icon.draw (
-            g,
-            area.removeFromLeft ((int) History::rowIconSize).toFloat().withSizeKeepingCentre (History::rowIconSize, History::rowIconSize),
-            p.textMuted);
-        area.removeFromLeft (Space::xs);
+        icon.draw (g, takeIconColumn (area, History::rowIconSize), p.textMuted);
         drawLetter (g, area, getLetter (change), colour);
 
         if (view.showsActions (getList(), row))
@@ -565,7 +383,7 @@ private:
 
     const VersionChange& getLine (int row) const { return isStaged ? view.staged[(size_t) row] : view.changes[(size_t) row]; }
     juce::ListBox& getList() const { return isStaged ? view.stagedList : view.changesList; }
-    RowHover& getHover() const { return isStaged ? *view.stagedHover : *view.changesHover; }
+    ListRowHover& getHover() const { return isStaged ? *view.stagedHover : *view.changesHover; }
 };
 
 //==============================================================================
@@ -588,7 +406,8 @@ public:
 
         drawListRow (g, view, area.toFloat(), selected, false);
 
-        area.reduce (Space::s, 0);
+        // From where a first level's chevron is, to inside the row's inset (VS Code's graph, SideBar).
+        area = area.withTrimmedLeft (SideBar::rowChevron).withTrimmedRight (Space::s);
         const auto lanes = juce::jmax (1, (int) view.branches.size());
         const auto laneArea = area.removeFromLeft (lanes * History::laneWidth + Space::xs);
         const auto laneCentre = [&laneArea] (int lane)
@@ -740,9 +559,9 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
       settings (s),
       branchButton (std::make_unique<BranchButton>()),
       messageField (std::make_unique<MessageField>()),
-      stagedSection (std::make_unique<Section> ("Staged Changes")),
-      changesSection (std::make_unique<Section> ("Changes")),
-      historySection (std::make_unique<Section> ("Graph")),
+      stagedSection (std::make_unique<SectionHeader> ("Staged Changes", SectionHeader::Style::group)),
+      changesSection (std::make_unique<SectionHeader> ("Changes", SectionHeader::Style::group)),
+      historySection (std::make_unique<SectionHeader> ("Graph", SectionHeader::Style::pane)),
       stagedModel (std::make_unique<ChangesModel> (*this, true)),
       changesModel (std::make_unique<ChangesModel> (*this, false)),
       historyModel (std::make_unique<HistoryModel> (*this)),
@@ -752,11 +571,6 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
 {
     setTitle ("Source Control");
     const auto& p = getPalette (*this);
-
-    title.setText ("Source Control", juce::dontSendNotification);
-    title.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
-    title.setJustificationType (juce::Justification::centredLeft);
-    title.setMinimumHorizontalScale (1.0f);
 
     for (auto* label : { &emptyText, &roomText })
     {
@@ -769,6 +583,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     branchButton->onClick = [this] { commands.invoke ("version.pickBranch"); };
     moreButton.setQuiet (true);
     moreButton.onClick = [this] { makeMoreMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton)); };
+    title.addAction (moreButton);
 
     // One message, as a commit's: its first line names the commit, the lines after it are its note.
     messageField->setTitle ("Commit message");
@@ -830,12 +645,11 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
         };
     };
 
-    stagedHover = std::make_unique<RowHover> (stagedList, repaintRows (stagedList));
-    changesHover = std::make_unique<RowHover> (changesList, repaintRows (changesList));
+    stagedHover = std::make_unique<ListRowHover> (stagedList, repaintRows (stagedList));
+    changesHover = std::make_unique<ListRowHover> (changesList, repaintRows (changesList));
 
-    for (auto* c : std::initializer_list<juce::Component*> { &title, branchButton.get(), &moreButton, messageField.get(), &saveButton,
-                                                             &saveMenuButton, changesSection.get(), &changesList, historySection.get(),
-                                                             &historyList })
+    for (auto* c : std::initializer_list<juce::Component*> { &title, branchButton.get(), messageField.get(), &saveButton, &saveMenuButton,
+                                                             changesSection.get(), &changesList, historySection.get(), &historyList })
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText,
@@ -1288,40 +1102,42 @@ void VersionsView::paint (juce::Graphics& g)
 
 void VersionsView::resized()
 {
-    auto area = getLocalBounds().reduced (Space::s);
+    // As VS Code's side bar lays out its Source Control (SideBar): the lists as wide as the panel, their rows inset; the fields
+    // and buttons in rows of their own, from the panel's sides.
+    auto area = getLocalBounds();
+    const auto inField = [] (juce::Rectangle<int> row, int height)
+    {
+        const auto field = row.withTrimmedLeft (SideBar::fieldLeft).withTrimmedRight (SideBar::fieldRight);
+        return field.withSizeKeepingCentre (field.getWidth(), height);
+    };
 
-    // The title and the view's menu, clear of the panel's buttons in its top right corner; then the branch, on a row of its
-    // own, as the panel is narrow.
-    auto top = area.removeFromTop (controlHeight);
-    top.removeFromRight (Shell::getPanelCornerWidth (3) + Space::xs - Space::s);
-    moreButton.setBounds (top.removeFromRight (controlHeight));
-    title.setBounds (top);
+    // The title and the view's menu; then the branch, on a row of its own, as the panel is narrow.
+    title.setBounds (area.removeFromTop (SideBar::titleHeight));
 
     if (branchButton->isVisible())
-        branchButton->setBounds (area.removeFromTop (controlHeight));
+        branchButton->setBounds (area.removeFromTop (ListRow::height).reduced ((int) ListRow::inset, 0));
 
-    area.removeFromTop (Space::xs);
-
-    // The message, as tall as its lines as they wrap, up to a few.
+    // The message, as tall as its lines as they wrap, up to a few: one line as tall as VS Code's, in its row.
     const auto lineHeight = juce::roundToInt (messageField->getFont().getHeight() * 1.2f);
-    const auto padding = controlHeight - lineHeight;
+    const auto fieldWidth = area.getWidth() - SideBar::fieldLeft - SideBar::fieldRight;
     juce::AttributedString text (messageField->getText().isEmpty() ? juce::String ("M") : messageField->getText());
     text.setFont (messageField->getFont());
     juce::TextLayout layout;
-    layout.createLayout (text, (float) juce::jmax (1, area.getWidth() - padding));
+    layout.createLayout (text, (float) juce::jmax (1, fieldWidth - (SideBar::controlHeight - lineHeight)));
     const auto messageLines = juce::jlimit (1, History::messageLines, layout.getNumLines());
-    messageField->setBounds (area.removeFromTop (padding + lineHeight * messageLines));
-    area.removeFromTop (Space::xs);
+    const auto messageHeight = SideBar::controlHeight + lineHeight * (messageLines - 1);
+    messageField->setBounds (
+        inField (area.removeFromTop (messageHeight + SideBar::inputRowHeight - SideBar::controlHeight), messageHeight));
 
-    auto saveRow = area.removeFromTop (controlHeight);
+    auto saveRow = inField (area.removeFromTop (SideBar::buttonRowHeight), SideBar::controlHeight);
     saveMenuButton.setBounds (saveRow.removeFromRight (History::saveMenuWidth));
     saveRow.removeFromRight (1); // a hairline between the two parts
     saveButton.setBounds (saveRow);
-    area.removeFromTop (Space::s);
 
     // The room the history takes, at the foot of the view.
     if (roomText.isVisible())
-        roomText.setBounds (area.removeFromBottom (controlHeight));
+        roomText.setBounds (
+            area.removeFromBottom (controlHeight).withTrimmedLeft (SideBar::fieldLeft - roomText.getBorderSize().getLeft()));
 
     // The staged changes and the changes, as many rows as they have while open (together up to half of what is left, the
     // staged ones up to half of that), then the graph.
@@ -1329,47 +1145,47 @@ void VersionsView::resized()
 
     if (stagedSection->isVisible())
     {
-        stagedSection->setBounds (area.removeFromTop (controlHeight));
+        stagedSection->setBounds (area.removeFromTop (stagedSection->getPreferredHeight()));
         const auto rows = stagedSection->getToggleState() ? (int) staged.size() : 0;
         const auto height = juce::jmin (listsRoom / 2, rows * History::changeRowHeight);
         stagedList.setBounds (rows == 0 ? juce::Rectangle<int>() : area.removeFromTop (height));
         listsRoom -= height;
     }
 
-    changesSection->setBounds (area.removeFromTop (controlHeight));
+    changesSection->setBounds (area.removeFromTop (changesSection->getPreferredHeight()));
     const auto changesOpen = changesSection->getToggleState();
 
     if (doneButton.isVisible() && changesOpen)
     {
-        auto buttons = area.removeFromTop (controlHeight);
+        auto buttons = inField (area.removeFromTop (SideBar::buttonRowHeight), SideBar::controlHeight);
         doneButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth(), History::buttonWidth)));
-        area.removeFromTop (Space::xs);
     }
 
     if (mergeButton.isVisible() && changesOpen)
     {
-        auto buttons = area.removeFromTop (controlHeight);
+        auto buttons = inField (area.removeFromTop (SideBar::buttonRowHeight), SideBar::controlHeight);
         cancelButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth() / 2, History::buttonWidth)));
         buttons.removeFromRight (Space::xs);
         mergeButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth(), History::buttonWidth)));
-        area.removeFromTop (Space::xs);
     }
 
     for (auto* button : { &doneButton, &mergeButton, &cancelButton })
         if (! changesOpen)
             button->setBounds ({});
 
+    // A note in the group, where its rows' names would be.
     if (emptyText.isVisible() && changesOpen)
-        emptyText.setBounds (area.removeFromTop (History::noteHeight + (isMerging (context) ? History::noteHeight : 0)));
+        emptyText.setBounds (area.removeFromTop (History::noteHeight + (isMerging (context) ? History::noteHeight : 0))
+                                 .withTrimmedLeft (History::rowText - emptyText.getBorderSize().getLeft())
+                                 .withTrimmedRight (SideBar::fieldRight));
     else
         emptyText.setBounds ({});
 
     const auto rows = changesOpen ? getNumChanges() : 0;
     const auto listHeight = juce::jmin (juce::jmax (listsRoom, History::changeRowHeight), rows * History::changeRowHeight);
     changesList.setBounds (rows == 0 ? juce::Rectangle<int>() : area.removeFromTop (listHeight));
-    area.removeFromTop (Space::s);
 
-    historySection->setBounds (area.removeFromTop (controlHeight));
+    historySection->setBounds (area.removeFromTop (historySection->getPreferredHeight()));
     historyList.setBounds (historySection->getToggleState() ? area : juce::Rectangle<int>());
 }
 } // namespace phazite::ui

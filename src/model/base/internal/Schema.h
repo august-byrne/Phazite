@@ -48,6 +48,10 @@ inline const juce::Identifier outline { "outline" };
 // notes keeping their times, rather than on their beats (model/transport/internal/Tempo.h). song
 inline const juce::Identifier patternsKeepTheirSpeed { "patternsKeepTheirSpeed" };
 
+// On PHAZITE. The project's notes, as the Project view shows them (model/project/ProjectContents.h): text, its lines
+// split by "\n"; none while there are none. song
+inline const juce::Identifier notes { "notes" };
+
 // Child of PHAZITE: the key set last on any track (keyRoot and keyScale), which new tracks get. state
 inline const juce::Identifier LASTKEY { "LASTKEY" };
 
@@ -506,7 +510,7 @@ inline const juce::Identifier sectionRole { "role" };
 // On SECTION: a one-line suggestion of what to put in it, or none.
 inline const juce::Identifier sectionTip { "tip" };
 
-// On SECTION. double 0..1, default 0.5: how intense it is, for the energy curve.
+// On SECTION. double 0..1, default 0.5: how intense it is, as the inspector shows it.
 inline const juce::Identifier sectionEnergy { "energy" };
 
 // On SECTION, if it was given a color of its own: the color, as juce::Colour::toString() writes it. Without it, its
@@ -729,6 +733,16 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
 {
     static const juce::Identifier names[] = { "osc1WavetableFile", "osc2WavetableFile" };
     return names[juce::jlimit (0, 1, osc)];
+}
+
+// What of a SOUNDS element names a sound file, rather than a factory sound or a table: a pad's file or an oscillator's.
+inline bool isSoundFileProperty (const juce::Identifier& property)
+{
+    for (int pad = 0; pad < 16; ++pad)
+        if (property == getPadSoundFile (pad))
+            return true;
+
+    return property == getOscillatorWavetableFile (0) || property == getOscillatorWavetableFile (1);
 }
 
 //==============================================================================

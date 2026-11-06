@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The browser (docs/design.md, section 11; roadmap step 1.5): favorites, recent items, Phazite Sounds (or, until they
 // are downloaded, a row that downloads them), the instruments and effects, the user's presets and own folders, in a tree
-// as in FL Studio's browser; or, while the search field has text, what search finds in all of them. Clicking a sound,
+// as in FL Studio's browser, laid out as VS Code's Explorer under its title (its rows, chevrons, levels and their guides);
+// or, while the search field has text, what search finds in all of them. Clicking a sound,
 // or moving to it with the arrow keys, plays it (a loop in time with the song). Dragging an item puts it into the song:
 // onto the playlist (a track, or empty space for a new one) or a mixer channel. So do Enter and a double-click: a sound
 // onto the selected track at the play start, a device or a preset onto the selected track. A track dragged in from the
@@ -15,6 +16,8 @@
 #include "model/project/ProjectContext.h"
 #include "services/BrowserModel.h"
 #include "ui/components/Controls.h"
+#include "ui/components/ViewTitle.h"
+#include "ui/theme/DesignTokens.h"
 #include "ui/theme/Icons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -92,7 +95,7 @@ public:
     const SoundView& getSoundView() const noexcept { return soundView; }
     void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override;
 
-    static constexpr int rowHeight = 26;
+    static constexpr int rowHeight = ListRow::height;
 
 private:
     struct Node;
@@ -102,6 +105,7 @@ private:
     struct SoundPackNode;
     struct RootNode;
     struct Tree;
+    struct TreeHover;
 
     Library& library;
     Previewer& previewer;
@@ -111,9 +115,16 @@ private:
     BrowserModel model;              // what the tree shows
     bool soundPackInstalled = false; // when the tree last showed it
 
+    ViewTitle title { "Browser" };
     SearchField searchField;
     std::unique_ptr<Tree> tree;
     std::unique_ptr<RootNode> placesRoot, searchRoot;
+
+    // The row under the pointer, whether the pointer is over the tree (its levels' guides show then, as VS Code's do), and
+    // whether the keys moved the selection last (its outline shows then, not after a click, as in VS Code's Modern UI).
+    std::unique_ptr<TreeHover> treeHover;
+    int hoveredRow = -1; // its number in the tree
+    bool pointerOverTree = false, keysMovedSelection = false;
     IconButton previewButton { "Preview sounds when selected", Icon::preview };
     Fader volumeFader { Fader::Direction::horizontal, "Preview volume", decibelsToFaderPosition (-6.0f) };
     std::unique_ptr<juce::FileChooser> folderChooser, presetChooser;

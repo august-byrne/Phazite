@@ -248,11 +248,11 @@ VocoderEditor::VocoderEditor (const DeviceHandle& handle)
 
     const auto carrier = makeControlsPart ("Carrier", { "carrier", "pitch" }, 2, ParameterControls::Size::compact, { "Carrier", "Pitch" });
     const auto voice = makeControlsPart ("Voice", { "formant", "unvoiced" }, 2, ParameterControls::Size::large);
-    const auto range = makeControlsPart ("Bands", { "bands", "lowFrequency", "highFrequency", "bandWidth" }, 4,
+    const auto range = makeControlsPart ("Range", { "bands", "lowFrequency", "highFrequency", "bandWidth" }, 4,
                                          ParameterControls::Size::compact, { "Bands", "Low", "High", "Width" });
     const auto response = makeControlsPart ("Response", { "attack", "release", "brightness", "stereo", "output" }, 5,
                                             ParameterControls::Size::compact, { "Attack", "Release", "Bright", "Stereo", "Output" });
-    setParts ({ { { "Bands", &shown, 340, 226, 140, true } }, { carrier, voice }, { range, response } });
+    setParts ({ { { "Bands", &shown, 340, 226, 140, true, GraphTint::minimumWidth } }, { carrier, voice }, { range, response } });
 }
 
 VocoderEditor::~VocoderEditor() = default;

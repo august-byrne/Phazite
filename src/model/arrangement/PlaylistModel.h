@@ -219,7 +219,7 @@ struct SongSection
     BeatRange range {};
     juce::Colour colour {}; // its own, or its role's
     juce::String tip;       // a one-line suggestion of what to put in it, for the hint bar
-    float energy = 0.5f;    // how intense it is, from 0 to 1, for the energy curve
+    float energy = 0.5f;    // how intense it is, from 0 to 1, as the inspector shows it
 };
 
 std::vector<SongSection> getSongSections (const ProjectContext&);

@@ -91,7 +91,7 @@ TEST_CASE ("The wavetable synth's editor draws each oscillator's table and names
     CHECK (phazite::test::findComponentWithTitle (editor, "Mod 8 Source") != nullptr);
 
     // As wide in a short dock as in a tall one: a shorter dock shows a part at a time under tabs.
-    CHECK (editor.getWidthForHeight (editor.getMinimumHeight()) == editor.getWidth());
+    CHECK (editor.getWidthForHeight (editor.getMinimumHeight()) == editor.getWidthForHeight (editor.getHeight()));
     CHECK (editor.getMinimumHeight() <= 235); // the default dock's height in a 1280 x 800 window
     CHECK (editor.getWidth() < 1100);
     CHECK_FALSE (names.contains ("2 Attack"));
@@ -165,22 +165,36 @@ TEST_CASE ("Dragging across a wavetable oscillator's drawing moves its position,
     CHECK (screen.getValue ("osc1Position") == doctest::Approx (before));
 }
 
-TEST_CASE ("The wavetable synth's editor fits a shorter Devices view, as wide, a part at a time under tabs")
+TEST_CASE ("The wavetable synth's editor fits the dock: its parts in pages, two to a page, the modulation a list down the side")
 {
     Screen screen;
     auto& editor = *screen.editor;
     const auto fullHeight = editor.getHeight();
     const auto shortest = editor.getMinimumHeight();
-    REQUIRE (shortest < fullHeight);
-    CHECK (editor.getWidthForHeight (shortest) == editor.getWidth());
+    REQUIRE (shortest <= fullHeight);
+    CHECK (editor.getWidthForHeight (shortest) == editor.getWidthForHeight (fullHeight));
 
-    editor.setSize (editor.getWidth(), shortest);
+    // As wide as its parts side by side, at its least height: every part showing; the modulation a list down the side, a part
+    // at a time.
+    editor.setSize (editor.getWidthForHeight (shortest), shortest);
     phazite::test::checkChildrenApart (editor);
-    CHECK (editor.getLayout().usesTabs (0));
+    CHECK_FALSE (editor.getLayout().usesPages());
     CHECK (editor.getTableView (0).isShowing());
-    CHECK (editor.getTableView (0).getHeight() > 0);
-    CHECK_FALSE (editor.getTableView (1).isShowing());
+    CHECK (editor.getTableView (1).isShowing());
+    CHECK (editor.getLayout().usesTabs (6));
 
-    // The modulation is a list down the side, one part at a time at any height.
-    CHECK (editor.getLayout().usesTabs (2));
+    // As wide and as tall as the dock at the default window: four pages, the first with both oscillators, whole.
+    constexpr int dockWidth = 552, dockHeight = 268; // beside the Devices view's column
+    REQUIRE (editor.getMinimumHeightAtWidth (dockWidth) <= dockHeight);
+    editor.setSize (dockWidth, dockHeight);
+    REQUIRE (editor.getLayout().getNumPages() == 4);
+    CHECK (editor.getLayout().getPageName (3) == "Modulation");
+    CHECK (editor.getTableView (0).isShowing());
+    CHECK (editor.getTableView (1).isShowing());
+    CHECK (editor.getTableView (0).getHeight() > 0);
+    phazite::test::checkChildrenApart (editor);
+
+    editor.getLayout().showPage (1);
+    CHECK_FALSE (editor.getTableView (0).isShowing());
+    CHECK (editor.findControl ("cutoff")->isShowing());
 }

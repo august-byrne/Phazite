@@ -5,6 +5,7 @@
 #include "UiTestHelpers.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -159,6 +160,36 @@ TEST_CASE ("View state and how the song plays are no change since the last versi
     s.setVolume (track, -3.0f);
     CHECK (phazite::hasChangesSinceLastVersion (s.context));
     phazite::undo (song);
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+}
+
+TEST_CASE ("A track muted and unmuted again, soloed and unsoloed, or a clip muted and unmuted, is no change since the last version")
+{
+    TestSong s;
+    const auto track = s.addTrack ("Keys");
+    const auto other = s.addTrack ("Pad");
+    const auto clip = s.addMidiClip (track, 0.0, 4.0);
+    keepVersion (s.context);
+    auto& song = *phazite::findSong (s.context);
+
+    // Muted, it is a change; unmuted, the track is as the version has it, so the change goes (it stayed: 2026-11-06).
+    phazite::toggleTracksMuted (song, { track });
+    CHECK (describeChanges (s.context) == "Keys: mute");
+    phazite::toggleTracksMuted (song, { track });
+    CHECK (describeChanges (s.context).isEmpty());
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+
+    // So do a solo, alone or not, and a clip's mute.
+    phazite::toggleTracksSoloed (song, { track });
+    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    phazite::toggleTracksSoloed (song, { track });
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    phazite::toggleSoloAlone (song, other);
+    phazite::toggleSoloAlone (song, other);
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    phazite::toggleClipsMuted (song, { clip });
+    CHECK (phazite::hasChangesSinceLastVersion (s.context));
+    phazite::toggleClipsMuted (song, { clip });
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
 }
 

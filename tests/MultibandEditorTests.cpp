@@ -125,16 +125,17 @@ TEST_CASE ("The multiband's editor has a control for every parameter but its cur
     checkShownWhole (editor, Multiband::mid);
     phazite::test::checkChildrenApart (editor.getDisplay());
 
-    // Monitor's switches for its traces share their room evenly, each wide enough for its name.
-    const juce::StringArray traceNames { "In", "Band In", "Out", "Heard", "Gain", "All Gains", "Pre/Post" };
-    juce::Array<int> widths;
+    // Monitor's traces are in its Traces menu, each ticked while it shows; an item switches it.
+    const auto menu = editor.getTracesMenu();
 
-    for (auto* button : phazite::test::findAll<juce::TextButton> (editor))
-        if (traceNames.contains (button->getButtonText()))
-            widths.addIfNotAlreadyThere (button->getWidth());
+    for (const auto* name : { "In", "Band In", "Out", "Heard", "Gain", "All Gains", "Pre/Post" })
+        CHECK (phazite::test::findMenuItem (menu, { name }) != nullptr);
 
-    CHECK (widths.size() == 1);
-    CHECK (widths.getFirst() >= 56);
+    REQUIRE (phazite::test::findMenuItem (menu, { "Heard" }) != nullptr);
+    const auto heard = phazite::test::findMenuItem (menu, { "Heard" })->isTicked;
+    REQUIRE (phazite::test::runMenuItem (menu, { "Heard" }));
+    const auto after = editor.getTracesMenu();
+    CHECK (phazite::test::findMenuItem (after, { "Heard" })->isTicked != heard);
 }
 
 TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and deleted, each one undo step")

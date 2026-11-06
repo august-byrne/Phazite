@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Devices view (src/ui/mixer/DevicesView.h; roadmap step 2.5), driven as the user would: the selected track's
-// devices in a row, each shown whole (an editor for Phazite's own, a container's macros and devices, a plug-in's key
-// knobs and a button for its window), which track it shows as the selection changes or a device's name is clicked in
-// the mixer, the master's devices, and the track's modulators with an editor beside them.
+// The Devices view (src/ui/mixer/DevicesView.h; roadmap step 2.5), driven as the user would: the selected track's devices
+// stacked in its column, the one clicked shown whole beside it (an editor for Phazite's own, a container's macros beside
+// its device's, a plug-in's key knobs), which track it shows as the selection changes or a device's name is clicked in the
+// mixer, the master's devices, and the track's modulators as chips whose editors pop out; and every built-in device whole
+// in the dock at the default window size, without scrolling.
+#include "AppScreen.h"
 #include "EnginePlayback.h"
 #include "TestPlugin.h"
 #include "UiTestHelpers.h"
@@ -19,6 +21,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/ModulatorDrag.h"
+#include "ui/components/PowerSwitch.h"
 #include "ui/devices/CompressorEditor.h"
 #include "ui/devices/EqEditor.h"
 #include "ui/devices/ModulatorEditor.h"
@@ -29,6 +32,7 @@
 #include "ui/mixer/MixerView.h"
 #include "ui/mixer/ModulatorSlots.h"
 #include "ui/mixer/StripParts.h"
+#include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
 #include <set>
@@ -158,7 +162,7 @@ struct Screen
 };
 } // namespace
 
-TEST_CASE ("The Effects page shows the selected track's effects in a row, as cards folded but one")
+TEST_CASE ("The Effects tab stacks the selected track's effects in the column, as FL Studio's mixer slots; the one clicked shows beside it")
 {
     Screen screen;
     auto& view = screen.view;
@@ -173,141 +177,134 @@ TEST_CASE ("The Effects page shows the selected track's effects in a row, as car
     REQUIRE (compressor != nullptr);
     REQUIRE (plugin != nullptr);
 
-    // Left to right as the sound goes, each as tall as the view.
-    CHECK (eq->getScreenX() < compressor->getScreenX());
-    CHECK (compressor->getScreenX() < plugin->getScreenX());
-    CHECK (eq->getScreenY() == plugin->getScreenY());
-    CHECK (eq->getHeight() > 300);
+    // One under another as the sound goes, in the narrow column at the left; the rest of the view for the one that shows.
+    CHECK (eq->getScreenY() < compressor->getScreenY());
+    CHECK (compressor->getScreenY() < plugin->getScreenY());
+    CHECK (eq->getScreenX() == plugin->getScreenX());
+    CHECK (eq->getWidth() < 170);
 
-    // Folded at first, narrow; the EQ's chevron opens it, its whole editor with its graph shrunk to fit, and opening the
-    // compressor folds it again. The plug-in has a button that opens its own window.
-    CHECK (countEditors<phazite::ui::EqEditor> (*eq) == 0);
-    CHECK (eq->getWidth() < 130);
-    auto* open = phazite::test::findComponentWithTitle (*eq, "Open");
-    REQUIRE (open != nullptr);
-    phazite::test::Mouse openMouse (*open);
-    openMouse.click (open->getLocalBounds().getCentre());
+    // The compressor, added last but the plug-in, shows beside the column, as wide as the rest of the view; a click on the
+    // EQ's name shows the EQ in its place, and selects it.
+    REQUIRE (view.isOpen (effects[1]));
+    auto* body = view.getShownBody();
+    REQUIRE (dynamic_cast<phazite::ui::CompressorEditor*> (body) != nullptr);
+    CHECK (body->getScreenX() > eq->getScreenX() + eq->getWidth());
+    CHECK (body->getWidth() > 1000);
+    auto* eqName = findNameButton (*eq, "EQ");
+    REQUIRE (eqName != nullptr);
+    phazite::test::Mouse eqMouse (*eqName);
+    eqMouse.click (eqName->getLocalBounds().getCentre());
     CHECK (view.isOpen (effects[0]));
-    CHECK (countEditors<phazite::ui::EqEditor> (*eq) == 1);
-    CHECK (eq->getWidth() > 300);
-    view.setOpen (effects[1], true);
-    CHECK_FALSE (view.isOpen (effects[0]));
-    CHECK (countEditors<phazite::ui::EqEditor> (*eq) == 0);
-    CHECK (countEditors<phazite::ui::CompressorEditor> (*compressor) == 1);
-    CHECK (phazite::test::findComponentWithTitle (*eq, "Open its window") == nullptr);
-    CHECK (phazite::test::findComponentWithTitle (*plugin, "Open its window") != nullptr);
+    CHECK_FALSE (view.isOpen (effects[1]));
+    CHECK (dynamic_cast<phazite::ui::EqEditor*> (view.getShownBody()) != nullptr);
+    CHECK (screen.context.getSongSelection().getDevices() == std::vector { effects[0] });
 
-    // Phazite's devices can show in a window of their own too, when the user wants (app/PluginWindow.h).
+    // Ctrl adds another to the selection, and shows nothing else.
+    auto* compressorName = findNameButton (*compressor, "Compressor");
+    REQUIRE (compressorName != nullptr);
+    phazite::test::Mouse compressorMouse (*compressorName);
+    compressorMouse.click (compressorName->getLocalBounds().getCentre(), juce::ModifierKeys::commandModifier);
+    CHECK (screen.context.getSongSelection().getDevices() == std::vector { effects[0], effects[1] });
+    CHECK (view.isOpen (effects[0]));
+
+    // The one that shows has its window's button under its line: Phazite's own opens in a window, a plug-in its own.
     CHECK (phazite::test::findComponentWithTitle (*eq, "Open in a window") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*plugin, "Open its window") != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*plugin, "Open in a window") == nullptr);
     const auto slots = phazite::getEffects (screen.context, screen.track (0));
     CHECK (slots[0].popsOut);
     CHECK_FALSE (slots[0].windowOpen);
     CHECK_FALSE (slots[2].popsOut);
-    CHECK (showingKnobs (*plugin) == juce::StringArray { "Mix" });
     CHECK (phazite::test::findComponentWithTitle (view, "Choose instrument") == nullptr); // no notes to play
 
-    // A plain click on a device's name selects it alone; Ctrl adds another.
-    auto* eqName = findNameButton (*eq, "EQ");
-    auto* compressorName = findNameButton (*compressor, "Compressor");
-    REQUIRE (eqName != nullptr);
-    REQUIRE (compressorName != nullptr);
-    phazite::test::Mouse eqMouse (*eqName), compressorMouse (*compressorName);
-    eqMouse.click (eqName->getLocalBounds().getCentre());
-    CHECK (screen.context.getSongSelection().getDevices() == std::vector { effects[0] });
-    compressorMouse.click (compressorName->getLocalBounds().getCentre(), juce::ModifierKeys::commandModifier);
-    CHECK (screen.context.getSongSelection().getDevices() == std::vector { effects[0], effects[1] });
-
-    // Turning one off from its header.
+    // Turning one off by its green switch, as a track's mute switch looks.
     auto* power = phazite::test::findComponentWithTitle (*compressor, "On");
     REQUIRE (power != nullptr);
+    CHECK (dynamic_cast<phazite::ui::PowerSwitch*> (power) != nullptr);
     phazite::test::Mouse powerMouse (*power);
     powerMouse.click (power->getLocalBounds().getCentre());
     CHECK_FALSE (phazite::getEffects (screen.context, screen.track (0))[1].isOn);
     CHECK (phazite::describeUndo (screen.song.get()).isNotEmpty());
-    phazite::test::checkChildrenApart (view);
+    phazite::test::checkChildrenApart (*compressor);
 
-    // Showing the plug-in opens its card, to its key knobs (the rest are in its window), and folds the one that was open.
+    // Showing the plug-in shows its key knobs beside the column (the rest are in its window).
     view.showDevice (effects[2]);
     CHECK (view.isOpen (effects[2]));
-    CHECK_FALSE (view.isOpen (effects[1]));
-    CHECK (showingKnobs (*plugin).size() >= 3);
-    CHECK (phazite::test::findComponentWithTitle (*plugin, "Open its window") != nullptr);
-    view.setOpen (effects[1], true);
+    REQUIRE (view.getShownBody() != nullptr);
+    CHECK_FALSE (showingKnobs (*view.getShownBody()).isEmpty()); // its mix is in its slot
 
-    // Each page keeps its own cards while the other shows: the same ones come back.
+    // Each page keeps its own while the other shows: the same slots come back, the same one showing.
     using Page = phazite::ui::DevicesView::Page;
     view.showPage (Page::instrument);
     view.showPage (Page::effects);
     CHECK (view.findPanel (effects[0]) == eq);
+    CHECK (view.isOpen (effects[2]));
 
-    // An effect just added opens, the others folding, even while the Instrument page shows.
+    // An effect just added shows, even while the Instrument page shows.
     view.showPage (Page::instrument);
     phazite::addEffect (screen.context, screen.track (0), screen.find ("phaziteDelay"));
     phazite::test::dispatchPendingMessages();
     view.showPage (Page::effects);
     const auto delay = phazite::getEffects (screen.context, screen.track (0)).back().id;
     CHECK (view.isOpen (delay));
-    CHECK_FALSE (view.isOpen (effects[1]));
+    CHECK_FALSE (view.isOpen (effects[2]));
 }
 
-TEST_CASE ("A folded card shows only what every effect has, one under another: its switch, name, sidechain and mix")
+TEST_CASE (
+    "An effect's slot has what every effect has along its line, its switch, name and mix; the one that shows, its Presets and sidechain under it")
 {
-    // The owner (2026-10-30): folded effects showed knobs and pictures squeezed under a header whose parts crowded its top.
+    // The owner (2026-11-06): stacked as FL Studio's mixer slots, in place of a row of cards that grew narrower as it grew.
     Screen screen;
     auto& view = screen.view;
     const auto effects = screen.effects (0);
     REQUIRE (effects.size() == 3);
-    view.setOpen (effects[1], false); // the compressor, added last, opened
+    REQUIRE (view.isOpen (effects[1])); // the compressor, added last but the plug-in
 
     for (const auto& effect : effects)
     {
-        auto* card = view.findPanel (effect);
-        REQUIRE (card != nullptr);
-        CAPTURE (card->getTitle());
-        REQUIRE_FALSE (view.isOpen (effect));
+        auto* slot = view.findPanel (effect);
+        REQUIRE (slot != nullptr);
+        CAPTURE (slot->getTitle());
 
-        // No editor, picture or key knob: its mix alone, named.
-        CHECK (countEditors<phazite::ui::EqEditor> (*card) == 0);
-        CHECK (countEditors<phazite::ui::CompressorEditor> (*card) == 0);
-        CHECK (showingKnobs (*card) == juce::StringArray { "Mix" });
-        CHECK (phazite::test::findComponentWithTitle (*card, "Compressor history") == nullptr);
+        // No editor, picture or key knob in the column: its mix alone.
+        CHECK (countEditors<phazite::ui::EqEditor> (*slot) == 0);
+        CHECK (countEditors<phazite::ui::CompressorEditor> (*slot) == 0);
+        CHECK (showingKnobs (*slot) == juce::StringArray { "Mix" });
 
-        // One under another, in a narrow card: the switch over the name, over the mix.
-        auto* power = phazite::test::findComponentWithTitle (*card, "On");
-        auto* name = findNameButton (*card, card->getTitle());
-        auto* mix = phazite::test::findComponentWithTitle (*card, "Mix");
+        // Along one line: the switch, the name, the mix.
+        auto* power = phazite::test::findComponentWithTitle (*slot, "On");
+        auto* name = findNameButton (*slot, slot->getTitle());
+        auto* mix = phazite::test::findComponentWithTitle (*slot, "Mix");
         REQUIRE (power != nullptr);
         REQUIRE (name != nullptr);
         REQUIRE (mix != nullptr);
-        CHECK (card->getWidth() < 130);
-        CHECK (power->getBottom() <= name->getY());
-        CHECK (name->getBottom() <= mix->getY());
-        phazite::test::checkChildrenApart (*card);
+        CHECK (power->getRight() <= name->getX());
+        CHECK (name->getRight() <= mix->getX());
+        CHECK (std::abs (power->getBounds().getCentreY() - name->getBounds().getCentreY()) <= 1);
+        phazite::test::checkChildrenApart (*slot);
+
+        // Its Presets under its line, while it shows only.
+        auto* presets = phazite::test::findComponentWithTitle (*slot, "Presets");
+        REQUIRE (presets != nullptr);
+        CHECK (presets->isVisible() == view.isOpen (effect));
+
+        if (view.isOpen (effect))
+            CHECK (presets->getY() >= name->getBottom());
     }
 
-    // The compressor's sidechain, between its name and its mix.
+    // The compressor's sidechain, under its line with its Presets.
     auto* compressor = view.findPanel (effects[1]);
     auto* sidechain = phazite::test::findComponentWithTitle (*compressor, "Sidechain");
     REQUIRE (sidechain != nullptr);
+    CHECK (sidechain->isVisible());
     CHECK (sidechain->getY() >= findNameButton (*compressor, "Compressor")->getBottom());
-    CHECK (sidechain->getBottom() <= phazite::test::findComponentWithTitle (*compressor, "Mix")->getY());
-
-    // The chevron opens it, with all its controls, its header's parts along its top again.
-    auto* open = phazite::test::findComponentWithTitle (*compressor, "Open");
-    REQUIRE (open != nullptr);
-    phazite::test::Mouse mouse (*open);
-    mouse.click (open->getLocalBounds().getCentre());
-    CHECK (view.isOpen (effects[1]));
-    CHECK (countEditors<phazite::ui::CompressorEditor> (*compressor) == 1);
-    CHECK (phazite::test::findComponentWithTitle (*compressor, "Mix")->getY() < 30);
 }
 
 TEST_CASE ("A modulator dragged by its grip lights every knob it can modulate as the drag starts, until it is let go")
 {
     Screen screen;
     auto& view = screen.view;
-    auto* group = phazite::test::findComponentWithTitle (view, "Modulators");
+    juce::Component* group = phazite::test::findAll<phazite::ui::ModulatorSlots> (view).getFirst(); // under its heading
     REQUIRE (group != nullptr);
     const auto lfo = phazite::addModulator (screen.context, screen.track (0), phazite::ModulatorType::lfo);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "LFO 1") != nullptr; }));
@@ -354,15 +351,14 @@ TEST_CASE ("A modulator dragged by its grip lights every knob it can modulate as
     CHECK_FALSE (otherKnob.isModulatorTarget());
 }
 
-TEST_CASE ("An effect dragged by its name moves among its neighbours, in the Devices view and in the mixer")
+TEST_CASE ("An effect dragged by its name moves among its neighbours, up and down the column and the mixer's strips")
 {
     Screen screen;
     auto& view = screen.view;
     const auto effects = screen.effects (0); // the EQ, the compressor, the plug-in
     REQUIRE (effects.size() == 3);
-    view.setOpen (effects[1], false);
 
-    // The EQ's name, dragged past the plug-in's card: it goes last, as one undo step.
+    // The EQ's name, dragged past the plug-in's slot: it goes last, as one undo step.
     auto* eq = view.findPanel (effects[0]);
     auto* plugin = view.findPanel (effects[2]);
     REQUIRE (eq != nullptr);
@@ -370,7 +366,7 @@ TEST_CASE ("An effect dragged by its name moves among its neighbours, in the Dev
     auto* eqName = findNameButton (*eq, "EQ");
     REQUIRE (eqName != nullptr);
     phazite::test::Mouse mouse (*eqName);
-    drag (mouse, eqName->getLocalBounds().getCentre(), eqName->getLocalPoint (plugin, juce::Point<int> (plugin->getWidth() - 4, 60)));
+    drag (mouse, eqName->getLocalBounds().getCentre(), eqName->getLocalPoint (plugin, juce::Point<int> (40, plugin->getHeight() - 2)));
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return screen.effects (0) == std::vector { effects[1], effects[2], effects[0] }; }));
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Move Device"));
     CHECK (screen.context.getSongSelection().getDevices().empty()); // a drag, not a click: nothing selected
@@ -381,7 +377,7 @@ TEST_CASE ("An effect dragged by its name moves among its neighbours, in the Dev
     eqName = findNameButton (*eq, "EQ");
     REQUIRE (eqName != nullptr);
     phazite::test::Mouse again (*eqName);
-    drag (again, eqName->getLocalBounds().getCentre(), eqName->getLocalBounds().getCentre().translated (8, 0));
+    drag (again, eqName->getLocalBounds().getCentre(), eqName->getLocalBounds().getCentre().translated (0, 8));
     phazite::test::dispatchPendingMessages();
     CHECK (screen.effects (0) == std::vector { effects[1], effects[2], effects[0] });
 
@@ -401,16 +397,14 @@ TEST_CASE ("An effect dragged by its name moves among its neighbours, in the Dev
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return screen.effects (0) == effects; }));
 }
 
-TEST_CASE ("While devices' windows show, one of Phazite's own folds with its button lit, and a plug-in's card stays as it was")
+TEST_CASE ("While devices' windows show, one of Phazite's own shows a word beside the column in its place, its button lit")
 {
     Screen screen;
     auto& view = screen.view;
     const auto effects = screen.effects (0);
     REQUIRE (effects.size() == 3);
-    REQUIRE (view.findPanel (effects[2]) != nullptr);
-    const auto pluginWidth = view.findPanel (effects[2])->getWidth();
     view.setOpen (effects[0], true);
-    REQUIRE (countEditors<phazite::ui::EqEditor> (*view.findPanel (effects[0])) == 1);
+    REQUIRE (dynamic_cast<phazite::ui::EqEditor*> (view.getShownBody()) != nullptr);
 
     // The windows of the EQ and the plug-in, shown as the model asks for them (the app's would be real ones on the screen).
     ShownWindows windows { screen.context };
@@ -419,26 +413,28 @@ TEST_CASE ("While devices' windows show, one of Phazite's own folds with its but
     REQUIRE (windows.open == std::set { effects[0], effects[2] });
 
     CHECK (phazite::isDeviceWindowOpen (screen.context, effects[2]));
-    CHECK_FALSE (phazite::getEffects (screen.context, screen.track (0))[2].windowOpen); // a plug-in's says nothing of its card
+    CHECK_FALSE (phazite::getEffects (screen.context, screen.track (0))[2].windowOpen); // a plug-in's says nothing of its slot
 
-    // The cards made again as the track is selected again.
+    // The slots made again as the track is selected again; the EQ still the one that shows.
     screen.context.getSongSelection().selectOnly (screen.track (1));
     phazite::test::dispatchPendingMessages();
     screen.context.getSongSelection().selectOnly (screen.track (0));
     phazite::test::dispatchPendingMessages();
 
-    auto* plugin = view.findPanel (effects[2]);
+    // One editor at a time: the window's, and a word in its place beside the column.
     auto* eq = view.findPanel (effects[0]);
-    REQUIRE (plugin != nullptr);
     REQUIRE (eq != nullptr);
-    CHECK (plugin->getWidth() == pluginWidth);
-    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (*eq).isEmpty());
+    CHECK (view.isOpen (effects[0]));
+    CHECK (phazite::test::findAll<phazite::ui::EqEditor> (view).isEmpty());
+    auto* word = dynamic_cast<juce::Label*> (view.getShownBody());
+    REQUIRE (word != nullptr);
+    CHECK (word->getText().contains ("window of its own"));
     auto* windowButton = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*eq, "Open in a window"));
     REQUIRE (windowButton != nullptr);
     CHECK (windowButton->getToggleState());
 }
 
-TEST_CASE ("The Instrument page shows the track's instrument alone, as wide as the page, or why it has none")
+TEST_CASE ("The Instrument page shows the track's instrument in the column, its editor beside it as wide as the rest, or why it has none")
 {
     using Page = phazite::ui::DevicesView::Page;
     Screen screen;
@@ -452,18 +448,25 @@ TEST_CASE ("The Instrument page shows the track's instrument alone, as wide as t
                         [] (juce::TextButton* button) { return button->isShowing() && button->getButtonText() == "+ Instrument"; }));
     CHECK (view.findPanel (effects[0]) == nullptr);
 
-    // With the synth: its editor alone, as wide as the page, and its page as the one it is on.
+    // With the synth: its name, Presets and window's button in the column (the owner, 2026-11-06: not a header as wide as
+    // the dock), its editor alone beside it, as wide as the rest of the view; and its page as the one it is on.
     phazite::chooseInstrument (screen.context, screen.track (0), screen.find ("phaziteSynth"));
     phazite::test::dispatchPendingMessages();
     const auto instrument = phazite::getInstrument (screen.context, screen.track (0));
     REQUIRE (instrument.has_value());
     auto* panel = view.findPanel (instrument->id);
     REQUIRE (panel != nullptr);
-    CHECK (phazite::test::findAll<phazite::ui::SynthEditor> (*panel).size() == 1);
-    CHECK (panel->getWidth() > 1000);
+    CHECK (panel->getWidth() < 170);
+    CHECK (findNameButton (*panel, "Synth") != nullptr);
+    auto* presets = phazite::test::findComponentWithTitle (*panel, "Presets");
+    REQUIRE (presets != nullptr);
+    CHECK (presets->isShowing());
+    CHECK (phazite::test::findComponentWithTitle (*panel, "Open in a window") != nullptr);
+    CHECK (dynamic_cast<phazite::ui::SynthEditor*> (view.getShownBody()) != nullptr);
+    CHECK (view.getShownBody()->getWidth() > 1000);
     CHECK (view.getPageOf (instrument->id) == Page::instrument);
     CHECK (view.getPageOf (effects[0]) == Page::effects);
-    phazite::test::checkChildrenApart (view);
+    phazite::test::checkChildrenApart (*panel);
 
     // No switch of its own, and it stays on: the track's switch mutes it (the owner, 2026-11-01).
     CHECK (phazite::test::findComponentWithTitle (*panel, "On") == nullptr);
@@ -527,7 +530,7 @@ TEST_CASE ("The Devices view follows the selection, and a click on a device's na
     setSong (screen.context, screen.song.get());
 }
 
-TEST_CASE ("A container shows its macros and its devices in line, as cards; a macro dropped on a device's knob modulates it")
+TEST_CASE ("A container lists its devices under it in the column; one shown shows beside the container's macros, which drop on its knobs")
 {
     Screen screen;
     const auto effects = screen.effects (0);
@@ -535,37 +538,36 @@ TEST_CASE ("A container shows its macros and its devices in line, as cards; a ma
     REQUIRE (container.isValid());
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return screen.view.findPanel (container) != nullptr; }));
 
-    // Grouped, it opens: its devices inside it, after its eight macros, as cards.
+    // Its devices under it in its slot, indented, one under another. Grouped, it shows: its eight macros beside the column,
+    // with a word on where its devices are.
     auto* panel = screen.view.findPanel (container);
     auto* eq = screen.view.findPanel (effects[0]);
     auto* compressor = screen.view.findPanel (effects[1]);
     REQUIRE (eq != nullptr);
     REQUIRE (compressor != nullptr);
     CHECK (panel->isParentOf (eq));
-    CHECK (eq->getScreenX() < compressor->getScreenX());
-    CHECK (phazite::test::findComponentWithTitle (*panel, "Macro 1") != nullptr);
-    CHECK (phazite::test::findComponentWithTitle (*panel, "Macro 8") != nullptr);
-    phazite::test::checkChildrenApart (*panel);
+    CHECK (eq->getScreenY() < compressor->getScreenY());
+    CHECK (eq->getScreenX() > panel->getScreenX());
+    CHECK (screen.view.isOpen (container));
+    auto* frame = screen.view.getShownBody();
+    REQUIRE (frame != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 1") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 8") != nullptr);
+    phazite::test::checkChildrenApart (*frame);
 
-    // A card inside it opening widens the container's card to hold it (the compressor's was open before it was grouped,
-    // and stays so: it folds first).
-    screen.view.setOpen (effects[1], false);
-    const auto foldedWidth = panel->getWidth();
-    screen.view.setOpen (effects[0], true);
-    eq = screen.view.findPanel (effects[0]);
-    REQUIRE (eq != nullptr);
-    CHECK (panel->getWidth() > foldedWidth + 100);
-    CHECK (panel->getLocalArea (eq, eq->getLocalBounds()).getRight() <= panel->getWidth());
-    phazite::test::checkChildrenApart (*panel);
-
-    // The first macro, dropped on the compressor's makeup gain, in its card opened: it modulates it.
-    const auto macro = phazite::getContainerMacros (screen.context, container)[0].id;
+    // Its compressor shown: its editor beside the container's macros, the first of which, dropped on its makeup gain,
+    // modulates it.
     screen.view.setOpen (effects[1], true);
-    compressor = screen.view.findPanel (effects[1]);
-    REQUIRE (compressor != nullptr);
-    auto* makeup = phazite::test::findComponentWithTitle (*compressor, "Makeup");
-    REQUIRE (makeup != nullptr);
-    auto* knob = dynamic_cast<phazite::ui::Knob*> (makeup);
+    CHECK (screen.view.isOpen (effects[1]));
+    CHECK (screen.view.isOpen (container));
+    auto* editor = dynamic_cast<phazite::ui::CompressorEditor*> (screen.view.getShownBody());
+    REQUIRE (editor != nullptr);
+    auto* holder = editor->getParentComponent();
+    REQUIRE (holder != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*holder, "Macro 1") != nullptr);
+    phazite::test::checkChildrenApart (*holder);
+    const auto macro = phazite::getContainerMacros (screen.context, container)[0].id;
+    auto* knob = dynamic_cast<phazite::ui::Knob*> (phazite::test::findComponentWithTitle (*editor, "Makeup"));
     REQUIRE (knob != nullptr);
     juce::Component source;
     const juce::DragAndDropTarget::SourceDetails drop { phazite::ui::makeModulatorDrag (macro), &source, {} };
@@ -573,10 +575,10 @@ TEST_CASE ("A container shows its macros and its devices in line, as cards; a ma
     knob->itemDropped (drop);
     CHECK (phazite::getModulations (screen.context, macro).size() == 1);
 
-    // Renamed by typing: the container's name, beside its macros.
+    // Renamed by typing: the container's name, over its macros.
     juce::Label* name = nullptr;
 
-    for (auto* label : phazite::test::findAll<juce::Label> (*panel))
+    for (auto* label : phazite::test::findAll<juce::Label> (*holder))
         if (label->getText() == "Container" && label->isEditableOnDoubleClick())
             name = label;
 
@@ -585,69 +587,90 @@ TEST_CASE ("A container shows its macros and its devices in line, as cards; a ma
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Rename Container"));
     CHECK (phazite::getEffects (screen.context, screen.track (0))[0].name == juce::String ("Glue"));
 
-    // A device added to it shows in it.
+    // Its chevron folds its devices under it, and shows them again.
+    panel = screen.view.findPanel (container);
+    REQUIRE (panel != nullptr);
+    auto* fold = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "Fold its devices"));
+    REQUIRE (fold != nullptr);
+    phazite::test::Mouse foldMouse (*fold);
+    foldMouse.click (fold->getLocalBounds().getCentre());
+    CHECK_FALSE (screen.view.findPanel (effects[0])->isShowing());
+
+    // A device added to it shows in it, and shows beside the column.
     phazite::addEffectToContainer (screen.context, container, screen.find ("phaziteReverb"));
     CHECK (phazite::test::dispatchMessagesUntil (
         [&]
         {
             const auto inside = phazite::getContainerDevices (screen.context, container);
-            return inside.size() == 3 && screen.view.findPanel (inside.back().id) != nullptr;
+            return inside.size() == 3 && screen.view.findPanel (inside.back().id) != nullptr && screen.view.isOpen (inside.back().id);
         }));
 }
 
-TEST_CASE ("The Devices view shows its track's modulators, a macro with its knob, and a modulator's editor beside them")
+TEST_CASE ("The Devices view shows its track's modulators as chips, a macro with its knob; a chip pops its editor out over the window")
 {
     Screen screen;
     auto& view = screen.view;
-    auto* group = phazite::test::findComponentWithTitle (view, "Modulators");
+    juce::Component* group = phazite::test::findAll<phazite::ui::ModulatorSlots> (view).getFirst(); // under its heading
     REQUIRE (group != nullptr);
     CHECK (group->isShowing());
+    auto* slots = dynamic_cast<phazite::ui::ModulatorSlots*> (group);
+    REQUIRE (slots != nullptr);
 
     phazite::addModulator (screen.context, screen.track (0), phazite::ModulatorType::lfo);
     phazite::addModulator (screen.context, screen.track (0), phazite::ModulatorType::macro);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "LFO 1") != nullptr; }));
     CHECK (phazite::test::findComponentWithTitle (*group, "Macro 1") != nullptr);
     CHECK (phazite::test::findAll<phazite::ui::Knob> (*group).size() == 1); // the macro's
+    CHECK (group->getWidth() < 170);                                        // a narrow column, the devices beside it
+    phazite::test::checkChildrenApart (*group);
 
-    // A click on the LFO's name opens its editor beside the modulators, and another click closes it.
-    auto* lfo = phazite::test::findComponentWithTitle (*group, "LFO 1");
+    // A click on the LFO's chip pops its editor out over the window, beside the chip, its chip lit; the devices keep their
+    // room. A click on the chip again closes it.
+    auto* lfo = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*group, "LFO 1"));
+    REQUIRE (lfo != nullptr);
+    const auto devicesBefore = phazite::test::findComponentWithTitle (view, "Controls")->getBounds();
     phazite::test::Mouse mouse (*lfo);
     mouse.click (lfo->getLocalBounds().getCentre());
-    auto editors = phazite::test::findAll<phazite::ui::ModulatorEditor> (view);
-    REQUIRE (editors.size() == 1);
-    CHECK (editors.getFirst()->isShowing());
-    CHECK (editors.getFirst()->getScreenX() > group->getScreenX());
-    phazite::test::checkChildrenApart (view);
+    auto* editor = dynamic_cast<phazite::ui::ModulatorEditor*> (slots->getOpenEditor());
+    REQUIRE (editor != nullptr);
+    CHECK (editor->isShowing());
+    CHECK (editor->findParentComponentOfClass<juce::CallOutBox>() != nullptr);
+    CHECK (lfo->getToggleState());
+    CHECK (phazite::test::findComponentWithTitle (view, "Controls")->getBounds() == devicesBefore);
+    juce::Thread::sleep (250); // a call-out takes a click on what opened it only after a moment, as a touch screen still sends one
     mouse.click (lfo->getLocalBounds().getCentre());
-    CHECK (phazite::test::findAll<phazite::ui::ModulatorEditor> (view).isEmpty());
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return slots->getOpenEditor() == nullptr; }));
+    slots->updateValues(); // the view's timer does it
+    CHECK_FALSE (lfo->getToggleState());
 
-    // The LFO's On switch turns it off, to hear the sound without it; the macro has none.
-    auto* on = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*group, "On"));
+    // The LFO's On switch, in its editor, turns it off, to hear the sound without it; its chip goes faint. The macro has none.
+    slots->openEditor (phazite::getModulators (screen.context, screen.track (0))[0].id);
+    editor = dynamic_cast<phazite::ui::ModulatorEditor*> (slots->getOpenEditor());
+    REQUIRE (editor != nullptr);
+    auto* on = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*editor, "On"));
     REQUIRE (on != nullptr);
     CHECK (on->getToggleState());
     phazite::test::Mouse onMouse (*on);
     onMouse.click (on->getLocalBounds().getCentre());
     CHECK_FALSE (phazite::isModulatorOn (screen.context, phazite::getModulators (screen.context, screen.track (0))[0].id));
-    CHECK_FALSE (on->getToggleState());
+    slots->updateValues();
+    CHECK (lfo->getAlpha() < 1.0f);
 
-    // Removing one takes its slot away, and its editor, open beside them: no slot is left to close it.
-    mouse.click (lfo->getLocalBounds().getCentre());
-    REQUIRE (phazite::test::findAll<phazite::ui::ModulatorEditor> (view).size() == 1);
+    // Removing one takes its chip away, and its editor with it.
     phazite::removeModulator (screen.context, phazite::getModulators (screen.context, screen.track (0))[0].id);
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "LFO 1") == nullptr; }));
-    CHECK (phazite::test::findAll<phazite::ui::ModulatorEditor> (view).isEmpty());
-    phazite::test::checkChildrenApart (view);
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return slots->getOpenEditor() == nullptr; }));
+    phazite::test::checkChildrenApart (*group);
 
-    // So does undoing a modulator's adding while its editor is open.
+    // So does undoing a modulator's adding while its editor shows. A new modulator's editor opens as it is added.
     const auto random = phazite::addModulator (screen.context, screen.track (0), phazite::ModulatorType::random);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findComponentWithTitle (*group, "Random 1") != nullptr; }));
-    auto* randomName = phazite::test::findComponentWithTitle (*group, "Random 1");
-    phazite::test::Mouse randomMouse (*randomName);
-    randomMouse.click (randomName->getLocalBounds().getCentre());
-    REQUIRE (phazite::test::findAll<phazite::ui::ModulatorEditor> (view).size() == 1);
-    CHECK (phazite::test::findAll<phazite::ui::ModulatorEditor> (view).getFirst()->getModulator() == random);
+    slots->openEditor (random);
+    editor = dynamic_cast<phazite::ui::ModulatorEditor*> (slots->getOpenEditor());
+    REQUIRE (editor != nullptr);
+    CHECK (editor->getModulator() == random);
     phazite::undo (*screen.song);
-    CHECK (phazite::test::dispatchMessagesUntil ([&] { return phazite::test::findAll<phazite::ui::ModulatorEditor> (view).isEmpty(); }));
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return slots->getOpenEditor() == nullptr; }));
 }
 
 TEST_CASE ("A device with a sidechain shows in its header what it listens to: the one place to choose it")
@@ -735,7 +758,7 @@ TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, al
     CHECK (meter->getValue() == doctest::Approx (9.0f).epsilon (0.05));
 }
 
-TEST_CASE ("An open card's Presets button asks for its device's presets; a folded card has none, nor has a container")
+TEST_CASE ("The shown device's Presets button asks for its presets; the other slots show none, nor has a container one")
 {
     Screen screen;
     auto& view = screen.view;
@@ -745,19 +768,19 @@ TEST_CASE ("An open card's Presets button asks for its device's presets; a folde
     std::vector<std::pair<DeviceID, juce::String>> asked;
     view.onShowPresets = [&asked] (DeviceID device, const juce::String& name, juce::Component&) { asked.emplace_back (device, name); };
 
-    // Folded, the EQ shows no Presets button; open, it does, along its header.
-    view.setOpen (effects[1], false);
+    // The compressor shows: the EQ's slot has no Presets button showing; shown, it does, under its line.
     auto* eq = view.findPanel (effects[0]);
     REQUIRE (eq != nullptr);
-    auto* folded = phazite::test::findComponentWithTitle (*eq, "Presets");
-    CHECK ((folded == nullptr || ! folded->isShowing()));
+    auto* hidden = phazite::test::findComponentWithTitle (*eq, "Presets");
+    CHECK ((hidden == nullptr || ! hidden->isShowing()));
 
     view.setOpen (effects[0], true);
     eq = view.findPanel (effects[0]);
+    REQUIRE (eq != nullptr);
     auto* presets = phazite::test::findComponentWithTitle (*eq, "Presets");
     REQUIRE (presets != nullptr);
     CHECK (presets->isShowing());
-    CHECK (presets->getY() < 30);
+    CHECK (presets->getY() >= findNameButton (*eq, "EQ")->getBottom());
     phazite::test::Mouse mouse (*presets);
     mouse.click (presets->getLocalBounds().getCentre());
     REQUIRE (asked.size() == 1);
@@ -765,14 +788,14 @@ TEST_CASE ("An open card's Presets button asks for its device's presets; a folde
     CHECK (asked[0].second == juce::String ("EQ"));
     phazite::test::checkChildrenApart (*eq);
 
-    // A container's presets load as new containers, from the browser: its card has no Presets button.
+    // A container's presets load as new containers, from the browser: its slot has no Presets button.
     const auto container = phazite::groupIntoContainer (screen.context, { effects[1] });
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr; }));
     view.setOpen (container, true);
-    auto* containerCard = view.findPanel (container);
-    REQUIRE (containerCard != nullptr);
+    auto* containerSlot = view.findPanel (container);
+    REQUIRE (containerSlot != nullptr);
 
-    for (auto* child : containerCard->getChildren())
+    for (auto* child : containerSlot->getChildren())
         CHECK (child->getTitle() != juce::String ("Presets"));
 }
 
@@ -797,11 +820,89 @@ TEST_CASE ("On a machine without a screen, as Linux CI is, a test mouse letting 
         auto* eqName = findNameButton (*eq, "EQ");
         REQUIRE (eqName != nullptr);
         phazite::test::Mouse mouse (*eqName);
-        drag (mouse, eqName->getLocalBounds().getCentre(), eqName->getLocalPoint (plugin, juce::Point<int> (plugin->getWidth() - 4, 60)));
+        drag (mouse, eqName->getLocalBounds().getCentre(), eqName->getLocalPoint (plugin, juce::Point<int> (40, plugin->getHeight() - 2)));
         CHECK (phazite::test::dispatchMessagesUntil ([&]
                                                      { return screen.effects (0) == std::vector { effects[1], effects[2], effects[0] }; }));
         CHECK (juce::Desktop::getInstance().isHeadless()); // as it was: none since the drag ended
     }
 
     displays.refresh(); // the machine's own again, if it has any
+}
+
+TEST_CASE ("At the default window size, every built-in instrument and effect shows whole in the dock, without scrolling")
+{
+    // The whole window at its default size, its panels at theirs, the dock under the playlist, in the app's look (its fonts set
+    // the buttons' widths); a track with nothing on it.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    auto& context = screen.session.getContext();
+    const auto track = phazite::getTrackIDs (*phazite::findSong (context)).back();
+    context.getSongSelection().selectOnly (track);
+    phazite::test::dispatchPendingMessages();
+
+    const auto findType = [&context] (const char* id)
+    {
+        for (const auto& type : phazite::getDeviceTypes (context))
+            if (type.description.fileOrIdentifier == juce::String (id))
+                return type;
+
+        FAIL ("no " << id);
+        return phazite::DeviceType {};
+    };
+
+    // The device that shows beside the column shows whole: no scroll bar up and down, nothing cut off at its side.
+    const auto checkWhole = [&screen] (const char* type)
+    {
+        CAPTURE (type);
+        phazite::test::dispatchPendingMessages();
+        auto* view = phazite::test::findAll<phazite::ui::DevicesView> (screen.shell).getFirst();
+        REQUIRE (view != nullptr);
+        auto shown = 0;
+
+        for (auto* port : phazite::test::findAll<juce::Viewport> (*view))
+        {
+            if (port->getTitle() != "Controls" || ! port->isShowing() || port->getViewedComponent() == nullptr)
+                continue;
+
+            CHECK (port->getViewedComponent()->getHeight() <= port->getHeight());
+            CHECK (port->getViewedComponent()->getWidth() <= port->getWidth());
+            CHECK_FALSE (port->getVerticalScrollBar().isVisible());
+            ++shown;
+        }
+
+        CHECK (shown == 1);
+    };
+
+    // Each instrument alone on the Instrument tab.
+    phazite::chooseInstrument (context, track, findType ("phaziteSynth"));
+    REQUIRE (screen.registry.invoke ("view.instrument"));
+
+    for (const auto* type : { "phaziteSynth", "phaziteWavetable", "phaziteDrums" })
+    {
+        phazite::chooseInstrument (context, track, findType (type));
+        checkWhole (type);
+    }
+
+    // Each effect alone in the chain, showing beside the column, on the Effects tab.
+    REQUIRE (screen.registry.invoke ("view.effects"));
+
+    for (const auto* type :
+         { "phaziteEq", "phaziteCompressor", "phaziteLimiter", "phaziteMultiband", "phaziteSaturator", "phaziteFilter", "phaziteDelay",
+           "phaziteReverb", "phazitePhaser", "phaziteFlanger", "phaziteStereoExpander", "phaziteVocoder" })
+    {
+        phazite::addEffect (context, track, findType (type));
+        phazite::test::dispatchPendingMessages();
+        const auto effects = phazite::getEffects (context, track);
+        REQUIRE_FALSE (effects.empty());
+        auto* view = phazite::test::findAll<phazite::ui::DevicesView> (screen.shell).getFirst();
+        REQUIRE (view != nullptr);
+        view->setOpen (effects.back().id, true);
+        checkWhole (type);
+        phazite::removeDevice (context, effects.back().id);
+    }
 }

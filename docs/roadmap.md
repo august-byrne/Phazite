@@ -211,7 +211,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - Keymap files (Phazite default and FL Studio), and key rebinding.
 - The command palette (Ctrl+K), and macros made of chained commands.
 - *Done when:* every action in the app so far is a command, can be found in the palette, and shows by name in the undo history.
-- *Status:* done: the registry, keymaps (Phazite and FL Studio, in `resources/keymaps/`), named undo, macros and the palette's search (`src/model/commands/CommandRegistry.h`, with tests); the palette (Ctrl+K), menus and shortcuts run the app's commands, including Quit, Open Recent and Save As, and **Options > Keyboard Shortcuts** changes keys (kept per keymap). Undo and Redo show the step they apply to by name ("Undo Change Volume") in the Edit menu and the palette; an undo history panel can come later.
+- *Status:* done: the registry, keymaps (Phazite and FL Studio, in `resources/keymaps/`), named undo, macros and the palette's search (`src/model/commands/CommandRegistry.h`, with tests); the palette (Ctrl+K), menus and shortcuts run the app's commands, including Quit, Open Recent and Save As, and **Keyboard Shortcuts** (Options > Keyboard Shortcuts then; the gear's menu since 2026-11-05) changes keys (kept per keymap). Undo and Redo show the step they apply to by name ("Undo Change Volume") in the Edit menu and the palette; an undo history panel can come later.
 
 **0.6 UI shell and design system (L)**
 - **The main window:** docking panels that resize, collapse and detach to another monitor. Layouts: Beat, Mix and Full.
@@ -233,7 +233,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - A settings page: audio device (including ASIO), buffer size and MIDI inputs.
 - Computer-keyboard MIDI input.
 - *Done when:* a MIDI keyboard and the computer keyboard both play the starter synth.
-- *Status:* done: **Options > Settings** with Audio (device type including ASIO, device, sample rate and buffer size), MIDI (each MIDI input with an on/off switch, and the computer keyboard) and Shortcuts tabs; the computer keyboard (`src/ui/input/ComputerKeyboard.h`) and live MIDI routing (`src/model/engine/internal/LiveInput.h`), with tests. Still to try by hand: a MIDI keyboard and the computer keyboard playing the starter synth.
+- *Status:* done: **Settings** (in the Options menu then; the gear's menu at the activity bar's foot since 2026-11-05) with Audio (device type including ASIO, device, sample rate and buffer size), MIDI (each MIDI input with an on/off switch, and the computer keyboard) and Shortcuts tabs; the computer keyboard (`src/ui/input/ComputerKeyboard.h`) and live MIDI routing (`src/model/engine/internal/LiveInput.h`), with tests. Still to try by hand: a MIDI keyboard and the computer keyboard playing the starter synth.
 
 ## Phase 1: Make a beat (milestone 1)
 
@@ -288,7 +288,7 @@ Done before this plan (progress since then is under [Status](#status)):
 - **Playlist:** track colors run through their rows; dragging past an edge scrolls; "+ Track" moved over the track headers, with a row after the last track that adds one; the sections became a band in the time bar and ghosts behind the tracks; four more outlines.
 - **Piano roll:** bar 1 is the clip's start; a selected track shows its clip nearest the playhead, and on a track without clips the first note starts one; a key is a track's, off until chosen; no Drums button.
 - **Mixer:** strips keep their parts apart at any height, and the mixer scrolls when it is shorter than they need.
-- **Keys and menus:** tool keys spring back after a hold; the digits 1 to 9 pick tools and M turns the computer keyboard on and off; the menu bar is File, Edit, Add, View, Options and Help.
+- **Keys and menus:** tool keys spring back after a hold; the digits 1 to 9 pick tools and M turns the computer keyboard on and off; the menu bar is File, Edit, Add, View, Options and Help (Options went on 2026-11-05: its settings are in the gear's menu).
 - **Tests that drive the UI:** the components are in a library of their own (`phazite_ui`), and `tests/UiTestHelpers.h` puts them in a window that isn't on any screen, so tests send them mouse and key events through JUCE as the app does (`tests/PlaylistTests.cpp`, `tests/PianoRollTests.cpp`, `tests/MixerViewTests.cpp`).
 
 **Second feedback round (2026-10-13):**

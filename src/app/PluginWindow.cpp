@@ -398,8 +398,8 @@ namespace
     };
 
     // One of Phazite's own devices out of the Devices view, when the user wants it: its editor, in a window named after it
-    // and its channel ("EQ - Bass"), as large as its editor at first and then as the user makes it. Its card in the Devices
-    // view stays folded meanwhile.
+    // and its channel ("EQ - Bass"), as large as its editor at first and then as the user makes it. The Devices view says
+    // meanwhile where it is, and its row there keeps its switch, mix and sidechain.
     class DeviceWindow final : public DeviceWindowFrame
     {
     public:

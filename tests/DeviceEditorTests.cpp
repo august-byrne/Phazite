@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // How editors reach Phazite's own devices (src/model/devices/DeviceHandle.h), the knobs a device gets until it has an
-// editor of its own (src/ui/devices/DeviceEditors.h), what every device's editor repaints, and the curves their graphs draw
-// (src/ui/devices/DeviceGraph.h).
+// editor of its own (src/ui/devices/DeviceEditors.h), what every device's editor repaints, how editors lay out their parts
+// (src/ui/devices/DeviceLayout.h), and the curves their graphs draw (src/ui/devices/DeviceGraph.h).
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
@@ -22,6 +22,8 @@
 #include "ui/components/DisplayTicker.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceGraph.h"
+#include "ui/devices/DeviceLayout.h"
+#include "ui/theme/DesignTokens.h"
 
 namespace
 {
@@ -182,4 +184,78 @@ TEST_CASE ("A graph's curve is one line from end to end, through the level at ea
     wash.closeSubPath();
     CHECK (! wash.contains (30.0f, 60.0f));
     CHECK (wash.contains (90.0f, 30.0f));
+}
+
+TEST_CASE ("A device's layout narrows its graphs first, then shows its columns in pages named by them, every part under its title")
+{
+    using phazite::ui::DeviceLayout;
+    juce::Component editor, graph, knobs, more, other;
+    DeviceLayout layout (editor, { { { "Graph", &graph, 300, 200, 120, true, 200 } },
+                                   { { "Knobs", &knobs, 160, 96, 96 }, { "More", &more, 160, 72, 72 } },
+                                   { { "Other", &other, 200, 120, 120 } } });
+    constexpr int gap = phazite::ui::Space::m; // between columns
+    CHECK (layout.getWidth() == 300 + 160 + 200 + 2 * gap);
+    CHECK (layout.getNarrowestWidth() == 200 + 160 + 200 + 2 * gap);
+
+    // A little narrower than its columns side by side: the graph narrows, the others keep their widths; no pages.
+    layout.layOut ({ 0, 0, 600, 240 });
+    CHECK_FALSE (layout.usesPages());
+    CHECK (graph.getWidth() == 600 - 160 - 200 - 2 * gap);
+    CHECK (knobs.getWidth() == 160);
+    CHECK (other.isVisible());
+
+    // Narrower, in a short area: pages, as many columns on each as fit, named by their first parts.
+    layout.layOut ({ 0, 0, 400, 240 });
+    REQUIRE (layout.usesPages());
+    CHECK (layout.getNumPages() == 2);
+    CHECK (layout.getPageName (0) == juce::String::fromUTF8 ("Graph \xc2\xb7 Knobs"));
+    CHECK (layout.getPageName (1) == "Other");
+    CHECK (graph.isVisible());
+    CHECK_FALSE (other.isVisible());
+    CHECK (layout.getMinimumHeightForWidth (400) > layout.getMinimumHeight()); // its pages' bar
+    CHECK (layout.getMinimumHeightForWidth (600) == layout.getMinimumHeight());
+
+    // The bar of pages over the parts, each part under its title still (the owner, 2026-11-06: every block names itself).
+    CHECK (graph.getY() == DeviceLayout::pageBarHeight + phazite::ui::Space::xs + DeviceLayout::titleHeight);
+    CHECK (knobs.getY() == graph.getY());
+    CHECK (more.getY() >= knobs.getBottom() + DeviceLayout::titleHeight);
+
+    // Its other page shows in its place.
+    layout.showPage (1);
+    CHECK (other.isVisible());
+    CHECK_FALSE (graph.isVisible());
+    CHECK_FALSE (knobs.isVisible());
+
+    // In a taller area as narrow, its columns wrap into rows instead, every part showing.
+    layout.layOut ({ 0, 0, 400, 600 });
+    CHECK_FALSE (layout.usesPages());
+    CHECK (graph.isVisible());
+    CHECK (other.isVisible());
+    CHECK (other.getY() > graph.getBottom());
+}
+
+TEST_CASE ("A pinned column leads every page of a device's layout, without naming any; a column's name names its page")
+{
+    using phazite::ui::DeviceLayout;
+    juce::Component editor, picker, first, second;
+    DeviceLayout layout (editor, { { { "Band", &picker, 72, 200, 200 } },
+                                   { { "First", &first, 300, 200, 150, true } },
+                                   { { "Second part", &second, 300, 200, 150, true } } });
+    layout.setPinned (0);
+    layout.setColumnName (2, "Second");
+    CHECK (layout.getMinimumWidth() == 72 + phazite::ui::Space::m + 300);
+
+    layout.layOut ({ 0, 0, 400, 240 });
+    REQUIRE (layout.getNumPages() == 2);
+    CHECK (layout.getPageName (0) == "First");
+    CHECK (layout.getPageName (1) == "Second");
+    CHECK (picker.isVisible());
+    CHECK (first.isVisible());
+    CHECK_FALSE (second.isVisible());
+
+    layout.showPage (1);
+    CHECK (picker.isVisible());
+    CHECK (second.isVisible());
+    CHECK_FALSE (first.isVisible());
+    CHECK (second.getX() > picker.getRight());
 }

@@ -20,6 +20,7 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/components/TrackSwitch.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
@@ -321,6 +322,80 @@ TEST_CASE ("The playlist paints, with sections, a clip and a selected track")
     CHECK (image.getWidth() == 1000);
 }
 
+TEST_CASE ("A track's header shows how loud the track plays now in a narrow bar along its right edge, as tall as its row")
+{
+    PlaylistScreen screen;
+    const auto headers = phazite::test::findAll<phazite::ui::TrackHeader> (screen.playlist);
+    REQUIRE (headers.size() == 3);
+
+    for (auto* header : headers)
+    {
+        // On the edge, as tall as the row above its border, apart from the switch beside it; clicks go to the header.
+        auto& bar = header->getPeakBar();
+        CHECK (bar.isVisible());
+        CHECK (bar.getRight() == header->getWidth());
+        CHECK (bar.getWidth() == phazite::ui::PeakBarTint::width);
+        CHECK (bar.getY() == 0);
+        CHECK (bar.getBottom() == header->getHeight() - 1);
+        const auto switches = phazite::test::findAll<phazite::ui::TrackSwitch> (*header);
+        REQUIRE (switches.size() == 1);
+        CHECK (switches.getFirst()->getRight() < bar.getX());
+        CHECK_FALSE (bar.hitTest (bar.getWidth() / 2, bar.getHeight() / 2));
+    }
+
+    // A collapsed row keeps it, as tall as the row.
+    auto& first = *headers[0];
+    phazite::setCollapsed (screen.context, first.getTrack(), true);
+    phazite::test::dispatchPendingMessages();
+    CHECK (first.getPeakBar().isVisible());
+    CHECK (first.getPeakBar().getHeight() == first.getHeight() - 1);
+}
+
+TEST_CASE ("Dragging the track headers' right edge makes them wider or narrower, within limits; a double-click puts them back")
+{
+    using phazite::ui::Playlist;
+    PlaylistScreen screen;
+    auto& playlist = screen.playlist;
+    auto kept = 0;
+    playlist.onHeaderWidthChanged = [&kept] (int width) { kept = width; };
+    const auto headers = phazite::test::findAll<phazite::ui::TrackHeader> (playlist);
+    REQUIRE_FALSE (headers.isEmpty());
+    CHECK (headers[0]->getWidth() == Playlist::defaultHeaderWidth);
+
+    // In the playlist's coordinates, which stay put as the edge moves.
+    const auto dragEdge = [&playlist] (int by)
+    {
+        auto* edge = phazite::test::findComponentWithTitle (playlist, "Track headers' edge");
+        REQUIRE (edge != nullptr);
+        phazite::test::Mouse mouse (playlist);
+        const auto from = playlist.getLocalArea (edge, edge->getLocalBounds()).getCentre();
+        mouse.press (from);
+        mouse.dragTo (from + juce::Point<int> (by / 2, 0));
+        mouse.dragTo (from + juce::Point<int> (by, 0));
+        mouse.release();
+    };
+
+    // Wider: the headers and what is over them follow, and the app is told the width to keep as the drag ends.
+    dragEdge (60);
+    CHECK (playlist.getHeaderWidth() == Playlist::defaultHeaderWidth + 60);
+    CHECK (headers[0]->getWidth() == playlist.getHeaderWidth());
+    CHECK (kept == playlist.getHeaderWidth());
+
+    // Never past its limits.
+    dragEdge (-500);
+    CHECK (playlist.getHeaderWidth() == Playlist::minHeaderWidth);
+    dragEdge (800);
+    CHECK (playlist.getHeaderWidth() == Playlist::maxHeaderWidth);
+
+    // A double-click puts it back.
+    auto* edge = phazite::test::findComponentWithTitle (playlist, "Track headers' edge");
+    REQUIRE (edge != nullptr);
+    phazite::test::Mouse mouse (*edge);
+    mouse.doubleClick (edge->getLocalBounds().getCentre());
+    CHECK (playlist.getHeaderWidth() == Playlist::defaultHeaderWidth);
+    CHECK (kept == Playlist::defaultHeaderWidth);
+}
+
 TEST_CASE ("A track's header moves the selected tracks from anywhere on it, a double-click collapses it, and its edge resizes it")
 {
     PlaylistScreen screen;
@@ -594,7 +669,8 @@ TEST_CASE ("With FL Studio's keymap, Ctrl+B repeats a selected time range, and t
     CHECK (loopAfterUndo.getEnd().inBeats() == doctest::Approx (8.0));
 }
 
-TEST_CASE ("The playlist's vertical scroll bar shows only while its tracks don't fit, and its room goes to the tracks otherwise")
+TEST_CASE (
+    "The playlist's vertical scroll bar shows only while its tracks don't fit, thin, over the lanes' edge, and the time line has no other")
 {
     PlaylistScreen screen;                         // three tracks, which fit
     CHECK (screen.playlist.isFollowingPlayback()); // unlike the piano roll
@@ -608,10 +684,23 @@ TEST_CASE ("The playlist's vertical scroll bar shows only while its tracks don't
     CHECK_FALSE (vertical->isVisible());
     CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
 
+    // The overview of the song along the time bar's top scrolls the time line, as FL Studio's: no scroll bar under the lanes.
+    for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
+        if (! bar->isVertical())
+            CHECK_FALSE (bar->isVisible());
+
+    // Tracks that don't fit: the bar shows over the lanes' right edge, thin, and the lanes keep their whole width; it is drawn in
+    // front of them, over a see-through track.
     phazite::ensureTracks (screen.getSong(), 30);
     phazite::test::dispatchPendingMessages();
     CHECK (vertical->isVisible());
-    CHECK (screen.lanes->getRight() == screen.playlist.getWidth() - phazite::ui::TimelineEditor::scrollBarSize);
+    CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
+    CHECK (vertical->getWidth() == phazite::ui::ScrollTint::overlayWidth);
+    CHECK (vertical->getRight() == screen.lanes->getRight());
+    CHECK (vertical->getY() == screen.lanes->getY());
+    CHECK (screen.playlist.getIndexOfChildComponent (vertical) > screen.playlist.getIndexOfChildComponent (screen.lanes));
+    CHECK_FALSE (vertical->findColour (juce::ScrollBar::trackColourId).isTransparent());
+    CHECK (vertical->findColour (juce::ScrollBar::thumbColourId).getAlpha() < 255);
 
     std::vector<phazite::TrackID> added;
 
@@ -624,6 +713,63 @@ TEST_CASE ("The playlist's vertical scroll bar shows only while its tracks don't
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (vertical->isVisible());
     CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
+}
+
+TEST_CASE (
+    "The overview along the time bar's top shows the whole song; its thumb drags to scroll, its end to zoom, a press elsewhere goes there")
+{
+    PlaylistScreen screen;
+    REQUIRE (screen.addClip (0, 0.0, 4.0).isValid());
+    REQUIRE (screen.addClip (2, 32.0, 4.0).isValid());
+    phazite::test::dispatchPendingMessages();
+
+    auto* overview = phazite::test::findComponentWithTitle (screen.playlist, "Overview");
+    REQUIRE (overview != nullptr);
+    CHECK (overview->getY() < screen.lanes->getY());
+    CHECK (overview->getX() == screen.lanes->getX());
+    CHECK (overview->getRight() == screen.lanes->getRight());
+
+    // The time line's range and the part in view, as its hidden scroll bar keeps them: where the overview puts its thumb.
+    juce::ScrollBar* timeline = nullptr;
+
+    for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
+        if (! bar->isVertical())
+            timeline = bar;
+
+    REQUIRE (timeline != nullptr);
+    const auto xFor = [&] (double beat)
+    {
+        const auto whole = timeline->getRangeLimit();
+        return (float) ((beat - whole.getStart()) / whole.getLength() * overview->getWidth());
+    };
+
+    // Dragging the thumb scrolls the playlist along.
+    phazite::test::Mouse mouse (*overview);
+    const auto startBefore = screen.playlist.getView().start.inBeats();
+    const auto view = timeline->getCurrentRange();
+    const auto middle = juce::Point<int> (juce::roundToInt (xFor (view.getStart() + view.getLength() / 2.0)), overview->getHeight() / 2);
+    mouse.press (middle);
+    mouse.dragTo (middle + juce::Point<int> (20, 0));
+    mouse.release();
+    CHECK (screen.playlist.getView().start.inBeats() > startBefore);
+
+    // Dragging its right end zooms out, its left end staying where it was.
+    const auto zoomBefore = screen.playlist.getView().pixelsPerBeat;
+    const auto startNow = screen.playlist.getView().start.inBeats();
+    const auto end = juce::Point<int> (juce::roundToInt (xFor (timeline->getCurrentRange().getEnd())), overview->getHeight() / 2);
+    mouse.press (end);
+    mouse.dragTo (end + juce::Point<int> (30, 0));
+    mouse.release();
+    CHECK (screen.playlist.getView().pixelsPerBeat < zoomBefore);
+    CHECK (screen.playlist.getView().start.inBeats() == doctest::Approx (startNow));
+
+    // A press away from the thumb brings that part of the song into view, centred.
+    const auto far = juce::Point<int> (overview->getWidth() - 4, overview->getHeight() / 2);
+    const auto beatThere =
+        timeline->getRangeLimit().getStart() + (double) far.x / overview->getWidth() * timeline->getRangeLimit().getLength();
+    mouse.click (far);
+    const auto shown = timeline->getCurrentRange();
+    CHECK (shown.contains (beatThere));
 }
 
 TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren't colored")
@@ -933,7 +1079,7 @@ TEST_CASE ("Scrolling continuously, the playlist keeps the playhead in the middl
     phazite::playOrStop (screen.getSong());
 }
 
-TEST_CASE ("A press in the ruler moves the playhead once, and the song plays on from there while it is held or dragged")
+TEST_CASE ("The playhead drags along the ruler to the grid; a song playing is silent until it is let go, then plays on from there")
 {
     PlaylistScreen screen;
     screen.addClip (0, 0.0, 16.0);
@@ -944,18 +1090,70 @@ TEST_CASE ("A press in the ruler moves the playhead once, and the song plays on 
     const auto y = ruler->getHeight() - 4;
     const auto x = [&screen] (double beat) { return juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
     const auto playhead = [&screen] { return screen.playlist.getPlayheadBeat().inBeats(); };
+    auto& song = screen.getSong();
 
+    // Stopped: a press takes it there, and a drag along, line by line of the grid; playback starts where it is let go.
     phazite::test::Mouse mouse (*ruler);
     mouse.press ({ x (3.0), y });
     CHECK (playhead() == doctest::Approx (3.0));
-
-    // The song plays on while the press is held: its drags leave the playhead where the song got to (no scrubbing), and
-    // so do those JUCE repeats while the button is held still, to scroll at the edges (which a window off the screen
-    // doesn't repeat: the drag here stands for them).
-    screen.playlist.movePlayheadTo (phazite::BeatPosition::fromBeats (5.0));
-    mouse.dragTo ({ x (4.0), y });
+    mouse.dragTo ({ x (4.0) + 1, y });
+    CHECK (playhead() == doctest::Approx (4.0));
+    mouse.dragTo ({ x (6.0), y });
+    CHECK (playhead() == doctest::Approx (6.0));
     mouse.release();
-    CHECK (playhead() == doctest::Approx (5.0));
+    CHECK_FALSE (phazite::isSongPlaying (song));
+    CHECK (phazite::getPlayStartBeat (song).inBeats() == doctest::Approx (6.0));
+
+    // Playing: the press pauses the song, the drag takes the playhead along in silence, and let go, the song plays on from
+    // there.
+    phazite::playOrStop (song);
+    REQUIRE (phazite::isSongPlaying (song));
+    mouse.press ({ x (2.0), y });
+    CHECK_FALSE (phazite::isSongPlaying (song));
+    CHECK (playhead() == doctest::Approx (2.0));
+    mouse.dragTo ({ x (8.0), y });
+    CHECK_FALSE (phazite::isSongPlaying (song));
+    CHECK (playhead() == doctest::Approx (8.0));
+    mouse.release();
+    CHECK (phazite::isSongPlaying (song));
+    CHECK (playhead() >= 8.0 - 1.0e-6);
+    CHECK (playhead() < 9.0);
+    phazite::playOrStop (song);
+    CHECK (playhead() == doctest::Approx (8.0)); // stopped, back where it was let go
+}
+
+TEST_CASE ("The playhead is a marker at the foot of the ruler with a line from its point down, in the focus colour")
+{
+    PlaylistScreen screen;
+    phazite::test::dispatchPendingMessages();
+    auto* ruler = phazite::test::findComponentWithTitle (screen.playlist, "Timeline");
+    auto* playhead = phazite::test::findComponentWithTitle (screen.playlist, "Playhead");
+    REQUIRE (ruler != nullptr);
+    REQUIRE (playhead != nullptr);
+    REQUIRE (playhead->isVisible());
+
+    // Its top is the marker's, at the foot of the ruler: nothing of it above, in the bar numbers.
+    CHECK (playhead->getY() == ruler->getBottom() - phazite::ui::PlayheadTint::markerHeight);
+    CHECK (playhead->getBottom() > ruler->getBottom());
+    CHECK (playhead->getX() + playhead->getWidth() / 2 == ruler->getX() + juce::roundToInt (screen.playlist.getView().beatToX ({})));
+
+    // Painted: the marker filled across its top, the line under its point, in the focus colour; clear beside the line.
+    phazite::ui::LookAndFeel lookAndFeel;
+    playhead->setLookAndFeel (&lookAndFeel);
+    const auto focus = phazite::ui::getPalette (*playhead).focus;
+    juce::Image image (juce::Image::ARGB, playhead->getWidth(), playhead->getHeight(), true, juce::SoftwareImageType());
+    {
+        juce::Graphics g (image);
+        playhead->paintEntireComponent (g, false);
+    }
+    playhead->setLookAndFeel (nullptr);
+
+    const auto isFocus = [&focus] (juce::Colour c) { return c.getAlpha() > 200 && std::abs (c.getRed() - focus.getRed()) < 8; };
+    const auto centre = playhead->getWidth() / 2;
+    CHECK (isFocus (image.getPixelAt (centre, 2)));
+    CHECK (isFocus (image.getPixelAt (1, 3)));
+    CHECK (isFocus (image.getPixelAt (centre, playhead->getHeight() - 2)));
+    CHECK (image.getPixelAt (1, playhead->getHeight() - 2).getAlpha() == 0);
 }
 
 TEST_CASE ("The sections strip adds, selects, resizes, moves and copies sections with the mouse")

@@ -119,11 +119,10 @@ protected:
         g.drawEllipse (dot, 1.5f);
 
         const auto notches = juce::roundToInt (values[Phaser::notches]) + 1;
-        graph::paintReadout (g, p, area,
-                             juce::String (notches) + (notches == 1 ? " notch  " : " notches  ")
-                                 + graph::formatFrequency (values[Phaser::frequency]) + "  Depth " + toPercent (values[Phaser::depth]),
-                             juce::Justification::topLeft);
-        graph::paintReadout (g, p, area, "Feedback " + toPercent (values[Phaser::feedback]), juce::Justification::topRight);
+        graph::paintReadouts (g, p, area,
+                              juce::String (notches) + (notches == 1 ? " notch  " : " notches  ")
+                                  + graph::formatFrequency (values[Phaser::frequency]) + "  Depth " + toPercent (values[Phaser::depth]),
+                              "Feedback " + toPercent (values[Phaser::feedback]));
     }
 
     float readPhase() const override
@@ -172,7 +171,7 @@ PhaserEditor::PhaserEditor (const DeviceHandle& handle)
                                        { "Sync", "Note", "Rate", "Shape" });
     const auto tone = makeControlsPart ("Tone", { "notches", "feedback", "spacing" }, 3);
     const auto space = makeControlsPart ("Stereo and Bass", { "stereo", "safeBass" }, 2);
-    setParts ({ { { "Notches", &shown, 320, 226, 140, true } }, { sweep, lfo }, { tone, space } });
+    setParts ({ { { "Notches", &shown, 320, 226, 140, true, GraphTint::minimumWidth } }, { sweep, lfo }, { tone, space } });
 }
 
 PhaserEditor::~PhaserEditor() = default;

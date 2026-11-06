@@ -337,44 +337,216 @@ private:
 };
 
 //==============================================================================
-// The editor's one panel, in Maximus's layout: the curve and the analysis display over their toolbars, and the selected band's
-// controls and the global ones below.
-class MultibandEditor::Panel : public juce::Component
+namespace
+{
+    // The traces Monitor shows, each switched in its menu, in Analysis::Trace's order.
+    constexpr const char* traceNames[] = { "In", "Band In", "Out", "Heard", "Gain", "All Gains", "Pre/Post" };
+
+    constexpr int bandTabWidth = 72;                    // the band tabs' column
+    constexpr int curveWidth = 220, displayWidth = 400; // the curve's and the display's, where there is room,
+    constexpr int curveLeast = 180, displayLeast = 340; // and the least they narrow to
+    constexpr int graphHeight = 220, graphLeast = 150;  // both
+
+    // A control's size as it wants it: a ParameterControls' grid, or a ChoiceButtons' buttons.
+    juce::Point<int> getWantedSize (const juce::Component& control)
+    {
+        if (auto* controls = dynamic_cast<const ParameterControls*> (&control))
+            return { controls->getPreferredWidth(), controls->getPreferredHeight() };
+
+        if (auto* buttons = dynamic_cast<const ChoiceButtons*> (&control))
+            return { buttons->getPreferredWidth(), buttons->getPreferredHeight() };
+
+        return { control.getWidth(), control.getHeight() };
+    }
+} // namespace
+
+// What a part shows of the selected band: each band's controls one beside another (or one under another), only the selected
+// band's showing; or controls that every band shares.
+class MultibandEditor::BandPart : public juce::Component
 {
 public:
-    explicit Panel (MultibandEditor& e)
-        : editor (e)
+    explicit BandPart (bool controlsAcross)
+        : across (controlsAcross)
     {
-        setTitle ("Multiband");
+    }
 
-        // The curve's toolbar: its menu, Freeze and Snap.
-        addAndMakeVisible (tools);
+    // A band's control; with no band, every band's.
+    void add (juce::Component& control, std::optional<int> band = {})
+    {
+        for (int b = 0; b < Multiband::numBands; ++b)
+            if (! band.has_value() || *band == b)
+                controls[(size_t) b].push_back (&control);
 
-        // The display's toolbar: its traces' switches, its speed, the spectrum, and Monitor or Bands.
-        static constexpr const char* traceNames[] = { "In", "Band In", "Out", "Heard", "Gain", "All Gains", "Pre/Post" };
-        static constexpr const char* traceTips[] = {
-            "Shows what comes into the multiband",
-            "Shows what comes into the selected band, after its pre gain",
-            "Shows what the selected band puts out",
-            "Shows what the selected band's compressor hears",
-            "Shows the selected band's gain",
-            "Shows every band's gain, each in its colour",
-            "Shows the selected band's pre (purple) and post (blue) gains",
-        };
+        addChildComponent (control);
+    }
 
-        for (int i = 0; i < Analysis::numTraces; ++i)
+    void show (int band)
+    {
+        shown = band;
+
+        for (int b = 0; b < Multiband::numBands; ++b)
+            if (b != band)
+                for (auto* control : controls[(size_t) b])
+                    control->setVisible (false);
+
+        for (auto* control : controls[(size_t) band])
+            control->setVisible (true);
+
+        resized();
+    }
+
+    // The widest and tallest band's, so that the part keeps its size as another band shows.
+    juce::Point<int> getPreferredSize() const
+    {
+        juce::Point<int> size;
+
+        for (const auto& band : controls)
         {
-            auto& button = *traceButtons.add (std::make_unique<juce::TextButton> (traceNames[i]));
-            button.setClickingTogglesState (true);
-            button.setToggleState (editor.analysis->traces[(size_t) i], juce::dontSendNotification);
-            button.setTooltip (traceTips[i]);
-            button.onClick = [this, i, &button]
+            juce::Point<int> each;
+
+            for (auto* control : band)
             {
-                editor.analysis->traces[(size_t) i] = button.getToggleState();
-                editor.analysis->repaint();
-            };
+                const auto wanted = getWantedSize (*control);
+                each = across ? juce::Point<int> (each.x + (each.x > 0 ? gap : 0) + wanted.x, std::max (each.y, wanted.y))
+                              : juce::Point<int> (std::max (each.x, wanted.x), each.y + (each.y > 0 ? gap : 0) + wanted.y);
+            }
+
+            size = { std::max (size.x, each.x), std::max (size.y, each.y) };
+        }
+
+        return size;
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+
+        for (auto* control : controls[(size_t) shown])
+        {
+            const auto wanted = getWantedSize (*control);
+
+            if (across)
+            {
+                control->setBounds (area.removeFromLeft (wanted.x).withHeight (wanted.y));
+                area.removeFromLeft (gap);
+            }
+            else
+            {
+                control->setBounds (area.removeFromTop (wanted.y)); // as wide as the part
+                area.removeFromTop (gap);
+            }
+        }
+    }
+
+private:
+    static constexpr int gap = Space::s;
+    const bool across;
+    std::array<std::vector<juce::Component*>, Multiband::numBands> controls;
+    int shown = 0;
+};
+
+//==============================================================================
+// The band tabs, one under another, low in red, mid in orange, high in yellow and the master in green, as Maximus colours
+// them; and under them the selected band's Solo (the master has none). It leads every page of the editor, as what picks the
+// band the other parts show.
+class MultibandEditor::BandsPart : public juce::Component
+{
+public:
+    explicit BandsPart (MultibandEditor& editor)
+    {
+        for (int band = 0; band < Multiband::numBands; ++band)
+        {
+            auto& button = *buttons.add (std::make_unique<juce::TextButton> (bandNames[band]));
+            button.setClickingTogglesState (true);
+            button.setRadioGroupId (2);
+            button.setColour (juce::TextButton::buttonOnColourId, getBandColour (band).withAlpha (0.6f));
+            button.setTooltip (juce::String ("Shows the ")
+                               + (band == Multiband::master ? "master band's" : bandNames[band] + juce::String (" band's"))
+                               + " curve and controls");
+            button.onClick = [&editor, band] { editor.selectBand (band); };
             addAndMakeVisible (button);
         }
+
+        addAndMakeVisible (solos);
+    }
+
+    void show (int band)
+    {
+        for (int i = 0; i < buttons.size(); ++i)
+            buttons[i]->setToggleState (i == band, juce::dontSendNotification);
+
+        solos.show (band);
+    }
+
+    int getPreferredHeight() const
+    {
+        return Multiband::numBands * (controlHeight + Space::xs) - Space::xs + Space::s + solos.getPreferredSize().y;
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+
+        for (auto* button : buttons)
+        {
+            button->setBounds (area.removeFromTop (controlHeight));
+            area.removeFromTop (Space::xs);
+        }
+
+        area.removeFromTop (Space::s - Space::xs);
+        const auto solo = solos.getPreferredSize();
+        solos.setBounds (area.removeFromTop (solo.y).withSizeKeepingCentre (std::min (area.getWidth(), solo.x), solo.y));
+    }
+
+    juce::OwnedArray<juce::TextButton> buttons;
+    BandPart solos { false };
+};
+
+//==============================================================================
+// The selected band's curve, square, over its toolbar: its menu, Freeze and Snap.
+class MultibandEditor::CurvePart : public juce::Component
+{
+public:
+    explicit CurvePart (DynamicsCurve& c)
+        : curve (c),
+          tools (c)
+    {
+        addAndMakeVisible (curve);
+        addAndMakeVisible (tools);
+    }
+
+    int getLeastWidth() const { return std::max (curveLeast, tools.getPreferredWidth()); }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        tools.setBounds (area.removeFromBottom (toolbarHeight).reduced (0, 2));
+
+        // Square, its levels in and out on one scale, as Maximus draws it.
+        const auto side = std::min (area.getWidth(), area.getHeight());
+        curve.setBounds (area.withSizeKeepingCentre (side, side));
+    }
+
+    DynamicsCurve& curve;
+    DynamicsCurveTools tools;
+};
+
+//==============================================================================
+// The analysis display, over its toolbar: the menu of its traces, the spectrum, Monitor or Bands, and Monitor's speed.
+class MultibandEditor::DisplayPart : public juce::Component
+{
+public:
+    explicit DisplayPart (MultibandEditor& e)
+        : editor (e)
+    {
+        addAndMakeVisible (*editor.analysis);
+
+        tracesButton.setTooltip ("Which traces Monitor shows: what comes into the multiband (In), what comes into the selected "
+                                 "band after its pre gain (Band In), what it puts out (Out), what its compressor hears (Heard), "
+                                 "its gain, every band's gain, and its pre (purple) and post (blue) gains");
+        tracesButton.onClick = [this]
+        { editor.getTracesMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tracesButton)); };
+        addAndMakeVisible (tracesButton);
 
         speed.setSliderStyle (juce::Slider::LinearHorizontal);
         speed.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -402,72 +574,13 @@ public:
             addAndMakeVisible (button);
         }
 
+        monitorButton.setConnectedEdges (juce::Button::ConnectedOnRight);
+        bandsButton.setConnectedEdges (juce::Button::ConnectedOnLeft);
         monitorButton.setToggleState (true, juce::dontSendNotification);
         monitorButton.setTooltip ("Monitor: the last seconds of the selected band");
         bandsButton.setTooltip ("Bands: the bands across the spectrum, with their crossovers and pre gains to drag");
         monitorButton.onClick = [this] { editor.showBands (false); };
         bandsButton.onClick = [this] { editor.showBands (true); };
-
-        // The band tabs, low in red, mid in orange, high in yellow and the master in green, as Maximus colours them.
-        for (int band = 0; band < Multiband::numBands; ++band)
-        {
-            auto& button = *bandButtons.add (std::make_unique<juce::TextButton> (bandNames[band]));
-            button.setClickingTogglesState (true);
-            button.setRadioGroupId (2);
-            button.setColour (juce::TextButton::buttonOnColourId, getBandColour (band).withAlpha (0.6f));
-            button.setTooltip (juce::String ("Shows the ")
-                               + (band == Multiband::master ? "master band's" : bandNames[band] + juce::String (" band's"))
-                               + " curve and controls");
-            button.onClick = [this, band] { editor.selectBand (band); };
-            addAndMakeVisible (button);
-        }
-    }
-
-    // Each band's own controls, of which the selected band's show.
-    struct BandControls
-    {
-        ChoiceButtons* mode = nullptr;
-        ParameterControls* solo = nullptr; // none for the master
-        ParameterControls* stereo = nullptr;
-        ParameterControls* gains = nullptr;
-        ParameterControls* saturation = nullptr;
-        ParameterControls* envelope = nullptr;
-        ParameterControls* curves = nullptr;
-        ChoiceButtons* detection = nullptr;
-        ParameterControls* release2 = nullptr;
-
-        std::vector<juce::Component*> getAll() const
-        {
-            return { mode, solo, stereo, gains, saturation, envelope, curves, detection, release2 };
-        }
-    };
-
-    std::array<BandControls, Multiband::numBands> bands;
-    ParameterControls *lmhDelay = nullptr, *lmhMix = nullptr, *frequencies = nullptr, *lowCut = nullptr, *midDrives = nullptr;
-    ChoiceButtons *lowSlope = nullptr, *highSlope = nullptr;
-    juce::OwnedArray<juce::TextButton> bandButtons;
-
-    void addControl (juce::Component* control, bool visible)
-    {
-        if (control == nullptr)
-            return;
-
-        addChildComponent (control);
-        control->setVisible (visible);
-    }
-
-    void showBand (int shown)
-    {
-        for (int band = 0; band < Multiband::numBands; ++band)
-        {
-            for (auto* control : bands[(size_t) band].getAll())
-                if (control != nullptr)
-                    control->setVisible (band == shown);
-
-            bandButtons[band]->setToggleState (band == shown, juce::dontSendNotification);
-        }
-
-        resized();
     }
 
     void syncViewButtons()
@@ -479,100 +592,33 @@ public:
     void resized() override
     {
         auto area = getLocalBounds();
-        auto top = area.removeFromTop (std::max (200, area.getHeight() / 2));
-        area.removeFromTop (Space::s);
+        auto tools = area.removeFromBottom (toolbarHeight).reduced (0, 2);
+        editor.analysis->setBounds (area);
 
-        // The curve, square, over its toolbar; the display beside it, over its own.
-        auto curveColumn = top.removeFromLeft (top.getHeight() - toolbarHeight);
-        auto curveTools = curveColumn.removeFromBottom (toolbarHeight).reduced (0, 2);
-        editor.curve->setBounds (curveColumn);
-        tools.setBounds (curveTools);
+        tracesButton.setBounds (tools.removeFromLeft (tracesWidth));
+        tools.removeFromLeft (Space::xs);
+        spectrumButton.setBounds (tools.removeFromLeft (spectrumWidth));
+        tools.removeFromLeft (Space::s);
+        monitorButton.setBounds (tools.removeFromLeft (viewWidth));
+        bandsButton.setBounds (tools.removeFromLeft (viewWidth));
+        tools.removeFromLeft (Space::s);
 
-        top.removeFromLeft (Space::s);
-        auto displayTools = top.removeFromBottom (toolbarHeight).reduced (0, 2);
-        editor.analysis->setBounds (top);
-        bandsButton.setBounds (displayTools.removeFromRight (64));
-        monitorButton.setBounds (displayTools.removeFromRight (72));
-        displayTools.removeFromRight (Space::s);
-        spectrumButton.setBounds (displayTools.removeFromRight (72));
-        displayTools.removeFromRight (Space::xs);
-        auto speedArea = displayTools.removeFromRight (std::min (128, displayTools.getWidth() / 3));
+        // The speed in what is left, named where there is room.
         const auto nameWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (speedName.getFont(), speedName.getText()));
-        speedName.setBounds (speedArea.removeFromLeft (nameWidth + Space::s));
-        speed.setBounds (speedArea.reduced (Space::xs, 0));
-        displayTools.removeFromRight (Space::s);
+        speedName.setVisible (tools.getWidth() >= nameWidth + Space::s + minimumSpeedWidth);
 
-        const auto traceWidth = std::min (64, displayTools.getWidth() / std::max (1, traceButtons.size()));
+        if (speedName.isVisible())
+            speedName.setBounds (tools.removeFromLeft (nameWidth + Space::s));
 
-        for (auto* button : traceButtons)
-            button->setBounds (displayTools.removeFromLeft (traceWidth));
-
-        // Below: the band tabs and Solo; the mode and stereo; the gains and saturation; the envelope; LMH; the crossovers.
-        const auto& shown = bands[(size_t) editor.selectedBand];
-        auto tabs = area.removeFromLeft (88);
-
-        for (auto* button : bandButtons)
-            button->setBounds (tabs.removeFromTop (controlHeight));
-
-        tabs.removeFromTop (Space::s);
-
-        if (shown.solo != nullptr)
-            shown.solo->setBounds (tabs.removeFromTop (shown.solo->getPreferredHeight())
-                                       .withSizeKeepingCentre (shown.solo->getPreferredWidth(), shown.solo->getPreferredHeight()));
-
-        area.removeFromLeft (Space::m);
-        auto modes = area.removeFromLeft (96);
-        shown.mode->setBounds (modes.removeFromTop (shown.mode->getPreferredHeight()));
-        modes.removeFromTop (Space::s);
-        shown.stereo->setBounds (modes.removeFromTop (shown.stereo->getPreferredHeight())
-                                     .withSizeKeepingCentre (shown.stereo->getPreferredWidth(), shown.stereo->getPreferredHeight()));
-
-        area.removeFromLeft (Space::m);
-        auto gains = area.removeFromLeft (shown.gains->getPreferredWidth());
-        shown.gains->setBounds (gains.removeFromTop (shown.gains->getPreferredHeight()));
-        gains.removeFromTop (Space::s);
-        shown.saturation->setBounds (gains.removeFromTop (shown.saturation->getPreferredHeight()));
-
-        // The envelope: its knobs, its curve boxes under them, and Release 2 with Peak or RMS beside it, as wide as its widest row.
-        area.removeFromLeft (Space::m);
-        const auto releasesWidth = shown.release2->getPreferredWidth() + Space::s + shown.detection->getPreferredWidth();
-        auto envelope =
-            area.removeFromLeft (std::max ({ shown.envelope->getPreferredWidth(), shown.curves->getPreferredWidth(), releasesWidth }));
-        shown.envelope->setBounds (
-            envelope.removeFromTop (shown.envelope->getPreferredHeight()).removeFromLeft (shown.envelope->getPreferredWidth()));
-        shown.curves->setBounds (
-            envelope.removeFromTop (shown.curves->getPreferredHeight()).removeFromLeft (shown.curves->getPreferredWidth()));
-        auto releases = envelope.removeFromTop (std::max (shown.release2->getPreferredHeight(), shown.detection->getPreferredHeight()));
-        shown.release2->setBounds (
-            releases.removeFromLeft (shown.release2->getPreferredWidth()).withHeight (shown.release2->getPreferredHeight()));
-        releases.removeFromLeft (Space::s);
-        shown.detection->setBounds (
-            releases.removeFromLeft (shown.detection->getPreferredWidth()).withHeight (shown.detection->getPreferredHeight()));
-
-        area.removeFromLeft (Space::m);
-        auto lmh = area.removeFromLeft (lmhDelay->getPreferredWidth());
-        lmhDelay->setBounds (lmh.removeFromTop (lmhDelay->getPreferredHeight()));
-        lmhMix->setBounds (lmh.removeFromTop (lmhMix->getPreferredHeight()));
-
-        area.removeFromLeft (Space::m);
-        auto crossovers = area.removeFromLeft (frequencies->getPreferredWidth());
-        frequencies->setBounds (crossovers.removeFromTop (frequencies->getPreferredHeight()));
-        auto slopes = crossovers.removeFromTop (lowSlope->getPreferredHeight());
-        lowSlope->setBounds (slopes.removeFromLeft (slopes.getWidth() / 2).reduced (Space::xs, 0));
-        highSlope->setBounds (slopes.reduced (Space::xs, 0));
-        crossovers.removeFromTop (Space::xs);
-        auto last = crossovers.removeFromTop (lowCut->getPreferredHeight());
-        lowCut->setBounds (last.removeFromLeft (lowCut->getPreferredWidth()));
-        midDrives->setBounds (last.removeFromLeft (midDrives->getPreferredWidth()));
+        speed.setBounds (tools.reduced (Space::xs, 0));
     }
 
-    // Wide enough for every part, and as tall as its controls need under the graphs.
-    static constexpr int preferredWidth = 1000, preferredHeight = 470, minimumHeight = 430;
+    // Its toolbar's least: every button, and a little of the speed.
+    static constexpr int tracesWidth = 72, spectrumWidth = 72, viewWidth = 68, minimumSpeedWidth = 48;
 
 private:
     MultibandEditor& editor;
-    DynamicsCurveTools tools { *editor.curve };
-    juce::OwnedArray<juce::TextButton> traceButtons;
+    juce::TextButton tracesButton { "Traces" };
     juce::Slider speed;
     juce::Label speedName { {}, "Speed" };
     juce::TextButton spectrumButton { "Spectrum" }, monitorButton { "Monitor" }, bandsButton { "Bands" };
@@ -599,18 +645,26 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle)
     curve->onEdit = [this] { refresh(); };
     auto& shownAnalysis = keep (std::make_unique<Analysis> (*this));
     analysis = &shownAnalysis;
-    auto& shownPanel = keep (std::make_unique<Panel> (*this));
-    panel = &shownPanel;
-    panel->addAndMakeVisible (shownCurve);
-    panel->addAndMakeVisible (shownAnalysis);
+
+    auto& curvePart = keep (std::make_unique<CurvePart> (shownCurve));
+    auto& displayPart = keep (std::make_unique<DisplayPart> (*this));
+    display = &displayPart;
+    auto& tabs = keep (std::make_unique<BandsPart> (*this));
+    bandTabs = &tabs;
+    auto& modePart = keep (std::make_unique<BandPart> (false));
+    auto& gainPart = keep (std::make_unique<BandPart> (true));
+    auto& saturationPart = keep (std::make_unique<BandPart> (true));
+    auto& envelopePart = keep (std::make_unique<BandPart> (true));
+    auto& curvesPart = keep (std::make_unique<BandPart> (true));
+    auto& crossoversPart = keep (std::make_unique<BandPart> (true));
+    bandParts = { &modePart, &gainPart, &saturationPart, &envelopePart, &curvesPart };
 
     // Each band's controls, by its parameters' IDs, named as Maximus names them.
     const auto id = [] (int band, Multiband::BandField field) { return idOf (Multiband::getBandParameter (band, field)); };
+    constexpr auto compact = ParameterControls::Size::compact;
 
     for (int band = 0; band < Multiband::numBands; ++band)
     {
-        auto& shown = panel->bands[(size_t) band];
-        const auto visible = band == selectedBand;
         auto& mode = keep (std::make_unique<ChoiceButtons> (device, id (band, Multiband::mode), ChoiceButtons::Direction::down,
                                                             std::vector<juce::String> {
                                                                 "The band is on",
@@ -621,54 +675,50 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle)
                                                                     : "The band is off: the mid band takes its room",
                                                             }));
         addControl (id (band, Multiband::mode), mode);
-        shown.mode = &mode;
+        modePart.add (mode, band);
+        modePart.add (makeControls ({ id (band, Multiband::stereo) }, 1, compact, {}, { "Stereo" }), band);
 
         if (band != Multiband::master)
-            shown.solo = &makeControls ({ id (band, Multiband::solo) }, 1, ParameterControls::Size::compact, {}, { "Solo" });
+            tabs.solos.add (makeControls ({ id (band, Multiband::solo) }, 1, compact, {}, { "Solo" }), band);
 
-        shown.stereo = &makeControls ({ id (band, Multiband::stereo) }, 1, ParameterControls::Size::compact, {}, { "Stereo" });
-        shown.gains = &makeControls ({ id (band, Multiband::pre), id (band, Multiband::post) }, 2, ParameterControls::Size::compact, {},
-                                     { "Pre", "Post" });
-        shown.saturation = &makeControls ({ id (band, Multiband::saturation), id (band, Multiband::ceiling) }, 2,
-                                          ParameterControls::Size::compact, {}, { "Sat", "Ceiling" });
-        shown.envelope = &makeControls ({ id (band, Multiband::attack), id (band, Multiband::release), id (band, Multiband::sustain) }, 3,
-                                        ParameterControls::Size::compact, {}, { "Attack", "Release", "Sustain" });
-        shown.curves = &makeControls ({ id (band, Multiband::curve), id (band, Multiband::releaseCurve) }, 2,
-                                      ParameterControls::Size::compact, {}, { "Curve", "Rel Curve" });
+        gainPart.add (makeControls ({ id (band, Multiband::pre), id (band, Multiband::post) }, 2, compact, {}, { "Pre", "Post" }), band);
+        saturationPart.add (
+            makeControls ({ id (band, Multiband::saturation), id (band, Multiband::ceiling) }, 2, compact, {}, { "Sat", "Ceiling" }), band);
+        envelopePart.add (makeControls ({ id (band, Multiband::attack), id (band, Multiband::release), id (band, Multiband::sustain),
+                                          id (band, Multiband::release2) },
+                                        4, compact, {}, { "Attack", "Release", "Sustain", "Release 2" }),
+                          band);
+        curvesPart.add (
+            makeControls ({ id (band, Multiband::curve), id (band, Multiband::releaseCurve) }, 2, compact, {}, { "Curve", "Rel Curve" }),
+            band);
         auto& detection = keep (std::make_unique<ChoiceButtons> (
             device, id (band, Multiband::detection), ChoiceButtons::Direction::down,
             std::vector<juce::String> { "Peak: the compressor hears each peak, held for the sustain: the fastest",
                                         "RMS: the compressor hears the average over the sustain, so transients pass" }));
         addControl (id (band, Multiband::detection), detection);
-        shown.detection = &detection;
-        shown.release2 = &makeControls ({ id (band, Multiband::release2) }, 1, ParameterControls::Size::compact, {}, { "Release 2" });
-
-        for (auto* control : shown.getAll())
-            panel->addControl (control, visible);
+        curvesPart.add (detection, band);
     }
 
-    panel->lmhDelay = &makeControls ({ idOf (Multiband::lmhDelay) }, 1, ParameterControls::Size::compact, {}, { "LMH Delay" });
-    panel->lmhMix = &makeControls ({ idOf (Multiband::lmhMix) }, 1, ParameterControls::Size::compact, {}, { "LMH Mix" });
-    panel->frequencies = &makeControls ({ idOf (Multiband::lowFrequency), idOf (Multiband::highFrequency) }, 2,
-                                        ParameterControls::Size::compact, {}, { "Low", "High" });
-    panel->lowCut = &makeControls ({ idOf (Multiband::lowCut) }, 1, ParameterControls::Size::compact, {}, { "Low Cut" });
-    panel->midDrives = &makeControls ({ idOf (Multiband::midDrivesMaster) }, 1, ParameterControls::Size::compact, {}, { "Mid Drives" });
-    auto& lowSlope = keep (std::make_unique<ChoiceButtons> (
-        device, idOf (Multiband::lowSlope), ChoiceButtons::Direction::down,
-        std::vector<juce::String> { "The low crossover: 12 dB per octave",
-                                    "The low crossover: 24 dB per octave, the bands kept further apart" }));
-    auto& highSlope = keep (std::make_unique<ChoiceButtons> (
-        device, idOf (Multiband::highSlope), ChoiceButtons::Direction::down,
-        std::vector<juce::String> { "The high crossover: 12 dB per octave",
-                                    "The high crossover: 24 dB per octave, the bands kept further apart" }));
-    addControl (idOf (Multiband::lowSlope), lowSlope);
-    addControl (idOf (Multiband::highSlope), highSlope);
-    panel->lowSlope = &lowSlope;
-    panel->highSlope = &highSlope;
+    // The global controls: the crossovers with their slopes; LMH Delay and Mix, the low cut and the mid band driving the master.
+    crossoversPart.add (
+        makeControls ({ idOf (Multiband::lowFrequency), idOf (Multiband::highFrequency) }, 2, compact, {}, { "Low", "High" }));
 
-    for (auto* control : std::initializer_list<juce::Component*> { panel->lmhDelay, panel->lmhMix, panel->frequencies, panel->lowCut,
-                                                                   panel->midDrives, panel->lowSlope, panel->highSlope })
-        panel->addControl (control, true);
+    const auto addSlope = [this, &crossoversPart] (int index, const juce::String& which)
+    {
+        auto& slope = keep (std::make_unique<ChoiceButtons> (
+            device, idOf (index), ChoiceButtons::Direction::down,
+            std::vector<juce::String> { "The " + which + " crossover: 12 dB per octave",
+                                        "The " + which + " crossover: 24 dB per octave, the bands kept further apart" }));
+        addControl (idOf (index), slope);
+        crossoversPart.add (slope);
+    };
+
+    addSlope (Multiband::lowSlope, "low");
+    addSlope (Multiband::highSlope, "high");
+
+    auto& global =
+        makeControls ({ idOf (Multiband::lmhDelay), idOf (Multiband::lmhMix), idOf (Multiband::lowCut), idOf (Multiband::midDrivesMaster) },
+                      4, compact, {}, { "LMH Delay", "LMH Mix", "Low Cut", "Mid Drives" });
 
     // The meters' first readings would show what played before the editor opened.
     if (auto* multiband = device.getProcessor<Multiband>())
@@ -684,8 +734,31 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle)
         multiband->getMainInputMeter().take();
     }
 
-    panel->showBand (selectedBand);
-    setParts ({ { { "Multiband", &shownPanel, Panel::preferredWidth, Panel::preferredHeight, Panel::minimumHeight, true } } });
+    showBandControls();
+    crossoversPart.show (0);
+
+    // Its parts: the band tabs, on every page in the dock; the band's curve, mode, gains and saturation; Monitor; the band's
+    // envelope; the crossovers. In a window of its own, or a tall dock, the curve, the band's controls and Monitor across,
+    // the rest under them, as Maximus lays them out.
+    const auto part = [] (const juce::String& title, BandPart& shown)
+    {
+        const auto size = shown.getPreferredSize();
+        return DeviceLayout::Part { title, &shown, size.x, size.y, size.y };
+    };
+
+    auto modeColumn = part ("Mode", modePart);
+    modeColumn.width = std::max (modeColumn.width, bandTabWidth);
+    const auto tabsHeight = tabs.getPreferredHeight();
+    setParts ({ { { "Band", &tabs, bandTabWidth, tabsHeight, tabsHeight } },
+                { { "Curve", &curvePart, std::max (curveWidth, curvePart.getLeastWidth()), graphHeight, graphLeast, true,
+                    curvePart.getLeastWidth() } },
+                { modeColumn },
+                { part ("Gain", gainPart), part ("Saturation", saturationPart) },
+                { { "Monitor", &displayPart, displayWidth, graphHeight, graphLeast, true, displayLeast } },
+                { part ("Envelope", envelopePart), part ("Curves", curvesPart) },
+                { part ("Crossovers", crossoversPart),
+                  { "LMH", &global, global.getPreferredWidth(), global.getPreferredHeight(), global.getPreferredHeight() } } });
+    getLayout().setPinned (0);
 }
 
 MultibandEditor::~MultibandEditor()
@@ -694,17 +767,45 @@ MultibandEditor::~MultibandEditor()
         scope->setListening (false);
 }
 
+void MultibandEditor::showBandControls()
+{
+    bandTabs->show (selectedBand);
+
+    for (auto* part : bandParts)
+        part->show (selectedBand);
+}
+
+juce::PopupMenu MultibandEditor::getTracesMenu()
+{
+    juce::PopupMenu menu;
+    const juce::Component::SafePointer<MultibandEditor> safeThis (this);
+
+    for (int i = 0; i < Analysis::numTraces; ++i)
+        menu.addItem (traceNames[i], true, analysis->traces[(size_t) i],
+                      [safeThis, i]
+                      {
+                          if (safeThis != nullptr)
+                          {
+                              auto& shown = safeThis->analysis->traces[(size_t) i];
+                              shown = ! shown;
+                              safeThis->analysis->repaint();
+                          }
+                      });
+
+    return menu;
+}
+
 void MultibandEditor::selectBand (int band)
 {
     selectedBand = juce::jlimit (0, Multiband::numBands - 1, band);
-    panel->showBand (selectedBand);
+    showBandControls();
     curve->setCurve (Multiband::getBandParameter (selectedBand, Multiband::points), getBandColour (selectedBand));
     analysis->repaint();
 }
 
 juce::Button& MultibandEditor::getBandButton (int band)
 {
-    return *panel->bandButtons[band];
+    return *bandTabs->buttons[band];
 }
 
 DynamicsCurve& MultibandEditor::getCurve() const noexcept
@@ -726,7 +827,7 @@ void MultibandEditor::showBands (bool bands)
 {
     analysis->showsBands = bands;
     analysis->bandsUntil = 0.0;
-    panel->syncViewButtons();
+    display->syncViewButtons();
     analysis->repaint();
 }
 

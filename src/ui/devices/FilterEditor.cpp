@@ -99,13 +99,11 @@ public:
 
         const auto type =
             juce::String (getInfo (FilterEffect::filterType).choices[(size_t) juce::roundToInt (values[FilterEffect::filterType])].data());
-        graph::paintReadout (g, p, area,
-                             type + "  " + graph::formatFrequency (values[FilterEffect::cutoff]) + "  Res "
-                                 + juce::String (juce::roundToInt (values[FilterEffect::resonance] * 100.0f)) + "%",
-                             juce::Justification::topLeft);
-
-        if (values[FilterEffect::drive] > 0.05f)
-            graph::paintReadout (g, p, area, "Drive " + graph::formatDecibels (values[FilterEffect::drive]), juce::Justification::topRight);
+        graph::paintReadouts (g, p, area,
+                              type + "  " + graph::formatFrequency (values[FilterEffect::cutoff]) + "  Res "
+                                  + juce::String (juce::roundToInt (values[FilterEffect::resonance] * 100.0f)) + "%",
+                              values[FilterEffect::drive] > 0.05f ? "Drive " + graph::formatDecibels (values[FilterEffect::drive])
+                                                                  : juce::String());
     }
 
     // A drag moves the dot, the cutoff with it sideways and the resonance up and down, as one undo step.
@@ -202,7 +200,7 @@ FilterEditor::FilterEditor (const DeviceHandle& handle)
 
     const auto sweep = makeControlsPart ("Sweep", { "cutoff", "resonance" }, 2, ParameterControls::Size::large);
     const auto character = makeControlsPart ("Character", { "filterType", "filterSlope", "drive" }, 3);
-    setParts ({ { { "Response", &shown, 320, 196, 100, true } }, { sweep, character } });
+    setParts ({ { { "Response", &shown, 320, 196, 100, true, GraphTint::minimumWidth } }, { sweep, character } });
 }
 
 FilterEditor::~FilterEditor() = default;

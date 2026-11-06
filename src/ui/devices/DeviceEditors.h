@@ -19,7 +19,8 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle&);
 // An editor that also fits a shorter space than the size it gives itself, as the Devices view's panels are (a graph
 // shrinks, or parts show one at a time under tabs): the least height it needs, and how wide it is at a height; and how tall
 // it is at a width, everything showing (narrower, its parts wrap), and the least width it wraps to (its widest part), or
-// -1 for both if it doesn't wrap.
+// -1 for both if it doesn't wrap. And the least height at a narrower width than its own, where it may show its parts in
+// pages (DeviceLayout.h), with their bar.
 class FlexibleHeight
 {
 public:
@@ -28,6 +29,7 @@ public:
     virtual int getWidthForHeight (int height) const = 0;
     virtual int getHeightForWidth (int) const { return -1; }
     virtual int getMinimumWidth() const { return -1; }
+    virtual int getMinimumHeightAtWidth (int) const { return getMinimumHeight(); }
 };
 
 //==============================================================================

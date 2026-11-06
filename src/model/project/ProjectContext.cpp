@@ -183,6 +183,10 @@ namespace
                 || (tree.hasType (schema::MACRO) && property == schema::macroValue))
                 return;
 
+            // The project's notes, the song's own.
+            if (tree == state && property == schema::notes)
+                return add (pending.notes);
+
             // A track frozen or played live again changes what its devices show too (their controls are off while frozen).
             if (tree.hasType (schema::TRACK) && property == schema::trackFrozen)
                 add (pending.devices);

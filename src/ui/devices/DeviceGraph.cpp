@@ -113,6 +113,17 @@ void paintReadout (juce::Graphics& g, const Palette& p, juce::Rectangle<float> a
     g.drawText (text, area.reduced ((float) Space::xs), where, true);
 }
 
+void paintReadouts (juce::Graphics& g, const Palette& p, juce::Rectangle<float> area, const juce::String& left, const juce::String& right)
+{
+    const juce::Font font { juce::FontOptions (TextSize::small) };
+    const auto both =
+        juce::GlyphArrangement::getStringWidth (font, left) + juce::GlyphArrangement::getStringWidth (font, right) + (float) Space::m;
+    paintReadout (g, p, area, left, juce::Justification::topLeft);
+
+    if (left.isEmpty() || both <= area.reduced ((float) Space::xs).getWidth())
+        paintReadout (g, p, area, right, juce::Justification::topRight);
+}
+
 juce::String formatFrequency (double hertz)
 {
     if (hertz >= 1000.0)

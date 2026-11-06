@@ -59,6 +59,11 @@ private:
     TempoHandle tempo;                    // the open project's, which owns those steps
     TempoStretchPanel tempoStretch;       // what a tempo change stretches, under the field while the tempo changes
     juce::uint32 tempoStretchShownAt = 0; // when it was shown, or last still in use
+
+    // While that shows, a press anywhere but on it or the tempo field hides it, as a popup goes (the field may keep the keys).
+    struct OutsideClick;
+    std::unique_ptr<OutsideClick> outsideClick;
+    bool hearsOutsideClicks = false;
     juce::TextButton timeSignatureButton; // a menu of time signatures
     LevelMeter masterMeter { "Master level" };
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", decibelsToFaderPosition (0.0f) };
@@ -72,6 +77,7 @@ private:
     void updateKeyboardButton();
     void updateTempo();
     void showTempoStretch(); // what the tempo stretches, as it starts to change
+    void hideTempoStretch();
     void showRecordMenu();
     void showMetronomeMenu();
     void showTimeSignatureMenu();

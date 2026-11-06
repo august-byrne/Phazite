@@ -67,7 +67,7 @@ The setup takes a few minutes to an hour, and the build a few minutes. [Building
 - **Help > Example Songs** opens a finished song to play and take apart; **Help > Lessons** walks you through making a beat, recording, arranging, effects and chords.
 - **Space** plays and stops. **M** (Ctrl+T with FL Studio's shortcuts) turns the computer keyboard into a piano (A S D F G H J K L for the white keys, W E T Y U O P for the black ones), and a MIDI keyboard plays as soon as it is plugged in.
 - **Ctrl+K** finds any command by name, and the bar along the bottom says what the control under the pointer does.
-- **Options > Scan for Plug-ins** finds your VST3 plug-ins. If you hear nothing, choose your output in **Options > Audio Settings**.
+- **Scan for Plug-ins**, in the menu of the gear at the bottom left, finds your VST3 plug-ins. If you hear nothing, choose your output in **Audio Settings**, in the same menu.
 - **Ctrl+S** saves (into `Documents\Phazite\Projects` at first), and **File > Export Song** renders it to a file.
 
 ## Get involved

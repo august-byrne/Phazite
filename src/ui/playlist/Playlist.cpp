@@ -230,6 +230,42 @@ void Playlist::AddTrackRow::mouseDown (const juce::MouseEvent& e)
 }
 
 //==============================================================================
+// The track headers' column's right edge, inside it: dragged, the column's width; double-clicked, its width again. Lit in the
+// focus colour under the pointer and while dragged, as the panels' dividers are.
+struct Playlist::HeaderEdge : public juce::Component
+{
+    explicit HeaderEdge (Playlist& p)
+        : playlist (p)
+    {
+        setTitle ("Track headers' edge");
+        setHelpText ("Drag to make the track headers wider or narrower; double-click to put them back as they were");
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        setRepaintsOnMouseActivity (true);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        if (isMouseOverOrDragging())
+            g.fillAll (getPalette (*this).focus.withAlpha (Shell::dividerLit));
+    }
+
+    void mouseDown (const juce::MouseEvent&) override { widthAtStart = playlist.getHeaderWidth(); }
+    void mouseDrag (const juce::MouseEvent& e) override { playlist.setHeaderWidth (widthAtStart + e.getDistanceFromDragStartX()); }
+    void mouseUp (const juce::MouseEvent&) override { playlist.keepHeaderWidth(); }
+
+    void mouseDoubleClick (const juce::MouseEvent&) override
+    {
+        playlist.setHeaderWidth (defaultHeaderWidth);
+        playlist.keepHeaderWidth();
+    }
+
+    static constexpr int width = Space::xs;
+
+    Playlist& playlist;
+    int widthAtStart = 0;
+};
+
+//==============================================================================
 Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     : TimelineEditor (bridge, projectContext, GridOwner::playlist),
       DisplayTicker::Display (static_cast<juce::Component&> (*this)),
@@ -240,7 +276,8 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
       chordLane (*this),
       chordLaneHeader (*this),
       addTrackRow (std::make_unique<AddTrackRow> (*this)),
-      lanes (std::make_unique<Lanes> (*this))
+      lanes (std::make_unique<Lanes> (*this)),
+      headerEdge (std::make_unique<HeaderEdge> (*this))
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Playlist");
@@ -279,8 +316,13 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     }
 
     for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &collapseAllButton, &sectionsStrip, &chordLaneHeader,
-                                                             &chordLane, &headerColumn, lanes.get() })
+                                                             &chordLane, &headerColumn, lanes.get(), headerEdge.get(), &getOverview() })
         addAndMakeVisible (c);
+
+    // The overview along the time bar's top scrolls and zooms the time line, as FL Studio's scroll bar there does: no scroll bar
+    // under the lanes. The rows' scroll bar lies over the lanes' right edge, thin and see-through.
+    horizontalScrollBar.setVisible (false);
+    updateScrollBarColours();
 
     selection.addChangeListener (this);
     range.addChangeListener (this);
@@ -340,6 +382,7 @@ void Playlist::showProject()
     collapseAllButton.setEnabled (open);
     addTrackRow->setVisible (open);
     rebuild();
+    overviewContentChanged();
 }
 
 void Playlist::tick()
@@ -375,6 +418,10 @@ void Playlist::songChanged (const SongChanges& changes)
         chordLaneHeader.update();
     }
 
+    // The overview of the whole song: its tracks and their clips.
+    if (changes.tracks || changes.clips || changes.tempo)
+        overviewContentChanged();
+
     if (changes.tracks)
     {
         rebuild(); // a name, color, mute or solo, or tracks added, deleted or moved
@@ -405,6 +452,33 @@ void Playlist::songChanged (const SongChanges& changes)
 juce::Rectangle<int> Playlist::getTimelineArea() const
 {
     return lanes->getBounds();
+}
+
+std::vector<TimelineEditor::OverviewMark> Playlist::getOverviewMarks() const
+{
+    // Each track that holds clips a row, in the playlist's order, folders' tracks too, however collapsed; its clips in its colour.
+    std::vector<OverviewMark> marks;
+
+    if (! context.hasProject())
+        return marks;
+
+    std::vector<TrackID> tracks;
+
+    for (const auto track : getAllPlaylistTracks (context))
+        if (canHoldClips (context, track))
+            tracks.push_back (track);
+
+    for (size_t row = 0; row < tracks.size(); ++row)
+    {
+        const auto shown = getTrackRow (context, tracks[row]);
+        const auto colour = shown.has_value() ? shown->colour : juce::Colours::grey;
+        const auto top = (float) row / (float) tracks.size(), bottom = (float) (row + 1) / (float) tracks.size();
+
+        for (const auto& clip : getClips (context, tracks[row]))
+            marks.push_back ({ clip.range.getStart().inBeats(), clip.range.getEnd().inBeats(), top, bottom, colour, clip.muted });
+    }
+
+    return marks;
 }
 
 BeatRange Playlist::getContentRange() const
@@ -455,29 +529,54 @@ void Playlist::resized()
     auto area = getLocalBounds();
     layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
 
-    const auto verticalBarWidth = getVerticalScrollBarWidth();
-    horizontalScrollBar.setBounds (area.removeFromBottom (scrollBarSize).withTrimmedLeft (headerWidth).withTrimmedRight (verticalBarWidth));
-
-    // The time bar: the song's sections over the bar numbers. Left of it, over the track headers, the button
-    // that adds a track.
-    auto timeBar = area.removeFromTop (SectionsStrip::preferredHeight + rulerHeight).withTrimmedRight (verticalBarWidth);
-    auto corner = timeBar.removeFromLeft (headerWidth).reduced (Space::s, Space::s);
+    // The time bar: the whole song in miniature with the part in view over it, as FL Studio's scroll bar shows it along the
+    // top, then the song's sections over the bar numbers. Left of them, over the track headers, the button that adds a track.
+    auto timeBar = area.removeFromTop (overviewHeight + SectionsStrip::preferredHeight + rulerHeight);
+    auto corner = timeBar.removeFromLeft (headerWidth).withTrimmedTop (overviewHeight).reduced (Space::s, Space::s);
     collapseAllButton.setBounds (corner.removeFromRight (corner.getHeight()));
     addTrackButton.setBounds (corner.withWidth (96));
+    getOverview().setBounds (timeBar.removeFromTop (overviewHeight));
     sectionsStrip.setBounds (timeBar.removeFromTop (SectionsStrip::preferredHeight));
     ruler.setBounds (timeBar);
 
     // Under it, the chord lane, with its header over the track headers.
-    auto chordRow = area.removeFromTop (ChordLane::preferredHeight).withTrimmedRight (verticalBarWidth);
+    auto chordRow = area.removeFromTop (ChordLane::preferredHeight);
     chordLaneHeader.setBounds (chordRow.removeFromLeft (headerWidth));
     chordLane.setBounds (chordRow);
 
-    verticalScrollBar.setBounds (area.removeFromRight (verticalBarWidth));
     headerColumn.setBounds (area.removeFromLeft (headerWidth));
+    headerEdge->setBounds (headerColumn.getBounds().removeFromRight (HeaderEdge::width)); // over the headers, right of their controls
     lanes->setBounds (area);
+
+    // The rows' scroll bar over the lanes' right edge, thin and see-through, as FL Studio's is: it takes no room of their own.
+    verticalScrollBar.setBounds (area.removeFromRight (ScrollTint::overlayWidth));
+    verticalScrollBar.toFront (false);
 
     layOutRows();
     setViewStart (getView().start);
+}
+
+void Playlist::setHeaderWidth (int width)
+{
+    width = juce::jlimit (minHeaderWidth, maxHeaderWidth, width);
+
+    if (width != headerWidth)
+    {
+        headerWidth = width;
+        resized();
+        repaint();
+    }
+}
+
+void Playlist::updateScrollBarColours()
+{
+    makeSeeThrough (verticalScrollBar);
+}
+
+void Playlist::keepHeaderWidth()
+{
+    if (onHeaderWidthChanged != nullptr)
+        onHeaderWidthChanged (headerWidth);
 }
 
 void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

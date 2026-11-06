@@ -19,6 +19,7 @@
 #include "ui/browser/PluginPicker.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/playlist/Playlist.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace
 {
@@ -526,4 +527,51 @@ TEST_CASE ("A device's presets menu lists Phazite's for it by kind of sound, the
 
     // None for a device without presets.
     CHECK (phazite::ui::makeDevicePresetMenu (library, "Reverb", "Reverb", [] (const juce::File&) {}).getNumItems() == 0);
+}
+
+TEST_CASE ("The browser is laid out as VS Code's Explorer: its title, its rows' height, each level further in, the outline after keys")
+{
+    namespace ListRow = phazite::ui::ListRow;
+    namespace SideBar = phazite::ui::SideBar;
+    BrowserScreen screen;
+    auto& tree = screen.browser.getTree();
+
+    // Its title along the top, the search under it, and the tree as wide as the panel.
+    const auto titles = phazite::test::findAll<phazite::ui::ViewTitle> (screen.browser);
+    REQUIRE (titles.size() == 1);
+    CHECK (titles[0]->getName() == juce::String ("Browser"));
+    CHECK (titles[0]->getBounds() == screen.browser.getLocalBounds().withHeight (SideBar::titleHeight));
+    CHECK (screen.browser.getSearchField().getY() >= titles[0]->getBottom());
+    CHECK (screen.browser.getSearchField().getHeight() == SideBar::controlHeight);
+    CHECK (tree.getX() == 0);
+    CHECK (tree.getWidth() == screen.browser.getWidth());
+
+    // Rows as tall as VS Code's, each level a step further in, the first at the tree's edge.
+    CHECK (screen.getRow ("Phazite Sounds").getHeight() == ListRow::height);
+    CHECK (screen.getRow ("Phazite Sounds").getX() == 0);
+    CHECK (screen.getRow ("Drums").getX() == SideBar::indent);
+
+    // The selected row's outline, at the row's inset edge, in the focus colour: not after a click, which selects it; once
+    // the keys move the selection, there.
+    const auto focus = phazite::ui::getPalette (tree).focus;
+    const auto edgeOf = [&screen, &tree] (const juce::String& name)
+    {
+        juce::Image image (juce::Image::ARGB, tree.getWidth(), tree.getHeight(), true, juce::SoftwareImageType());
+        {
+            juce::Graphics g (image);
+            tree.paintEntireComponent (g, false);
+        }
+
+        return image.getPixelAt ((int) ListRow::inset, screen.getRow (name).getCentreY());
+    };
+
+    phazite::test::Mouse mouse (tree);
+    mouse.click (screen.getRow ("Drums").getCentre()); // a folder: it opens
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (tree.hasKeyboardFocus (true));
+    CHECK (edgeOf ("Drums") != focus);
+    screen.window.pressKey (downKey);
+    REQUIRE (screen.browser.getSelectedItem().has_value());
+    CHECK (screen.browser.getSelectedItem()->name == juce::String ("Kick"));
+    CHECK (edgeOf ("Kick") == focus);
 }

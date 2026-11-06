@@ -156,6 +156,42 @@ TEST_CASE ("The activity bar's icons show or hide their views in the left panel,
     CHECK (screen.services.settings.get (phazite::Settings::panelLayout).contains ("leftView=versions"));
 }
 
+TEST_CASE ("A view an icon shows has the keys; hidden with them, they go to the playlist, never to the title bar's buttons")
+{
+    Screen screen;
+    auto& bar = screen.getBar();
+    auto& left = screen.shell.getPanel (Panel::left);
+
+    for (const auto view : { LeftView::browser, LeftView::versions })
+    {
+        CAPTURE ((int) view);
+
+        // Shown by its icon, the view has the keys (the browser's search, the commit's message).
+        if (! screen.leftShows (view))
+            screen.click (bar.getButton (view));
+
+        if (! juce::Component::getCurrentlyFocusedComponent() || ! left.isParentOf (juce::Component::getCurrentlyFocusedComponent()))
+        {
+            screen.click (bar.getButton (view)); // hides it
+            screen.click (bar.getButton (view)); // and shows it again, with the keys
+        }
+
+        REQUIRE (screen.leftShows (view));
+        auto* focused = juce::Component::getCurrentlyFocusedComponent();
+        REQUIRE (focused != nullptr);
+        CHECK (left.isParentOf (focused));
+
+        // Hidden by its icon while it has them: the playlist, the editor in use, takes them, and no button of the title bar
+        // shows a focus ring.
+        screen.click (bar.getButton (view));
+        REQUIRE_FALSE (left.isShowing());
+        focused = juce::Component::getCurrentlyFocusedComponent();
+        REQUIRE (focused != nullptr);
+        CHECK_FALSE (screen.shell.getTitleBar().isParentOf (focused));
+        CHECK (dynamic_cast<phazite::ui::Playlist*> (focused) != nullptr);
+    }
+}
+
 TEST_CASE ("The left panel in a window of its own shows the view an icon picks, there")
 {
     Screen screen;
@@ -451,7 +487,7 @@ TEST_CASE ("The activity bar's icons are switches screen readers name, with tool
     Screen screen;
     auto& bar = screen.getBar();
 
-    for (const auto view : { LeftView::browser, LeftView::versions })
+    for (const auto view : { LeftView::browser, LeftView::project, LeftView::versions })
     {
         auto& button = bar.getButton (view);
         CHECK (button.getTitle() == phazite::ui::getLeftViewName (view));

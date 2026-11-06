@@ -84,15 +84,6 @@ namespace
         return {};
     }
 
-    bool isSoundFileProperty (const juce::Identifier& property)
-    {
-        for (int pad = 0; pad < 16; ++pad)
-            if (property == schema::getPadSoundFile (pad))
-                return true;
-
-        return property == schema::getOscillatorWavetableFile (0) || property == schema::getOscillatorWavetableFile (1);
-    }
-
     void findAudioFilePaths (const juce::ValueTree& element, juce::StringArray& paths)
     {
         if (element.hasType (schema::CLIP))
@@ -101,7 +92,7 @@ namespace
 
         if (element.hasType (schema::SOUNDS))
             for (int i = 0; i < element.getNumProperties(); ++i)
-                if (const auto property = element.getPropertyName (i); isSoundFileProperty (property))
+                if (const auto property = element.getPropertyName (i); schema::isSoundFileProperty (property))
                     if (const auto path = element[property].toString(); path.isNotEmpty())
                         paths.addIfNotAlreadyThere (path);
 

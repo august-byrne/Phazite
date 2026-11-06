@@ -412,7 +412,12 @@ void setTrackMuted (Song& song, TrackID id, bool muted, juce::UndoManager* undo)
 {
     if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && (bool) state[schema::trackMute] != muted)
     {
-        state.setProperty (schema::trackMute, muted, undo);
+        // Off is no property at all, as it is at first: unmuted again, the track is as it was, which a version's changes then
+        // don't count (docs/versions.md).
+        if (muted)
+            state.setProperty (schema::trackMute, true, undo);
+        else
+            state.removeProperty (schema::trackMute, undo);
     }
 }
 
@@ -420,7 +425,10 @@ void setTrackSoloed (Song& song, TrackID id, bool soloed)
 {
     if (auto state = findTrackState (song, id); state.hasType (schema::TRACK) && (bool) state[schema::trackSolo] != soloed)
     {
-        state.setProperty (schema::trackSolo, soloed, nullptr);
+        if (soloed)
+            state.setProperty (schema::trackSolo, true, nullptr);
+        else
+            state.removeProperty (schema::trackSolo, nullptr);
     }
 }
 
@@ -514,9 +522,12 @@ void toggleSoloAlone (Song& song, TrackID id)
 
     for (auto other : getTrackStates (song))
         if (other != state)
-            other.setProperty (schema::trackSolo, false, nullptr);
+            other.removeProperty (schema::trackSolo, nullptr);
 
-    state.setProperty (schema::trackSolo, ! alone, nullptr);
+    if (alone)
+        state.removeProperty (schema::trackSolo, nullptr);
+    else
+        state.setProperty (schema::trackSolo, true, nullptr);
 }
 
 bool isSilencedBySolo (const Song& song, TrackID id)

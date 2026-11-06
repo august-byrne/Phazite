@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Choosing what a device's sidechain listens to (docs/design.md, section 8), in one place: a button in the device's header
-// in the Devices view, showing the track it listens to (a dot in that track's colour, and its name) or "Sidechain" while
-// it listens to the sound passing through it; a click lists Off and every other track in the song's order, each with
-// its colour, those that would make a loop greyed with why. Choosing one is one undo step, in which Phazite's compressor,
-// still as it was made, starts ducking. And the track menu's Duck Under, which adds a compressor that does it in one step.
+// Choosing what a device's sidechain listens to (docs/design.md, section 8), in one place: a button in the device's row
+// in the Devices view's column, showing the track it listens to (a dot in that track's colour, and its name) or
+// "Sidechain" while it listens to the sound passing through it; a click lists Off and every other track in the song's
+// order, each with its colour, those that would make a loop greyed with why. Choosing one is one undo step, in which
+// Phazite's compressor, still as it was made, starts ducking. And the track menu's Duck Under, which adds a compressor
+// that does it in one step.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -25,7 +26,7 @@ namespace phazite::ui
 juce::PopupMenu makeSidechainMenu (ProjectContext&, DeviceID, const std::function<void()>& changed = {});
 juce::PopupMenu makeDuckUnderMenu (ProjectContext&, TrackID ducked);
 
-// The header's button.
+// The row's button.
 class SidechainButton : public juce::Button
 {
 public:

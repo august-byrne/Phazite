@@ -83,7 +83,7 @@ TEST_CASE ("The synth's editor has a control for each parameter, in groups, and 
     CHECK (wave->getText() == juce::String ("Saw"));
 }
 
-TEST_CASE ("Given less height, as a Devices view gives it, a column's groups show one at a time under tabs, as wide as before")
+TEST_CASE ("Narrower than its parts side by side, as the dock is, the synth's editor shows them in pages, each whole, without tabs")
 {
     phazite::test::TestSong song;
     auto& s = *phazite::findSong (song.context);
@@ -96,38 +96,49 @@ TEST_CASE ("Given less height, as a Devices view gives it, a column's groups sho
 
     // As wide at any height: a shorter dock never makes it wider.
     const auto low = panel->getMinimumHeight();
-    REQUIRE (low < tall);
-    CHECK (panel->getWidthForHeight (tall) == width);
-    CHECK (panel->getWidthForHeight (low) == width);
+    REQUIRE (low <= tall);
+    CHECK (panel->getWidthForHeight (low) == panel->getWidthForHeight (tall));
 
-    // At its own height, every group stacked; at the least, the first column's under tabs, the first showing.
+    // At its own size, as a window first shows it, a part to a column in rows: no pages, no tabs.
     phazite::test::TestWindow window (*panel, width, tall);
-    CHECK_FALSE (panel->getLayout().usesTabs (0));
-    window.setSize (width, low);
-    CHECK (panel->getLayout().usesTabs (0));
-    CHECK (panel->getLayout().getShownPart (0) == 0);
-    phazite::test::checkChildrenApart (*panel);
+    auto& layout = panel->getLayout();
+    CHECK_FALSE (layout.usesPages());
 
+    for (int column = 0; column < 6; ++column)
+        CHECK_FALSE (layout.usesTabs (column));
+
+    // As wide and as tall as the dock at the default window: in pages, two or three parts to each, every page whole.
+    constexpr int dockWidth = 552, dockHeight = 268; // beside the Devices view's column
+    REQUIRE (panel->getMinimumHeightAtWidth (dockWidth) <= dockHeight);
+    window.setSize (dockWidth, dockHeight);
+    REQUIRE (layout.usesPages());
+    CHECK (layout.getNumPages() == 3);
+    CHECK (layout.getPageName (0) == juce::String::fromUTF8 ("Oscillators \xc2\xb7 Filter"));
+
+    for (int column = 0; column < 6; ++column)
+        CHECK_FALSE (layout.usesTabs (column));
+
+    phazite::test::checkChildrenApart (*panel);
     auto* unison = panel->findControl ("unisonVoices");
     REQUIRE (unison != nullptr);
     CHECK_FALSE (unison->isShowing());
 
-    // The Unison tab shows its controls, inside the panel.
+    // The last page's tab shows the unison and how the synth plays, inside the editor.
     juce::Button* tab = nullptr;
 
-    for (auto* button : phazite::test::findAll<juce::TextButton> (*panel))
-        if (button->getTitle() == "Unison")
+    for (auto* button : phazite::test::findAll<juce::Button> (*panel))
+        if (button->getTitle() == layout.getPageName (2))
             tab = button;
 
     REQUIRE (tab != nullptr);
     phazite::test::Mouse mouse (*tab);
     mouse.click (tab->getLocalBounds().getCentre());
-    CHECK (panel->getLayout().getShownPart (0) == 1);
+    CHECK (layout.getShownPage() == 2);
     CHECK (unison->isShowing());
-    CHECK (unison->getParentComponent()->getBottom() <= low);
+    CHECK (panel->getLocalBounds().contains (panel->getLocalArea (unison, unison->getLocalBounds())));
     phazite::test::checkChildrenApart (*panel);
 
-    // Narrower, as the Instrument tab may be, its columns wrap, every group showing.
+    // Narrower in a taller dock, its columns wrap into rows, every part showing.
     CHECK (panel->getHeightForWidth (width / 2) > tall);
 }
 

@@ -315,9 +315,8 @@ private:
             time = juce::String (name.data(), name.size()) + "  " + time;
         }
 
-        graph::paintReadout (g, p, area, time + "  Feedback " + juce::String (juce::roundToInt (feedback * 100.0f)) + "%",
-                             juce::Justification::topLeft);
-        graph::paintReadout (g, p, area, bounces() ? "Ping-pong: left above, right below" : "", juce::Justification::topRight);
+        graph::paintReadouts (g, p, area, time + "  Feedback " + juce::String (juce::roundToInt (feedback * 100.0f)) + "%",
+                              bounces() ? "Ping-pong: left above, right below" : "");
     }
 
     void paintBand (juce::Graphics& g, const Palette& p, juce::Colour tint)
@@ -355,7 +354,7 @@ DelayEditor::DelayEditor (const DeviceHandle& handle)
     const auto time = makeControlsPart ("Time", { "sync", "time", "milliseconds", "pingPong" }, 4, ParameterControls::Size::compact,
                                         { "Sync", "Note", "Time", "Ping-Pong" });
     const auto feedback = makeControlsPart ("Feedback", { "feedback" }, 1, ParameterControls::Size::large);
-    setParts ({ { { "Echoes", &shown, 300, 196, 120, true } }, { time, feedback } });
+    setParts ({ { { "Echoes", &shown, 300, 196, 120, true, GraphTint::minimumWidth } }, { time, feedback } });
 }
 
 DelayEditor::~DelayEditor() = default;

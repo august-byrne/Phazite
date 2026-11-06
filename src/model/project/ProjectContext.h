@@ -32,6 +32,7 @@ struct SongChanges
     bool chords = false;     // the chord lane's chords and keys (model/chords/ChordModel.h)
     bool tempo = false;      // the tempo or the time signature
     bool view = false;       // how tracks show: their heights, collapsed and pinned ones, drum rows, automation lanes (view state)
+    bool notes = false;      // the project's notes (model/project/ProjectContents.h)
 };
 
 class ProjectContext

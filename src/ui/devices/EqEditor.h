@@ -2,7 +2,7 @@
 // The EQ's editor (roadmap step 1.6, devices/eq/Equalizer.h): its curve over an analyzer of what it plays (and, fainter, what
 // comes in), with a dot for each band to drag (frequency and gain, as one undo step; the wheel changes Q; a double-click turns
 // the band on or off; a right-click picks its shape), and beside it the selected band's controls and the output's, which work
-// from the keyboard too. Its mix is its header's.
+// from the keyboard too. Its mix is its row's in the Devices view.
 #pragma once
 
 #include "DeviceEditors.h"
@@ -11,6 +11,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/components/PowerSwitch.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -29,8 +30,10 @@ public:
 
     static constexpr int numKnobs = 4; // the band's frequency, gain and Q, and the EQ's output
 
-    int getMinimumHeight() const override; // its graph shrinks, down to GraphTint::minimumHeight
-    int getWidthForHeight (int) const override { return getWidth(); }
+    // Its graph shrinks, down to GraphTint::minimumHeight, and narrows, down to GraphTint::minimumWidth, beside the controls.
+    int getMinimumHeight() const override;
+    int getWidthForHeight (int) const override;
+    int getMinimumWidth() const override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -57,7 +60,7 @@ private:
 
     std::unique_ptr<Graph> graph;
     juce::OwnedArray<juce::TextButton> bandButtons;
-    juce::ToggleButton onButton { "On" };
+    PowerSwitch onButton { "Band On" }; // the selected band's
     juce::ComboBox typeBox, slopeBox;
     Knob frequencyKnob { "Frequency", 1000.0 }, gainKnob { "Gain", 0.0 }, qKnob { "Q", 1.0 }, outputKnob { "Output", 0.0 };
     juce::OwnedArray<juce::Label> labels;

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumSamplerEditor.h"
+#include "DeviceLayout.h"
 #include "devices/drums/DrumSampler.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <iterator>
+#include <limits>
 
 namespace phazite::ui
 {
@@ -339,12 +341,12 @@ private:
 //==============================================================================
 namespace
 {
-    const auto knobCell = compactKnobSize + Space::l;
-    constexpr int cells = 7; // the pad's five knobs, its choke group and the output
+    const auto knobCell = compactKnobSize + Space::xs; // close together, so that the pads have the room
+    constexpr int cells = 7;                           // the pad's five knobs, its choke group and the output
 
     int getControlsWidth()
     {
-        return cells * knobCell;
+        return cells * knobCell + Space::s; // and the line before the output
     }
 
     int getControlsHeight()
@@ -367,7 +369,9 @@ DrumSamplerEditor::DrumSamplerEditor (const DeviceHandle& handle)
     waveform = std::make_unique<Waveform> (*this);
     addAndMakeVisible (*waveform);
 
-    padName.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
+    // Each block named as a device's parts are (DeviceLayout.h): the pads; the pad chosen, with its sound and its controls.
+    padName.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
+    padName.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
     addAndMakeVisible (padName);
 
     loadButton.setTooltip ("Picks a sound file for the pad; the project keeps a copy of it");
@@ -404,28 +408,36 @@ DrumSamplerEditor::DrumSamplerEditor (const DeviceHandle& handle)
             drums->getPadMeter (pad).take();
 
     selectPad (0);
-    const auto height = 2 * Space::s + getGridSize (10000);
+    const auto height = 2 * Space::xs + DeviceLayout::titleHeight + getGridSize (std::numeric_limits<int>::max(), 10000);
     setSize (getWidthForHeight (height), height);
 }
 
 DrumSamplerEditor::~DrumSamplerEditor() = default;
 
-int DrumSamplerEditor::getGridSize (int height) const
+int DrumSamplerEditor::getGridSize (int width, int height) const
 {
+    // As big as the height lets it be, up to the pads' own size, and as the width leaves it beside the controls; never under
+    // the least. The edge is less at the top and bottom, as the dock is short (DeviceEditorBase::marginY).
+    const auto room = width == std::numeric_limits<int>::max() ? width : width - 2 * Space::s - Space::m - getControlsWidth();
     return juce::jlimit (columns * smallestPad + (columns - 1) * Space::xs, columns * padSize + (columns - 1) * Space::xs,
-                         height - 2 * Space::s);
+                         std::min (room, height - 2 * Space::xs - DeviceLayout::titleHeight));
 }
 
 int DrumSamplerEditor::getMinimumHeight() const
 {
     // The pads at their smallest, beside the name's row, a little of the waveform and the controls.
     const auto right = controlHeight + Space::s + 60 + Space::s + getControlsHeight();
-    return 2 * Space::s + std::max (columns * smallestPad + (columns - 1) * Space::xs, right);
+    return 2 * Space::xs + std::max (DeviceLayout::titleHeight + columns * smallestPad + (columns - 1) * Space::xs, right);
 }
 
 int DrumSamplerEditor::getWidthForHeight (int height) const
 {
-    return 2 * Space::s + getGridSize (height) + Space::m + getControlsWidth();
+    return 2 * Space::s + getGridSize (std::numeric_limits<int>::max(), height) + Space::m + getControlsWidth();
+}
+
+int DrumSamplerEditor::getMinimumWidth() const
+{
+    return 2 * Space::s + columns * smallestPad + (columns - 1) * Space::xs + Space::m + getControlsWidth();
 }
 
 juce::Button& DrumSamplerEditor::getPad (int pad)
@@ -512,7 +524,9 @@ void DrumSamplerEditor::refresh()
             juce::roundToInt (device.getParameter (getInfo (DrumSampler::getParameterIndex (pad, Field::choke)).id).getValue()));
     }
 
-    padName.setText ("Pad " + juce::String (selectedPad + 1) + ": " + device.getPadName (selectedPad), juce::dontSendNotification);
+    padName.setText (("Pad " + juce::String (selectedPad + 1) + ": " + device.getPadName (selectedPad)).toUpperCase(),
+                     juce::dontSendNotification);
+    padName.setTitle ("Pad " + juce::String (selectedPad + 1) + ": " + device.getPadName (selectedPad));
     resetButton.setEnabled (device.hasPadSound (selectedPad));
     waveform->show (selectedPad);
 
@@ -527,14 +541,25 @@ void DrumSamplerEditor::refresh()
 
 void DrumSamplerEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (getPalette (*this).surface);
+    const auto& p = getPalette (*this);
+    g.fillAll (p.surface);
+
+    // The pads' title, as a device's parts have theirs (DeviceLayout::paint()); and a line between the pad's controls and the
+    // sampler's output, which is every pad's.
+    g.setColour (p.textMuted);
+    g.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
+    g.drawText ("PADS", padsTitle, juce::Justification::centredLeft, true);
+    g.setColour (p.border);
+    g.fillRect (outputLine);
 }
 
 void DrumSamplerEditor::resized()
 {
-    auto area = getLocalBounds().reduced (Space::s);
-    const auto gridSize = getGridSize (getHeight());
-    const auto grid = area.removeFromLeft (gridSize).withSizeKeepingCentre (gridSize, gridSize);
+    auto area = getLocalBounds().reduced (Space::s, Space::xs);
+    const auto gridSize = getGridSize (getWidth(), getHeight());
+    auto left = area.removeFromLeft (gridSize);
+    padsTitle = left.removeFromTop (DeviceLayout::titleHeight);
+    const auto grid = left.withHeight (gridSize);
     const auto pad = (gridSize - (columns - 1) * Space::xs) / columns;
 
     // The first pad at the bottom left, the last at the top right.
@@ -578,7 +603,10 @@ void DrumSamplerEditor::resized()
         }
     };
 
-    for (const auto slot : { 0, 1, 2, 3, 4, numKnobs, outputKnob })
+    for (const auto slot : { 0, 1, 2, 3, 4, numKnobs })
         place (slot);
+
+    outputLine = controls.removeFromLeft (Space::s).withSizeKeepingCentre (1, compactKnobSize + labelHeight);
+    place (outputKnob);
 }
 } // namespace phazite::ui
