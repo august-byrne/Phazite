@@ -942,13 +942,18 @@ void Playlist::AutomationLaneHeader::update (const TrackRow& shown, const LaneRo
     const auto mode = getAutomationMode (playlist.context, track);
     modeButton.setButtonText (getModeName (mode));
     modeButton.setTitle ("Automation mode: " + getModeName (mode));
-
-    // A mode that writes stands out, as an armed track does.
-    const auto& p = getPalette (*this);
-    modeButton.setColour (juce::TextButton::textColourOffId, mode == AutomationMode::read ? p.textMuted : p.danger);
-    nameLabel.setColour (juce::Label::textColourId, getInkFor (p.surface.interpolatedWith (row.colour, LaneTint::header)));
+    updateColours();
     resized();
     repaint();
+}
+
+void Playlist::AutomationLaneHeader::updateColours()
+{
+    // A mode that writes stands out, as an armed track does.
+    const auto& p = getPalette (*this);
+    const auto mode = getAutomationMode (playlist.context, track);
+    modeButton.setColour (juce::TextButton::textColourOffId, mode == AutomationMode::read ? p.textMuted : p.danger);
+    nameLabel.setColour (juce::Label::textColourId, getInkFor (p.surface.interpolatedWith (row.colour, LaneTint::header)));
 }
 
 void Playlist::AutomationLaneHeader::paint (juce::Graphics& g)

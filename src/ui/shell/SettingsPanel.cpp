@@ -121,9 +121,9 @@ AudioSettings::AudioSettings (EngineContext& e, const ProjectContext& context)
         label->setMinimumHorizontalScale (1.0f);
     }
 
-    delayText.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
-    correctionNote.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
-    warning.setColour (juce::Label::textColourId, getPalette (*this).warning);
+    setThemeColour (delayText, juce::Label::textColourId, &Palette::textMuted);
+    setThemeColour (correctionNote, juce::Label::textColourId, &Palette::textMuted);
+    setThemeColour (warning, juce::Label::textColourId, &Palette::warning);
 
     for (auto* c : std::initializer_list<juce::Component*> { &viewport, &delayHeading, &delayText, &warning, &recordingHeading,
                                                              &correctionLabel, &correction, &correctionNote })
@@ -209,7 +209,7 @@ MidiSettings::MidiSettings (EngineContext& e, ComputerKeyboard& keyboard, const 
     for (auto* label : { &noInputsLabel, &keyboardHelp, &routingLabel })
     {
         label->setJustificationType (juce::Justification::topLeft);
-        label->setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+        setThemeColour (*label, juce::Label::textColourId, &Palette::textMuted);
     }
 
     keyboardButton.onClick = [this] { computerKeyboard.setEnabled (keyboardButton.getToggleState()); };

@@ -142,7 +142,7 @@ ParameterControls::ParameterControls (const DeviceHandle& device, std::vector<st
             control->knobAttachment->setParameter (std::move (handle));
             control->knob->setTooltip (help);
             control->value = makeLabel ({});
-            control->value->setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+            setThemeColour (*control->value, juce::Label::textColourId, &Palette::textMuted);
             addAndMakeVisible (*control->knob);
             addAndMakeVisible (*control->value);
         }

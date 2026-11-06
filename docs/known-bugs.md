@@ -17,17 +17,3 @@ commit that fixes it. Races and allocations on the audio thread in code Phazite 
 - **How to fix:** let the test's engine wait for a helper's block without a deadline, as a render's block does
   (`PlaybackSession::lendToRender()`), so that the test is the same every time; or check that no block missed its
   deadline before comparing levels.
-
-## 8. Switching the theme while Phazite runs leaves some controls in the old theme's colours
-
-- **How it shows:** after Settings > Theme (or the activity bar's Theme menu) switches between the dark and the light theme,
-  the text already in a field keeps the old theme's colour (the inspector's Name field: light grey on white after
-  switching to the light theme), and a button that needs attention (Choose instrument) keeps its old warning mix until
-  what it shows changes. Found on 2026-11-05, in headless screenshots of both themes taken after a switch. Starting
-  Phazite in a theme draws everything in it.
-- **Why:** `MainWindow::setTheme()` sends every window a look-and-feel change, which repaints them, but a
-  `juce::TextEditor` keeps the colour each piece of its text was typed in, and components that set a colour from the
-  palette once (`setColour (...)` when their state changes) set it again only then.
-- **How to fix:** in each component that sets colours from the palette, set them again in `lookAndFeelChanged()` (as
-  `TopBar` does); and in fields that hold text, call `applyColourToAllText (findColour (juce::TextEditor::textColourId))`
-  there. A test switches the theme and checks a field's text and the instrument button's colour.

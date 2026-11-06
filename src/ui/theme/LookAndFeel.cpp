@@ -774,6 +774,93 @@ const Palette& getPalette (const juce::Component& component)
     return fallback;
 }
 
+//==============================================================================
+namespace
+{
+    // The palette's colours by their places, which a component keeps of a colour set by role (setThemeColour()).
+    constexpr juce::Colour Palette::* paletteRoles[] = {
+        &Palette::background,    &Palette::surface,
+        &Palette::surfaceRaised, &Palette::border,
+        &Palette::controlBorder, &Palette::text,
+        &Palette::textMuted,     &Palette::textBright,
+        &Palette::accent,        &Palette::textOnAccent,
+        &Palette::focus,         &Palette::hover,
+        &Palette::selected,      &Palette::selectedInactive,
+        &Palette::scrollThumb,   &Palette::indentGuide,
+        &Palette::warning,       &Palette::danger,
+        &Palette::loop,          &Palette::modulation,
+        &Palette::frozen,        &Palette::boost,
+        &Palette::playing,       &Palette::soloed,
+    };
+    static_assert (sizeof (Palette) == std::size (paletteRoles) * sizeof (juce::Colour), "paletteRoles lists every colour of Palette's");
+
+    // The colours a component has set by role, each [its colour ID, its role's place, its alpha, the colour it set].
+    const juce::Identifier themeColoursProperty { "phaziteThemeColours" };
+
+    void applyThemeColour (juce::Component& component, juce::var& entry)
+    {
+        auto& fields = *entry.getArray();
+        const auto& role = getPalette (component).*paletteRoles[(int) fields[1]];
+        const auto colour = role.withMultipliedAlpha ((float) (double) fields[2]);
+        component.setColour ((int) fields[0], colour);
+        fields.set (3, (juce::int64) colour.getARGB());
+    }
+
+    void refreshThemeIn (juce::Component& component)
+    {
+        if (auto* entries = component.getProperties().getVarPointer (themeColoursProperty); entries != nullptr && entries->isArray())
+            for (auto& entry : *entries->getArray())
+                if (const auto colourID = (int) entry[0];
+                    component.isColourSpecified (colourID)
+                    && (juce::int64) component.findColour (colourID).getARGB() == (juce::int64) entry[3])
+                    applyThemeColour (component, entry);
+
+        if (auto* field = dynamic_cast<juce::TextEditor*> (&component))
+        {
+            field->applyColourToAllText (field->findColour (juce::TextEditor::textColourId), true);
+
+            if (const auto placeholder = field->getTextToShowWhenEmpty(); placeholder.isNotEmpty())
+                field->setTextToShowWhenEmpty (placeholder, getPalette (*field).textMuted);
+        }
+
+        for (auto* child : component.getChildren())
+            refreshThemeIn (*child);
+    }
+} // namespace
+
+void setThemeColour (juce::Component& component, int colourId, juce::Colour Palette::* role, float alpha)
+{
+    const auto* found = std::find (std::begin (paletteRoles), std::end (paletteRoles), role);
+    jassert (found != std::end (paletteRoles));
+    auto& properties = component.getProperties();
+
+    if (! properties.contains (themeColoursProperty))
+        properties.set (themeColoursProperty, juce::Array<juce::var>());
+
+    auto& entries = *properties.getVarPointer (themeColoursProperty)->getArray();
+    juce::var* entry = nullptr;
+
+    for (auto& each : entries)
+        if ((int) each[0] == colourId)
+            entry = &each;
+
+    if (entry == nullptr)
+    {
+        entries.add (juce::Array<juce::var> { colourId, 0, 1.0, 0 });
+        entry = &entries.getReference (entries.size() - 1);
+    }
+
+    entry->getArray()->set (1, (int) std::distance (std::begin (paletteRoles), found));
+    entry->getArray()->set (2, (double) alpha);
+    applyThemeColour (component, *entry);
+}
+
+void refreshTheme (juce::Component& window)
+{
+    refreshThemeIn (window);
+    window.sendLookAndFeelChange();
+}
+
 juce::Colour drawListRow (juce::Graphics& g, const juce::Component& list, juce::Rectangle<float> row, bool selected, bool hovered,
                           bool listHasFocus)
 {

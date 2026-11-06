@@ -19,7 +19,7 @@ CleanUpPanel::CleanUpPanel (ProjectContext& c, Removal r)
     title.setFont (juce::FontOptions (TextSize::heading, juce::Font::bold));
     summary.setFont (juce::FontOptions (TextSize::body));
     summary.setJustificationType (juce::Justification::topLeft);
-    summary.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+    setThemeColour (summary, juce::Label::textColourId, &Palette::textMuted);
     list.setTitle (list.getName());
     list.setRowHeight (controlHeight);
     list.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);

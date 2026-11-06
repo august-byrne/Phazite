@@ -354,7 +354,7 @@ void ExportPanel::start()
     status.setText (chosen.stems ? "Exporting " + juce::String (stemNames.size()) + " stems into " + destination.getFileName() + "..."
                                  : "Exporting " + destination.getFileName() + "...",
                     juce::dontSendNotification);
-    status.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+    setThemeColour (status, juce::Label::textColourId, &Palette::textMuted);
     progress = 0.0;
 
     running = startExport (chosen, destination,
@@ -375,7 +375,7 @@ void ExportPanel::cancel()
     stopTimer();
     running = nullptr;
     status.setText ("Export cancelled.", juce::dontSendNotification);
-    status.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+    setThemeColour (status, juce::Label::textColourId, &Palette::textMuted);
     updateControls();
 }
 
@@ -383,14 +383,13 @@ void ExportPanel::finished (const ExportSettings& chosen, const ExportReport& re
 {
     stopTimer();
     running = nullptr;
-    const auto& p = getPalette (*this);
 
     if (report.result.failed())
     {
         status.setText ((chosen.stems ? "Phazite couldn't export the stems: " : "Phazite couldn't export the song: ")
                             + report.result.getErrorMessage(),
                         juce::dontSendNotification);
-        status.setColour (juce::Label::textColourId, p.danger);
+        setThemeColour (status, juce::Label::textColourId, &Palette::danger);
     }
     else
     {
@@ -419,7 +418,7 @@ void ExportPanel::finished (const ExportSettings& chosen, const ExportReport& re
         }
 
         status.setText (text, juce::dontSendNotification);
-        status.setColour (juce::Label::textColourId, p.text);
+        setThemeColour (status, juce::Label::textColourId, &Palette::text);
     }
 
     showButton.setVisible (report.result.wasOk());

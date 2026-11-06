@@ -120,6 +120,7 @@ struct TimelineEditor::Overview : public juce::Component
     }
 
     void resized() override { picture = {}; }
+    void lookAndFeelChanged() override { contentChanged(); } // its marks in the new theme's colours
 
     void mouseMove (const juce::MouseEvent& e) override
     {

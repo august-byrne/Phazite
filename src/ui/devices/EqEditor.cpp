@@ -400,7 +400,7 @@ EqEditor::EqEditor (const DeviceHandle& handle)
         addLabel (name);
 
     for (int i = 0; i < numKnobs; ++i)
-        addLabel ({}).setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+        setThemeColour (addLabel ({}), juce::Label::textColourId, &Palette::textMuted);
 
     showAsParameter (outputKnob, getInfo (Eq::outputParameter));
     outputAttachment.setParameter (device.getParameter (getInfo (Eq::outputParameter).id));

@@ -63,7 +63,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
-    void lookAndFeelChanged() override { makeSeeThrough (verticalScrollBar); } // another theme: its scroll bar's colours in it
+    void lookAndFeelChanged() override; // another theme: its scroll bar's colours, and its instrument button's, in it
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool keyPressed (const juce::KeyPress&) override; // Escape during a drag takes it back
 

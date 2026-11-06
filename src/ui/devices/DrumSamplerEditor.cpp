@@ -371,7 +371,7 @@ DrumSamplerEditor::DrumSamplerEditor (const DeviceHandle& handle)
 
     // Each block named as a device's parts are (DeviceLayout.h): the pads; the pad chosen, with its sound and its controls.
     padName.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
-    padName.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+    setThemeColour (padName, juce::Label::textColourId, &Palette::textMuted);
     addAndMakeVisible (padName);
 
     loadButton.setTooltip ("Picks a sound file for the pad; the project keeps a copy of it");
@@ -394,7 +394,7 @@ DrumSamplerEditor::DrumSamplerEditor (const DeviceHandle& handle)
         addAndMakeVisible (*knobs[(size_t) i]);
         addAndMakeVisible (*names.add (makeLabel (i == outputKnob ? juce::String ("Output") : getFieldName (parameter)).release()));
         addAndMakeVisible (*texts.add (makeLabel ({}).release()));
-        texts.getLast()->setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+        setThemeColour (*texts.getLast(), juce::Label::textColourId, &Palette::textMuted);
     }
 
     showAsParameter (*knobs[outputKnob], getInfo (DrumSampler::outputParameter));

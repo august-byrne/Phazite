@@ -354,7 +354,7 @@ ProjectView::ProjectView (CommandBridge& bridge, ProjectContext& projectContext)
     {
         label->setFont (juce::FontOptions (TextSize::small));
         label->setJustificationType (juce::Justification::topLeft);
-        label->setColour (juce::Label::textColourId, p.textMuted);
+        setThemeColour (*label, juce::Label::textColourId, &Palette::textMuted);
         addChildComponent (label);
     }
 

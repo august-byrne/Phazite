@@ -748,17 +748,27 @@ void MainWindow::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void MainWindow::setTheme (ui::ThemeName theme)
 {
+    const auto oldSurface = lookAndFeel.getPalette().surface;
     lookAndFeel.setTheme (theme);
-    setBackgroundColour (lookAndFeel.getPalette().surface); // the window's frame, as the shell paints it
+    const auto surface = lookAndFeel.getPalette().surface;
+    setBackgroundColour (surface); // the window's frame, as the shell paints it
 
-    // This window (even before it is on the screen), and every other one: panels in their own
-    // windows, dialogs and tooltips.
-    sendLookAndFeelChange();
+    // This window (even before it is on the screen), and every other one: panels in their own windows, dialogs, whose
+    // backgrounds were the old theme's surface as they opened, and tooltips.
+    ui::refreshTheme (*this);
     auto& desktop = juce::Desktop::getInstance();
 
     for (int i = 0; i < desktop.getNumComponents(); ++i)
+    {
         if (auto* window = desktop.getComponent (i); window != nullptr && window != this)
-            window->sendLookAndFeelChange();
+        {
+            if (auto* dialog = dynamic_cast<juce::ResizableWindow*> (window);
+                dialog != nullptr && dialog->getBackgroundColour() == oldSurface)
+                dialog->setBackgroundColour (surface);
+
+            ui::refreshTheme (*window);
+        }
+    }
 
     repaint();
 

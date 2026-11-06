@@ -140,8 +140,8 @@ void showAsParameter (juce::Slider&, const devices::ParameterInfo&);
 void showAsLoudness (juce::Slider&);
 void showAsTruePeak (juce::Slider&);
 
-// Shows a button as its window's main one, in the accent colour, or as an ordinary one. Call it again when the theme
-// changes (lookAndFeelChanged()).
+// Shows a button as its window's main one, in the accent colour, or as an ordinary one, in each theme switched to after
+// (setThemeColour()).
 void setPrimary (juce::TextButton&, bool primary);
 
 //==============================================================================

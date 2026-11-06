@@ -131,6 +131,17 @@ private:
 // The palette of the LookAndFeel a component uses (the dark theme if that isn't Phazite's).
 const Palette& getPalette (const juce::Component&);
 
+// One of a component's colours in a role of the palette's (&Palette::textMuted, say), at that much of its alpha: set now, and
+// again from the palette of each theme switched to later (refreshTheme()), unless something else set that colour since. A
+// colour that comes straight from the palette needs no lookAndFeelChanged() of its component, then.
+void setThemeColour (juce::Component&, int colourId, juce::Colour Palette::* role, float alpha = 1.0f);
+
+// After the theme changed (LookAndFeel::setTheme()), in a window and everything in it: the colours set by role in the new
+// palette's; the text already in each field in the field's text colour, which a juce::TextEditor otherwise keeps from when it
+// was typed, and its placeholder in the muted one; then the look-and-feel change, which each component's lookAndFeelChanged()
+// takes for the colours it works out itself (an attention tint, a track's ink).
+void refreshTheme (juce::Component& window);
+
 // A row of a list as VS Code's lists draw theirs: under the pointer, the hover wash; selected, the selection's wash (or, where
 // the keyboard isn't in the list, the inactive selection's), rounded and inset from the list's sides (ListRow). The colour its
 // text is drawn in: the bright text's on a selection.

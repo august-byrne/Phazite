@@ -394,9 +394,8 @@ void showAsTruePeak (juce::Slider& slider)
 
 void setPrimary (juce::TextButton& button, bool primary)
 {
-    const auto& p = getPalette (button);
-    button.setColour (juce::TextButton::buttonColourId, primary ? p.accent : p.surfaceRaised);
-    button.setColour (juce::TextButton::textColourOffId, primary ? p.textOnAccent : p.text);
+    setThemeColour (button, juce::TextButton::buttonColourId, primary ? &Palette::accent : &Palette::surfaceRaised);
+    setThemeColour (button, juce::TextButton::textColourOffId, primary ? &Palette::textOnAccent : &Palette::text);
 }
 
 //==============================================================================

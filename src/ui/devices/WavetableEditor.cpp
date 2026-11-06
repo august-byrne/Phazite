@@ -275,7 +275,7 @@ public:
             row->amountAttachment->setParameter (device.getParameter (amount.id));
             row->number.setText (juce::String (slot + 1), juce::dontSendNotification);
             row->number.setFont (juce::FontOptions (TextSize::small));
-            row->number.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+            setThemeColour (row->number, juce::Label::textColourId, &Palette::textMuted);
 
             for (auto* control : std::initializer_list<juce::Component*> { &row->number, &row->source, &row->target, row->amount.get() })
                 addAndMakeVisible (control);

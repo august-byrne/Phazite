@@ -570,13 +570,12 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
       historyList ("Graph", historyModel.get())
 {
     setTitle ("Source Control");
-    const auto& p = getPalette (*this);
 
     for (auto* label : { &emptyText, &roomText })
     {
         label->setFont (juce::FontOptions (TextSize::small));
         label->setJustificationType (juce::Justification::topLeft);
-        label->setColour (juce::Label::textColourId, p.textMuted);
+        setThemeColour (*label, juce::Label::textColourId, &Palette::textMuted);
     }
 
     roomText.setTitle ("Room the history takes");

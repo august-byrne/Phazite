@@ -161,6 +161,8 @@ struct Playlist::AutomationLaneHeader : public juce::Component
 
     // The track's color, folders and write mode, the parameter's name, and whether the lane is collapsed.
     void update (const TrackRow&, const LaneRow&);
+    void updateColours();                                   // the write mode's and the name's, in the theme's colours
+    void lookAndFeelChanged() override { updateColours(); } // another theme
 
     void paint (juce::Graphics&) override;
     void resized() override;

@@ -190,8 +190,8 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     openingLabel.setText ("Opening...", juce::dontSendNotification);
     openingLabel.setJustificationType (juce::Justification::centred);
     openingLabel.setFont (juce::FontOptions (TextSize::heading));
-    openingLabel.setColour (juce::Label::backgroundColourId, getPalette (*this).surface);
-    openingLabel.setColour (juce::Label::textColourId, getPalette (*this).textMuted);
+    setThemeColour (openingLabel, juce::Label::backgroundColourId, &Palette::surface);
+    setThemeColour (openingLabel, juce::Label::textColourId, &Palette::textMuted);
     addChildComponent (openingLabel);
     openingLabel.setVisible (! projectContext.hasProject());
 

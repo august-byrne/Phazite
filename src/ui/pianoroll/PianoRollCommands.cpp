@@ -157,6 +157,12 @@ void PianoRoll::showNextNoteMenu()
 }
 
 //==============================================================================
+void PianoRoll::lookAndFeelChanged()
+{
+    makeSeeThrough (verticalScrollBar);
+    updateToolbar(); // its instrument button's tint, while it asks for one
+}
+
 void PianoRoll::updateToolbar()
 {
     const auto track = getTrack();

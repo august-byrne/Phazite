@@ -974,6 +974,9 @@ void DevicesView::lookAndFeelChanged()
 
     if (auto* note = dynamic_cast<juce::Label*> (body.get()))
         note->setColour (juce::Label::textColourId, p.textMuted);
+
+    if (column != nullptr)
+        showInstrumentButton(); // its tint, while the track asks for an instrument
 }
 
 juce::Component* DevicesView::findPanel (DeviceID id) const

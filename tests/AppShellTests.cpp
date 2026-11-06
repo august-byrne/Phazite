@@ -4,12 +4,15 @@
 // the plug-in picker, Detach, New, Open or Save As): Linux CI has no display.
 #include "AppScreen.h"
 #include "GoldenFiles.h"
+#include "TestClips.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/input/Keymap.h"
+#include "ui/mixer/DevicesView.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/shell/ActivityBar.h"
 #include "ui/shell/PanelLayout.h"
+#include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
 #include <functional>
@@ -655,4 +658,79 @@ TEST_CASE ("Every control in the window explains itself in the hint bar, with a 
 
     INFO (silent.joinIntoString ("\n").toStdString());
     CHECK (silent.isEmpty());
+}
+
+TEST_CASE ("Switching the theme puts what the window shows already in the new theme's colours")
+{
+    // Known bug 8 until 2026-11-06: after a switch from the dark theme to the light one, the text already in a field stayed
+    // light grey on white, and a button asking for an instrument kept the dark theme's tint.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+
+    // A track with notes and no instrument, selected: the inspector shows its name in a field, and the Devices view asks for
+    // an instrument.
+    REQUIRE (screen.registry.invoke ("track.add"));
+    auto& context = screen.session.getContext();
+    auto& song = *phazite::findSong (context);
+    const auto track = phazite::getAllPlaylistTracks (context).back();
+    const auto clip = phazite::test::addMidiClip (song, track, { phazite::test::at (0.0), phazite::test::at (4.0) });
+    phazite::test::addMidiNote (song, clip, 60, phazite::test::at (0.0), phazite::test::lasting (1.0));
+    context.getSongSelection().selectOnly (track);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.registry.invoke ("view.instrument"));
+
+    if (phazite::test::findAll<phazite::ui::DevicesView> (screen.shell).getFirst() == nullptr
+        || ! phazite::test::findAll<phazite::ui::DevicesView> (screen.shell).getFirst()->isShowing())
+        REQUIRE (screen.registry.invoke ("view.instrument"));
+
+    phazite::test::dispatchPendingMessages();
+    const auto name = phazite::getTrackRow (context, track)->name;
+    juce::TextEditor* nameField = nullptr;
+
+    for (auto* field : phazite::test::findAll<juce::TextEditor> (screen.shell))
+        if (field->isShowing() && field->getText() == name)
+            nameField = field;
+
+    const auto tinted = [&screen]
+    {
+        juce::Array<juce::TextButton*> found;
+
+        for (auto* button : phazite::test::findAll<juce::TextButton> (screen.shell))
+            if (button->isShowing() && button->getButtonText() == "Choose instrument"
+                && ! button->findColour (juce::TextButton::buttonColourId).isTransparent())
+                found.add (button);
+
+        return found;
+    };
+
+    REQUIRE (nameField != nullptr);
+    REQUIRE_FALSE (tinted().isEmpty());
+
+    lookAndFeel.setTheme (phazite::ui::ThemeName::light);
+    phazite::ui::refreshTheme (screen.window);
+    phazite::test::dispatchPendingMessages();
+
+    // The button's tint is the light theme's.
+    const auto& light = lookAndFeel.getPalette();
+    const auto attention = light.surfaceRaised.interpolatedWith (light.warning, phazite::ui::attentionTint);
+    REQUIRE_FALSE (tinted().isEmpty());
+
+    for (auto* button : tinted())
+        CHECK (button->findColour (juce::TextButton::buttonColourId) == attention);
+
+    // The name reads dark on the field's light background: its darkest pixels are about the light theme's text, not the dark
+    // theme's light grey.
+    const auto image = nameField->createComponentSnapshot (nameField->getLocalBounds(), true, 1.0f);
+    auto darkest = 1.0f;
+
+    for (int y = 0; y < image.getHeight(); ++y)
+        for (int x = 0; x < image.getWidth(); ++x)
+            if (const auto pixel = image.getPixelAt (x, y); pixel.isOpaque()) // not the corners outside its rounded box
+                darkest = std::min (darkest, pixel.getBrightness());
+
+    CHECK (darkest < 0.5f);
 }
