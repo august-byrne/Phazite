@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "LoudnessMeter.h"
 
+#include <juce_audio_basics/juce_audio_basics.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -17,10 +19,9 @@ namespace
     }
 } // namespace
 
-void LoudnessMeter::prepare (double rate, int blockSize)
+void LoudnessMeter::prepare (double rate, int)
 {
     sampleRate = rate;
-    maximumBlockSize = std::max (1, blockSize);
     blockLength = std::max (1, (int) std::lround (rate * 0.1));
 
     // The K-weighting at this rate, as BS.1770's analogue filters through the bilinear transform: a shelf of about +4 dB
@@ -53,9 +54,10 @@ void LoudnessMeter::prepare (double rate, int blockSize)
         highPass.a2 = (1.0 - highK / highQ + highK * highK) / highA0;
     }
 
-    oversampling =
-        std::make_unique<juce::dsp::Oversampling<float>> (2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, false);
-    oversampling->initProcessing ((size_t) maximumBlockSize);
+    for (auto& detector : truePeaks)
+        detector.reset();
+
+    prepared = true;
     binPower.assign ((size_t) histogramBins, 0.0);
     binCount.assign ((size_t) histogramBins, 0);
     blockPower = 0.0;
@@ -68,7 +70,7 @@ void LoudnessMeter::prepare (double rate, int blockSize)
 
 void LoudnessMeter::process (const float* const* channels, int numChannels, int numSamples) noexcept
 {
-    if (oversampling == nullptr || numChannels <= 0)
+    if (! prepared || numChannels <= 0)
         return;
 
     if (resetWanted.exchange (false, std::memory_order_acquire))
@@ -90,23 +92,14 @@ void LoudnessMeter::process (const float* const* channels, int numChannels, int 
             finishBlock();
     }
 
-    // Its true peak, four times oversampled, in pieces as long as it was prepared for.
-    const float* pair[] = { channels[0], channels[sides - 1] };
-
-    for (int done = 0; done < numSamples;)
+    // Its true peak: the points between the samples, as BS.1770 finds them, and the samples themselves (the points lie an
+    // eighth of a sample or more from them).
+    for (int side = 0; side < sides; ++side)
     {
-        const auto length = std::min (numSamples - done, maximumBlockSize);
-        const juce::dsp::AudioBlock<const float> block (pair, 2, (size_t) done, (size_t) length);
-        const auto upsampled = oversampling->processSamplesUp (block);
+        auto& detector = truePeaks[(size_t) side];
 
-        for (size_t side = 0; side < upsampled.getNumChannels(); ++side)
-        {
-            const auto range =
-                juce::FloatVectorOperations::findMinAndMax (upsampled.getChannelPointer (side), (int) upsampled.getNumSamples());
-            heldPeak = std::max ({ heldPeak, std::abs (range.getStart()), std::abs (range.getEnd()) });
-        }
-
-        done += length;
+        for (int i = 0; i < numSamples; ++i)
+            heldPeak = std::max ({ heldPeak, detector.push (channels[side][i]), std::abs (channels[side][i]) });
     }
 
     truePeak.store (heldPeak, std::memory_order_relaxed);

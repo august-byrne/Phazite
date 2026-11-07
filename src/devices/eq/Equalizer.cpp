@@ -145,7 +145,7 @@ namespace
                     if (section == numSections - 1)
                         sectionQ *= q / 0.70710678;
 
-                    sections[(size_t) section] = dsp::makeFilter (
+                    sections[(size_t) section] = dsp::makeMatchedFilter (
                         type == (int) BandType::lowCut ? FilterShape::highPass : FilterShape::lowPass, frequency, sampleRate, sectionQ);
                 }
 
@@ -153,19 +153,19 @@ namespace
             }
 
             case BandType::lowShelf:
-                sections[0] = dsp::makeFilter (FilterShape::lowShelf, frequency, sampleRate, q, gainDecibels);
+                sections[0] = dsp::makeMatchedFilter (FilterShape::lowShelf, frequency, sampleRate, q, gainDecibels);
                 return 1;
 
             case BandType::bell:
-                sections[0] = dsp::makeFilter (FilterShape::bell, frequency, sampleRate, q, gainDecibels);
+                sections[0] = dsp::makeMatchedFilter (FilterShape::bell, frequency, sampleRate, q, gainDecibels);
                 return 1;
 
             case BandType::notch:
-                sections[0] = dsp::makeFilter (FilterShape::notch, frequency, sampleRate, q);
+                sections[0] = dsp::makeMatchedFilter (FilterShape::notch, frequency, sampleRate, q);
                 return 1;
 
             case BandType::highShelf:
-                sections[0] = dsp::makeFilter (FilterShape::highShelf, frequency, sampleRate, q, gainDecibels);
+                sections[0] = dsp::makeMatchedFilter (FilterShape::highShelf, frequency, sampleRate, q, gainDecibels);
                 return 1;
         }
 

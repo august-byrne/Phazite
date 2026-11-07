@@ -7,6 +7,7 @@ Phazite is licensed under the GNU Affero General Public License, version 3 or (a
 | [JUCE](https://github.com/juce-framework/JUCE) 9.0.5 (`external/JUCE`, at `d60b7a78`) | AGPL-3.0, or commercial | App, audio-device, audio-file, DSP and plug-in-hosting framework, compiled into the app and its helper program (`PhaziteHost`) |
 | VST 3 SDK (bundled with JUCE) | MIT | VST3 plug-in hosting, compiled in |
 | [Rubber Band Library](https://breakfastquay.com/rubberband/) 4.0 | GPL-2.0-or-later, or commercial | Stretches and pitches audio clips and the browser's previews (its R3 engine), compiled in; the license ships next to the app (`licenses/RubberBand.txt`) |
+| [r8brain-free-src](https://github.com/avaneev/r8brain-free-src) 7.6 (`external/r8brain-free-src`, at `cb2abb99`), with its bundled Ooura FFT | MIT (the Ooura FFT: free for any use, with credit) | Resamples audio files at another rate than the engine's as they play (`src/engine/audio/Resampler.cpp`), header-only, compiled in; the license ships next to the app (`licenses/r8brain-free-src.txt`). Sample rate converter designed by Aleksey Vaneev of Voxengo |
 | ASIO® SDK 2.3.4 headers (bundled with JUCE) | GPL-3.0-only (Steinberg's GPLv3 option) | ASIO driver support on Windows, compiled in |
 | [WindowsToolchain](https://github.com/MarkSchofield/WindowsToolchain) | MIT | Finds MSVC at build time on Windows; nothing compiled in |
 | [doctest](https://github.com/doctest/doctest) 2.4.11 (`external/doctest`) | MIT | Unit-test framework; compiled into the tests only, not the app |

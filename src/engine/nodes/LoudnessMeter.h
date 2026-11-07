@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The song's loudness as Phazite's engine measures what goes out, by EBU R128 and ITU-R BS.1770-4: through the
+// The song's loudness as Phazite's engine measures what goes out, by EBU R128 and ITU-R BS.1770-5: through the
 // K-weighting filters, the momentary loudness (the last 400 ms) and the short-term (the last 3 s), the integrated
 // loudness since it was last reset, gated as R128 gates it (blocks quieter than -70 LUFS, then those more than 10 LU
 // below the rest, left out; the blocks kept in a histogram of tenths of a LU, so that its memory stays the same however
-// long it measures), and the true peak, four times oversampled, held. The audio thread measures; any thread reads.
+// long it measures), and the true peak, by BS.1770's four times oversampling (devices/dynamics/TruePeak.h, as the limiter
+// finds it), held. The audio thread measures; any thread reads.
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
+#include "devices/dynamics/TruePeak.h"
 
 #include <array>
 #include <atomic>
-#include <memory>
 #include <optional>
 #include <vector>
 
@@ -59,8 +59,8 @@ private:
     double sampleRate = 48000.0;
     int blockLength = 4800; // 100 ms
     std::array<std::array<Biquad, 2>, 2> filters;
-    std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
-    int maximumBlockSize = 0;
+    std::array<devices::TruePeak, 2> truePeaks;
+    bool prepared = false;
 
     // The audio thread's: the K-weighted power of the 100 ms block being measured, and of the last thirty; the gating
     // blocks' histogram (each bin's count and power); the held peak.

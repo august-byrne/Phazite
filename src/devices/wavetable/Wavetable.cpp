@@ -17,11 +17,11 @@ namespace
 
     constexpr int guardBefore = 1, guardAfter = 2; // the samples around each level's cycle, for interpolation
 
-    // The samples a level keeps: at least four for each cycle of its highest harmonic, so that cubic interpolation reads
-    // it cleanly, as a power of two, and at least 64.
-    int getLevelLength (int harmonics)
+    // The samples a level keeps: at least so many for each cycle of its highest harmonic (four for a wavetable), so that
+    // cubic interpolation reads it cleanly, as a power of two, and at least 64.
+    int getLevelLength (int harmonics, int samplesPerCycle)
     {
-        return std::max (64, juce::nextPowerOfTwo (4 * harmonics));
+        return std::max (64, juce::nextPowerOfTwo (samplesPerCycle * harmonics));
     }
 
     int getOrder (int size)
@@ -126,6 +126,17 @@ namespace
 
 std::shared_ptr<const Wavetable> Wavetable::fromHarmonics (const juce::String& tableName, const std::vector<Harmonics>& frames)
 {
+    return make (tableName, frames, true, 4);
+}
+
+std::shared_ptr<const Wavetable> Wavetable::forOscillator (const juce::String& tableName, const Harmonics& frame)
+{
+    return make (tableName, { frame }, false, 32);
+}
+
+std::shared_ptr<const Wavetable> Wavetable::make (const juce::String& tableName, const std::vector<Harmonics>& frames, bool peakAtOne,
+                                                  int samplesPerCycle)
+{
     std::shared_ptr<Wavetable> table (new Wavetable());
     table->name = tableName;
     table->numFrames = std::clamp ((int) frames.size(), 1, maxFrames);
@@ -135,7 +146,7 @@ std::shared_ptr<const Wavetable> Wavetable::fromHarmonics (const juce::String& t
 
     for (int level = 0; level < numLevels; ++level)
     {
-        table->levelLengths[(size_t) level] = getLevelLength (harmonicsAtLevel[(size_t) level]);
+        table->levelLengths[(size_t) level] = getLevelLength (harmonicsAtLevel[(size_t) level], samplesPerCycle);
         table->levelOffsets[(size_t) level] = offset + guardBefore;
         offset += guardBefore + table->levelLengths[(size_t) level] + guardAfter;
     }
@@ -173,6 +184,9 @@ std::shared_ptr<const Wavetable> Wavetable::fromHarmonics (const juce::String& t
             cycle[length + 1] = cycle[1];
         }
     }
+
+    if (! peakAtOne)
+        return table;
 
     // The loudest frame's peak at 1.
     auto peak = 0.0f;

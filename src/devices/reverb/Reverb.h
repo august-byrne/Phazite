@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's reverb (roadmap step 1.6): a room or hall around the sound. After a pre-delay and a few allpass filters that
 // smear the attack, eight delay lines feed each other through a mixing matrix that keeps the sound's energy (a
-// "feedback delay network"); each line loses the treble faster than the bass, past the damping frequency, and fades
-// by 60 dB over the decay time. The lines' lengths move a little, each at its own slow rate, so the tail doesn't ring
+// "feedback delay network"); each line loses the treble faster than the bass, past the damping frequency, as much on a
+// pass as its length asks (so that the tail keeps its colour as it fades), and fades by 60 dB over the decay time. The lines' lengths move a little, each at its own slow rate, so the tail doesn't ring
 // like metal; their starting points come from a fixed seed, so it plays the same every time. A low cut keeps rumble out
 // of the tail, and the width spreads it from mono to wide stereo. On an insert it starts at 25 % mix; on a return,
 // all effect.

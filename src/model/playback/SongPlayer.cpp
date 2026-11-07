@@ -1175,7 +1175,7 @@ void SongPlayer::prepareComparison (double sampleRate, int maximumBlockSize)
     const auto hearing = comparisonState != nullptr && comparisonState->isHearingVersion();
     comparisonState = std::make_shared<engine::ComparisonState>();
     comparisonState->prepare (sampleRate, maximumBlockSize);
-    comparisonRegion = std::make_shared<engine::RegionState>();
+    comparisonRegion = nullptr; // made for the bounce's file (addComparison())
 
     if (hearing)
         comparisonState->hear (true);
@@ -1189,6 +1189,9 @@ void SongPlayer::addComparison (engine::Plan& plan, double sampleRate)
         return;
 
     prepareComparison (sampleRate, preparedBlockSize);
+
+    if (comparisonRegion == nullptr || ! comparisonRegion->playsAt (*file, sampleRate))
+        comparisonRegion = std::make_shared<engine::RegionState> (*file, sampleRate);
 
     // The whole bounce from the version's start, which the comparison plays at the song's beats.
     engine::AudioRegion bounce;
@@ -1204,8 +1207,9 @@ engine::AudioRegion SongPlayer::makeRegion (std::int64_t id, std::shared_ptr<eng
     region.file = std::move (file);
     auto& state = regions[id];
 
-    if (state == nullptr)
-        state = std::make_shared<engine::RegionState>();
+    // Made anew for a file at another rate, or an engine at another (resampling the one where they differ).
+    if (state == nullptr || ! state->playsAt (*region.file, preparedRate))
+        state = std::make_shared<engine::RegionState> (*region.file, preparedRate);
 
     region.state = state;
     usedRegions.insert (id);

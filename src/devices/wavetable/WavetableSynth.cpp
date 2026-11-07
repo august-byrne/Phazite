@@ -624,6 +624,11 @@ void WavetableSynth::startVoice (Voice& voice)
     for (auto& filter : voice.filters)
         filter.reset();
 
+    for (auto& drive : voice.drives)
+        drive.reset();
+
+    voice.driveBlend = 0.0f;
+
     for (size_t i = 0; i < voice.lfos.size(); ++i)
         voice.lfos[i].reset (0.0f, lfoSeed + (std::uint32_t) (notesPlayed * 2 + i));
 }
@@ -1179,10 +1184,13 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 soundLeft += centre;
                 soundRight += centre;
 
-                // The filter, its drive saturating what goes in (its quiet parts keeping their level): both sides through
-                // it while unison spreads the voice, otherwise one.
+                // The filter, its drive saturating what goes in (its quiet parts keeping their level) at twice the rate so
+                // that it doesn't alias, faded in and out over 32 samples as it comes on or off: both sides through it
+                // while unison spreads the voice, otherwise one.
                 const auto channels = settings.stereo ? 2 : 1;
                 std::array<float, 2> sides { soundLeft, soundRight };
+                const auto driveWanted = voice.filtering && voice.driveGain > 1.0001f ? 1.0f : 0.0f;
+                voice.driveBlend += std::clamp (driveWanted - voice.driveBlend, -1.0f / 32.0f, 1.0f / 32.0f);
 
                 for (int channel = 0; channel < channels; ++channel)
                 {
@@ -1190,8 +1198,12 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
 
                     if (voice.filtering)
                     {
-                        if (voice.driveGain > 1.0001f)
-                            x = dsp::softClip (x * voice.driveGain) / voice.driveGain;
+                        if (voice.driveBlend > 0.0f)
+                        {
+                            const auto gain = std::max (1.0f, voice.driveGain);
+                            const auto driven = voice.drives[(size_t) channel].process (x * gain, dsp::SoftCurve {}) / gain;
+                            x += voice.driveBlend * (driven - x);
+                        }
 
                         x = voice.filters[(size_t) channel].process (x);
                     }

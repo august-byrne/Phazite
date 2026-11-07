@@ -304,8 +304,8 @@ bool Previewer::play (const juce::File& newFile, const ProjectContext& context, 
         }
 
         impl->host.getPreviewFileReader().add (audio);
+        region.state = std::make_shared<engine::RegionState> (*audio, rate);
         region.file = std::move (audio);
-        region.state = std::make_shared<engine::RegionState>();
         sound.audio.push_back (std::move (region));
     }
 
@@ -350,8 +350,8 @@ bool Previewer::playSound (juce::AudioBuffer<float> sound, double soundRate)
 
     engine::AudioRegion region;
     region.length = (std::int64_t) std::llround (seconds * previews.getSampleRate());
+    region.state = std::make_shared<engine::RegionState> (*audio, previews.getSampleRate());
     region.file = std::move (audio);
-    region.state = std::make_shared<engine::RegionState>();
     auto strip = impl->makeSoundStrip();
     strip.audio.push_back (std::move (region));
 

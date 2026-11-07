@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // An audio clip as Phazite's engine plays it: a part of an audio file (AudioFile.h), from a sample of the song for so
 // many, at a gain, faded in and out by one of Phazite's fade shapes, cut off at its edges. A file at another rate than
-// the engine's plays through 5-point Lagrange interpolation. Built by the model from the song, with the file Phazite's
-// renders of stretched, pitched and reversed clips are in when a clip needs one.
+// the engine's plays through r8brain-free-src's resampling (Resampler.h). Built by the model from the song, with the file
+// Phazite's renders of stretched, pitched and reversed clips are in when a clip needs one.
 #pragma once
 
 #include "AudioFile.h"
 
-#include <array>
 #include <memory>
 
 namespace phazite::engine
@@ -31,13 +30,28 @@ struct FadeCurve
 float getFadeGain (FadeCurve, float along) noexcept;
 
 // What a region keeps from one block to the next, by its clip's ID from plan to plan: where it played to, to tell a jump
-// (after which it fades in over 40 samples rather than click), and where it is in a file at another rate.
+// (after which it fades in over 40 samples rather than click), where it is in its file, and for a file at another rate
+// than the engine's, its resampling, from the file's sample it reads next.
 struct RegionState
 {
+    // For a file at the engine's rate.
+    RegionState();
+
+    // For a file played by an engine at a rate: through a resampler for each of its channels (two at most) where their
+    // rates differ, made here. Allocates: off the audio thread.
+    RegionState (const AudioFile&, double engineRate);
+
+    ~RegionState();
+
+    // Whether it was made for a file at the rate and with the channels this one has, played at that rate.
+    bool playsAt (const AudioFile&, double engineRate) const noexcept;
+
     std::int64_t playedTo = -1; // the song's sample after the last it played; -1 before it first plays
-    double filePosition = 0.0;
-    std::array<juce::LagrangeInterpolator, 2> interpolators;
-    int fadingIn = 0; // samples left of its fade in after a jump
+    double filePosition = 0.0;  // the file's sample it plays next (at another rate: it reads next)
+    int fadingIn = 0;           // samples left of its fade in after a jump
+
+    struct Conversion;
+    std::unique_ptr<Conversion> conversion; // a file at another rate's, or nullptr
 };
 
 struct AudioRegion
@@ -53,8 +67,9 @@ struct AudioRegion
     std::int64_t getEnd() const noexcept { return start + length; }
 
     // Audio thread, or a render's (which reads what it needs first): adds what the region plays from a sample of the song,
-    // for so many samples, into two channels (a mono file into both). Scratch holds what a file at another rate is read into:
-    // at least 8 times as many samples as are played, on two channels.
+    // for so many samples, into two channels (a mono file into both). Scratch holds what it plays before its gain and fades:
+    // at least as many samples as are played, on two channels. A file at another rate than the engine's plays only through
+    // a state made for the two (RegionState's), and otherwise as silence.
     void play (float* const* channels, std::int64_t songSample, int numSamples, double engineRate, bool isRender,
                juce::AudioBuffer<float>& scratch) const noexcept;
 };

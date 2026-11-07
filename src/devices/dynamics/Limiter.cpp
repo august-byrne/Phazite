@@ -25,17 +25,6 @@ namespace
     };
 
     constexpr double gainSeconds = 0.02; // how long a change of the gain takes, about
-    constexpr double pi = 3.14159265358979323846;
-
-    // A Hann-windowed sinc tap, for a point at a distance (in samples) from the sample it weighs.
-    double getTap (double distance)
-    {
-        if (std::abs (distance) >= 4.0)
-            return 0.0;
-
-        const auto sinc = std::abs (distance) < 1.0e-9 ? 1.0 : std::sin (pi * distance) / (pi * distance);
-        return sinc * 0.5 * (1.0 + std::cos (pi * distance / 4.0));
-    }
 } // namespace
 
 const DeviceInfo Limiter::info { .typeID = typeID, .name = "Limiter", .kind = DeviceKind::effect, .parameters = parameters };
@@ -45,23 +34,10 @@ void Limiter::prepare (double newSampleRate, int)
     sampleRate = newSampleRate;
     lookahead = std::max (1, (int) std::lround (lookaheadSeconds * sampleRate));
 
-    // The gain for a sample is known once the samples up to lookahead - 1 after it have come in, and the four after
-    // it that the interpolation reads.
-    latency = lookahead + taps / 2 - 1;
+    // The gain for a sample is known once the samples up to lookahead - 1 after it have come in, and the ones after it
+    // that the true peak's filter reads.
+    latency = lookahead + TruePeak::pointAge - 1;
     gainSmoothing = (float) (1.0 - std::exp (-1.0 / (gainSeconds * sampleRate)));
-
-    // The points between the samples taps / 2 - 1 and taps / 2 of the last ones, weighed from each of them.
-    for (int point = 0; point < points; ++point)
-    {
-        const auto at = taps / 2 - 1 + (point + 1) / 4.0;
-        auto sum = 0.0;
-
-        for (int tap = 0; tap < taps; ++tap)
-            sum += getTap (tap - at);
-
-        for (int tap = 0; tap < taps; ++tap)
-            interpolator[(size_t) point][(size_t) tap] = (float) (getTap (tap - at) / sum);
-    }
 
     heldValues.assign ((size_t) lookahead, 1.0f);
     heldTimes.assign ((size_t) lookahead, 0);
@@ -75,8 +51,8 @@ void Limiter::prepare (double newSampleRate, int)
 
 void Limiter::reset()
 {
-    for (auto& channel : recent)
-        channel.fill (0.0f);
+    for (auto& truePeak : truePeaks)
+        truePeak.reset();
 
     lastBetween = 0.0f;
     heldFirst = heldCount = 0;
@@ -156,25 +132,14 @@ void Limiter::process (const ProcessContext& block)
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
-            auto& last = recent[(size_t) channel];
+            auto& truePeak = truePeaks[(size_t) channel];
             const auto in = block.channels[channel][i] * appliedGain;
-            std::copy (last.begin() + 1, last.end(), last.begin());
-            last.back() = in;
             delays[(size_t) channel].push (in);
             loudestIn = std::max (loudestIn, std::abs (in));
 
-            // The sample whose gain is worked out now, and the points between it and the next.
-            sample = std::max (sample, std::abs (last[taps / 2 - 1]));
-
-            for (const auto& weights : interpolator)
-            {
-                auto point = 0.0f;
-
-                for (int tap = 0; tap < taps; ++tap)
-                    point += weights[(size_t) tap] * last[(size_t) tap];
-
-                between = std::max (between, std::abs (point));
-            }
+            // The points between the sample whose gain is worked out now and the next, and that sample.
+            between = std::max (between, truePeak.push (in));
+            sample = std::max (sample, std::abs (truePeak.getSample (TruePeak::pointAge)));
         }
 
         // What that sample needs, with the peaks on either side of it, held, released and smoothed.

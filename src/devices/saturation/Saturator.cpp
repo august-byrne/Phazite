@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Saturator.h"
 #include "devices/dsp/Math.h"
-#include "devices/dsp/Oscillators.h"
 
 #include <algorithm>
 #include <cmath>
@@ -40,28 +39,30 @@ float Saturator::shapeSample (Shape shape, float x) noexcept
     switch (shape)
     {
         case Shape::tape:
-            return x / (1.0f + std::abs (x)); // rounds off earlier and more gently than soft
+            return dsp::TapeCurve::value (x);
         case Shape::tube:
-            return dsp::softClip (x + 0.2f * x * x); // lopsided: even harmonics too (the DC it leaves is filtered out)
+            return dsp::TubeCurve::value (x);
         case Shape::hard:
-            return std::clamp (x, -1.0f, 1.0f);
+            return dsp::HardCurve::value (x);
         case Shape::fold:
-            return dsp::sineOfPhase (0.25f * x); // sin (pi x / 2): smooth up to 1, then folds back
+            return dsp::FoldCurve::value (x);
         case Shape::soft:
         default:
-            return dsp::softClip (x);
+            return dsp::SoftCurve::value (x);
     }
 }
 
 void Saturator::prepare (double newSampleRate, int maximumBlockSize)
 {
     sampleRate = newSampleRate;
+    dsp::TubeCurve::prepare();
 
-    // Twice the rate, through half-band filters that keep the latency short and whole.
+    // Twice the rate, through half-band filters that keep the latency short and whole; the curves' averaging and the
+    // filter that levels it again add 4 samples at that rate, 2 at the sound's.
     oversampling =
         std::make_unique<juce::dsp::Oversampling<float>> (2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, true);
     oversampling->initProcessing ((size_t) std::max (1, maximumBlockSize));
-    latency = (int) std::lround (oversampling->getLatencyInSamples());
+    latency = (int) std::lround (oversampling->getLatencyInSamples()) + dsp::AntialiasedCurve::delay / 2;
 
     const auto rate = 2.0 * sampleRate;
     smoothing = (float) (1.0 - std::exp (-1.0 / (gainSeconds * rate)));
@@ -72,6 +73,9 @@ void Saturator::reset()
 {
     if (oversampling != nullptr)
         oversampling->reset();
+
+    for (auto& curve : curves)
+        curve.reset();
 
     for (auto* filters : { &dcBlockers, &lowTilts, &highTilts })
         for (auto& filter : *filters)
@@ -107,25 +111,59 @@ void Saturator::process (const ProcessContext& block)
     const auto lowTilt = dsp::makeFilter (dsp::FilterShape::lowShelf, tiltFrequency, rate, 0.5, -tiltDecibels * values[tone]);
     const auto highTilt = dsp::makeFilter (dsp::FilterShape::highShelf, tiltFrequency, rate, 0.5, tiltDecibels * values[tone]);
 
+    // Another curve: its averaging starts again.
+    if (curve != lastShape)
+    {
+        for (auto& antialiased : curves)
+            antialiased.restartAveraging();
+
+        lastShape = curve;
+    }
+
     juce::dsp::AudioBlock<float> audio (block.channels, (size_t) numChannels, (size_t) block.numSamples);
     auto fast = oversampling->processSamplesUp (audio);
 
-    for (size_t i = 0; i < fast.getNumSamples(); ++i)
+    // Each sample driven into the curve, played by its antiderivative.
+    const auto play = [&] (auto curveType)
     {
-        driveGain += (targetDrive - driveGain) * smoothing;
-        outputGain += (targetOutput - outputGain) * smoothing;
+        using Curve = decltype (curveType);
 
-        for (size_t channel = 0; channel < fast.getNumChannels(); ++channel)
+        for (size_t i = 0; i < fast.getNumSamples(); ++i)
         {
-            auto* samples = fast.getChannelPointer (channel);
-            auto y = shapeSample (curve, samples[i] * driveGain);
+            driveGain += (targetDrive - driveGain) * smoothing;
+            outputGain += (targetOutput - outputGain) * smoothing;
 
-            if (curve == Shape::tube)
-                y = dcBlockers[channel].process (y, dcBlocker);
+            for (size_t channel = 0; channel < fast.getNumChannels(); ++channel)
+            {
+                auto* samples = fast.getChannelPointer (channel);
+                auto y = curves[channel].process (samples[i] * driveGain, Curve {});
 
-            y = highTilts[channel].process (lowTilts[channel].process (y, lowTilt), highTilt);
-            samples[i] = y * outputGain;
+                if (curve == Shape::tube)
+                    y = dcBlockers[channel].process (y, dcBlocker);
+
+                y = highTilts[channel].process (lowTilts[channel].process (y, lowTilt), highTilt);
+                samples[i] = y * outputGain;
+            }
         }
+    };
+
+    switch (curve)
+    {
+        case Shape::tape:
+            play (dsp::TapeCurve {});
+            break;
+        case Shape::tube:
+            play (dsp::TubeCurve {});
+            break;
+        case Shape::hard:
+            play (dsp::HardCurve {});
+            break;
+        case Shape::fold:
+            play (dsp::FoldCurve {});
+            break;
+        case Shape::soft:
+            play (dsp::SoftCurve {});
+            break;
     }
 
     oversampling->processSamplesDown (audio);

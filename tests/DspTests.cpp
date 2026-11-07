@@ -441,7 +441,7 @@ TEST_CASE ("Oscillators play at their frequency, their pulse at its width, and t
         CAPTURE ((int) waveform);
         CHECK (std::abs (crossings - 1000) <= 1);
         CHECK (peak > 0.9f);
-        CHECK (peak < 1.1f);
+        CHECK (peak < 1.2f); // a band-limited wave overshoots each of its jumps by 9 % of it (Gibbs), a square most
     }
 
     dsp::Oscillator pulse;
@@ -525,13 +525,28 @@ TEST_CASE ("A delay line returns what was pushed, also between samples")
 
     CHECK (line.read (10) == doctest::Approx (1.0f));
     CHECK (line.read (9) == doctest::Approx (0.0f));
-    CHECK (line.read (9.5f) == doctest::Approx (0.5f));
-    CHECK (line.read (9.25f) == doctest::Approx (0.25f));
+    CHECK (line.read (10.0f) == 1.0f); // a whole number of samples: that sample, exactly
+
+    // Between samples, by 4-point Lagrange interpolation: a lone sample's neighbours read as its cubic's, and a line, which a
+    // cubic follows exactly, reads as itself.
+    CHECK (line.read (9.5f) == doctest::Approx (0.5625f));
+    CHECK (line.read (10.5f) == doctest::Approx (0.5625f));
 
     for (int i = 0; i < 90; ++i)
         line.push (0.0f);
 
     CHECK (line.read (100) == doctest::Approx (1.0f)); // the longest delay it was prepared for
+
+    dsp::DelayLine ramp;
+    ramp.prepare (16);
+
+    for (int i = 0; i < 16; ++i)
+        ramp.push ((float) i); // the one pushed d samples ago is 15 - d
+
+    for (const auto delay : { 1.25f, 4.5f, 7.75f, 12.1f })
+        CHECK (ramp.read (delay) == doctest::Approx (15.0f - delay).epsilon (1.0e-5));
+
+    CHECK (ramp.read (0.5f) == doctest::Approx (14.5f)); // under a sample, a straight line
 
     line.reset();
     CHECK (line.read (100) == doctest::Approx (0.0f));

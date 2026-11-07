@@ -108,8 +108,15 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/MultimodeFilter.cpp
     src/devices/dsp/MultimodeFilter.h
     src/devices/dsp/NoteValues.h
+    src/devices/dsp/Oscillators.cpp
     src/devices/dsp/Oscillators.h
+    src/devices/dsp/Oversampling.cpp
+    src/devices/dsp/Oversampling.h
     src/devices/dsp/Random.h
+    src/devices/dsp/Saturation.cpp
+    src/devices/dsp/Saturation.h
+    src/devices/dsp/SincReader.cpp
+    src/devices/dsp/SincReader.h
     src/devices/dsp/SyncedLfo.h
     src/devices/dynamics/Compressor.cpp
     src/devices/dynamics/Compressor.h
@@ -119,6 +126,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dynamics/Limiter.h
     src/devices/dynamics/Multiband.cpp
     src/devices/dynamics/Multiband.h
+    src/devices/dynamics/TruePeak.cpp
+    src/devices/dynamics/TruePeak.h
     src/devices/eq/Equalizer.cpp
     src/devices/eq/Equalizer.h
     src/devices/filter/FilterEffect.cpp
@@ -156,6 +165,8 @@ target_sources(phazite_core PRIVATE
     src/engine/audio/AudioRegion.h
     src/engine/audio/FileReader.cpp
     src/engine/audio/FileReader.h
+    src/engine/audio/Resampler.cpp
+    src/engine/audio/Resampler.h
     src/engine/automation/Curve.cpp
     src/engine/automation/Curve.h
     src/engine/core/Engine.cpp
@@ -529,6 +540,17 @@ target_include_directories(phazite_core SYSTEM PRIVATE external/rubberband)
 if(NOT MSVC)
     set_source_files_properties(src/devices/stretch/RubberBandLibrary.cpp PROPERTIES COMPILE_OPTIONS "-w")
 endif()
+
+# r8brain-free-src 7.6 (MIT), header-only, which resamples audio files at another rate than the engine's
+# (src/engine/audio/Resampler.cpp). Its code is third-party: its folder is a system one, so that GCC and Clang keep its
+# warnings to themselves, and Resampler.cpp turns MSVC's off around it.
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/r8brain-free-src/CDSPResampler.h")
+    message(FATAL_ERROR
+        "external/r8brain-free-src is empty because the git submodules are not checked out. Run:\n"
+        "  git submodule update --init --recursive --depth 1")
+endif()
+
+target_include_directories(phazite_core SYSTEM PRIVATE external/r8brain-free-src)
 
 # GCC 13 and later read `const auto& button = opt.getButtons().front();` in JUCE 9.0.5's juce_LookAndFeel_V2.cpp as a
 # reference to a temporary (-Wdangling-reference, in -Wall): getButtons() returns a Span by value, but the button is in the
@@ -920,6 +942,12 @@ add_custom_command(TARGET Phazite POST_BUILD
             "${CMAKE_CURRENT_SOURCE_DIR}/external/rubberband/COPYING" "$<TARGET_FILE_DIR:Phazite>/licenses/RubberBand.txt"
     VERBATIM)
 
+# r8brain-free-src is compiled in, under the MIT licence, whose notice goes with every copy.
+add_custom_command(TARGET Phazite POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/external/r8brain-free-src/LICENSE" "$<TARGET_FILE_DIR:Phazite>/licenses/r8brain-free-src.txt"
+    VERBATIM)
+
 # The loudness meter's K-weighting and gating follow libebur128 (MIT), whose notice goes with every copy.
 add_custom_command(TARGET Phazite POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -951,6 +979,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestMain.cpp
         tests/TestHelpers.h
         tests/ActivityBarTests.cpp
+        tests/AntialiasingTests.cpp
         tests/AppInfoTests.cpp
         tests/AppScreen.h
         tests/AppShellTests.cpp
@@ -1099,6 +1128,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TopBarTests.cpp
         tests/TrackTests.cpp
         tests/TransportModelTests.cpp
+        tests/TruePeakTests.cpp
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h
         tests/UndoTests.cpp

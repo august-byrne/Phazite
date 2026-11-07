@@ -192,13 +192,26 @@ void Reverb::process (const ProcessContext& block)
     }
 
     // Each line's loss on each pass, so that every line fades by 60 dB over the decay time; worked out for the size at
-    // the block's start.
-    std::array<float, numLines> lengths {}, losses {};
+    // the block's start. And its damping: as much treble lost on a pass as its length is of the lines' mean, as its loss
+    // is (Jot and Chaigne, 1991), so that a short line, which goes round more often, loses its treble no faster than a
+    // long one and the tail keeps its colour as it fades. Matched at the Nyquist frequency, where a one-pole low-pass of
+    // coefficient c keeps c / (2 - c); the mean line's is the damping knob's, which getDecayAt() draws.
+    std::array<float, numLines> lengths {}, losses {}, dampings {};
+    auto meanLength = 0.0f;
 
     for (int line = 0; line < numLines; ++line)
     {
         lengths[(size_t) line] = (float) getLineSamples (line, shownSize, sampleRate);
         losses[(size_t) line] = (float) std::pow (10.0, -3.0 * lengths[(size_t) line] / (decaySeconds * sampleRate));
+        meanLength += lengths[(size_t) line] / (float) numLines;
+    }
+
+    const auto keptAtNyquist = (double) dampingCoefficient / (2.0 - (double) dampingCoefficient);
+
+    for (int line = 0; line < numLines; ++line)
+    {
+        const auto kept = std::pow (keptAtNyquist, (double) (lengths[(size_t) line] / meanLength));
+        dampings[(size_t) line] = (float) (2.0 * kept / (1.0 + kept));
     }
 
     const auto sizeStep = (values[size] - shownSize) * std::min (1.0f, smoothing * (float) block.numSamples);
@@ -239,7 +252,7 @@ void Reverb::process (const ProcessContext& block)
 
             const auto delay = lengths[line] / startScale * scale + modulationDepth * (1.0f + dsp::sineOfPhase (phase));
             auto& smooth = damped[line];
-            smooth += (lines[line].read (delay) - smooth) * dampingCoefficient;
+            smooth += (lines[line].read (delay) - smooth) * dampings[line];
             out[line] = smooth * losses[line];
             sum += out[line];
         }

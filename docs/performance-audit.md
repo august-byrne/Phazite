@@ -555,3 +555,32 @@ images of the screen's kind (Direct2D's on Windows). After that, each repaint of
 Each "painted" figure includes making a Direct2D context and finishing it, which a window's repaint does once for
 everything it draws. What is behind a popup doesn't repaint with it, because the glass is opaque. Before, a menu was a
 translucent window of its own on the desktop, which Windows composited at each repaint.
+
+## 15. The DSP audit's fixes (2026-11-06)
+
+[dsp-audit.md](dsp-audit.md) (section 8) fixed what it found for the sound's sake; this is what that costs. Measured with
+`phazite_tests.exe --test-suite=benchmark --no-skip` from the `windows-profile` build, before (the code as it was, built
+from a checkout of its own) and after, on the owner's PC:
+
+| `windows-profile`, % of a core | Before | After | Why |
+|---|---|---|---|
+| Synth: 1 note / 8 notes / 16 notes with 7-voice unison | 0.11 / 0.71 / 1.75 | 0.12 / 0.78 / 1.54 | Its saw, square and triangle read from band-limited tables, by straight lines (read by cubics, 0.16 / 1.11 / 2.28) |
+| Wavetable: 1 note / 8 notes / 8 notes with full unison | 0.28 / 1.27 / 3.53 | 0.18 / 1.35 / 3.78 | Within the runs' spread: its sub reads band-limited tables, and its drive is off |
+| Drum Sampler, 4 pads every 16th | 0.87 | 0.22 | A pad at its own rate, untuned, plays its samples as they are, with no interpolation at all |
+| Filter | 0.08 | 0.09 | Its drive's twice-the-rate path runs only while the drive is on (always run, it cost 0.41) |
+| Saturator | 0.37 | 0.78 | Each curve by its antiderivative, at twice the rate, with its correction filter |
+| Limiter | 0.23 | 0.33 | BS.1770's 48-tap true-peak filter, where 3 points of 8 taps were |
+| Delay | 0.11 | 0.15 | 4-point Lagrange interpolation, where a straight line was |
+| Reverb | 0.62 | 0.91 | Its eight modulated lines read by 4-point Lagrange interpolation |
+| Multiband | 1.58 | 1.50 | The same (nothing saturates in the benchmark) |
+| An audio clip of a 44.1 kHz file on a 48 kHz engine, of 64 playing at once | 0.078 | 0.244 | r8brain-free-src, where 5-point Lagrange interpolation was |
+| ... of a 96 kHz file | 0.082 | 0.172 | |
+| 20 tracks, each a synth, an EQ, a compressor and a reverb, chords: 1 thread / 4 threads | 27.6 / 8.0 | 34.1 / 11.6 | The reverb, mostly, and the synth |
+
+Latencies changed too: the limiter's from 99 samples to 101 at 48 kHz, the saturator's from 4 to 6, the filter's from 0
+to 6, and the multiband's from 480 to 490. The live-note figures (section 1) moved within their usual spread.
+
+A clip of a file at another rate than the engine's costs three times what it did: a quarter of a percent of a core for a
+stereo clip, 16 % for 64 playing at once. A 110 dB filter in place of 136 dB saved only 9 %, so the filter stays. If
+many such clips at once ever weigh on a song, converting each file once into the song's cache, as stretched clips are,
+would cost nothing as they play, at the price of a wait before a new clip sounds (dsp-audit.md, 3.1).

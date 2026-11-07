@@ -12,6 +12,7 @@
 #include "devices/core/LiveValue.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/SincReader.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -103,6 +104,7 @@ private:
     double sampleRate = 44100.0;
     std::array<std::atomic<const Sound*>, numPads> sounds;
     std::array<Voice, maxVoices> voices {};
+    dsp::SincReader reader; // for a pad tuned, or at another rate than the engine's
     std::uint64_t hits = 0;
     std::atomic<std::uint64_t> blocksDone { 0 };
 

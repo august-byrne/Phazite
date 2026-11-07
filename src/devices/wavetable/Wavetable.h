@@ -33,6 +33,11 @@ public:
     // whole cycle), with any constant offset taken out and the loudest frame's peak at 1. Of at least one frame (a
     // silent one if none is given) and at most maxFrames.
     static std::shared_ptr<const Wavetable> fromHarmonics (const juce::String& name, const std::vector<Harmonics>& frames);
+
+    // A table for an oscillator that reads one frame (devices/dsp/Oscillators.h): its harmonics at the level they give,
+    // and each level with 32 samples for each cycle of its highest harmonic rather than 4, so that the oscillator reads it
+    // by straight lines between its samples, cheaply, and what that adds is more than 80 dB down.
+    static std::shared_ptr<const Wavetable> forOscillator (const juce::String& name, const Harmonics& frame);
     static std::shared_ptr<const Wavetable> fromFrames (const juce::String& name, const std::vector<std::vector<float>>& frames);
 
     // A table from a sound, as Serum reads one: frames of samplesPerFrame when that is given (from a WAV file's 'clm '
@@ -72,6 +77,9 @@ private:
     int frameStride = 0; // the samples each frame takes
 
     Wavetable() = default;
+
+    static std::shared_ptr<const Wavetable> make (const juce::String& name, const std::vector<Harmonics>& frames, bool peakAtOne,
+                                                  int samplesPerCycle);
 };
 
 // A level's wave at a place in its cycle (in samples, from 0 up to its length), with 4-point cubic (Catmull-Rom)

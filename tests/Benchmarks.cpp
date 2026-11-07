@@ -28,6 +28,7 @@
 #include "devices/synth/Synth.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "engine/audio/AudioRegion.h"
 #include "host/ThreadCpu.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -550,6 +551,76 @@ TEST_CASE ("Benchmark: rendering audio clips stretched and pitched" * doctest::t
             report << juce::String (seconds, 0) << " s in stereo, " << name << ": " << milliseconds (ms, 0) << " ("
                    << juce::String (seconds * 1000.0 / ms, 1) << " times as fast as it plays)\n";
         }
+    }
+
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: audio clips of files at another rate than the engine's" * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // What a clip costs as it plays (docs/dsp-audit.md, 3.1): 64 clips of a stereo file, in memory, on an engine at 48 kHz,
+    // played for 10 s in blocks of 512: a file at the engine's rate, which plays as it is, and files at 44.1 and 96 kHz.
+    namespace engine = phazite::engine;
+
+    struct NoiseReader final : engine::SampleReader
+    {
+        explicit NoiseReader (double rate)
+            : fileRate (rate)
+        {
+        }
+
+        int getNumChannels() const override { return 2; }
+        double getSampleRate() const override { return fileRate; }
+        std::int64_t getLength() const override { return (std::int64_t) (12.0 * fileRate); }
+
+        bool read (juce::AudioBuffer<float>& buffer, std::int64_t, int numSamples) override
+        {
+            for (int channel = 0; channel < 2; ++channel)
+                for (int i = 0; i < numSamples; ++i)
+                    buffer.setSample (channel, i, 0.3f * (random.nextFloat() * 2.0f - 1.0f));
+
+            return true;
+        }
+
+        double fileRate;
+        juce::Random random { 7 };
+    };
+
+    constexpr double engineRate = 48000.0;
+    constexpr int blockSize = 512, numClips = 64;
+    juce::String report ("\n");
+
+    for (const auto fileRate : { 48000.0, 44100.0, 96000.0 })
+    {
+        auto file = std::make_shared<engine::AudioFile> (std::make_unique<NoiseReader> (fileRate), nullptr);
+        file->readNow (0, file->getLength());
+        std::vector<engine::AudioRegion> regions;
+
+        for (int i = 0; i < numClips; ++i)
+        {
+            engine::AudioRegion region;
+            region.file = file;
+            region.state = std::make_shared<engine::RegionState> (*file, engineRate);
+            region.length = (std::int64_t) (10.0 * engineRate);
+            regions.push_back (region);
+        }
+
+        juce::AudioBuffer<float> out (2, blockSize), scratch (2, 9 * blockSize + 16);
+        const auto ms = millisecondsOf (
+            [&]
+            {
+                for (std::int64_t at = 0; at < (std::int64_t) (10.0 * engineRate); at += blockSize)
+                {
+                    out.clear();
+                    float* channels[] = { out.getWritePointer (0), out.getWritePointer (1) };
+
+                    for (const auto& region : regions)
+                        region.play (channels, at, blockSize, engineRate, false, scratch);
+                }
+            });
+
+        report << numClips << " clips of a file at " << juce::String (fileRate / 1000.0, 1) << " kHz: " << juce::String (ms / 100.0, 2)
+               << " % of a core (" << juce::String (ms / 100.0 / numClips, 3) << " % each)\n";
     }
 
     MESSAGE (report);

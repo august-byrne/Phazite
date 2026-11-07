@@ -34,6 +34,18 @@ struct FilterCoefficients
 // bell and the shelves only.
 FilterCoefficients makeFilter (FilterShape, double frequency, double sampleRate, double q, double gainDecibels = 0.0);
 
+// The same analog section matched rather than bilinear (M. Vicanek, "Matched Second Order Digital Filters", 2016): its
+// poles where the analog section's map to (z = e^(s T)), and its zeros chosen so that its gain is the analog section's at
+// 0 Hz, at the Nyquist frequency and at its own frequency. The bilinear transform squeezes the whole analog response
+// below the Nyquist frequency, so that a bell or a shelf set above about 10 kHz comes out narrower and lopsided; matched,
+// it keeps the analog shape to the top. For the EQ's bands: low-pass, high-pass, bell, notch and the shelves (any other
+// shape is makeFilter()'s). The filter that plays it is the same: any stable second-order section maps onto its
+// coefficients, and getResponse() gives its response exactly.
+FilterCoefficients makeMatchedFilter (FilterShape, double frequency, double sampleRate, double q, double gainDecibels = 0.0);
+
+// The analog section that makeFilter() and makeMatchedFilter() approximate: its response at a frequency, for tests.
+std::complex<double> getAnalogResponse (FilterShape, double frequency, double cutoff, double q, double gainDecibels = 0.0);
+
 // The filter's gain (not in decibels) at a frequency; and its response there, its gain and phase, for filters whose
 // sections are added together.
 double getMagnitude (const FilterCoefficients&, double frequency, double sampleRate);

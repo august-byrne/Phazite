@@ -2,10 +2,12 @@
 // Phazite's limiter (roadmap step 1.6), the master's last device: it raises the sound by its gain and keeps it under the
 // ceiling. It looks ahead, so it turns the sound down smoothly before a peak arrives instead of clipping it, and it
 // listens for the peaks between samples too ("true peaks", which a converter or a lossy encoder can bring out), as
-// streaming services' loudness rules ask. Looking ahead delays the sound by about 2 ms, which the engine makes up for
-// on the other tracks. No sample ever goes over the ceiling.
+// streaming services' loudness rules ask, found as ITU-R BS.1770 finds them (TruePeak.h), as the loudness meter does.
+// Looking ahead delays the sound by about 2 ms, which the engine makes up for on the other tracks. No sample ever goes
+// over the ceiling.
 #pragma once
 
+#include "TruePeak.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
@@ -45,19 +47,16 @@ public:
     const FallingValue* getGainReduction() const noexcept override { return &gainReduction; }
 
 private:
-    // Peaks between samples are found at a quarter, a half and three quarters of the way from one to the next, each
-    // interpolated from the eight samples around it.
-    static constexpr int taps = 8, points = 3;
-
     double sampleRate = 44100.0;
     int lookahead = 1, latency = 0;
     float gainSmoothing = 0.001f; // of the way to the gain, per sample
     float appliedGain = 0.0f;
     bool isFirstBlock = true;
 
-    std::array<std::array<float, taps>, points> interpolator {};
-    std::array<std::array<float, taps>, 2> recent {}; // each channel's last samples, newest last
-    float lastBetween = 0.0f;                         // the loudest point between the two samples before
+    // Each channel's true peak: the points between the sample whose gain is worked out (TruePeak::pointAge before the one
+    // in) and the next.
+    std::array<TruePeak, 2> truePeaks;
+    float lastBetween = 0.0f; // the loudest point between the two samples before
 
     // The gain each sample needs, held at the least of the last lookahead samples (a running minimum, kept in order),
     // then let back up at the release time, then averaged over the lookahead so that it moves smoothly.

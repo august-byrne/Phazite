@@ -123,23 +123,6 @@ namespace
         return juce::jlimit (0, count - 1, (int) std::lround (value));
     }
 
-    // The saturation: up to its threshold the sound passes as it is, then it rounds off into the ceiling (type A, softly, as
-    // tanh does) or bends more firmly (type B, a cubic that reaches the ceiling flat). The further the knob turns either way,
-    // the lower the threshold, down to 24 dB under the ceiling.
-    float saturate (float x, float amount, float ceiling) noexcept
-    {
-        const auto threshold = ceiling * dsp::decibelsToGain (-24.0f * std::abs (amount));
-        const auto size = std::abs (x);
-
-        if (size <= threshold || ceiling <= threshold)
-            return x;
-
-        const auto room = ceiling - threshold;
-        const auto over = (size - threshold) / room;
-        const auto shaped = amount < 0.0f ? std::tanh (over) : (over < 1.5f ? over - (4.0f / 27.0f) * over * over * over : 1.0f);
-        return std::copysign (threshold + room * shaped, x);
-    }
-
     // A band's stereo separation, from mono (-1) through as it is (0) to twice as wide (1), through its middle and sides.
     void separate (float& left, float& right, float amount) noexcept
     {
@@ -159,11 +142,51 @@ namespace
 
 const DeviceInfo Multiband::info { .typeID = typeID, .name = "Multiband", .kind = DeviceKind::effect, .parameters = parameters };
 
+// The saturation: up to its threshold the sound passes as it is, then it rounds off into the ceiling (type A, softly, as
+// tanh does) or bends more firmly (type B, a cubic that reaches the ceiling flat). The further the knob turns either way,
+// the lower the threshold, down to 24 dB under the ceiling (process() sets it).
+float Multiband::SaturationCurve::value (float x) const noexcept
+{
+    const auto size = std::abs (x);
+
+    if (size <= threshold || room <= 0.0f)
+        return x;
+
+    const auto over = (size - threshold) / room;
+    const auto shaped = soft ? std::tanh (over) : (over < 1.5f ? over - (4.0f / 27.0f) * over * over * over : 1.0f);
+    return std::copysign (threshold + room * shaped, x);
+}
+
+// Its integral from 0: x^2 / 2 up to the threshold; past it, the threshold's level for the rest of the way and the room
+// squared times the bend's integral, ln cosh for tanh, o^2 / 2 - o^4 / 27 for the cubic (then straight, from 15/16 on).
+double Multiband::SaturationCurve::integral (double x) const noexcept
+{
+    const auto size = std::abs (x), below = (double) threshold, r = (double) room;
+
+    if (size <= below || r <= 0.0)
+        return 0.5 * x * x;
+
+    const auto over = (size - below) / r;
+    const auto bent = soft ? over + std::log1p (std::exp (-2.0 * over)) - 0.69314718055994531
+                           : (over < 1.5 ? 0.5 * over * over - over * over * over * over / 27.0 : 0.9375 + (over - 1.5));
+    return 0.5 * below * below + below * (size - below) + r * r * bent;
+}
+
+bool Multiband::SaturationCurve::isSame (const SaturationCurve& other) const noexcept
+{
+    return juce::exactlyEqual (threshold, other.threshold) && juce::exactlyEqual (room, other.room) && soft == other.soft;
+}
+
 void Multiband::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
     lookahead = std::max (1, (int) std::lround (mostLookaheadSeconds * sampleRate));
+    saturationLatency = (int) std::lround (dsp::AntialiasedShaper::getLatencySamples());
     preSmoothing = getCoefficient (gainSeconds, sampleRate);
+
+    for (auto* lines : { &bandsInStep, &masterInStep })
+        for (auto& line : *lines)
+            line.prepare (std::max (1, saturationLatency));
 
     for (auto* delays : { &dryDelays, &masterDelays })
         for (auto& delay : *delays)
@@ -207,6 +230,20 @@ void Multiband::reset()
     for (auto& band : bandDelays)
         for (auto& delay : band)
             delay.reset();
+
+    for (auto& band : saturators)
+        for (auto& saturator : band)
+            saturator.reset();
+
+    for (auto& inStep : dryInStep)
+        inStep.reset();
+
+    for (auto* lines : { &bandsInStep, &masterInStep })
+        for (auto& line : *lines)
+            line.reset();
+
+    lastCurves = {};
+    bandsSaturated = masterSaturated = false;
 
     for (auto& compressor : compressors)
     {
@@ -379,6 +416,58 @@ void Multiband::process (const ProcessContext& block)
         isFirstBlock = false;
     }
 
+    // Each band's saturation as a curve (a band that is off, a straight line), its averaging started again when it changes.
+    std::array<SaturationCurve, numBands> saturationCurves {};
+    const SaturationCurve straight;
+
+    for (int band = 0; band < numBands; ++band)
+    {
+        const auto b = (size_t) band;
+        auto& curve = saturationCurves[b];
+
+        if (bandModes[b] != Mode::off)
+        {
+            const auto threshold = ceilings[b] * dsp::decibelsToGain (-24.0f * std::abs (saturations[b]));
+            curve.threshold = threshold;
+            curve.room = std::max (0.0f, ceilings[b] - threshold);
+            curve.soft = saturations[b] < 0.0f;
+        }
+
+        if (! curve.isSame (lastCurves[b]))
+        {
+            for (auto& saturator : saturators[b])
+                saturator.restartAveraging();
+
+            lastCurves[b] = curve;
+        }
+    }
+
+    // Whether the bands go through their saturations (while any of them saturates), and the master through its own; each
+    // starting from silence as it begins to.
+    auto bandsSaturate = false;
+
+    for (int band = low; band <= high; ++band)
+        bandsSaturate = bandsSaturate || saturationCurves[(size_t) band].room > 0.0f;
+
+    const auto masterSaturates = saturationCurves[(size_t) master].room > 0.0f;
+
+    if (bandsSaturate && ! bandsSaturated)
+    {
+        for (int band = low; band <= high; ++band)
+            for (auto& saturator : saturators[(size_t) band])
+                saturator.reset();
+
+        for (auto& inStep : dryInStep)
+            inStep.reset();
+    }
+
+    if (masterSaturates && ! masterSaturated)
+        for (auto& saturator : saturators[(size_t) master])
+            saturator.reset();
+
+    bandsSaturated = bandsSaturate;
+    masterSaturated = masterSaturates;
+
     // What a band's detector hears from a pair of samples: its peak, held for its sustain, or its average over it.
     const auto hear = [&] (int band, float left, float right)
     {
@@ -432,6 +521,9 @@ void Multiband::process (const ProcessContext& block)
 
             dryDelays[channel].push (phased);
             dry[channel] = dryDelays[channel].read (lookahead);
+
+            if (bandsSaturate)
+                dry[channel] = dryInStep[channel].process (dry[channel], straight);
 
             const auto split = [&] (size_t crossover, float sound, float& below, float& above)
             {
@@ -504,16 +596,21 @@ void Multiband::process (const ProcessContext& block)
             if (band == mid)
                 midHeard = { l, r };
 
-            if (bandModes[b] == Mode::off)
-            {
-                // As it came in (already delayed as the others are).
-            }
-            else
+            // Its gain, then its saturation while the bands saturate (a band that is off, or doesn't saturate, through a
+            // straight line at twice the rate, in step with them); a band that is off as it came in (already delayed as the
+            // others are).
+            if (bandModes[b] != Mode::off)
             {
                 const auto gain = compress (c, values, band, ahead, compresses[b]);
-                l = saturate (l * gain * postGains[b], saturations[b], ceilings[b]);
-                r = saturate (r * gain * postGains[b], saturations[b], ceilings[b]);
+                l *= gain * postGains[b];
+                r *= gain * postGains[b];
                 most[b] = std::max (most[b], -c.gain);
+            }
+
+            if (bandsSaturate)
+            {
+                l = saturators[b][0].process (l, saturationCurves[b]);
+                r = saturators[b][1].process (r, saturationCurves[b]);
             }
 
             loudestIn[b] = std::max (loudestIn[b], std::max (std::abs (bandDelays[b][0].read (0)), std::abs (bandDelays[b][1].read (0))));
@@ -531,6 +628,16 @@ void Multiband::process (const ProcessContext& block)
         const auto m = (size_t) master;
         auto l = dry[0] + lmh * (sum[0] - dry[0]);
         auto r = dry[1] + lmh * (sum[1] - dry[1]);
+
+        // While the bands don't saturate, as late as if they did.
+        bandsInStep[0].push (l);
+        bandsInStep[1].push (r);
+
+        if (! bandsSaturate)
+        {
+            l = bandsInStep[0].read (saturationLatency);
+            r = bandsInStep[1].read (saturationLatency);
+        }
         preGains[m] += (targetPre[m] - preGains[m]) * preSmoothing;
         postGains[m] += (targetPost[m] - postGains[m]) * preSmoothing;
 
@@ -552,17 +659,31 @@ void Multiband::process (const ProcessContext& block)
         l = masterDelays[0].read (lookahead);
         r = masterDelays[1].read (lookahead);
 
-        if (bandModes[m] == Mode::muted)
-        {
-            l = r = 0.0f;
-        }
-        else if (bandModes[m] != Mode::off)
+        if (bandModes[m] != Mode::off && bandModes[m] != Mode::muted)
         {
             const auto gain = compress (c, values, master, ahead, compresses[m]);
-            l = saturate (l * gain * postGains[m], saturations[m], ceilings[m]);
-            r = saturate (r * gain * postGains[m], saturations[m], ceilings[m]);
+            l *= gain * postGains[m];
+            r *= gain * postGains[m];
             most[m] = std::max (most[m], -c.gain);
         }
+
+        // Its saturation, or while it doesn't saturate, a delay as long.
+        masterInStep[0].push (l);
+        masterInStep[1].push (r);
+
+        if (masterSaturates)
+        {
+            l = saturators[m][0].process (l, saturationCurves[m]);
+            r = saturators[m][1].process (r, saturationCurves[m]);
+        }
+        else
+        {
+            l = masterInStep[0].read (saturationLatency);
+            r = masterInStep[1].read (saturationLatency);
+        }
+
+        if (bandModes[m] == Mode::muted)
+            l = r = 0.0f;
 
         loudestOut[m] = std::max ({ loudestOut[m], std::abs (l), std::abs (r) });
         left[i] = l;

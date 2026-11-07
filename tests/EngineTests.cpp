@@ -1065,6 +1065,70 @@ struct MemoryReader final : engine::SampleReader
     std::optional<float> value;
 };
 
+// A mono file of a full-scale sine at a frequency, starting at its upward zero crossing.
+struct SineReader final : engine::SampleReader
+{
+    SineReader (double sampleRate, double frequency, std::int64_t samples)
+        : fileRate (sampleRate),
+          hertz (frequency),
+          length (samples)
+    {
+    }
+
+    int getNumChannels() const override { return 1; }
+    double getSampleRate() const override { return fileRate; }
+    std::int64_t getLength() const override { return length; }
+
+    bool read (juce::AudioBuffer<float>& buffer, std::int64_t start, int numSamples) override
+    {
+        for (int i = 0; i < numSamples; ++i)
+            buffer.setSample (0, i, (float) std::sin (juce::MathConstants<double>::twoPi * hertz * (double) (start + i) / fileRate));
+
+        return true;
+    }
+
+    double fileRate, hertz;
+    std::int64_t length;
+};
+
+// How a stretch of a channel holds a sine at a frequency: its level, in decibels against full scale, and how far everything
+// else in it (aliases, images, noise) is under that, in decibels; by least squares.
+struct ToneFit
+{
+    double decibels = 0.0, othersUnder = 0.0;
+};
+
+ToneFit fitTone (const float* samples, int numSamples, double frequency, double sampleRate)
+{
+    double ss = 0.0, cc = 0.0, sc = 0.0, ys = 0.0, yc = 0.0;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto phase = juce::MathConstants<double>::twoPi * frequency * i / sampleRate;
+        const auto s = std::sin (phase), c = std::cos (phase);
+        ss += s * s;
+        cc += c * c;
+        sc += s * c;
+        ys += samples[i] * s;
+        yc += samples[i] * c;
+    }
+
+    const auto determinant = ss * cc - sc * sc;
+    const auto a = (ys * cc - yc * sc) / determinant, b = (yc * ss - ys * sc) / determinant;
+    auto residual = 0.0;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto phase = juce::MathConstants<double>::twoPi * frequency * i / sampleRate;
+        const auto error = samples[i] - (a * std::sin (phase) + b * std::cos (phase));
+        residual += error * error;
+    }
+
+    const auto amplitude = std::sqrt (a * a + b * b);
+    const auto tonePower = 0.5 * amplitude * amplitude * numSamples;
+    return { 20.0 * std::log10 (std::max (amplitude, 1.0e-12)), 10.0 * std::log10 (tonePower / std::max (residual, 1.0e-30)) };
+}
+
 // What a region plays from a sample of the song for so many, a block at a time, as a render plays it.
 juce::AudioBuffer<float> playRegion (const engine::AudioRegion& region, std::int64_t from, int numSamples, double engineRate = rate)
 {
@@ -1081,11 +1145,11 @@ juce::AudioBuffer<float> playRegion (const engine::AudioRegion& region, std::int
     return out;
 }
 
-engine::AudioRegion makeRegion (std::shared_ptr<engine::AudioFile> file, std::int64_t start, std::int64_t length)
+engine::AudioRegion makeRegion (std::shared_ptr<engine::AudioFile> file, std::int64_t start, std::int64_t length, double engineRate = rate)
 {
     engine::AudioRegion region;
+    region.state = std::make_shared<engine::RegionState> (*file, engineRate);
     region.file = std::move (file);
-    region.state = std::make_shared<engine::RegionState>();
     region.start = start;
     region.length = length;
     return region;
@@ -1168,15 +1232,86 @@ TEST_CASE ("An audio region started inside fades in over 40 samples rather than 
     CHECK (next.getSample (0, 0) == doctest::Approx (0.8f));
 }
 
-TEST_CASE ("An audio region of a file at another rate plays it at its own speed")
+TEST_CASE ("An audio region of a file at another rate plays it at its own speed, in time from its first sample")
 {
     auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (1, rate / 2.0, 1000, 0.6f), nullptr);
     const auto region = makeRegion (file, 0, 2000);
 
     const auto out = playRegion (region, 0, 1000);
-    CHECK (out.getSample (0, 500) == doctest::Approx (0.6f));
-    CHECK (out.getSample (0, 999) == doctest::Approx (0.6f));
-    CHECK (region.state->filePosition == doctest::Approx (500.0).epsilon (0.01));
+    CHECK (out.getSample (0, 500) == doctest::Approx (0.6f).epsilon (1.0e-4));
+    CHECK (out.getSample (1, 999) == doctest::Approx (0.6f).epsilon (1.0e-4));
+
+    // A low tone at 44.1 kHz comes out at 48 kHz where it was, sample for sample: the resampling hides its latency.
+    constexpr double hertz = 100.0;
+    auto tone = std::make_shared<engine::AudioFile> (std::make_unique<SineReader> (44100.0, hertz, 44100), nullptr);
+    const auto played = playRegion (makeRegion (tone, 0, 48000), 0, 48000);
+    auto worst = 0.0;
+
+    for (int i = 2000; i < 46000; ++i)
+        worst = std::max (worst, std::abs (played.getSample (0, i) - std::sin (juce::MathConstants<double>::twoPi * hertz * i / rate)));
+
+    CHECK (worst < 0.005); // under a tenth of a sample late or early
+
+    // A region whose state was made for another rate plays nothing rather than at the wrong speed.
+    auto wrong = makeRegion (tone, 0, 48000);
+    wrong.state = std::make_shared<engine::RegionState>();
+    CHECK (playRegion (wrong, 0, 1000).getMagnitude (0, 1000) == 0.0f);
+}
+
+TEST_CASE ("A file at another rate keeps its top octave at its level, and nothing of it comes back as false tones")
+{
+    // Each tone at full scale, measured once the region has played a while.
+    const auto measure = [] (double fileRate, double hertz)
+    {
+        auto file = std::make_shared<engine::AudioFile> (std::make_unique<SineReader> (fileRate, hertz, (std::int64_t) fileRate), nullptr);
+        const auto played = playRegion (makeRegion (file, 0, 48000), 0, 40000);
+        return fitTone (played.getReadPointer (0, 4000), 32768, hertz, rate);
+    };
+
+    // 44.1 kHz, the most common rate of samples, in a 48 kHz project: whole to 20 kHz (JUCE's Lagrange interpolation lost
+    // 1.2 dB at 15 kHz and 4.4 dB at 20 kHz, and its false tones were 17.5 dB and 4.7 dB under them; docs/dsp-audit.md).
+    for (const auto hertz : { 1000.0, 10000.0, 15000.0, 20000.0 })
+    {
+        CAPTURE (hertz);
+        const auto fit = measure (44100.0, hertz);
+        CHECK (std::abs (fit.decibels) < 0.01);
+        CHECK (fit.othersUnder > 100.0);
+    }
+
+    // 96 kHz, in the same project: what lies above 24 kHz is gone, not folded down (Lagrange interpolation dropped every other
+    // sample there, so 30 kHz came back at 18 kHz at full level).
+    for (const auto hertz : { 30000.0, 40000.0 })
+    {
+        CAPTURE (hertz);
+        auto file = std::make_shared<engine::AudioFile> (std::make_unique<SineReader> (96000.0, hertz, 96000), nullptr);
+        const auto played = playRegion (makeRegion (file, 0, 48000), 0, 40000);
+        CHECK (played.getMagnitude (0, 4000, 32768) < 1.0e-5f); // more than 100 dB down
+    }
+
+    CHECK (std::abs (measure (96000.0, 15000.0).decibels) < 0.01);
+}
+
+TEST_CASE ("A file at another rate played from inside, or after a jump, fades in and plays in time from there")
+{
+    constexpr double hertz = 100.0;
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<SineReader> (44100.0, hertz, 88200), nullptr);
+    const auto region = makeRegion (file, 0, 96000);
+    const auto ideal = [] (std::int64_t sample) { return std::sin (juce::MathConstants<double>::twoPi * hertz * (double) sample / rate); };
+
+    // On from 9600, then a jump on to 28800, and back to 19200 (as to a loop's start): each where a sample of the file plays,
+    // since a jump starts the file at the sample nearest (half a sample late or early at most, 11 microseconds here).
+    for (const auto from : { std::int64_t { 9600 }, std::int64_t { 28800 }, std::int64_t { 19200 } })
+    {
+        CAPTURE (from);
+        const auto played = playRegion (region, from, 6000);
+        CHECK (std::abs (played.getSample (0, 0)) < 0.05f);
+        auto worst = 0.0;
+
+        for (int i = 2000; i < 6000; ++i)
+            worst = std::max (worst, std::abs (played.getSample (0, i) - ideal (from + i)));
+
+        CHECK (worst < 0.005);
+    }
 }
 
 TEST_CASE ("A long audio file is read ahead of where it plays, each clip's start kept, and what it played long ago let go of")

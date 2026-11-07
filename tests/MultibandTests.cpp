@@ -138,10 +138,13 @@ TEST_CASE ("The multiband describes itself: global parameters, then each band's,
            == Multiband::getPointParameter (Multiband::high, curves::maxPoints - 1, curves::pointType));
     CHECK (devices::findParameter (Multiband::info, devices::mixParameterID) < 0); // LMH Mix, before the master band, is its mix
 
-    // Its latency is the most both look-aheads take, whatever they are set to.
+    // Its latency is the most both look-aheads take, whatever they are set to, and the two saturations' at twice the rate.
     Multiband multiband;
     multiband.prepare (testRate, testBlockSize);
-    CHECK (multiband.getLatencySamples() == 2 * (int) std::lround (Multiband::mostLookaheadSeconds * testRate));
+    const auto saturation = (int) std::lround (phazite::devices::dsp::AntialiasedShaper::getLatencySamples());
+    CHECK (saturation > 0);
+    CHECK (saturation < 8);
+    CHECK (multiband.getLatencySamples() == 2 * (int) std::lround (Multiband::mostLookaheadSeconds * testRate) + 2 * saturation);
 }
 
 TEST_CASE ("The multiband's curves: Maximus's axis, a limiter at first, and each line's shape")

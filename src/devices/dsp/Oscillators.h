@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Oscillators for Phazite's devices: a band-limited one for the synth's voices, whose saw and square waves have their
-// steps smoothed with PolyBLEP (a polynomial band-limited step) so that high notes don't alias into harsh tones, and
-// a low-frequency one for modulation. Real-time safe.
+// Oscillators for Phazite's devices: a band-limited one for the synth's voices, the wavetable synth's sub and the
+// vocoder's buzz, whose saw, pulse and triangle are read from band-limited tables as the wavetable synth's are
+// (wavetable/Wavetable.h), so that high notes don't alias into harsh tones; and a low-frequency one for modulation.
+// Real-time safe, once made.
 #pragma once
 
 #include "Random.h"
+#include "devices/wavetable/Wavetable.h"
 
+#include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace phazite::devices::dsp
 {
@@ -23,8 +27,8 @@ inline float sineOfPhase (float phase) noexcept
     return x * (1.0f + x2 * (-1.0f / 6.0f + x2 * (1.0f / 120.0f + x2 * (-1.0f / 5040.0f))));
 }
 
-// The correction for a unit step at phase 0 of a wave that moves dt per sample: subtracted from a falling step (a saw's
-// wrap), added to a rising one.
+// The correction for a unit step at phase 0 of a wave that moves dt per sample: subtracted from a falling step, added to
+// a rising one (the wavetable synth's hard sync smooths its jump back with it).
 inline float polyBlep (float t, float dt) noexcept
 {
     if (t < dt)
@@ -50,14 +54,33 @@ enum class Waveform
     square // a pulse of a width from 5 % to 95 %; 50 % is a square
 };
 
+// The band-limited waves the oscillator reads: a saw rising from -1 to 1 and a triangle falling from 1 to -1 and back, each
+// with every harmonic of the plain wave at its level, kept at the levels a wavetable keeps (a copy each half octave with
+// fewer harmonics), each finely enough to be read by straight lines between its samples (Wavetable::forOscillator()). Made
+// the first time they are asked for, which takes a few milliseconds, and kept: an oscillator asks as it is made, which is
+// never on the audio thread.
+struct BandLimitedWaves
+{
+    std::shared_ptr<const Wavetable> saw, triangle;
+};
+
+const BandLimitedWaves& getBandLimitedWaves();
+
 class Oscillator
 {
 public:
-    // Up to just below half the sample rate.
+    Oscillator();
+
+    // Up to just below half the sample rate. Each wave plays every harmonic whose alias stays above 20 kHz.
     void setFrequency (double frequency, double sampleRate) noexcept
     {
         const auto step = frequency / sampleRate;
         increment = (float) (step < 0.0 ? 0.0 : (step > 0.49 ? 0.49 : step));
+
+        const auto limit = std::clamp (1.0 - 20000.0 / sampleRate, 0.45, 0.9);
+        const auto level = Wavetable::chooseLevel (limit / std::max (1.0e-9, (double) increment));
+        sawLevel = saw->getLevel (0, level);
+        triangleLevel = triangle->getLevel (0, level);
     }
 
     void setPhase (float newPhase) noexcept { phase = newPhase - std::floor (newPhase); }
@@ -65,7 +88,7 @@ public:
 
     float next (Waveform waveform, float pulseWidth = 0.5f) noexcept
     {
-        const auto t = phase, dt = increment;
+        const auto t = phase;
         auto value = 0.0f;
 
         switch (waveform)
@@ -75,25 +98,24 @@ public:
                 break;
 
             case Waveform::triangle:
-                // Its harmonics fall at 12 dB per octave, so it aliases little without a correction.
-                value = 4.0f * std::abs (t - 0.5f) - 1.0f;
+                value = read (triangleLevel, t);
                 break;
 
             case Waveform::saw:
-                value = 2.0f * t - 1.0f - polyBlep (t, dt);
+                value = read (sawLevel, t);
                 break;
 
             case Waveform::square:
             {
+                // Two saws a width apart, one taken from the other, so that the width can move: high for the width, then low.
                 const auto width = pulseWidth < 0.05f ? 0.05f : (pulseWidth > 0.95f ? 0.95f : pulseWidth);
-                auto fall = t + 1.0f - width;
-                fall -= std::floor (fall);
-                value = (t < width ? 1.0f : -1.0f) + polyBlep (t, dt) - polyBlep (fall, dt);
+                const auto behind = t < width ? t - width + 1.0f : t - width;
+                value = read (sawLevel, behind) - read (sawLevel, t) + 2.0f * width - 1.0f;
                 break;
             }
         }
 
-        phase += dt;
+        phase += increment;
 
         if (phase >= 1.0f)
             phase -= 1.0f;
@@ -102,7 +124,24 @@ public:
     }
 
 private:
+    const Wavetable* saw = nullptr;
+    const Wavetable* triangle = nullptr;
+    Wavetable::Level sawLevel, triangleLevel;
     float phase = 0.0f, increment = 0.0f;
+
+    // A level's wave at a place in its cycle, from 0 to 1.
+    static float read (const Wavetable::Level& level, float place) noexcept
+    {
+        const auto length = (float) level.length;
+        auto at = place * length;
+
+        if (at >= length) // a place just under 1, rounded up
+            at -= length;
+
+        const auto index = (int) at;
+        const auto* s = level.samples + index;
+        return s[0] + (at - (float) index) * (s[1] - s[0]);
+    }
 };
 
 //==============================================================================

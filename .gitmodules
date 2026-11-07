@@ -13,3 +13,7 @@
 	path = external/doctest
 	url = https://github.com/doctest/doctest.git
 	shallow = true
+[submodule "external/r8brain-free-src"]
+	path = external/r8brain-free-src
+	url = https://github.com/avaneev/r8brain-free-src.git
+	shallow = true

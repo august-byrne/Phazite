@@ -8,12 +8,15 @@
 // same chain. Each compressor hears its band's peak, held for the sustain, or its average over the sustain (RMS); grips
 // with an attack, the curve box rounding its start; and lets go through two releases, one speeding up (Release) and one
 // slowing down (Release 2), which together make an S; and looks ahead, the bands by LMH Delay and the master by its attack,
-// up to 5 ms each, so that a band can limit. Its latency is always the most look-ahead, 10 ms. Each band is on, its
-// compression off, muted, or off (passing as it came, the mid band taking a low or high band's room), and a band can be
-// soloed; the master's compressor can listen to the mid band instead of what it plays (Maximus's Master Mid mode: ducking,
-// gating and de-essing), the low and high bands' compression off meanwhile. Not built: Maximus's oversampling, its
-// linear-phase crossovers and its spare state (Phazite's undo and presets do that). Its curves are Maximus's, as the
-// compressor's is (DynamicsCurve.h).
+// up to 5 ms each, so that a band can limit. Each saturation runs at twice the sample rate, played by its antiderivative
+// (dsp/Oversampling.h), so that what it adds doesn't fold back as aliasing: while any of the three bands saturates, all of
+// them and the sound mixed back in go that way, so that they stay in step; while none does, they take a plain delay as
+// long, which leaves a limited peak where it is. Its latency is always the most look-ahead, 10 ms, and that of the two
+// saturations in a row (the bands' and the master's). Each band is on, its compression off, muted, or off (passing as it came, the mid
+// band taking a low or high band's room), and a band can be soloed; the master's compressor can listen to the mid band
+// instead of what it plays (Maximus's Master Mid mode: ducking, gating and de-essing), the low and high bands' compression
+// off meanwhile. Not built: Maximus's oversampling of the whole chain, its linear-phase crossovers and its spare state
+// (Phazite's undo and presets do that). Its curves are Maximus's, as the compressor's is (DynamicsCurve.h).
 #pragma once
 
 #include "DynamicsCurve.h"
@@ -22,6 +25,7 @@
 #include "devices/core/Processor.h"
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Filters.h"
+#include "devices/dsp/Oversampling.h"
 
 #include <array>
 
@@ -110,7 +114,7 @@ public:
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
-    int getLatencySamples() const override { return 2 * lookahead; }
+    int getLatencySamples() const override { return 2 * lookahead + 2 * saturationLatency; }
     const FallingValue* getGainReduction() const noexcept override { return &gainReduction; } // the master's
 
     // How far each part looks ahead, at most, in seconds.
@@ -133,7 +137,25 @@ private:
 
     double sampleRate = 44100.0;
     int lookahead = 1;
+    int saturationLatency = 0; // a saturation's, rounded
     float preSmoothing = 0.001f;
+
+    // A band's saturation as its antiderivative plays it: straight up to its threshold, then rounding off into its ceiling.
+    struct SaturationCurve
+    {
+        float threshold = 1.0f, room = 0.0f; // room is the ceiling less the threshold: none for a straight line
+        bool soft = true;                    // tanh's (type A) rather than the cubic's (type B)
+
+        float value (float x) const noexcept;
+        double integral (double x) const noexcept;
+        bool isSame (const SaturationCurve&) const noexcept;
+    };
+
+    std::array<std::array<dsp::AntialiasedShaper, 2>, numBands> saturators; // each band's, per channel
+    std::array<dsp::AntialiasedShaper, 2> dryInStep;                        // the sound mixed back in, kept in step with them
+    std::array<SaturationCurve, numBands> lastCurves {};
+    bool bandsSaturated = false, masterSaturated = false;    // whether the bands, and the master, went that way last
+    std::array<dsp::DelayLine, 2> bandsInStep, masterInStep; // as long as a saturation, for while none saturates
 
     // A crossover's bands add up to what went in through an all-pass of the crossover's order: of a 24 dB crossover, second
     // (its coefficients given); of a 12 dB one, first (its coefficient given). What else meets the bands goes through the same,

@@ -19,6 +19,7 @@
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
+#include "devices/dsp/Oversampling.h"
 #include "devices/dsp/Random.h"
 
 #include <array>
@@ -300,13 +301,15 @@ private:
         std::array<OscillatorRun, numOscillators> oscillators;
         dsp::Oscillator sub;
         dsp::Random noise, phases;
-        dsp::Adsr amp, envelope2, envelope3;         // the second and third at the control rate
-        std::array<dsp::Lfo, 2> lfos;                // those that start again with each note, at the control rate
-        std::array<dsp::MultimodeFilter, 2> filters; // each side
-        bool filtering = false;                      // the filter is on
-        bool stepPending = true;                     // it (re)started since the last control step: its values are due
-        float fade = 1.0f, fadeStep = 0.0f;          // fading out: taken for another note, or cut as playback stopped
-        int age = 0;                                 // the samples since its note began (up to a limit)
+        dsp::Adsr amp, envelope2, envelope3;          // the second and third at the control rate
+        std::array<dsp::Lfo, 2> lfos;                 // those that start again with each note, at the control rate
+        std::array<dsp::MultimodeFilter, 2> filters;  // each side
+        std::array<dsp::AntialiasedShaper, 2> drives; // the filter's drive, each side, at twice the rate
+        float driveBlend = 0.0f;                      // how far the sound goes through them: fades as the drive comes on or off
+        bool filtering = false;                       // the filter is on
+        bool stepPending = true;                      // it (re)started since the last control step: its values are due
+        float fade = 1.0f, fadeStep = 0.0f;           // fading out: taken for another note, or cut as playback stopped
+        int age = 0;                                  // the samples since its note began (up to a limit)
         float subGain = 0.0f, noiseGain = 0.0f, gainLeft = 1.0f, gainRight = 1.0f, driveGain = 1.0f;
         float cutoffNow = 0.0f; // its filter's frequency, as it was last set
     };

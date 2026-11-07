@@ -121,19 +121,6 @@ namespace
     }
 
     constexpr auto parameters = makeParameters();
-
-    // A point between samples, from the four around it (a cubic Hermite spline).
-    float readAt (const float* samples, int length, double position)
-    {
-        const auto index = (int) position;
-        const auto t = (float) (position - index);
-        const auto at = [samples, length] (int i) { return i >= 0 && i < length ? samples[i] : 0.0f; };
-        const auto y0 = at (index - 1), y1 = at (index), y2 = at (index + 1), y3 = at (index + 2);
-        const auto c1 = 0.5f * (y2 - y0);
-        const auto c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
-        const auto c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
-        return ((c3 * t + c2) * t + c1) * t + y1;
-    }
 } // namespace
 
 const DeviceInfo DrumSampler::info { .typeID = typeID, .name = "Drum Sampler", .kind = DeviceKind::instrument, .parameters = parameters };
@@ -290,10 +277,25 @@ void DrumSampler::render (float* left, float* right, int numSamples)
                 voice.fadeStep = std::max (voice.fadeStep, cutStep);
 
             envelope *= voice.fade;
-            left[i] += readAt (first, frames, voice.position) * voice.gainLeft * envelope;
+
+            // At its own rate and untuned, its samples as they are; otherwise read between them by a windowed sinc.
+            auto sampleLeft = 0.0f, sampleRight = 0.0f;
+
+            if (juce::exactlyEqual (voice.step, 1.0))
+            {
+                const auto index = (int) voice.position;
+                sampleLeft = first[index];
+                sampleRight = second[index];
+            }
+            else
+            {
+                reader.read (first, second, frames, voice.position, voice.step, sampleLeft, sampleRight);
+            }
+
+            left[i] += sampleLeft * voice.gainLeft * envelope;
 
             if (right != nullptr)
-                right[i] += readAt (second, frames, voice.position) * voice.gainRight * envelope;
+                right[i] += sampleRight * voice.gainRight * envelope;
 
             voice.position += voice.step;
             voice.fade -= voice.fadeStep;

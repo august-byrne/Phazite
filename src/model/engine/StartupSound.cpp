@@ -98,11 +98,13 @@ juce::AudioBuffer<float> makeStartupSound (double sampleRate)
 
     sound.copyFrom (1, 0, sound, 0, 0, blipLength);
 
-    // Its echoes, bouncing between the sides: the delay puts out the echoes alone.
+    // Its echoes, bouncing between the sides: the delay puts out the echoes alone. They come back a whole number of samples
+    // apart at any rate, as they do at 48 kHz, where the sound was tuned: an echo between samples comes back a little duller
+    // on every pass.
     juce::AudioBuffer<float> echoes (sound);
     std::array<float, devices::Delay::mix + 1> echo {};
     echo[devices::Delay::sync] = 0.0f;
-    echo[devices::Delay::milliseconds] = echoMilliseconds;
+    echo[devices::Delay::milliseconds] = (float) (std::round (echoMilliseconds * 0.001 * sampleRate) / sampleRate * 1000.0);
     echo[devices::Delay::feedback] = echoFeedback;
     echo[devices::Delay::pingPong] = 1.0f;
     echo[devices::Delay::lowCut] = echoLowCutHz;

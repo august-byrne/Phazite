@@ -120,7 +120,7 @@ TEST_CASE ("The limiter's description holds together, and it reports its look-ah
 
     Limiter limiter;
     limiter.prepare (testRate, testBlockSize);
-    CHECK (limiter.getLatencySamples() == 96 + 3); // 2 ms, and half its interpolation
+    CHECK (limiter.getLatencySamples() == 96 + 5); // 2 ms, and what the true peak's filter reads after a sample
 }
 
 TEST_CASE ("The limiter leaves sound under its ceiling as it was, only later")
@@ -170,6 +170,41 @@ TEST_CASE ("The limiter keeps loud sound under its ceiling, between samples too"
         // Its samples are 3 dB under its true peak of 0 dB, under the ceiling, but its true peak isn't.
         CHECK (getTruePeak (played, 4800) < -1.0f + 0.2f);
         CHECK (getTruePeak (played, 4800) > -1.0f - 0.5f);
+    }
+
+    SUBCASE ("Bright full-scale sines at 44.1 kHz, up to 19 kHz, whose peaks mostly fall between their samples")
+    {
+        // Measured exactly: once the limiter has settled, each comes out a sine, whose amplitude is its true peak. The
+        // limiter's earlier 8-tap interpolation let 18 kHz past the ceiling by 3.8 dB (docs/dsp-audit.md).
+        constexpr double rate = 44100.0;
+        values[Limiter::gain] = 0.0f;
+
+        for (const auto hertz : { 15000.0, 17000.0, 18000.0, 19000.0 })
+        {
+            CAPTURE (hertz);
+            Limiter limiter;
+            limiter.prepare (rate, testBlockSize);
+            const auto played =
+                play (limiter, values, 44100, [hertz] (int t) { return (float) std::sin (twoPi * hertz * t / rate + 0.3); });
+
+            double ss = 0.0, cc = 0.0, sc = 0.0, ys = 0.0, yc = 0.0;
+
+            for (int t = 22050; t < 44100; ++t)
+            {
+                const auto s = std::sin (twoPi * hertz * t / rate), c = std::cos (twoPi * hertz * t / rate);
+                ss += s * s;
+                cc += c * c;
+                sc += s * c;
+                ys += played[(size_t) t] * s;
+                yc += played[(size_t) t] * c;
+            }
+
+            const auto determinant = ss * cc - sc * sc;
+            const auto a = (ys * cc - yc * sc) / determinant, b = (yc * ss - ys * sc) / determinant;
+            const auto truePeak = 20.0 * std::log10 (std::sqrt (a * a + b * b));
+            CHECK (truePeak < -1.0 + 0.25);
+            CHECK (truePeak > -1.0 - 0.5);
+        }
     }
 }
 

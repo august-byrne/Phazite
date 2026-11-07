@@ -103,23 +103,24 @@ double warmUp (ProcessFor& processFor)
 }
 
 //==============================================================================
-// A stereo sine wave file, two seconds long or as long as asked, so audio clips have something to play.
+// A stereo sine wave file, two seconds long or as long as asked, so audio clips have something to play; at the engine's rate,
+// or at another.
 class SineFile
 {
 public:
-    explicit SineFile (double seconds = 2.0)
+    explicit SineFile (double seconds = 2.0, double fileRate = auditSampleRate)
     {
-        juce::AudioBuffer<float> buffer (2, juce::roundToInt (auditSampleRate * seconds));
+        juce::AudioBuffer<float> buffer (2, juce::roundToInt (fileRate * seconds));
 
         for (int i = 0; i < buffer.getNumSamples(); ++i)
         {
-            const auto sample = 0.5f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * (float) i / (float) auditSampleRate);
+            const auto sample = 0.5f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * (float) i / (float) fileRate);
             buffer.setSample (0, i, sample);
             buffer.setSample (1, i, sample);
         }
 
         std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (temp.getFile());
-        const auto options = juce::AudioFormatWriterOptions {}.withSampleRate (auditSampleRate).withNumChannels (2).withBitsPerSample (24);
+        const auto options = juce::AudioFormatWriterOptions {}.withSampleRate (fileRate).withNumChannels (2).withBitsPerSample (24);
 
         if (auto writer = juce::WavAudioFormat().createWriterFor (stream, options))
             writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
@@ -1116,6 +1117,20 @@ TEST_SUITE ("realtime-audit")
         const auto m = playAndMeasure (song);
         report ("An audio clip", m);
         CHECK (m.peakLevel > 0.01f);
+    }
+
+    TEST_CASE ("Real-time audit: audio clips of a file at another rate than the engine's, resampled as they play")
+    {
+        // A 44.1 kHz file on the 48 kHz engine, through r8brain-free-src (src/engine/audio/Resampler.h), on two tracks.
+        SineFile sine (2.0, 44100.0);
+        TestSong song;
+        addSineClip (song, song.firstTrack, sine);
+        addSineClip (song, song.addTrack ("Second"), sine);
+
+        const auto m = playAndMeasure (song);
+        report ("Audio clips of a 44.1 kHz file, resampled", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
     }
 
     TEST_CASE ("Real-time audit: a loop stretched to the song's tempo")

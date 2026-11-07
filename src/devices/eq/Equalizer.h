@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's EQ (roadmap step 1.6): eight bands, each a low cut, low shelf, bell, notch, high shelf or high cut, then an
 // output gain. A new EQ changes nothing: its cuts are off and its other bands at 0 dB. Its parameters move smoothly, so
-// turning a knob doesn't click, and it taps what it plays for its editor's analyzer.
+// turning a knob doesn't click, and it taps what it plays for its editor's analyzer. Its bands are matched to their analog
+// shapes (dsp::makeMatchedFilter()), so a bell or a shelf near the top keeps its width and symmetry.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
