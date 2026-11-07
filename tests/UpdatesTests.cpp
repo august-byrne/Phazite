@@ -89,6 +89,7 @@ TEST_CASE ("Phazite asks its own releases on GitHub for updates, over HTTPS, wit
     phazite::Settings settings;
     const Updates updates (settings);
     CHECK (updates.launch != nullptr);
+    CHECK (updates.canCheckSource() == Updates::canCheck()); // over HTTPS: not in Linux builds without curl
     CHECK (updates.getState() == State::idle);
     CHECK (updates.getRunningVersion() == phazite::getVersionString());
     CHECK_FALSE (updates.checksAtStart());
@@ -401,6 +402,8 @@ TEST_CASE ("The Updates window says when this Phazite is the latest, and when a 
     Updates updates (settings, releases.downloads, releases.source, "0.2.0");
     phazite::ui::UpdatePanel panel (updates, [] {});
     phazite::test::TestWindow window (panel, phazite::ui::UpdatePanel::width, phazite::ui::UpdatePanel::height);
+    CHECK (updates.canCheckSource()); // a local file, in every build
+    CHECK (panel.getActionButton().getButtonText() == "Check Now");
 
     updates.check();
     REQUIRE (waitForUpdates (updates));

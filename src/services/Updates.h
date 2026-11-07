@@ -117,6 +117,9 @@ public:
     // releases page opens in a browser.
     static bool canCheck();
 
+    // Whether this update check can read its source: over HTTPS where canCheck(), or a local file (the tests') anywhere.
+    bool canCheckSource() const;
+
 private:
     struct Job;
 

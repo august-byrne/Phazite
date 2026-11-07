@@ -122,14 +122,14 @@ void UpdatePanel::refresh()
 
         case State::failed:
             said = updates.getError();
-            step = Updates::canCheck() ? "Try Again" : "";
+            step = updates.canCheckSource() ? "Try Again" : "";
             break;
 
         case State::idle:
         default:
-            said = Updates::canCheck() ? "Phazite hasn't looked for a newer version yet."
-                                       : "This build of Phazite can't check for updates: its releases page lists them.";
-            step = Updates::canCheck() ? "Check Now" : "";
+            said = updates.canCheckSource() ? "Phazite hasn't looked for a newer version yet."
+                                            : "This build of Phazite can't check for updates: its releases page lists them.";
+            step = updates.canCheckSource() ? "Check Now" : "";
             break;
     }
 

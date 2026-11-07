@@ -398,6 +398,11 @@ bool Updates::canCheck()
 #endif
 }
 
+bool Updates::canCheckSource() const
+{
+    return canCheck() || source.updateFile.isLocalFile();
+}
+
 juce::File Updates::getDefaultDownloadsFolder()
 {
     return juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile (juce::String (appName) + " Updates");
@@ -443,7 +448,7 @@ void Updates::check()
     if (const auto now = getState(); now == State::checking || now == State::downloading)
         return;
 
-    if (! canCheck() && ! source.updateFile.isLocalFile())
+    if (! canCheckSource())
     {
         update (State::failed, 0.0, "This build of Phazite can't check for updates: its releases page lists them.");
         return;
