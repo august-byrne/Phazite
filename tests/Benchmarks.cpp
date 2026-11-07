@@ -41,6 +41,7 @@
 #include "model/engine/internal/PreviewLoop.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackHost.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -56,6 +57,7 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <thread>
 #include <vector>
 
@@ -674,6 +676,14 @@ TEST_CASE ("Benchmark: a loop previewed in time, until it can start" * doctest::
 
 TEST_CASE ("Benchmark: the UI's work on a big song" * doctest::test_suite ("benchmark") * doctest::skip())
 {
+    // A native image held throughout, as the app's window holds Direct2D's device on Windows for as long as it is open:
+    // without one, the first native image painted (the time bar's overview's picture) made the device, about 200 ms, which
+    // the whole window's paint then counted (2026-11-07).
+    juce::Image keepsNativeImages (juce::Image::ARGB, 1, 1, true);
+    {
+        juce::Graphics g (keepsNativeImages);
+    }
+
     phazite::test::AppScreen screen;
     screen.session.openAtStartup();
     auto* open = phazite::findSong (screen.session.getContext());
@@ -963,6 +973,349 @@ TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite (
              });
 
     report << "\nClip components in the playlist: " << phazite::test::findAll<phazite::ui::ClipComponent> (*playlist).size() << "\n";
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: a song scrolling continuously as it plays, each frame painted as the window paints it"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // Each frame painted as the window paints it on Windows: what it asked to repaint, into one native image (Direct2D's, its
+    // device held as the window holds it), in the app's look and feel, at the owner's screen size (docs/performance-audit.md,
+    // section 16, options 15 and 16).
+    juce::Image frameImage (juce::Image::ARGB, 1920, 1080, true);
+    {
+        juce::Graphics g (frameImage);
+    }
+
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    juce::String report;
+
+    {
+        phazite::test::AppScreen screen;
+        screen.window.setSize (1920, 1080);
+        screen.session.openAtStartup();
+        REQUIRE (screen.registry.invoke ("help.example.houseGroove")); // 124 BPM, an automation lane, an audio loop
+        phazite::test::dispatchMessagesUntil ([] { return false; }, 2000);
+        auto* song = phazite::findSong (screen.session.getContext());
+        auto* playlist = phazite::test::findAll<phazite::ui::Playlist> (screen.shell).getFirst();
+        auto* lanes = playlist != nullptr ? phazite::test::findComponentWithTitle (*playlist, "Tracks") : nullptr;
+        REQUIRE (song != nullptr);
+        REQUIRE (lanes != nullptr);
+
+        // As the owner played a song: scrolling continuously, at about 22 pixels a beat, so that the song moves about 0.75 of a
+        // pixel a frame at 124 BPM and 60 Hz.
+        playlist->setScrollingContinuously (true);
+        playlist->zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (lanes->getWidth() / 22.0) });
+        phazite::playOrStop (*song);
+        REQUIRE (phazite::isSongPlaying (*song));
+        auto* session = phazite::findPlayingSession (*song);
+        REQUIRE (session != nullptr);
+
+        // What each part takes to paint, as JUCE times it (ComponentListener::componentPainted()), summed over a frame.
+        struct PartTimes : juce::ComponentListener
+        {
+            void componentPainted (juce::Component&, const juce::ComponentPaintDiagnostics& d) override
+            {
+                total += d.totalPaintDuration.get<juce::Milliseconds>();
+                own += d.paintDuration.get<juce::Milliseconds>();
+            }
+
+            void reset() { total = own = 0.0; }
+            double total = 0.0, own = 0.0;
+        };
+
+        PartTimes lanesTimes, automationTimes, barTimes, midiTimes, audioTimes;
+        lanes->addComponentListener (&lanesTimes);
+        std::vector<juce::Component*> automationLanes, timeBar;
+
+        for (auto* each : phazite::test::findAll<juce::Component> (*lanes))
+            if (each->getTitle().startsWith ("Automation of"))
+                automationLanes.push_back (each);
+
+        for (const auto* title : { "Timeline", "Sections", "Chords" })
+            if (auto* part = phazite::test::findComponentWithTitle (*playlist, title))
+                timeBar.push_back (part);
+
+        for (auto* part : automationLanes)
+            part->addComponentListener (&automationTimes);
+
+        for (auto* part : timeBar)
+            part->addComponentListener (&barTimes);
+
+        struct Frame
+        {
+            double work, painted, lanes, background, automation, midi, audio, bar;
+        };
+
+        std::vector<Frame> frames;
+        const auto beatsPerFrame = 124.0 / 60.0 / 60.0;
+        auto beat = 64.0, time = juce::Time::getMillisecondCounterHiRes();
+        playlist->showFrame (time / 1000.0);
+        screen.window.takeRepaintedArea();
+
+        for (int f = 0; f < 600; ++f)
+        {
+            beat += beatsPerFrame;
+            time += 1000.0 / 60.0;
+            // Where the song is at this frame: the tests' engine plays no blocks, so the song waits where it is put.
+            session->locate (phazite::BeatPosition::fromBeats (beat));
+            lanesTimes.reset();
+            automationTimes.reset();
+            barTimes.reset();
+            midiTimes.reset();
+            audioTimes.reset();
+
+            // The clips in view, which come and go: each heard once.
+            for (auto* clip : phazite::test::findAll<phazite::ui::ClipComponent> (*playlist))
+            {
+                auto& times = clip->getInfo().kind == phazite::ClipType::audio ? audioTimes : midiTimes;
+                clip->removeComponentListener (&times);
+                clip->addComponentListener (&times);
+            }
+
+            Frame frame {};
+            frame.work = millisecondsOf (
+                [&]
+                {
+                    playlist->showFrame (time / 1000.0);
+                    phazite::test::dispatchPendingMessages();
+                });
+
+            const auto area = screen.window.takeRepaintedArea();
+            frame.painted = millisecondsOf (
+                [&]
+                {
+                    juce::Graphics g (frameImage);
+
+                    if (g.reduceClipRegion (area))
+                        screen.window.paintEntireComponent (g, false);
+                });
+
+            frame.lanes = lanesTimes.total;
+            frame.background = lanesTimes.own;
+            frame.automation = automationTimes.total;
+            frame.midi = midiTimes.total;
+            frame.audio = audioTimes.total;
+            frame.bar = barTimes.total;
+            frames.push_back (frame);
+        }
+
+        phazite::playOrStop (*song);
+        lanes->removeComponentListener (&lanesTimes);
+
+        for (auto* part : automationLanes)
+            part->removeComponentListener (&automationTimes);
+
+        for (auto* part : timeBar)
+            part->removeComponentListener (&barTimes);
+
+        const auto clips = phazite::test::findAll<phazite::ui::ClipComponent> (*playlist);
+        auto kept = 0;
+
+        for (auto* clip : clips)
+        {
+            clip->removeComponentListener (&midiTimes);
+            clip->removeComponentListener (&audioTimes);
+            kept += clip->getCachedComponentImage() != nullptr ? 1 : 0;
+        }
+
+        const auto row = [&frames, &report] (const juce::String& what, double Frame::* value)
+        {
+            std::vector<double> values;
+
+            for (const auto& frame : frames)
+                values.push_back (frame.*value);
+
+            std::sort (values.begin(), values.end());
+            const auto mean = std::accumulate (values.begin(), values.end(), 0.0) / (double) values.size();
+            report << "| " << what << " | " << milliseconds (mean) << " | " << milliseconds (values[values.size() * 95 / 100]) << " | "
+                   << milliseconds (values.back()) << " |\n";
+        };
+
+        report << "\n| Each of 600 frames, House Groove scrolling continuously at " << juce::String (playlist->getView().pixelsPerBeat, 1)
+               << " pixels a beat, 1920 x 1080 | Mean | 95th percentile | Most |\n|---|---|---|---|\n";
+        row ("The frame's work: the song's position shown, and what that posts", &Frame::work);
+        row ("Its paint, through Direct2D, of what it asked to repaint", &Frame::painted);
+        row ("... of which the lanes, with their clips and automation lanes", &Frame::lanes);
+        row ("... ... the lanes' grid and sections (their own paint)", &Frame::background);
+        row ("... ... the automation lanes", &Frame::automation);
+        row ("... ... the MIDI clips", &Frame::midi);
+        row ("... ... the audio clips", &Frame::audio);
+        row ("... the ruler, the sections' strip and the chord lane", &Frame::bar);
+
+        const auto slow = std::count_if (frames.begin(), frames.end(), [] (const Frame& f) { return f.work + f.painted > 8.0; });
+        const auto slowest = std::max_element (frames.begin(), frames.end(),
+                                               [] (const Frame& a, const Frame& b) { return a.work + a.painted < b.work + b.painted; });
+        report << "\nFrames whose work and paint took more than half a frame (8 ms): " << (int) slow << " of " << (int) frames.size()
+               << "; the slowest is frame " << (int) std::distance (frames.begin(), slowest) + 1
+               << "\nAutomation lanes: " << (int) automationLanes.size() << "; clip components at the end: " << clips.size()
+               << ", of which kept as pictures: " << kept << "\n";
+    }
+
+    juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+    MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: the mouse moving over the playlist while the song scrolls continuously, at the display's pace"
+           * doctest::test_suite ("benchmark") * doctest::skip())
+{
+    // The owner, 2026-11-07: "when i move my mouse around on top of the playlist though, i can get visual stuttering". Frames
+    // at 60 Hz in real time, so that timers run as in the app, with the mouse moving over the track headers and the lanes
+    // between them as Windows reports it (four moves a frame) for two seconds, then resting for one, as a hand does; first
+    // without the window's tooltips, then with them, on frosted glass as the main window has them (docs/performance-audit.md,
+    // section 16).
+    juce::Image frameImage (juce::Image::ARGB, 1920, 1080, true);
+    {
+        juce::Graphics g (frameImage);
+    }
+
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    juce::String report;
+
+    {
+        phazite::test::AppScreen screen;
+        screen.window.setSize (1920, 1080);
+        screen.session.openAtStartup();
+        REQUIRE (screen.registry.invoke ("help.example.houseGroove"));
+        phazite::test::dispatchMessagesUntil ([] { return false; }, 2000);
+        auto* song = phazite::findSong (screen.session.getContext());
+        auto* playlist = phazite::test::findAll<phazite::ui::Playlist> (screen.shell).getFirst();
+        auto* lanes = playlist != nullptr ? phazite::test::findComponentWithTitle (*playlist, "Tracks") : nullptr;
+        REQUIRE (song != nullptr);
+        REQUIRE (lanes != nullptr);
+        playlist->setScrollingContinuously (true);
+        playlist->zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (lanes->getWidth() / 22.0) });
+        phazite::test::dispatchPendingMessages();
+        std::unique_ptr<phazite::ui::Tooltips> tips;
+
+        // A tooltip shown over the lanes: what showing it takes, with the clips under it kept as pictures and without.
+        const auto timeTips = [&]
+        {
+            std::vector<double> times;
+            const auto centre = lanes->localPointToGlobal (lanes->getLocalBounds().getCentre());
+
+            for (int i = 0; i < 20; ++i)
+            {
+                const auto at = centre + juce::Point<int> ((i % 5) * 120 - 240, (i % 4) * 48 - 96);
+                times.push_back (millisecondsOf ([&] { tips->displayTip (at, "A tip over the clips, " + juce::String (i)); }));
+                tips->hideTip();
+            }
+
+            std::sort (times.begin(), times.end());
+            return times;
+        };
+
+        tips = std::make_unique<phazite::ui::Tooltips> (screen.window, true);
+        const auto overPictures = timeTips();
+
+        for (auto* clip : phazite::test::findAll<phazite::ui::ClipComponent> (*playlist))
+            clip->setBufferedToImage (false); // until the view moves
+
+        const auto overClips = timeTips();
+        tips = nullptr;
+        report << "\n| A tooltip shown over the lanes, on frosted glass (20 times) | Median | Most |\n|---|---|---|\n"
+               << "| Over clips kept as pictures | " << milliseconds (overPictures[10]) << " | " << milliseconds (overPictures.back())
+               << " |\n| Over clips painted afresh | " << milliseconds (overClips[10]) << " | " << milliseconds (overClips.back())
+               << " |\n";
+
+        // The frames, paced as the display's: a frame's work (the mouse's moves before it, the song's position shown and what
+        // that posts) and its paint, and the frames missed while one took longer than a frame.
+        const auto area = juce::Rectangle<int> (0, lanes->getY(), playlist->getWidth(), lanes->getHeight()).reduced (8);
+        const auto pathAt = [area] (int step)
+        {
+            const auto t = step * 0.003;
+            return juce::Point<int> (area.getCentreX() + juce::roundToInt (area.getWidth() * 0.5 * std::sin (t * 0.9)),
+                                     area.getCentreY() + juce::roundToInt (area.getHeight() * 0.5 * std::sin (t * 0.37)));
+        };
+
+        const auto run = [&] (const juce::String& name, bool moving)
+        {
+            phazite::playOrStop (*song);
+            REQUIRE (phazite::isSongPlaying (*song));
+            auto* session = phazite::findPlayingSession (*song);
+            REQUIRE (session != nullptr);
+            phazite::test::Mouse mouse (*playlist);
+            std::vector<double> work, paint, moves;
+            auto missed = 0, shows = 0, over = 0;
+            auto showing = false;
+            auto beat = 64.0;
+            constexpr double interval = 1000.0 / 60.0;
+            auto due = juce::Time::getMillisecondCounterHiRes();
+
+            for (int f = 0; f < 1200; ++f)
+            {
+                due += interval;
+
+                while (juce::Time::getMillisecondCounterHiRes() < due)
+                    std::this_thread::yield();
+
+                beat += 124.0 / 60.0 / 60.0;
+                session->locate (phazite::BeatPosition::fromBeats (beat));
+
+                work.push_back (millisecondsOf (
+                    [&]
+                    {
+                        if (moving && f % 180 < 120)
+                            for (int m = 0; m < 4; ++m)
+                                moves.push_back (millisecondsOf ([&] { mouse.moveTo (pathAt (f * 4 + m)); }));
+
+                        playlist->showFrame (due / 1000.0);
+                        phazite::test::dispatchPendingMessages();
+                    }));
+
+                const auto repainted = screen.window.takeRepaintedArea();
+                paint.push_back (millisecondsOf (
+                    [&]
+                    {
+                        juce::Graphics g (frameImage);
+
+                        if (g.reduceClipRegion (repainted))
+                            screen.window.paintEntireComponent (g, false);
+                    }));
+
+                over += work.back() + paint.back() > 8.0 ? 1 : 0;
+                shows += tips != nullptr && tips->isVisible() && ! showing ? 1 : 0;
+                showing = tips != nullptr && tips->isVisible();
+
+                // The vertical blanks that went by meanwhile.
+                for (const auto now = juce::Time::getMillisecondCounterHiRes(); due + interval < now; due += interval)
+                    ++missed;
+            }
+
+            phazite::playOrStop (*song);
+            const auto row = [&report] (const juce::String& what, std::vector<double> values)
+            {
+                std::sort (values.begin(), values.end());
+                const auto mean = std::accumulate (values.begin(), values.end(), 0.0) / (double) values.size();
+                report << " | " << what << " " << milliseconds (mean) << " / " << milliseconds (values[values.size() * 95 / 100]) << " / "
+                       << milliseconds (values.back());
+            };
+
+            report << "| " << name;
+
+            if (moves.empty())
+                report << " | -";
+            else
+                row ("", moves);
+
+            row ("", work);
+            row ("", paint);
+            report << " | " << over << " | " << missed << " | " << shows << " |\n";
+        };
+
+        report << "\n| 1,200 frames at 60 Hz, House Groove scrolling continuously, the mouse moving over the playlist | A move of the "
+                  "mouse, mean / 95th percentile / most | A frame's work, with its moves | Its paint | Frames over 8 ms | Frames missed | "
+                  "Tooltips shown |\n|---|---|---|---|---|---|---|\n";
+        run ("The mouse still", false);
+        run ("Without tooltips", true);
+        tips = std::make_unique<phazite::ui::Tooltips> (screen.window, true);
+        run ("With the window's tooltips", true);
+        tips = nullptr;
+    }
+
+    juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     MESSAGE (report);
 }
 

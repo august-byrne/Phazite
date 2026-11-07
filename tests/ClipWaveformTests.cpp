@@ -51,19 +51,21 @@ TEST_CASE ("A clip's waveform loads in the background and draws where its file h
     const auto clips = phazite::importFiles (context, { file.getFullPathName() }, track, phazite::BeatPosition());
     REQUIRE (clips.size() == 1);
 
-    juce::Component shown;
+    // What shows it is told as its levels load, to paint it again.
+    auto loads = 0;
     const auto make = phazite::getClipWaveformMaker();
-    auto waveform = make (context, clips[0], shown);
+    auto waveform = make (context, clips[0], [&loads] { ++loads; });
     REQUIRE (waveform != nullptr);
 
     // The clip's two beats, then two more past its end, where its file has no audio.
     const phazite::BeatRange span { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (4.0) };
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return countLit (paint (*waveform, span), 0, 190) > 190 * 10; }, 10000));
+    CHECK (phazite::test::dispatchMessagesUntil ([&loads] { return loads > 0; })); // its message can come after the levels
     const auto image = paint (*waveform, span);
     CHECK (countLit (image, 210, 400) == 0);
 
     // Another waveform of the same file has its levels at once, from the cache.
-    auto again = make (context, clips[0], shown);
+    auto again = make (context, clips[0], {});
     CHECK (countLit (paint (*again, span), 0, 190) > 190 * 10);
 
     setSong (context, nullptr);

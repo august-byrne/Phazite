@@ -9,6 +9,7 @@
 #include "EventQueue.h"
 #include "Handover.h"
 #include "Plan.h"
+#include "PlayheadClock.h"
 #include "Recording.h"
 #include "Workers.h"
 #include "engine/nodes/LoudnessMeter.h"
@@ -55,9 +56,15 @@ public:
     // A count-in: a bar of clicks on the song's beats before the playhead, as long as a bar there, which the song waits
     // for; live notes and the inputs play meanwhile, and a take starts after it.
 
-    // Where the playhead is: where the audio thread last played, moved on by the time since, as far as a block (any
-    // thread). Before the first block after a locate, where it was asked to be.
+    // Where the playhead is: where the latest block the audio thread played started, moved on by the time since, as far as
+    // a block and a half (any thread). Before the first block after a locate, where it was asked to be.
     double getPlayheadBeat() const noexcept;
+
+    // Where the playhead was, or is, at a moment in milliseconds by juce::Time::getMillisecondCounterHiRes() (any thread):
+    // in the block that was playing then, of the last few seconds' (PlayheadClock.h), each stamped as it started on a clock
+    // smoothed over the blocks, so that the window's frames, each asking at its own time, see it move evenly however the
+    // blocks come. Before the first block after a locate, where it was asked to be.
+    double getPlayheadBeatAt (double milliseconds) const noexcept;
 
     // A note or controller played live into a track's instrument (the computer keyboard, a MIDI input, the piano roll's
     // guide notes), from any thread: it plays in the audio thread's next block, as far into it as it came after the last
@@ -295,12 +302,11 @@ private:
     void playCountIn (float* const* outputs, int numOutputs, int numSamples) noexcept;
     void continueClick (float* const* outputs, int numOutputs, int offset, int from, int to) noexcept;
 
-    // Where the playhead is, for any thread: written by the audio thread after each block, between two counts of a
-    // sequence (odd while it writes), so that a reader takes the three values from one block.
-    std::atomic<std::uint32_t> playheadSequence { 0 };
-    std::atomic<double> playheadBeat { 0.0 }, playheadMilliseconds { 0.0 }, beatsPerMillisecond { 0.0 };
-    std::atomic<double> playheadLimit { 0.0 }; // how far it may move on before the next block: one block's beats
-    void publishPlayhead (double beat, double beatsPerSecond, double blockSeconds) noexcept;
+    // Where the playhead was as each of the last blocks started, for any thread (PlayheadClock.h): stamped by the audio thread
+    // with when the block started, on its blocks' smoothed clock, and how long it lasts (milliseconds).
+    BlockClock blockClock;
+    PlayheadStamps playheadStamps;
+    void publishPlayhead (double beat, double beatsPerSecond, double startMilliseconds, double lengthMilliseconds) noexcept;
 
     Engine (const Engine&) = delete;
     Engine& operator= (const Engine&) = delete;

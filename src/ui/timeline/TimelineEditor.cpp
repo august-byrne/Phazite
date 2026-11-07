@@ -409,7 +409,9 @@ void TimelineRuler::movePlayhead (const juce::MouseEvent& e)
 //==============================================================================
 // The playhead, in the focus colour so that it is easy to find: a marker at the foot of the ruler pointing down at where
 // playback is, and a line from its point down over the time line (nothing above the marker). Clicks go through it to the
-// ruler, which a drag along moves it.
+// ruler, which a drag along moves it. It sits on whole pixels, a pixel wider than its marker, and draws itself the part of a
+// pixel further right that the playhead is (setOffset()), so that it glides rather than steps (docs/performance-audit.md,
+// section 16).
 struct TimelineEditor::Playhead : public juce::Component
 {
     Playhead()
@@ -429,22 +431,34 @@ struct TimelineEditor::Playhead : public juce::Component
         }
     }
 
+    // How far right of its whole pixel it is drawn, from 0 to 1.
+    void setOffset (float newOffset)
+    {
+        if (! juce::exactlyEqual (offset, newOffset))
+        {
+            offset = newOffset;
+            repaint();
+        }
+    }
+
     bool linked = false;
+    float offset = 0.0f;
+    FrameLog* log = nullptr; // told when it is painted, as the frames' log times the paints
 
     void paint (juce::Graphics& g) override
     {
-        const auto width = (float) getWidth(), centre = width / 2.0f;
+        const auto left = offset, width = (float) PlayheadTint::markerWidth, centre = left + width / 2.0f;
         const auto tip = (float) PlayheadTint::markerHeight, body = PlayheadTint::body, corner = PlayheadTint::corner;
         g.setColour (getPalette (*this).focus.withMultipliedAlpha (linked ? linkedPlayheadAlpha : 1.0f));
 
         // The marker: square at the top, its corners rounded, its sides turning in to the point.
         juce::Path marker;
-        marker.startNewSubPath (0.0f, body);
-        marker.lineTo (0.0f, corner);
-        marker.quadraticTo (0.0f, 0.0f, corner, 0.0f);
-        marker.lineTo (width - corner, 0.0f);
-        marker.quadraticTo (width, 0.0f, width, corner);
-        marker.lineTo (width, body);
+        marker.startNewSubPath (left, body);
+        marker.lineTo (left, corner);
+        marker.quadraticTo (left, 0.0f, left + corner, 0.0f);
+        marker.lineTo (left + width - corner, 0.0f);
+        marker.quadraticTo (left + width, 0.0f, left + width, corner);
+        marker.lineTo (left + width, body);
         marker.lineTo (centre, tip);
         marker.closeSubPath();
         g.fillPath (marker);
@@ -452,6 +466,9 @@ struct TimelineEditor::Playhead : public juce::Component
         // The line, from the point down.
         g.fillRect (juce::Rectangle<float> (centre - PlayheadTint::lineWidth / 2.0f, tip - 1.0f, PlayheadTint::lineWidth,
                                             (float) getHeight() - tip + 1.0f));
+
+        if (log != nullptr)
+            log->painted (juce::Time::getMillisecondCounterHiRes());
     }
 };
 
@@ -534,6 +551,7 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, 
     gridButton.setEnabled (false);
     updateGridControls();
     addMouseListener (useListener.get(), true);
+    playhead->log = &frameLog;
 }
 
 TimelineEditor::~TimelineEditor()
@@ -579,9 +597,16 @@ void TimelineEditor::showProject()
     snapButton.setEnabled (open);
     gridButton.setEnabled (open);
 
+    frameBeat.reset();
+    holdsPlayhead = false;
+    frameLog = FrameLog();
     updateGridControls();
     setViewStart ({});
-    playheadFrames = {};
+
+    // At each frame of the display from now on (showFrame()), so that the playhead moves from the first frame after Play;
+    // a frame does nothing while the song is stopped, and the window's own painting wakes the message thread at each one
+    // anyway. A few times a second, the timer notices what changed elsewhere.
+    playheadFrames = open ? juce::VBlankAttachment (this, [this] (double seconds) { showFrame (seconds); }) : juce::VBlankAttachment();
 
     if (open)
         startTimerHz (5);
@@ -592,7 +617,9 @@ void TimelineEditor::showProject()
 //==============================================================================
 void TimelineEditor::setViewStart (BeatPosition start)
 {
-    // From the time origin, and no later than a view goes, however it is scrolled.
+    // From the time origin, and no later than a view goes, however it is scrolled; on whole pixels, which only following the
+    // playhead continuously moves by a part of one, after this (followPlayhead()).
+    setSubPixel (0.0f);
     view.start = std::clamp (start, timeOrigin, std::max (timeOrigin, BeatPosition::fromBeats (TimelineView::latestStart)));
     ruler.repaint();
     timelineChanged();
@@ -622,8 +649,8 @@ void TimelineEditor::zoom (double factor)
     const auto width = getTimelineArea().getWidth();
     auto x = width / 2.0;
 
-    if (const auto playheadX = view.beatToX (getPlayheadBeat()); playheadX >= 0.0 && playheadX <= width)
-        x = playheadX;
+    if (const auto shownX = view.beatToX (getShownPlayheadBeat()); shownX >= 0.0 && shownX <= width)
+        x = shownX;
 
     zoomAround (x, factor);
 }
@@ -672,20 +699,27 @@ void TimelineEditor::centreOnPlayhead()
         return;
 
     followPaused = false;
-    setViewStart (getPlayheadBeat() - BeatDuration::fromBeats (getTimelineArea().getWidth() / 2.0 / view.pixelsPerBeat));
+    setViewStart (getShownPlayheadBeat() - BeatDuration::fromBeats (getTimelineArea().getWidth() / 2.0 / view.pixelsPerBeat));
 }
 
 void TimelineEditor::movePlayheadTo (BeatPosition beat)
 {
-    // Playback starts there from now on, and Space comes back there when it stops; the view follows it again.
+    // Playback starts there from now on, and Space comes back there when it stops; the view follows it again. It shows
+    // there at once, not where the last frame heard it.
     phazite::movePlayhead (timelineContext, beat);
     followPaused = false;
+    frameBeat.reset();
     updatePlayhead();
 }
 
 BeatPosition TimelineEditor::getPlayheadBeat() const
 {
     return phazite::getPlayheadBeat (timelineContext);
+}
+
+BeatPosition TimelineEditor::getShownPlayheadBeat() const
+{
+    return frameBeat.value_or (getPlayheadBeat());
 }
 
 bool TimelineEditor::isPlayheadShowingLinkedClip() const
@@ -701,21 +735,26 @@ void TimelineEditor::updatePlayhead()
         return;
     }
 
-    // At the song's position, or where a linked clip's playing shows in this editor's notes.
+    // At the song's position (while it plays, the beat heard at the frame shown), or where a linked clip's playing shows in
+    // this editor's notes. Between pixels, so that it glides at any zoom, but on the whole pixel the view scrolls under it by
+    // whole pixels, while it does.
     const auto area = getTimelineArea();
-    const auto songBeat = getPlayheadBeat().inBeats();
+    const auto songBeat = getShownPlayheadBeat().inBeats();
     const auto linkedBeat = getLinkedPlayheadBeat (songBeat);
     const auto x = (linkedBeat.value_or (songBeat) - view.start.inBeats()) * view.pixelsPerBeat;
-    const auto isInView = x >= -1.0 && x <= area.getWidth() + 1.0;
+    playheadX = holdsPlayhead && ! linkedBeat.has_value() ? std::round (x) : x;
+    const auto isInView = playheadX >= -1.0 && playheadX <= area.getWidth() + 1.0;
     playhead->setLinked (linkedBeat.has_value());
     playhead->setVisible (isInView);
 
     // The marker's point at the foot of the ruler, the line under it.
     if (isInView)
     {
+        const auto left = std::floor (playheadX);
         const auto top = ruler.getBottom() - PlayheadTint::markerHeight;
-        playhead->setBounds (area.getX() + juce::roundToInt (x) - PlayheadTint::markerWidth / 2, top, PlayheadTint::markerWidth,
+        playhead->setBounds (area.getX() + (int) left - PlayheadTint::markerWidth / 2, top, PlayheadTint::markerWidth + 1,
                              area.getBottom() - top);
+        playhead->setOffset ((float) (playheadX - left));
     }
 }
 
@@ -984,18 +1023,8 @@ void TimelineEditor::timerCallback()
     if (! timelineContext.hasProject())
         return;
 
-    // While playing where it shows, the playhead moves at each frame of the display, as smooth as it can be at any refresh
-    // rate; otherwise this notices moves made elsewhere a few times a second. An editor that doesn't show draws nothing
-    // (docs/performance-audit.md, U5 and section 8).
-    if (const auto playing = isPlaying (timelineContext) && isShowing(); playing == playheadFrames.isEmpty())
-        playheadFrames = playing ? juce::VBlankAttachment (this,
-                                                           [this] (double)
-                                                           {
-                                                               if (isShowing())
-                                                                   followPlayhead();
-                                                           })
-                                 : juce::VBlankAttachment();
-
+    // While playing where it shows, the playhead moves at each frame of the display (showFrame()); this notices moves made
+    // elsewhere a few times a second. An editor that doesn't show draws nothing (docs/performance-audit.md, U5 and section 8).
     if (! isShowing())
         return;
 
@@ -1026,23 +1055,35 @@ void TimelineEditor::followPlayhead()
         followPaused = false;
 
     playedWhenFollowed = playing;
+    holdsPlayhead = false;
+    auto shift = 0.0f; // the part of a pixel what draws the song moves by, scrolling continuously
 
     // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end), or scroll it to
     // the middle, unless the user scrolled away while it played, or holds the mouse down in the editor (dragging what is in
     // view).
     if (followPlayback && ! followPaused && ! isViewFixed() && playing && ! horizontalScrollBar.isMouseButtonDown() && ! mouseIsDown)
     {
-        const auto beat = getPlayheadBeat();
+        const auto beat = getShownPlayheadBeat();
         const auto width = getTimelineArea().getWidth();
 
         if (scrollContinuously)
         {
-            // By whole pixels, once the playhead has moved one: what is drawn moves without shimmering, and the view isn't
-            // painted again at every frame of the display for a song that hasn't moved a pixel since. Near the song's start
-            // the playhead crosses to the middle first.
-            const auto pixels = std::round ((beat.inBeats() - width / 2.0 / view.pixelsPerBeat) * view.pixelsPerBeat);
+            // The view by whole pixels, which what it draws lines up with, and the rest of a pixel as a shift of what draws the
+            // song (setSubPixel()), so that the song glides under the playhead: by whole pixels alone, it stood still one frame
+            // in four at the owner's zoom (docs/performance-audit.md, section 16). The playhead stays on one column, the
+            // middle's, a whole pixel: a middle half a pixel in (a time line an odd number of pixels wide) put the playhead,
+            // rounded, on one side of it or the other as the song moved on by parts of a pixel, so that it jittered (the owner,
+            // 2026-11-07). Near the song's start the playhead crosses to the middle first.
+            const auto middle = width / 2;
+            const auto exact = beat.inBeats() * view.pixelsPerBeat;
+            const auto pixels = std::round (exact) - middle;
+            const auto start = std::max (timeOrigin, BeatPosition::fromBeats (pixels / view.pixelsPerBeat));
+            holdsPlayhead = start > timeOrigin; // the view moves under it, rather than waiting at the song's start
 
-            if (const auto start = std::max (timeOrigin, BeatPosition::fromBeats (pixels / view.pixelsPerBeat)); start != view.start)
+            if (holdsPlayhead)
+                shift = (float) (exact - std::round (exact));
+
+            if (start != view.start)
                 setViewStart (start);
         }
         else if (const auto x = view.beatToX (beat); x < 0.0 || x > width - 4.0)
@@ -1051,7 +1092,69 @@ void TimelineEditor::followPlayhead()
         }
     }
 
+    setSubPixel (shift);
     updatePlayhead();
+}
+
+void TimelineEditor::setSubPixel (float shift)
+{
+    if (juce::exactlyEqual (shift, subPixel))
+        return;
+
+    // A translation JUCE draws, the parts' mouse positions and hit-testing included, and their children's pictures moved
+    // with them without being drawn again.
+    subPixel = shift;
+    const auto transform = juce::exactlyEqual (shift, 0.0f) ? juce::AffineTransform() : juce::AffineTransform::translation (-shift, 0.0f);
+    ruler.setTransform (transform);
+
+    for (auto* part : getScrollingParts())
+        part->setTransform (transform);
+}
+
+void TimelineEditor::showFrame (double seconds)
+{
+    const auto playing = timelineContext.hasProject() && isShowing() && isPlaying (timelineContext);
+
+    // Stopped, or hidden: the playhead where playback went back to, and the frames since it started into the log.
+    if (! playing)
+    {
+        if (frameBeat.has_value())
+        {
+            frameBeat.reset();
+            followPlayhead();
+            writeFrameLog();
+        }
+
+        return;
+    }
+
+    // The beat heard at the frame's own time, not at the moment the message thread gets to it, which changes with what else
+    // it does (docs/performance-audit.md, section 16).
+    const auto taken = juce::Time::getMillisecondCounterHiRes();
+    const auto milliseconds = seconds * 1000.0;
+    const auto startBefore = view.start;
+    const auto xBefore = playheadX;
+    const auto shiftBefore = subPixel;
+    frameBeat = getHeardPlayheadBeat (timelineContext, milliseconds);
+    followPlayhead();
+
+    // Where the song shows under the playhead's line: the view's start and the line's place, and the part of a pixel the song
+    // is shifted by while it scrolls continuously.
+    const auto moved =
+        playhead->isVisible()
+        && (view.start != startBefore || ! juce::exactlyEqual (playheadX, xBefore) || ! juce::exactlyEqual (subPixel, shiftBefore));
+    frameLog.frame (milliseconds, taken, frameBeat->inBeats(), view.start.inBeats() * view.pixelsPerBeat + playheadX + subPixel, moved);
+}
+
+void TimelineEditor::writeFrameLog()
+{
+    // A second of frames or more; less tells nothing.
+    if (frameLog.getFrames() >= 60)
+        juce::Logger::writeToLog (frameLog.takeSummary (getTitle(), ! followPlayback     ? "not following the playhead"
+                                                                    : scrollContinuously ? "scrolling continuously"
+                                                                                         : "turning pages"));
+
+    frameLog = FrameLog();
 }
 
 //==============================================================================

@@ -34,7 +34,8 @@ void Engine::prepare (double rate, int blockSize)
     click = makeClick (sampleRate, false);
     accentClick = makeClick (sampleRate, true);
     clicking = nullptr;
-    transport.plan = nullptr; // a plan for another rate: the playhead stays on its beat
+    transport.plan = nullptr;  // a plan for another rate: the playhead stays on its beat
+    blockClock = BlockClock(); // the device's blocks timed afresh
 
     // What was asked while no audio thread took it (no device played; past 64 commands, the latest were dropped): the
     // transport as last asked, at once, rather than the commands one by one.
@@ -52,7 +53,7 @@ void Engine::prepare (double rate, int blockSize)
         {
             transport.beat = requestedBeat.load();
             transport.chase = true;
-            publishPlayhead (transport.beat, 0.0, 0.0); // shown there until the next block
+            publishPlayhead (transport.beat, 0.0, getMilliseconds(), 0.0); // shown there until the next block
             locatesTaken.store (asked);
         }
     }
@@ -135,37 +136,27 @@ double Engine::getPlayheadBeat() const noexcept
     if (locatesAsked.load() != locatesTaken.load())
         return requestedBeat.load();
 
-    double beat = 0.0, milliseconds = 0.0, rate = 0.0, limit = 0.0;
+    // From where the latest block started, by the time since. A block that started later than now (one of several the device
+    // took at once, or blocks played faster than real time) shows where it starts.
+    if (const auto latest = playheadStamps.getLatest())
+        return latest->beat
+               + std::clamp (getMilliseconds() - latest->milliseconds, 0.0, 1.5 * latest->length) * latest->beatsPerMillisecond;
 
-    for (;;)
-    {
-        const auto before = playheadSequence.load (std::memory_order_acquire);
-
-        if ((before & 1u) == 0)
-        {
-            beat = playheadBeat.load (std::memory_order_relaxed);
-            milliseconds = playheadMilliseconds.load (std::memory_order_relaxed);
-            rate = beatsPerMillisecond.load (std::memory_order_relaxed);
-            limit = playheadLimit.load (std::memory_order_relaxed);
-            std::atomic_thread_fence (std::memory_order_acquire);
-
-            if (playheadSequence.load (std::memory_order_relaxed) == before)
-                break;
-        }
-    }
-
-    return beat + std::clamp ((getMilliseconds() - milliseconds) * rate, 0.0, limit);
+    return requestedBeat.load();
 }
 
-void Engine::publishPlayhead (double beat, double beatsPerSecond, double blockSeconds) noexcept
+double Engine::getPlayheadBeatAt (double milliseconds) const noexcept
 {
-    playheadSequence.fetch_add (1, std::memory_order_acq_rel); // odd: being written
-    std::atomic_thread_fence (std::memory_order_release);
-    playheadBeat.store (beat, std::memory_order_relaxed);
-    playheadMilliseconds.store (getMilliseconds(), std::memory_order_relaxed);
-    beatsPerMillisecond.store (beatsPerSecond / 1000.0, std::memory_order_relaxed);
-    playheadLimit.store (beatsPerSecond * blockSeconds, std::memory_order_relaxed);
-    playheadSequence.fetch_add (1, std::memory_order_release); // even: written
+    if (locatesAsked.load() != locatesTaken.load())
+        return requestedBeat.load();
+
+    return playheadStamps.getBeatAt (milliseconds).value_or (requestedBeat.load());
+}
+
+void Engine::publishPlayhead (double beat, double beatsPerSecond, double startMilliseconds, double lengthMilliseconds) noexcept
+{
+    playheadStamps.publish (
+        { beat, startMilliseconds, beatsPerSecond / 1000.0, lengthMilliseconds, locatesTaken.load (std::memory_order_relaxed) });
 }
 
 //==============================================================================
@@ -298,6 +289,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
 {
     const juce::ScopedNoDenormals noDenormals;
     const auto startTicks = juce::Time::getHighResolutionTicks();
+    const auto startMilliseconds = blockClock.stamp (getMilliseconds(), numSamples, sampleRate); // smoothed (PlayheadClock.h)
     numOutputs = std::min (numOutputs, maximumChannels);
     numInputs = inputs != nullptr ? std::clamp (numInputs, 0, maximumInputs) : 0;
 
@@ -407,9 +399,10 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                 transport.beat = plan->tempo.toBeats ((double) transport.sample);
             }
 
+            // Where this part started, and when: the block's start on its smoothed clock and the samples before the part.
             const auto beatsPerSecond =
                 transport.playing && transport.countIn.left == 0 ? sampleRate / plan->tempo.getSamplesPerBeat (startBeat) : 0.0;
-            publishPlayhead (startBeat, beatsPerSecond, length / sampleRate);
+            publishPlayhead (startBeat, beatsPerSecond, startMilliseconds + done * 1000.0 / sampleRate, length * 1000.0 / sampleRate);
         }
         else
         {

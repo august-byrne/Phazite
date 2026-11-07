@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist, driven with the mouse and the keys as the user would.
+#include "TestClips.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/PlaylistModel.h"
@@ -14,6 +15,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
@@ -29,6 +31,7 @@
 #include "ui/theme/LookAndFeel.h"
 
 #include <array>
+#include <set>
 
 namespace
 {
@@ -1191,6 +1194,362 @@ TEST_CASE ("Scrolling continuously, the playlist keeps the playhead in the middl
     phazite::test::dispatchMessagesUntil ([] { return false; }, 300);
     CHECK (viewStart() == doctest::Approx (scrolledTo));
     phazite::playOrStop (screen.getSong());
+}
+
+TEST_CASE ("Scrolling continuously, the playhead stays on one column while the song moves on by parts of a pixel")
+{
+    // The owner, 2026-11-07: the playhead jittered while the playlist followed it. With the time line an odd number of
+    // pixels wide its middle was half a pixel in, and the playhead's place, rounded, went from one side of it to the other.
+    PlaylistScreen screen;
+    screen.addClip (0, 0.0, 256.0);
+
+    if (screen.lanes->getWidth() % 2 == 0)
+        screen.window.setSize (screen.window.getWidth() + 1, screen.window.getHeight());
+
+    REQUIRE (screen.lanes->getWidth() % 2 == 1);
+    screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (16.0) });
+    screen.playlist.setScrollingContinuously (true);
+    auto* playhead = phazite::test::findComponentWithTitle (screen.playlist, "Playhead");
+    REQUIRE (playhead != nullptr);
+    phazite::playOrStop (screen.getSong());
+    REQUIRE (phazite::isSongPlaying (screen.getSong()));
+
+    // Past the middle, at a quarter and three quarters of a pixel: the same column for both, which the view moves under.
+    const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
+    const auto pixel = std::floor (40.0 * pixelsPerBeat);
+    std::set<int> columns;
+    std::set<double> lines;
+
+    for (const auto part : { 0.25, 0.75, 1.25, 1.75 })
+    {
+        phazite::movePlayhead (screen.getSong(), beats ((pixel + part) / pixelsPerBeat));
+        phazite::test::dispatchMessagesUntil ([] { return false; }, 300); // the editor's checks, five times a second
+        REQUIRE (playhead->isVisible());
+        columns.insert (playhead->getX());
+        lines.insert (screen.playlist.getPlayheadX());
+    }
+
+    // Its line on the column too: drawn between pixels, it would wobble while the view moves by whole ones.
+    CHECK (columns.size() == 1);
+    CHECK (lines.size() == 1);
+    CHECK (screen.playlist.getView().start.inBeats() > 0.0);
+    phazite::playOrStop (screen.getSong());
+}
+
+TEST_CASE ("The playhead's line is drawn where the playhead is, between pixels, so that it glides rather than steps")
+{
+    // docs/performance-audit.md, section 16 (G2): drawn on whole pixels, at 0.8 of a pixel a frame (the default zoom at 120 BPM
+    // on a 60 Hz display) it stood still one frame in five.
+    PlaylistScreen screen;
+    phazite::test::dispatchPendingMessages();
+    auto* playhead = phazite::test::findComponentWithTitle (screen.playlist, "Playhead");
+    REQUIRE (playhead != nullptr);
+    phazite::ui::LookAndFeel lookAndFeel;
+    playhead->setLookAndFeel (&lookAndFeel);
+    const auto focus = phazite::ui::getPalette (*playhead).focus;
+
+    // Where the line's colour is, weighed by how much of each pixel it covers, along a row under the marker, in the
+    // lanes' pixels.
+    const auto paintedCentre = [&]
+    {
+        juce::Image image (juce::Image::ARGB, playhead->getWidth(), playhead->getHeight(), true, juce::SoftwareImageType());
+        {
+            juce::Graphics g (image);
+            playhead->paintEntireComponent (g, false);
+        }
+
+        auto weighed = 0.0, total = 0.0;
+
+        for (int x = 0; x < image.getWidth(); ++x)
+            if (const auto pixel = image.getPixelAt (x, image.getHeight() - 4); std::abs (pixel.getRed() - focus.getRed()) < 8)
+            {
+                weighed += (x + 0.5) * pixel.getFloatAlpha();
+                total += pixel.getFloatAlpha();
+            }
+
+        return playhead->getX() - screen.lanes->getX() + weighed / std::max (1.0e-9, total);
+    };
+
+    const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
+
+    for (const auto x : { 100.25, 100.75, 101.5 })
+    {
+        screen.playlist.movePlayheadTo (beats (x / pixelsPerBeat));
+        CHECK (screen.playlist.getPlayheadX() == doctest::Approx (x));
+        CHECK (paintedCentre() == doctest::Approx (x).epsilon (0.0005));
+    }
+
+    playhead->setLookAndFeel (nullptr);
+}
+
+TEST_CASE ("At each frame while the song plays, the playhead shows the beat heard then, and the frames go into the log once it stops")
+{
+    // docs/performance-audit.md, section 16 (G3, G6 and option 5): the playhead was read whenever the message thread got to a
+    // frame, from the first frame after a fifth of a second; the frames' log tells how the display's frames went.
+    PlaylistScreen screen;
+    screen.addClip (0, 0.0, 64.0);
+
+    // Phazite's log, as the app writes it, caught for as long as the test lasts, however it ends.
+    struct Log : juce::Logger
+    {
+        Log() { juce::Logger::setCurrentLogger (this); }
+        ~Log() override { juce::Logger::setCurrentLogger (nullptr); }
+        void logMessage (const juce::String& message) override { lines.add (message); }
+        juce::StringArray lines;
+    } log;
+
+    // Playing from beat 2, shown from the first frame on. The tests' engine plays no blocks, so the playhead waits where it
+    // is put, as if the song had played on to there.
+    phazite::movePlayhead (screen.getSong(), beats (2.0));
+    phazite::playOrStop (screen.getSong());
+    REQUIRE (phazite::isSongPlaying (screen.getSong()));
+    auto* session = phazite::findPlayingSession (screen.getSong());
+    REQUIRE (session != nullptr);
+    session->locate (beats (5.37));
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    const auto heard = phazite::getHeardPlayheadBeat (screen.context, start);
+    CHECK (heard.inBeats() == doctest::Approx (5.37));
+    screen.playlist.showFrame (start / 1000.0);
+    CHECK (screen.playlist.getPlayheadX() == doctest::Approx (screen.playlist.getView().beatToX (heard)));
+
+    for (int frame = 1; frame < 70; ++frame)
+        screen.playlist.showFrame ((start + frame * 1000.0 / 60.0) / 1000.0);
+
+    // Stopped: the next frame puts the playhead back where playback started, and writes the log.
+    phazite::playOrStop (screen.getSong());
+    screen.playlist.showFrame ((start + 70 * 1000.0 / 60.0) / 1000.0);
+    CHECK (screen.playlist.getPlayheadX() == doctest::Approx (screen.playlist.getView().beatToX (beats (2.0))));
+
+    juce::StringArray frameLines;
+
+    for (const auto& line : log.lines)
+        if (line.startsWith ("Frames, "))
+            frameLines.add (line);
+
+    REQUIRE (frameLines.size() == 1);
+    CHECK (frameLines[0].startsWith ("Frames, Playlist (turning pages): 70 in "));
+    CHECK (frameLines[0].contains ("one every 16.7 ms"));
+}
+
+TEST_CASE ("Scrolling continuously, the song glides under the playhead by parts of a pixel, and a click finds what shows there")
+{
+    // docs/performance-audit.md, section 16 (option 15): by whole pixels alone, the song stood still one frame in four at the
+    // owner's zoom.
+    PlaylistScreen screen;
+    const auto clip = screen.addClip (0, 0.0, 256.0);
+    phazite::test::dispatchPendingMessages(); // the playlist shows the clip
+    screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (16.0) });
+    screen.playlist.setScrollingContinuously (true);
+    phazite::playOrStop (screen.getSong());
+    REQUIRE (phazite::isSongPlaying (screen.getSong()));
+    auto* session = phazite::findPlayingSession (screen.getSong());
+    auto* ruler = phazite::test::findComponentWithTitle (screen.playlist, "Timeline");
+    REQUIRE (session != nullptr);
+    REQUIRE (ruler != nullptr);
+
+    // Past whole pixels by parts of one: the lanes and the ruler move left by that part, and the playhead stays on its column.
+    const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
+    const auto pixel = std::floor (40.0 * pixelsPerBeat);
+    const auto frame = [&screen] { screen.playlist.showFrame (juce::Time::getMillisecondCounterHiRes() / 1000.0); };
+    std::set<double> lines;
+
+    for (const auto part : { 0.1, 0.3, -0.2, -0.4 })
+    {
+        session->locate (beats ((pixel + part) / pixelsPerBeat)); // the tests' engine plays no blocks: the song waits there
+        frame();
+        CHECK (screen.playlist.getSubPixel() == doctest::Approx (part));
+        CHECK (screen.lanes->getTransform().getTranslationX() == doctest::Approx (-part));
+        CHECK (ruler->getTransform().getTranslationX() == doctest::Approx (-part));
+        lines.insert (screen.playlist.getPlayheadX());
+    }
+
+    CHECK (lines.size() == 1);
+
+    // The mouse, moved with them, still finds the clip where it shows.
+    REQUIRE_FALSE (juce::exactlyEqual (screen.playlist.getSubPixel(), 0.0f));
+    phazite::test::Mouse mouse (*screen.lanes);
+    mouse.click (screen.at (44.0, 0));
+    mouse.pause();
+    CHECK (screen.selection.isSelected (clip));
+
+    // Stopped, on whole pixels again.
+    phazite::playOrStop (screen.getSong());
+    frame();
+    CHECK (screen.playlist.getSubPixel() == 0.0f);
+    CHECK (screen.lanes->getTransform().isIdentity());
+    CHECK (ruler->getTransform().isIdentity());
+}
+
+TEST_CASE ("A clip is kept as a picture, which scrolling only moves; one that draws the part of it in view is painted afresh while "
+           "the view's edge cuts it")
+{
+    // docs/performance-audit.md, section 16 (option 16): every clip in view was painted again at each frame the song scrolled.
+    PlaylistScreen screen;
+    const auto whole = screen.addClip (0, 4.0, 4.0);  // named after its track: no tag
+    const auto tagged = screen.addClip (1, 4.0, 4.0); // its name in a tag, which stays in view
+    const auto wide = screen.addClip (2, 0.0, 400.0); // larger than a picture should be
+    phazite::renameClips (screen.context, { tagged }, "Hook");
+    phazite::test::dispatchPendingMessages();
+
+    const auto componentOf = [&screen] (phazite::ClipID id) -> phazite::ui::ClipComponent*
+    {
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (component->getClip() == id)
+                return component;
+
+        return nullptr;
+    };
+
+    const auto kept = [&componentOf] (phazite::ClipID id)
+    {
+        auto* component = componentOf (id);
+        REQUIRE (component != nullptr);
+        return component->getCachedComponentImage() != nullptr;
+    };
+
+    CHECK (kept (whole));
+    CHECK (kept (tagged));
+    CHECK_FALSE (kept (wide));
+
+    // The view's left edge across them: the one with a tag is painted afresh, its tag moving to stay in view; all of it in view
+    // again, kept. What the other draws doesn't change with the view, and it stays a picture.
+    screen.playlist.setViewStart (beats (6.0));
+    CHECK (kept (whole));
+    CHECK_FALSE (kept (tagged));
+    screen.playlist.setViewStart ({});
+    CHECK (kept (tagged));
+
+    // A change to it drops its picture: muted, it shows faint at once.
+    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto at = lanesAt + screen.at (6.37, 0);
+    const auto before = screen.window.paintEverything().getPixelAt (at.x, at.y);
+    phazite::toggleClipsMuted (screen.context, { whole });
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.window.paintEverything().getPixelAt (at.x, at.y) != before);
+}
+
+TEST_CASE ("A clip with a tag stays a picture while the view's top edge cuts it, and draws again with its tag in view as the rows scroll")
+{
+    // docs/performance-audit.md, section 16 (option 16): only the view's left and right edges, which scroll at every frame of a
+    // song playing, stop a clip with a tag being kept; scrolled up or down, it draws its picture again, its tag where it shows.
+    PlaylistScreen screen;
+    screen.tracks = phazite::ensureTracks (screen.getSong(), 30); // more than fit: the rows scroll
+    const auto tagged = screen.addClip (1, 4.0, 4.0);
+    phazite::renameClips (screen.context, { tagged }, "Hook");
+    phazite::test::dispatchPendingMessages();
+
+    juce::ScrollBar* vertical = nullptr;
+
+    for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
+        if (bar->isVertical())
+            vertical = bar;
+
+    REQUIRE (vertical != nullptr);
+    REQUIRE (vertical->isVisible());
+
+    const auto kept = [&screen, tagged]
+    {
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (component->getClip() == tagged)
+                return component->getCachedComponentImage() != nullptr;
+
+        return false;
+    };
+
+    // Drawn as a picture all in view; then scrolled down by its track's row and 10 pixels more, its top out of view.
+    CHECK (kept());
+    screen.window.paintEverything();
+    vertical->setCurrentRangeStart (screen.heightOf (0) + 10.0, juce::sendNotificationSync);
+    const auto shown = screen.boundsOf (tagged);
+    REQUIRE (shown.getY() == -10);
+    CHECK (kept());
+
+    // Its tag is at the top of what shows of it, in the clip's color: not 10 pixels higher, where its picture had it.
+    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto tag = screen.window.paintEverything().getPixelAt (lanesAt.x + shown.getX() + phazite::ui::ClipLabelTint::margin + 2,
+                                                                 lanesAt.y + phazite::ui::ClipLabelTint::margin
+                                                                     + phazite::ui::ClipLabelTint::height / 2);
+    const auto colour = phazite::getTrackColour (screen.getSong(), screen.tracks[1], 1);
+    CHECK (std::abs ((int) tag.getRed() - (int) colour.getRed()) <= 2);
+    CHECK (std::abs ((int) tag.getGreen() - (int) colour.getGreen()) <= 2);
+    CHECK (std::abs ((int) tag.getBlue() - (int) colour.getBlue()) <= 2);
+}
+
+TEST_CASE ("A clip too long to keep as a picture draws its notes where they are as the view moves along it, muted too")
+{
+    // docs/performance-audit.md, section 16: such a clip is painted again at each frame the song scrolls, and draws only the
+    // notes where it is being painted. Muted, it paints in a layer of its own, faint.
+    for (const auto muted : { false, true })
+    {
+        CAPTURE (muted);
+        PlaylistScreen screen;
+        const auto clip = screen.addClip (0, 0.0, 400.0); // larger than a picture should be
+
+        if (muted)
+            phazite::toggleClipsMuted (screen.context, { clip });
+
+        phazite::test::dispatchPendingMessages();
+        screen.playlist.setViewStart (beats (200.0));
+
+        const auto lanesAt = screen.lanes->getBounds().getPosition();
+        const auto columnAt = [&screen, lanesAt] (const juce::Image& image, double beat)
+        {
+            const auto x = lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (beat)));
+            std::vector<juce::Colour> column;
+
+            for (int y = 0; y < screen.heightOf (0); ++y)
+                column.push_back (image.getPixelAt (x, lanesAt.y + y));
+
+            return column;
+        };
+
+        const auto before = screen.window.paintEverything();
+
+        // A note in each bar, for its first two beats.
+        for (int bar = 0; bar < 100; ++bar)
+            phazite::test::addMidiNote (screen.getSong(), clip, 60, phazite::test::at (bar * 4.0), phazite::test::lasting (2.0));
+
+        phazite::test::dispatchPendingMessages();
+        const auto after = screen.window.paintEverything();
+        CHECK (columnAt (after, 200.37) != columnAt (before, 200.37)); // the 51st bar's note
+        CHECK (columnAt (after, 203.37) == columnAt (before, 203.37)); // none
+    }
+}
+
+TEST_CASE ("The Smart Tool finds where two audio clips meet as the mouse moves, and follows the clips and the zoom")
+{
+    // docs/performance-audit.md, section 16: each move of the mouse asked the model where the track's audio clips meet, which
+    // took a frame's time over a track of a dozen, and the song stuttered as the mouse moved. The playlist keeps them now.
+    PlaylistScreen screen;
+    phazite::test::TemporaryFolder temp;
+    const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Tone.wav"), 4.0); // 8 beats
+    const auto imported = phazite::importFiles (screen.context, { file.getFullPathName() }, screen.tracks[0], beats (0.0));
+    REQUIRE (imported.size() == 1);
+    const auto halves = phazite::splitClips (screen.context, imported, beats (4.0));
+    REQUIRE (halves.size() == 1);
+    phazite::test::dispatchPendingMessages();
+
+    // In the lower third of the row, at the boundary: there, the Smart Tool draws a crossfade.
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto crossfadesAt = [&screen, &mouse] (double beat)
+    {
+        mouse.moveTo ({ juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))), screen.heightOf (0) - 8 });
+        return screen.lanes->getDescription().startsWith ("Drag to crossfade");
+    };
+
+    CHECK (crossfadesAt (4.0));
+    CHECK_FALSE (crossfadesAt (2.0));
+
+    // Zoomed in, where the boundary shows now.
+    screen.playlist.zoomTo ({ beats (2.0), beats (6.0) });
+    CHECK (crossfadesAt (4.0));
+    CHECK_FALSE (crossfadesAt (3.0));
+
+    // The second half moved away: they no longer meet.
+    phazite::moveClip (screen.context, halves[0], beats (6.0), screen.tracks[0]);
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (crossfadesAt (4.0));
+    CHECK_FALSE (crossfadesAt (6.0)); // the first ends at 4, two beats before it
 }
 
 TEST_CASE ("The playhead drags along the ruler to the grid; a song playing is silent until it is let go, then plays on from there")

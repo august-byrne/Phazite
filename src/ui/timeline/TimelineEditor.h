@@ -4,6 +4,7 @@
 // these act on the editor used last (addTimelineCommands()), so the same keys work in both.
 #pragma once
 
+#include "FrameLog.h"
 #include "SmartTool.h"
 #include "TimelineView.h"
 #include "model/arrangement/TimelineModel.h"
@@ -106,6 +107,22 @@ public:
     BeatPosition getPlayheadBeat() const;
     bool isPlayheadShowingLinkedClip() const; // where a linked clip plays elsewhere (getLinkedPlayheadBeat()), for tests
 
+    // A frame of the display, at its vertical blank's time (seconds by juce::Time::getMillisecondCounterHiRes()): while the
+    // song plays where the editor shows, the playhead moves to the beat heard then (getHeardPlayheadBeat()) and the frame is
+    // logged (FrameLog.h); once it stops, the playhead goes where playback went back to, and the log is written. The
+    // display's own frames call it from the moment a project shows (a juce::VBlankAttachment); tests call it with times of
+    // their own.
+    void showFrame (double seconds);
+
+    // Where the playhead's line is drawn, in pixels from the time line's left: between pixels, so that it moves evenly, but on
+    // a whole pixel while the view scrolls under it by whole pixels (for tests).
+    double getPlayheadX() const noexcept { return playheadX; }
+
+    // Scrolling continuously, the part of a pixel the song has moved past the view's whole pixel, by which the ruler and the
+    // editor's other parts that draw the time line are moved left, so that the song glides under the playhead rather than
+    // stepping a pixel at a time (docs/performance-audit.md, section 16, option 15); 0 otherwise (for tests).
+    float getSubPixel() const noexcept { return subPixel; }
+
     // While playing, turn the page when the playhead reaches the right edge; or, scrolling continuously (View > Scroll
     // Continuously, which the app keeps in its settings), keep the playhead in the middle and scroll the song under it, as
     // Logic Pro's Scroll in Play and Cubase's Stationary Cursor do. Scrolling the view sideways while the song plays pauses
@@ -198,6 +215,9 @@ protected:
 
     // Where beats are drawn, in this component's coordinates: x starts from beat view.start at the left.
     virtual juce::Rectangle<int> getTimelineArea() const = 0;
+    // The parts that draw the time line by the view, besides the ruler: what scrolling continuously moves by parts of a pixel
+    // (getSubPixel()).
+    virtual std::vector<juce::Component*> getScrollingParts() { return {}; }
     // What zoom to fit shows; the scroll bar covers it and some room after it.
     virtual BeatRange getContentRange() const = 0;
     // The view moved or zoomed: lay out and repaint what depends on it.
@@ -289,13 +309,21 @@ private:
     double lastAutoScrollTime = 0.0;    // milliseconds (juce::Time::getMillisecondCounterHiRes())
     std::unique_ptr<Playhead> playhead;
     std::unique_ptr<juce::Component> overview; // an Overview (TimelineOverview.cpp), made as the derived class first asks for it
-    juce::VBlankAttachment playheadFrames;     // while playing where it shows: followPlayhead() at each frame of the display
+    juce::VBlankAttachment playheadFrames;     // showFrame() at each frame of the display, while a project shows
     std::unique_ptr<UseListener> useListener;
+    std::optional<BeatPosition> frameBeat; // while playing, the beat heard at the frame shown last (showFrame())
+    bool holdsPlayhead = false;            // scrolling continuously, the view moves under the playhead, which stays put
+    double playheadX = 0.0;                // getPlayheadX()
+    float subPixel = 0.0f;                 // getSubPixel()
+    FrameLog frameLog;
+    void setSubPixel (float); // moves the ruler and getScrollingParts() left by it
 
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
     void componentVisibilityChanged (juce::Component&) override; // the vertical scroll bar showed or hid itself
-    void timerCallback() override;                               // notices what changed elsewhere, and starts and stops playheadFrames
+    void timerCallback() override;                               // notices what changed elsewhere, a few times a second
     void followPlayhead();                                       // moves the playhead, and turns the page while playing
+    BeatPosition getShownPlayheadBeat() const;                   // the beat heard at the frame shown, while playing
+    void writeFrameLog();                                        // the frames since playback started, into Phazite's log
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TimelineEditor)
 };

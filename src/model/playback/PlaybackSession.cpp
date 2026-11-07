@@ -181,6 +181,18 @@ BeatPosition PlaybackSession::getPlayhead() const
     return BeatPosition::fromBeats (host.getEngine().getPlayheadBeat());
 }
 
+double PlaybackSession::getHeardDelay() const
+{
+    const auto* plan = host.getEngine().getPlan();
+    const auto samples = host.getOutputLatency() + (plan != nullptr ? engine::Engine::getOutputLatency (*plan) : 0);
+    return samples * 1000.0 / host.getEngine().getSampleRate();
+}
+
+BeatPosition PlaybackSession::getHeardPlayhead (double milliseconds) const
+{
+    return BeatPosition::fromBeats (host.getEngine().getPlayheadBeatAt (milliseconds - getHeardDelay()));
+}
+
 void PlaybackSession::timerCallback()
 {
     // Playing on with nothing looped, and nothing recorded: it stops as the playhead crosses the song's end, and goes back

@@ -144,10 +144,18 @@ private:
     std::vector<ClipSubRow> shownSubRows; // shownSubRows[i] is shownClips[i]'s
     std::unordered_map<ClipID, size_t> clipIndex;
     std::unordered_map<ClipID, std::unique_ptr<ClipComponent>> clipComponents;
+    std::unordered_map<ClipID, juce::Rectangle<int>> shownParts; // what showed of each, in its own coordinates (layOutClips())
     std::unordered_map<ClipID, std::unique_ptr<ClipWaveform>> waveforms;
     std::unordered_map<TrackID, FolderSummary> folderSummaries; // what each folder's row shows of its tracks' clips
-    int contentHeight = 0;                                      // of the scrolling rows
-    int pinnedHeight = 0;                                       // of the pinned band
+
+    // Where audio clips on a track meet, by track, as the model found them at the zoom of crossfadeZoom (its pixels a beat),
+    // asked for when the mouse first comes over the track: a mouse move asks the model nothing, which made a move over a
+    // track of a dozen audio clips take a frame's time (docs/performance-audit.md, section 16). rebuildClips() forgets them.
+    std::unordered_map<TrackID, std::vector<CrossfadeSpot>> crossfadeSpots;
+    double crossfadeZoom = 0.0;
+
+    int contentHeight = 0; // of the scrolling rows
+    int pinnedHeight = 0;  // of the pinned band
     bool focusMode = false;
     std::optional<BeatPosition> fileDropBeat; // where files dragged over the playlist would go
     int fileDropRow = -1;
@@ -212,6 +220,7 @@ private:
     void rebuildClips(); // the clips on the rows, as they are now
     void layOutClips();  // a component for each clip in view, where it is
     std::unique_ptr<ClipComponent> makeClipComponent (const ClipInfo&);
+    void waveformLoaded (ClipID);                                        // more of an audio clip's waveform loaded: its component paints it
     int getZOrderFor (const juce::Component& layer, size_t index) const; // after the clips before it in the list
     void updateClips();                                                  // their colors and whether they are selected
     void showLookOf (ClipComponent&) const;
@@ -229,7 +238,7 @@ private:
     void smartToolDown (const juce::MouseEvent&);
     void beginDrag (const juce::MouseEvent&);
     juce::Point<int> getGestureStart() const; // where the mouse went down, in the lanes as they are now
-    std::optional<CrossfadeSpot> findCrossfadeAt (juce::Point<int>) const;
+    std::optional<CrossfadeSpot> findCrossfadeAt (juce::Point<int>);
     void selectRange (BeatPosition from, BeatPosition to, int fromRow, int toRow);
     ClipID placeClip (int row, BeatPosition, bool snapStart);  // a copy of lastClip, for Draw and Paint
     void muteOrDeleteClipAt (juce::Point<int>, bool deleteIt); // once per gesture for each clip
@@ -260,6 +269,7 @@ private:
 
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;
+    std::vector<juce::Component*> getScrollingParts() override;  // the lanes, the sections and the chord lane
     std::vector<OverviewMark> getOverviewMarks() const override; // each track's clips, a row each
     BeatRange getContentRange() const override;
     void timelineChanged() override;

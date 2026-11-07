@@ -2,6 +2,7 @@
 // The song as Phazite's own engine plays it (model/playback/): the plan the model compiles from the song, and the transport
 // the model's commands drive through it while it plays the project.
 #include "EnginePlayback.h"
+#include "TestDevices.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "devices/eq/Equalizer.h"
@@ -96,6 +97,31 @@ TEST_CASE ("Phazite's engine loops the range the song loops, and stops at the so
     followTheSong();
     CHECK_FALSE (phazite::isPlaying (song.context));
     CHECK (phazite::getPlayheadBeat (song.context).inBeats() == doctest::Approx (0.0));
+}
+
+TEST_CASE ("The playhead heard is where the engine was as long before as its sound takes to reach the speakers")
+{
+    // The window showed where the engine played, ahead of what was heard by the delay compensation and the audio output's
+    // latency (docs/performance-audit.md, section 16, option 7). An effect 64 samples late delays the song's sound by as much.
+    TestSong song;
+    song.setTempo (120.0);
+    song.addMidiClip (song.firstTrack, 0.0, 16.0);
+    auto& state = *phazite::findSong (song.context);
+    phazite::test::addTestDevice (state, song.firstTrack, phazite::test::TestDelay::typeID);
+    EnginePlayback playback;
+
+    song.run ("transport.playStop");
+    playback.play (0.5);
+    const auto* session = phazite::findPlayingSession (state);
+    REQUIRE (session != nullptr);
+    CHECK (session->getHeardDelay() == doctest::Approx (phazite::test::TestDelay::latency * 1000.0 / EnginePlayback::sampleRate));
+
+    // At any moment, the playhead heard is the engine's that much earlier.
+    const auto& engine = phazite::getPlaybackHost (phazite::test::getEngineContext()).getEngine();
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    CHECK (phazite::getHeardPlayheadBeat (song.context, now).inBeats()
+           == doctest::Approx (engine.getPlayheadBeatAt (now - session->getHeardDelay())));
+    song.run ("transport.playStop");
 }
 
 TEST_CASE ("Phazite's engine clicks the metronome on each beat's sample")

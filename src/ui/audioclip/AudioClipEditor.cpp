@@ -77,7 +77,7 @@ struct AudioClipEditor::Waveform : public juce::Component
         if (drawnClip != editor.clip)
         {
             drawnClip = editor.clip;
-            drawing = editor.clip.isValid() ? makeClipWaveform (editor.context, editor.clip, *this) : nullptr;
+            drawing = editor.clip.isValid() ? makeClipWaveform (editor.context, editor.clip, [this] { repaint(); }) : nullptr;
         }
 
         repaint();

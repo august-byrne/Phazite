@@ -9,6 +9,12 @@ namespace phazite::ui
 namespace
 {
     constexpr int focusedOutHeight = 20; // in focus mode, the tracks out of focus are this tall
+
+    // A clip is kept as a picture (layOutClips()) only so wide and so large, in pixels: a picture takes the clip's width by its
+    // height in memory, four bytes a pixel (four times as many on a display at 200 %), and the graphics card takes none wider
+    // than 16,384 of its pixels.
+    constexpr int widestClipPicture = 4096;
+    constexpr int largestClipPicture = 4096 * 96;
 } // namespace
 
 std::vector<TrackRow> Playlist::getShownRows() const
@@ -243,6 +249,7 @@ void Playlist::rebuildClips()
     shownSubRows.clear();
     clipIndex.clear();
     folderSummaries.clear();
+    crossfadeSpots.clear(); // found again as the mouse comes over each track
 
     for (const auto& row : rows)
     {
@@ -273,6 +280,7 @@ void Playlist::layOutClips()
     // A pinned track's clips are in the pinned layer, the others in the scrolling one, which keeps them out of the pinned
     // band; each layer's bounds are what of it shows. Components of clips that left the view go.
     std::unordered_map<ClipID, std::unique_ptr<ClipComponent>> inView;
+    std::unordered_map<ClipID, juce::Rectangle<int>> partsInView;
 
     for (size_t i = 0; i < shownClips.size(); ++i)
     {
@@ -296,9 +304,38 @@ void Playlist::layOutClips()
             layer.addAndMakeVisible (component, getZOrderFor (layer, i));
 
         component.setBounds (bounds - layer.getPosition());
+
+        // Kept as a picture, which scrolling then only moves rather than painting it again (docs/performance-audit.md,
+        // section 16, option 16). A clip that draws the part of itself in view (an audio clip's waveform, a tag with its name
+        // or marks, which stay in view) isn't kept while the view's left or right edge crosses it, as scrolling sideways then
+        // changes what it draws at every step; kept, it draws its picture again when what shows of it changes (a scroll up or
+        // down across it). None is kept larger than a picture should be. A clip's picture is also dropped as it repaints (a
+        // change, a waveform loading).
+        const auto& shown = component.getInfo();
+        const auto drawsWhatShows = shown.kind == ClipType::audio || shown.linked || component.getLabel().isNotEmpty();
+        const auto across = bounds.getX() < layer.getX() || bounds.getRight() > layer.getRight();
+        const auto part = bounds.getIntersection (layer.getBounds()) - bounds.getPosition();
+        const auto keep = ! (drawsWhatShows && across) && bounds.getWidth() <= widestClipPicture
+                          && bounds.getWidth() * bounds.getHeight() <= largestClipPicture;
+
+        if (keep != (component.getCachedComponentImage() != nullptr))
+            component.setBufferedToImage (keep);
+        else if (const auto before = shownParts.find (clip.id);
+                 keep && drawsWhatShows && before != shownParts.end() && before->second != part)
+            component.repaint();
+
+        partsInView[clip.id] = part;
     }
 
     clipComponents = std::move (inView);
+    shownParts = std::move (partsInView);
+}
+
+void Playlist::waveformLoaded (ClipID clip)
+{
+    // Its clip's component, if in view, paints it again, dropping its picture.
+    if (const auto found = clipComponents.find (clip); found != clipComponents.end())
+        found->second->repaint();
 }
 
 std::unique_ptr<ClipComponent> Playlist::makeClipComponent (const ClipInfo& clip)
@@ -311,7 +348,7 @@ std::unique_ptr<ClipComponent> Playlist::makeClipComponent (const ClipInfo& clip
         auto& waveform = waveforms[clip.id];
 
         if (waveform == nullptr)
-            waveform = makeClipWaveform (context, clip.id, *lanes); // which it repaints as it loads
+            waveform = makeClipWaveform (context, clip.id, [this, id = clip.id] { waveformLoaded (id); });
 
         component->showWaveform (waveform.get());
     }

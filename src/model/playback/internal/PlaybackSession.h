@@ -62,6 +62,14 @@ public:
     void locate (BeatPosition);
     BeatPosition getPlayhead() const;
 
+    // What is heard at a moment left the engine this many milliseconds before: the delay compensation that lines up its
+    // devices, and the audio output's latency as the device reports it (a Bluetooth output's radio adds more, which Windows
+    // doesn't report). The playhead heard at a moment (milliseconds by juce::Time::getMillisecondCounterHiRes()) is where
+    // the engine was that much earlier: the window's frames show it while the song plays (docs/performance-audit.md,
+    // section 16).
+    double getHeardDelay() const;
+    BeatPosition getHeardPlayhead (double milliseconds) const;
+
     // The engine's clock as playback last started: what Capture keeps of what was played while the song plays.
     std::int64_t getPlayStartClock() const noexcept { return playStartClock; }
 

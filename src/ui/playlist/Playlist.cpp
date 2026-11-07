@@ -368,6 +368,7 @@ void Playlist::showProject()
     laneViews.clear();
     knownLanes.reset(); // the new project's lanes show where they are
     clipComponents.clear();
+    shownParts.clear();
     waveforms.clear();
     shownClips.clear();
     shownSubRows.clear();
@@ -459,6 +460,11 @@ void Playlist::songChanged (const SongChanges& changes)
 juce::Rectangle<int> Playlist::getTimelineArea() const
 {
     return lanes->getBounds();
+}
+
+std::vector<juce::Component*> Playlist::getScrollingParts()
+{
+    return { lanes.get(), &sectionsStrip, &chordLane };
 }
 
 std::vector<TimelineEditor::OverviewMark> Playlist::getOverviewMarks() const

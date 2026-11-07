@@ -180,6 +180,8 @@ target_sources(phazite_core PRIVATE
     src/engine/core/EventQueue.h
     src/engine/core/Handover.h
     src/engine/core/Plan.h
+    src/engine/core/PlayheadClock.cpp
+    src/engine/core/PlayheadClock.h
     src/engine/core/Recording.cpp
     src/engine/core/Recording.h
     src/engine/core/TempoMap.cpp
@@ -839,6 +841,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/theme/LookAndFeel.h
     src/ui/theme/Popups.cpp
     src/ui/theme/Popups.h
+    src/ui/timeline/FrameLog.cpp
+    src/ui/timeline/FrameLog.h
     src/ui/timeline/SmartTool.cpp
     src/ui/timeline/SmartTool.h
     src/ui/timeline/TimelineEditor.cpp
@@ -1081,6 +1085,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ExampleSongTests.cpp
         tests/ExportTests.cpp
         tests/FactoryPresetTests.cpp
+        tests/FrameLogTests.cpp
         tests/FreezeTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
@@ -1119,6 +1124,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ParameterHandleTests.cpp
         tests/PianoRollTests.cpp
         tests/PlaybackTests.cpp
+        tests/PlayheadClockTests.cpp
         tests/PlaylistModelTests.cpp
         tests/PluginKeysTests.cpp
         tests/PluginParametersTests.cpp

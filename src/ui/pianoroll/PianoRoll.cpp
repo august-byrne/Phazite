@@ -499,6 +499,11 @@ juce::Rectangle<int> PianoRoll::getTimelineArea() const
     return grid->getBounds().getUnion (velocityLane->getBounds());
 }
 
+std::vector<juce::Component*> PianoRoll::getScrollingParts()
+{
+    return { grid.get(), velocityLane.get() };
+}
+
 std::optional<double> PianoRoll::getLinkedPlayheadBeat (double songBeat) const
 {
     // The notes shown play wherever a clip linked to theirs plays: the playhead shows where, in the clip shown.

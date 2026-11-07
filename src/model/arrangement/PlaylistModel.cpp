@@ -541,26 +541,37 @@ std::vector<CrossfadeSpot> getCrossfadeSpots (const ProjectContext& context, Tra
     if (song == nullptr || ! holdsClips (*song, trackID))
         return spots;
 
-    std::vector<juce::ValueTree> audio;
+    // Where each audio clip plays, worked out once: it reads the clip's file and the song's tempo, which every pair of clips
+    // asked again made a mouse move over a track of a dozen clips take a frame's time (docs/performance-audit.md, section 16).
+    struct Placed
+    {
+        ClipID id;
+        PlayedPosition position;
+        BeatPosition start, end;
+    };
+
+    std::vector<Placed> audio;
 
     for (const auto& clipState : getClipStates (findTrackState (*song, trackID)))
+    {
         if (isAudioState (clipState))
-            audio.push_back (clipState);
+        {
+            const auto position = getPlayedPosition (*song, clipState);
+            audio.push_back ({ getClipID (clipState), position, toBeats (*song, position.start), toBeats (*song, position.end) });
+        }
+    }
 
     for (const auto& first : audio)
     {
         for (const auto& second : audio)
         {
-            if (first == second)
-                continue;
-
             // The second starts after the first, where it ends or inside it (a crossfade already), and ends later.
-            const auto one = getPlayedPosition (*song, first), two = getPlayedPosition (*song, second);
+            const auto &one = first.position, &two = second.position;
 
-            if (two.start <= one.start || two.end <= one.end || toBeats (*song, two.start) > toBeats (*song, one.end) + gap)
+            if (first.id == second.id || two.start <= one.start || two.end <= one.end || second.start > first.end + gap)
                 continue;
 
-            spots.push_back ({ getClipID (first), getClipID (second), toBeats (*song, (one.end + two.start) / 2.0) });
+            spots.push_back ({ first.id, second.id, toBeats (*song, (one.end + two.start) / 2.0) });
         }
     }
 

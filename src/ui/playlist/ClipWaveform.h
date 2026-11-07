@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // An audio clip's waveform as the playlist and the audio clip editor draw it. The app makes them
-// (src/app/ClipWaveforms.h): the levels of the clip's file load in the background and repaint a component as they go,
-// which needs both a window component and the open project's clips, so they belong to the app. Without a maker set,
-// clips show no waveform (in tests, say).
+// (src/app/ClipWaveforms.h): the levels of the clip's file load in the background and call back as they go, for what shows
+// them to be painted again, which needs the open project's clips, so they belong to the app. Without a maker set, clips
+// show no waveform (in tests, say).
 #pragma once
 
 #include "model/base/Beats.h"
@@ -36,9 +36,10 @@ public:
     virtual void paintSpan (juce::Graphics&, juce::Rectangle<int> area, BeatRange span) = 0;
 };
 
-// Makes the waveform of an audio clip of the open project, which repaints a component as it loads.
-using ClipWaveformMaker = std::function<std::unique_ptr<ClipWaveform> (ProjectContext&, ClipID, juce::Component& toRepaint)>;
+// Makes the waveform of an audio clip of the open project, which calls loaded() on the message thread as more of its levels
+// load, for what shows it to paint it again (and to drop a picture of it, such as the playlist's clips keep).
+using ClipWaveformMaker = std::function<std::unique_ptr<ClipWaveform> (ProjectContext&, ClipID, std::function<void()> loaded)>;
 
-void setClipWaveformMaker (ClipWaveformMaker);                                                        // the app's, or nothing
-std::unique_ptr<ClipWaveform> makeClipWaveform (ProjectContext&, ClipID, juce::Component& toRepaint); // nullptr without a maker
+void setClipWaveformMaker (ClipWaveformMaker);                                                          // the app's, or nothing
+std::unique_ptr<ClipWaveform> makeClipWaveform (ProjectContext&, ClipID, std::function<void()> loaded); // nullptr without a maker
 } // namespace phazite::ui

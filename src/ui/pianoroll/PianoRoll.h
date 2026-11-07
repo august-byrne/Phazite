@@ -217,6 +217,7 @@ private:
 
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;
+    std::vector<juce::Component*> getScrollingParts() override;  // the notes and the velocities
     std::vector<OverviewMark> getOverviewMarks() const override; // the clips' notes, at their pitches
     BeatRange getContentRange() const override;
     void timelineChanged() override;

@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <functional>
+#include <utility>
 
 namespace phazite
 {
@@ -30,10 +31,10 @@ namespace
                      private juce::ChangeListener
     {
     public:
-        Waveform (ProjectContext& c, ClipID id, juce::Component& component)
+        Waveform (ProjectContext& c, ClipID id, std::function<void()> onLoaded)
             : context (c),
               clipID (id),
-              toRepaint (component)
+              loaded (std::move (onLoaded))
         {
         }
 
@@ -68,13 +69,17 @@ namespace
     private:
         ProjectContext& context;
         const ClipID clipID;
-        juce::Component& toRepaint;
+        std::function<void()> loaded; // called as more of the levels load
         juce::SharedResourcePointer<Levels> levels;
         std::unique_ptr<juce::AudioThumbnail> thumbnail;
         juce::File shownFile; // what it shows
 
         // More of the file has been read: what shows it shows it.
-        void changeListenerCallback (juce::ChangeBroadcaster*) override { toRepaint.repaint(); }
+        void changeListenerCallback (juce::ChangeBroadcaster*) override
+        {
+            if (loaded != nullptr)
+                loaded();
+        }
 
         // The clip's element, if it is an audio clip of the open project's song.
         juce::ValueTree findClip() const
@@ -158,7 +163,7 @@ namespace
 
 ui::ClipWaveformMaker getClipWaveformMaker()
 {
-    return [] (ProjectContext& context, ClipID clip, juce::Component& toRepaint) -> std::unique_ptr<ui::ClipWaveform>
-    { return std::make_unique<Waveform> (context, clip, toRepaint); };
+    return [] (ProjectContext& context, ClipID clip, std::function<void()> loaded) -> std::unique_ptr<ui::ClipWaveform>
+    { return std::make_unique<Waveform> (context, clip, std::move (loaded)); };
 }
 } // namespace phazite

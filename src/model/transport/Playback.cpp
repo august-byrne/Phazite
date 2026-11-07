@@ -227,6 +227,12 @@ BeatPosition getPlayheadBeat (const Song& song)
     return session != nullptr ? session->getPlayhead() : getPlayStartBeat (song);
 }
 
+BeatPosition getHeardPlayheadBeat (const Song& song, double milliseconds)
+{
+    const auto* session = findPlayingSession (song);
+    return session != nullptr ? session->getHeardPlayhead (milliseconds) : getPlayStartBeat (song);
+}
+
 bool isLowLatencyOn (const PlaybackHost& host)
 {
     return host.isLowLatency();

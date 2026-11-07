@@ -349,6 +349,9 @@ void ClipComponent::paintNotes (juce::Graphics& g, juce::Rectangle<int> area, ju
     const auto beatToX = [&] (double beat) { return (float) (beat / clipLength * getWidth()); };
     const auto end = (float) getShape().getRight(); // short of the line after it
 
+    // Only those where it is being painted: a clip too long to keep as a picture is painted again at each frame the song
+    // scrolls, and most of it is out of view (docs/performance-audit.md, section 16).
+    const auto painted = g.getClipBounds().toFloat();
     g.setColour (ink);
 
     for (const auto& note : notes)
@@ -360,7 +363,10 @@ void ClipComponent::paintNotes (juce::Graphics& g, juce::Rectangle<int> area, ju
             continue; // outside the clip
 
         const auto top = (float) area.getBottom() - (float) (note.pitch - bottomNote + 1.0) * noteHeight;
-        g.fillRect (juce::Rectangle<float> (left, top, std::max (1.0f, right - left), std::max (1.0f, noteHeight - 1.0f)));
+
+        if (const juce::Rectangle<float> box (left, top, std::max (1.0f, right - left), std::max (1.0f, noteHeight - 1.0f));
+            box.intersects (painted))
+            g.fillRect (box);
     }
 }
 } // namespace phazite::ui

@@ -119,17 +119,28 @@ void Playlist::selectRange (BeatPosition from, BeatPosition to, int fromRow, int
     range.set (BeatRange::between (from, to), tracks);
 }
 
-std::optional<CrossfadeSpot> Playlist::findCrossfadeAt (juce::Point<int> position) const
+std::optional<CrossfadeSpot> Playlist::findCrossfadeAt (juce::Point<int> position)
 {
     const auto row = getRowAt (position.y);
 
     if (row < 0)
         return {};
 
-    // Clips a pixel apart count as touching.
-    const auto pixel = BeatDuration::fromBeats (1.0 / getView().pixelsPerBeat);
+    // The track's spots, as the model finds them once for the clips and the zoom as they are: clips a pixel apart count as
+    // touching.
+    if (! juce::exactlyEqual (crossfadeZoom, getView().pixelsPerBeat))
+    {
+        crossfadeSpots.clear();
+        crossfadeZoom = getView().pixelsPerBeat;
+    }
 
-    for (const auto& spot : getCrossfadeSpots (context, rows[(size_t) row].track.id, pixel))
+    const auto track = rows[(size_t) row].track.id;
+    auto known = crossfadeSpots.find (track);
+
+    if (known == crossfadeSpots.end())
+        known = crossfadeSpots.emplace (track, getCrossfadeSpots (context, track, BeatDuration::fromBeats (1.0 / crossfadeZoom))).first;
+
+    for (const auto& spot : known->second)
     {
         // Only where the two show side by side, in the same sub-row (clips that overlap show one under another), and in
         // the lower third of it, so the upper part still trims.

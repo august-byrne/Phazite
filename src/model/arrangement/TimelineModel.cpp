@@ -96,6 +96,12 @@ BeatPosition getPlayheadBeat (const ProjectContext& context)
     return song != nullptr ? getPlayheadBeat (*song) : BeatPosition();
 }
 
+BeatPosition getHeardPlayheadBeat (const ProjectContext& context, double milliseconds)
+{
+    auto* song = findSong (context);
+    return song != nullptr ? getHeardPlayheadBeat (*song, milliseconds) : BeatPosition();
+}
+
 void movePlayhead (ProjectContext& context, BeatPosition beat)
 {
     if (auto* song = findSong (context))

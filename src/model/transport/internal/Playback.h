@@ -94,6 +94,10 @@ void stopPlaying (Song&);
 bool isSongPlaying (const Song&);
 BeatPosition getPlayheadBeat (const Song&);
 
+// Where the playhead is heard at a moment (milliseconds by juce::Time::getMillisecondCounterHiRes()): its session's
+// (PlaybackSession::getHeardPlayhead()), or where playback starts without one.
+BeatPosition getHeardPlayheadBeat (const Song&, double milliseconds);
+
 // The Low Latency switch (PlaybackHost.h: setLowLatency()).
 bool isLowLatencyOn (const PlaybackHost&);
 void toggleLowLatency (PlaybackHost&);

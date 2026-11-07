@@ -47,6 +47,10 @@ void saveGridSettings (ProjectContext&, GridOwner, const GridSettings&);
 BeatPosition getPlayheadBeat (const ProjectContext&);
 void movePlayhead (ProjectContext&, BeatPosition);
 
+// Where the playhead is heard at a moment (milliseconds by juce::Time::getMillisecondCounterHiRes()), which a frame of the
+// display shows while the song plays: where playback was as long before as its sound takes to reach the speakers.
+BeatPosition getHeardPlayheadBeat (const ProjectContext&, double milliseconds);
+
 // The loop as a ruler shows and changes it: where it is while playback loops (nothing while it doesn't); a range to
 // loop, which turns looping on (an empty one changes nothing); looping on or off; and the whole song. Not undo steps,
 // as in most DAWs (Playback.h).

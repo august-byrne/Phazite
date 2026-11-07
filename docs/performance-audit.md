@@ -584,3 +584,237 @@ A clip of a file at another rate than the engine's costs three times what it did
 stereo clip, 16 % for 64 playing at once. A 110 dB filter in place of 136 dB saved only 9 %, so the filter stays. If
 many such clips at once ever weigh on a song, converting each file once into the song's cache, as stretched clips are,
 would cost nothing as they play, at the price of a wait before a new clip sounds (dsp-audit.md, 3.1).
+
+## 16. The window's frames and the playhead (2026-11-07)
+
+*The owner: "i sometimes notice when the track is following the playhead, that the playhead line can jitter. that
+implies to me that the frame timing or the fps are not steady. i want you to audit our graphical performance. what routes
+of improvement do we have. rank our options along efficacy and also cost of implementation (all options must be FOSS if
+they use outside packages)." This section follows the path from an audio block to a frame on the screen through
+Phazite's code and JUCE 9.0.5's on Windows, and ranks what would make it smoother. Its findings come from reading the code
+and from the measurements of sections 8 and 13; the tests can't time what reaches the screen.*
+
+**How a frame is made while the song plays.**
+1. The audio thread plays a block (480 samples, 10 ms, on the owner's settings) and publishes where the block started
+   and when (`Engine::publishPlayhead()`); `Engine::getPlayheadBeat()` moves that on by the time since, by a block at most.
+2. JUCE's vblank thread waits for the display's vertical blank (`IDXGIOutput::WaitForVBlank()`, `juce_VBlank_windows.cpp`),
+   notes the time and posts a message to the message thread; it skips a vblank while the last one is still unhandled.
+3. On the message thread, the window calls its vblank listeners first: the time line editors' `juce::VBlankAttachment`,
+   which runs `TimelineEditor::followPlayhead()` (it reads the playhead and moves the view or the playhead's component).
+   Then it paints what changed through Direct2D and presents it (`D2DRenderContext::onVBlank()`,
+   `juce_Windowing_windows.cpp`), if its swap chain has taken the last frame; otherwise at the next vblank.
+4. Windows' compositor shows the frame at a following vblank.
+
+The playhead looks steady when each frame moves it by what the time between frames moves the song, to well under a pixel.
+At 24 pixels a beat (the default zoom) and 120 BPM it moves 48 pixels a second: 0.8 of a pixel a frame at 60 Hz, a third
+of a pixel at 144 Hz.
+
+| | What | Where | What it does to the playhead |
+|---|---|---|---|
+| G1 | Scrolling continuously, the playhead's column was the time line's middle, half a pixel in when the time line is an odd number of pixels wide; the playhead's place, rounded, fell on one side of it or the other as the song moved on by parts of a pixel | `TimelineEditor::followPlayhead()` | A pixel back and forth on most frames, whenever the window's and panels' sizes made the width odd: the jitter the owner saw. Fixed (below) |
+| G2 | It is drawn on whole pixels | `TimelineEditor::updatePlayhead()` | At 0.8 of a pixel a frame it stands still one frame in five, a hitch twelve times a second; zoomed out further it moves in steps |
+| G3 | It is read when the message thread gets to the frame, not at the frame's time, which JUCE hands the attachment and Phazite ignores | `TimelineEditor::timerCallback()` | The delay changes with what else the thread does (the displays' 30 Hz ticks, the views' timers, paints): each millisecond moves the line 0.05 of a pixel at the default zoom, 0.4 at 200 pixels a beat |
+| G4 | The engine stamps a block when it has played it, so the stamp moves with how long the block took, and moves the playhead on by a block at most, so a late block holds it still until it comes | `Engine::process()`, `Engine::getPlayheadBeat()` | Blocks with plug-ins in helpers take 0.2 to 1.7 ms (section 13), busier songs more. An output that takes blocks in bursts (Bluetooth, some shared-mode devices) makes the playhead jump a block and wait one: 10 ms, half a pixel at the default zoom, 4 pixels at 200 pixels a beat |
+| G5 | JUCE's Direct2D window paints at a vblank only if its swap chain has taken the last frame (its frame-latency object, polled without waiting), the last frame ended over a millisecond before, and Windows has delivered the paint message for what changed; otherwise at the next vblank, two frames' movement at once | `juce_Direct2DHwndContext_windows.cpp` (`checkPaintReady()`), `juce_Windowing_windows.cpp` | Unknown: the vblank thread and the swap chain wake at the same vblank, in no fixed order. Option 5 measures it |
+| G6 | The per-frame attachment is made by the editor's 5 Hz timer | `TimelineEditor::timerCallback()` | For up to 200 ms after Play, the playhead moves five times a second |
+| G7 | The displays' ticker (30 Hz) and about fifteen views' timers (4 to 15 Hz, section 13) run at their own times, not the display's | `ui::DisplayTicker`, the views | Feeds G3; meters and the playhead change on different frames |
+| G8 | Scrolling continuously repaints the whole time line at each pixel it moves | `TimelineEditor::setViewStart()` | Not a cause here: 1.6 ms of painting for the 100-track song (section 13) in a frame of 16.7 ms. It would weigh on a slow laptop, a 4K screen, or Linux, which paints in software |
+| G9 | The playhead shows what the engine is playing, not what is heard, which comes the output's latency later | `Engine::getPlayheadBeat()` | Not jitter: the line runs ahead of the sound, by 10 to 20 ms on a wired output and 150 to 250 ms on Bluetooth (section 1) |
+
+What already works: Windows draws through Direct2D on the graphics card, with a flip-model swap chain that presents only
+what changed, at the display's own rate, and nothing in Phazite repaints while nothing moves (section 13). Clips drawn
+see-through (the same day) cost nothing more: a clip's rounded corners never let it be opaque, so what is behind it was
+repainted with it already.
+
+**Fixed now (G1).** The column the playhead stays on is a whole pixel (the width halved, rounded down), and the view moves
+under it by whole pixels, so the playhead's place is within half a pixel of that column and rounds to it. A test plays
+the song at places a quarter of a pixel either side of whole pixels, on a time line an odd number of pixels wide, and
+finds the playhead on one column ("Scrolling continuously, the playhead stays on one column...", `tests/PlaylistTests.cpp`);
+before the fix it found two. Turning pages, and the start of a song, where the playhead crosses to the middle, are as
+they were.
+
+**The options, ranked** by what each buys against what it costs. Every outside package named is open source.
+
+| Rank | Option | Fixes | Efficacy | Cost | Outside code |
+|---|---|---|---|---|---|
+| 1 | Done: the middle on a whole pixel | G1 | High, scrolling continuously | Trivial: two lines and a test | None |
+| 2 | Done: draw the playhead's line where it is, between pixels, anti-aliased: its component stays on whole pixels and the line is offset inside it (on a display at 200 % that is a whole pixel of the screen's) | G2 | High: the line glides rather than steps, at any zoom and refresh rate | Small: a few hours | None |
+| 3 | Done: read the playhead at the frame's time: an `Engine::getPlayheadBeatAt()` given the vblank's timestamp, which is on the engine's clock (`juce::Time::getMillisecondCounterHiRes()`) | G3 | Medium to high: what else the message thread does no longer moves the line | Small | None |
+| 4 | Done: stamp each block when it starts, smooth the stamps with a delay-locked loop, as JACK and PipeWire smooth their clocks, and let the playhead run on a little past a block | G4 | Medium; high with Bluetooth, a busy song or a close zoom | Small to medium: about a day on the audio thread, with a test of uneven block times and the real-time audit | None |
+| 5 | Done: measure the frames: a log, while playing, of each frame's vblank time, how late the message thread took it, how long the paint took, and the gaps between paints (JUCE counts some of this itself with `JUCE_DIRECT2D_METRICS`), written as the engine's block times are; and a run of PresentMon, which records when each frame reached the screen | G5, and checks 2 to 4 | Tells whether G5 happens, and what 2 to 4 gained | Small | PresentMon (MIT), which the owner runs: it needs administrator rights |
+| 6 | Done: follow at each frame from the moment playback starts: the attachment made as the editor shows, doing nothing while stopped (the window's own vblank already wakes the message thread at each frame) | G6 | Low to medium: the first fifth of a second | Trivial | None |
+| 7 | Done: show the playhead where the sound is heard: the frame's time less the output's latency | G9 | Accuracy, not smoothness | Small, once 3 and 4 are done | None |
+| 8 | If 5 finds frames that JUCE puts off: report it to JUCE with the measurements | G5 | Could be high | Small to report; JUCE's to fix (`external/` stays as it is) | None |
+| 9 | Tick the displays at the display's frames, and fold the views' timers into that tick, as section 13 planned for the CPU at rest | G7 | Low to medium once 3 is done | Medium | None |
+| 10 | Keep clips' pictures between frames (`juce::Component::setBufferedToImage()`), or the time line's in tiles, so that scrolling moves pictures rather than painting them again | G8 | Low on the owner's PC; medium on a laptop, a 4K screen or Linux | Small to try for clips (a few MB of pictures); medium for tiles | None |
+| 11 | Scroll continuously by the screen's own pixels on a scaled display (150 %, 200 %): smaller steps | G2, for the view | Low to medium, on scaled displays only; none at the owner's 100 % | Medium: every rounding in the time line's drawing | None |
+| 12 | A frame profiler as a build option, for later audits | | Shows what each frame spends, function by function | Small to medium | Tracy (BSD-3-Clause) |
+| 13 | JUCE's OpenGL renderer in place of Direct2D | | None for jitter: Direct2D already draws on the graphics card, and the OpenGL path brings weaker text and timing of its own | Small to try | None (part of JUCE) |
+| 14 | Another drawing library or UI framework | | None for jitter, which comes from timing, not drawing speed, and drawing speed isn't short here | Very high: `src/ui` is about 52,000 lines on JUCE's `Graphics` | Visage (MIT), YUP (ISC: a fork of JUCE 7 on Rive's renderer), Skia (BSD-3-Clause), Blend2D (Zlib), ThorVG (MIT), Qt Quick (LGPL-3.0) |
+
+**Recommendation.** Make 5's log first, so that it measures before and after; then 2, 3, 4 and 6 as one change, as they
+share the playhead's path (about a day and a half with their tests); then 7. Decide 8 on what the log and PresentMon
+find. 9 goes with the CPU-at-rest work of section 13; 10 and 11 wait until a slower machine or a scaled display needs
+them; 12 when an audit needs more than the log; 13 and 14 aren't worth their cost for this.
+
+**Built the same day: options 2 to 7**, on the owner's word ("i want to follow your recommendation: 5, then 2, 3, 4, 6,
+7"). The tests below show each change against the old behaviour; figures from the app itself are the owner's to take, with
+the log.
+- *5, the frames' log* (`src/ui/timeline/FrameLog.*`). While the song plays, each editor that shows the playhead notes
+  every frame, and when it stops writes one line into Phazite's log (`%APPDATA%\Phazite\Phazite.log`), after a second of
+  playing or more: "Frames, Playlist (turning pages): 744 in 12.4 s of playing, one every 16.7 ms; taken 0.4 ms after their
+  vertical blank on average and 3.1 ms at most, 0 missed; a move waited 4.2 ms at most for its paint, and 0 waited for a
+  later frame; the playhead stood still in 0 frames while the song played on, and its step changed by 0.01 pixels a frame
+  on average and 0.20 at most" (figures made up). A move is the playhead or the view moving; "waited for a later frame"
+  counts the frames G5 is about, which only the app on the screen can show.
+- *2*: the playhead's component stays on whole pixels, a pixel wider than its marker, and draws the marker and the line
+  the part of a pixel further right that the playhead is; on its column while the view scrolls under it, it stays whole.
+  A test paints it at 100.25, 100.75 and 101.5 pixels and finds the line's centre there to 0.05 of a pixel; another feeds the
+  log the old drawing and the new at 0.8 of a pixel a frame: the old stands still one frame in five, the new never.
+- *3*: each frame hands its vertical blank's time on (`TimelineEditor::showFrame()`), and the playhead shows the beat
+  heard then (`getHeardPlayheadBeat()`), from the engine's blocks (`Engine::getPlayheadBeatAt()`), whenever the message
+  thread gets to it.
+- *4* (`src/engine/core/PlayheadClock.h`): the engine stamps each block as it starts, on a delay-locked loop of 0.5 Hz over
+  the times the blocks come at (settled in a second or two; it starts again after a dropout), and keeps where the playhead
+  was at the last 256 blocks, so that a moment shortly past finds the block that played then, across a loop's end but not
+  across a locate. Blocks of 128 samples handed four at once, as shared-mode WASAPI hands them at that size, come spread
+  over 8.4 ms around a steady stream; their stamps keep within 0.5 ms of one (the test's bound; 0.14 ms in a simulation
+  of the same blocks). Blocks of 480 samples, each up to 1 ms late, spread over 1 ms; their stamps over 0.3 ms. The latest
+  block's playhead runs on a block and a half, not one, for a next block that comes a little late. The engine stamps and
+  smooths without allocating or waiting: the real-time audit is unchanged.
+- *6*: the attachment is made as the editor shows a project, so the first frame after Play moves the playhead; a frame does
+  nothing while the song is stopped.
+- *7*: the playhead heard is the engine's at the frame's time less the delay compensation and the audio output's latency as
+  the device reports it (WASAPI reports its stream latency and buffer; a Bluetooth radio's delay goes unreported). The line
+  no longer runs ahead of the sound by those: about 20 to 30 ms on a wired output, a pixel at the default zoom and 10 at 400
+  pixels a second. A frame reaches the screen about a frame (17 ms) after its vertical blank, too little to see against the
+  sound, so the playhead shows the beat of its vertical blank. The owner's log shows Bluetooth headphones (CMF Headphone
+  Pro, in exclusive mode): their radio's delay, typically 150 to 250 ms, is reported nowhere, so the playhead still leads
+  what they play by that; a delay of the user's own in the audio settings, as Ableton Live's Driver Error Compensation and
+  REAPER's output offset take one, would cover it, and a wired output needs none.
+
+**Measured after the change**, with `phazite_tests.exe --test-suite=benchmark --no-skip` from the `windows-profile` build,
+against sections 14 and 15:
+
+| `windows-profile` | Before (2026-11-05 and 06) | After |
+|---|---|---|
+| An 11-px column of the window, as a playhead repaints | 0.68 ms | 0.77 ms |
+| The playlist painted, 100 tracks, 2,400 clips and 38,400 notes | 1.04 to 1.11 ms | 1.34 to 1.51 ms |
+| The whole window painted, 16 tracks, 256 clips, 16,384 notes | 11.9 ms | 18.7 ms at its first paint, 7.2 ms at its second |
+| 20 tracks of synth, EQ, compressor and reverb playing chords: 1 thread / 4 threads | 34.1 / 11.6 % | 32.9 / 9.4 % |
+| A live note on a synth, heard after the next block starts | 1.48 ms (section 9) | 1.48 ms |
+
+The paints are JUCE's software renderer's: see-through clips cost it their blending, which the graphics card does for free
+under Direct2D. The audio is as it was. The benchmark's whole window had grown to about 220 ms since the time bar's
+overview came (2026-11-06): its picture was the first native image the benchmark painted, and on Windows the first one
+makes Direct2D's device, which the app's window holds from its start. The benchmark now holds one as the window does. Two
+figures grew since 2026-11-05 for reasons outside this change, for a later look: a clip moved a beat in the big song, from
+3.2 to 8.1 ms of the UI thread's work (probably the overview's marks, read again from every track's clips at each change:
+`Playlist::getOverviewMarks()`), and Save, from 103 to 145 ms.
+
+**What the log decides.** The owner asked whether 9, 10 and 11 should follow now as the correct thing to do: no, the log
+decides 9 and 10, and 11 doesn't apply at the owner's 100 % scale (1920 x 1080 at 60 Hz). Frames missed, or a message
+thread more than 8 ms late (half a frame), mean other work keeps it busy: 9 then, with 12 to find what. Moves that waited
+for a later frame are G5, JUCE's: 8. A move that waits most of a frame for its paint while none is missed means painting
+is slow: 10. With none of these, the frames are as smooth as the display allows, and 9 waits for the CPU-at-rest work.
+
+**What the owner's first log showed** (the same day, the Release build, a 60 Hz display, the Bluetooth headphones at 480
+samples):
+
+| Editor, and how it followed | Frames | Taken after the vertical blank, mean / most | Missed | A frame late | Stood still | Step change, mean / most |
+|---|---|---|---|---|---|---|
+| Piano roll, the playhead crossing it, 24 s | 1,436 | 0.2 / 1.1 ms | 0 | 2 | 0 | 0.00 / 0.40 px |
+| Audio clip editor, the same, 15 s | 871 | 0.5 / 2.5 ms | 0 | 0 | 0 | 0.00 / 0.01 px |
+| Playlist, scrolling continuously, 43 s | 2,596 | 0.1 / 1.9 ms | 1 | 124 | 696 | 0.53 / 1.01 px |
+
+- The message thread takes every frame at once: 9 isn't needed. 11 doesn't apply.
+- A playhead crossing the view glides, its step the same at every frame (2 to 4 work).
+- Scrolling continuously, two things are left. The view moves by whole pixels: here on three frames of four (0.73 of a
+  pixel a frame), a steady rhythm, which only drawing between pixels can smooth. And JUCE showed one frame in 21 a frame
+  late (about three a second) while the whole playlist was painted at every frame, a move waiting up to 11.1 ms for its
+  paint, against 2 frames in 1,436 when only the playhead moved: G5 is real, and comes with long paints.
+- So, for scrolling continuously: **15.** move the lanes and the time bar by the part of a pixel the view has moved past
+  its whole pixel (a translation JUCE draws, hit-testing included), so that the song glides under the playhead: small,
+  but it paints at every frame where it now paints at three of four; **16.** make such a frame cheap: clips kept as
+  pictures, which then only move, and the grid and the automation lanes drawn from pictures wider than the view, slid
+  under it: medium; and **8**, first with a JUCE-only test app that paints as much at every frame, then a report.
+
+**Built the same day: 15 and 16**, on the owner's word ("yes, do rec 1 and 2"); 8 waits.
+- *15*: scrolling continuously, the view still moves by whole pixels, and the parts that scroll with it are drawn the
+  part of a pixel further that the playhead's beat is past its whole pixel (`TimelineEditor::setSubPixel()`, a translation
+  JUCE draws and hit-tests through): the playlist's lanes, ruler, sections' strip and chord lane, the piano roll's grid,
+  ruler and velocity lane (`getScrollingParts()`). The playhead stays on its column, and the song glides under it. A test
+  puts the song a tenth to two fifths of a pixel either side of a whole pixel and finds the lanes and the ruler moved by
+  that part, the playhead on one column, and a click finding the clip drawn there; stopped, nothing is moved. Clips' and
+  tags' edges look a little softer while they glide, as anything drawn between pixels does, and sharp again when the
+  song stops.
+- *16*: the playlist keeps a clip as a picture (`juce::Component::setBufferedToImage()`), which scrolling then only moves,
+  in `Playlist::layOutClips()`. A clip that draws the part of it in view (an audio clip's waveform, a tag with its name,
+  an alias's link) is kept only while the view's left and right edges don't cut it, as scrolling sideways would change its
+  picture at every frame; scrolled up or down, it draws its picture again, its tag where it shows. None is kept wider
+  than 4,096 pixels or larger than 4,096 by 96, so that a picture stays a few MB at most; a clip longer than that draws
+  only its notes where it is painted. Pictures cost memory and their first paint, which a zoom or a change repeats, so the
+  grid (0.2 ms a frame) and the automation lanes (0.2 ms) are still drawn at each frame.
+
+Measured with the benchmark of a song scrolling continuously (`tests/Benchmarks.cpp`): 600 frames of House Groove at
+22 pixels a beat and 1920 x 1080, each painted as the window paints it, through Direct2D, and timed part by part as JUCE
+times components (`ComponentListener::componentPainted()`); both columns with 15.
+
+| `windows-profile`, each frame | Before 16: mean / 95th percentile | After |
+|---|---|---|
+| Its paint, all it asked to repaint | 5.28 / 7.16 ms | 4.29 / 4.70 ms |
+| ... the lanes, with their clips and automation lanes | 2.10 / 3.42 ms | 1.03 / 1.19 ms |
+| ... ... the MIDI clips | 0.94 / 1.63 ms | 0.47 / 0.61 ms |
+| ... ... the audio clips | 0.98 / 1.62 ms | 0.10 / 0.15 ms |
+| ... the ruler, the sections' strip and the chord lane | 0.55 / 0.84 ms | 0.67 / 0.76 ms |
+| Frames whose work and paint took over 8 ms, half a frame | 23 of 600 | 1 of 600: the first, which makes the pictures (31 ms) |
+
+29 of the 34 clips in view are pictures; the other five cross the view's edges with a tag, or are too long. What is left
+of a frame's paint is the time bar, the playhead and the rest of the window that a frame repaints, and Direct2D's own
+work. Whether the frames that JUCE put off (G5, one in 21) went with the long paints is the owner's next log to show: if
+they remain, 8.
+
+**What the owner's second log showed** (the same day, the Release build with 15 and 16, the same display and headphones;
+the playlist scrolling continuously):
+
+| | First log, 43 s | Second log, 63 s |
+|---|---|---|
+| Frames in which the song stood still | 696 of 2,596 (27 %) | 0 of 3,751 |
+| Change of its step from frame to frame, mean / most | 0.53 / 1.01 px | 0.00 / 0.34 px |
+| Frames that JUCE showed a frame late (G5) | 124: one in 21, about 3 a second | 46: one in 82, about 0.7 a second |
+| Frames missed: the message thread still busy at the next frame | 1 | 6 |
+| Most the message thread took to reach a frame | 1.9 ms | 12.6 ms |
+
+- The song moves at every frame by the same step: the whole-pixel steps are gone.
+- The frames JUCE puts off go with how much a frame paints, though every paint here is far shorter than a frame: 2 in
+  1,436 when only a playhead's line moved (the first log's piano roll), one in 82 now, one in 21 before. That is JUCE's
+  timing (G5): 8.
+- Six times in the minute something kept the message thread busy past a frame, where the first log had it once. The
+  log doesn't say when or what; to find out, it would have to name its slowest frames.
+
+**The mouse over the playlist** (the same day). The owner: "when i move my mouse around on top of the playlist though, i
+can get visual stuttering". Their next log had 54 frames missed in 140 s. A benchmark that paces frames at 60 Hz in real
+time and moves the mouse over the track headers and the lanes between them, four moves a frame (`tests/Benchmarks.cpp`,
+"the mouse moving over the playlist"), found it: each move over a track asked the model where the track's audio clips
+meet, for the Smart Tool's crossfade (`Playlist::findCrossfadeAt()`), and the model worked out where each clip plays
+again for every pair of clips (`getCrossfadeSpots()`: its file's path and the song's tempo, twice for each of 132 pairs
+on House Groove's track of 12 loops), about 14 ms a move there. Now the model works each clip out once, and the playlist
+keeps each track's spots until its clips or the zoom change, so a move asks the model nothing. A test finds the crossfade
+where two clips meet, after a zoom, and no longer once one is moved away (`tests/PlaylistTests.cpp`); it fails if the
+playlist keeps the spots past a change of the clips.
+
+| 1,200 frames at 60 Hz, the mouse moving | Before | After |
+|---|---|---|
+| A move of the mouse over the playlist, mean / most | 0.46 / 16 ms | 0.01 / 1.0 ms |
+| A frame's work with its moves, mean / 95th percentile / most | 1.79 / 4.90 / 55 ms | 0.56 / 1.60 / 2.2 ms |
+| Frames missed | 70 | 0 (4 in the same run with the mouse still) |
+
+The window's tooltips on frosted glass aren't a cause: one shown over the lanes takes 0.3 ms, the clips under it pictures
+or not. Paced as the display paces them, frames take longer to paint than back to back: 7.4 ms with the mouse still and
+7.8 ms with it moving, against 4.3 ms in the benchmark above, probably as the processor and the graphics card slow down
+between frames. The mouse adds nothing to a frame's paint.
+
+**The owner's third log** (the same day, the Release build with the mouse fixed, the playlist scrolling continuously): 2
+frames missed in 1,175 (20 s), where the two runs before the fix missed 54 in 140 s and 105 in 33 s; the song stood still
+in none, and JUCE put off one frame in 84, as in the second log. The owner: "it works well". What is left is JUCE's (G5),
+for 8, should the owner still see it.
