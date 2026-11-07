@@ -8,6 +8,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 
 namespace phazite::devices
 {
@@ -24,7 +25,7 @@ public:
     float push (float sample) noexcept;
 
     // A sample it was given: 0 is the last, up to taps - 1.
-    float getSample (int age) const noexcept { return history[(size_t) (newest - age + taps)]; }
+    float getSample (int age) const noexcept { return history[(std::size_t) (newest - age + taps)]; }
 
 private:
     // The last samples twice over, so that the newest twelve are always in a row: the newest at newest and at newest + taps.

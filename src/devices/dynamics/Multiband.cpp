@@ -423,22 +423,22 @@ void Multiband::process (const ProcessContext& block)
     for (int band = 0; band < numBands; ++band)
     {
         const auto b = (size_t) band;
-        auto& curve = saturationCurves[b];
+        auto& bandCurve = saturationCurves[b];
 
         if (bandModes[b] != Mode::off)
         {
             const auto threshold = ceilings[b] * dsp::decibelsToGain (-24.0f * std::abs (saturations[b]));
-            curve.threshold = threshold;
-            curve.room = std::max (0.0f, ceilings[b] - threshold);
-            curve.soft = saturations[b] < 0.0f;
+            bandCurve.threshold = threshold;
+            bandCurve.room = std::max (0.0f, ceilings[b] - threshold);
+            bandCurve.soft = saturations[b] < 0.0f;
         }
 
-        if (! curve.isSame (lastCurves[b]))
+        if (! bandCurve.isSame (lastCurves[b]))
         {
             for (auto& saturator : saturators[b])
                 saturator.restartAveraging();
 
-            lastCurves[b] = curve;
+            lastCurves[b] = bandCurve;
         }
     }
 

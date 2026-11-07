@@ -33,7 +33,7 @@ void TruePeak::reset() noexcept
 float TruePeak::push (float sample) noexcept
 {
     newest = (newest + 1) % taps;
-    history[(size_t) newest] = history[(size_t) (newest + taps)] = sample;
+    history[(std::size_t) newest] = history[(std::size_t) (newest + taps)] = sample;
 
     // The newest sample at newest + taps, the oldest of the twelve at newest + 1.
     const auto* last = history.data() + newest + taps;
@@ -44,7 +44,7 @@ float TruePeak::push (float sample) noexcept
         auto point = 0.0f;
 
         for (int tap = 0; tap < taps; ++tap)
-            point += weights[(size_t) tap] * last[-tap];
+            point += weights[(std::size_t) tap] * last[-tap];
 
         loudest = std::max (loudest, std::abs (point));
     }

@@ -624,8 +624,8 @@ void WavetableSynth::startVoice (Voice& voice)
     for (auto& filter : voice.filters)
         filter.reset();
 
-    for (auto& drive : voice.drives)
-        drive.reset();
+    for (auto& shaper : voice.drives)
+        shaper.reset();
 
     voice.driveBlend = 0.0f;
 
