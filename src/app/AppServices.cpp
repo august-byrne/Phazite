@@ -92,7 +92,8 @@ AppServices::AppServices (EngineContext& context, AppServicesOptions options)
       recentProjects (settings),
       soundPack (options.packsFolder, options.soundPackRelease),
       updates (settings, options.updatesFolder, options.updateSource),
-      library (engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),
+      library (engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder,
+               options.settingsInMemory ? juce::File() : Settings::getFolder().getChildFile ("Library facts.txt")),
       previewer (createPreviewer (engineContext))
 {
     // Plug-ins in helper processes: the scan's list, and those that crashed as they loaded kept off.

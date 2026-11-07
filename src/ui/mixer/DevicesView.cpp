@@ -9,6 +9,7 @@
 #include "ui/components/PowerSwitch.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceMenus.h"
+#include "ui/devices/DrumSamplerEditor.h"
 #include "ui/devices/SidechainMenus.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
@@ -1252,6 +1253,14 @@ void DevicesView::showBody()
             shown = makeNote ("It shows in a window of its own: its button at the left brings the window to the front.");
         else if (! device->opensWindow)
             shown = createDeviceEditor (getDeviceHandle (context, device->id));
+
+        // A drum sampler's Swap tries the browser's sounds on a pad (onSwap: the app's browser).
+        if (auto* drums = dynamic_cast<DrumSamplerEditor*> (shown.get()); drums != nullptr && onSwap != nullptr)
+            drums->onSwap = [this, id = device->id] (int pad)
+            {
+                if (onSwap != nullptr)
+                    onSwap (id, pad);
+            };
 
         if (shown == nullptr)
             shown = std::make_unique<KeyKnobs> (context, *device);

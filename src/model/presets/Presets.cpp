@@ -417,8 +417,9 @@ namespace
     //==============================================================================
     // A preset's values put into one of Phazite's own devices of its type, each as a value set by hand, and a parameter it
     // doesn't name at its default, so that a preset is the same starting point whatever the device was set to; its sounds
-    // too, copied into the project, and the device's own sound where it names none.
-    void loadInto (Song& song, DeviceID id, const devices::DeviceInfo& info, const juce::var& saved)
+    // too, copied into the project (or, unless copyFiles, left where they are), and the device's own sound where it names
+    // none.
+    void loadInto (Song& song, DeviceID id, const devices::DeviceInfo& info, const juce::var& saved, bool copyFiles = true)
     {
         const auto values = saved[keys::parameters];
 
@@ -438,7 +439,19 @@ namespace
                 sounds.setProperty (property, sound, nullptr);
 
         device.appendChild (sounds, nullptr);
-        copyDeviceFilesInto (song, device);
+
+        if (copyFiles)
+        {
+            copyDeviceFilesInto (song, device);
+        }
+        else
+        {
+            // Where they are, but those that aren't there any more, as copying leaves them out.
+            for (const auto& property : getSoundProperties (info))
+                if (const auto path = sounds[property].toString(); juce::File::isAbsolutePath (path) && ! juce::File (path).existsAsFile())
+                    sounds.removeProperty (property, nullptr);
+        }
+
         const auto copied = device.getChildWithName (schema::SOUNDS);
 
         for (const auto& property : getSoundProperties (info))
@@ -916,6 +929,27 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
     if (saved.hasProperty (keys::mix))
         setMix (*song, id, (float) saved[keys::mix]);
 
+    return true;
+}
+
+bool isPresetFor (const Song& song, DeviceID id, const juce::File& file)
+{
+    const auto* own = findOwnInfo (findDeviceState (song, id));
+
+    if (own == nullptr || ! isPresetFile (file))
+        return false;
+
+    const auto preset = readPreset (file);
+    return findKind (preset[keys::kind].toString()) == PresetKind::device
+           && preset[keys::device][keys::type].toString() == toString (own->typeID);
+}
+
+bool tryPresetIn (Song& song, DeviceID id, const juce::File& file)
+{
+    if (! isPresetFor (song, id, file))
+        return false;
+
+    loadInto (song, id, *findOwnInfo (findDeviceState (song, id)), readPreset (file)[keys::device], false);
     return true;
 }
 } // namespace phazite

@@ -217,6 +217,7 @@ private:
     void addModulation (engine::Plan::Strip&, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs);
     void setValues (engine::DeviceNode&, const juce::ValueTree& deviceState);
     void loadSounds (engine::DeviceNode&, const juce::ValueTree& deviceState);
+    void loadSound (engine::DeviceNode&, const juce::ValueTree& deviceState, const juce::Identifier& property); // its pad's or oscillator's
     void setChannel (const juce::ValueTree& channelState, bool isMaster);
     void updateAudibility();
 };

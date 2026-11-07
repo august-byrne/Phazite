@@ -65,7 +65,10 @@ public:
     static constexpr const char* keyChangesPrefix = "phaziteKeyChanges."; // + a keymap's name; saved at once
     static constexpr ListSetting recentProjects { "phaziteRecentProjects", SaveTiming::now };
     static constexpr ListSetting browserFolders { "phaziteBrowserFolders", SaveTiming::soon };
+    // The browser's favorites, a line for each (services/Library.h: a file's size, the SHA-256 of its start and its path, or
+    // a device's identifier); its collections, as JSON (each one's name, and its items' lines); and its recent items' keys.
     static constexpr ListSetting browserFavorites { "phaziteBrowserFavorites", SaveTiming::soon };
+    static constexpr TextSetting browserCollections { "phaziteBrowserCollections", "", SaveTiming::soon };
     static constexpr ListSetting browserRecent { "phaziteBrowserRecent", SaveTiming::soon };
     static constexpr BoolSetting browserPreview { "phaziteBrowserPreview", true, SaveTiming::soon };
     static constexpr NumberSettingWithoutDefault browserPreviewVolume { "phaziteBrowserPreviewVolume", SaveTiming::soon };

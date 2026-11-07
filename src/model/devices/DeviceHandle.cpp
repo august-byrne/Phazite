@@ -4,6 +4,7 @@
 #include "internal/Devices.h"
 #include "internal/DrumKit.h"
 #include "internal/ParameterHandle.h"
+#include "internal/Swap.h"
 #include "internal/Wavetables.h"
 #include "model/base/internal/Schema.h"
 #include "model/mixer/internal/Mixer.h"
@@ -102,6 +103,12 @@ void DeviceHandle::clearPadSound (int pad) const
 {
     if (auto* song = songOf (impl))
         phazite::clearPadSound (*song, impl->id, pad);
+}
+
+std::optional<int> DeviceHandle::getSwap() const
+{
+    auto* song = songOf (impl);
+    return song != nullptr ? findOpenSwap (*song, impl->id) : std::nullopt;
 }
 
 juce::String DeviceHandle::getWavetableName (int osc) const

@@ -155,6 +155,11 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     devices.onShowPresets = [this] (DeviceID device, const juce::String& name, juce::Component& target)
     { browser.showDevicePresetMenu (device, name, target); };
 
+    // Swap: a drum pad's Swap, or a device's in its Presets menu, tries the browser's sounds or presets in place; the browser
+    // shows, with the keys.
+    devices.onSwap = [this] (DeviceID device, int pad) { browser.startSwap (device, pad); };
+    browser.onSwapStarted = [this] { revealBrowser(); };
+
     for (auto* c : std::initializer_list<juce::Component*> { &titleBar, &topBar, &activityBar, &leftPanel, &leftDivider, &centre,
                                                              &inspectorDivider, &inspector, &inspectorButtons, &statusBar })
         addAndMakeVisible (c);
@@ -498,6 +503,23 @@ void AppShell::showLeftView (LeftView view)
                                                   : static_cast<juce::Component&> (browser);
         shown.grabKeyboardFocus();
     }
+}
+
+void AppShell::startSwap (DeviceID device, int pad)
+{
+    browser.startSwap (device, pad);
+}
+
+void AppShell::revealBrowser()
+{
+    panels.leftView = LeftView::browser;
+
+    if (leftWindow != nullptr)
+        leftWindow->toFront (true);
+    else if (! panels.takesRoom (Panel::left))
+        panels.show (Panel::left);
+
+    updateLayout();
 }
 
 AppShell::LeftPanel::LeftPanel (juce::Component& browserToShow, juce::Component& projectToShow, juce::Component& versionsToShow)
@@ -1152,14 +1174,7 @@ void AppShell::addCommands (CommandRegistry& registry)
          { "find", "sounds", "samples", "plugins" },
          [this]
          {
-             panels.leftView = LeftView::browser;
-
-             if (leftWindow != nullptr)
-                 leftWindow->toFront (true);
-             else if (! panels.takesRoom (Panel::left))
-                 panels.show (Panel::left);
-
-             updateLayout();
+             revealBrowser();
              browser.focusSearch();
          });
 

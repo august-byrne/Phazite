@@ -110,9 +110,11 @@ public:
         g.setColour (fill);
         g.fillRoundedRectangle (area, cornerRadius);
 
+        // Outlined while it is selected, a sound is dropped on it, or it is being swapped.
         const auto selected = pad == editor.selectedPad;
-        g.setColour (selected || dropping || hasKeyboardFocus (false) ? palette.accent : palette.border);
-        g.drawRoundedRectangle (area, cornerRadius, selected || dropping ? 2.0f : 1.0f);
+        const auto lit = selected || dropping || pad == editor.swappedPad;
+        g.setColour (lit || hasKeyboardFocus (false) ? palette.accent : palette.border);
+        g.drawRoundedRectangle (area, cornerRadius, lit ? 2.0f : 1.0f);
 
         // Its number in the corner, and what it plays.
         const auto inside = area.reduced ((float) Space::xs);
@@ -374,15 +376,21 @@ DrumSamplerEditor::DrumSamplerEditor (const DeviceHandle& handle)
     setThemeColour (padName, juce::Label::textColourId, &Palette::textMuted);
     addAndMakeVisible (padName);
 
-    loadButton.setTooltip ("Picks a sound file for the pad; the project keeps a copy of it");
-    loadButton.onClick = [this] { chooseFile(); };
     resetButton.setTooltip ("Puts the kit's own sound back on the pad");
     resetButton.onClick = [this]
     {
         device.clearPadSound (selectedPad);
         refresh();
     };
-    addAndMakeVisible (loadButton);
+    swapButton.setTooltip ("Tries the browser's sounds on the pad, in the beat: move to each with the arrow keys; Enter keeps one, "
+                           "Esc puts this one back");
+    swapButton.setClickingTogglesState (false);
+    swapButton.onClick = [this]
+    {
+        if (onSwap != nullptr)
+            onSwap (selectedPad);
+    };
+    addChildComponent (swapButton); // while onSwap is set
     addAndMakeVisible (resetButton);
 
     for (int i = 0; i < numKnobs; ++i)
@@ -498,19 +506,6 @@ bool DrumSamplerEditor::dropFile (int pad, const juce::File& file)
     return put;
 }
 
-void DrumSamplerEditor::chooseFile()
-{
-    chooser = std::make_unique<juce::FileChooser> ("Choose a sound for pad " + juce::String (selectedPad + 1), juce::File(),
-                                                   "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
-    chooser->launchAsync (
-        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-        [safe = juce::Component::SafePointer<DrumSamplerEditor> (this), pad = selectedPad] (const juce::FileChooser& chosen)
-        {
-            if (safe != nullptr && chosen.getResult() != juce::File())
-                safe->dropFile (pad, chosen.getResult());
-        });
-}
-
 void DrumSamplerEditor::refresh()
 {
     auto* drums = device.getProcessor<DrumSampler>();
@@ -528,6 +523,28 @@ void DrumSamplerEditor::refresh()
                      juce::dontSendNotification);
     padName.setTitle ("Pad " + juce::String (selectedPad + 1) + ": " + device.getPadName (selectedPad));
     resetButton.setEnabled (device.hasPadSound (selectedPad));
+
+    // Swap, where something can swap; lit on the pad being swapped, which shows outlined.
+    if (const auto canSwap = onSwap != nullptr; canSwap != swapButton.isVisible())
+    {
+        swapButton.setVisible (canSwap);
+        resized();
+    }
+
+    if (const auto swapped = device.getSwap().value_or (-1); swapped != swappedPad)
+    {
+        swappedPad = swapped;
+
+        for (auto& each : pads)
+            each->repaint();
+    }
+
+    swapButton.setToggleState (swappedPad >= 0 && swappedPad == selectedPad, juce::dontSendNotification);
+    swapButton.setTooltip (swapButton.getToggleState()
+                               ? "Swapping this pad's sound: click to keep the one on it, or press Esc in the browser to put the "
+                                 "old one back"
+                               : "Tries the browser's sounds on the pad, in the beat: move to each with the arrow keys; Enter keeps "
+                                 "one, Esc puts this one back");
     waveform->show (selectedPad);
 
     for (int i = 0; i < numKnobs; ++i)
@@ -574,8 +591,13 @@ void DrumSamplerEditor::resized()
     // The pad's name with its buttons, its sound, then its controls in a row.
     auto top = area.removeFromTop (controlHeight);
     resetButton.setBounds (top.removeFromRight (knobCell + Space::s));
-    top.removeFromRight (Space::xs);
-    loadButton.setBounds (top.removeFromRight (knobCell + Space::l));
+
+    if (swapButton.isVisible())
+    {
+        top.removeFromRight (Space::xs);
+        swapButton.setBounds (top.removeFromRight (knobCell + Space::s));
+    }
+
     top.removeFromRight (Space::s);
     padName.setBounds (top);
     area.removeFromTop (Space::s);

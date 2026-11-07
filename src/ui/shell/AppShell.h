@@ -67,6 +67,10 @@ public:
     // scroll bars it would take (app/MainWindow.h). The bars across the top and the bottom reach the sides.
     void setEdgeInset (int);
 
+    // Swap from outside the Devices view (a drum sampler's pads in the device's own window, app/PluginWindow.h): the browser
+    // tries its sounds on the pad (Browser::startSwap()), and shows.
+    void startSwap (DeviceID, int pad);
+
     // Layouts arrange the panels; they don't hide features.
     enum class Layout
     {
@@ -234,6 +238,7 @@ private:
     void placeViews();                                 // in the areas, as viewPlaces says
     void showSelectedDevice();                         // in the Devices view (the "device.show" command)
     void showLeftView (LeftView);                      // or hides the left panel if it shows it: an activity bar icon's click
+    void revealBrowser(); // the browser, in the left panel or its window, shown whatever showed there: never hidden
     void placePanelButtons();
     void updateCards();         // where the panels' cards are, after they moved
     void keepOverlaysInFront(); // the cards over the panels, the lesson's ring and card over them

@@ -3,6 +3,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/internal/Undo.h"
 #include "model/engine/AppInfo.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -312,6 +313,9 @@ bool Project::hasUnsavedChanges()
 juce::Result Project::save()
 {
     JUCE_ASSERT_MESSAGE_THREAD
+
+    // What is being tried in place (Swap) is kept first, as its own step: the file holds what is heard.
+    Trial::keepOpenTrial (song->getUndoManager());
 
     autosaveWriter->wait(); // an autosave being written, which this makes old
     backgroundSave = {};    // and a save in the background, which this overtakes
@@ -760,7 +764,8 @@ void AutosaveTimer::timerCallback()
 
     wasAutosaving = project.isAutosaving();
 
-    if (recording || wasAutosaving)
+    // Never halfway through a drag, nor while something is tried in place (Swap), which may yet be put back.
+    if (recording || wasAutosaving || Gesture::isInProgress (project.getSong()) || Trial::isInProgress (project.getSong()))
         return;
 
     // Auto Save: a moment after the last change, as VS Code's afterDelay; while the song plays, at most every few seconds.

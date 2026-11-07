@@ -2,18 +2,72 @@
 #include "BrowserModel.h"
 
 #include <algorithm>
+#include <map>
 
 namespace phazite
 {
-juce::String BrowserPlace::getTitle() const
+namespace
 {
-    // A type's sounds, as plurals where English has them: Kicks, Hats, Loops; Percussion, Bass, FX, Foley.
-    if (kind == Kind::type && ! juce::StringArray { "Percussion", "Bass", "FX", "Foley" }.contains (name))
-        return name + "s";
+    bool isSoundOrMidi (const LibraryItem& item)
+    {
+        return item.kind == LibraryItem::Kind::sound || item.kind == LibraryItem::Kind::midi;
+    }
 
-    return name;
+    // The types a sound is: its tags that name one (Kick, Snare...).
+    juce::StringArray getTypesOf (const LibraryItem& item)
+    {
+        static const auto types = []
+        {
+            auto all = Library::getSoundTypes();
+            all.removeString ("Loop");
+            return all;
+        }();
+
+        juce::StringArray found;
+
+        for (const auto& tag : item.tags)
+            if (types.contains (tag))
+                found.add (tag);
+
+        return found;
+    }
+
+    bool isLoop (const LibraryItem& item)
+    {
+        return item.tags.contains ("Loop");
+    }
+
+    const auto byName = [] (const LibraryItem& a, const LibraryItem& b) { return a.name.compareNatural (b.name) < 0; };
+
+    // Whether a file is within a folder, by their paths: the index's files are found from the folders the places name, so
+    // that their paths start with the folders' as written.
+    bool isWithin (const LibraryItem& item, const juce::String& folderPath)
+    {
+        const auto path = item.file.getFullPathName();
+        return path.length() > folderPath.length() && path.startsWith (folderPath)
+               && path.substring (folderPath.length(), folderPath.length() + 1) == juce::File::getSeparatorString();
+    }
+} // namespace
+
+std::optional<int> getTempo (const LibraryItem& item)
+{
+    for (const auto& tag : item.tags)
+        if (tag.endsWith (" BPM"))
+            return tag.getIntValue();
+
+    return std::nullopt;
 }
 
+bool BrowserFilters::accepts (const LibraryItem& item) const
+{
+    if (isEmpty())
+        return true;
+
+    return isSoundOrMidi (item) && (type.isEmpty() || item.tags.contains (type)) && (! loops.has_value() || isLoop (item) == *loops)
+           && (! tempo.has_value() || getTempo (item) == tempo) && (! key.has_value() || item.key == key);
+}
+
+//==============================================================================
 juce::String BrowserPlace::getTooltip() const
 {
     switch (kind)
@@ -22,10 +76,6 @@ juce::String BrowserPlace::getTooltip() const
             return "What you starred: click the star next to a sound or device, or right-click it";
         case Kind::recent:
             return "What you put into the song lately, newest first";
-        case Kind::types:
-            return "Every sound, from Phazite's and your folders, by what it is: from the words in its name and folders";
-        case Kind::type:
-            return "Every sound tagged " + name + ", from Phazite's and your folders";
         case Kind::sounds:
             return "Phazite's free sounds: drums, loops, effects and foley, all public domain (CC0)";
         case Kind::instruments:
@@ -41,6 +91,13 @@ juce::String BrowserPlace::getTooltip() const
             return folder.getFullPathName();
         case Kind::addFolder:
             return "Adds a folder of your own sounds to the browser";
+        case Kind::collections:
+            return "Your own sets of sounds, presets and devices: right-click one to add it to a collection. A sound you rename "
+                   "or move stays in its collections";
+        case Kind::collection:
+            return "Your collection " + name + ": right-click it to rename or delete it";
+        case Kind::newCollection:
+            return "Makes a collection, to keep sounds, presets and devices in";
     }
 
     return {};
@@ -58,12 +115,12 @@ BrowserModel::BrowserModel (const Library& l, const SoundPack& pack)
 {
 }
 
-std::vector<BrowserPlace> BrowserModel::getPlaces() const
+std::vector<BrowserPlace> BrowserModel::getPlaces (const BrowserFilters& filters) const
 {
     using Kind = BrowserPlace::Kind;
     std::vector<BrowserPlace> places { { Kind::favorites, "Favorites", {} },
                                        { Kind::recent, "Recent", {} },
-                                       { Kind::types, "Sounds by Type", {} },
+                                       { Kind::collections, "Collections", {} },
                                        { Kind::sounds, "Phazite Sounds", library.getFactorySounds() },
                                        { Kind::instruments, "Instruments", {} },
                                        { Kind::effects, "Effects", {} },
@@ -74,14 +131,144 @@ std::vector<BrowserPlace> BrowserModel::getPlaces() const
         places.push_back ({ Kind::folder, folder.getFileName(), folder });
 
     places.push_back ({ Kind::addFolder, "Add Folder...", {} });
-    return places;
+
+    if (filters.isEmpty())
+        return places;
+
+    // With filters set, the places with sounds that have their values, each with how many; Collections while any of its
+    // collections has some.
+    std::vector<BrowserPlace> filtered;
+
+    for (auto& place : places)
+    {
+        if (place.kind == Kind::collections)
+        {
+            if (! getContents (place, filters).places.empty())
+                filtered.push_back (std::move (place));
+
+            continue;
+        }
+
+        if (! place.holdsItems() || place.kind == Kind::instruments || place.kind == Kind::effects)
+            continue;
+
+        auto total = 0;
+        getFiltered (place, filters, total);
+
+        if (total > 0)
+        {
+            place.count = total;
+            filtered.push_back (std::move (place));
+        }
+    }
+
+    return filtered;
 }
 
-BrowserContents BrowserModel::getContents (const BrowserPlace& place) const
+std::vector<LibraryItem> BrowserModel::getIndexedIn (const juce::File& folder, const BrowserFilters& filters) const
+{
+    std::vector<LibraryItem> items;
+
+    if (folder == juce::File())
+        return items;
+
+    const auto path = folder.getFullPathName();
+
+    const auto indexed = library.getIndex(); // held while it is gone through: the index thread may replace it meanwhile
+
+    for (const auto& item : *indexed)
+        if (filters.accepts (item) && isWithin (item, path))
+            items.push_back (item);
+
+    return items;
+}
+
+std::vector<LibraryItem> BrowserModel::getFiltered (const BrowserPlace& place, const BrowserFilters& filters, int& total) const
+{
+    using Kind = BrowserPlace::Kind;
+    std::vector<LibraryItem> items;
+
+    const auto keep = [&filters, &items] (std::vector<LibraryItem> all)
+    {
+        for (auto& item : all)
+            if (filters.accepts (item))
+                items.push_back (std::move (item));
+    };
+
+    switch (place.kind)
+    {
+        case Kind::favorites:
+            keep (library.getFavorites());
+            break;
+        case Kind::recent:
+            keep (library.getRecent());
+            break;
+        case Kind::collection:
+            keep (library.getCollection (place.name));
+            break;
+        case Kind::sounds:
+        case Kind::folder:
+        case Kind::presets:
+        case Kind::factoryPresets:
+            items = getIndexedIn (place.folder, filters);
+            break;
+        case Kind::collections:
+        case Kind::instruments:
+        case Kind::effects:
+        case Kind::addFolder:
+        case Kind::newCollection:
+            break;
+    }
+
+    // Favorites, recent items and collections keep their own order; the others go by name.
+    if (place.kind != Kind::favorites && place.kind != Kind::recent && place.kind != Kind::collection)
+        std::sort (items.begin(), items.end(), byName);
+
+    total = (int) items.size();
+
+    if (total > maxListed)
+        items.resize ((size_t) maxListed);
+
+    return items;
+}
+
+BrowserContents BrowserModel::getContents (const BrowserPlace& place, const BrowserFilters& filters) const
 {
     using Kind = BrowserPlace::Kind;
     BrowserContents contents;
     juce::String hint;
+
+    // With filters set: the place's sounds with their values, as one list; the collections with any, each with how many.
+    if (! filters.isEmpty())
+    {
+        if (place.kind == Kind::collections)
+        {
+            for (const auto& name : library.getCollections())
+            {
+                BrowserPlace inside { Kind::collection, name, {} };
+                auto total = 0;
+                getFiltered (inside, filters, total);
+
+                if (total > 0)
+                {
+                    inside.count = total;
+                    contents.places.push_back (inside);
+                }
+            }
+
+            return contents;
+        }
+
+        auto total = 0;
+        contents.items = getFiltered (place, filters, total);
+
+        if (total > maxListed)
+            contents.messages.add ("The first " + juce::String (maxListed) + " of " + juce::String (total) + ": filter them further");
+        else if (contents.items.empty())
+            contents.messages.add ("None of these with the filters set");
+
+        return contents;
+    }
 
     switch (place.kind)
     {
@@ -93,14 +280,19 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place) const
             contents.items = library.getRecent();
             hint = "What you put into the song shows here";
             break;
-        case Kind::types:
-            for (const auto& soundType : Library::getSoundTypes())
-                contents.places.push_back ({ Kind::type, soundType, {} });
+        case Kind::collections:
+            for (const auto& name : library.getCollections())
+                contents.places.push_back ({ Kind::collection, name, {} });
+
+            contents.places.push_back ({ Kind::newCollection, "New Collection...", {} });
+
+            if (library.getCollections().isEmpty())
+                contents.messages.add ("Right-click a sound or a device to add it to a collection");
 
             return contents;
-        case Kind::type:
-            contents.items = library.listByTag (place.name);
-            hint = library.isIndexing() ? "Still looking through your sounds..." : "None yet";
+        case Kind::collection:
+            contents.items = library.getCollection (place.name);
+            hint = "Empty: right-click a sound or a device, then Add to Collection";
             break;
         case Kind::sounds:
             if (! soundPack.isInstalled())
@@ -138,6 +330,7 @@ BrowserContents BrowserModel::getContents (const BrowserPlace& place) const
             hint = "None yet: right-click a device or a track to save its settings, or drag a track here";
             break;
         case Kind::addFolder:
+        case Kind::newCollection:
             break;
     }
 
@@ -165,19 +358,75 @@ BrowserContents BrowserModel::getContents (const LibraryItem& folder) const
     return contents;
 }
 
-BrowserContents BrowserModel::search (const juce::String& query) const
+BrowserContents BrowserModel::search (const juce::String& query, const BrowserFilters& filters) const
 {
     BrowserContents contents;
-    contents.items = library.search (query.trim());
+    contents.items = library.search (query.trim(), 200, [&filters] (const LibraryItem& item) { return filters.accepts (item); });
 
     if (contents.items.empty())
         contents.messages.add (library.isIndexing() ? juce::String ("Still looking through your sounds...")
-                                                    : "Nothing matches \"" + query.trim() + "\"");
+                               : filters.isEmpty()  ? "Nothing matches \"" + query.trim() + "\""
+                                                    : "Nothing matches \"" + query.trim() + "\" with the filters set");
 
     if (library.isIndexFull())
         contents.messages.add ("Search covers the first " + juce::String (Library::maxIndexed) + " sounds");
 
     return contents;
+}
+
+FilterOptions BrowserModel::getFilterOptions (const juce::String& query, const BrowserFilters& filters) const
+{
+    // Each item counts for a filter's values where it has the other filters' values: so a filter offers what the others
+    // leave, and choosing another of its values never leaves nothing.
+    std::map<juce::String, int> types;
+    std::map<int, int> tempos;
+    std::map<SoundKey, int> keys;
+    FilterOptions options;
+
+    const auto count = [&] (const LibraryItem& item)
+    {
+        if (! isSoundOrMidi (item))
+            return;
+
+        const auto tempo = getTempo (item);
+        const auto hasType = filters.type.isEmpty() || item.tags.contains (filters.type);
+        const auto hasLoop = ! filters.loops.has_value() || isLoop (item) == *filters.loops;
+        const auto hasTempo = ! filters.tempo.has_value() || tempo == filters.tempo;
+        const auto hasKey = ! filters.key.has_value() || item.key == filters.key;
+
+        if (hasLoop && hasTempo && hasKey)
+            for (const auto& type : getTypesOf (item))
+                ++types[type];
+
+        if (hasType && hasTempo && hasKey)
+            ++(isLoop (item) ? options.loops : options.oneShots);
+
+        if (hasType && hasLoop && hasKey && tempo.has_value())
+            ++tempos[*tempo];
+
+        if (hasType && hasLoop && hasTempo && item.key.has_value())
+            ++keys[*item.key];
+    };
+
+    if (query.trim().isNotEmpty())
+    {
+        library.forEachMatch (query.trim(), count);
+    }
+    else
+    {
+        const auto indexed = library.getIndex(); // held while it is gone through: the index thread may replace it meanwhile
+
+        for (const auto& item : *indexed)
+            count (item);
+    }
+
+    for (const auto& type : Library::getSoundTypes())
+        if (const auto found = types.find (type); found != types.end())
+            options.types.emplace_back (type, found->second);
+
+    options.tempos.assign (tempos.begin(), tempos.end());
+    options.keys.assign (keys.begin(), keys.end());
+    return options;
 }
 
 //==============================================================================
@@ -255,11 +504,17 @@ juce::String BrowserModel::getDetail (const LibraryItem& item)
         return item.preset->device;
     }
 
+    // A sound's key and tempo: "Am · 120 BPM".
+    juce::StringArray detail;
+
+    if (item.key.has_value())
+        detail.add (item.key->getShortName());
+
     for (const auto& tag : item.tags)
         if (tag.endsWith (" BPM"))
-            return tag;
+            detail.add (tag);
 
-    return {};
+    return detail.joinIntoString (juce::String::fromUTF8 (" \xc2\xb7 "));
 }
 
 juce::String BrowserModel::getTooltip (const LibraryItem& item)

@@ -20,7 +20,7 @@ TEST_CASE ("A sound's tags come from the words in its name and its folders")
 
     CHECK (tagsOf ("Drums/Kicks/Deep 01.wav") == juce::StringArray { "Kick", "One-shot" });
     CHECK (tagsOf ("OpenHat.wav") == juce::StringArray { "Hat", "One-shot" });
-    CHECK (tagsOf ("808Bass_C.wav") == juce::StringArray { "Bass", "One-shot" });
+    CHECK (tagsOf ("808Bass_C.wav") == juce::StringArray { "Bass", "One-shot", "C" }); // and the note it is tuned to
     CHECK (tagsOf ("FX/Riser 8 bars.flac") == juce::StringArray { "FX", "One-shot" });
     CHECK (tagsOf ("Loops/Break 120 BPM.wav") == juce::StringArray { "Loop", "120 BPM" });
     CHECK (tagsOf ("kick_loop_128bpm.wav") == juce::StringArray { "Kick", "Loop", "128 BPM" });
@@ -28,7 +28,7 @@ TEST_CASE ("A sound's tags come from the words in its name and its folders")
     // "808" alone is a bass, "808 Clap" a clap; two words that make a tag word count as one; an effect with a tempo is
     // still a one-shot.
     CHECK (tagsOf ("808 Clap.wav") == juce::StringArray { "Clap", "One-shot" });
-    CHECK (tagsOf ("808 C.wav") == juce::StringArray { "Bass", "One-shot" });
+    CHECK (tagsOf ("808 C.wav") == juce::StringArray { "Bass", "One-shot", "C" });
     CHECK (tagsOf ("Bass Drum 01.wav") == juce::StringArray { "Kick", "One-shot" });
     CHECK (tagsOf ("bassdrum.wav") == juce::StringArray { "Kick", "One-shot" });
     CHECK (tagsOf ("Hi Hat Open.wav") == juce::StringArray { "Hat", "One-shot" });

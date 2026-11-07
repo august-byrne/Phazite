@@ -16,7 +16,7 @@ juce::StringArray getTitles (const std::vector<phazite::BrowserPlace>& places)
     juce::StringArray titles;
 
     for (const auto& place : places)
-        titles.add (place.getTitle());
+        titles.add (place.name);
 
     return titles;
 }
@@ -73,15 +73,16 @@ TEST_CASE ("The browser's places come in order, the user's folders before Add Fo
     Libraries libraries (true);
     const auto places = libraries.model.getPlaces();
     CHECK (getTitles (places)
-           == juce::StringArray { "Favorites", "Recent", "Sounds by Type", "Phazite Sounds", "Instruments", "Effects", "Phazite Presets",
+           == juce::StringArray { "Favorites", "Recent", "Collections", "Phazite Sounds", "Instruments", "Effects", "Phazite Presets",
                                   "Presets", "My Sounds", "Add Folder..." });
     CHECK_FALSE (places.back().holdsItems());
 
     // The keys are those of the places a user left open, which the settings keep from one session to the next.
     CHECK (places[0].getKey() == juce::String ("0:Favorites:"));
-    CHECK (places[8].getKey() == "7:My Sounds:" + libraries.userFolder.getFullPathName());
-    CHECK (places[6].getKey().startsWith ("10:Phazite Presets:"));
-    CHECK (places[7].getKey().startsWith ("9:Presets:"));
+    CHECK (places[2].getKey() == juce::String ("9:Collections:"));
+    CHECK (places[8].getKey() == "5:My Sounds:" + libraries.userFolder.getFullPathName());
+    CHECK (places[6].getKey().startsWith ("8:Phazite Presets:"));
+    CHECK (places[7].getKey().startsWith ("7:Presets:"));
     CHECK (places[8].getTooltip() == libraries.userFolder.getFullPathName());
 }
 
@@ -95,17 +96,13 @@ TEST_CASE ("Each place holds its items, or says what it is for while it holds no
     CHECK (favorites.items.empty());
     CHECK (favorites.messages == juce::StringArray { "Nothing yet: click the star next to a sound or device" });
 
-    // Sounds by Type holds a place for each type, which lists that type's sounds from every library, in the plural where
-    // English has one.
-    const auto types = model.getContents (libraries.find (Kind::types));
-    CHECK ((int) types.places.size() == phazite::Library::getSoundTypes().size());
-    const auto kicks =
-        std::find_if (types.places.begin(), types.places.end(), [] (const phazite::BrowserPlace& p) { return p.name == "Kick"; });
-    REQUIRE (kicks != types.places.end());
-    CHECK (kicks->getTitle() == juce::String ("Kicks"));
-    CHECK (getNames (model.getContents (*kicks).items).contains ("Deep Kick"));
-    CHECK (getNames (model.getContents (*kicks).items).contains ("Kick"));
-    CHECK (phazite::BrowserPlace { Kind::type, "Percussion", {} }.getTitle() == juce::String ("Percussion"));
+    // The Type filter finds a type's sounds in every library: Phazite Sounds' kick and the user's.
+    phazite::BrowserFilters kicks;
+    kicks.type = "Kick";
+    const auto withKicks = model.getPlaces (kicks);
+    REQUIRE (getTitles (withKicks) == juce::StringArray { "Phazite Sounds", "My Sounds" });
+    CHECK (getNames (model.getContents (withKicks[0], kicks).items) == juce::StringArray { "Kick" });
+    CHECK (getNames (model.getContents (withKicks[1], kicks).items) == juce::StringArray { "Deep Kick" });
 
     // Phazite Sounds list their folders, and a folder its sounds.
     const auto sounds = model.getContents (libraries.find (Kind::sounds));

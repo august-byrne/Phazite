@@ -222,6 +222,23 @@ namespace SideBar
     inline constexpr int inputRowHeight = 34, buttonRowHeight = 36, controlHeight = 26;
 } // namespace SideBar
 
+// The browser's filters (ui/browser/FilterBar.h), as VS Code's filter tags: a chip for each, so tall and round, its name this
+// far from its ends, the x of one that is set so big, the chips so far apart in a row and between rows (four fit the side
+// panel's width at first, 2026-11-07); one that is set washed in the accent this opaque.
+namespace FilterChipTint
+{
+    inline constexpr int height = 22, textInset = 6, iconSize = 10, gap = 3;
+    inline constexpr float corner = 11.0f, setFill = 0.22f;
+} // namespace FilterChipTint
+
+// Swap in the browser (docs/design.md, section 11): over the tree while a sound or a preset is tried in place, a strip so
+// tall, washed in the accent this opaque, its text and buttons this far from its sides and so tall.
+namespace SwapTint
+{
+    inline constexpr int height = 56, inset = 8, buttonHeight = 22, buttonWidth = 72;
+    inline constexpr float fill = 0.16f;
+} // namespace SwapTint
+
 // A view area's tabs (ui/shell/Panels.h), as VS Code's panels' in its Modern UI: pills so tall in the middle of the bar, so far
 // apart, their names this far from their ends. A device editor's pages' tabs (ui/devices/DeviceLayout.h) are the same, smaller.
 namespace TabTint

@@ -13,6 +13,7 @@
 #include "services/Settings.h"
 #include "ui/browser/Browser.h"
 #include "ui/devices/DeviceWindowContent.h"
+#include "ui/devices/DrumSamplerEditor.h"
 #include "ui/input/PluginKeys.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -411,6 +412,15 @@ namespace
             setContentNonOwned (&content, true);
             setResizable (true, false);
             setResizeLimits (content.getMinimumWidth(), std::min (content.getHeight(), content.getMinimumHeight()), 8192, 8192);
+
+            // A drum sampler's pads swap their sounds from the main window's browser.
+            if (auto* drums = dynamic_cast<ui::DrumSamplerEditor*> (content.getEditor());
+                drums != nullptr && services != nullptr && services->swap != nullptr)
+                drums->onSwap = [d] (int pad)
+                {
+                    if (services != nullptr && services->swap != nullptr)
+                        services->swap (d, pad);
+                };
 
             // It is Phazite's own: every shortcut works in it, and the computer keyboard, as in the main window, while the
             // app's keys are there (until the main window goes).

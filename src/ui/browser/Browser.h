@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The browser (docs/design.md, section 11; roadmap step 1.5): favorites, recent items, Phazite Sounds (or, until they
-// are downloaded, a row that downloads them), the instruments and effects, the user's presets and own folders, in a tree
-// as in FL Studio's browser, laid out as VS Code's Explorer under its title (its rows, chevrons, levels and their guides);
-// or, while the search field has text, what search finds in all of them. Clicking a sound,
+// The browser (docs/design.md, section 11; roadmap step 1.5): favorites, recent items, the user's collections, Phazite
+// Sounds (or, until they are downloaded, a row that downloads them), the instruments and effects, the user's presets and own
+// folders, in a tree as in FL Studio's browser, laid out as VS Code's Explorer under its title (its rows, chevrons, levels
+// and their guides); or, while the search field has text, what search finds in all of them. Under the search, the filters
+// (FilterBar.h): with any set, each place lists its sounds with their values as one list. Clicking a sound,
 // or moving to it with the arrow keys, plays it (a loop in time with the song). Dragging an item puts it into the song:
 // onto the playlist (a track, or empty space for a new one) or a mixer channel. So do Enter and a double-click: a sound
 // onto the selected track at the play start, a device or a preset onto the selected track. A track dragged in from the
-// playlist is saved as a preset (roadmap step 2.4), as are the selected device and track by their commands.
+// playlist is saved as a preset (roadmap step 2.4), as are the selected device and track by their commands. While it swaps
+// a drum pad's sound or a device's preset (Swap, model/devices/SwapModel.h), what it moves to plays in that place instead.
 #pragma once
 
+#include "FilterBar.h"
 #include "SoundView.h"
 #include "model/commands/CommandRegistry.h"
+#include "model/devices/SwapModel.h"
 #include "model/engine/Preview.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/ProjectContext.h"
@@ -83,6 +87,24 @@ public:
     // Asks for a folder to add to the browser.
     void chooseFolderToAdd();
 
+    // The filters (FilterBar.h), as the user sets them; and Clear, which takes away the search's words with them.
+    void setFilters (const BrowserFilters&);
+    const BrowserFilters& getFilters() const noexcept { return filters; }
+    void clearFiltersAndSearch();
+
+    // Swap (docs/design.md, section 11; model/devices/SwapModel.h): the sound on a drum sampler's pad, or with pad -1 the
+    // preset of one of Phazite's own devices, tried in place as the browser moves to each, heard in the beat; Enter or Keep
+    // keeps one as one undo step, Esc or Put Back puts the old one back, and starting another, or anything else that changes
+    // the song, keeps what was tried. Meanwhile a strip over the search says what is swapped, previews stay silent, and
+    // the filters and the search show what fits: a pad's sounds of its type ("Kick", by its sound's name), or the device's
+    // presets, their folders opened; once it ends, they are as they were. onSwapStarted shows the browser, which then has
+    // the keys. Asked again for what it swaps (its Swap button clicked again), it keeps what is in its place.
+    void startSwap (DeviceID, int pad = -1);
+    bool isSwapping() const;
+    void keepSwap();
+    void putBackSwap();
+    std::function<void()> onSwapStarted;
+
     void paint (juce::Graphics&) override;
     void resized() override;
     void visibilityChanged() override;
@@ -91,9 +113,18 @@ public:
     // For tests.
     juce::TreeView& getTree() noexcept;
     juce::TextEditor& getSearchField() noexcept { return searchField; }
+    FilterBar& getFilterBar() noexcept { return filterBar; }
     std::optional<LibraryItem> getSelectedItem() const;
     const SoundView& getSoundView() const noexcept { return soundView; }
     void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override;
+    const Swap* getSwap() const noexcept { return swap.get(); }
+    juce::Component& getSwapStrip();
+
+    // A row's menu, as a right-click shows it: an item's (into the song, favorites, collections, its folder), or a place's
+    // (a collection's: rename or delete it). And the field that names a collection, while it shows.
+    juce::PopupMenu getItemMenu (const LibraryItem&, bool canRemoveFolder);
+    juce::PopupMenu getPlaceMenu (const BrowserPlace&);
+    juce::TextEditor* getNameField() noexcept;
 
     static constexpr int rowHeight = ListRow::height;
 
@@ -106,6 +137,8 @@ private:
     struct RootNode;
     struct Tree;
     struct TreeHover;
+    struct SwapStrip;
+    struct NameField;
 
     Library& library;
     Previewer& previewer;
@@ -117,8 +150,22 @@ private:
 
     ViewTitle title { "Browser" };
     SearchField searchField;
+    FilterBar filterBar;
+    BrowserFilters filters;
+    std::unique_ptr<juce::XmlElement> opennessUnfiltered; // the places' folders open before filters were set
     std::unique_ptr<Tree> tree;
     std::unique_ptr<RootNode> placesRoot, searchRoot;
+
+    // The swap open, the strip that shows it, and the search and the filters as they were before it; and which files it can
+    // try, by path, as the rows ask at every paint (a preset is read to know).
+    std::unique_ptr<Swap> swap;
+    std::unique_ptr<SwapStrip> swapStrip;
+    juce::String searchBeforeSwap;
+    BrowserFilters filtersBeforeSwap;
+    mutable std::map<juce::String, bool> triable;
+
+    // The field that names a new collection, or renames one, over its row.
+    std::unique_ptr<NameField> nameField;
 
     // The row under the pointer, whether the pointer is over the tree (its levels' guides show then, as VS Code's do), and
     // whether the keys moved the selection last (its outline shows then, not after a click, as in VS Code's Modern UI).
@@ -144,7 +191,8 @@ private:
     void saveSelectedTrackPreset();
     void choosePresetFile (const juce::String& folder, const juce::String& name, std::function<bool (const juce::File&)> save);
     void presetSaved (const juce::File&);
-    void reveal (BrowserPlace::Kind, const juce::File&); // a file in a place: its folders opened, and it selected
+    void reveal (BrowserPlace::Kind, const juce::File&);                    // a file in a place: its folders opened, and it selected
+    void openFolderIn (BrowserPlace::Kind, const juce::String& folderName); // a place's folder of that name, opened
     void addRows (juce::TreeViewItem& parent, const BrowserContents&);
     void updateSearch();
     void focusTree();
@@ -154,6 +202,14 @@ private:
     bool isPreviewing (const LibraryItem&) const;
     bool isPreviewOn() const;
     void selectionMoved(); // the sound view shows the item selected now
+    void showFilters();    // the filter bar as the filters and the search are now
+    void endSwap();        // once it is kept, put back, or closed by something else: the browser as it was before it
+    bool canTryInSwap (const LibraryItem&) const;
+
+    // Asks for a collection's name in a field over a row of the tree (from the browser's top while it has none), named as
+    // given at first; done gets the name typed, as Enter or a click elsewhere leaves it, unless Esc does.
+    void askForName (const juce::TreeViewItem*, const juce::String& name, std::function<void (const juce::String&)> done);
+    void newCollection (std::optional<LibraryItem> toAdd); // named as the user types, with an item in it if one is given
 
     // A search through a big library takes a while: once one has, typing waits for the keys to pause (docs/performance-
     // audit.md, U7). Small ones search at each key.
@@ -171,7 +227,7 @@ private:
 
     void textEditorTextChanged (juce::TextEditor&) override;
     void textEditorReturnKeyPressed (juce::TextEditor&) override { focusTree(); }
-    void textEditorEscapeKeyPressed (juce::TextEditor&) override;
+    void textEditorEscapeKeyPressed (juce::TextEditor&) override;    // puts back what a swap tried, else empties the search
     void changeListenerCallback (juce::ChangeBroadcaster*) override; // the sound pack's download went on
     void timerCallback() override;
 };

@@ -2,9 +2,10 @@
 // The drum sampler's editor (roadmap step 1.6, devices/drums/DrumSampler.h): its 16 pads in a grid, the first at the bottom
 // left as on FL Studio's FPC and an MPC, each named after what it plays, its choke group in its corner, and lit when it
 // plays. Clicking a pad, or Space or Enter on it, plays it and shows it: the sound it plays, drawn, with its attack's ramp at
-// the start and its length's cut, each dragged sideways as one undo step, and a line where it is as it plays; Load... or a
-// sound dropped on the pad from the browser or Explorer replaces it, and Reset puts the kit's back; then its level, pan,
-// tuning, attack, length and choke group, and the output. The pads fit the dock's height.
+// the start and its length's cut, each dragged sideways as one undo step, and a line where it is as it plays; Swap tries the
+// browser's sounds on it in the beat (model/devices/SwapModel.h), a sound dropped on the pad from the browser or Explorer
+// replaces it, and Reset puts the kit's back; then its level, pan, tuning, attack, length and choke group, and the output.
+// The pads fit the dock's height.
 #pragma once
 
 #include "DeviceEditors.h"
@@ -42,6 +43,11 @@ public:
     juce::Button& getPad (int pad);
     bool dropFile (int pad, const juce::File&);
 
+    // Swap, beside Reset while what shows the editor sets onSwap (the browser, through the Devices view or the device's
+    // window): asked for the selected pad. Lit while that pad is being swapped, which a click on it then keeps.
+    std::function<void (int pad)> onSwap;
+    juce::Button& getSwapButton() noexcept { return swapButton; }
+
     // The selected pad's sound, drawn; where it draws the attack's end and the length's cut, in its own coordinates.
     juce::Component& getWaveform() const;
     float getAttackX() const;
@@ -62,8 +68,8 @@ private:
 
     juce::Label padName;
     juce::Rectangle<int> padsTitle, outputLine; // the pads' title, and the line before the output, as laid out
-    juce::TextButton loadButton { "Load..." }, resetButton { "Reset" };
-    std::unique_ptr<juce::FileChooser> chooser;
+    juce::TextButton swapButton { "Swap" }, resetButton { "Reset" };
+    int swappedPad = -1; // the pad being swapped, as last shown, or -1
 
     static constexpr int numKnobs = 6; // the pad's level, pan, tune, attack and length, and the output
     std::array<std::unique_ptr<Knob>, numKnobs> knobs;
@@ -74,7 +80,6 @@ private:
 
     int getGridSize (int width, int height) const; // the pads' square, at a size
     void play (int pad);
-    void chooseFile();
     void tick() override { refresh(); }
 };
 } // namespace phazite::ui

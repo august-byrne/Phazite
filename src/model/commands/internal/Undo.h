@@ -76,6 +76,50 @@ private:
 };
 
 //==============================================================================
+// The undo step of something tried in place until it is kept or put back, as Swap tries sounds and presets (docs/design.md,
+// section 11; model/devices/SwapModel.h). What its owner changes through apply() is one step, begun at the first change:
+// keep() keeps it, under a name of its own; putBack() takes it all back, leaving nothing to redo. Unlike a Gesture it gives
+// way: before a step, a gesture or a recording begins meanwhile, or an undo or a redo, what was tried is kept, by its
+// owner's keepFirst (which keeps it or puts it back as it sees fit), so that the next change is a step of its own.
+// Destroyed while open, it puts back what was tried. Message thread only, one at a time for a song.
+class Trial
+{
+public:
+    Trial (Song&, const juce::String& name, std::function<void()> keepFirst);
+    ~Trial();
+
+    // Makes a change in its step, steps begun meanwhile joining it; fromStart takes back what was tried before, first.
+    void apply (const std::function<void()>& change, bool fromStart = false);
+
+    // The name of its step, as Undo's menu shows it meanwhile and as it is kept if something else keeps it.
+    void rename (const juce::String&);
+
+    bool hasChanges() const;
+    void keep (const juce::String& name);
+    void putBack();
+    bool isOpen() const noexcept { return open; }
+
+    // Keeps the trial open for a song, if it has changes: what a change that begins elsewhere does first.
+    static void keepOpenTrial (juce::UndoManager&);
+
+    // Whether a song has a trial open, changes and all: Auto Save waits until it ends (model/project/internal/Project.h).
+    static bool isInProgress (const Song&);
+
+private:
+    juce::WeakReference<Song> song;
+    juce::String name;
+    std::function<void()> keepFirst;
+    bool open = true, begun = false, applying = false;
+
+    juce::UndoManager* getUndoManager() const;
+    void close();
+
+    friend class UndoStep;
+
+    JUCE_DECLARE_NON_COPYABLE (Trial)
+};
+
+//==============================================================================
 // The undo step of what is recorded while the song plays (automation, roadmap step 2.1), which the song takes in as
 // recording ends: it begins a named step. Unlike a Gesture, changes made meanwhile begin steps of their own as usual,
 // and what is recorded after one of them joins its step. Begun during a gesture, it joins the gesture's step. Message

@@ -5,6 +5,8 @@
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <utility>
+
 namespace phazite::ui
 {
 namespace
@@ -61,6 +63,7 @@ struct Browser::Node : public juce::TreeViewItem
     }
 
     virtual juce::String getText() const = 0;
+    virtual juce::String getDetail() const { return {}; } // after its name, muted: a sound's key and tempo, a place's count
     virtual std::optional<Icon> getIcon() const { return std::nullopt; }
     virtual const LibraryItem* getItem() const { return nullptr; } // a sound, MIDI file, device or folder
     virtual void populate() {}                                     // adds the rows under it, as it opens
@@ -148,14 +151,11 @@ struct Browser::Node : public juce::TreeViewItem
     {
         auto name = getText();
 
-        if (const auto* item = getItem())
-        {
-            if (const auto detail = BrowserModel::getDetail (*item); detail.isNotEmpty())
-                name << ", " << detail;
+        if (const auto detail = getDetail(); detail.isNotEmpty())
+            name << ", " << detail;
 
-            if (browser.library.isFavorite (*item))
-                name << ", favorite";
-        }
+        if (const auto* item = getItem(); item != nullptr && browser.library.isFavorite (*item))
+            name << ", favorite";
 
         return name;
     }
@@ -230,19 +230,22 @@ struct Browser::Node : public juce::TreeViewItem
             if (favorite || isSelected())
                 browser.drawIcon (g, Icon::favorite, star.toFloat().withSizeKeepingCentre (14.0f, 14.0f),
                                   favorite ? p.warning : mutedColour, favorite);
-
-            if (const auto detail = BrowserModel::getDetail (*item); detail.isNotEmpty())
-            {
-                const juce::Font font { juce::FontOptions (TextSize::small) };
-                g.setFont (font);
-                g.setColour (mutedColour);
-                const auto detailWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, detail)) + Space::s;
-                g.drawText (detail, area.removeFromRight (detailWidth), juce::Justification::centredRight, false);
-            }
         }
 
+        if (const auto detail = getDetail(); detail.isNotEmpty())
+        {
+            const juce::Font font { juce::FontOptions (TextSize::small) };
+            g.setFont (font);
+            g.setColour (mutedColour);
+            const auto detailWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, detail)) + Space::s;
+            g.drawText (detail, area.removeFromRight (detailWidth), juce::Justification::centredRight, false);
+        }
+
+        // While a swap is open, what it can't try is muted (folders lead to what it can).
+        const auto unmuted =
+            item == nullptr || ! browser.isSwapping() || item->kind == LibraryItem::Kind::folder || browser.canTryInSwap (*item);
         g.setFont (juce::FontOptions (TextSize::body));
-        g.setColour (canBeSelected() ? textColour : mutedColour);
+        g.setColour (canBeSelected() && unmuted ? textColour : mutedColour);
         g.drawText (getText(), area, juce::Justification::centredLeft, true);
     }
 
@@ -333,6 +336,7 @@ struct Browser::ItemNode : public Node
     }
 
     juce::String getText() const override { return item.name; }
+    juce::String getDetail() const override { return BrowserModel::getDetail (item); }
     std::optional<Icon> getIcon() const override { return getIconFor (item); }
     const LibraryItem* getItem() const override { return &item; }
     bool mightContainSubItems() override { return item.kind == LibraryItem::Kind::folder; }
@@ -353,7 +357,8 @@ struct Browser::ItemNode : public Node
 };
 
 //==============================================================================
-// A place in the tree, which lists sounds or devices: at the top, or a type under "Sounds by Type".
+// A place in the tree, which lists sounds or devices: at the top, or a collection under "Collections"; while filters are
+// set, with how many of its sounds have their values.
 struct Browser::PlaceNode : public Node
 {
     PlaceNode (Browser& b, BrowserPlace p)
@@ -362,7 +367,8 @@ struct Browser::PlaceNode : public Node
     {
     }
 
-    juce::String getText() const override { return place.getTitle(); }
+    juce::String getText() const override { return place.name; }
+    juce::String getDetail() const override { return place.count >= 0 ? juce::String (place.count) : juce::String(); }
 
     std::optional<Icon> getIcon() const override
     {
@@ -372,19 +378,20 @@ struct Browser::PlaceNode : public Node
                 return Icon::favorite;
             case BrowserPlace::Kind::recent:
                 return Icon::recent;
-            case BrowserPlace::Kind::type:
-                return Icon::sound;
             case BrowserPlace::Kind::instruments:
                 return Icon::instrument;
             case BrowserPlace::Kind::effects:
                 return Icon::effect;
             case BrowserPlace::Kind::addFolder:
                 return Icon::addFolder;
-            case BrowserPlace::Kind::types:
+            case BrowserPlace::Kind::newCollection:
+                return Icon::plus;
+            case BrowserPlace::Kind::collections: // a folder of sets, not the browser's own icon
             case BrowserPlace::Kind::sounds:
             case BrowserPlace::Kind::folder:
             case BrowserPlace::Kind::factoryPresets:
             case BrowserPlace::Kind::presets: // a folder of the user's presets
+            case BrowserPlace::Kind::collection:
                 break;
         }
 
@@ -393,23 +400,22 @@ struct Browser::PlaceNode : public Node
 
     bool mightContainSubItems() override { return place.holdsItems(); }
     juce::String getUniqueName() const override { return "place:" + place.getKey(); }
-    void populate() override { browser.addRows (*this, browser.model.getContents (place)); }
+    void populate() override { browser.addRows (*this, browser.model.getContents (place, browser.filters)); }
 
     void clicked() override
     {
         if (place.kind == BrowserPlace::Kind::addFolder)
             browser.chooseFolderToAdd();
+        else if (place.kind == BrowserPlace::Kind::newCollection)
+            browser.newCollection (std::nullopt);
     }
 
     void activate() override { clicked(); }
 
     void showMenu() override
     {
-        const auto isFolder = place.kind == BrowserPlace::Kind::folder;
-        const auto isPresets = place.kind == BrowserPlace::Kind::presets && place.folder.isDirectory();
-
-        if (isFolder || isPresets || (place.kind == BrowserPlace::Kind::sounds && browser.soundPack.isInstalled()))
-            browser.showMenu (browser.library.makeFileItem (place.folder, place.folder), isFolder);
+        if (auto menu = browser.getPlaceMenu (place); menu.getNumItems() > 0)
+            menu.showMenuAsync (juce::PopupMenu::Options());
     }
 
     juce::String getTooltip() override { return place.getTooltip(); }
@@ -467,12 +473,36 @@ struct Browser::Tree : public juce::TreeView
             return true;
         }
 
-        // Esc stops a preview (and does what it does elsewhere when none plays).
+        // Esc puts back what a swap tried; else it stops a preview (and does what it does elsewhere when none plays).
+        if (key == juce::KeyPress::escapeKey && browser.isSwapping())
+        {
+            browser.putBackSwap();
+            return true;
+        }
+
         if (key == juce::KeyPress::escapeKey && browser.previewer.isPlaying())
         {
             browser.previewer.stop();
             repaint();
             return true;
+        }
+
+        // Down with nothing selected goes to the first row that can be, and plays it (or tries it, swapping).
+        if (key == juce::KeyPress::downKey && before == nullptr)
+        {
+            for (int row = 0; row < getNumRowsInTree(); ++row)
+            {
+                if (auto* node = dynamic_cast<Node*> (getItemOnRow (row)); node != nullptr && node->canBeSelected())
+                {
+                    node->setSelected (true, true);
+                    scrollToKeepItemVisible (node);
+
+                    if (const auto* item = node->getItem())
+                        browser.preview (*item);
+
+                    return true;
+                }
+            }
         }
 
         if (! juce::TreeView::keyPressed (key))
@@ -543,6 +573,97 @@ struct Browser::TreeHover : public juce::MouseListener
 };
 
 //==============================================================================
+// Over the search while a swap is open: what it swaps, and what is in its place now; then Keep and Put Back.
+struct Browser::SwapStrip : public juce::Component
+{
+    explicit SwapStrip (Browser& b)
+        : browser (b)
+    {
+        setTitle ("Swap");
+        keepButton.setTooltip ("Keeps what is in its place now, as one step to undo (Enter)");
+        keepButton.onClick = [this] { browser.keepSwap(); };
+        putBackButton.setTooltip ("Puts back what was there before (Esc)");
+        putBackButton.onClick = [this] { browser.putBackSwap(); };
+        addAndMakeVisible (keepButton);
+        addAndMakeVisible (putBackButton);
+    }
+
+    // "Swap Pad 1", and "Kick 03 in place of Kick", or what to do while nothing is tried yet.
+    juce::String getTitleText() const
+    {
+        const auto* open = browser.swap.get();
+        return open != nullptr ? "Swap " + open->getTargetName() : juce::String();
+    }
+
+    juce::String getStatusText() const
+    {
+        const auto* open = browser.swap.get();
+
+        if (open == nullptr)
+            return {};
+
+        const auto tried = open->getTried().getFileNameWithoutExtension();
+        const auto old = open->getOldName();
+        const auto what = open->getPad() >= 0 ? juce::String ("sound") : juce::String ("preset");
+
+        if (tried.isEmpty())
+            return "Move to a " + what + " to try it" + (old.isNotEmpty() ? " in place of " + old : juce::String());
+
+        return old.isNotEmpty() ? tried + " in place of " + old : tried;
+    }
+
+    void update()
+    {
+        setDescription (getTitleText() + ": " + getStatusText());
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto& p = getPalette (*this);
+        const auto area = getLocalBounds().toFloat();
+        g.setColour (p.accent.withAlpha (SwapTint::fill));
+        g.fillRoundedRectangle (area, cornerRadius);
+        g.setColour (p.accent);
+        g.drawRoundedRectangle (area.reduced (0.5f), cornerRadius, 1.0f);
+
+        // Its title, bold, then what is in place, muted.
+        auto line = getLocalBounds()
+                        .reduced (SwapTint::inset, 0)
+                        .withTrimmedTop (SwapTint::inset)
+                        .withHeight (juce::roundToInt (TextSize::body) + Space::xs);
+        const juce::Font bold { juce::FontOptions (TextSize::small, juce::Font::bold) };
+        const auto titleText = getTitleText().toUpperCase();
+        const auto titleWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (bold, titleText)) + Space::s;
+        g.setFont (bold);
+        g.setColour (p.text);
+        g.drawText (titleText, line.removeFromLeft (titleWidth), juce::Justification::centredLeft, true);
+        g.setFont (juce::FontOptions (TextSize::small));
+        g.setColour (p.textMuted);
+        g.drawText (getStatusText(), line, juce::Justification::centredLeft, true);
+    }
+
+    void resized() override
+    {
+        auto row = getLocalBounds().reduced (SwapTint::inset).removeFromBottom (SwapTint::buttonHeight);
+        keepButton.setBounds (row.removeFromLeft (SwapTint::buttonWidth));
+        row.removeFromLeft (Space::xs);
+        putBackButton.setBounds (row.removeFromLeft (SwapTint::buttonWidth));
+    }
+
+    Browser& browser;
+    juce::TextButton keepButton { "Keep" }, putBackButton { "Put Back" };
+};
+
+//==============================================================================
+// The field that names a collection, over its row: Enter, or a click elsewhere, names it; Esc doesn't.
+struct Browser::NameField : public juce::TextEditor
+{
+    std::function<void (const juce::String&)> done;
+    bool finished = false;
+};
+
+//==============================================================================
 Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const ProjectContext& context)
     : library (l),
       previewer (p),
@@ -609,20 +730,28 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     };
     previewer.setVolume ((float) volumeFader.getValue());
 
-    for (auto* c : std::initializer_list<juce::Component*> { &title, &searchField, tree.get(), &previewButton, &volumeFader })
+    // The filters under the search, what each offers as the search and the others leave it, and Clear.
+    filterBar.getOptions = [this] { return model.getFilterOptions (searchField.getText(), filters); };
+    filterBar.onChange = [this] (const BrowserFilters& changed) { setFilters (changed); };
+    filterBar.onClear = [this] { clearFiltersAndSearch(); };
+
+    swapStrip = std::make_unique<SwapStrip> (*this);
+    addChildComponent (*swapStrip); // while a swap is open
+
+    for (auto* c : std::initializer_list<juce::Component*> { &title, &searchField, &filterBar, tree.get(), &previewButton, &volumeFader })
         addAndMakeVisible (c);
 
     treeHover = std::make_unique<TreeHover> (*this);
 
     addChildComponent (soundView); // while a sound is selected
 
-    // Search finds more once the index of the sounds is ready.
+    // Search finds more once the index of the sounds is ready, and the filters count what it found.
     library.onIndexChanged = [this]
     {
         if (searchField.getText().trim().isNotEmpty())
             updateSearch();
-
-        refreshPlace (BrowserPlace::Kind::type);
+        else if (! filters.isEmpty())
+            rebuildPlaces();
     };
 
     soundPack.addChangeListener (this);
@@ -635,9 +764,16 @@ Browser::~Browser()
     soundPack.removeChangeListener (this);
     library.onIndexChanged = nullptr;
 
-    // The folders open now open again next time.
-    if (const auto openness = placesRoot->getOpennessState())
+    // What a swap tried stays, as anything else that changes the song leaves it.
+    if (swap != nullptr && swap->isOpen())
+        swap->keep();
+
+    // The folders open now open again next time: as they were without the filters, if any are set.
+    if (const auto openness = opennessUnfiltered != nullptr ? std::move (opennessUnfiltered) : placesRoot->getOpennessState())
         settings.set (Settings::browserOpenness, openness->toString (juce::XmlElement::TextFormat().singleLine().withoutHeader()));
+
+    if (nameField != nullptr)
+        nameField->finished = true; // nothing is named as it goes
 
     tree->setRootItem (nullptr);
 }
@@ -676,7 +812,7 @@ void Browser::rebuildPlaces()
     auto root = std::make_unique<RootNode> (*this);
     PlaceNode* sounds = nullptr;
 
-    for (auto& place : model.getPlaces())
+    for (auto& place : model.getPlaces (filters))
     {
         const auto isSounds = place.kind == BrowserPlace::Kind::sounds;
         auto* node = new PlaceNode (*this, std::move (place));
@@ -711,6 +847,13 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
             if (safeThis == nullptr || safeThis->placesRoot == nullptr)
                 return;
 
+            // While filters are set, every place's count may have changed with it.
+            if (! safeThis->filters.isEmpty())
+            {
+                safeThis->rebuildPlaces();
+                return;
+            }
+
             // Its folders open now stay open.
             const auto reopen = [kind] (juce::TreeViewItem* item)
             {
@@ -725,7 +868,7 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
                 }
             };
 
-            // The places at the top, and the types under "Sounds by Type".
+            // The places at the top, and the collections under "Collections".
             auto& root = *safeThis->placesRoot;
 
             for (int i = 0; i < root.getNumSubItems(); ++i)
@@ -733,9 +876,10 @@ void Browser::refreshPlace (BrowserPlace::Kind kind)
                 auto* place = root.getSubItem (i);
                 reopen (place);
 
-                if (auto* types = dynamic_cast<PlaceNode*> (place); types != nullptr && types->place.kind == BrowserPlace::Kind::types)
-                    for (int j = 0; j < types->getNumSubItems(); ++j)
-                        reopen (types->getSubItem (j));
+                if (auto* holder = dynamic_cast<PlaceNode*> (place);
+                    holder != nullptr && holder->place.kind == BrowserPlace::Kind::collections)
+                    for (int j = 0; j < holder->getNumSubItems(); ++j)
+                        reopen (holder->getSubItem (j));
             }
         });
 }
@@ -746,6 +890,50 @@ void Browser::textEditorTextChanged (juce::TextEditor&)
         searchDelay.startTimer (150);
     else
         updateSearch();
+
+    showFilters(); // Clear, while the search has words
+}
+
+void Browser::showFilters()
+{
+    const auto before = filterBar.getHeight();
+    filterBar.show (filters, searchField.getText().trim().isNotEmpty());
+
+    if (filterBar.getHeightForWidth (filterBar.getWidth()) != before)
+        resized();
+}
+
+void Browser::setFilters (const BrowserFilters& changed)
+{
+    if (changed == filters)
+        return;
+
+    // The folders open without filters, kept while they are set, open again once they are all taken away.
+    if (filters.isEmpty() && ! changed.isEmpty() && placesRoot != nullptr)
+        opennessUnfiltered = placesRoot->getOpennessState();
+
+    filters = changed;
+    showFilters();
+    rebuildPlaces();
+
+    if (filters.isEmpty() && opennessUnfiltered != nullptr)
+    {
+        placesRoot->restoreOpennessState (*opennessUnfiltered);
+        opennessUnfiltered = nullptr;
+    }
+
+    if (searchField.getText().trim().isNotEmpty())
+        updateSearch();
+
+    selectionMoved();
+}
+
+void Browser::clearFiltersAndSearch()
+{
+    searchField.setText ({}, false);
+    setFilters ({});
+    updateSearch();
+    showFilters();
 }
 
 void Browser::updateSearch()
@@ -761,7 +949,7 @@ void Browser::updateSearch()
 
     const auto started = juce::Time::getMillisecondCounterHiRes();
     searchRoot->clearSubItems();
-    addRows (*searchRoot, model.search (query));
+    addRows (*searchRoot, model.search (query, filters));
     lastSearchMilliseconds = juce::Time::getMillisecondCounterHiRes() - started;
 
     tree->setRootItem (searchRoot.get());
@@ -798,12 +986,15 @@ void Browser::focusTree()
 
 void Browser::textEditorEscapeKeyPressed (juce::TextEditor&)
 {
-    searchField.setText ({}, true);
+    if (isSwapping())
+        putBackSwap();
+    else
+        searchField.setText ({}, true);
 }
 
 void Browser::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // Once Phazite Sounds are installed, their place lists them, and search and Sounds by Type find them.
+    // Once Phazite Sounds are installed, their place lists them, and search and the filters find them.
     if (const auto installed = soundPack.isInstalled(); installed != soundPackInstalled)
     {
         soundPackInstalled = installed;
@@ -817,6 +1008,20 @@ void Browser::changeListenerCallback (juce::ChangeBroadcaster*)
 //==============================================================================
 bool Browser::place (const LibraryItem& item)
 {
+    // Swapping, Enter or a double-click keeps it, tried first if it wasn't yet.
+    if (isSwapping())
+    {
+        if (! canTryInSwap (item))
+            return false;
+
+        if (swap->getTried() != item.file)
+            swap->tryFile (item.file);
+
+        noteUsed (item);
+        keepSwap();
+        return true;
+    }
+
     if (onPlace == nullptr || ! onPlace (item))
         return false;
 
@@ -843,10 +1048,24 @@ void Browser::dragOperationEnded (const juce::DragAndDropTarget::SourceDetails& 
 
 void Browser::preview (const LibraryItem& item)
 {
-    if (BrowserModel::canPreview (item) && isPreviewOn())
-        previewer.play (item.file, projectContext, BrowserModel::previewsInTime (item));
-    else
+    // Swapping, it plays in place instead, through the track, whether previews are on or not: that is the swap.
+    if (isSwapping())
+    {
         previewer.stop();
+
+        if (canTryInSwap (item))
+            swap->tryFile (item.file);
+
+        swapStrip->update();
+    }
+    else if (BrowserModel::canPreview (item) && isPreviewOn())
+    {
+        previewer.play (item.file, projectContext, BrowserModel::previewsInTime (item));
+    }
+    else
+    {
+        previewer.stop();
+    }
 
     wasPlaying = previewer.isPlaying();
     tree->repaint();
@@ -856,8 +1075,8 @@ void Browser::preview (const LibraryItem& item)
 void Browser::togglePreview (const LibraryItem& item)
 {
     // A one-shot plays again from its start, as clicked again and again to hear it; a loop, which plays until something
-    // stops it, stops.
-    if (! isPreviewing (item) || ! previewer.isInTime())
+    // stops it, stops. Swapping, a click tries it again.
+    if (isSwapping() || ! isPreviewing (item) || ! previewer.isInTime())
     {
         preview (item);
         return;
@@ -871,6 +1090,9 @@ void Browser::togglePreview (const LibraryItem& item)
 
 bool Browser::isPreviewing (const LibraryItem& item) const
 {
+    if (isSwapping())
+        return item.isFile() && item.file == swap->getTried();
+
     return item.isFile() && item.file == previewer.getFile() && previewer.isPlaying();
 }
 
@@ -888,10 +1110,15 @@ void Browser::toggleFavorite (const LibraryItem& item)
 
 void Browser::showMenu (const LibraryItem& item, bool canRemoveFolder)
 {
+    getItemMenu (item, canRemoveFolder).showMenuAsync (juce::PopupMenu::Options());
+}
+
+juce::PopupMenu Browser::getItemMenu (const LibraryItem& item, bool canRemoveFolder)
+{
     const juce::Component::SafePointer<Browser> safeThis (this);
     juce::PopupMenu menu;
 
-    if (BrowserModel::canPlace (item))
+    if (BrowserModel::canPlace (item) && ! isSwapping())
         menu.addItem ("Add to the Song",
                       [safeThis, item]
                       {
@@ -905,6 +1132,32 @@ void Browser::showMenu (const LibraryItem& item, bool canRemoveFolder)
                       if (safeThis != nullptr)
                           safeThis->toggleFavorite (item);
                   });
+
+    // Its collections, each ticked while it is in it (choosing one again takes it out), and a new one with it in it.
+    juce::PopupMenu collections;
+
+    for (const auto& name : library.getCollections())
+        collections.addItem (name, true, library.isInCollection (item, name),
+                             [safeThis, item, name]
+                             {
+                                 if (safeThis == nullptr)
+                                     return;
+
+                                 auto& lib = safeThis->library;
+                                 lib.setInCollection (item, name, ! lib.isInCollection (item, name));
+                                 safeThis->refreshPlace (BrowserPlace::Kind::collection);
+                             });
+
+    if (collections.getNumItems() > 0)
+        collections.addSeparator();
+
+    collections.addItem ("New Collection...",
+                         [safeThis, item]
+                         {
+                             if (safeThis != nullptr)
+                                 safeThis->newCollection (item);
+                         });
+    menu.addSubMenu ("Add to Collection", collections);
 
     if (item.isFile())
         menu.addItem (getShowInFolderText(), [file = item.file] { file.revealToUser(); });
@@ -920,7 +1173,303 @@ void Browser::showMenu (const LibraryItem& item, bool canRemoveFolder)
                           safeThis->rebuildPlaces();
                       });
 
-    menu.showMenuAsync (juce::PopupMenu::Options());
+    return menu;
+}
+
+juce::PopupMenu Browser::getPlaceMenu (const BrowserPlace& place)
+{
+    const juce::Component::SafePointer<Browser> safeThis (this);
+
+    // A collection's: its name typed anew over its row, or it deleted, once asked (its sounds stay where they are).
+    if (place.kind == BrowserPlace::Kind::collection)
+    {
+        juce::PopupMenu menu;
+        menu.addItem ("Rename...",
+                      [safeThis, name = place.name]
+                      {
+                          if (safeThis == nullptr)
+                              return;
+
+                          const juce::TreeViewItem* row = nullptr;
+                          auto& tree = *safeThis->tree;
+
+                          for (int i = 0; i < tree.getNumRowsInTree() && row == nullptr; ++i)
+                              if (auto* node = dynamic_cast<PlaceNode*> (tree.getItemOnRow (i));
+                                  node != nullptr && node->place.kind == BrowserPlace::Kind::collection && node->place.name == name)
+                                  row = node;
+
+                          safeThis->askForName (row, name,
+                                                [safeThis, name] (const juce::String& newName)
+                                                {
+                                                    if (safeThis != nullptr && safeThis->library.renameCollection (name, newName))
+                                                        safeThis->refreshPlace (BrowserPlace::Kind::collections);
+                                                });
+                      });
+        menu.addItem ("Delete Collection",
+                      [safeThis, name = place.name]
+                      {
+                          if (safeThis == nullptr)
+                              return;
+
+                          juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                            .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                                            .withTitle ("Delete the collection " + name + "?")
+                                                            .withMessage ("Its sounds, presets and devices stay where they are.")
+                                                            .withButton ("Delete", 1)
+                                                            .withButton ("Cancel", 0)
+                                                            .withAssociatedComponent (safeThis.getComponent()),
+                                                        [safeThis, name] (int chosen)
+                                                        {
+                                                            if (safeThis == nullptr || chosen != 1)
+                                                                return;
+
+                                                            safeThis->library.removeCollection (name);
+                                                            safeThis->refreshPlace (BrowserPlace::Kind::collections);
+                                                        });
+                      });
+        return menu;
+    }
+
+    // A folder's, Phazite Sounds' and the presets' folder's, as the items' are; the user's folders can go from the browser.
+    const auto isFolder = place.kind == BrowserPlace::Kind::folder;
+    const auto isPresets = place.kind == BrowserPlace::Kind::presets && place.folder.isDirectory();
+
+    if (isFolder || isPresets || (place.kind == BrowserPlace::Kind::sounds && soundPack.isInstalled()))
+        return getItemMenu (library.makeFileItem (place.folder, place.folder), isFolder);
+
+    return {};
+}
+
+void Browser::askForName (const juce::TreeViewItem* row, const juce::String& name, std::function<void (const juce::String&)> done)
+{
+    nameField = std::make_unique<NameField>();
+    auto& field = *nameField;
+    field.setTitle ("Name");
+    field.setFont (juce::FontOptions (TextSize::body));
+    field.setText (name, false);
+    field.done = std::move (done);
+
+    // Named once: Enter, or the keys going elsewhere, names it; Esc doesn't. The field goes after the key or the click that
+    // ended it.
+    const juce::Component::SafePointer<Browser> safeThis (this);
+    const auto finish = [safeThis] (bool named)
+    {
+        if (safeThis == nullptr || safeThis->nameField == nullptr || std::exchange (safeThis->nameField->finished, true))
+            return;
+
+        const auto text = safeThis->nameField->getText().trim();
+        auto then = safeThis->nameField->done;
+        safeThis->nameField->setVisible (false);
+        juce::MessageManager::callAsync (
+            [safeThis]
+            {
+                if (safeThis != nullptr && safeThis->nameField != nullptr && safeThis->nameField->finished)
+                    safeThis->nameField = nullptr;
+            });
+
+        if (named && text.isNotEmpty() && then != nullptr)
+            then (text);
+
+        if (safeThis != nullptr)
+            safeThis->tree->grabKeyboardFocus();
+    };
+
+    field.onReturnKey = [finish] { finish (true); };
+    field.onEscapeKey = [finish] { finish (false); };
+    field.onFocusLost = [finish] { finish (true); };
+
+    // Over its row, or the tree's first while it has none.
+    auto area = tree->getBounds().withHeight (rowHeight);
+
+    if (row != nullptr)
+        area = row->getItemPosition (true).withHeight (row->getItemHeight()) + tree->getPosition();
+
+    addAndMakeVisible (field);
+    field.setBounds (area.withTrimmedLeft (SideBar::rowChevron + SideBar::chevronSize));
+    field.grabKeyboardFocus();
+    field.selectAll();
+}
+
+void Browser::newCollection (std::optional<LibraryItem> toAdd)
+{
+    // Over its row in Collections, if that is open; else at the tree's top.
+    const juce::TreeViewItem* row = nullptr;
+
+    for (int i = 0; i < tree->getNumRowsInTree() && row == nullptr; ++i)
+        if (auto* node = dynamic_cast<PlaceNode*> (tree->getItemOnRow (i));
+            node != nullptr && node->place.kind == BrowserPlace::Kind::newCollection)
+            row = node;
+
+    const juce::Component::SafePointer<Browser> safeThis (this);
+    askForName (row, "New Collection",
+                [safeThis, toAdd] (const juce::String& name)
+                {
+                    if (safeThis == nullptr)
+                        return;
+
+                    const auto made = safeThis->library.addCollection (name);
+
+                    if (made.isNotEmpty() && toAdd.has_value())
+                        safeThis->library.setInCollection (*toAdd, made, true);
+
+                    safeThis->refreshPlace (BrowserPlace::Kind::collections);
+                });
+}
+
+//==============================================================================
+bool Browser::isSwapping() const
+{
+    return swap != nullptr && swap->isOpen();
+}
+
+bool Browser::canTryInSwap (const LibraryItem& item) const
+{
+    if (! isSwapping() || ! item.isFile() || item.kind == LibraryItem::Kind::folder)
+        return false;
+
+    const auto [known, isNew] = triable.try_emplace (item.file.getFullPathName(), false);
+
+    if (isNew)
+        known->second = swap->canTry (item.file);
+
+    return known->second;
+}
+
+juce::Component& Browser::getSwapStrip()
+{
+    return *swapStrip;
+}
+
+juce::TextEditor* Browser::getNameField() noexcept
+{
+    return nameField.get();
+}
+
+void Browser::startSwap (DeviceID device, int pad)
+{
+    // Asked again for what it swaps, it keeps what is in its place (a Swap button clicked again); asked for another, it keeps
+    // what it tried first, as anything else does.
+    const auto same = isSwapping() && swap->getDevice() == device && swap->getPad() == pad;
+
+    if (swap != nullptr)
+    {
+        if (swap->isOpen())
+            swap->keep();
+
+        endSwap();
+    }
+
+    if (same)
+        return;
+
+    auto& context = const_cast<ProjectContext&> (projectContext); // trying something in place changes the open project
+    swap = std::make_unique<Swap> (context, device, pad);
+    triable.clear();
+
+    if (! swap->isOpen())
+    {
+        swap = nullptr;
+        return;
+    }
+
+    previewer.stop();
+    searchBeforeSwap = searchField.getText();
+    filtersBeforeSwap = filters;
+    searchField.setText ({}, false);
+
+    // What fits: a pad's sounds of its sound's type, where there are some; a device's presets, in their folders, opened.
+    BrowserFilters fitting;
+
+    if (pad >= 0)
+    {
+        const auto types = getSoundTypesIn (swap->getOldName());
+        const auto options = model.getFilterOptions ({}, {});
+
+        for (const auto& [type, count] : options.types)
+            if (fitting.type.isEmpty() && types.contains (type) && count > 0)
+                fitting.type = type;
+    }
+
+    setFilters (fitting);
+    updateSearch();
+
+    if (pad < 0)
+    {
+        const auto folder = getPresetFolderName (projectContext, device);
+        openFolderIn (BrowserPlace::Kind::factoryPresets, folder);
+        openFolderIn (BrowserPlace::Kind::presets, folder);
+    }
+
+    tree->clearSelectedItems();
+    swapStrip->update();
+    swapStrip->setVisible (true);
+    resized();
+
+    if (onSwapStarted != nullptr)
+        onSwapStarted();
+
+    tree->grabKeyboardFocus();
+    tree->repaint();
+}
+
+void Browser::keepSwap()
+{
+    if (swap != nullptr)
+        swap->keep();
+
+    endSwap();
+}
+
+void Browser::putBackSwap()
+{
+    if (swap != nullptr)
+        swap->putBack();
+
+    endSwap();
+}
+
+void Browser::endSwap()
+{
+    if (swap == nullptr)
+        return;
+
+    swap = nullptr; // puts back what is tried, unless it was kept
+    swapStrip->setVisible (false);
+
+    // As the browser was before it.
+    searchField.setText (searchBeforeSwap, false);
+    setFilters (filtersBeforeSwap);
+    updateSearch();
+    showFilters();
+    resized();
+    tree->repaint();
+    repaint (statusArea);
+}
+
+void Browser::openFolderIn (BrowserPlace::Kind kind, const juce::String& folderName)
+{
+    if (placesRoot == nullptr || folderName.isEmpty())
+        return;
+
+    for (int i = 0; i < placesRoot->getNumSubItems(); ++i)
+    {
+        auto* place = dynamic_cast<PlaceNode*> (placesRoot->getSubItem (i));
+
+        if (place == nullptr || place->place.kind != kind)
+            continue;
+
+        place->setOpen (true);
+
+        for (int j = 0; j < place->getNumSubItems(); ++j)
+        {
+            if (auto* node = dynamic_cast<Node*> (place->getSubItem (j)); node != nullptr && node->getText() == folderName)
+            {
+                node->setOpen (true);
+                tree->scrollToKeepItemVisible (node);
+                return;
+            }
+        }
+    }
 }
 
 void Browser::chooseFolderToAdd()
@@ -1017,10 +1566,27 @@ void Browser::showDevicePresetMenu (DeviceID device, const juce::String& name, j
 
     auto& context = const_cast<ProjectContext&> (projectContext); // loading into the device changes the open project
     const juce::Component::SafePointer<Browser> safeThis (this);
-    auto menu = makeDevicePresetMenu (library, folder, name,
-                                      [&context, device] (const juce::File& file) { loadPresetInto (context, device, file); });
+    auto presets = makeDevicePresetMenu (library, folder, name,
+                                         [&context, device] (const juce::File& file) { loadPresetInto (context, device, file); });
 
-    if (menu.getNumItems() == 0)
+    // First, one of Phazite's own devices' presets tried in place from the browser, each heard as the browser moves to it.
+    juce::PopupMenu menu;
+
+    if (getDeviceHandle (context, device).isValid())
+    {
+        menu.addItem ("Swap: Try Them in Place",
+                      [safeThis, device]
+                      {
+                          if (safeThis != nullptr)
+                              safeThis->startSwap (device);
+                      });
+        menu.addSeparator();
+    }
+
+    for (juce::PopupMenu::MenuItemIterator item (presets); item.next();)
+        menu.addItem (item.getItem());
+
+    if (presets.getNumItems() == 0)
         menu.addItem ("No presets for " + name + " yet", false, false, nullptr);
 
     menu.addSeparator();
@@ -1237,7 +1803,9 @@ void Browser::paint (juce::Graphics& g)
 
     g.setColour (p.textMuted);
     g.setFont (juce::FontOptions (TextSize::small));
-    g.drawText (BrowserModel::getPreviewStatus (isPreviewOn(), previewer), statusArea, juce::Justification::centredLeft, true);
+    g.drawText (isSwapping() ? juce::String ("Swapping: Enter keeps it, Esc puts the old one back")
+                             : BrowserModel::getPreviewStatus (isPreviewOn(), previewer),
+                statusArea, juce::Justification::centredLeft, true);
 
     // A track about to be saved as a preset, as a mixer channel shows a device about to be dropped on it.
     if (trackDropping)
@@ -1256,8 +1824,21 @@ void Browser::resized()
     { return row.withTrimmedLeft (SideBar::fieldLeft).withTrimmedRight (SideBar::fieldRight); };
 
     title.setBounds (area.removeFromTop (SideBar::titleHeight));
+
+    // While a swap is open, what it swaps, over the search.
+    if (swapStrip->isVisible())
+    {
+        swapStrip->setBounds (fromSides (area.removeFromTop (SwapTint::height)));
+        area.removeFromTop (Space::xs);
+    }
+
     const auto search = fromSides (area.removeFromTop (SideBar::inputRowHeight));
     searchField.setBounds (search.withSizeKeepingCentre (search.getWidth(), SideBar::controlHeight));
+
+    // The filters under it, in as many rows as they need.
+    const auto filtersWidth = fromSides (area).getWidth();
+    filterBar.setBounds (fromSides (area.removeFromTop (filterBar.getHeightForWidth (filtersWidth))));
+    area.removeFromTop (Space::xs);
 
     auto footer = fromSides (area.removeFromBottom (SideBar::buttonRowHeight));
     footer = footer.withSizeKeepingCentre (footer.getWidth(), SideBar::controlHeight);
@@ -1293,7 +1874,7 @@ void Browser::selectionMoved()
 
 void Browser::visibilityChanged()
 {
-    // A hidden browser plays nothing.
+    // A hidden browser plays nothing, and swaps nothing: what a swap tried stays, as anything else leaves it.
     if (isVisible())
     {
         startTimerHz (10);
@@ -1302,6 +1883,9 @@ void Browser::visibilityChanged()
     {
         stopTimer();
         previewer.stop();
+
+        if (isSwapping())
+            keepSwap();
     }
 }
 
@@ -1312,6 +1896,11 @@ void Browser::lookAndFeelChanged()
 
 void Browser::timerCallback()
 {
+    // A swap something else ended (a change that kept what it tried, its device gone, another project): the browser as it
+    // was before it.
+    if (swap != nullptr && ! swap->isOpen())
+        endSwap();
+
     previewer.keepInTime (projectContext);
 
     // A one-shot ends by itself.

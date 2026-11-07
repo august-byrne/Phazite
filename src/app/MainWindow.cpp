@@ -91,7 +91,7 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
       services (appServices),
       computerKeyboard ([&audio = getAudioIO (appServices.engineContext)] (const juce::MidiMessage& m) { audio.playLive (m); }),
       shortcutKeys (bridge),
-      pluginWindowServices { s.getContext(), appServices.library, appServices.settings }
+      pluginWindowServices { s.getContext(), appServices.library, appServices.settings, {} }
 {
     // Phazite's own title bar on Windows (ui/shell/TitleBar.h), in the bar Windows would draw: the content fills the window,
     // and findControlAtPoint() tells Windows which of its parts are the caption and the buttons. Linux and macOS keep the
@@ -154,8 +154,9 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     pluginKeys = std::make_unique<ui::PluginKeys> (shortcutKeys, computerKeyboard);
     ui::setPluginKeys (pluginKeys.get());
 
-    // Plug-in windows' menus save and load presets, and keep their key switches in the settings. The devices' windows
-    // open over this one, for the project open.
+    // Plug-in windows' menus save and load presets, and keep their key switches in the settings; a drum sampler's pads in its
+    // own window swap their sounds from the browser. The devices' windows open over this one, for the project open.
+    pluginWindowServices.swap = [this] (DeviceID device, int pad) { shell->startSwap (device, pad); };
     setPluginWindowServices (&pluginWindowServices);
     deviceWindows = std::make_unique<DeviceWindows> (s.getContext(), this);
 

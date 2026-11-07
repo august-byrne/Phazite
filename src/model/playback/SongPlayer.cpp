@@ -933,6 +933,41 @@ void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& de
             loadOscillatorTable (static_cast<devices::WavetableSynth&> (processor), song, sounds, osc);
 }
 
+void SongPlayer::loadSound (engine::DeviceNode& node, const juce::ValueTree& deviceState, const juce::Identifier& property)
+{
+    // Only the pad or the oscillator whose sound changed, as Swap changes one at each sound it tries; all of them for
+    // anything else.
+    const auto sounds = deviceState.getChildWithName (schema::SOUNDS);
+    auto& processor = node.getRunner().getProcessor();
+    const auto type = node.getDeviceInfo().typeID;
+
+    if (type == devices::DrumSampler::typeID)
+    {
+        for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+        {
+            if (property == schema::getPadSound (pad) || property == schema::getPadSoundFile (pad))
+            {
+                loadPadSound (static_cast<devices::DrumSampler&> (processor), song, sounds, pad);
+                return;
+            }
+        }
+    }
+
+    if (type == devices::WavetableSynth::typeID)
+    {
+        for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
+        {
+            if (property == schema::getOscillatorWavetable (osc) || property == schema::getOscillatorWavetableFile (osc))
+            {
+                loadOscillatorTable (static_cast<devices::WavetableSynth&> (processor), song, sounds, osc);
+                return;
+            }
+        }
+    }
+
+    loadSounds (node, deviceState);
+}
+
 void SongPlayer::setChannel (const juce::ValueTree& channelState, bool isMaster)
 {
     if (auto* strip = findStrip (isMaster ? 0 : getID (channelState, schema::trackID)))
@@ -1080,7 +1115,7 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
     if (tree.hasType (schema::SOUNDS))
     {
         if (auto* node = findDevice (getID (tree.getParent(), schema::deviceID)))
-            loadSounds (*node, tree.getParent());
+            loadSound (*node, tree.getParent(), property);
 
         return true;
     }

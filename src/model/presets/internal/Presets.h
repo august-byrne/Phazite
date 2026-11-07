@@ -36,4 +36,11 @@ juce::ValueTree makeDeviceFromPreset (Song&, const PluginHost&, const juce::var&
 // plug-ins' instances.
 DeviceID addDeviceFromPreset (Song&, const PluginHost&, TrackID, const juce::var& preset, Selection*);
 TrackID addTrackFromPreset (Song&, const PluginHost&, TrackID after, const juce::var& preset, Selection*);
+
+// Whether a file is a preset of one of Phazite's own devices of a device's type, as Swap tries them (model/devices/
+// SwapModel.h). And its settings put into the device as loadPresetInto() puts them (PresetModel.h), in the caller's undo step
+// and with the sound files it names left where they are, by their full paths, rather than copied into the project: Swap
+// copies those it keeps. Returns false, changing nothing, for what isPresetFor() refuses.
+bool isPresetFor (const Song&, DeviceID, const juce::File&);
+bool tryPresetIn (Song&, DeviceID, const juce::File&);
 } // namespace phazite

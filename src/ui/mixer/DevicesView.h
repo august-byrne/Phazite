@@ -73,6 +73,9 @@ public:
     // over the button (the app's browser does: Browser::showDevicePresetMenu()).
     std::function<void (DeviceID, const juce::String& deviceName, juce::Component& target)> onShowPresets;
 
+    // A drum sampler's Swap, in its editor, was clicked for a pad: the app's browser swaps its sound (Browser::startSwap()).
+    std::function<void (DeviceID, int pad)> onSwap;
+
     void paint (juce::Graphics&) override;
     void resized() override;
     void lookAndFeelChanged() override; // another theme: its colours in it

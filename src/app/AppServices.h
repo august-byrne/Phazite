@@ -32,8 +32,9 @@ struct AppServices
     // On the engine context the app makes as it starts (src/app/Main.cpp), or the tests' one.
     explicit AppServices (EngineContext&, AppServicesOptions = {});
 
-    // In this order: each may use those before it. The browser's library indexes Phazite Sounds' folder, and writes its
-    // settings until the window that shows it goes; what the previewer plays goes before the engine context.
+    // In this order: each may use those before it. The browser's library indexes Phazite Sounds' folder, keeping what it read
+    // of the sounds' files beside the settings (but in tests, whose settings are in memory), and writes its settings until the
+    // window that shows it goes; what the previewer plays goes before the engine context.
     EngineContext& engineContext;                       // the engine as the UI reaches it
     std::unique_ptr<juce::PropertiesFile> settingsFile; // Phazite's own (Settings::getFileOptions()), or none in memory
     Settings settings;

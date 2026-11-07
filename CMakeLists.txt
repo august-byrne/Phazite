@@ -287,6 +287,8 @@ target_sources(phazite_core PRIVATE
     src/model/devices/ParameterHandle.h
     src/model/devices/ParameterRef.h
     src/model/devices/Parameters.cpp
+    src/model/devices/Swap.cpp
+    src/model/devices/SwapModel.h
     src/model/devices/Wavetables.cpp
     src/model/devices/internal/DeviceFiles.h
     src/model/devices/internal/DeviceHandle.h
@@ -294,6 +296,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/internal/DrumKit.h
     src/model/devices/internal/ParameterHandle.h
     src/model/devices/internal/Parameters.h
+    src/model/devices/internal/Swap.h
     src/model/devices/internal/Wavetables.h
     src/model/engine/AppInfo.cpp
     src/model/engine/AppInfo.h
@@ -638,6 +641,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/audioclip/AudioClipEditor.h
     src/ui/browser/Browser.cpp
     src/ui/browser/Browser.h
+    src/ui/browser/FilterBar.cpp
+    src/ui/browser/FilterBar.h
     src/ui/browser/PluginPicker.cpp
     src/ui/browser/PluginPicker.h
     src/ui/browser/SoundView.cpp
@@ -1048,6 +1053,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AutomationModelTests.cpp
         tests/BeatsTests.cpp
         tests/Benchmarks.cpp
+        tests/BrowserFilterTests.cpp
         tests/BrowserModelTests.cpp
         tests/BrowserTests.cpp
         tests/ChordLaneTests.cpp
@@ -1155,12 +1161,14 @@ if(PHAZITE_BUILD_TESTS)
         tests/SettingsTests.cpp
         tests/ShortcutTests.cpp
         tests/SidechainTests.cpp
+        tests/SoundKeyTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
         tests/StartupSoundTests.cpp
         tests/StatusBarTests.cpp
         tests/StereoExpanderTests.cpp
         tests/StretchTests.cpp
+        tests/SwapTests.cpp
         tests/SynthEditorTests.cpp
         tests/SynthTests.cpp
         tests/TestAudioDevice.cpp

@@ -60,12 +60,15 @@ private:
 };
 
 // What the plug-in windows' menus work with: the open project, the user's presets, and the settings, which keep for each
-// plug-in whether it gets every key. The main window sets them while it is open; until then the menus' items are off.
+// plug-in whether it gets every key; and what a drum sampler's Swap in its own window asks (the browser's, which tries its
+// sounds on the pad: ui/browser/Browser.h). The main window sets them while it is open; until then the menus' items are off,
+// and the pads have no Swap.
 struct PluginWindowServices
 {
     ProjectContext& context;
     Library& library;
     Settings& settings;
+    std::function<void (DeviceID, int pad)> swap;
 };
 
 void setPluginWindowServices (const PluginWindowServices*);

@@ -84,7 +84,8 @@ public:
     bool hasUnsavedChanges();
 
     // Saves to the project file. A copy of the previous version goes into Backups/ first, and the
-    // new file only replaces the old one once it has been written completely.
+    // new file only replaces the old one once it has been written completely. What is being tried in place (Swap) is kept
+    // first, as its own undo step (model/commands/internal/Undo.h: Trial).
     juce::Result save();
 
     // Writes the autosave if anything changed since the last save or autosave.
@@ -202,7 +203,8 @@ public:
 
     // Auto Save, as VS Code's files.autoSave "afterDelay": while on (for a project with a file of its own), the project saves
     // itself autoSaveDelayMs after its last change (Project::saveInBackground()), in place of autosaving for a crash; while
-    // the song plays, at most every playingSaveSeconds; never while it records, and at once as a recording ends.
+    // the song plays, at most every playingSaveSeconds; never while it records, halfway through a drag (a Gesture) or while
+    // something is tried in place (a Trial: model/commands/internal/Undo.h), and at once as a recording ends.
     void setAutoSave (bool);
     bool isAutoSaving() const noexcept { return autoSave; }
     static constexpr int autoSaveDelayMs = 1000, playingSaveSeconds = 10;

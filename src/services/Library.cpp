@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Library.h"
 #include "model/engine/AppInfo.h"
-#include "model/engine/AudioFiles.h"
 #include "model/engine/EngineContext.h"
+
+#include <juce_cryptography/juce_cryptography.h>
 
 #include <algorithm>
 #include <set>
@@ -12,6 +13,8 @@ namespace phazite
 namespace
 {
     constexpr const char* devicePrefix = "device:";
+    constexpr int startBytes = 64 * 1024; // what a set knows a file by, besides its size
+    constexpr int mostCandidates = 32;    // files of a member's size looked into in its folder, and in the index, to find it again
 
     // The words in a name, lowercase: split at anything but letters and digits, between letters and digits
     // ("Kick01", "808Bass") and before a capital that follows a small letter ("DeepKick").
@@ -206,37 +209,190 @@ namespace
 
         return results;
     }
+
+    //==============================================================================
+    // A sound's tags and key: what it is, from the words of its name and folders; a loop or a one-shot, its tempo and its
+    // key, from them or from its loop data.
+    struct SoundDescription
+    {
+        juce::StringArray tags;
+        std::optional<SoundKey> key;
+    };
+
+    SoundDescription describeSound (const juce::File& file, const juce::File& root, const SoundFacts* facts)
+    {
+        // The words of the name, and of the folders' names between the root and the file.
+        const auto name = file.getFileNameWithoutExtension();
+        auto tokens = joinTagWords (getTokens (name));
+        juce::Array<juce::File> folders; // the nearest first
+
+        for (auto folder = file.getParentDirectory(); folder.isAChildOf (root); folder = folder.getParentDirectory())
+        {
+            tokens.addArray (joinTagWords (getTokens (folder.getFileName())));
+            folders.add (folder);
+        }
+
+        SoundDescription description;
+        auto& tags = description.tags;
+
+        for (const auto& tagWords : getTagWords())
+        {
+            // "808" alone is the 808's bass drum, played as a bass; "808 Clap" is a clap.
+            const auto is808Bass = juce::String (tagWords.tag) == "Bass" && tags.isEmpty() && tokens.contains ("808");
+
+            if (is808Bass || hasWord (tokens, tagWords.words))
+                tags.add (tagWords.tag);
+        }
+
+        // A riser made for 4 bars at 128 BPM is still a one-shot. Loop data say what the sound is, and its tempo where its
+        // name doesn't.
+        auto tempo = getTempoFromName (name);
+        auto isLoop = hasWord (tokens, { "loop", "break", "breakbeat", "groove" }) || (tempo.has_value() && ! tags.contains ("FX"));
+
+        if (facts != nullptr && facts->loopData == AudioFileInfo::LoopData::loop)
+        {
+            isLoop = true;
+
+            if (const auto beatsPerMinute = facts->seconds > 0.0 ? facts->loopBeats * 60.0 / facts->seconds : 0.0;
+                ! tempo.has_value() && beatsPerMinute >= 40.0 && beatsPerMinute <= 300.0)
+                tempo = std::round (beatsPerMinute);
+        }
+        else if (facts != nullptr && facts->loopData == AudioFileInfo::LoopData::oneShot)
+        {
+            isLoop = false;
+        }
+
+        tags.add (isLoop ? "Loop" : "One-shot");
+
+        if (tempo.has_value())
+            tags.add (juce::String (juce::roundToInt (*tempo)) + " BPM");
+
+        // Its key: its name's, a folder's with minor or major, or its loop data's.
+        description.key = getKeyFromName (name);
+
+        for (int i = 0; i < folders.size() && ! description.key.has_value(); ++i)
+            description.key = getKeyFromName (folders[i].getFileName(), false);
+
+        if (! description.key.has_value() && facts != nullptr)
+            description.key = facts->key;
+
+        if (description.key.has_value())
+            tags.add (description.key->describe());
+
+        return description;
+    }
+
+    //==============================================================================
+    // The files whose loop data the index reads: WAV and AIFF, which keep them in a chunk of their own.
+    bool mayHaveLoopData (const juce::File& file)
+    {
+        return file.hasFileExtension ("wav;wave;aif;aiff;aifc");
+    }
+
+    SoundFacts readFacts (const juce::File& file, juce::int64 size, juce::int64 modified)
+    {
+        SoundFacts facts { size, modified };
+
+        if (const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (file)); reader != nullptr)
+        {
+            const auto info = readAudioFileInfo (*reader, {}); // its loop data alone, not its name's tempo
+            facts.loopData = info.loopData;
+            facts.loopBeats = info.loopData == AudioFileInfo::LoopData::loop ? info.loopBeats : 0.0;
+            facts.seconds = info.getSeconds();
+            facts.key = info.key;
+        }
+
+        return facts;
+    }
+
+    // The facts file: a line for each file, its size, when it was changed, its loop data, beats, seconds, key and path.
+    juce::String toLine (const juce::String& path, const SoundFacts& facts)
+    {
+        juce::StringArray fields { juce::String (facts.size),
+                                   juce::String (facts.modified),
+                                   juce::String ((int) facts.loopData),
+                                   juce::String (facts.loopBeats),
+                                   juce::String (facts.seconds),
+                                   juce::String (facts.key.has_value() ? facts.key->root : -1),
+                                   juce::String (facts.key.has_value() ? (int) facts.key->mode : 0),
+                                   path };
+        return fields.joinIntoString ("\t");
+    }
+
+    std::map<juce::String, SoundFacts> readFactsFile (const juce::File& file)
+    {
+        std::map<juce::String, SoundFacts> read;
+        juce::StringArray lines;
+        file.readLines (lines);
+
+        for (const auto& line : lines)
+        {
+            const auto fields = juce::StringArray::fromTokens (line, "\t", "");
+
+            if (fields.size() != 8 || ! juce::File::isAbsolutePath (fields[7]))
+                continue;
+
+            SoundFacts facts { fields[0].getLargeIntValue(), fields[1].getLargeIntValue() };
+            facts.loopData = (AudioFileInfo::LoopData) juce::jlimit (0, 2, fields[2].getIntValue());
+            facts.loopBeats = fields[3].getDoubleValue();
+            facts.seconds = fields[4].getDoubleValue();
+
+            if (const auto root = fields[5].getIntValue(); juce::isPositiveAndBelow (root, 12))
+                facts.key = SoundKey { root, (SoundKey::Mode) juce::jlimit (0, 2, fields[6].getIntValue()) };
+
+            read[fields[7]] = facts;
+        }
+
+        return read;
+    }
+
+    void writeFactsFile (const juce::File& file, const std::map<juce::String, SoundFacts>& facts)
+    {
+        juce::MemoryOutputStream text;
+
+        for (const auto& [path, each] : facts)
+            text << toLine (path, each) << "\n";
+
+        file.getParentDirectory().createDirectory();
+        file.replaceWithText (text.toString());
+    }
+
+    //==============================================================================
+    // The SHA-256 of a file's first 64 KiB: with its size, what a set knows it by.
+    juce::String readStart (const juce::File& file)
+    {
+        juce::FileInputStream stream (file);
+
+        if (! stream.openedOk())
+            return {};
+
+        juce::MemoryBlock block;
+        stream.readIntoMemoryBlock (block, startBytes);
+        return juce::SHA256 (block).toHexString();
+    }
 } // namespace
 
 //==============================================================================
-juce::StringArray getSoundTags (const juce::File& file, const juce::File& root)
+juce::StringArray getSoundTags (const juce::File& file, const juce::File& root, const SoundFacts* facts)
 {
-    // The words of the name, and of the folders' names between the root and the file.
-    auto tokens = joinTagWords (getTokens (file.getFileNameWithoutExtension()));
+    return describeSound (file, root, facts).tags;
+}
 
-    for (auto folder = file.getParentDirectory(); folder.isAChildOf (root); folder = folder.getParentDirectory())
-        tokens.addArray (joinTagWords (getTokens (folder.getFileName())));
+std::optional<SoundKey> getSoundKey (const juce::File& file, const juce::File& root, const SoundFacts* facts)
+{
+    return describeSound (file, root, facts).key;
+}
 
-    juce::StringArray tags;
+juce::StringArray getSoundTypesIn (const juce::String& name)
+{
+    const auto tokens = joinTagWords (getTokens (name));
+    juce::StringArray types;
 
     for (const auto& tagWords : getTagWords())
-    {
-        // "808" alone is the 808's bass drum, played as a bass; "808 Clap" is a clap.
-        const auto is808Bass = juce::String (tagWords.tag) == "Bass" && tags.isEmpty() && tokens.contains ("808");
+        if ((juce::String (tagWords.tag) == "Bass" && types.isEmpty() && tokens.contains ("808")) || hasWord (tokens, tagWords.words))
+            types.add (tagWords.tag);
 
-        if (is808Bass || hasWord (tokens, tagWords.words))
-            tags.add (tagWords.tag);
-    }
-
-    // A riser made for 4 bars at 128 BPM is still a one-shot.
-    const auto tempo = getTempoFromName (file.getFileNameWithoutExtension());
-    const auto isLoop = hasWord (tokens, { "loop", "break", "breakbeat", "groove" }) || (tempo.has_value() && ! tags.contains ("FX"));
-    tags.add (isLoop ? "Loop" : "One-shot");
-
-    if (tempo.has_value())
-        tags.add (juce::String (juce::roundToInt (*tempo)) + " BPM");
-
-    return tags;
+    return types;
 }
 
 juce::String LibraryItem::getKey() const
@@ -259,28 +415,109 @@ struct Library::Indexer : public juce::Thread
 
     ~Indexer() override { stopThread (4000); }
 
+    // A file found, with its root, its size and when it was last changed (in milliseconds).
+    struct Found
+    {
+        juce::File file, root;
+        juce::int64 size = 0, modified = 0;
+    };
+
     void run() override
     {
-        std::vector<LibraryItem> found;
+        std::vector<Found> files;
 
         for (const auto& root : roots)
         {
             for (const auto& entry : juce::RangedDirectoryIterator (root, true, "*", juce::File::findFiles | juce::File::ignoreHiddenFiles))
             {
-                if (threadShouldExit() || (int) found.size() >= maxIndexed)
+                if (threadShouldExit() || (int) files.size() >= maxIndexed)
                     break;
 
                 if (const auto& file = entry.getFile(); owner.isSoundFile (file) || owner.isMidiFile (file) || isPreset (file))
-                    found.push_back (owner.makeFileItem (file, root));
+                    files.push_back ({ file, root, entry.getFileSize(), entry.getModificationTime().toMilliseconds() });
             }
         }
 
         if (threadShouldExit())
             return;
 
+        // What was read of the files before, by the last index or, at first, from one start to the next.
+        std::map<juce::String, SoundFacts> known;
+
         {
             const juce::ScopedLock lock (owner.indexLock);
-            owner.index = std::move (found);
+            known = owner.facts;
+        }
+
+        if (known.empty() && owner.factsFile.existsAsFile())
+            known = readFactsFile (owner.factsFile);
+
+        // First from their names, with what was read of them before, as it was read.
+        std::map<juce::String, SoundFacts> read;
+        std::vector<size_t> unread;
+        std::vector<LibraryItem> items;
+        items.reserve (files.size());
+
+        for (size_t i = 0; i < files.size(); ++i)
+        {
+            const auto& found = files[i];
+            const SoundFacts* fact = nullptr;
+
+            if (mayHaveLoopData (found.file))
+            {
+                const auto path = found.file.getFullPathName();
+
+                if (const auto k = known.find (path);
+                    k != known.end() && k->second.size == found.size && k->second.modified == found.modified)
+                {
+                    auto& kept = read[path];
+                    kept = k->second;
+                    fact = &kept;
+                }
+                else
+                {
+                    unread.push_back (i);
+                }
+            }
+
+            items.push_back (owner.makeFileItem (found.file, found.root, fact, true));
+        }
+
+        publish (items, read, files);
+
+        // Then again with the loop data of the WAV and AIFF files not read before.
+        for (const auto i : unread)
+        {
+            if (threadShouldExit())
+                return;
+
+            const auto& found = files[i];
+            auto& fact = read[found.file.getFullPathName()];
+            fact = readFacts (found.file, found.size, found.modified);
+            items[i] = owner.makeFileItem (found.file, found.root, &fact, true);
+        }
+
+        if (! unread.empty())
+            publish (items, read, files);
+
+        // Kept for the next start, when anything changed.
+        if (owner.factsFile != juce::File() && (! unread.empty() || read.size() != known.size()))
+            writeFactsFile (owner.factsFile, read);
+    }
+
+    void publish (const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read, const std::vector<Found>& files)
+    {
+        auto built = std::make_shared<const std::vector<LibraryItem>> (items);
+        std::multimap<juce::int64, juce::File> bySize;
+
+        for (const auto& found : files)
+            bySize.emplace (found.size, found.file);
+
+        {
+            const juce::ScopedLock lock (owner.indexLock);
+            owner.index = std::move (built);
+            owner.facts = read;
+            owner.filesBySize = std::move (bySize);
         }
 
         owner.triggerAsyncUpdate();
@@ -291,14 +528,17 @@ struct Library::Indexer : public juce::Thread
 };
 
 //==============================================================================
-Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File presets, juce::File factoryPresets)
+Library::Library (EngineContext& e, Settings& s, juce::File factory, juce::File presets, juce::File factoryPresets, juce::File factsToKeep)
     : engine (e),
       settings (s),
       factorySounds (std::move (factory)),
       presetsFolder (std::move (presets)),
       factoryPresetsFolder (std::move (factoryPresets)),
-      audioExtensions (engine.getAudioFileExtensions()) // which the index can check on its own thread
+      factsFile (std::move (factsToKeep)),
+      audioExtensions (engine.getAudioFileExtensions()), // which the index can check on its own thread
+      index (std::make_shared<const std::vector<LibraryItem>>())
 {
+    readSets();
     reindex();
 }
 
@@ -395,10 +635,25 @@ juce::File Library::findRoot (const juce::File& file) const
 
 LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& root) const
 {
+    std::optional<SoundFacts> known;
+
+    if (mayHaveLoopData (file))
+    {
+        const juce::ScopedLock lock (indexLock);
+
+        if (const auto found = facts.find (file.getFullPathName()); found != facts.end())
+            known = found->second;
+    }
+
+    return makeFileItem (file, root, known.has_value() ? &*known : nullptr, false);
+}
+
+LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& root, const SoundFacts* known, bool knownFile) const
+{
     LibraryItem item;
     item.file = file;
 
-    if (file.isDirectory())
+    if (! knownFile && file.isDirectory())
     {
         item.kind = LibraryItem::Kind::folder;
         item.name = file.getFileName();
@@ -423,7 +678,9 @@ LibraryItem Library::makeFileItem (const juce::File& file, const juce::File& roo
 
     item.kind = isMidiFile (file) ? LibraryItem::Kind::midi : LibraryItem::Kind::sound;
     item.name = file.getFileNameWithoutExtension();
-    item.tags = getSoundTags (file, root);
+    auto description = describeSound (file, root, known);
+    item.tags = std::move (description.tags);
+    item.key = description.key;
     return item;
 }
 
@@ -474,7 +731,8 @@ std::vector<LibraryItem> Library::listDevices (LibraryItem::Kind kind) const
     return items;
 }
 
-std::vector<LibraryItem> Library::search (const juce::String& query, int maximum) const
+std::vector<LibraryItem> Library::search (const juce::String& query, int maximum,
+                                          const std::function<bool (const LibraryItem&)>& accepts) const
 {
     const Query wanted (query);
 
@@ -483,24 +741,44 @@ std::vector<LibraryItem> Library::search (const juce::String& query, int maximum
 
     std::vector<std::pair<int, LibraryItem>> matches;
 
-    const auto consider = [&matches, &wanted] (const LibraryItem& item)
+    const auto consider = [&matches, &wanted, &accepts] (const LibraryItem& item)
     {
+        if (accepts != nullptr && ! accepts (item))
+            return;
+
         if (const auto score = wanted.getScore (item); score >= 0)
             matches.emplace_back (score, item);
     };
 
-    {
-        const juce::ScopedLock lock (indexLock);
+    const auto indexed = getIndex(); // held while it is gone through: the index thread may replace it meanwhile
 
-        for (const auto& item : index)
-            consider (item);
-    }
+    for (const auto& item : *indexed)
+        consider (item);
 
     for (const auto kind : { LibraryItem::Kind::instrument, LibraryItem::Kind::effect })
         for (const auto& item : listDevices (kind))
             consider (item);
 
     return getBest (std::move (matches), maximum);
+}
+
+void Library::forEachMatch (const juce::String& query, const std::function<void (const LibraryItem&)>& matched) const
+{
+    const Query wanted (query);
+
+    if (wanted.words.isEmpty())
+        return;
+
+    const auto indexed = getIndex(); // held while it is gone through: the index thread may replace it meanwhile
+
+    for (const auto& item : *indexed)
+        if (wanted.getScore (item) >= 0)
+            matched (item);
+
+    for (const auto kind : { LibraryItem::Kind::instrument, LibraryItem::Kind::effect })
+        for (const auto& item : listDevices (kind))
+            if (wanted.getScore (item) >= 0)
+                matched (item);
 }
 
 std::vector<LibraryItem> Library::searchDevices (const juce::String& query) const
@@ -541,30 +819,15 @@ bool Library::isIndexing() const
     return indexer != nullptr && indexer->isThreadRunning();
 }
 
-bool Library::isIndexFull() const
+std::shared_ptr<const std::vector<LibraryItem>> Library::getIndex() const
 {
     const juce::ScopedLock lock (indexLock);
-    return (int) index.size() >= maxIndexed;
+    return index;
 }
 
-std::vector<LibraryItem> Library::listByTag (const juce::String& tag, int maximum) const
+bool Library::isIndexFull() const
 {
-    std::vector<LibraryItem> items;
-
-    {
-        const juce::ScopedLock lock (indexLock);
-
-        for (const auto& item : index)
-            if (item.kind != LibraryItem::Kind::preset && item.tags.contains (tag)) // a synth's preset is no synth sound
-                items.push_back (item);
-    }
-
-    std::sort (items.begin(), items.end(), [] (const LibraryItem& a, const LibraryItem& b) { return a.name.compareNatural (b.name) < 0; });
-
-    if ((int) items.size() > maximum)
-        items.resize ((size_t) std::max (0, maximum));
-
-    return items;
+    return (int) getIndex()->size() >= maxIndexed;
 }
 
 juce::StringArray Library::getSoundTypes()
@@ -587,31 +850,331 @@ void Library::reindex()
 
 void Library::handleAsyncUpdate()
 {
+    // Members of the sets renamed or moved since, found again, before the browser lists them.
+    findMovedMembers();
+
     if (onIndexChanged != nullptr)
         onIndexChanged();
 }
 
+//==============================================================================
+void Library::readSets()
+{
+    // A member's line: its size, its start and its path, for a file known by them; else its key alone.
+    const auto read = [] (const juce::String& line)
+    {
+        const auto fields = juce::StringArray::fromTokens (line, "\t", "");
+        return fields.size() == 3 ? Member { fields[2], fields[0].getLargeIntValue(), fields[1] } : Member { line };
+    };
+
+    favorites.clear();
+
+    for (const auto& line : settings.get (Settings::browserFavorites))
+        favorites.push_back (read (line));
+
+    collections.clear();
+
+    const auto parsed = juce::JSON::parse (settings.get (Settings::browserCollections)); // which the list points into
+
+    if (const auto* list = parsed.getArray())
+    {
+        for (const auto& saved : *list)
+        {
+            Collection collection { saved["name"].toString().trim() };
+
+            if (collection.name.isEmpty() || findCollection (collection.name) != nullptr)
+                continue;
+
+            if (const auto* members = saved["items"].getArray())
+                for (const auto& line : *members)
+                    collection.members.push_back (read (line.toString()));
+
+            collections.push_back (std::move (collection));
+        }
+    }
+
+    favoriteKeys.clear();
+
+    for (const auto& member : favorites)
+        favoriteKeys.insert (member.key);
+}
+
+namespace
+{
+    template <typename MemberType>
+    juce::String toSavedLine (const MemberType& member)
+    {
+        return member.size >= 0 && member.start.isNotEmpty() ? juce::String (member.size) + "\t" + member.start + "\t" + member.key
+                                                             : member.key;
+    }
+} // namespace
+
+void Library::writeFavorites() const
+{
+    juce::StringArray lines;
+    favoriteKeys.clear();
+
+    for (const auto& member : favorites)
+    {
+        lines.add (toSavedLine (member));
+        favoriteKeys.insert (member.key);
+    }
+
+    settings.set (Settings::browserFavorites, lines);
+}
+
+void Library::writeCollections() const
+{
+    juce::Array<juce::var> list;
+
+    for (const auto& collection : collections)
+    {
+        juce::Array<juce::var> lines;
+
+        for (const auto& member : collection.members)
+            lines.add (toSavedLine (member));
+
+        auto saved = juce::DynamicObject::Ptr (new juce::DynamicObject());
+        saved->setProperty ("name", collection.name);
+        saved->setProperty ("items", lines);
+        list.add (juce::var (saved.get()));
+    }
+
+    settings.set (Settings::browserCollections, juce::JSON::toString (list, true));
+}
+
+Library::Member Library::makeMember (const LibraryItem& item) const
+{
+    Member member { item.getKey() };
+
+    // A sound, MIDI file or preset is known by its size and its start too.
+    if (item.isFile() && item.kind != LibraryItem::Kind::folder && item.file.existsAsFile())
+    {
+        member.size = item.file.getSize();
+        member.start = readStart (item.file);
+    }
+
+    return member;
+}
+
+bool Library::isStillThere (const Member& member) const
+{
+    if (member.key.startsWith (devicePrefix) || ! juce::File::isAbsolutePath (member.key))
+        return true; // a device, found by findItem()
+
+    const juce::File file (member.key);
+    return member.size < 0 ? file.exists() : file.existsAsFile() && file.getSize() == member.size;
+}
+
+bool Library::findAgain (Member& member) const
+{
+    if (member.size < 0 || member.start.isEmpty())
+        return false;
+
+    // The files of its size in the folder it was in, renamed there since the index was built perhaps; then the index's,
+    // anywhere in the library. Among them, the one that starts as it does.
+    std::vector<juce::File> candidates;
+
+    for (const auto& entry :
+         juce::RangedDirectoryIterator (juce::File (member.key).getParentDirectory(), false, "*", juce::File::findFiles))
+        if (entry.getFileSize() == member.size && (int) candidates.size() < mostCandidates)
+            candidates.push_back (entry.getFile());
+
+    {
+        const juce::ScopedLock lock (indexLock);
+        const auto [from, to] = filesBySize.equal_range (member.size);
+
+        for (auto i = from; i != to && (int) candidates.size() < 2 * mostCandidates; ++i)
+            candidates.push_back (i->second);
+    }
+
+    for (const auto& file : candidates)
+    {
+        if (file.getFullPathName() != member.key && file.existsAsFile() && readStart (file) == member.start)
+        {
+            member.key = file.getFullPathName();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+std::vector<LibraryItem> Library::getItems (std::vector<Member>& members, bool& moved) const
+{
+    std::vector<LibraryItem> items;
+
+    for (auto& member : members)
+    {
+        if (! isStillThere (member))
+            moved = findAgain (member) || moved;
+
+        if (auto item = findItem (member.key))
+            items.push_back (std::move (*item));
+    }
+
+    return items;
+}
+
+void Library::findMovedMembers()
+{
+    const auto findAll = [this] (std::vector<Member>& members)
+    {
+        auto moved = false;
+
+        for (auto& member : members)
+            if (! isStillThere (member))
+                moved = findAgain (member) || moved;
+
+        return moved;
+    };
+
+    if (findAll (favorites))
+        writeFavorites();
+
+    auto collectionsMoved = false;
+
+    for (auto& collection : collections)
+        collectionsMoved = findAll (collection.members) || collectionsMoved;
+
+    if (collectionsMoved)
+        writeCollections();
+}
+
 bool Library::isFavorite (const LibraryItem& item) const
 {
-    return settings.get (Settings::browserFavorites).contains (item.getKey());
+    return favoriteKeys.count (item.getKey()) > 0;
 }
 
 void Library::setFavorite (const LibraryItem& item, bool favorite)
 {
-    auto list = settings.get (Settings::browserFavorites);
-    list.removeString (item.getKey());
+    const auto member = makeMember (item);
+
+    // Once in favorites, under its key now or as it was before it moved.
+    favorites.erase (
+        std::remove_if (favorites.begin(), favorites.end(), [&] (const Member& m)
+                        { return m.key == member.key || (member.size >= 0 && m.size == member.size && m.start == member.start); }),
+        favorites.end());
 
     if (favorite)
-        list.add (item.getKey());
+        favorites.push_back (member);
 
-    settings.set (Settings::browserFavorites, list);
+    writeFavorites();
 }
 
 std::vector<LibraryItem> Library::getFavorites() const
 {
-    return getItems (settings.get (Settings::browserFavorites));
+    auto moved = false;
+    auto items = getItems (favorites, moved);
+
+    if (moved)
+        writeFavorites();
+
+    return items;
 }
 
+Library::Collection* Library::findCollection (const juce::String& name) const
+{
+    for (auto& collection : collections)
+        if (collection.name == name)
+            return &collection;
+
+    return nullptr;
+}
+
+juce::StringArray Library::getCollections() const
+{
+    juce::StringArray names;
+
+    for (const auto& collection : collections)
+        names.add (collection.name);
+
+    return names;
+}
+
+juce::String Library::addCollection (const juce::String& name)
+{
+    const auto wanted = name.trim();
+
+    if (wanted.isEmpty())
+        return {};
+
+    // "Kicks", then "Kicks 2", "Kicks 3"...
+    auto unique = wanted;
+
+    for (int number = 2; findCollection (unique) != nullptr; ++number)
+        unique = wanted + " " + juce::String (number);
+
+    collections.push_back ({ unique });
+    writeCollections();
+    return unique;
+}
+
+bool Library::renameCollection (const juce::String& name, const juce::String& newName)
+{
+    const auto wanted = newName.trim();
+    auto* collection = findCollection (name);
+
+    if (collection == nullptr || wanted.isEmpty() || (wanted != name && findCollection (wanted) != nullptr))
+        return false;
+
+    collection->name = wanted;
+    writeCollections();
+    return true;
+}
+
+void Library::removeCollection (const juce::String& name)
+{
+    collections.erase (std::remove_if (collections.begin(), collections.end(), [&name] (const Collection& c) { return c.name == name; }),
+                       collections.end());
+    writeCollections();
+}
+
+bool Library::isInCollection (const LibraryItem& item, const juce::String& name) const
+{
+    const auto* collection = findCollection (name);
+    const auto key = item.getKey();
+    return collection != nullptr
+           && std::any_of (collection->members.begin(), collection->members.end(), [&key] (const Member& m) { return m.key == key; });
+}
+
+void Library::setInCollection (const LibraryItem& item, const juce::String& name, bool in)
+{
+    auto* collection = findCollection (name);
+
+    if (collection == nullptr)
+        return;
+
+    const auto member = makeMember (item);
+    auto& members = collection->members;
+    members.erase (
+        std::remove_if (members.begin(), members.end(), [&] (const Member& m)
+                        { return m.key == member.key || (member.size >= 0 && m.size == member.size && m.start == member.start); }),
+        members.end());
+
+    if (in)
+        members.push_back (member);
+
+    writeCollections();
+}
+
+std::vector<LibraryItem> Library::getCollection (const juce::String& name) const
+{
+    auto* collection = findCollection (name);
+
+    if (collection == nullptr)
+        return {};
+
+    auto moved = false;
+    auto items = getItems (collection->members, moved);
+
+    if (moved)
+        writeCollections();
+
+    return items;
+}
+
+//==============================================================================
 void Library::noteUsed (const LibraryItem& item)
 {
     auto list = settings.get (Settings::browserRecent);

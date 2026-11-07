@@ -176,21 +176,11 @@ TEST_CASE ("The browser shows its places, plays a sound when clicked, and Enter 
 
     // Phazite's sounds are open at first.
     CHECK (screen.getRows()
-           == juce::StringArray { "Favorites", "Recent", "Sounds by Type", "Phazite Sounds", "Drums", "Loops", "Instruments", "Effects",
+           == juce::StringArray { "Favorites", "Recent", "Collections", "Phazite Sounds", "Drums", "Loops", "Instruments", "Effects",
                                   "Phazite Presets", "Presets", "Add Folder..." });
 
-    // Sounds by Type lists every kick, from every library.
-    phazite::test::Mouse mouse (screen.browser.getTree());
-    mouse.click (screen.getRow ("Sounds by Type").getCentre());
-    phazite::test::dispatchPendingMessages();
-    mouse.click (screen.getRow ("Kicks").getCentre());
-    phazite::test::dispatchPendingMessages();
-    CHECK (screen.getRows().contains ("Kick"));
-    mouse.click (screen.getRow ("Sounds by Type").getCentre()); // closes it again
-    phazite::test::dispatchPendingMessages();
-    CHECK_FALSE (screen.getRows().contains ("Kicks"));
-
     // One click opens a folder; a click on a sound plays it.
+    phazite::test::Mouse mouse (screen.browser.getTree());
     mouse.click (screen.getRow ("Drums").getCentre());
     phazite::test::dispatchPendingMessages(); // the tree shows the rows of a folder it opens
     CHECK (screen.getRows().contains ("Kick"));
@@ -408,15 +398,16 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
 
     // Their place has a row that downloads them, which says how large they are.
     const auto rows = getRows (browser);
-    REQUIRE (rows.size() > 5);
-    CHECK (rows[3] == juce::String ("Phazite Sounds"));
-    CHECK (rows[4].startsWith (phazite::SoundPack::canDownload() ? "Download (" : "Get Them ("));
-    CHECK (rows[5] == juce::String ("Free drums, loops and effects to start with"));
+    const auto place = rows.indexOf ("Phazite Sounds");
+    REQUIRE (place >= 0);
+    REQUIRE (rows.size() > place + 2);
+    CHECK (rows[place + 1].startsWith (phazite::SoundPack::canDownload() ? "Download (" : "Get Them ("));
+    CHECK (rows[place + 2] == juce::String ("Free drums, loops and effects to start with"));
 
     // A click downloads them. Where Phazite can't download, it shows the page instead, and the user installs the zip
     // downloaded in a browser.
     phazite::test::Mouse mouse (browser.getTree());
-    mouse.click (getRow (browser, rows[4]).getCentre());
+    mouse.click (getRow (browser, rows[place + 1]).getCentre());
     CHECK (pageShown != phazite::SoundPack::canDownload());
 
     if (! phazite::SoundPack::canDownload())

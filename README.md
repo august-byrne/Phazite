@@ -32,7 +32,7 @@ What works today, on Windows:
 
 The song plays, records, exports and freezes through Phazite's own engine, built on JUCE, and plug-ins run in Phazite's own helper processes.
 
-The passes on performance and accessibility are done, and so are a Windows installer (which you [build yourself](docs/building.md#the-installer) until the first release), an update check you can turn on, and every license shown in the app. Next come code signing, a user guide and version 1; after it, rounds of testing with new users, a richer browser, chord suggestions and the sound generator. The [roadmap](docs/roadmap.md) has the plan step by step.
+The passes on performance and accessibility are done, and so are a Windows installer (which you [build yourself](docs/building.md#the-installer) until the first release), an update check you can turn on, and every license shown in the app. Next come code signing, a user guide and version 1; the browser's filters, keys, collections and Swap (trying sounds and presets in place as the beat plays), planned for after it, came early. After it come rounds of testing with new users, the browser's analysis of your own sounds, chord suggestions and the sound generator. The [roadmap](docs/roadmap.md) has the plan step by step.
 
 | Platform | Status |
 |---|---|

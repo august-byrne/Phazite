@@ -14,6 +14,7 @@
 #include "model/mixer/SidechainChoice.h"
 
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -39,6 +40,10 @@ public:
     bool hasPadSound (int pad) const;
     bool setPadSound (int pad, const juce::File&) const;
     void clearPadSound (int pad) const;
+
+    // The swap open on the device (model/devices/SwapModel.h): the pad it tries sounds on, or -1 while it tries the device's
+    // presets; none while none is.
+    std::optional<int> getSwap() const;
 
     // The wavetable synth's oscillators (model/devices/internal/Wavetables.h): what each plays, its table for drawing, and
     // putting one of the factory tables (devices/wavetable/FactoryWavetables.h) or a sound file on one, as undo steps.
