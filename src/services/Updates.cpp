@@ -7,15 +7,19 @@ namespace phazite
 {
 namespace
 {
-    constexpr int maxUpdateFileSize = 64 * 1024;                     // an update file is a few hundred bytes
+    constexpr int maxUpdateFileSize = 64 * 1024; // an update file is a few hundred bytes
+    constexpr int maxRedirects = 5;              // GitHub's downloads take one
+    constexpr int connectionTimeout = 20000;     // milliseconds
+
+    // What an installer must be, which only Windows' builds download (the release's page has the others' downloads).
+#if JUCE_WINDOWS
     constexpr juce::int64 maxInstallerSize = 1024LL * 1024LL * 1024; // Phazite's is tens of megabytes
-    constexpr int maxRedirects = 5;                                  // GitHub's downloads take one
-    constexpr int connectionTimeout = 20000;                         // milliseconds
 
     bool isSha256 (const juce::String& text)
     {
         return text.length() == 64 && text.containsOnly ("0123456789abcdef");
     }
+#endif
 
     // A version's numbers, or none if it isn't a version: one to four numbers, with dots between them.
     std::optional<std::vector<int>> getNumbers (const juce::String& version)
