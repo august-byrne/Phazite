@@ -1873,7 +1873,7 @@ TEST_CASE ("A track without an instrument has an arm switch: with an input, a cl
     CHECK_FALSE (arm->getToggleState());
 }
 
-TEST_CASE ("A clip shows a tag with its name only where that isn't its track's, and a link while it is an alias")
+TEST_CASE ("A clip shows a tag with its name only where that isn't its track's or like it, and a link while it is an alias")
 {
     // The owner, 2026-11-07: a strip along the top of every clip repeated its track's name, with a "*" after an alias's.
     phazite::ui::LookAndFeel lookAndFeel;
@@ -1922,6 +1922,14 @@ TEST_CASE ("A clip shows a tag with its name only where that isn't its track's, 
     CHECK_FALSE (tagShows (*shown, false));
     CHECK (tagShows (*shown, true));
     CHECK_FALSE (tagShows (*other, true));
+
+    // A name of its own like its track's, but for its capitals and a tempo, as a sample's file name often is: no tag either,
+    // though screen readers read it (2026-11-07, the owner: "Shaker" over the track, "Shaker 85bmp" over its clips).
+    phazite::renameClips (screen.context, { clip }, "keys_120bpm");
+    phazite::test::dispatchPendingMessages();
+    CHECK (shown->getLabel().isEmpty());
+    CHECK (shown->getTitle() == juce::String ("keys_120bpm"));
+    CHECK_FALSE (tagShows (*shown, false));
 
     // A name of its own: on it and its alias.
     phazite::renameClips (screen.context, { clip }, "Verse");

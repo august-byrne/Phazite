@@ -8,6 +8,7 @@
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/chords/internal/Chords.h"
+#include "model/engine/AudioFiles.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -71,7 +72,9 @@ namespace
         info.track = getTrackID (clipState.getParent());
         info.kind = isAudioState (clipState) ? ClipType::audio : ClipType::midi;
         info.name = getClipName (song, clipState);
-        info.namedAfterTrack = info.name == getTrackName (song, info.track);
+        const auto trackName = getTrackName (song, info.track);
+        info.namedAfterTrack = info.name == trackName;
+        info.namedLikeTrack = areNamesAlike (info.name, trackName);
         info.range = getClipRange (song, clipState);
         info.muted = clipState[schema::clipMute];
         info.linked = clipState.hasProperty (schema::clipLink);

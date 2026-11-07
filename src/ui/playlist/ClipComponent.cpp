@@ -206,7 +206,7 @@ void ClipComponent::paint (juce::Graphics& g)
 
 juce::String ClipComponent::getLabel() const
 {
-    auto label = info.namedAfterTrack ? juce::String() : info.name;
+    auto label = info.namedLikeTrack ? juce::String() : info.name;
 
     if (info.takes > 1)
         label << (label.isEmpty() ? "" : "  ") << "Take " << info.take << "/" << info.takes;

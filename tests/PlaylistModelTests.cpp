@@ -350,6 +350,60 @@ TEST_CASE ("Clips by ID: what the playlist draws of them, and the tools' edits")
     CHECK (context.getSongSelection().isSelected (added));
 }
 
+TEST_CASE ("A clip is named like its track when its name is the track's but for capitals and separators and a tempo or key")
+{
+    Song song;
+    auto& context = song.context;
+
+    // A new MIDI clip is named after its track, whose header says it: the playlist shows no tag with it.
+    auto info = phazite::getClip (context, song.clip);
+    REQUIRE (info.has_value());
+    CHECK (info->name == juce::String ("A"));
+    CHECK (info->namedAfterTrack);
+    CHECK (info->namedLikeTrack);
+
+    // Names of their own, as samples' files give them (2026-11-07, the owner: the track header said "Shaker" while the clips
+    // on it said "Shaker 85bmp"): alike where the track's header says what they do, but for a tempo or key it doesn't give.
+    struct Names
+    {
+        const char *track, *clip;
+        bool alike;
+    };
+
+    // clang-format off
+    const Names names[] = {
+        { "Shaker",        "Shaker 82 BPM",    true  },
+        { "Shaker",        "shaker_85bpm",     true  }, // whatever the capitals and what is between the words
+        { "Shaker Loop",   "ShakerLoop",       true  },
+        { "Shaker 82 BPM", "Shaker",           true  }, // the track's name gives the tempo
+        { "Bass",          "Bass Am",          true  }, // a key
+        { "Pad",           "Pad C#min 120bpm", true  },
+        { "Kick",          "Kick (F)",         true  },
+        { "Vox Am",        "Vox Am 90 BPM",    true  }, // the same key in both
+        { "Shaker",        "Shaker 2",         false }, // a word more: which of the shakers
+        { "Shaker",        "Shaker Loop",      false },
+        { "808",           "808 Long F",       false },
+        { "Vox Am",        "Vox Em",           false }, // another key
+        { "Shaker 120bpm", "Shaker 85bpm",     false }, // another tempo
+        { "120 BPM",       "128 BPM",          false }, // a tempo and nothing else
+        { "Bass",          "Am",               false },
+    };
+    // clang-format on
+
+    for (const auto& each : names)
+    {
+        CAPTURE (each.track);
+        CAPTURE (each.clip);
+        phazite::renameTrack (context, song.a, each.track);
+        phazite::renameClips (context, { song.clip }, each.clip);
+        info = phazite::getClip (context, song.clip);
+        REQUIRE (info.has_value());
+        CHECK (info->name == juce::String (each.clip));
+        CHECK_FALSE (info->namedAfterTrack); // a name of its own, which the inspector's Name shows
+        CHECK (info->namedLikeTrack == each.alike);
+    }
+}
+
 TEST_CASE ("Audio clips by ID are faded, crossfaded and slipped")
 {
     Song song;
