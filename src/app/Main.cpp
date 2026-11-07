@@ -31,17 +31,29 @@ public:
     // helper program, PhaziteHost, never in another copy of this one.
     bool moreThanOneInstanceAllowed() override { return false; }
 
-    void anotherInstanceStarted (const juce::String&) override
+    void anotherInstanceStarted (const juce::String& commandLine) override
     {
         if (mainWindow != nullptr)
         {
             mainWindow->setMinimised (false);
             mainWindow->toFront (true);
         }
+
+        // A project double-clicked while Phazite runs opens here, once the user has answered what an open dialog asks.
+        if (auto* modal = juce::Component::getCurrentlyModalComponent())
+            modal->toFront (true);
+        else if (const auto file = ProjectSession::findFileToOpen (commandLine); file != juce::File() && session != nullptr)
+            session->openFile (file);
     }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
+        // Held while Phazite runs, so that its installer waits for it to close, or asks the user to close it, before it
+        // replaces its files (packaging/windows/Phazite.iss).
+#if JUCE_WINDOWS
+        juce::ignoreUnused (runningLock.enter (0)); // only this Phazite holds it: a second one passes its command line here
+#endif
+
         // A log of what happened, for a report of what went wrong (%APPDATA%\Phazite\Phazite.log), kept short: JUCE trims
         // the start of an old one (docs/performance-audit.md, R7).
         logger.reset (juce::FileLogger::createDefaultAppLogger ("Phazite", "Phazite.log", "Phazite " + getApplicationVersion()));
@@ -76,7 +88,8 @@ public:
         if (auto* peer = mainWindow->getPeer())
             peer->performAnyPendingRepaintsNow();
 
-        session->openAtStartup (runMarker->didLastRunEndBadly());
+        // The project or DAWproject file Phazite was started with (a double-click in Explorer), or the last project.
+        session->openAtStartup (runMarker->didLastRunEndBadly(), ProjectSession::findFileToOpen (commandLine));
 
         // Phazite's sound, now that it has opened (model/engine/StartupSound.h), unless the settings turn it off: after the
         // project, whose opening stops what the previews play, and only through an audio output that opened.
@@ -84,6 +97,9 @@ public:
             playStartupSound (*services->previewer);
 
         mainWindow->showWelcomeOnFirstRun();
+
+        // An earlier update's installer goes, and a newer release is asked for if the user turned that on (services/Updates.h).
+        services->updates.startUp();
     }
 
     void shutdown() override
@@ -145,6 +161,9 @@ public:
 private:
     // Declaration order matters: members are destroyed in reverse order, so even if shutdown() is
     // never called, the window goes first and the engine context last.
+#if JUCE_WINDOWS
+    juce::InterProcessLock runningLock { "PhaziteRunning" }; // the named mutex the installer looks for, held from initialise() on
+#endif
     std::unique_ptr<juce::FileLogger> logger;
     std::unique_ptr<EngineContext> engineContext;
     std::unique_ptr<RunMarker> runMarker;

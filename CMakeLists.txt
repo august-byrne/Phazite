@@ -10,6 +10,12 @@ cmake_minimum_required(VERSION 3.28...4.4)
 project(Phazite VERSION 0.1.0 LANGUAGES C CXX)   # JUCE needs the C language enabled as well
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/PhaziteHelpers.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/PhaziteNotices.cmake")
+
+# Phazite's copyright notice, and where its source code and its releases are: the About box, the installer, the app's version
+# information, NOTICES.txt and the update check say them (src/model/engine/AppInfo.h, src/services/Updates.h).
+set(PHAZITE_COPYRIGHT "Copyright (C) 2026 the Phazite contributors")
+set(PHAZITE_SOURCE_URL "https://github.com/august-byrne/Phazite")
 
 if(WIN32 AND NOT MSVC)
     message(FATAL_ERROR "On Windows, configure through the windows-* presets (MSVC). "
@@ -445,7 +451,9 @@ target_sources(phazite_core PRIVATE
     src/services/Settings.cpp
     src/services/Settings.h
     src/services/SoundPack.cpp
-    src/services/SoundPack.h)
+    src/services/SoundPack.h
+    src/services/Updates.cpp
+    src/services/Updates.h)
 
 # Small data files compiled into the program (PhaziteData.h, namespace PhaziteData). Fonts don't go
 # here: CLAUDE.md requires them as separate files next to the app.
@@ -467,6 +475,8 @@ juce_add_binary_data(phazite_data
         resources/outlines/techno.outline.json
         # Chord progressions (src/model/chords/Progressions.h)
         resources/progressions/progressions.json
+        # The notices of the code and fonts from others that Phazite is built with, for the About box (src/model/engine/AppInfo.h)
+        resources/licenses/notices.json
         # Phazite's logo, its own drawing (ui::createLogo()), from which the app's icon is made too (juce_add_gui_app below)
         resources/logo/phazite.svg
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
@@ -563,6 +573,8 @@ endif()
 
 target_compile_definitions(phazite_core PRIVATE
     PHAZITE_VERSION_STRING="${PROJECT_VERSION}"
+    PHAZITE_COPYRIGHT_STRING="${PHAZITE_COPYRIGHT}"
+    PHAZITE_SOURCE_URL="${PHAZITE_SOURCE_URL}"
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_AU=1
     JUCE_USE_CURL=0
@@ -770,6 +782,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/playlist/TrackHeights.h
     src/ui/project/ProjectView.cpp
     src/ui/project/ProjectView.h
+    src/ui/shell/AboutPanel.cpp
+    src/ui/shell/AboutPanel.h
     src/ui/shell/ActivityBar.cpp
     src/ui/shell/ActivityBar.h
     src/ui/shell/AppShell.cpp
@@ -808,6 +822,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/TitleBar.h
     src/ui/shell/TopBar.cpp
     src/ui/shell/TopBar.h
+    src/ui/shell/UpdatePanel.cpp
+    src/ui/shell/UpdatePanel.h
     src/ui/shell/Welcome.cpp
     src/ui/shell/Welcome.h
     src/ui/theme/DesignTokens.h
@@ -866,6 +882,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS resources/logo/ph
 juce_add_gui_app(Phazite
     PRODUCT_NAME "Phazite"
     COMPANY_NAME "Phazite"
+    COMPANY_COPYRIGHT "${PHAZITE_COPYRIGHT}"
     BUNDLE_ID "io.github.august-byrne.phazite"
     ICON_BIG resources/logo/phazite.svg
     MICROPHONE_PERMISSION_ENABLED TRUE
@@ -900,6 +917,7 @@ phazite_use_core(phazite_host)
 juce_add_gui_app(PhaziteHost
     PRODUCT_NAME "PhaziteHost"
     COMPANY_NAME "Phazite"
+    COMPANY_COPYRIGHT "${PHAZITE_COPYRIGHT}"
     BUNDLE_ID "io.github.august-byrne.phazite.host"
     ICON_BIG resources/logo/phazite.svg # the app's, so that Task Manager shows the helper as Phazite's
     NEEDS_CURL FALSE
@@ -930,35 +948,57 @@ add_custom_command(TARGET Phazite POST_BUILD
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/presets" "$<TARGET_FILE_DIR:Phazite>/presets"
     VERBATIM)
 
-# The icons are compiled in, so their licence, which asks to go with every copy, goes next to the app.
+# Phazite's licence, and the notices of the code and fonts from others that it is built with, which their licences ask to go
+# with every copy (resources/licenses/notices.json: JUCE and what it bundles, Rubber Band's GPL, r8brain-free-src, Inter's
+# OFL, Lucide, VS Code's themes and the rest): written as CMake configures (cmake/PhaziteNotices.cmake) and put next to the
+# app, licenses/ and NOTICES.txt, which the About box reads and the installer installs.
+phazite_write_notices("${CMAKE_BINARY_DIR}/notices")
+
 add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/lucide/LICENSE" "$<TARGET_FILE_DIR:Phazite>/licenses/Lucide.txt"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory_if_different "${CMAKE_BINARY_DIR}/notices" "$<TARGET_FILE_DIR:Phazite>"
     VERBATIM)
 
-# Rubber Band Library is compiled in, under the GPL (version 2 or later), whose text goes with every copy.
-add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/external/rubberband/COPYING" "$<TARGET_FILE_DIR:Phazite>/licenses/RubberBand.txt"
-    VERBATIM)
+# --- The installer, on Windows: Inno Setup 6.6 or newer (tools\setup-windows.cmd installs it) compiles
+# packaging/windows/Phazite.iss into build/<preset>/installer/Phazite-<version>-Setup.exe, from the app's folder and the
+# notices, and writes beside it the installer's SHA-256 and the update file that a release carries for the update check
+# (cmake/WriteUpdateFile.cmake; src/services/Updates.h). Build it from the release preset:
+#   cmake --build --preset windows-release --target installer
+if(WIN32)
+    set(_phazite_programs_x86 "ProgramFiles(x86)")
+    find_program(PHAZITE_ISCC ISCC
+        HINTS "$ENV{${_phazite_programs_x86}}/Inno Setup 6" "$ENV{ProgramFiles}/Inno Setup 6" "$ENV{LOCALAPPDATA}/Programs/Inno Setup 6"
+        DOC "Inno Setup's compiler, which builds Phazite's installer (the installer target)")
 
-# r8brain-free-src is compiled in, under the MIT licence, whose notice goes with every copy.
-add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/external/r8brain-free-src/LICENSE" "$<TARGET_FILE_DIR:Phazite>/licenses/r8brain-free-src.txt"
-    VERBATIM)
+    set(_phazite_installer_name "Phazite-${PROJECT_VERSION}-Setup")
+    set(_phazite_installer_folder "${CMAKE_BINARY_DIR}/installer")
+    get_target_property(_phazite_generated Phazite JUCE_GENERATED_SOURCES_DIRECTORY) # where juceaide put the app's icon.ico
 
-# The loudness meter's K-weighting and gating follow libebur128 (MIT), whose notice goes with every copy.
-add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources/licenses/libebur128.txt" "$<TARGET_FILE_DIR:Phazite>/licenses/libebur128.txt"
-    VERBATIM)
+    if(PHAZITE_ISCC)
+        add_custom_target(installer
+            COMMAND "${PHAZITE_ISCC}" /Q
+                    "/DAppVersion=${PROJECT_VERSION}"
+                    "/DCopyright=${PHAZITE_COPYRIGHT}"
+                    "/DSourceUrl=${PHAZITE_SOURCE_URL}"
+                    "/DAppFolder=$<PATH:NATIVE_PATH,$<TARGET_FILE_DIR:Phazite>>"
+                    "/DNoticesFolder=$<PATH:NATIVE_PATH,${CMAKE_BINARY_DIR}/notices>"
+                    "/DIconFile=$<PATH:NATIVE_PATH,${_phazite_generated}/icon.ico>"
+                    "/DOutputFolder=$<PATH:NATIVE_PATH,${_phazite_installer_folder}>"
+                    "/DOutputName=${_phazite_installer_name}"
+                    "$<PATH:NATIVE_PATH,${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/Phazite.iss>"
+            COMMAND "${CMAKE_COMMAND}" "-DINSTALLER=${_phazite_installer_folder}/${_phazite_installer_name}.exe"
+                    "-DVERSION=${PROJECT_VERSION}" "-DSOURCE_URL=${PHAZITE_SOURCE_URL}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/WriteUpdateFile.cmake"
+            COMMENT "Building Phazite's installer with Inno Setup"
+            VERBATIM)
+    else()
+        add_custom_target(installer
+            COMMAND "${CMAKE_COMMAND}" -E echo "Phazite's installer needs Inno Setup 6.6 or newer, which CMake didn't find. Run tools\\setup-windows.cmd, then configure again."
+            COMMAND "${CMAKE_COMMAND}" -E false
+            VERBATIM)
+    endif()
 
-# The dark and light themes' colours and the window's sizes are VS Code's (MIT), whose notice goes with every copy.
-add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources/licenses/VSCode.txt" "$<TARGET_FILE_DIR:Phazite>/licenses/VSCode.txt"
-    VERBATIM)
+    add_dependencies(installer Phazite) # and so PhaziteHost, which goes next to it
+endif()
 
 # --- phazite_soundkit: renders Phazite Sounds, the pack Phazite offers to download, from the recipes in the
 # phazite-sounds repository (CC0 sample libraries and its own synthesis), and zips it for a release. It is run by hand
@@ -978,6 +1018,7 @@ if(PHAZITE_BUILD_TESTS)
     target_sources(phazite_tests PRIVATE
         tests/TestMain.cpp
         tests/TestHelpers.h
+        tests/AboutPanelTests.cpp
         tests/ActivityBarTests.cpp
         tests/AntialiasingTests.cpp
         tests/AppInfoTests.cpp
@@ -1132,6 +1173,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/UiTestHelpers.cpp
         tests/UiTestHelpers.h
         tests/UndoTests.cpp
+        tests/UpdatesTests.cpp
         tests/ValueTextTests.cpp
         tests/VersionStoreTests.cpp
         tests/VersionsBranchTests.cpp
@@ -1175,6 +1217,10 @@ if(PHAZITE_BUILD_TESTS)
 
     add_dependencies(phazite_tests phazite_test_host)
     target_compile_definitions(phazite_tests PRIVATE PHAZITE_TEST_HOST="$<TARGET_FILE:phazite_test_host>")
+
+    # The licences' folder as the build writes it for the app (cmake/PhaziteNotices.cmake), which the tests check against the
+    # list of notices.
+    target_compile_definitions(phazite_tests PRIVATE PHAZITE_NOTICES_DIR="${CMAKE_BINARY_DIR}/notices")
 
     # A CTest test for each test file, which runs phazite_tests with that file's tests only, so that CTest can run them
     # side by side (the test presets run 4 at once; -j <n> changes that). Each test program has a temporary folder of its

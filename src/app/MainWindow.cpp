@@ -10,10 +10,12 @@
 #include "model/project/internal/Export.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/input/KeymapStore.h"
+#include "ui/shell/AboutPanel.h"
 #include "ui/shell/CleanUpPanel.h"
 #include "ui/shell/ExportPanel.h"
 #include "ui/shell/ProgressionsPanel.h"
 #include "ui/shell/RenderPanel.h"
+#include "ui/shell/UpdatePanel.h"
 #include "ui/theme/Icons.h"
 
 #include <juce_audio_utils/juce_audio_utils.h> // PluginListComponent
@@ -180,6 +182,10 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
         menuItemsChanged(); // the recent projects
     };
 
+    // A newer release found marks the settings' icon, and names the update command after it.
+    services.updates.addChangeListener (this);
+    showUpdateState();
+
     updateTitle();
     startTimerHz (1); // the title shows unsaved changes
     setVisible (true);
@@ -188,6 +194,7 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
 MainWindow::~MainWindow()
 {
     stopTimer();
+    services.updates.removeChangeListener (this);
     session.onProjectClosing = nullptr;
     session.onProjectChanged = nullptr;
     session.onExport = nullptr;
@@ -204,6 +211,8 @@ MainWindow::~MainWindow()
     delete settingsWindow.getComponent();
     delete pluginListWindow.getComponent();
     delete welcomeWindow.getComponent();
+    delete aboutWindow.getComponent();
+    delete updatesWindow.getComponent(); // it listens to the update check, the services'
     deviceWindows = nullptr;
 
     setPluginWindowServices (nullptr);
@@ -478,6 +487,34 @@ void MainWindow::addCommands()
           .description = "Downloads Phazite Sounds, 85 free drums, loops and effects to start with, or installs them from a file.",
           .synonyms = { "samples", "sample pack", "sound pack", "library", "download", "drums", "loops", "content" },
           .perform = [this] { showWelcome (ui::WelcomePanel::sounds); } });
+
+    // Updates, asked of Phazite's releases on GitHub only when the user asks, or turned on (services/Updates.h).
+    registry.add ({ .id = "help.checkForUpdates",
+                    .name = "Check for Updates...",
+                    .category = "Help",
+                    .description = "Asks Phazite's releases on GitHub whether a newer version is out, and downloads and installs it if you "
+                                   "want, once its SHA-256 is the release's.",
+                    .synonyms = { "update", "upgrade", "new version", "latest version", "release", "download", "install" },
+                    .perform = [this] { showUpdates(); },
+                    .currentName = [this] { return ui::getUpdateCommandName (services.updates); } });
+
+    registry.add ({ .id = "options.updateCheck",
+                    .name = "Check for Updates When Phazite Opens",
+                    .category = "Options",
+                    .description =
+                        "Off until you turn it on. Each time Phazite opens, it then asks its releases on GitHub for one small file, "
+                        "to see whether a newer version is out.",
+                    .synonyms = { "update", "automatic updates", "auto update", "new version", "internet", "privacy" },
+                    .perform = [this] { services.updates.setChecksAtStart (! services.updates.checksAtStart()); },
+                    .isTicked = [this] { return services.updates.checksAtStart(); } });
+
+    registry.add (
+        { .id = "help.about",
+          .name = "About Phazite",
+          .category = "Help",
+          .description = "Phazite's version and license, and the licenses and notices of the code and fonts it is built with.",
+          .synonyms = { "version", "license", "licence", "credits", "copyright", "notices", "third-party", "open source", "trademarks" },
+          .perform = [this] { showAbout(); } });
 }
 
 //==============================================================================
@@ -544,6 +581,92 @@ void MainWindow::showWelcome (ui::WelcomePanel::Page page)
     o.content.setOwned (panel);
 
     welcomeWindow = o.launchAsync();
+}
+
+void MainWindow::showAbout()
+{
+    if (aboutWindow != nullptr)
+    {
+        aboutWindow->toFront (true);
+        return;
+    }
+
+    auto* panel = new ui::AboutPanel();
+
+    juce::DialogWindow::LaunchOptions o;
+    o.dialogTitle = panel->getTitle();
+    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = false;
+    o.componentToCentreAround = this;
+    o.content.setOwned (panel);
+
+    aboutWindow = o.launchAsync();
+}
+
+void MainWindow::showUpdates()
+{
+    // Asked: look again, unless a newer release was found already.
+    if (! ui::isUpdateWaiting (services.updates))
+        services.updates.check();
+
+    if (updatesWindow != nullptr)
+    {
+        updatesWindow->toFront (true);
+        return;
+    }
+
+    auto* panel = new ui::UpdatePanel (services.updates, [this] { installUpdate(); });
+
+    juce::DialogWindow::LaunchOptions o;
+    o.dialogTitle = panel->getTitle();
+    o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = false;
+    o.componentToCentreAround = this;
+    o.content.setOwned (panel);
+
+    updatesWindow = o.launchAsync();
+}
+
+void MainWindow::installUpdate()
+{
+    // As quitting does: the project's changes saved first, if the user wants. Then the installer, which waits for Phazite to
+    // close before it installs, and opens it again (packaging/windows/Phazite.iss); then Phazite quits.
+    session.closeThen (
+        [safeThis = juce::Component::SafePointer<MainWindow> (this)] (bool closed)
+        {
+            if (safeThis == nullptr || ! closed)
+                return;
+
+            if (const auto started = safeThis->services.updates.startInstaller(); started.failed())
+            {
+                juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                  .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                  .withTitle ("Phazite couldn't install the update")
+                                                  .withMessage (started.getErrorMessage())
+                                                  .withButton ("OK", 0)
+                                                  .withAssociatedComponent (safeThis.getComponent()),
+                                              nullptr);
+                return;
+            }
+
+            juce::JUCEApplication::quit();
+        });
+}
+
+void MainWindow::showUpdateState()
+{
+    shell->getActivityBar().showUpdateBadge (ui::isUpdateWaiting (services.updates));
+
+    // The menus and the command search name the update found, once it is found (not at every step of its download).
+    if (const auto name = ui::getUpdateCommandName (services.updates); name != shownUpdateName)
+    {
+        shownUpdateName = name;
+        commands.getCommandManager().commandStatusChanged();
+    }
 }
 
 void MainWindow::showExport()
@@ -738,8 +861,14 @@ void MainWindow::showPluginList()
             list->scanFor (*format);
 }
 
-void MainWindow::changeListenerCallback (juce::ChangeBroadcaster*)
+void MainWindow::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source == &services.updates)
+    {
+        showUpdateState();
+        return;
+    }
+
     // Keys changed, in the shortcuts editor or with another keymap: keep them, and update the
     // tooltips and hints that show them.
     ui::saveKeySettings (commands, services.settings);
@@ -1060,6 +1189,10 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
             menu.addSeparator();
             add (menu, { "help.phaziteSounds", "help.welcome" });
+
+            // As in VS Code's Help menu: the updates, then About.
+            menu.addSeparator();
+            add (menu, { "help.checkForUpdates", "help.about" });
             break;
 
         default:

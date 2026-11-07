@@ -26,6 +26,9 @@ namespace
     {
         return chosen.hasFileExtension (Project::fileExtension) ? chosen.getFileNameWithoutExtension() : chosen.getFileName();
     }
+
+    // What other DAWs export (model/project/internal/DawProject.h), which Phazite imports.
+    constexpr const char* dawProjectExtension = ".dawproject";
 } // namespace
 
 ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentProjects, juce::File projects, juce::File unsaved)
@@ -62,11 +65,57 @@ bool ProjectSession::isUntitled() const
     return project != nullptr && projectUnsavedFolder != nullptr && project->getFile().isAChildOf (projectUnsavedFolder->getFolder());
 }
 
-void ProjectSession::openAtStartup (bool afterCrash)
+void ProjectSession::openAtStartup (bool afterCrash, const juce::File& fileToOpen)
 {
     // An untitled project that an earlier Phazite didn't close properly, such as in a crash, comes first: its changes are
     // nowhere else.
     const auto leftover = UnsavedFolder::findProjectToRestore (unsavedFolder);
+
+    // Unless a file was double-clicked: then that one. The last run's crash concerns it only if it was the project open
+    // then; an untitled project the crash left stays in its folder, for the next start to offer.
+    if (fileToOpen != juce::File())
+    {
+        const auto recentProjects = recent.getProjects();
+        const auto wasOpen = leftover == juce::File() && ! recentProjects.isEmpty() && recentProjects.getFirst() == fileToOpen;
+        const auto openIt = [this, fileToOpen]
+        {
+            if (! fileToOpen.hasFileExtension (dawProjectExtension))
+            {
+                openWithRestoreQuestion (fileToOpen); // which makes a first project if it doesn't open
+                return;
+            }
+
+            importDawProject (fileToOpen);
+
+            if (project == nullptr) // it didn't import, and said why
+                createFirstProject();
+        };
+
+        if (! afterCrash || ! wasOpen)
+        {
+            openIt();
+            return;
+        }
+
+        askHowToOpenAfterCrash (fileToOpen,
+                                [this, openIt] (AfterCrash choice)
+                                {
+                                    if (choice == AfterCrash::startNew)
+                                    {
+                                        createFirstProject();
+                                        return;
+                                    }
+
+                                    if (choice == AfterCrash::openWithoutPlugins)
+                                    {
+                                        pluginsOffUntilOpen = true;
+                                        getPluginHost (engineContext).setLoadsPlugins (false);
+                                    }
+
+                                    openIt();
+                                });
+        return;
+    }
 
     const auto openAsUsual = [this, leftover]
     {
@@ -285,6 +334,31 @@ void ProjectSession::openProject (const juce::File& file)
             if (closed)
                 openWithRestoreQuestion (file);
         });
+}
+
+juce::File ProjectSession::findFileToOpen (const juce::String& commandLine)
+{
+    for (const auto& token : juce::StringArray::fromTokens (commandLine, true))
+    {
+        const auto argument = token.trim().unquoted();
+
+        if (argument.isEmpty() || argument.startsWithChar ('-'))
+            continue;
+
+        if (const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (argument);
+            file.existsAsFile() && (file.hasFileExtension (Project::fileExtension) || file.hasFileExtension (dawProjectExtension)))
+            return file;
+    }
+
+    return {};
+}
+
+void ProjectSession::openFile (const juce::File& file)
+{
+    if (file.hasFileExtension (dawProjectExtension))
+        importDawProject (file); // which asks whether to save the open project, if it replaces it
+    else if (project == nullptr || file != project->getFile())
+        openProject (file);
 }
 
 void ProjectSession::chooseRecentProject()
@@ -765,9 +839,17 @@ void ProjectSession::importDawProject (const juce::File& file)
         return;
     }
 
-    // Any other: a new project of its own.
-    if (const auto result = createUntitled (file.getFileNameWithoutExtension(), [read] (Song& song) { takeDawProject (song, *read); });
-        result.failed())
-        showError ("Phazite couldn't import " + file.getFileName(), result.getErrorMessage());
+    // Any other: a new project of its own, in place of the open one, whose changes are saved first if the user wants.
+    closeThen (
+        [this, file, read] (bool closed)
+        {
+            if (! closed)
+                return;
+
+            if (const auto result =
+                    createUntitled (file.getFileNameWithoutExtension(), [read] (Song& song) { takeDawProject (song, *read); });
+                result.failed())
+                showError ("Phazite couldn't import " + file.getFileName(), result.getErrorMessage());
+        });
 }
 } // namespace phazite

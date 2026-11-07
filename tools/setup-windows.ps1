@@ -14,6 +14,7 @@
       Kitware.CMake                      CMake (MSI, added to the system PATH)
       Ninja-build.Ninja                  Ninja (linked from C:\Program Files\WinGet\Links)
       Gitleaks.Gitleaks                  gitleaks, run by the hooks in .githooks (also linked from WinGet\Links)
+      JRSoftware.InnoSetup               Inno Setup 6, which builds Phazite's installer (CMake's installer target)
       Microsoft.VisualStudio.BuildTools  VS 2026 Build Tools: MSVC x64/x86 + Windows 11 SDK, no IDE
     Optional: LLVM.LLVM (-WithLlvm) and the Surge XT VST3 test plug-in (-WithTestPlugin).
     Also (admin): crash dumps for Phazite.exe in %LOCALAPPDATA%\CrashDumps (Windows Error Reporting).
@@ -323,6 +324,7 @@ function Invoke-AdminSteps {
     Invoke-Step 'CMake'          { Install-WingetPackage -Id 'Kitware.CMake' -Extra @('--installer-type', 'wix') }  # the MSI, never the zip
     Invoke-Step 'Ninja'          { Install-WingetPackage -Id 'Ninja-build.Ninja' -Extra @('--scope', 'machine') }
     Invoke-Step 'Gitleaks'       { Install-WingetPackage -Id 'Gitleaks.Gitleaks' -Extra @('--scope', 'machine') }
+    Invoke-Step 'Inno Setup'     { Install-WingetPackage -Id 'JRSoftware.InnoSetup' -Extra @('--scope', 'machine') }
     Invoke-Step 'VS Build Tools' { Install-BuildTools }
     Invoke-Step 'crash dumps'    { Enable-CrashDumps }
     if ($WithLlvm)       { Invoke-Step 'LLVM'     { Install-WingetPackage -Id 'LLVM.LLVM' } }            # no --scope: its manifest has none
@@ -428,6 +430,26 @@ function Get-ToolLine([string]$Name) {
     return ('{0}  [{1}]{2}' -f ("$first").Trim(), $cmd.Source, $note)
 }
 
+function Get-InnoSetupLine {
+    # Inno Setup 6's compiler, where CMake looks for it (CMakeLists.txt: the installer target), with the version Windows
+    # keeps for its uninstaller (ISCC.exe itself says none).
+    foreach ($dir in @((Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6'), (Join-Path $env:ProgramFiles 'Inno Setup 6'),
+                       (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6'))) {
+        $iscc = Join-Path $dir 'ISCC.exe'
+        if (-not (Test-Path -LiteralPath $iscc)) { continue }
+        $version = ''
+        foreach ($key in @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1',
+                           'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1',
+                           'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1')) {
+            $entry = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+            if ($entry -and $entry.DisplayVersion) { $version = ' ' + $entry.DisplayVersion; break }
+        }
+        return ('Inno Setup{0}  [{1}]' -f $version, $iscc)
+    }
+    $script:Missing = $true
+    return 'MISSING (Inno Setup 6, which builds the installer)'
+}
+
 function Write-Report {
     $ErrorActionPreference = 'Continue'
     Write-Log ''
@@ -437,6 +459,7 @@ function Write-Report {
     Write-Log ('cmake   ' + (Get-ToolLine 'cmake.exe'))
     Write-Log ('ninja   ' + (Get-ToolLine 'ninja.exe'))
     Write-Log ('secrets ' + (Get-ToolLine 'gitleaks.exe'))
+    Write-Log ('inno    ' + (Get-InnoSetupLine))
     $clang = Join-Path $env:ProgramFiles 'LLVM\bin\clang.exe'
     if (Test-Path -LiteralPath $clang) { Write-Log ('clang   ' + (& $clang --version | Select-Object -First 1) + "  [$clang]") }
     $clangFormat = Find-ClangFormat

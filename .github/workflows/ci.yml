@@ -1,6 +1,7 @@
 # Phazite's continuous integration: on every push and pull request, check the repository (secrets,
 # formatting, whitespace, architecture budgets), build every preset on Windows and Linux with warnings
-# as errors, and run the tests (phazite_tests, through CTest, a test file in each, 4 at once). The problem matchers in
+# as errors, and run the tests (phazite_tests, through CTest, a test file in each, 4 at once); and build the Windows
+# installer from windows-release, install it, check it and uninstall it. The problem matchers in
 # .github/problem-matchers turn compiler messages, failed tests and sanitizer reports into annotations on the run,
 # which the public API serves without signing in, unlike the logs. Builds keep going after
 # a failure (ninja -k 0) to report every problem at once. Every compile goes through ccache, whose cache each preset
@@ -113,6 +114,17 @@ jobs:
         run: |
           echo "::add-matcher::.github/problem-matchers/tests.json"
           ctest --preset ${{ matrix.preset }}
+
+      # The installer, built with the image's Inno Setup, then installed for the runner's user, checked and uninstalled
+      # (tools/test-installer.ps1, whose last line says what it found).
+      - name: Installer
+        if: matrix.preset == 'windows-release'
+        run: |
+          cmake --build --preset windows-release --target installer
+          $installer = Get-ChildItem build\windows-release\installer\Phazite-*-Setup.exe | Select-Object -First 1
+          if ($null -eq $installer) { throw "The installer target made no installer." }
+          Get-Content "$($installer.FullName).sha256"
+          & tools\test-installer.ps1 -Installer $installer.FullName
 
   linux:
     name: Linux (${{ matrix.preset }})

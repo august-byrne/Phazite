@@ -4,6 +4,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestPlugin.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "app/AppServices.h"
 #include "app/ProjectSession.h"
@@ -22,6 +23,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/plugins/internal/PluginInstances.h"
+#include "model/project/internal/DawProject.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Tempo.h"
@@ -246,6 +248,116 @@ TEST_CASE ("Startup opens the most recent project")
     REQUIRE (session.getProject() != nullptr);
     CHECK (session.getProject()->getFile() == newer);
     CHECK (recent.getProjects() == juce::Array<juce::File> { newer, older });
+}
+
+TEST_CASE ("The project or DAWproject a command line names is the file to open, as Explorer passes a file double-clicked")
+{
+    phazite::test::TemporaryFolder temp;
+    const auto project = createClosedProject (temp.folder.getChildFile ("With Spaces"), "Song");
+    const auto dawProject = temp.folder.getChildFile ("Elsewhere.dawproject");
+    const auto sound = temp.folder.getChildFile ("Kick.wav");
+    REQUIRE (dawProject.replaceWithText ("a zip, as other DAWs write it"));
+    REQUIRE (sound.replaceWithText ("not a project"));
+
+    using phazite::ProjectSession;
+    CHECK (ProjectSession::findFileToOpen ("\"" + project.getFullPathName() + "\"") == project);
+    CHECK (ProjectSession::findFileToOpen ("--some-option \"" + project.getFullPathName() + "\"") == project);
+    CHECK (ProjectSession::findFileToOpen ("\"" + dawProject.getFullPathName() + "\"") == dawProject);
+    CHECK (ProjectSession::findFileToOpen ("\"" + sound.getFullPathName() + "\"") == juce::File());
+    CHECK (ProjectSession::findFileToOpen ("\"" + temp.folder.getChildFile ("Gone.phazite").getFullPathName() + "\"") == juce::File());
+    CHECK (ProjectSession::findFileToOpen ({}) == juce::File());
+}
+
+TEST_CASE ("Startup opens the project Phazite was started with; after a crash it asks how only if that was the project open then")
+{
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto older = createClosedProject (temp.folder, "Older");
+    const auto newer = createClosedProject (temp.folder, "Newer");
+
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    recent.add (older);
+    recent.add (newer); // each project opened goes first, as the one open last
+
+    auto asked = 0;
+    const auto answerOpen = [&asked] (const juce::File&, std::function<void (phazite::ProjectSession::AfterCrash)> callback)
+    {
+        ++asked;
+        callback (phazite::ProjectSession::AfterCrash::open);
+    };
+
+    {
+        phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+        session.askAfterCrash = answerOpen;
+        session.openAtStartup (false, older);
+        REQUIRE (session.getProject() != nullptr);
+        CHECK (session.getProject()->getFile() == older);
+    }
+
+    {
+        phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+        session.askAfterCrash = answerOpen;
+        session.openAtStartup (true, recent.getProjects()[1]); // not the one open at the crash
+        REQUIRE (session.getProject() != nullptr);
+        CHECK (asked == 0);
+    }
+
+    {
+        phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+        session.askAfterCrash = answerOpen;
+        const auto wasOpen = recent.getProjects().getFirst();
+        session.openAtStartup (true, wasOpen);
+        CHECK (asked == 1);
+        REQUIRE (session.getProject() != nullptr);
+        CHECK (session.getProject()->getFile() == wasOpen);
+    }
+}
+
+TEST_CASE ("A DAWproject double-clicked imports as a new project, and the open one's changes are saved first")
+{
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto dawProject = temp.folder.getChildFile ("Elsewhere.dawproject");
+
+    {
+        phazite::test::TestSong elsewhere;
+        elsewhere.addTrack ("Bass");
+        auto content = phazite::describeDawProject (*phazite::findSong (elsewhere.context),
+                                                    &phazite::getSession (elsewhere.context)->getPlugins(), "Elsewhere", {});
+        content.bounces.clear();
+        REQUIRE (phazite::writeDawProject (content, {}, dawProject).wasOk());
+    }
+
+    const auto project = createClosedProject (temp.folder, "Song");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    session.setAutoSave (true); // so the changes are saved without asking, as with Auto Save on
+    session.openProject (project);
+    REQUIRE (session.getProject() != nullptr);
+    phazite::test::settle();
+
+    // A change not saved yet, then the DAWproject from Explorer: the change saved, the import open, untitled.
+    session.getProject()->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    REQUIRE (session.getProject()->hasUnsavedChanges());
+    session.openFile (dawProject);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.isUntitled());
+    juce::StringArray names;
+
+    for (const auto track : phazite::getTrackIDs (session.getProject()->getSong()))
+        names.add (phazite::getTrackName (session.getProject()->getSong(), track));
+
+    CHECK (names.contains ("Bass"));
+    CHECK (project.loadFileAsString().contains ("pop"));
+
+    // A project double-clicked while it is open already stays as it is.
+    session.openFile (project);
+    session.openFile (project);
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.getProject()->getFile() == project);
 }
 
 TEST_CASE ("The app's services are made together, with the settings in memory")

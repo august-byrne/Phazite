@@ -57,6 +57,23 @@ namespace
 
         return area;
     }
+
+    // As VS Code counts the changes on its Source Control icon, and marks an update on its Manage icon: a pill at the icon's
+    // lower right, in the accent color.
+    void drawBadge (juce::Graphics& g, const juce::Component& item, juce::Rectangle<float> iconArea, const juce::String& count)
+    {
+        const auto& p = getPalette (item);
+        g.setFont (juce::FontOptions (TextSize::badge, juce::Font::bold));
+        const auto width = juce::jmax (Shell::activityBadgeHeight,
+                                       juce::TextLayout::getStringWidth (g.getCurrentFont(), count) + Shell::activityBadgeHeight / 2.0f);
+        const auto pill = juce::Rectangle<float> (width, Shell::activityBadgeHeight)
+                              .withCentre (iconArea.getBottomRight().translated (-1.0f, -2.0f))
+                              .constrainedWithin (item.getLocalBounds().toFloat());
+        g.setColour (p.accent);
+        g.fillRoundedRectangle (pill, Shell::activityBadgeHeight / 2.0f);
+        g.setColour (p.textOnAccent);
+        g.drawText (count, pill, juce::Justification::centred, false);
+    }
 } // namespace
 
 //==============================================================================
@@ -99,24 +116,11 @@ public:
 
     void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
     {
-        const auto& p = getPalette (*this);
         const auto iconArea = drawIcon (g, *this, drawable.get(), drawableColour, getToggleState(), isHighlighted || isDown);
 
-        // As VS Code counts the changes on its Source Control icon: a pill at the icon's lower right, in the accent color.
         if (badge > 0)
-        {
-            const auto count = badge > Shell::activityBadgeMost ? juce::String (Shell::activityBadgeMost) + "+" : juce::String (badge);
-            g.setFont (juce::FontOptions (TextSize::badge, juce::Font::bold));
-            const auto width = juce::jmax (Shell::activityBadgeHeight, juce::TextLayout::getStringWidth (g.getCurrentFont(), count)
-                                                                           + Shell::activityBadgeHeight / 2.0f);
-            const auto pill = juce::Rectangle<float> (width, Shell::activityBadgeHeight)
-                                  .withCentre (iconArea.getBottomRight().translated (-1.0f, -2.0f))
-                                  .constrainedWithin (getLocalBounds().toFloat());
-            g.setColour (p.accent);
-            g.fillRoundedRectangle (pill, Shell::activityBadgeHeight / 2.0f);
-            g.setColour (p.textOnAccent);
-            g.drawText (count, pill, juce::Justification::centred, false);
-        }
+            drawBadge (g, *this, iconArea,
+                       badge > Shell::activityBadgeMost ? juce::String (Shell::activityBadgeMost) + "+" : juce::String (badge));
     }
 
     void refreshTooltip()
@@ -152,14 +156,29 @@ public:
         setMouseClickGrabsKeyboardFocus (false);
     }
 
+    // A badge of one, which screen readers say after its name ("Settings, an update is waiting"), or none.
+    void setBadge (bool shown, const juce::String& description)
+    {
+        setDescription (shown ? description : juce::String());
+
+        if (std::exchange (badge, shown) != shown)
+            repaint();
+    }
+
+    bool hasBadge() const noexcept { return badge; }
+
     void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
     {
-        drawIcon (g, *this, drawable.get(), drawableColour, false, isHighlighted || isDown);
+        const auto iconArea = drawIcon (g, *this, drawable.get(), drawableColour, false, isHighlighted || isDown);
+
+        if (badge)
+            drawBadge (g, *this, iconArea, "1");
     }
 
 private:
     std::unique_ptr<juce::Drawable> drawable;
     juce::Colour drawableColour { juce::Colours::black };
+    bool badge = false;
 };
 
 //==============================================================================
@@ -247,6 +266,16 @@ juce::Button& ActivityBar::getSettingsButton()
     return *settingsItem;
 }
 
+void ActivityBar::showUpdateBadge (bool shown)
+{
+    settingsItem->setBadge (shown, "an update is waiting");
+}
+
+bool ActivityBar::showsUpdateBadge() const
+{
+    return settingsItem->hasBadge();
+}
+
 juce::PopupMenu ActivityBar::makeSettingsMenu()
 {
     // As VS Code's Manage menu: the command search, then the settings' windows, then the looks and the keys; and whether
@@ -272,6 +301,10 @@ juce::PopupMenu ActivityBar::makeSettingsMenu()
     menu.addSubMenu ("Theme", themes, themes.containsAnyActiveItems());
     menu.addSubMenu ("Keymap", keymaps, keymaps.containsAnyActiveItems());
     addCommandItems (menu, commands, { "options.startupSound" });
+
+    // And last, as in VS Code's: Check for Updates..., or the update found (the main window's command, ui/shell/UpdatePanel.h).
+    menu.addSeparator();
+    addCommandItems (menu, commands, { "help.checkForUpdates" });
     return menu;
 }
 

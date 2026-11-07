@@ -113,7 +113,7 @@ Every push and pull request runs [CI](.github/workflows/ci.yml) on GitHub's mach
 
 ### Licenses
 
-Phazite is AGPL-3.0-or-later. Only add code under licenses compatible with it: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license); fonts may also be under the SIL Open Font License 1.1. Never compile in code that is under a proprietary license alone. No sounds or samples go in this repository: they belong in [phazite-sounds](https://github.com/august-byrne/phazite-sounds), under CC0. Add every new dependency to [docs/third-party.md](docs/third-party.md).
+Phazite is AGPL-3.0-or-later. Only add code under licenses compatible with it: GPL-3.0, AGPL-3.0, LGPL-2.1-or-later, LGPL-3.0, MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC or Zlib (not the 4-clause BSD license); fonts may also be under the SIL Open Font License 1.1. Never compile in code that is under a proprietary license alone. No sounds or samples go in this repository: they belong in [phazite-sounds](https://github.com/august-byrne/phazite-sounds), under CC0. Add every new dependency to [docs/third-party.md](docs/third-party.md), and one that ships (compiled in, or a font next to the app) to [resources/licenses/notices.json](resources/licenses/notices.json) too, with the files its notice is made of: the build puts the notices next to the app, and **Help > About Phazite** and the installer show them.
 
 ### No secrets
 

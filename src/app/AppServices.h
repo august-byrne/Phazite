@@ -10,6 +10,7 @@
 #include "services/RecentProjects.h"
 #include "services/Settings.h"
 #include "services/SoundPack.h"
+#include "services/Updates.h"
 
 namespace phazite
 {
@@ -22,6 +23,8 @@ struct AppServicesOptions
     juce::File presetsFolder = Library::getDefaultPresetsFolder(); // where the user's presets are saved
     juce::File factoryPresetsFolder = Library::getDefaultFactoryPresetsFolder(); // the presets that come with Phazite
     SoundPack::Release soundPackRelease = SoundPack::getPinnedRelease();         // the release of them that is downloaded
+    juce::File updatesFolder = Updates::getDefaultDownloadsFolder();             // where an update's installer is downloaded
+    Updates::Source updateSource = Updates::getReleases();                       // where updates are asked for
 };
 
 struct AppServices
@@ -36,6 +39,7 @@ struct AppServices
     Settings settings;
     RecentProjects recentProjects;
     SoundPack soundPack;                  // Phazite Sounds, downloaded when the user asks
+    Updates updates;                      // the update check, which asks Phazite's releases only when the user asks or turned it on
     Library library;                      // what the browser and the plug-in picker show
     std::unique_ptr<Previewer> previewer; // the browser's
 

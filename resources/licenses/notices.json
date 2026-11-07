@@ -1,0 +1,261 @@
+{
+    "about": "The code and fonts from others that Phazite is built with, in its app and its helper, each with the notice its licence asks to go with every copy. CMake copies each one's sources, joined, into licenses/<file> next to the app and writes NOTICES.txt from this list (cmake/PhaziteNotices.cmake); the About box lists them (ui/shell/AboutPanel.h); docs/third-party.md says more of each. An entry with platforms is in those builds only.",
+    "notices": [
+        {
+            "name": "JUCE",
+            "version": "9.0.5",
+            "licence": "AGPL-3.0-only",
+            "copyright": "Copyright (c) Raw Material Software Limited",
+            "use": "Phazite's framework: its windows, audio and MIDI devices, audio files and plug-in formats",
+            "url": "https://juce.com",
+            "file": "JUCE.txt",
+            "sources": [ "external/JUCE/LICENSE.md", "LICENSE" ]
+        },
+        {
+            "name": "zlib",
+            "version": "1.3.2",
+            "licence": "Zlib",
+            "copyright": "Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler",
+            "use": "Compression, in JUCE: zip files and PNG images",
+            "url": "https://zlib.net",
+            "file": "zlib.txt",
+            "sources": [ "external/JUCE/modules/juce_core/zip/zlib/LICENSE" ]
+        },
+        {
+            "name": "HarfBuzz",
+            "version": "15.0.0",
+            "licence": "MIT-Modern-Variant",
+            "copyright": "Copyright (c) 2010-2022 Google, Inc., and the HarfBuzz authors",
+            "use": "Shapes text, in JUCE",
+            "url": "https://harfbuzz.github.io",
+            "file": "HarfBuzz.txt",
+            "sources": [ "external/JUCE/modules/juce_graphics/fonts/harfbuzz/COPYING" ]
+        },
+        {
+            "name": "SheenBidi",
+            "version": "2.9.0",
+            "licence": "Apache-2.0",
+            "copyright": "Copyright (C) 2014-2025 Muhammad Tayyab Akram",
+            "use": "Lays out text that mixes writing directions, in JUCE",
+            "url": "https://github.com/Tehreer/SheenBidi",
+            "file": "SheenBidi.txt",
+            "sources": [ "external/JUCE/modules/juce_graphics/unicode/sheenbidi/LICENSE" ]
+        },
+        {
+            "name": "LunaSVG",
+            "version": "3.5.0",
+            "licence": "MIT",
+            "copyright": "Copyright (c) 2020-2025 Samuel Ugochukwu",
+            "use": "Draws SVG pictures, in JUCE: the icons and the logo",
+            "url": "https://github.com/sammycage/lunasvg",
+            "file": "LunaSVG.txt",
+            "sources": [ "external/JUCE/modules/juce_graphics/drawables/lunasvg/LICENSE" ]
+        },
+        {
+            "name": "PlutoVG",
+            "version": "1.3.2",
+            "licence": "MIT",
+            "copyright": "Copyright (c) 2020-2025 Samuel Ugochukwu",
+            "use": "The drawing library under LunaSVG, in JUCE",
+            "url": "https://github.com/sammycage/plutovg",
+            "file": "PlutoVG.txt",
+            "sources": [ "external/JUCE/modules/juce_graphics/drawables/lunasvg/plutovg/LICENSE" ]
+        },
+        {
+            "name": "libpng",
+            "version": "1.6.58",
+            "licence": "libpng-2.0",
+            "copyright": "Copyright (c) 1995-2026 The PNG Reference Library Authors",
+            "use": "Reads and writes PNG images, in JUCE",
+            "url": "http://www.libpng.org/pub/png/libpng.html",
+            "file": "libpng.txt",
+            "sources": [ "external/JUCE/modules/juce_graphics/image_formats/pnglib/LICENSE" ]
+        },
+        {
+            "name": "libjpeg",
+            "version": "10",
+            "licence": "IJG",
+            "copyright": "Copyright (C) 1991-2026, Thomas G. Lane, Guido Vollbeding",
+            "use": "Reads JPEG images, in JUCE. This software is based in part on the work of the Independent JPEG Group",
+            "url": "https://ijg.org",
+            "file": "libjpeg.txt",
+            "sources": [ "external/JUCE/modules/juce_graphics/image_formats/jpglib/README" ]
+        },
+        {
+            "name": "libwebp",
+            "version": "1.6.0",
+            "licence": "BSD-3-Clause",
+            "copyright": "Copyright (c) 2010, Google Inc.",
+            "use": "Reads WebP images, in JUCE",
+            "url": "https://chromium.googlesource.com/webm/libwebp",
+            "file": "libwebp.txt",
+            "sources": [ "external/JUCE/modules/juce_graphics/image_formats/libwebp/COPYING" ]
+        },
+        {
+            "name": "FLAC",
+            "version": "1.5.0",
+            "licence": "BSD-3-Clause",
+            "copyright": "Copyright (C) 2000-2009 Josh Coalson, 2011-2023 Xiph.Org Foundation",
+            "use": "Reads and writes FLAC files, in JUCE",
+            "url": "https://xiph.org/flac/",
+            "file": "FLAC.txt",
+            "sources": [ "external/JUCE/modules/juce_audio_formats/codecs/flac/Flac Licence.txt" ]
+        },
+        {
+            "name": "libogg",
+            "version": "1.3.6",
+            "licence": "BSD-3-Clause",
+            "copyright": "Copyright (c) 2002-2020 Xiph.org Foundation",
+            "use": "Ogg files, in JUCE",
+            "url": "https://xiph.org/ogg/",
+            "file": "libogg.txt",
+            "sources": [ "external/JUCE/modules/juce_audio_formats/codecs/ogg/COPYING" ]
+        },
+        {
+            "name": "libvorbis",
+            "version": "1.3.7",
+            "licence": "BSD-3-Clause",
+            "copyright": "Copyright (c) 2002-2020 Xiph.org Foundation",
+            "use": "Reads and writes Ogg Vorbis files, in JUCE",
+            "url": "https://xiph.org/vorbis/",
+            "file": "libvorbis.txt",
+            "sources": [ "external/JUCE/modules/juce_audio_formats/codecs/vorbis/COPYING" ]
+        },
+        {
+            "name": "Opus",
+            "version": "1.6.1",
+            "licence": "BSD-3-Clause",
+            "copyright": "Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon",
+            "use": "Opus audio, in JUCE",
+            "url": "https://opus-codec.org",
+            "file": "Opus.txt",
+            "sources": [ "external/JUCE/modules/juce_audio_formats/codecs/opus/opus/COPYING" ]
+        },
+        {
+            "name": "opusfile",
+            "version": "0.12",
+            "licence": "BSD-3-Clause",
+            "copyright": "Copyright (c) 1994-2013 Xiph.Org Foundation and contributors",
+            "use": "Reads Opus files, in JUCE",
+            "url": "https://opus-codec.org",
+            "file": "opusfile.txt",
+            "sources": [ "external/JUCE/modules/juce_audio_formats/codecs/opus/opusfile/COPYING" ]
+        },
+        {
+            "name": "libopusenc",
+            "version": "0.3",
+            "licence": "BSD-3-Clause",
+            "copyright": "Copyright (c) 1994-2013 Xiph.Org Foundation and contributors, (c) 2017 Jean-Marc Valin",
+            "use": "Writes Opus files, in JUCE",
+            "url": "https://opus-codec.org",
+            "file": "libopusenc.txt",
+            "sources": [ "external/JUCE/modules/juce_audio_formats/codecs/opus/libopusenc/COPYING" ]
+        },
+        {
+            "name": "VST 3 SDK",
+            "version": "3.8.0",
+            "licence": "MIT",
+            "copyright": "Copyright (c) 2025, Steinberg Media Technologies GmbH",
+            "use": "Hosts VST® 3 plug-ins, in JUCE",
+            "url": "https://github.com/steinbergmedia/vst3sdk",
+            "file": "VST3-SDK.txt",
+            "sources": [ "external/JUCE/modules/juce_audio_processors_headless/format_types/VST3_SDK/LICENSE.txt" ]
+        },
+        {
+            "name": "PreSonus Plug-In Extensions",
+            "version": "",
+            "licence": "Public domain",
+            "copyright": "Written and placed in the public domain by PreSonus Software Ltd.",
+            "use": "Extensions to VST 3 that some plug-ins use, in JUCE",
+            "url": "https://presonussoftware.com",
+            "file": "",
+            "sources": []
+        },
+        {
+            "name": "ASIO SDK",
+            "version": "2.3.4",
+            "licence": "GPL-3.0-only",
+            "copyright": "Copyright (c) 2025, Steinberg Media Technologies GmbH",
+            "use": "ASIO® drivers, for audio interfaces, in JUCE. Used under the GNU General Public License, version 3",
+            "url": "https://www.steinberg.net/developers/",
+            "file": "ASIO-SDK.txt",
+            "sources": [ "external/JUCE/modules/juce_audio_devices/native/asio/LICENSE.txt", "resources/licenses/GPL-3.0.txt" ],
+            "platforms": [ "windows" ]
+        },
+        {
+            "name": "Rubber Band Library",
+            "version": "4.0",
+            "licence": "GPL-2.0-or-later",
+            "copyright": "Copyright 2007-2024 Particular Programs Ltd.",
+            "use": "Stretches and pitches audio clips and the browser's previews",
+            "url": "https://breakfastquay.com/rubberband/",
+            "file": "RubberBand.txt",
+            "sources": [ "external/rubberband/COPYING" ]
+        },
+        {
+            "name": "r8brain-free-src",
+            "version": "7.6",
+            "licence": "MIT",
+            "copyright": "Copyright (c) 2013-2026 Aleksey Vaneev",
+            "use": "Resamples audio files at another rate than the engine's. Sample rate converter designed by Aleksey Vaneev of Voxengo",
+            "url": "https://github.com/avaneev/r8brain-free-src",
+            "file": "r8brain-free-src.txt",
+            "sources": [ "external/r8brain-free-src/LICENSE" ]
+        },
+        {
+            "name": "Ooura FFT",
+            "version": "",
+            "licence": "LicenseRef-Ooura",
+            "copyright": "Copyright (C) 1996-2001 Takuya OOURA",
+            "use": "The FFT that r8brain-free-src bundles",
+            "url": "https://www.kurims.kyoto-u.ac.jp/~ooura/fft.html",
+            "file": "Ooura-FFT.txt",
+            "sources": [ "resources/licenses/Ooura-FFT.txt" ]
+        },
+        {
+            "name": "libebur128",
+            "version": "",
+            "licence": "MIT",
+            "copyright": "Copyright (c) 2011 Jan Kokemüller",
+            "use": "The loudness meter follows its K-weighting filters and its gating",
+            "url": "https://github.com/jiixyj/libebur128",
+            "file": "libebur128.txt",
+            "sources": [ "resources/licenses/libebur128.txt" ]
+        },
+        {
+            "name": "Inter",
+            "version": "4.1",
+            "licence": "OFL-1.1",
+            "copyright": "Copyright (c) 2016 The Inter Project Authors",
+            "use": "The interface's font, in fonts/Inter next to the app",
+            "url": "https://rsms.me/inter/",
+            "file": "Inter.txt",
+            "sources": [ "resources/fonts/Inter/OFL.txt" ]
+        },
+        {
+            "name": "Lucide",
+            "version": "1.55.0",
+            "licence": "ISC AND MIT",
+            "copyright": "Copyright (c) 2026 Lucide Icons and Contributors; the icons from Feather, Copyright (c) 2013-present Cole Bemis",
+            "use": "The icons",
+            "url": "https://lucide.dev",
+            "file": "Lucide.txt",
+            "sources": [ "resources/icons/lucide/LICENSE" ]
+        },
+        {
+            "name": "Code - OSS",
+            "version": "",
+            "licence": "MIT",
+            "copyright": "Copyright (c) 2015 - present Microsoft Corporation",
+            "use": "The dark and light themes' colors, and the window's sizes and spacing, taken as values",
+            "url": "https://github.com/microsoft/vscode",
+            "file": "VSCode.txt",
+            "sources": [ "resources/licenses/VSCode.txt" ]
+        }
+    ],
+    "trademarks": [
+        { "text": "VST is a registered trademark of Steinberg Media Technologies GmbH." },
+        { "text": "ASIO is a registered trademark of Steinberg Media Technologies GmbH.", "platforms": [ "windows" ] },
+        { "text": "Other names of products are their owners' trademarks, named only to say what Phazite works with." }
+    ]
+}

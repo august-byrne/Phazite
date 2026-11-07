@@ -1,0 +1,8 @@
+Takuya Ooura's FFT package (fft4g), which r8brain-free-src bundles (external/r8brain-free-src/fft/fft4g.h), modified
+and used with the permission its licence grants.
+
+Copyright (C) 1996-2001 Takuya OOURA
+https://www.kurims.kyoto-u.ac.jp/~ooura/fft.html
+
+You may use, copy, modify and distribute this code for any purpose (include commercial use) and without fee. Please
+refer to this package when you modify this code.

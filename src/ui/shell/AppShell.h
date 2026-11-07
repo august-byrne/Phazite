@@ -55,6 +55,7 @@ public:
     // asks it what its frame does where.
     TitleBar& getTitleBar() noexcept { return titleBar; }
     StatusBar& getStatusBar() noexcept { return statusBar; }
+    ActivityBar& getActivityBar() noexcept { return activityBar; } // whose settings' icon the window marks for an update
     juce::Component::WindowControlKind getWindowControlAt (juce::Point<int>) const;
 
     // The open project's name, whether it is saved and when it was last autosaved, which the window knows: the title bar

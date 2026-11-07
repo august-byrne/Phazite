@@ -521,6 +521,24 @@ TEST_CASE ("The account and the settings sit at the foot of the activity bar, th
     CHECK (phazite::test::findMenuItem (menu, { "Keymap" }) != nullptr);
 }
 
+TEST_CASE ("The settings' icon shows a badge while an update waits, as VS Code's Manage icon does, and screen readers say so")
+{
+    Screen screen;
+    auto& bar = screen.getBar();
+    auto& settings = bar.getSettingsButton();
+    CHECK_FALSE (bar.showsUpdateBadge());
+    CHECK (settings.getDescription().isEmpty());
+
+    bar.showUpdateBadge (true);
+    CHECK (bar.showsUpdateBadge());
+    CHECK (settings.getDescription() == "an update is waiting");
+    juce::ignoreUnused (bar.createComponentSnapshot (bar.getLocalBounds())); // the badge drawn
+
+    bar.showUpdateBadge (false);
+    CHECK_FALSE (bar.showsUpdateBadge());
+    CHECK (settings.getDescription().isEmpty());
+}
+
 TEST_CASE ("Ctrl+Enter in the message saves a version, its first line the name; a change's Put Back shows under the pointer")
 {
     Screen screen;

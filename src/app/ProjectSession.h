@@ -70,8 +70,18 @@ public:
     std::function<void (const juce::File& projectFile, std::function<void (AfterCrash)>)> askAfterCrash;
 
     // Restores the untitled project an earlier Phazite didn't close properly, if the user wants it, or opens the most
-    // recent project (offering to restore its autosave), or makes a first project; after a crash, asking how first.
-    void openAtStartup (bool afterCrash = false);
+    // recent project (offering to restore its autosave), or makes a first project; after a crash, asking how first. Given a
+    // file to open (Phazite started by a double-click on one: findFileToOpen()), opens that instead, asking how after a crash
+    // only if it is the project that was open then; an untitled project left by a crash waits for the next start.
+    void openAtStartup (bool afterCrash = false, const juce::File& fileToOpen = {});
+
+    // The project or DAWproject file a command line names (Windows' Explorer passes the file double-clicked, in quotes),
+    // relative to the current folder or whole; none if it names no such file.
+    static juce::File findFileToOpen (const juce::String& commandLine);
+
+    // Opens a project, or imports a DAWproject (importDawProject()), asking whether to save the open project first: a file
+    // double-clicked while Phazite runs.
+    void openFile (const juce::File&);
 
     void newProject(); // the new-project window
     void openProject();
@@ -83,7 +93,8 @@ public:
     void cleanUpAudio();        // through onCleanUpAudio
 
     // Import DAWproject... (model/project/internal/DawProject.h): a file chooser, then the file chosen. One exported from a
-    // version of the open project comes back as a new branch from that version; any other opens as a new untitled project.
+    // version of the open project comes back as a new branch from that version; any other opens as a new untitled project,
+    // after asking whether to save the one that is open.
     void importDawProject();
     void importDawProject (const juce::File&);
 

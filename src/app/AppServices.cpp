@@ -91,6 +91,7 @@ AppServices::AppServices (EngineContext& context, AppServicesOptions options)
       settings (settingsFile.get()),
       recentProjects (settings),
       soundPack (options.packsFolder, options.soundPackRelease),
+      updates (settings, options.updatesFolder, options.updateSource),
       library (engineContext, settings, soundPack.getFolder(), options.presetsFolder, options.factoryPresetsFolder),
       previewer (createPreviewer (engineContext))
 {

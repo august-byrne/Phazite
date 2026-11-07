@@ -2,7 +2,7 @@
 // The column of icons along the window's left edge, as VS Code's activity bar (docs/versions.md: The activity bar): one for
 // each of the left panel's views, the browser, the project (what the song holds: ui/project/ProjectView.h) and the versions,
 // and at its foot, as VS Code's Accounts and Manage, the account (none yet: its menu says so) and the settings, whose menu
-// holds the settings' commands. It is always there: while the left panel is hidden, while another panel fills the window and
+// holds the settings' commands, and whose badge says an update waits. It is always there: while the left panel is hidden, while another panel fills the window and
 // in full screen. A click on the icon of the view the left panel shows hides the panel; on another, or while the panel is
 // hidden, it shows that view there (the view.browser, view.project and view.versions commands, AppShell's). The view that
 // shows is marked, and while the song has changes since its branch's last version, a badge on the Versions icon counts them.
@@ -38,8 +38,14 @@ public:
     juce::Button& getAccountButton();
     juce::Button& getSettingsButton();
 
-    // The settings' menu, as its icon opens it: Search Commands, the settings' windows, then the themes and the keymaps.
+    // The settings' menu, as its icon opens it: Search Commands, the settings' windows, then the themes and the keymaps, and
+    // last Check for Updates... (the main window's command, named for the update while one waits).
     juce::PopupMenu makeSettingsMenu();
+
+    // A badge on the settings' icon while a newer Phazite waits to be installed, as VS Code marks its Manage icon (the main
+    // window shows it: ui/shell/UpdatePanel.h, isUpdateWaiting()).
+    void showUpdateBadge (bool);
+    bool showsUpdateBadge() const;
 
     void paint (juce::Graphics&) override;
     void resized() override;

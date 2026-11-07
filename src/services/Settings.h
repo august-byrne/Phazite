@@ -101,6 +101,10 @@ public:
     static constexpr BoolSetting versionBounce { "phaziteVersionBounce", false, SaveTiming::now };
     static constexpr BoolSetting autoSave { "phaziteAutoSave", true, SaveTiming::now };
 
+    // Whether Phazite asks its releases for a newer version each time it opens (services/Updates.h): off until the user turns
+    // it on (docs/design.md, section 22).
+    static constexpr BoolSetting updateCheck { "phaziteUpdateCheck", false, SaveTiming::now };
+
     // Kept in that file (which must outlive this), or, without one, in memory (tests). The parameter isn't named
     // 'file': it would hide the member (C4458, -Wshadow).
     explicit Settings (juce::PropertiesFile* propertiesFile = nullptr);

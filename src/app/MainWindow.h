@@ -39,7 +39,8 @@ public:
 
     ui::AppShell& getShell() noexcept { return *shell; }
 
-    // The window's commands ("options.", "input.", "help." and the shell's "view." commands).
+    // The window's commands ("options.", "input.", "help." and the shell's "view." commands), with Check for Updates... and
+    // About Phazite.
     void addCommands();
 
     // The welcome window, the first time Phazite opens.
@@ -73,7 +74,7 @@ private:
     // turned off.
     std::unique_ptr<ui::Tooltips> tipsInside, tipsElsewhere;
     juce::Component::SafePointer<juce::DialogWindow> settingsWindow, pluginListWindow, welcomeWindow, exportWindow, progressionsWindow,
-        renderWindow, cleanUpWindow;
+        renderWindow, cleanUpWindow, aboutWindow, updatesWindow;
     juce::Component::SafePointer<ui::SettingsPanel> settingsPanel;
     juce::Component::SafePointer<ui::WelcomePanel> welcomePanel;
 
@@ -83,6 +84,14 @@ private:
     void showExport();       // for the open project's song
     void showCleanUp();      // Clean Up Unused Audio..., for the open project
     void showProgressions(); // the chord progressions, for the open project's chord lane
+    void showAbout();        // Phazite's version, license and notices (ui/shell/AboutPanel.h)
+
+    // The Updates window (ui/shell/UpdatePanel.h), which looks for a newer release unless one was found already; Install and
+    // Restart in it saves the project if the user wants, starts the installer, and quits.
+    void showUpdates();
+    void installUpdate();
+    void showUpdateState(); // the settings' icon's badge and the update command's name, as the update check is now
+    juce::String shownUpdateName;
     void setTheme (ui::ThemeName);
     void setHoverHelp (bool);
     void setInterfaceScale (float);
@@ -95,7 +104,7 @@ private:
     ui::TitleBar::WindowActions getWindowActions(); // what the title bar's own window buttons do
 
     void timerCallback() override { updateTitle(); }
-    void changeListenerCallback (juce::ChangeBroadcaster*) override; // the keys changed
+    void changeListenerCallback (juce::ChangeBroadcaster*) override; // the keys changed, or the update check
 
     juce::StringArray getMenuBarNames() override;
     juce::PopupMenu getMenuForIndex (int menuIndex, const juce::String& menuName) override;

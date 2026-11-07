@@ -32,7 +32,7 @@ What works today, on Windows:
 
 The song plays, records, exports and freezes through Phazite's own engine, built on JUCE, and plug-ins run in Phazite's own helper processes.
 
-The passes on performance and accessibility are done. Next come an installer and version 1; after it, rounds of testing with new users, a richer browser, chord suggestions and the sound generator. The [roadmap](docs/roadmap.md) has the plan step by step.
+The passes on performance and accessibility are done, and so are a Windows installer (which you [build yourself](docs/building.md#the-installer) until the first release), an update check you can turn on, and every license shown in the app. Next come code signing, a user guide and version 1; after it, rounds of testing with new users, a richer browser, chord suggestions and the sound generator. The [roadmap](docs/roadmap.md) has the plan step by step.
 
 | Platform | Status |
 |---|---|
@@ -84,6 +84,6 @@ Phazite is built in the open, and every kind of help counts:
 
 ## License
 
-Phazite is licensed under the [GNU Affero General Public License, version 3 or later](LICENSE). It builds on JUCE, Rubber Band Library and other open-source code: [docs/third-party.md](docs/third-party.md) lists each with its license.
+Phazite is licensed under the [GNU Affero General Public License, version 3 or later](LICENSE). It builds on JUCE, Rubber Band Library and other open-source code: [docs/third-party.md](docs/third-party.md) lists each with its license, and **Help > About Phazite** shows them all in the app.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH. ASIO is a registered trademark of Steinberg Media Technologies GmbH.

@@ -4,6 +4,7 @@ Phazite has no downloads yet, so you build it from source. This page explains ea
 
 - [Windows](#windows)
 - [Running Phazite](#running-phazite)
+- [The installer](#the-installer)
 - [Troubleshooting](#troubleshooting)
 - [Linux and WSL2](#linux-and-wsl2)
 
@@ -47,7 +48,7 @@ tools\setup-windows.cmd
 
 It runs [tools/setup-windows.ps1](../tools/setup-windows.ps1) without changing PowerShell's execution policy (you can also double-click it in File Explorer), and:
 
-- installs or updates Git; CMake and Ninja, which generate and run the build; gitleaks, the secret scanner the git hooks run; and Visual Studio 2026 Build Tools (the MSVC C++ compiler and the Windows 11 SDK, without the Visual Studio IDE);
+- installs or updates Git; CMake and Ninja, which generate and run the build; gitleaks, the secret scanner the git hooks run; Inno Setup, which builds [the installer](#the-installer); and Visual Studio 2026 Build Tools (the MSVC C++ compiler and the Windows 11 SDK, without the Visual Studio IDE);
 - sets a global git option for your user account: `core.longpaths true`, which lets git handle paths over 260 characters;
 - turns on this clone's git hooks, which stop a commit or push that would publish a secret or a private email address ([CONTRIBUTING.md](../CONTRIBUTING.md#the-git-hooks));
 - turns on crash dumps for `Phazite.exe` (Windows keeps the last 3);
@@ -114,6 +115,34 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](../CONTRIBUTI
 - **Sound:** Phazite opens your default audio output. With an audio interface, choose **ASIO**® under **Audio Settings** (in the menu of the gear at the bottom left) for the lowest delay; without an ASIO driver, [FlexASIO](https://github.com/dechamps/FlexASIO) (MIT) gives you one that plays through Windows' normal audio. Audio inputs are off until you turn them on there.
 - **Plug-ins:** **Scan for Plug-ins** (in the gear's menu) scans the standard VST3 folders. The scan runs in Phazite's helper program (`PhaziteHost`, next to the app), a file at a time with a time limit for each, so a plug-in that crashes or hangs while being scanned doesn't take Phazite down; plug-ins play in helpers too. With no plug-ins installed, `tools\setup-windows.cmd -WithTestPlugin` installs Surge XT to try it with.
 - **Crashes:** a crash leaves `Phazite.exe.<number>.dmp` in `%LOCALAPPDATA%\CrashDumps`. Only `windows-profile` and `windows-debug` builds have the symbols that make one readable. A dump holds Phazite's whole memory, so never attach one to a public issue: describe what you did instead.
+- **Licenses:** the build puts Phazite's license and the notices of the code and fonts it is built with next to the app (`licenses\` and `NOTICES.txt`); **Help > About Phazite** shows them.
+
+## The installer
+
+Phazite's Windows installer is built with [Inno Setup](https://jrsoftware.org/isinfo.php) 6.6 or newer, which the setup script installs (`tools\setup-windows.cmd -CheckOnly` shows it on its `inno` line). Build it from the release preset:
+
+```powershell
+cmake --preset windows-release
+cmake --build --preset windows-release --target installer
+```
+
+It builds the app first if it needs to, then writes three files into `build\windows-release\installer`:
+
+| File | What it is |
+|---|---|
+| `Phazite-<version>-Setup.exe` | The installer. Run it to install Phazite for your Windows user (no administrator rights, in `%LOCALAPPDATA%\Programs\Phazite`), or with `/ALLUSERS` for every user (in Program Files). Its first page shows the licenses. It adds Phazite to the Start menu, opens projects (`.phazite`) with Phazite, and puts Phazite in the Open With menu of DAWproject files. Settings > Apps uninstalls it, leaving your projects and settings. |
+| `Phazite-<version>-Setup.exe.sha256` | The installer's SHA-256, for checking a download: `(Get-FileHash Phazite-<version>-Setup.exe).Hash` must match it (case aside), or `sha256sum -c` on Linux. |
+| `phazite-update.json` | What a release carries for Phazite's update check: its version, and the installer's address in the release `v<version>` on GitHub, its size and its SHA-256. |
+
+The installer isn't signed yet (roadmap step 4.3), so Windows' SmartScreen warns before it runs: **More info**, then **Run anyway**.
+
+To check an installer without touching your own Phazite, `tools\test-installer.ps1` installs it silently for your user into a folder of its own, checks its files, file associations, shortcut and uninstaller, uninstalls it and checks that all of it went (CI runs it too):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\test-installer.ps1 build\windows-release\installer\Phazite-0.1.0-Setup.exe
+```
+
+It stops before installing if Phazite is open or already installed for your user, and ends with a `Result:` line (0: all as it should be).
 
 ## Troubleshooting
 
@@ -126,6 +155,7 @@ Start it from File Explorer or PowerShell, or with F5 in [VS Code](../CONTRIBUTI
 | Configure says a folder under `external` is empty or missing | The submodules aren't there: run [step 3](#3-fetch-the-submodules) (after step 2 on a new machine). |
 | `fatal error C1081` (file name too long) | The repository path is too long: clone again into a short one such as `C:\src\Phazite`. |
 | `LNK1104` on `Phazite.exe` | Phazite or a debug session is still running. Close it and build again. |
+| The `installer` target says Inno Setup wasn't found | Run `tools\setup-windows.cmd` (it installs Inno Setup), then configure again: `cmake --preset windows-release`. |
 | Errors after a Build Tools update (new MSVC) or a toolchain change | Run `cmake --preset <preset> --fresh` (the setup script prints this when MSVC changes). If it still fails, delete `build\<preset>` and configure again. |
 | No sound | Choose an output in **Audio Settings**, in the menu of the gear at the bottom left. |
 | A message from `pre-commit` or `pre-push` | See [the git hooks](../CONTRIBUTING.md#when-a-hook-stops-you) in CONTRIBUTING.md. |
