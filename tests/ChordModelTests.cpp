@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The chord lane as the UI reaches it (src/model/chords/ChordModel.h): its chords and keys, progressions laid over the
-// song, each edit one undo step, chords that go with the song's time, parts made from the chords that follow them until
-// their notes are edited, the chord commands, and a progression written out for the previewer.
+// song, each edit one undo step, chords that go with the song's time, Delete All Chords, where a progression goes, the
+// lane saved and read back, and a progression written out for the previewer.
 #include "TestHelpers.h"
-#include "devices/synth/Synth.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/Clips.h"
@@ -13,9 +12,7 @@
 #include "model/chords/ChordModel.h"
 #include "model/chords/Progressions.h"
 #include "model/chords/internal/Chords.h"
-#include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
-#include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -26,7 +23,6 @@ namespace
 using phazite::ChordType;
 using phazite::Key;
 using phazite::Numeral;
-using phazite::PartStyle;
 using phazite::Scale;
 
 phazite::BeatPosition beat (double beats)
@@ -80,21 +76,6 @@ struct Song
     void undo() { phazite::undo (*song); }
 
     phazite::Song& getSong() const { return *song; }
-
-    // Whether the song has a MIDI clip of this ID.
-    bool isMidiClip (phazite::ClipID id) const { return phazite::isMidiState (phazite::findClipState (getSong(), id)); }
-
-    std::vector<int> pitchesOf (phazite::ClipID id) const
-    {
-        std::vector<int> pitches;
-        REQUIRE (isMidiClip (id));
-
-        for (const auto& note : phazite::getClipNotes (getSong(), id))
-            pitches.push_back (note.pitch);
-
-        std::sort (pitches.begin(), pitches.end());
-        return pitches;
-    }
 
     phazite::Song::Ptr song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
@@ -249,123 +230,60 @@ TEST_CASE ("The chord lane: chords go with the song's time, as sections do")
     CHECK (phazite::getTimelineEnd (song.context) >= beat (24.0));
 }
 
-TEST_CASE ("Parts made from the chords: a new track with the synth, notes that follow the chords until they are edited")
+TEST_CASE ("Delete All Chords takes every chord and the key changes after the song's start away, as one undo step")
 {
+    // The owner, 2026-11-07: the playlist shows the chord lane only while the song has chords, so they go all at once.
     Song song;
+    CHECK_FALSE (phazite::hasLaneChords (song.context));
+    phazite::deleteAllLaneChords (song.context); // nothing to delete: no undo step
+    CHECK_FALSE (song.getSong().getUndoManager().canUndo());
+
+    phazite::setLaneKey (song.context, beat (0.0), { 2, Scale::minor });
     phazite::applyProgression (song.context, getProgression ("popAnthem"), beats (0.0, 16.0));
-    const auto tracksBefore = phazite::getTrackIDs (song.getSong()).size();
+    phazite::setLaneKey (song.context, beat (8.0), { 4, Scale::major });
+    REQUIRE (phazite::hasLaneChords (song.context));
+    REQUIRE (phazite::getLaneKeyChanges (song.context).size() == 2);
+    const auto chordsBefore = song.names();
 
-    const auto part = phazite::makeChordPart (song.context, PartStyle::bassRoots, beats (0.0, 16.0));
-    REQUIRE (part.has_value());
-    CHECK (song.describeUndo() == juce::String ("Undo Make Bass Line"));
+    phazite::deleteAllLaneChords (song.context);
+    CHECK (song.describeUndo() == juce::String ("Undo Delete All Chords"));
+    CHECK_FALSE (phazite::hasLaneChords (song.context));
+    const auto keys = phazite::getLaneKeyChanges (song.context);
+    REQUIRE (keys.size() == 1); // the song's key stays
+    CHECK (keys.front().key == phazite::Key { 2, Scale::minor });
 
-    // At the end of the song, named for its part, with Phazite's synth, and selected.
-    const auto tracks = phazite::getTrackIDs (song.getSong());
-    REQUIRE (tracks.size() == tracksBefore + 1);
-    const auto bass = tracks.back();
-    CHECK (phazite::getTrackName (song.getSong(), bass) == juce::String ("Bass"));
-    const auto instrument = phazite::getInstrument (song.getSong(), bass);
-    REQUIRE (instrument.isValid());
-    CHECK (phazite::findDeviceState (song.getSong(), instrument)[phazite::schema::deviceType].toString()
-           == juce::String (phazite::devices::Synth::typeID));
-    CHECK (phazite::getSelection (song.context).isSelected (bass));
-
-    CHECK (song.pitchesOf (*part) == std::vector<int> { 36, 41, 43, 45 });
-    CHECK (phazite::getChordPart (song.context, *part) == PartStyle::bassRoots);
-    CHECK (phazite::followsChords (song.context, *part));
-
-    // Changing a chord changes the part's notes in the same undo step, and undo puts both back.
-    phazite::changeLaneChord (song.context, beat (0.0), { 2, 0, ChordType::minor, 0 });
-    CHECK (song.pitchesOf (*part) == std::vector<int> { 38, 41, 43, 45 });
-    CHECK (phazite::followsChords (song.context, *part));
     song.undo();
-    CHECK (song.pitchesOf (*part) == std::vector<int> { 36, 41, 43, 45 });
-
-    // So does a change of key: the bass moves to D major.
-    phazite::setLaneKey (song.context, beat (0.0), { 2, Scale::major });
-    CHECK (song.pitchesOf (*part) == std::vector<int> { 38, 43, 45, 47 });
-    song.undo();
-
-    // A note edited by hand: the part stops following, and keeps its notes when the chords change.
-    REQUIRE (song.isMidiClip (*part));
-    const auto notes = phazite::getClipNotes (song.getSong(), *part);
-    REQUIRE_FALSE (notes.empty());
-    {
-        const phazite::UndoStep step (song.getSong(), "Change Velocity");
-        phazite::setNoteVelocities (song.getSong(), { notes.front().getRef() }, 60);
-    }
-    CHECK_FALSE (phazite::followsChords (song.context, *part));
-    phazite::changeLaneChord (song.context, beat (0.0), { 2, 0, ChordType::minor, 0 });
-    CHECK (song.pitchesOf (*part) == std::vector<int> { 36, 41, 43, 45 });
-
-    // Following again makes its notes from the chords again; stopping makes it a clip like any other.
-    phazite::setFollowsChords (song.context, *part, true);
-    CHECK (song.describeUndo() == juce::String ("Undo Follow the Chords"));
-    CHECK (song.pitchesOf (*part) == std::vector<int> { 38, 41, 43, 45 });
-    CHECK (phazite::followsChords (song.context, *part));
-
-    phazite::setFollowsChords (song.context, *part, false);
-    CHECK (song.describeUndo() == juce::String ("Undo Stop Following the Chords"));
-    CHECK_FALSE (phazite::getChordPart (song.context, *part).has_value());
-    CHECK_FALSE (phazite::followsChords (song.context, *part));
+    CHECK (song.names() == chordsBefore);
+    CHECK (phazite::getLaneKeyChanges (song.context).size() == 2);
 }
 
-TEST_CASE ("Parts made from the chords go where the selection says: a time range, sections, or all of the chords")
+TEST_CASE ("A progression goes where the selection says: a time range, or sections")
 {
     Song song;
-    CHECK_FALSE (phazite::getChordPartRange (song.context).has_value());
-    CHECK_FALSE (phazite::canMakeChordPart (song.context));
-
-    phazite::applyProgression (song.context, getProgression ("popAnthem"), beats (4.0, 20.0));
-    CHECK (phazite::getChordPartRange (song.context) == beats (4.0, 20.0));
-    CHECK (phazite::canMakeChordPart (song.context));
+    CHECK_FALSE (phazite::getSelectedSectionsRange (song.context).has_value());
+    CHECK_FALSE (phazite::getSelectedTimeRange (song.context).has_value());
 
     const auto section = phazite::insertSection (song.getSong(), phazite::BeatPosition::fromBeats (8.0),
                                                  { .name = "Verse", .length = phazite::BeatDuration::fromBeats (8.0) });
     REQUIRE (section.isValid());
     phazite::getSelection (song.context).selectOnly (section);
     CHECK (phazite::getSelectedSectionsRange (song.context) == beats (8.0, 16.0));
-    CHECK (phazite::getChordPartRange (song.context) == beats (8.0, 16.0));
 
     song.context.getSongRange().set (beats (12.0, 14.0), { phazite::getTrackIDs (song.getSong())[0] });
     CHECK (phazite::getSelectedTimeRange (song.context) == beats (12.0, 14.0));
-    CHECK (phazite::getChordPartRange (song.context) == beats (12.0, 14.0));
-
-    // The commands make their parts there.
-    phazite::CommandRegistry registry;
-    phazite::addChordCommands (registry, song.context);
-
-    for (const auto* id : { "chords.makeChordPart", "chords.makeBassLine", "chords.makeArpeggio" })
-    {
-        const auto* command = registry.find (id);
-        INFO (id);
-        REQUIRE (command != nullptr);
-        CHECK (phazite::CommandRegistry::isEnabled (*command));
-    }
-
-    const auto clip = phazite::makeChordPartHere (song.context, PartStyle::arpeggioUp);
-    REQUIRE (clip.has_value());
-    REQUIRE (song.isMidiClip (*clip));
-    const auto made = phazite::getClipRange (song.getSong(), *clip);
-    CHECK (made.getStart().inBeats() == doctest::Approx (12.0));
-    CHECK (made.getEnd().inBeats() == doctest::Approx (14.0));
-    CHECK (phazite::getClipNotes (song.getSong(), *clip).size() == 4); // eighth notes over two beats
-    CHECK (phazite::getTrackName (song.getSong(), phazite::getClipTrack (song.getSong(), *clip)) == juce::String ("Arpeggio"));
 }
 
-TEST_CASE ("The chord lane and its parts are saved, and read back the same")
+TEST_CASE ("The chord lane is saved, and read back the same")
 {
     Song song;
     phazite::setLaneKey (song.context, beat (0.0), { 2, Scale::minor });
     phazite::applyProgression (song.context, getProgression ("canon"), beats (0.0, 32.0));
     phazite::addLaneChord (song.context, beats (32.0, 36.0), { 4, -1, ChordType::majorSeventh, 2 });
-    const auto part = phazite::makeChordPart (song.context, PartStyle::bassRootFifth, beats (0.0, 36.0));
-    REQUIRE (part.has_value());
 
     const auto namesBefore = song.names();
     const auto placesBefore = song.places();
 
-    // As saved: the chords' numerals by name, the key by name, and the part's style by name.
+    // As saved: the chords' numerals by name, and the key by name.
     const auto lane = song.getSong().getState().getChildWithName (phazite::schema::CHORDLANE);
     REQUIRE (lane.isValid());
     const auto key = lane.getChildWithName (phazite::schema::CHORDKEY);
@@ -383,11 +301,7 @@ TEST_CASE ("The chord lane and its parts are saved, and read back the same")
     CHECK ((int) last[phazite::schema::chordAccidental] == -1);
     CHECK ((int) last[phazite::schema::chordInversion] == 2);
 
-    REQUIRE (song.isMidiClip (*part));
-    CHECK (phazite::findClipState (song.getSong(), *part)[phazite::schema::chordPart].toString() == juce::String ("bassRootFifth"));
-
-    // A copy of the song, made from its state as a project opens one, reads the same chords, and its part still follows
-    // them.
+    // A copy of the song, made from its state as a project opens one, reads the same chords.
     const phazite::test::TemporaryFolder temp;
     auto copy = phazite::makeSong (song.getSong().getState().createCopy(), temp.folder.getChildFile ("Copy.phazite"));
     REQUIRE (copy != nullptr);
@@ -405,7 +319,6 @@ TEST_CASE ("The chord lane and its parts are saved, and read back the same")
 
     CHECK (names.joinIntoString (" ") == namesBefore);
     CHECK (places.joinIntoString (" ") == placesBefore);
-    CHECK (phazite::followsChords (other, *part));
     setSong (other, nullptr);
 }
 

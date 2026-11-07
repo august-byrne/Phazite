@@ -13,9 +13,11 @@
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
 #include "ui/components/PeakBar.h"
+#include "ui/components/ScrollBarFade.h"
 #include "ui/components/TrackSwitch.h"
 #include "ui/components/ValueText.h"
 #include "ui/theme/DesignTokens.h"
+#include "ui/theme/LookAndFeel.h"
 
 TEST_CASE ("A slider linked to a track's volume sets it, one undo step per change")
 {
@@ -281,4 +283,111 @@ TEST_CASE ("A number field moves in steps when dragged or stepped, takes any val
     CHECK (value->getRange().getInterval() == doctest::Approx (1.0));
     value->setValue (140.0);
     CHECK (field.getValue() == doctest::Approx (140.0));
+}
+
+TEST_CASE ("A volume fader's scale marks the decibels where the fader puts them, 0 dB in the text colour")
+{
+    // The owner, 2026-11-07: the mixer's faders had no scale, which consoles print and Pro Tools draws beside its faders.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+
+    // A strip's fader with its scale left of it, as the mixer lays them out.
+    struct FaderWithScale : public juce::Component
+    {
+        FaderWithScale()
+        {
+            phazite::ui::showAsDecibels (fader);
+            addAndMakeVisible (fader);
+            addAndMakeVisible (scale);
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds();
+            scale.setBounds (area.removeFromLeft (phazite::ui::FaderScaleTint::width));
+            fader.setBounds (area);
+        }
+
+        phazite::ui::Fader fader { phazite::ui::Fader::Direction::vertical, "Volume", phazite::decibelsToFaderPosition (0.0f) };
+        phazite::ui::FaderScale scale { fader };
+    } shown;
+
+    phazite::test::TestWindow window (shown, phazite::ui::FaderScaleTint::width + 46, 160);
+
+    // A slider shown in decibels holds a fader's position, from 0 to 1, whatever range it had before: the browser's preview
+    // volume kept JUCE's, 0 to 10, which put 0 dB a tenth of the way along.
+    CHECK (shown.fader.getMinimum() == 0.0);
+    CHECK (shown.fader.getMaximum() == 1.0);
+
+    // Each tick at the scale's right edge, on the row of the fader's thumb at its level.
+    const auto image = window.paintEverything();
+    const auto& palette = phazite::ui::getPalette (shown);
+    const auto tickAt = [&] (float decibels)
+    {
+        const auto y = (int) std::floor (shown.fader.getPositionOfValue (phazite::decibelsToFaderPosition (decibels)));
+        return image.getPixelAt (shown.scale.getRight() - 1, y);
+    };
+
+    CHECK (tickAt (0.0f) == palette.text);
+    CHECK (tickAt (-12.0f) == palette.textMuted);
+    CHECK (tickAt (6.0f) == palette.textMuted);
+    CHECK (shown.scale.getTitle().isEmpty()); // only for the eye: screen readers read the fader
+}
+
+TEST_CASE ("An overlay scroll bar shows while the pointer is over its editor, and fades a moment after it leaves, still taking clicks")
+{
+    // The owner, 2026-11-07: the playlist's should "fade away when the cursor is not hovering on the playlist for a while".
+    struct Editor : public juce::Component
+    {
+        Editor()
+        {
+            bar.setRangeLimits (0.0, 100.0);
+            bar.setCurrentRange (0.0, 10.0);
+            addAndMakeVisible (bar);
+        }
+
+        void resized() override { bar.setBounds (getLocalBounds().removeFromRight (phazite::ui::ScrollTint::overlayWidth)); }
+
+        juce::ScrollBar bar { true };
+        phazite::ui::ScrollBarFade fade { bar, *this };
+    } editor;
+
+    phazite::test::TestWindow window (editor, 200, 200);
+
+    // Faded out until it is wanted, though its range was set (the editor scrolling itself doesn't show it), and then nothing
+    // repaints.
+    const auto rests = [&window]
+    {
+        phazite::test::dispatchPendingMessages();
+        window.takeRepaintedArea();
+        phazite::test::dispatchMessagesUntil ([] { return false; }, 100);
+        return window.takeRepaintedArea().isEmpty();
+    };
+
+    CHECK (juce::exactlyEqual (editor.bar.getAlpha(), 0.0f));
+    CHECK_FALSE (editor.fade.isShown());
+    CHECK (rests());
+
+    // The pointer over its editor shows it at once, while it keeps moving too, more often than a frame: each move doesn't put
+    // the fade off (it did until the fade's timer ran on rather than start again at each).
+    phazite::test::Mouse mouse (editor);
+    mouse.moveTo ({ 50, 50 });
+    CHECK (editor.fade.isShown());
+    const auto until = juce::Time::getMillisecondCounterHiRes() + 1000.0;
+
+    for (int i = 0; ! juce::exactlyEqual (editor.bar.getAlpha(), 1.0f) && juce::Time::getMillisecondCounterHiRes() < until; ++i)
+    {
+        mouse.moveTo ({ 50 + i % 2, 50 });
+        phazite::test::dispatchMessagesUntil ([] { return false; }, 4);
+    }
+
+    CHECK (juce::exactlyEqual (editor.bar.getAlpha(), 1.0f));
+
+    // Gone from the editor, it fades out a moment later; faded, it still takes clicks where it is, and rests.
+    mouse.moveTo ({ -20, -20 });
+    CHECK (phazite::test::dispatchMessagesUntil ([&editor] { return juce::exactlyEqual (editor.bar.getAlpha(), 0.0f); }, 4000));
+    CHECK_FALSE (editor.fade.isShown());
+    CHECK (editor.getComponentAt (editor.bar.getBounds().getCentre()) == &editor.bar);
+    CHECK (rests());
 }

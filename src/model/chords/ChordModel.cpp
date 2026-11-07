@@ -4,8 +4,6 @@
 #include "internal/Chords.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
-#include "model/base/internal/Schema.h"
-#include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -18,13 +16,6 @@ namespace phazite
 namespace
 {
     constexpr double tiny = 1.0e-6;
-
-    // The song a MIDI clip is in, or nullptr.
-    Song* findSongOfMidiClip (const ProjectContext& context, ClipID id)
-    {
-        auto* song = findSong (context);
-        return song != nullptr && isMidiState (findClipState (*song, id)) ? song : nullptr;
-    }
 
     LaneChord toLaneChord (const PlacedChord& chord)
     {
@@ -39,7 +30,7 @@ namespace
         if (auto* song = findSong (context))
         {
             const UndoStep step (*song, stepName);
-            changeLane (*song, [&] { change (*song); });
+            change (*song);
         }
     }
 
@@ -136,6 +127,23 @@ void deleteLaneChord (ProjectContext& context, BeatPosition chordStart)
         editLane (context, "Delete Chord", [&] (Song& song) { removeLaneChord (song, chordStart); });
 }
 
+void deleteAllLaneChords (ProjectContext& context)
+{
+    if (! hasLaneChords (context))
+        return;
+
+    editLane (context, "Delete All Chords",
+              [] (Song& song)
+              {
+                  for (const auto& chord : getLaneChords (song))
+                      removeLaneChord (song, chord.range.getStart());
+
+                  for (const auto& key : getLaneKeys (song))
+                      if (key.start > BeatPosition())
+                          removeLaneKeyChange (song, key.start);
+              });
+}
+
 void setLaneChordEnd (ProjectContext& context, BeatPosition chordStart, BeatPosition end)
 {
     if (auto* played = findSong (context);
@@ -218,22 +226,6 @@ std::optional<BeatRange> getWholeSongRange (const ProjectContext& context)
     return BeatRange (BeatPosition(), end);
 }
 
-std::optional<BeatRange> getChordPartRange (const ProjectContext& context)
-{
-    if (const auto range = getSelectedTimeRange (context))
-        return range;
-
-    if (const auto range = getSelectedSectionsRange (context))
-        return range;
-
-    const auto chords = getLaneChords (context);
-
-    if (chords.empty())
-        return std::nullopt;
-
-    return BeatRange (chords.front().range.getStart(), chords.back().range.getEnd());
-}
-
 BeatDuration getProgressionLength (const ProjectContext& context, const Progression& progression, BeatPosition from)
 {
     auto* song = findSong (context);
@@ -246,81 +238,6 @@ BeatDuration getProgressionLength (const ProjectContext& context, const Progress
     }
 
     return beat - from;
-}
-
-//==============================================================================
-std::optional<ClipID> makeChordPart (ProjectContext& context, PartStyle style, BeatRange range)
-{
-    auto* song = findSong (context);
-
-    if (song == nullptr || range.isEmpty())
-        return std::nullopt;
-
-    const UndoStep step (*song, getMakePartName (getPartKind (style)));
-
-    if (const auto clip = addChordPart (*song, style, range, &getSelection (context)); clip.isValid())
-        return clip;
-
-    return std::nullopt;
-}
-
-std::optional<ClipID> makeChordPartHere (ProjectContext& context, PartStyle style)
-{
-    if (const auto range = getChordPartRange (context); range.has_value() && canMakeChordPart (context))
-        return makeChordPart (context, style, *range);
-
-    return std::nullopt;
-}
-
-bool canMakeChordPart (const ProjectContext& context)
-{
-    const auto range = getChordPartRange (context);
-
-    if (! range.has_value())
-        return false;
-
-    for (const auto& chord : getLaneChords (context))
-        if (chord.range.overlaps (*range))
-            return true;
-
-    return false;
-}
-
-juce::String getMakePartName (PartKind kind)
-{
-    switch (kind)
-    {
-        case PartKind::bass:
-            return "Make Bass Line";
-        case PartKind::arpeggio:
-            return "Make Arpeggio";
-        case PartKind::chords:
-        default:
-            return "Make Chord Part";
-    }
-}
-
-std::optional<PartStyle> getChordPart (const ProjectContext& context, ClipID id)
-{
-    auto* song = findSongOfMidiClip (context, id);
-    return song != nullptr ? getChordPartStyle (*song, id) : std::nullopt;
-}
-
-bool followsChords (const ProjectContext& context, ClipID id)
-{
-    auto* song = findSongOfMidiClip (context, id);
-    return song != nullptr && followsChords (*song, id);
-}
-
-void setFollowsChords (ProjectContext& context, ClipID id, bool follow)
-{
-    auto* song = findSongOfMidiClip (context, id);
-
-    if (song == nullptr || ! getChordPartStyle (*song, id).has_value() || followsChords (*song, id) == follow)
-        return;
-
-    const UndoStep step (*song, follow ? "Follow the Chords" : "Stop Following the Chords");
-    setChordPart (*song, id, follow ? getChordPartStyle (*song, id) : std::nullopt);
 }
 
 //==============================================================================
@@ -366,42 +283,5 @@ bool writeProgressionPreview (const ProjectContext& context, const Progression& 
     file.deleteFile();
     juce::FileOutputStream stream (file);
     return stream.openedOk() && midi.writeTo (stream);
-}
-
-//==============================================================================
-void addChordCommands (CommandRegistry& registry, ProjectContext& context)
-{
-    const auto undoTarget = [&context] { return context.getUndoManager(); };
-
-    registry.add ({ .id = "chords.makeChordPart",
-                    .name = "Make Chord Part",
-                    .category = "Chords",
-                    .description = "Adds a track that plays the chord lane's chords, held, over the selected range or sections, "
-                                   "or all of the chords. It changes with the chords until you edit its notes.",
-                    .synonyms = { "pad", "chords", "harmony", "generate", "accompaniment", "keys" },
-                    .perform = [&context] { makeChordPartHere (context, PartStyle::sustainedTriads); },
-                    .isEnabled = [&context] { return canMakeChordPart (context); },
-                    .undoTarget = undoTarget });
-
-    registry.add ({ .id = "chords.makeBassLine",
-                    .name = "Make Bass Line",
-                    .category = "Chords",
-                    .description = "Adds a track that plays the chord lane's roots as a bass line, over the selected range or "
-                                   "sections, or all of the chords. It changes with the chords until you edit its notes.",
-                    .synonyms = { "bass", "bassline", "roots", "generate", "low end" },
-                    .perform = [&context] { makeChordPartHere (context, PartStyle::bassRoots); },
-                    .isEnabled = [&context] { return canMakeChordPart (context); },
-                    .undoTarget = undoTarget });
-
-    registry.add ({ .id = "chords.makeArpeggio",
-                    .name = "Make Arpeggio",
-                    .category = "Chords",
-                    .description = "Adds a track that plays the chord lane's chords one note at a time, in eighth notes, over the "
-                                   "selected range or sections, or all of the chords. It changes with the chords until you edit "
-                                   "its notes.",
-                    .synonyms = { "arp", "arpeggiator", "broken chords", "generate", "melody" },
-                    .perform = [&context] { makeChordPartHere (context, PartStyle::arpeggioUp); },
-                    .isEnabled = [&context] { return canMakeChordPart (context); },
-                    .undoTarget = undoTarget });
 }
 } // namespace phazite

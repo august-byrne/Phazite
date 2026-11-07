@@ -14,10 +14,11 @@ class CommandRegistry;
 
 namespace phazite::ui
 {
-// Track heights in the playlist, at the normal interface size.
+// Track heights in the playlist, at the normal interface size. At first a track is so tall that its clips' notes have the room
+// they had in 64 pixels under a strip for their names, which clips have no more (the owner, 2026-11-07).
 namespace TrackHeight
 {
-    inline constexpr int minimum = 32, standard = 64, maximum = 320, step = 16;
+    inline constexpr int minimum = 32, standard = 48, maximum = 320, step = 16;
     inline constexpr int collapsed = 24; // a collapsed track's row, which shows its name
     inline constexpr int folder = 40;    // a folder's row at first: it holds no clips, and shows its tracks' in thin lanes
 } // namespace TrackHeight

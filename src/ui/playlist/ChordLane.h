@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The chord lane in the playlist (docs/design.md, section 14; roadmap step 2.7): under the time bar, the song's chords
-// over their time, each with its name and its numeral in the key there, and a line where the key changes. A click on a
-// chord offers the key's chords and others to put in its place, its kind and inversion, and Delete; a click on empty
-// space adds a chord there, a bar long. Dragging a chord's right edge makes it longer or shorter. Its header, over the
-// track headers, shows the song's key and offers the progressions and the parts made from the chords. It reaches the
-// chords through the model (model/chords/ChordModel.h).
+// The chord lane in the playlist (docs/design.md, section 14; roadmap step 2.7): under the time bar while the song has chords,
+// a guide to them over their time, each with its name and its numeral in the key there, and a line where the key changes. A
+// click on a chord offers the key's chords and others to put in its place, its kind and inversion, and Delete; a click on
+// empty space adds a chord there, a bar long. Dragging a chord's right edge makes it longer or shorter. Its header, over the
+// track headers, offers the progressions and Delete All Chords. It reaches the chords through the model
+// (model/chords/ChordModel.h).
 #pragma once
 
 #include "model/chords/ChordModel.h"
@@ -60,41 +60,37 @@ private:
     bool isOnRightEdge (const LaneChord&, juce::Point<int>) const;
 
     void addChordMenu (juce::PopupMenu&, const LaneChord&);
-    void addEmptyMenu (juce::PopupMenu&, BeatPosition);
-    BeatRange getNewChordRange (BeatPosition) const; // a bar from the bar's start, up to the next chord
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordLane)
 };
 
 //==============================================================================
-// Left of the chord lane, over the track headers: its name, the song's key (a menu of keys), and a menu with the
-// progressions and the parts made from the chords.
+// Left of the chord lane, over the track headers: its name, and a menu with the progressions and Delete All Chords.
 class ChordLaneHeader : public juce::Component
 {
 public:
     explicit ChordLaneHeader (TimelineEditor&);
 
-    void update(); // the key shown, after the chords or the project changed
+    void update(); // after the chords or the project changed
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    // For tests.
-    juce::TextButton& getKeyButton() noexcept { return keyButton; }
-    juce::PopupMenu getKeyMenu();
-    juce::PopupMenu getMoreMenu();
+    juce::PopupMenu getMoreMenu(); // what its button shows (tests run its items)
 
 private:
     TimelineEditor& editor;
     ProjectContext& context;
     juce::Label nameLabel { {}, "Chords" };
-    juce::TextButton keyButton, moreButton { "..." };
+    juce::TextButton moreButton { "..." };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChordLaneHeader)
 };
 
-// The parts made from the chords, by kind and style, as a menu of submenus: they go where getChordPartRange() says.
-juce::PopupMenu getMakePartMenu (ProjectContext&);
+// The chords the key offers at a place, under a heading, to add one there, from the start of its bar to the end of the bar
+// or the next chord, as a click on the lane's empty space adds one. The time bar's menu offers it too (SectionsStrip.h),
+// which puts a song's first chord on it, and so shows the lane.
+juce::PopupMenu getAddChordMenu (ProjectContext&, BeatPosition);
 
 // A menu of keys, a submenu of scales for each root, with the key ticked; choosing one calls back.
 juce::PopupMenu getKeyChoiceMenu (const Key& current, std::function<void (Key)> choose);

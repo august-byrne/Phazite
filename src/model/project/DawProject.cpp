@@ -522,7 +522,7 @@ namespace
             element->setAttribute ("time", number ((double) clip[schema::clipStart]));
             element->setAttribute ("duration", number ((double) clip[schema::clipLength]));
             element->setAttribute ("playStart", number ((double) clip.getProperty (schema::clipOffset, 0.0)));
-            element->setAttribute ("name", clip[schema::clipName].toString());
+            element->setAttribute ("name", getClipName (song, clip));
 
             if ((bool) clip[schema::clipMute])
                 element->setAttribute ("enable", "false");
@@ -582,7 +582,7 @@ namespace
             element->setAttribute ("fadeTimeUnit", "seconds");
             element->setAttribute ("fadeInTime", number ((double) clip.getProperty (schema::clipFadeIn, 0.0)));
             element->setAttribute ("fadeOutTime", number ((double) clip.getProperty (schema::clipFadeOut, 0.0)));
-            element->setAttribute ("name", clip[schema::clipName].toString());
+            element->setAttribute ("name", getClipName (song, clip));
 
             if ((bool) clip[schema::clipMute])
                 element->setAttribute ("enable", "false");
@@ -1154,10 +1154,13 @@ namespace
 
             for (const auto* clip : theirs.getClips (track, true))
             {
+                // A clip with its track's name gets none of its own: it is called after its track, as Phazite's are
+                // (getClipName()).
                 const auto start = clip->getDoubleAttribute ("time");
+                const auto name = clip->getStringAttribute ("name");
                 const auto clipID = placeClipState (
                     song,
-                    makeMidiClipState (song, clip->getStringAttribute ("name"),
+                    makeMidiClipState (song, name == getTrackName (song, id) ? juce::String() : name,
                                        { BeatPosition::fromBeats (start),
                                          BeatPosition::fromBeats (start + std::max (0.25, clip->getDoubleAttribute ("duration"))) }),
                     id);

@@ -291,6 +291,18 @@ juce::Label* LookAndFeel::createSliderTextBox (juce::Slider& slider)
     return label;
 }
 
+juce::Slider::SliderLayout LookAndFeel::getSliderLayout (juce::Slider& slider)
+{
+    auto layout = juce::LookAndFeel_V4::getSliderLayout (slider);
+
+    // JUCE keeps a pixel around a bar for a border of its own, which Phazite doesn't draw: the top bar's tempo field was two
+    // pixels shorter than the buttons beside it (the owner, 2026-11-07).
+    if (slider.isBar())
+        layout.sliderBounds = slider.getLocalBounds();
+
+    return layout;
+}
+
 //==============================================================================
 void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour, bool isHighlighted,
                                         bool isDown)

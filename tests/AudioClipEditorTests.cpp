@@ -382,6 +382,41 @@ TEST_CASE ("In the audio clip editor, a vocal is turned up, pitched, reversed an
     CHECK (screen.get().clip.range.getEnd().inBeats() == doctest::Approx (12.0));
 }
 
+TEST_CASE ("In the audio clip editor, Normalize beside the gain sets it from the clip's loudest peak, as one undo step")
+{
+    EditorScreen screen;
+    screen.editor.showClip (screen.vocal);
+    phazite::test::dispatchPendingMessages();
+
+    // On the gain's row, at its right.
+    auto& gain = screen.find ("Gain");
+    auto* normalize = dynamic_cast<juce::Button*> (&screen.find ("Normalize"));
+    REQUIRE (normalize != nullptr);
+    CHECK (normalize->isEnabled());
+    CHECK (normalize->getBounds().getCentreY() == gain.getBounds().getCentreY());
+    CHECK (normalize->getX() > gain.getRight());
+    CHECK (normalize->getTooltip().contains ("-1 dB"));
+
+    // The vocal peaks at a quarter of full scale (-12 dB): clicked, its gain goes up by 11 dB, which the field shows.
+    phazite::test::Mouse mouse (*normalize);
+    mouse.click (normalize->getLocalBounds().getCentre());
+    const auto expected = phazite::normalizedPeak - juce::Decibels::gainToDecibels (0.25f);
+    CHECK (screen.get().gain == doctest::Approx (expected).epsilon (0.001));
+    CHECK (screen.describeUndo() == juce::String ("Undo Normalize Clip"));
+    phazite::test::dispatchPendingMessages();
+    auto* gainField = dynamic_cast<juce::Slider*> (&gain);
+    REQUIRE (gainField != nullptr);
+    CHECK (gainField->getValue() == doctest::Approx (expected).epsilon (0.001));
+
+    phazite::undo (*screen.song);
+    CHECK (screen.get().gain == doctest::Approx (0.0f));
+
+    // With no clip to show, there is nothing to normalize.
+    screen.editor.showClip ({});
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (normalize->isEnabled());
+}
+
 TEST_CASE ("The clip editor's tab shows the piano roll or the audio clip editor, as the selection asks, named for it")
 {
     using phazite::ui::View;

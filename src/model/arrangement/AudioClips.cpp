@@ -9,6 +9,8 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <cmath>
+#include <memory>
 
 namespace phazite
 {
@@ -405,5 +407,43 @@ void toggleClipsFollowTempo (Song& song, const std::vector<ClipID>& clips)
     toggleAll (
         getAudioClipsAmong (song, clips), [&song] (ClipID clip) { return getClipTempo (song, clip) > 0.0; },
         [&song] (ClipID clip, bool on) { setClipFollowsTempo (song, clip, on); });
+}
+
+//==============================================================================
+std::optional<float> getClipPeak (const Song& song, ClipID clip)
+{
+    const auto clipState = findAudioState (song, clip);
+
+    if (! clipState.isValid())
+        return {};
+
+    const std::unique_ptr<juce::AudioFormatReader> reader (getAudioFormats().createReaderFor (getClipFile (song, clipState)));
+
+    if (reader == nullptr || reader->numChannels == 0 || reader->sampleRate <= 0.0)
+        return {};
+
+    // The samples the part covers, whole: from the one it starts in to the one it ends in.
+    const auto part = getFilePart (clipState);
+    const auto first = juce::jlimit ((juce::int64) 0, reader->lengthInSamples, (juce::int64) std::floor (part.start * reader->sampleRate));
+    const auto end = juce::jlimit (first, reader->lengthInSamples, (juce::int64) std::ceil (part.end * reader->sampleRate));
+
+    if (end == first)
+        return 0.0f;
+
+    std::vector<juce::Range<float>> levels ((size_t) reader->numChannels);
+    reader->readMaxLevels (first, end - first, levels.data(), (int) reader->numChannels);
+    auto peak = 0.0f;
+
+    for (const auto& level : levels)
+        peak = std::max ({ peak, std::abs (level.getStart()), std::abs (level.getEnd()) });
+
+    return peak;
+}
+
+void normalizeClips (Song& song, const std::vector<ClipID>& clips)
+{
+    for (const auto clip : getAudioClipsAmong (song, clips))
+        if (const auto peak = getClipPeak (song, clip); peak.has_value() && *peak > 0.0f)
+            setClipGain (song, clip, normalizedPeak - juce::Decibels::gainToDecibels (*peak, -200.0f));
 }
 } // namespace phazite

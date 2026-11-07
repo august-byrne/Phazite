@@ -49,8 +49,16 @@ void moveClipState (Song&, juce::ValueTree clipState, BeatPosition start);
 // if it is in none.
 std::vector<juce::ValueTree> getAliasStates (const juce::ValueTree& clipState);
 
-// A new MIDI clip's element, with an ID of the song's, on no track yet.
+// A new MIDI clip's element, with an ID of the song's, on no track yet. With no name, it has none of its own: it is called after
+// the track it goes on (getClipName()).
 juce::ValueTree makeMidiClipState (Song&, const juce::String& name, BeatRange);
+
+// A clip's name: its own (schema::clipName), or else its track's, whatever the track is called now.
+juce::String getClipName (const Song&, const juce::ValueTree& clipState);
+
+// A step of its own, "Rename Clip" ("Rename Clips" for several): the clips, and the aliases of each, which play what it plays,
+// take the name. A name that is empty, or a clip's track's, leaves the clip without one of its own, called after its track.
+void renameClips (Song&, const std::vector<ClipID>&, const juce::String& name);
 
 // A copy of a clip's element, on no track yet, with an ID of its own and the same notes, with the same IDs, in the same alias
 // group.

@@ -19,6 +19,7 @@ clip.fadeConcave
 clip.fadeSCurve
 clip.reverse
 clip.followTempo
+clip.normalize
 edit.split | ctrl + E
 edit.insertTime | ctrl + I
 edit.removeTime | ctrl + shift + delete
@@ -51,9 +52,6 @@ section.outline.lofi
 section.outline.rnb
 section.outline.drumAndBass
 section.outline.techno
-chords.makeChordPart
-chords.makeBassLine
-chords.makeArpeggio
 track.addReturn
 track.freeze
 track.bounceInPlace

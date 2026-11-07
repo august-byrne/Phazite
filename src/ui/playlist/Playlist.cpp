@@ -5,6 +5,8 @@
 #include "model/arrangement/TimelineModel.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <utility>
+
 namespace phazite::ui
 {
 //==============================================================================
@@ -378,6 +380,7 @@ void Playlist::showProject()
     sectionsStrip.showProject();
     chordLane.showProject();
     chordLaneHeader.update();
+    showChordLaneWithChords();
     addTrackButton.setEnabled (open);
     collapseAllButton.setEnabled (open);
     addTrackRow->setVisible (open);
@@ -411,7 +414,11 @@ void Playlist::songChanged (const SongChanges& changes)
     if (changes.sections || changes.tempo)
         sectionsStrip.repaint();
 
-    // A track's key sets the new project's, which an empty lane is in until a key is chosen for it.
+    // The chord lane, while the song has chords. A track's key sets the new project's, which the lane is in until a key is
+    // chosen for it.
+    if (changes.chords)
+        showChordLaneWithChords();
+
     if (changes.chords || changes.tempo || changes.tracks)
     {
         chordLane.repaint();
@@ -539,8 +546,8 @@ void Playlist::resized()
     sectionsStrip.setBounds (timeBar.removeFromTop (SectionsStrip::preferredHeight));
     ruler.setBounds (timeBar);
 
-    // Under it, the chord lane, with its header over the track headers.
-    auto chordRow = area.removeFromTop (ChordLane::preferredHeight);
+    // Under it, while the song has chords, the chord lane, with its header over the track headers.
+    auto chordRow = area.removeFromTop (chordLaneShown ? ChordLane::preferredHeight : 0);
     chordLaneHeader.setBounds (chordRow.removeFromLeft (headerWidth));
     chordLane.setBounds (chordRow);
 
@@ -554,6 +561,17 @@ void Playlist::resized()
 
     layOutRows();
     setViewStart (getView().start);
+}
+
+void Playlist::showChordLaneWithChords()
+{
+    // A guide to the song's chords, with nothing to show without them, as other DAWs' chord tracks show only once added.
+    const auto shown = hasLaneChords (context);
+    chordLane.setVisible (shown);
+    chordLaneHeader.setVisible (shown);
+
+    if (std::exchange (chordLaneShown, shown) != shown)
+        resized();
 }
 
 void Playlist::setHeaderWidth (int width)

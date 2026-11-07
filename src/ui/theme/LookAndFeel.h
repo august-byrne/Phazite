@@ -40,8 +40,10 @@ public:
                            juce::Slider::SliderStyle, juce::Slider&) override;
     int getSliderThumbRadius (juce::Slider&) override;
 
-    // A bar slider is a number field (ui::NumberField): a box with its value, in the number font, typed in after a click.
+    // A bar slider is a number field (ui::NumberField): a box with its value, in the number font, typed in after a click. Its
+    // box fills it, as a button's or a combo box's does.
     juce::Label* createSliderTextBox (juce::Slider&) override;
+    juce::Slider::SliderLayout getSliderLayout (juce::Slider&) override;
 
     // Buttons as VS Code's (ButtonTint): one filled in the accent while it is on (or its colour is the accent, the main one),
     // else clear in a border; the hover wash under the pointer; the focus outline, the fill inside it.

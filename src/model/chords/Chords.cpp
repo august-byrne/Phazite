@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Chords.h"
 #include "Progressions.h"
-#include "devices/synth/Synth.h"
-#include "model/arrangement/internal/Clips.h"
-#include "model/arrangement/internal/Import.h"
-#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
-#include "model/mixer/internal/Mixer.h"
-#include "model/notes/internal/Notes.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
@@ -131,84 +125,6 @@ namespace
     int getBeatsPerBar (const Song& song, BeatPosition where)
     {
         return getBars (song).getBeatsPerBar (where);
-    }
-
-    //==============================================================================
-    // Parts.
-
-    // Whether two lists hold the same notes, in any order, whatever their IDs.
-    bool areSameNotes (std::vector<NoteData> a, std::vector<NoteData> b)
-    {
-        if (a.size() != b.size())
-            return false;
-
-        const auto earlier = [] (const NoteData& x, const NoteData& y)
-        {
-            if (std::abs ((x.start - y.start).inBeats()) > tiny)
-                return x.start < y.start;
-
-            return x.pitch < y.pitch;
-        };
-
-        std::sort (a.begin(), a.end(), earlier);
-        std::sort (b.begin(), b.end(), earlier);
-
-        for (size_t i = 0; i < a.size(); ++i)
-            if (a[i].pitch != b[i].pitch || std::abs ((a[i].start - b[i].start).inBeats()) > 1.0e-4
-                || std::abs ((a[i].length - b[i].length).inBeats()) > 1.0e-4 || a[i].velocity != b[i].velocity || a[i].muted != b[i].muted)
-                return false;
-
-        return true;
-    }
-
-    void setPartNotes (Song& song, ClipID clip, const std::vector<NoteData>& notes)
-    {
-        setClipNotes (song, clip, notes);
-    }
-
-    // The sound of each kind of part on Phazite's synth.
-    struct Setting
-    {
-        const char* id;
-        float value;
-    };
-
-    // Chords: a soft pad of two detuned saws that swells in and fades out slowly.
-    constexpr Setting padSound[] = { { "osc2Detune", 12.0f },     { "cutoff", 1800.0f }, { "resonance", 0.1f },
-                                     { "filterEnvelope", 12.0f }, { "attack", 150.0f },  { "decay", 600.0f },
-                                     { "sustain", 0.75f },        { "release", 900.0f }, { "level", -14.0f } };
-
-    // Bass: one voice at a time, a sub under the saws, and a short filter pluck.
-    constexpr Setting bassSound[] = { { "subLevel", 0.5f },        { "cutoff", 600.0f },      { "resonance", 0.2f },
-                                      { "filterEnvelope", 18.0f }, { "filterDecay", 180.0f }, { "filterSustain", 0.15f },
-                                      { "attack", 2.0f },          { "decay", 250.0f },       { "sustain", 0.7f },
-                                      { "release", 120.0f },       { "voiceMode", 1.0f },     { "level", -10.0f } };
-
-    // Arpeggio: the starter project's pluck.
-    constexpr Setting pluckSound[] = { { "cutoff", 700.0f },      { "resonance", 0.25f },    { "filterEnvelope", 30.0f },
-                                       { "filterDecay", 250.0f }, { "filterSustain", 0.1f }, { "decay", 400.0f },
-                                       { "sustain", 0.4f },       { "release", 250.0f },     { "osc2Detune", 10.0f },
-                                       { "level", -12.0f } };
-
-    // Phazite's synth for a kind of part, made with that sound.
-    juce::ValueTree makeSynth (Song& song, PartKind kind)
-    {
-        std::vector<std::pair<juce::String, float>> values;
-
-        const auto add = [&values] (const auto& settings)
-        {
-            for (const auto& setting : settings)
-                values.push_back ({ setting.id, setting.value });
-        };
-
-        if (kind == PartKind::bass)
-            add (bassSound);
-        else if (kind == PartKind::arpeggio)
-            add (pluckSound);
-        else
-            add (padSound);
-
-        return makeOwnDeviceState (song, devices::Synth::typeID, values);
     }
 
     //==============================================================================
@@ -433,21 +349,6 @@ void putProgression (Song& song, const Progression& progression, BeatRange range
     }
 }
 
-void changeLane (Song& song, const std::function<void()>& change)
-{
-    std::vector<std::pair<ClipID, PartStyle>> following;
-
-    for (const auto& clipState : getClipStates (song))
-        if (const auto clip = getClipID (clipState); isMidiState (clipState))
-            if (const auto style = getChordPartStyle (song, clip); style.has_value() && followsChords (song, clip))
-                following.emplace_back (clip, *style);
-
-    change();
-
-    for (const auto& [clip, style] : following)
-        setPartNotes (song, clip, makeChordPartNotes (song, clip, style));
-}
-
 //==============================================================================
 void insertLaneTime (Song& song, BeatPosition at, BeatDuration length)
 {
@@ -600,64 +501,5 @@ void pasteLaneChords (Song& song, const LaneCopy& copy, BeatPosition destination
         clearLaneRange (song, range); // a chord the inserted time made longer is cut around it
         lane.appendChild (pasted, getUndo (song));
     }
-}
-
-//==============================================================================
-std::optional<PartStyle> getChordPartStyle (const Song& song, ClipID clip)
-{
-    return findPartStyle (findClipState (song, clip)[schema::chordPart].toString());
-}
-
-std::vector<NoteData> makeChordPartNotes (const Song& song, ClipID clip, PartStyle style)
-{
-    return makePartNotes (getLaneChords (song), style, getClipRange (findClipState (song, clip)), clip);
-}
-
-bool followsChords (const Song& song, ClipID clip)
-{
-    const auto style = getChordPartStyle (song, clip);
-    return style.has_value() && areSameNotes (getClipNotes (song, clip), makeChordPartNotes (song, clip, *style));
-}
-
-void setChordPart (Song& song, ClipID clip, std::optional<PartStyle> style)
-{
-    auto clipState = findClipState (song, clip);
-
-    if (! isMidiState (clipState))
-        return;
-
-    if (! style.has_value())
-    {
-        clipState.removeProperty (schema::chordPart, getUndo (song));
-        return;
-    }
-
-    clipState.setProperty (schema::chordPart, getSavedPartStyleName (*style), getUndo (song));
-    setPartNotes (song, clip, makeChordPartNotes (song, clip, *style));
-}
-
-ClipID addChordPart (Song& song, PartStyle style, BeatRange range, Selection* selection)
-{
-    if (range.isEmpty())
-        return {};
-
-    const auto track = insertTrack (song, {}, selection);
-
-    if (! track.isValid())
-        return {};
-
-    const auto kind = getPartKind (style);
-    setTrackName (song, track, getPartKindName (kind));
-
-    if (const auto colour = getColourForName (getTrackName (song, track)))
-        setTrackColour (song, track, *colour);
-
-    insertDeviceState (song, track, makeSynth (song, kind));
-    const auto clip = insertMidiClip (song, track, range, nullptr);
-
-    if (clip.isValid())
-        setChordPart (song, clip, style);
-
-    return clip;
 }
 } // namespace phazite

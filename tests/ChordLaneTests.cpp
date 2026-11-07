@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The chord lane in the playlist (src/ui/playlist/ChordLane.h), its header, the Chord Progressions window
-// (src/ui/shell/ProgressionsPanel.h), and the inspector's switch for parts that follow the chords, driven as the user
-// would: the mouse on the lane, and the items of the menus it shows.
+// (src/ui/shell/ProgressionsPanel.h), and the song's key in the inspector, driven as the user would: the mouse on the lane,
+// and the items of the menus it shows.
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
@@ -51,8 +51,10 @@ struct ChordScreen
 
         lane = dynamic_cast<phazite::ui::ChordLane*> (phazite::test::findComponentWithTitle (playlist, "Chords"));
         header = dynamic_cast<phazite::ui::ChordLaneHeader*> (phazite::test::findComponentWithTitle (playlist, "Chord lane"));
+        sections = phazite::test::findAll<phazite::ui::SectionsStrip> (playlist).getFirst();
         REQUIRE (lane != nullptr);
         REQUIRE (header != nullptr);
+        REQUIRE (sections != nullptr);
     }
 
     ~ChordScreen() { setSong (context, nullptr); }
@@ -81,19 +83,26 @@ struct ChordScreen
     phazite::test::TestWindow window { playlist, 1000, 600 };
     phazite::ui::ChordLane* lane = nullptr;
     phazite::ui::ChordLaneHeader* header = nullptr;
+    phazite::ui::SectionsStrip* sections = nullptr; // whose menu the time bar's right-click shows
 };
 } // namespace
 
-TEST_CASE ("The chord lane: a click on empty space offers the key's chords, and adds one there, a bar long")
+TEST_CASE ("The chord lane shows only while the song has chords: the time bar's menu adds the first, a bar long")
 {
+    // The owner, 2026-11-07: an empty lane took a row of the playlist for nothing, as no other DAW's chord track does.
     ChordScreen screen;
-    CHECK (screen.lane->getHeight() == phazite::ui::ChordLane::preferredHeight);
-    CHECK (screen.lane->getDescription().startsWith ("The song's chords"));
+    CHECK_FALSE (screen.lane->isVisible());
+    CHECK_FALSE (screen.header->isVisible());
 
-    // In bar 2: the seven chords of C major, then the others in a submenu.
-    const auto menu = screen.lane->getMenuAt (screen.at (5.0));
-    REQUIRE (runMenuItem (menu, { "F    IV" }));
+    // In bar 2, from the time bar's right-click: the seven chords of C major, then the others in a submenu.
+    REQUIRE (runMenuItem (screen.sections->getMenuAt (beat (5.0)), { "Add Chord Here", "F    IV" }));
     CHECK (screen.names() == juce::String ("F"));
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.lane->isVisible());
+    CHECK (screen.header->isVisible());
+    CHECK (screen.lane->getHeight() == phazite::ui::ChordLane::preferredHeight);
+    CHECK (screen.lane->getBottom() <= screen.window.getHeight());
+    CHECK (screen.lane->getDescription().startsWith ("The song's chords"));
 
     const auto chords = phazite::getLaneChords (screen.context);
     REQUIRE (chords.size() == 1);
@@ -101,9 +110,15 @@ TEST_CASE ("The chord lane: a click on empty space offers the key's chords, and 
     CHECK (chords[0].range.getEnd() == beat (8.0));
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Chord"));
 
-    // In the bar before, up to the chord after it; and one from outside the key.
+    // A click on the lane's empty space: in the bar before, up to the chord after it; and one from outside the key.
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (1.0)), { "Outside the Key", "Bb    bVII" }));
     CHECK (screen.names() == juce::String ("Bb F"));
+
+    // Their last deleted, the lane goes again.
+    REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (1.0)), { "Delete Chord" }));
+    REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.at (5.0)), { "Delete Chord" }));
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (screen.lane->isVisible());
 }
 
 TEST_CASE ("The chord lane: a chord's menu changes it, its kind and inversion, and deletes it")
@@ -153,25 +168,19 @@ TEST_CASE ("The chord lane: dragging a chord's right edge makes it longer, over 
     CHECK_FALSE (screen.lane->getDragTarget().has_value());
 }
 
-TEST_CASE ("The chord lane's header: the song's key, which the chords follow, and the parts made from them")
+TEST_CASE ("The chord lane's header: the progressions, and Delete All Chords, which takes the lane away")
 {
     ChordScreen screen;
-    CHECK (screen.header->getKeyButton().getButtonText() == juce::String ("C major"));
     phazite::applyProgression (screen.context, getProgression ("popAnthem"), { beat (0.0), beat (16.0) });
-
-    REQUIRE (runMenuItem (screen.header->getKeyMenu(), { "D", "Major" }));
     phazite::test::dispatchPendingMessages();
-    CHECK (screen.header->getKeyButton().getButtonText() == juce::String ("D major"));
-    CHECK (screen.names() == juce::String ("D A Bm G"));
+    REQUIRE (screen.header->isVisible());
 
-    const auto tracksBefore = phazite::getTrackIDs (*screen.song).size();
-    REQUIRE (runMenuItem (screen.header->getMoreMenu(), { "Make a Part from the Chords", "Bass", "Root and fifth" }));
-    const auto tracks = phazite::getTrackIDs (*screen.song);
-    REQUIRE (tracks.size() == tracksBefore + 1);
-    CHECK (phazite::getTrackName (*screen.song, tracks.back()) == juce::String ("Bass"));
-    const auto clips = phazite::getClips (*screen.song, tracks.back());
-    REQUIRE (clips.size() == 1);
-    CHECK (phazite::followsChords (screen.context, clips[0]));
+    REQUIRE (runMenuItem (screen.header->getMoreMenu(), { "Delete All Chords" }));
+    CHECK (screen.names().isEmpty());
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Delete All Chords"));
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (screen.lane->isVisible());
+    CHECK_FALSE (screen.header->isVisible());
 }
 
 TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, and put it on the chord lane")
@@ -233,8 +242,9 @@ TEST_CASE ("The Chord Progressions window: browse by mood and genre, play one, a
     setSong (context, nullptr);
 }
 
-TEST_CASE ("The inspector shows whether a part made from the chords follows them, and turns it back on")
+TEST_CASE ("The inspector shows the song's key, which the chords follow, with nothing selected")
 {
+    // Until 2026-11-07 the chord lane's header showed it, but the lane shows only while the song has chords.
     const auto song = phazite::createSong();
     phazite::ProjectContext context { phazite::test::getEngineContext() };
     setSong (context, song.get());
@@ -243,35 +253,30 @@ TEST_CASE ("The inspector shows whether a part made from the chords follows them
 
     {
         phazite::applyProgression (context, getProgression ("popAnthem"), { beat (0.0), beat (16.0) });
-        const auto part = phazite::makeChordPart (context, phazite::PartStyle::bassRoots, { beat (0.0), beat (16.0) });
-        REQUIRE (part.has_value());
-
         phazite::ui::Inspector inspector (commands, context);
         phazite::test::TestWindow window (inspector, 320, 700);
-        context.getSongSelection().selectOnly (*part);
         phazite::test::dispatchPendingMessages();
-        CHECK (inspector.getShown() == juce::String ("Clip"));
+        CHECK (inspector.getShown() == juce::String ("Song"));
 
-        auto* toggle = dynamic_cast<juce::ToggleButton*> (phazite::test::findComponentWithTitle (inspector, "Follows the chords"));
-        REQUIRE (toggle != nullptr);
-        CHECK (toggle->isVisible());
-        CHECK (toggle->getToggleState());
+        auto* key = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (inspector, "Key"));
+        REQUIRE (key != nullptr);
+        CHECK (key->isShowing());
+        CHECK (key->getButtonText() == juce::String ("C major"));
 
-        // A note edited by hand: it stops following.
-        const auto notes = phazite::getClipNotes (*song, *part);
-        REQUIRE_FALSE (notes.empty());
-        {
-            const phazite::UndoStep step (*song, "Change Velocity");
-            phazite::setNoteVelocities (*song, { notes.front().getRef() }, 50);
-        }
+        // Its menu is the keys', as the lane's Change Key from Here shows it; the chords move with the key.
+        const auto shown = phazite::getLaneKeyAt (context, {});
+        REQUIRE (runMenuItem (
+            phazite::ui::getKeyChoiceMenu (shown, [&context] (phazite::Key chosen) { phazite::setLaneKey (context, {}, chosen); }),
+            { "D", "Major" }));
         phazite::test::dispatchPendingMessages();
-        CHECK_FALSE (toggle->getToggleState());
+        CHECK (key->getButtonText() == juce::String ("D major"));
 
-        phazite::test::Mouse mouse (*toggle);
-        mouse.click (toggle->getLocalBounds().getCentre());
-        phazite::test::dispatchPendingMessages();
-        CHECK (phazite::followsChords (context, *part));
-        CHECK (toggle->getToggleState());
+        juce::StringArray names;
+
+        for (const auto& chord : phazite::getLaneChords (context))
+            names.add (chord.name);
+
+        CHECK (names.joinIntoString (" ") == juce::String ("D A Bm G"));
     }
 
     setSong (context, nullptr);

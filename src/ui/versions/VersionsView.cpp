@@ -571,6 +571,10 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
 {
     setTitle ("Source Control");
 
+    // Its icon gives it the keys (and a screen reader its name), not the commit's message, so that Space plays on; Tab goes on
+    // into its parts.
+    setWantsKeyboardFocus (true);
+
     for (auto* label : { &emptyText, &roomText })
     {
         label->setFont (juce::FontOptions (TextSize::small));
@@ -792,12 +796,6 @@ juce::Rectangle<int> VersionsView::getPutBackPosition (int row) const
 juce::Rectangle<int> VersionsView::getUnstagePosition (int row) const
 {
     return getActionPosition (stagedList, row, 0);
-}
-
-void VersionsView::focusMessage()
-{
-    if (messageField->isShowing())
-        messageField->grabKeyboardFocus();
 }
 
 int VersionsView::getLane (const juce::String& branchID) const

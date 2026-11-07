@@ -50,6 +50,8 @@ enum class Icon
     close,      // closes something
     frozen,     // a frozen track: it plays a file of its sound
     lowLatency, // the Low Latency switch: a lightning bolt
+    alias,      // a clip that is an alias of others in the playlist: a link
+    normalize,  // an audio clip's gain set so that its loudest peak plays at the level Normalize sets: an arrow up to a line
     // The lower panel's corner (ui/shell/PanelLayout.h), with detach and close
     maximizePanel,
     restorePanels,

@@ -83,7 +83,7 @@ void Playlist::showClipMenu()
     juce::PopupMenu fadeShapes;
     addCommandItems (fadeShapes, bridge, { "clip.fadeLinear", "clip.fadeConvex", "clip.fadeConcave", "clip.fadeSCurve" });
     menu.addSubMenu ("Fade Shape", fadeShapes);
-    addCommandItems (menu, bridge, { "clip.reverse", "clip.followTempo" });
+    addCommandItems (menu, bridge, { "clip.reverse", "clip.followTempo", "clip.normalize" });
 
     // A clip recorded round a looped range: its takes, the one it plays ticked, each one undo step (RecordingModel.h).
     for (const auto id : selection.getClips())

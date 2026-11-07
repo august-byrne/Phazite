@@ -377,7 +377,10 @@ juce::ValueTree makeMidiClipState (Song& song, const juce::String& name, BeatRan
     juce::ValueTree clipState (schema::CLIP);
     clipState.setProperty (schema::clipID, (juce::int64) song.makeID(), nullptr);
     clipState.setProperty (schema::clipKind, schema::clipIsMidi, nullptr);
-    clipState.setProperty (schema::clipName, name, nullptr);
+
+    if (name.isNotEmpty())
+        clipState.setProperty (schema::clipName, name, nullptr);
+
     clipState.setProperty (schema::clipStart, start, nullptr);
     clipState.setProperty (schema::clipLength, std::max (range.getLength().inBeats(), minimumClipLength.inBeats()), nullptr);
     return clipState;
@@ -635,7 +638,7 @@ void setFadeCurve (Song& song, ClipID clip, bool fadeIn, FadeCurve curve)
 
 ClipID insertMidiClip (Song& song, TrackID track, BeatRange range, Selection* selection, const juce::String& name)
 {
-    const auto clipState = makeMidiClipState (song, name.isNotEmpty() ? name : getTrackName (song, track), range);
+    const auto clipState = makeMidiClipState (song, name, range);
     const auto clip = placeClipState (song, clipState, track);
 
     if (clip.isValid() && selection != nullptr)
@@ -789,6 +792,42 @@ void makeClipsUnique (Song& song, const std::vector<ClipID>& clips)
         // The last one left in the group leaves it too.
         if (auto last = aliases.size() == 2 ? aliases[1] : juce::ValueTree(); last.isValid())
             last.removeProperty (schema::clipLink, &song.getUndoManager());
+    }
+}
+
+juce::String getClipName (const Song& song, const juce::ValueTree& clipState)
+{
+    if (const auto own = clipState[schema::clipName].toString(); own.isNotEmpty())
+        return own;
+
+    return getTrackName (song, getTrackID (clipState.getParent()));
+}
+
+void renameClips (Song& song, const std::vector<ClipID>& clips, const juce::String& name)
+{
+    // The clips with their aliases, each once, but only those that the name changes.
+    const auto trimmed = name.trim();
+    const auto ownNameOf = [&song, &trimmed] (const juce::ValueTree& clipState)
+    { return trimmed == getTrackName (song, getTrackID (clipState.getParent())) ? juce::String() : trimmed; };
+    std::vector<juce::ValueTree> renamed;
+
+    for (const auto clip : clips)
+        for (const auto& clipState : getAliasStates (findClipState (song, clip)))
+            if (clipState.isValid() && clipState[schema::clipName].toString() != ownNameOf (clipState)
+                && std::find (renamed.begin(), renamed.end(), clipState) == renamed.end())
+                renamed.push_back (clipState);
+
+    if (renamed.empty())
+        return;
+
+    const UndoStep step (song, clips.size() > 1 ? "Rename Clips" : "Rename Clip");
+
+    for (auto clipState : renamed)
+    {
+        if (const auto own = ownNameOf (clipState); own.isNotEmpty())
+            clipState.setProperty (schema::clipName, own, &song.getUndoManager());
+        else
+            clipState.removeProperty (schema::clipName, &song.getUndoManager());
     }
 }
 

@@ -14,6 +14,7 @@
 #include "model/base/IDs.h"
 #include "model/base/Song.h"
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -116,6 +117,15 @@ void setClipTempo (Song&, ClipID, double bpm);
 int getClipTakeCount (const Song&, ClipID);
 int getClipTake (const Song&, ClipID);
 void playTake (Song&, ClipID, int take);
+
+// The loudest sample of the part of its file a clip plays, in any of its channels, from 0 to 1 (more for a file of floating
+// point samples that goes over); nothing for a clip whose file can't be read, or that isn't an audio clip. It reads that
+// part of the file, on the caller's thread.
+std::optional<float> getClipPeak (const Song&, ClipID);
+
+// Each audio clip among them gets its gain set so that its loudest peak plays at normalizedPeak (AudioClipModel.h: what
+// normalizeClip() does), in the caller's undo step; MIDI clips are left as they are.
+void normalizeClips (Song&, const std::vector<ClipID>&);
 
 // Every audio clip of the song, on every track.
 std::vector<ClipID> getAudioClips (const Song&);

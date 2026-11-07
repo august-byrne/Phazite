@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Selection.h"
+#include "AudioClipModel.h"
 #include "internal/Arrangement.h"
 #include "internal/AudioClips.h"
 #include "internal/Clips.h"
@@ -448,6 +449,18 @@ void addSelectionCommands (CommandRegistry& registry, Selection& selection, Rang
           .undoTarget = undoTarget,
           .isTicked =
               ifSong (selection, [&selection] (const Song& song) { return doAllClipsFollowTempo (song, getSelectedClips (selection)); }) });
+
+    // Each selected audio clip's gain, from its loudest peak (as the audio clip editor's button sets one clip's).
+    registry.add (
+        { .id = "clip.normalize",
+          .name = "Normalize",
+          .category = "Clip",
+          .description = "Sets each selected audio clip's gain so that its loudest peak plays at " + juce::String (normalizedPeak, 0)
+                         + " dB. Their audio files don't change.",
+          .synonyms = { "normalise", "maximize", "peak", "level", "louder", "gain staging" },
+          .perform = withSong (selection, [&selection] (Song& song) { normalizeClips (song, getSelectedClips (selection)); }),
+          .isEnabled = ifSong (selection, [&selection] (const Song& song) { return hasAudioClips (song, getSelectedClips (selection)); }),
+          .undoTarget = undoTarget });
 
     registry.add ({ .id = "edit.split",
                     .name = "Split",

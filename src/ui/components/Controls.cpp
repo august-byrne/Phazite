@@ -264,6 +264,40 @@ Fader::Fader (Direction direction, const juce::String& title, double defaultValu
 }
 
 //==============================================================================
+FaderScale::FaderScale (const Fader& f)
+    : fader (f)
+{
+    setInterceptsMouseClicks (false, false);
+    setAccessible (false); // screen readers read the fader's value
+}
+
+void FaderScale::paint (juce::Graphics& g)
+{
+    const auto& p = getPalette (*this);
+    const auto right = (float) getWidth();
+    const auto textRight = right - (float) (FaderScaleTint::unityTick + FaderScaleTint::gap);
+    g.setFont (juce::FontOptions (FaderScaleTint::textSize));
+
+    // Each level where the fader's thumb is at it: a tick towards the fader, on the pixel row there so that it is sharp, and
+    // its number.
+    const auto mark = [&] (double position, const juce::String& text, bool unity)
+    {
+        const auto y = std::floor (getLocalPoint (&fader, juce::Point<float> (0.0f, fader.getPositionOfValue (position))).y);
+        const auto tick = (float) (unity ? FaderScaleTint::unityTick : FaderScaleTint::tick);
+        g.setColour (unity ? p.text : p.textMuted);
+        g.fillRect (juce::Rectangle<float> (right - tick, y, tick, 1.0f));
+        g.drawText (text, juce::Rectangle<float> (0.0f, y - FaderScaleTint::textSize, textRight, 2.0f * FaderScaleTint::textSize),
+                    juce::Justification::centredRight, false);
+    };
+
+    for (const auto decibels : FaderScaleTint::marks)
+        mark (decibelsToFaderPosition (decibels), (decibels > 0.0f ? "+" : "") + juce::String (juce::roundToInt (decibels)),
+              juce::exactlyEqual (decibels, 0.0f));
+
+    mark (0.0, juce::String::fromUTF8 ("-\xe2\x88\x9e"), false); // silence, at the bottom
+}
+
+//==============================================================================
 namespace
 {
     // What screen readers read and set for a number field: its value with its units, stepped as the arrow keys step it
@@ -355,6 +389,9 @@ std::unique_ptr<juce::AccessibilityHandler> NumberField::createAccessibilityHand
 
 void showAsDecibels (juce::Slider& slider)
 {
+    // A fader's position, whatever it controls: a slider left with JUCE's range (0 to 10) put 0 dB a tenth of the way along
+    // (the browser's preview volume's did, until 2026-11-07).
+    slider.setRange (0.0, 1.0);
     slider.textFromValueFunction = [] (double position) { return formatDecibels (faderPositionToDecibels ((float) position)); };
     slider.valueFromTextFunction = [&slider] (const juce::String& text)
     {

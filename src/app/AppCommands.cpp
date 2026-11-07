@@ -5,7 +5,6 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
-#include "model/chords/ChordModel.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/UndoCommands.h"
 #include "model/engine/internal/EngineContext.h"
@@ -37,7 +36,6 @@ void addSongCommands (CommandRegistry& registry, ProjectContext& context, TrackR
     ui::addTrackViewCommands (registry, context); // right after the model's: the order decides key ties and lists
     addSectionCommands (registry, selection);
     addOutlineCommands (registry, selection);
-    addChordCommands (registry, context);
     addMixerCommands (registry, selection);
     addFreezeCommands (registry, context, renders);
     addContainerCommands (registry, selection);

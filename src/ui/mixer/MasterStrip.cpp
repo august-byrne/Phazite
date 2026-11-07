@@ -32,7 +32,8 @@ MasterStrip::MasterStrip (CommandBridge& bridge, ProjectContext& projectContext)
     deviceView.setScrollBarsShown (true, false);
     deviceView.setScrollBarThickness (6);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &effectsHeading, &deviceView, &meter, &volume, &loudness, &resetButton })
+    for (auto* c :
+         std::initializer_list<juce::Component*> { &effectsHeading, &deviceView, &meter, &volume, &volumeScale, &loudness, &resetButton })
         addAndMakeVisible (c);
 
     context.addListener (this);
@@ -154,9 +155,11 @@ void MasterStrip::resized()
     loudness.setBounds (readout);
     area.removeFromBottom (Space::s);
 
-    // The fader, as tall as the channels', and above it the effects, which scroll. (The mixer keeps the strip at least
-    // getMinimumHeight() tall.)
-    auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
+    // The fader with its scale, as tall as the channels', and above it the effects, which scroll. (The mixer keeps the strip at
+    // least getMinimumHeight() tall.)
+    auto faderArea = area.removeFromBottom (faderHeight)
+                         .withSizeKeepingCentre (std::min (area.getWidth(), faderWidth + FaderScaleTint::width), faderHeight);
+    volumeScale.setBounds (faderArea.removeFromLeft (FaderScaleTint::width));
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);
     area.removeFromBottom (Space::xs);

@@ -117,6 +117,25 @@ TEST_CASE ("A lane shows under its track, and a click on it adds a point, on the
     CHECK (screen.context.getSongSelection().getSelectedAutomationPoints().indices == std::vector { 0 });
 }
 
+TEST_CASE ("The wash under a lane's line reaches down to the line under the lane")
+{
+    // The owner, 2026-11-07: the wash stopped short of the lane's bottom, above the room kept for the points' dots, which
+    // looked like a gap under the lane wider than other DAWs'.
+    LaneScreen screen;
+    phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (0.0), 0.5f });
+    phazite::test::dispatchPendingMessages();
+
+    auto& lane = screen.lane();
+    const auto area = screen.playlist.getLocalArea (&lane, lane.getLocalBounds());
+    const auto image = screen.window.paintEverything();
+    const auto x = area.getX() + screen.at (2.37, 0.5f).x; // between grid lines
+    const auto washed = image.getPixelAt (x, area.getY() + screen.at (2.37, 0.25f).y);
+    const auto bottom = image.getPixelAt (x, area.getBottom() - 2); // the last row above the line under the lane
+    CHECK (std::abs ((int) bottom.getRed() - (int) washed.getRed()) <= 2);
+    CHECK (std::abs ((int) bottom.getGreen() - (int) washed.getGreen()) <= 2);
+    CHECK (std::abs ((int) bottom.getBlue() - (int) washed.getBlue()) <= 2);
+}
+
 TEST_CASE ("Dragging a point moves it on the grid as one step, and a double-click deletes it")
 {
     LaneScreen screen;

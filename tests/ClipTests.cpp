@@ -111,17 +111,66 @@ TEST_CASE ("The Smart Tool picks what a drag does from where it starts on a clip
         CHECK (phazite::ui::describeClipZone (zone).isNotEmpty());
 }
 
-TEST_CASE ("A new MIDI clip is named after its track, and selected")
+TEST_CASE ("A new MIDI clip is called after its track, whatever the track is called, and selected")
 {
     ClipEdit e;
     phazite::setTrackName (e.song, e.tracks[0], "Bass");
 
     const auto clip = phazite::insertMidiClip (e.song, e.tracks[0], { beats (4.0), beats (8.0) }, &e.selection);
     REQUIRE (clip.isValid());
-    CHECK (phazite::findClipState (e.song, clip)[phazite::schema::clipName].toString() == juce::String ("Bass"));
+    const auto clipState = phazite::findClipState (e.song, clip);
+    CHECK_FALSE (clipState.hasProperty (phazite::schema::clipName)); // no name of its own
+    CHECK (phazite::getClipName (e.song, clipState) == juce::String ("Bass"));
     CHECK (e.rangeOf (clip).getStart().inBeats() == doctest::Approx (4.0));
     CHECK (e.rangeOf (clip).getEnd().inBeats() == doctest::Approx (8.0));
     CHECK (phazite::getSelectedClips (e.selection) == std::vector { clip });
+
+    // Its track renamed, or moved where it is called "Track 2" by its place, it goes on being called after it.
+    phazite::setTrackName (e.song, e.tracks[0], "Sub Bass");
+    CHECK (phazite::getClipName (e.song, clipState) == juce::String ("Sub Bass"));
+    const auto unnamed = phazite::insertMidiClip (e.song, e.tracks[1], { beats (0.0), beats (4.0) }, nullptr);
+    CHECK (phazite::getClipName (e.song, phazite::findClipState (e.song, unnamed)) == phazite::getTrackName (e.song, e.tracks[1]));
+}
+
+TEST_CASE ("Renaming a clip names its aliases too, as one undo step; an empty name, or its track's, takes its own away")
+{
+    // The owner, 2026-11-07: the playlist shows a clip's name only where it isn't its track's, which the header shows.
+    ClipEdit e;
+    phazite::setTrackName (e.song, e.tracks[0], "Keys");
+    const auto clip = e.addClip (0, 0.0, 4.0);
+    const auto aliases = phazite::copyClips (e.song, { clip }, true);
+    REQUIRE (aliases.size() == 1);
+    const auto other = e.addClip (1, 0.0, 4.0);
+    const auto nameOf = [&e] (phazite::ClipID id) { return phazite::getClipName (e.song, phazite::findClipState (e.song, id)); };
+    const auto hasOwnName = [&e] (phazite::ClipID id)
+    { return phazite::findClipState (e.song, id).hasProperty (phazite::schema::clipName); };
+    e.song.getUndoManager().clearUndoHistory();
+
+    phazite::renameClips (e.song, { clip }, "  Verse chords ");
+    CHECK (phazite::describeUndo (&e.song) == juce::String ("Undo Rename Clip"));
+    CHECK (nameOf (clip) == juce::String ("Verse chords"));
+    CHECK (nameOf (aliases[0]) == juce::String ("Verse chords"));
+    CHECK_FALSE (hasOwnName (other));
+
+    // A name they have already makes no step.
+    phazite::undo (e.song);
+    phazite::redo (e.song);
+    REQUIRE (e.song.getUndoManager().canUndo());
+    phazite::renameClips (e.song, { aliases[0] }, "Verse chords");
+    phazite::undo (e.song);
+    CHECK (nameOf (clip) == juce::String ("Keys"));
+
+    // Their track's name, or none: called after their track again, with no name of their own.
+    phazite::redo (e.song);
+    phazite::renameClips (e.song, { clip, aliases[0] }, "Keys");
+    CHECK (phazite::describeUndo (&e.song) == juce::String ("Undo Rename Clips"));
+    CHECK_FALSE (hasOwnName (clip));
+    CHECK_FALSE (hasOwnName (aliases[0]));
+    phazite::undo (e.song);
+    CHECK (nameOf (clip) == juce::String ("Verse chords"));
+    phazite::renameClips (e.song, { clip }, {});
+    CHECK_FALSE (hasOwnName (clip));
+    CHECK (nameOf (clip) == juce::String ("Keys"));
 }
 
 TEST_CASE ("Moving a clip keeps its length, and can take it to another track")

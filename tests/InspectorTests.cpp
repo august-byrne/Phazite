@@ -18,6 +18,7 @@
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/Inspector.h"
+#include "ui/theme/DesignTokens.h"
 
 #include <algorithm>
 
@@ -69,6 +70,7 @@ TEST_CASE ("With nothing selected the inspector shows the song; a selected track
     CHECK (screen.inspector.getShown() == juce::String ("Song"));
     CHECK (screen.shows ("120 BPM"));
     CHECK (screen.shows ("4/4"));
+    CHECK (screen.shows ("C major")); // the key the chord lane's chords are in
 
     selection.selectOnly (screen.track (1));
     phazite::test::dispatchPendingMessages();
@@ -118,6 +120,25 @@ TEST_CASE ("A selected clip shows its place, length and whether it plays; a sect
     mouse.click (muted->getLocalBounds().getCentre());
     CHECK (phazite::getClip (screen.context, clip)->muted);
     phazite::test::checkChildrenApart (screen.inspector);
+
+    // Its name: none of its own, so the field is empty over its track's; one typed is its own, which the playlist shows over
+    // it, as one undo step (2026-11-07).
+    auto* name = dynamic_cast<juce::TextEditor*> (phazite::test::findComponentWithTitle (screen.inspector, "Name"));
+    REQUIRE (name != nullptr);
+    CHECK (name->getText().isEmpty());
+    CHECK (name->getTextToShowWhenEmpty() == phazite::getTrackRow (screen.context, screen.track (0))->name + " (the track's)");
+    name->setText ("Intro keys", juce::dontSendNotification);
+    REQUIRE (name->onReturnKey != nullptr);
+    name->onReturnKey();
+    CHECK (phazite::getClip (screen.context, clip)->name == juce::String ("Intro keys"));
+    CHECK_FALSE (phazite::getClip (screen.context, clip)->namedAfterTrack);
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Rename Clip"));
+
+    // Leaving the field as it shows changes nothing.
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (name->onFocusLost != nullptr);
+    name->onFocusLost();
+    CHECK (phazite::getClip (screen.context, clip)->name == juce::String ("Intro keys"));
 
     // A section: its own page.
     const auto section = phazite::addSectionAt (screen.context, BeatPosition::fromBeats (8.0));
@@ -294,6 +315,55 @@ TEST_CASE ("The inspector fills its panel, and scrolls up and down when the pane
     CHECK (title->getText().isNotEmpty()); // the track's name
     CHECK (title->getBottom() <= viewport->getY());
 
+    // In its title's row, short of the panel's X at its right end, which the shell puts there.
+    const auto row = screen.inspector.getTitleRow();
+    CHECK (row.getWidth() == screen.inspector.getWidth());
+    CHECK (row.contains (title->getBounds()));
+    screen.inspector.setTitleRoom (40);
+    CHECK (title->getRight() == screen.inspector.getWidth() - 40);
+    screen.inspector.setTitleRoom (0);
+    CHECK (title->getRight() == screen.inspector.getWidth() - phazite::ui::Space::m);
+
     screen.window.setSize (300, 200);
     CHECK (page->getHeight() > 200); // it scrolls
+}
+
+TEST_CASE ("Enter in a name field renames and gives the keys back to the window, as Escape does, the field unselected")
+{
+    Screen screen;
+    screen.context.getSongSelection().selectOnly (screen.track (1));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.inspector.getShown() == juce::String ("Track"));
+    auto* name = dynamic_cast<juce::TextEditor*> (phazite::test::findComponentWithTitle (screen.inspector, "Name"));
+    REQUIRE (name != nullptr);
+
+    // Clicked, it has the keys and its text is selected; typed over and Enter, the track has the name, and the keys are the
+    // window's again (Space plays), the field showing no selection.
+    const auto click = [&screen, name]
+    {
+        phazite::test::Mouse mouse (*name);
+        mouse.click (name->getLocalBounds().getCentre());
+        name->selectAll();
+        REQUIRE (name->hasKeyboardFocus (false));
+    };
+
+    click();
+
+    for (const auto letter : { 'l', 'e', 'a', 'd' })
+        screen.window.pressKey (juce::KeyPress (letter, 0, letter));
+
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getTrackRow (screen.context, screen.track (1))->name == juce::String ("lead"));
+    CHECK (juce::Component::getCurrentlyFocusedComponent() == nullptr);
+    CHECK (name->getHighlightedRegion().isEmpty());
+
+    // Escape too, keeping what was typed, as leaving the field does.
+    click();
+    screen.window.pressKey (juce::KeyPress ('x', 0, 'x'));
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+    phazite::test::dispatchPendingMessages();
+    CHECK (juce::Component::getCurrentlyFocusedComponent() == nullptr);
+    CHECK (name->getHighlightedRegion().isEmpty());
+    CHECK (phazite::getTrackRow (screen.context, screen.track (1))->name == juce::String ("x"));
 }

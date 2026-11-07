@@ -16,6 +16,7 @@
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/browser/Browser.h"
 #include "ui/input/KeyDispatcher.h"
+#include "ui/input/TextFieldRelease.h"
 #include "ui/mixer/DevicesView.h"
 #include "ui/mixer/Inspector.h"
 #include "ui/mixer/MixerView.h"
@@ -184,8 +185,12 @@ private:
     int sizeAtDragStart = 0;             // of that panel
     PanelLayout panelsAtDragStart;       // their sizes then, which a panel closed by the drag keeps for when it opens
 
-    // In the lower panel's top right corner, as in VS Code's panel's: Maximize, a window of its own, and Hide.
-    PanelButtons editorButtons { commands, Panel::editor };
+    // In the lower panel's top right corner, as in VS Code's panel's: Maximize, a window of its own, and Hide; and the X at
+    // the right end of the inspector's title, which hides it.
+    PanelButtons editorButtons { commands, Panel::editor }, inspectorButtons { commands, Panel::inspector };
+
+    // A press away from a text field gives the keys back to the window's shortcuts.
+    TextFieldRelease textFieldRelease;
 
     // Over the panels, under the lesson's card: their corners and edges, each a card as VS Code's Modern UI's.
     PanelCards cards;

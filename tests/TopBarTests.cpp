@@ -17,6 +17,7 @@
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/shell/TopBar.h"
+#include "ui/theme/LookAndFeel.h"
 
 namespace
 {
@@ -152,6 +153,44 @@ TEST_CASE ("The top bar's tempo field shows the song's tempo, and a drag on it i
     // A change made elsewhere shows there.
     phazite::setTempo (*screen.song, 95.5);
     CHECK (phazite::test::dispatchMessagesUntil ([&field] { return juce::approximatelyEqual (field.getValue(), 95.5); }));
+}
+
+TEST_CASE ("The top bar's controls are drawn along its top, all as tall, the tempo field's box too")
+{
+    // The owner, 2026-11-07: the tempo field looked shorter than the buttons beside it (JUCE kept a pixel around a bar slider's
+    // box for a border that Phazite doesn't draw), and the bar had more room above its controls than below them.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    TopBarScreen screen (phazite::ui::Shell::transportBarHeight);
+    auto* play = phazite::test::findComponentWithTitle (screen.topBar, "Play");
+    auto* timeSignature = phazite::test::findComponentWithTitle (screen.topBar, "Time signature");
+    REQUIRE (play != nullptr);
+    REQUIRE (timeSignature != nullptr);
+
+    // Each one's outline: the first and the last rows of its middle column drawn in anything but the bar's colour. The bar
+    // fills the window.
+    const auto image = screen.window.paintEverything();
+    const auto bar = phazite::ui::getPalette (screen.topBar).surface;
+
+    for (auto* control : { play, static_cast<juce::Component*> (&screen.getTempoField()), timeSignature })
+    {
+        CAPTURE (control->getTitle());
+        const auto x = screen.topBar.getLocalArea (control, control->getLocalBounds()).getCentreX();
+        auto first = -1, last = -1;
+
+        for (int y = 0; y < image.getHeight(); ++y)
+        {
+            if (image.getPixelAt (x, y) != bar)
+            {
+                first = first < 0 ? y : first;
+                last = y;
+            }
+        }
+
+        CHECK (first == 0);
+        CHECK (last == phazite::ui::controlHeight - 1);
+    }
 }
 
 TEST_CASE ("The top bar shows the song's time signature")

@@ -156,7 +156,8 @@ TEST_CASE ("The activity bar's icons show or hide their views in the left panel,
     CHECK (screen.services.settings.get (phazite::Settings::panelLayout).contains ("leftView=versions"));
 }
 
-TEST_CASE ("A view an icon shows has the keys; hidden with them, they go to the playlist, never to the title bar's buttons")
+TEST_CASE ("A view an icon shows has the keys, not a text field in it; hidden with them, they go to the playlist, never to the "
+           "title bar's buttons")
 {
     Screen screen;
     auto& bar = screen.getBar();
@@ -166,7 +167,8 @@ TEST_CASE ("A view an icon shows has the keys; hidden with them, they go to the 
     {
         CAPTURE ((int) view);
 
-        // Shown by its icon, the view has the keys (the browser's search, the commit's message).
+        // Shown by its icon, the view has the keys: the view itself, not the browser's search or the commit's message, so
+        // that Space plays on (the owner, 2026-11-07).
         if (! screen.leftShows (view))
             screen.click (bar.getButton (view));
 
@@ -180,6 +182,8 @@ TEST_CASE ("A view an icon shows has the keys; hidden with them, they go to the 
         auto* focused = juce::Component::getCurrentlyFocusedComponent();
         REQUIRE (focused != nullptr);
         CHECK (left.isParentOf (focused));
+        CHECK (dynamic_cast<juce::TextEditor*> (focused) == nullptr);
+        CHECK (focused->getTitle() == juce::String (view == LeftView::browser ? "Browser" : "Source Control"));
 
         // Hidden by its icon while it has them: the playlist, the editor in use, takes them, and no button of the title bar
         // shows a focus ring.

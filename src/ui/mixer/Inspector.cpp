@@ -17,6 +17,8 @@
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/CommandUI.h"
+#include "ui/input/TextFieldRelease.h"
+#include "ui/playlist/ChordLane.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
@@ -147,14 +149,26 @@ namespace
         juce::Label state;
     };
 
-    // A single-line field that changes something when Enter is pressed or the focus leaves it.
+    // A single-line field that changes something when Enter is pressed or the focus leaves it. Enter and Escape let the keys
+    // go back to the window's shortcuts, as a press elsewhere does (TextFieldRelease.h); each apply changes nothing when the
+    // text is what is shown already.
     void setUpNameEditor (juce::TextEditor& editor, std::function<void (const juce::String&)> apply)
     {
+        const auto release = [&editor]
+        {
+            clearSelection (editor);
+            editor.giveAwayKeyboardFocus();
+        };
+
         editor.setFont (juce::FontOptions (TextSize::body));
         editor.setSelectAllWhenFocused (true);
-        editor.onReturnKey = [&editor, apply] { apply (editor.getText()); };
+        editor.onReturnKey = [&editor, apply, release]
+        {
+            apply (editor.getText());
+            release();
+        };
         editor.onFocusLost = [&editor, apply] { apply (editor.getText()); };
-        editor.onEscapeKey = [&editor] { editor.giveAwayKeyboardFocus(); };
+        editor.onEscapeKey = release;
     }
 
     // The numbers in a text, as words and commas part them ("Bar 5, beat 3.5": 5 and 3.5).
@@ -815,10 +829,17 @@ namespace
             makeUniqueButton.setTooltip ("Makes the clips copies of their own, so that changing them no longer changes the clips "
                                          "they were aliases of");
             makeUniqueButton.onClick = [this] { invokeOnClips ("clip.makeUnique"); };
-            followsChordsToggle.setTitle ("Follows the chords");
-            followsChordsToggle.setTooltip ("A part made from the chord lane changes with the chords until its notes are edited. "
-                                            "Turned on again, its notes are made from the chords again.");
-            followsChordsToggle.onClick = [this] { setFollowsChords (context, clips.front(), followsChordsToggle.getToggleState()); };
+
+            // A name of their own, which the playlist shows over them; none, and each is called after its track.
+            setUpNameEditor (nameEditor,
+                             [this] (const juce::String& text)
+                             {
+                                 if (text.trim() != shownName)
+                                     renameClips (context, clips, text);
+                             });
+            nameEditor.setTitle ("Name");
+            nameEditor.setTooltip ("A name the playlist shows over the clips, with their aliases. Leave it empty and each is called "
+                                   "after its track, which shows no name over it");
 
             // The fade shapes are commands, ticked for the shape the clips have.
             for (int i = 0; i < (int) std::size (fadeShapes); ++i)
@@ -832,6 +853,7 @@ namespace
                     invokeOnClips (fadeShapes[index].command);
             };
 
+            addRow ("Name", &nameEditor);
             addRow ("Kind", &kindLabel);
             addRow ("Track", &trackLabel);
             addRow ("Starts", &startField);
@@ -839,7 +861,6 @@ namespace
             addRow ("Muted", &mutedToggle);
             addRow ("Alias", &aliasLabel);
             addRow ({}, &makeUniqueButton);
-            addRow ("Follows the chords", &followsChordsToggle);
             addRow ("Gain", &gainField);
             addRow ("Pitch", &pitchField);
             addRow ("Fade in", &fadeInLabel);
@@ -924,10 +945,19 @@ namespace
             aliasLabel.setText (linked ? "Yes: plays what its copies play" : "No", juce::dontSendNotification);
             setRowVisible (makeUniqueButton, linked);
 
-            // A part made from the chord lane: whether its notes change with the chords.
-            const auto part = infos.size() == 1 ? getChordPart (context, first.id) : std::nullopt;
-            followsChordsToggle.setToggleState (part.has_value() && followsChords (context, first.id), juce::dontSendNotification);
-            setRowVisible (followsChordsToggle, part.has_value());
+            // Their own name, if they share one; else nothing, over the name each is called after, or "Several names".
+            const auto sameName = std::all_of (infos.begin(), infos.end(), [&first] (const ClipInfo& info)
+                                               { return info.name == first.name && info.namedAfterTrack == first.namedAfterTrack; });
+            shownName = sameName && ! first.namedAfterTrack ? first.name : juce::String();
+
+            if (! nameEditor.hasKeyboardFocus (true))
+            {
+                nameEditor.setText (shownName, juce::dontSendNotification);
+                nameEditor.setTextToShowWhenEmpty (! sameName              ? juce::String ("Several names")
+                                                   : first.namedAfterTrack ? first.name + " (the track's)"
+                                                                           : juce::String(),
+                                                   getPalette (*this).textMuted);
+            }
 
             // An audio clip's fades, as parts of its length; a MIDI clip has none.
             fadeInLabel.setText (juce::String (juce::roundToInt (first.fadeIn * 100.0)) + "% of the clip", juce::dontSendNotification);
@@ -978,9 +1008,11 @@ namespace
         MultiField lengthField { context, "Length", 0.0, 100000.0, 1.0, "Change Clip Length" }; // the model keeps a 64th at least
         MultiField gainField { context, "Gain", minClipGain, maxClipGain, 0.5, "Change Clip Gain" };
         MultiField pitchField { context, "Pitch", -maxClipPitch, maxClipPitch, 1.0, "Change Clip Pitch" };
-        juce::ToggleButton mutedToggle, followsChordsToggle;
+        juce::ToggleButton mutedToggle;
         juce::TextButton makeUniqueButton { "Make Unique" };
         juce::ComboBox shapeBox;
+        juce::TextEditor nameEditor;
+        juce::String shownName; // what the name field shows: their own name, if they share one, else nothing
     };
 
     //==============================================================================
@@ -1325,7 +1357,7 @@ namespace
     };
 
     //==============================================================================
-    // With nothing selected, the song: its tempo, time signature, length, tracks and sections.
+    // With nothing selected, the song: its tempo, time signature, key, length, tracks and sections.
     struct SongPage : public Inspector::Page
     {
         explicit SongPage (ProjectContext& c)
@@ -1337,11 +1369,23 @@ namespace
             for (auto* label : { &tempoLabel, &signatureLabel, &lengthLabel, &tracksLabel, &sectionsLabel, &hintLabel })
                 setUpValueLabel (*label);
 
+            // The key the chord lane's chords are in, from the song's start (a change of key further on is the lane's).
+            keyButton.setTitle ("Key");
+            keyButton.setTooltip ("The song's key: the chord lane's chords are in it and move with it, and the chord progressions "
+                                  "play in it. Click for another");
+            keyButton.onClick = [this]
+            {
+                auto& projectContext = context;
+                getKeyChoiceMenu (getLaneKeyAt (context, {}), [&projectContext] (Key key) { setLaneKey (projectContext, {}, key); })
+                    .showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&keyButton));
+            };
+
             hintLabel.setText ("Select a track, clips, notes, automation points or a section to see and change them here.",
                                juce::dontSendNotification);
             hintLabel.setJustificationType (juce::Justification::topLeft);
             addRow ("Tempo", &tempoLabel);
             addRow ("Time", &signatureLabel);
+            addRow ("Key", &keyButton);
             addRow ("Length", &lengthLabel);
             addRow ("Tracks", &tracksLabel);
             addRow ("Sections", &sectionsLabel);
@@ -1357,6 +1401,7 @@ namespace
             const auto signature = getTimeSignature (context).value_or (TimeSignature {});
             signatureLabel.setText (juce::String (signature.numerator) + "/" + juce::String (signature.denominator),
                                     juce::dontSendNotification);
+            keyButton.setButtonText (describeKey (getLaneKeyAt (context, {})));
             lengthLabel.setText (describeLength (context, { BeatPosition(), getTimelineEnd (context) }), juce::dontSendNotification);
             tracksLabel.setText (juce::String ((int) getAllPlaylistTracks (context).size()), juce::dontSendNotification);
             sectionsLabel.setText (juce::String ((int) getSongSections (context).size()), juce::dontSendNotification);
@@ -1364,6 +1409,7 @@ namespace
 
         ProjectContext& context;
         juce::Label tempoLabel, signatureLabel, lengthLabel, tracksLabel, sectionsLabel, hintLabel;
+        juce::TextButton keyButton;
     };
 } // namespace
 
@@ -1498,13 +1544,24 @@ void Inspector::resized()
 {
     // The page's title over its rows, which scroll under it.
     auto area = getLocalBounds();
-    auto header = area.removeFromTop (Space::m + titleHeight + Space::s);
+    area.removeFromTop (Space::m + titleHeight + Space::s);
 
     if (page != nullptr)
-        page->title.setBounds (header.reduced (Space::m, 0).withTrimmedTop (Space::m).withHeight (titleHeight));
+        page->title.setBounds (getTitleRow().withTrimmedLeft (Space::m).withTrimmedRight (std::max (Space::m, titleRoom)));
 
     view.setBounds (area);
     layOutPage();
+}
+
+juce::Rectangle<int> Inspector::getTitleRow() const
+{
+    return getLocalBounds().withTrimmedTop (Space::m).withHeight (titleHeight);
+}
+
+void Inspector::setTitleRoom (int room)
+{
+    if (std::exchange (titleRoom, room) != room)
+        resized();
 }
 
 void Inspector::projectChanged()

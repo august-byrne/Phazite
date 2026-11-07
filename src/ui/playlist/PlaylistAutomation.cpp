@@ -308,7 +308,6 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
     }
 
     const auto clip = g.getClipBounds();
-    const auto curveArea = getCurveArea();
 
     if (points.empty())
     {
@@ -339,9 +338,12 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
                 line.lineTo (at);
         }
 
+        // The wash goes down to the line under the lane, past the room kept for the points' dots, so that the lane is filled
+        // as a clip fills its row.
+        const auto washBottom = (float) getHeight() - 1.0f;
         auto wash = line;
-        wash.lineTo ((float) right, curveArea.getBottom());
-        wash.lineTo ((float) left, curveArea.getBottom());
+        wash.lineTo ((float) right, washBottom);
+        wash.lineTo ((float) left, washBottom);
         wash.closeSubPath();
         g.setColour (colour.withAlpha (LaneTint::wash));
         g.fillPath (wash);

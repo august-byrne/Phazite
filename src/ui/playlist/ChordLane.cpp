@@ -13,8 +13,8 @@ namespace
 {
     constexpr int dragThreshold = 4;
 
-    const juce::String emptyHint ("The song's chords. Click to add one, or choose a progression from the menu at the left; "
-                                  "parts made from the chords change with them.");
+    const juce::String laneHint ("The song's chords, a guide to what plays over them: click a chord to change it, or the space "
+                                 "between chords to add one. Right-click for the key and the progressions.");
     const juce::String chordHint ("Click to change the chord, or right-click for more. ");
     const juce::String edgeHint ("Drag to make the chord longer or shorter.");
 
@@ -52,6 +52,34 @@ namespace
 
         menu.addSubMenu ("Outside the Key", outside);
     }
+
+    // Where a chord added at a place goes: the bar there, cut where the chords before and after it end and start.
+    BeatRange getNewChordRange (const ProjectContext& context, BeatPosition where)
+    {
+        const auto bar = getBarAt (context, where);
+        auto start = getBarStart (context, bar), end = getBarStart (context, bar + 1);
+
+        for (const auto& chord : getLaneChords (context))
+        {
+            if (chord.range.getEnd() <= where)
+                start = std::max (start, chord.range.getEnd());
+            else if (chord.range.getStart() > where)
+                end = std::min (end, chord.range.getStart());
+        }
+
+        return end > start ? BeatRange (start, end) : BeatRange (where, BeatDuration::fromBeats (1.0));
+    }
+
+    void addNewChordChoices (juce::PopupMenu& menu, ProjectContext& context, BeatPosition where)
+    {
+        auto& ctx = context;
+        const auto range = getNewChordRange (context, where);
+        const auto key = getLaneKeyAt (context, range.getStart());
+
+        menu.addSectionHeader ("Add a chord in bar " + juce::String (getBarAt (context, where) + 1) + ", in " + describeKey (key));
+        addChordChoices (menu, getChordChoices (context, range.getStart()), key, std::nullopt,
+                         [&ctx, range] (Numeral numeral) { addLaneChord (ctx, range, numeral); });
+    }
 } // namespace
 
 ChordLane::ChordLane (TimelineEditor& e)
@@ -60,7 +88,7 @@ ChordLane::ChordLane (TimelineEditor& e)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Chords");
-    setDescription (emptyHint);
+    setDescription (laneHint);
 }
 
 void ChordLane::showProject()
@@ -95,23 +123,6 @@ bool ChordLane::isOnRightEdge (const LaneChord& chord, juce::Point<int> position
     return position.x >= block.getRight() - width && position.x < block.getRight();
 }
 
-BeatRange ChordLane::getNewChordRange (BeatPosition where) const
-{
-    // The bar there, cut where the chords before and after it end and start.
-    const auto bar = getBarAt (context, where);
-    auto start = getBarStart (context, bar), end = getBarStart (context, bar + 1);
-
-    for (const auto& chord : getLaneChords (context))
-    {
-        if (chord.range.getEnd() <= where)
-            start = std::max (start, chord.range.getEnd());
-        else if (chord.range.getStart() > where)
-            end = std::min (end, chord.range.getStart());
-    }
-
-    return end > start ? BeatRange (start, end) : BeatRange (where, BeatDuration::fromBeats (1.0));
-}
-
 std::optional<BeatPosition> ChordLane::getDragTarget() const
 {
     if (drag.has_value() && drag->dragging)
@@ -129,15 +140,6 @@ void ChordLane::paint (juce::Graphics& g)
     g.fillRect (getLocalBounds().removeFromBottom (1));
 
     const auto chords = getLaneChords (context);
-
-    if (chords.empty())
-    {
-        g.setColour (p.textMuted);
-        g.setFont (juce::FontOptions (TextSize::small));
-        g.drawText (emptyHint, getLocalBounds().reduced (Space::s, 0), juce::Justification::centredLeft, true);
-        return;
-    }
-
     const auto clip = g.getClipBounds();
     const juce::Font nameFont { juce::FontOptions (TextSize::small, juce::Font::bold) };
     const juce::Font numeralFont { juce::FontOptions (TextSize::small) };
@@ -210,7 +212,7 @@ void ChordLane::mouseMove (const juce::MouseEvent& e)
     if (! chord.has_value())
     {
         setMouseCursor (juce::MouseCursor::NormalCursor);
-        setDescription (emptyHint);
+        setDescription (laneHint);
         return;
     }
 
@@ -224,7 +226,7 @@ void ChordLane::mouseMove (const juce::MouseEvent& e)
 void ChordLane::mouseExit (const juce::MouseEvent&)
 {
     hovered.reset();
-    setDescription (emptyHint);
+    setDescription (laneHint);
     repaint();
 }
 
@@ -301,7 +303,7 @@ juce::PopupMenu ChordLane::getMenuAt (juce::Point<int> position)
     if (chord.has_value())
         addChordMenu (menu, *chord);
     else
-        addEmptyMenu (menu, where);
+        addNewChordChoices (menu, context, where);
 
     // The key from here on, and the rest of what the lane offers.
     menu.addSeparator();
@@ -315,7 +317,6 @@ juce::PopupMenu ChordLane::getMenuAt (juce::Point<int> position)
 
     menu.addSeparator();
     addCommandItem (menu, editor.getCommands(), "chords.progressions");
-    menu.addSubMenu ("Make a Part from the Chords", getMakePartMenu (context), canMakeChordPart (context));
     return menu;
 }
 
@@ -357,17 +358,6 @@ void ChordLane::addChordMenu (juce::PopupMenu& menu, const LaneChord& chord)
     menu.addItem ("Delete Chord", [&ctx, start] { deleteLaneChord (ctx, start); });
 }
 
-void ChordLane::addEmptyMenu (juce::PopupMenu& menu, BeatPosition where)
-{
-    auto& ctx = context;
-    const auto range = getNewChordRange (where);
-    const auto key = getLaneKeyAt (context, range.getStart());
-
-    menu.addSectionHeader ("Add a chord in bar " + juce::String (getBarAt (context, where) + 1) + ", in " + describeKey (key));
-    addChordChoices (menu, getChordChoices (context, range.getStart()), key, std::nullopt,
-                     [&ctx, range] (Numeral numeral) { addLaneChord (ctx, range, numeral); });
-}
-
 //==============================================================================
 ChordLaneHeader::ChordLaneHeader (TimelineEditor& e)
     : editor (e),
@@ -378,13 +368,8 @@ ChordLaneHeader::ChordLaneHeader (TimelineEditor& e)
     nameLabel.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
     addAndMakeVisible (nameLabel);
 
-    keyButton.setTitle ("Song key");
-    keyButton.setTooltip ("The song's key: the chords follow it when it changes.");
-    keyButton.onClick = [this] { getKeyMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&keyButton)); };
-    addAndMakeVisible (keyButton);
-
     moreButton.setTitle ("Chord lane menu");
-    moreButton.setTooltip ("Chord progressions to try, and parts made from the chords.");
+    moreButton.setTooltip ("Chord progressions to try, and Delete All Chords, which takes the lane away.");
     moreButton.onClick = [this] { getMoreMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&moreButton)); };
     addAndMakeVisible (moreButton);
 
@@ -393,17 +378,7 @@ ChordLaneHeader::ChordLaneHeader (TimelineEditor& e)
 
 void ChordLaneHeader::update()
 {
-    const auto hasProject = context.hasProject();
-    keyButton.setButtonText (hasProject ? describeKey (getLaneKeyAt (context, {})) : juce::String());
-    keyButton.setEnabled (hasProject);
-    moreButton.setEnabled (hasProject);
-}
-
-juce::PopupMenu ChordLaneHeader::getKeyMenu()
-{
-    auto& ctx = context;
-    auto menu = getKeyChoiceMenu (getLaneKeyAt (context, {}), [&ctx] (Key key) { setLaneKey (ctx, {}, key); });
-    return menu;
+    moreButton.setEnabled (context.hasProject());
 }
 
 juce::PopupMenu ChordLaneHeader::getMoreMenu()
@@ -411,7 +386,8 @@ juce::PopupMenu ChordLaneHeader::getMoreMenu()
     juce::PopupMenu menu;
     addCommandItem (menu, editor.getCommands(), "chords.progressions");
     menu.addSeparator();
-    menu.addSubMenu ("Make a Part from the Chords", getMakePartMenu (context), canMakeChordPart (context));
+    auto& ctx = context;
+    menu.addItem ("Delete All Chords", hasLaneChords (context), false, [&ctx] { deleteAllLaneChords (ctx); });
     return menu;
 }
 
@@ -426,29 +402,19 @@ void ChordLaneHeader::paint (juce::Graphics& g)
 
 void ChordLaneHeader::resized()
 {
-    auto area = getLocalBounds().reduced (Space::s, 2);
+    auto area = getLocalBounds().reduced (Space::s, 1);
     moreButton.setBounds (area.removeFromRight (area.getHeight() + Space::xs));
     area.removeFromRight (Space::xs);
-    nameLabel.setBounds (area.removeFromLeft (56));
-    keyButton.setBounds (area);
+    nameLabel.setBounds (area);
 }
 
 //==============================================================================
-juce::PopupMenu getMakePartMenu (ProjectContext& context)
+juce::PopupMenu getAddChordMenu (ProjectContext& context, BeatPosition where)
 {
     juce::PopupMenu menu;
-    auto& ctx = context;
 
-    for (const auto kind : { PartKind::chords, PartKind::bass, PartKind::arpeggio })
-    {
-        juce::PopupMenu styles;
-
-        for (const auto style : getPartStyles())
-            if (getPartKind (style) == kind)
-                styles.addItem (getPartStyleName (style), [&ctx, style] { makeChordPartHere (ctx, style); });
-
-        menu.addSubMenu (getPartKindName (kind), styles);
-    }
+    if (context.hasProject())
+        addNewChordChoices (menu, context, where);
 
     return menu;
 }

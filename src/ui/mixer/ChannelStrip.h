@@ -77,6 +77,7 @@ private:
 
     LevelMeter meter { "Level" };
     Fader volume { Fader::Direction::vertical, "Volume", decibelsToFaderPosition (0.0f) };
+    FaderScale volumeScale { volume }; // the decibels along the fader, left of it
     Knob pan { "Pan", 0.0 };
     TrackSwitch muteSolo; // mute (a click) and solo (a right-click)
     ArmButton arm;        // a track's that records audio

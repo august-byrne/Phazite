@@ -165,70 +165,11 @@ namespace
     }
 
     //==============================================================================
-    struct Table
-    {
-        PartStyle style;
-        PartKind kind;
-        const char* savedName;
-        const char* name;
-    };
-
-    // clang-format off
-    constexpr Table partStyles[] = { { PartStyle::sustainedTriads,   PartKind::chords,   "sustainedTriads",   "Held triads" },
-                                     { PartStyle::sustainedSevenths, PartKind::chords,   "sustainedSevenths", "Held sevenths" },
-                                     { PartStyle::spreadChords,      PartKind::chords,   "spreadChords",      "Spread pads" },
-                                     { PartStyle::pulsingChords,     PartKind::chords,   "pulsingChords",     "A chord on every beat" },
-                                     { PartStyle::offbeatStabs,      PartKind::chords,   "offbeatStabs",      "Offbeat stabs" },
-                                     { PartStyle::bassRoots,         PartKind::bass,     "bassRoots",         "Held roots" },
-                                     { PartStyle::bassPulses,        PartKind::bass,     "bassPulses",        "Roots in eighth notes" },
-                                     { PartStyle::bassRootFifth,     PartKind::bass,     "bassRootFifth",     "Root and fifth" },
-                                     { PartStyle::bassOctaves,       PartKind::bass,     "bassOctaves",       "Octaves" },
-                                     { PartStyle::arpeggioUp,        PartKind::arpeggio, "arpeggioUp",        "Up" },
-                                     { PartStyle::arpeggioDown,      PartKind::arpeggio, "arpeggioDown",      "Down" },
-                                     { PartStyle::arpeggioUpDown,    PartKind::arpeggio, "arpeggioUpDown",    "Up and down" } };
-    // clang-format on
-
-    const Table& findStyle (PartStyle style)
-    {
-        for (const auto& entry : partStyles)
-            if (entry.style == style)
-                return entry;
-
-        return partStyles[0];
-    }
-
-    //==============================================================================
     // Voicing.
 
     constexpr int chordCentre = 62; // the middle of where chords are voiced: around middle C and the D above it
     constexpr int lowestChordNote = 48, highestChordNote = 76;
     constexpr int lowestBassNote = 36; // C2: bass roots go from here up an octave
-    constexpr int lowestArpeggioNote = 60;
-
-    // A chord's notes for a part: its pitch classes, from the bass note up, with a seventh added to a triad when sevenths
-    // are wanted (the key's own, on a root of the key's scale, or else a minor seventh, a diminished one on a diminished
-    // triad).
-    std::vector<int> getPartPitchClasses (const PlacedChord& chord, bool sevenths)
-    {
-        auto classes = getPitchClassesIn (chord.numeral, chord.key);
-        const auto intervals = getChordIntervals (chord.numeral.type);
-
-        if (! sevenths || intervals.size() != 3)
-            return classes;
-
-        const auto root = getRootIn (chord.numeral, chord.key);
-        auto seventh = chord.numeral.type == ChordType::diminished ? 9 : 10;
-
-        if (chord.numeral.accidental == 0)
-        {
-            const auto steps = getScaleSteps (chord.key.scale);
-            const auto degree = chord.numeral.degree - 1;
-            seventh = mod12 (steps[(size_t) ((degree + 6) % 7)] - steps[(size_t) degree]);
-        }
-
-        classes.push_back (mod12 (root + seventh));
-        return classes;
-    }
 
     // Stacks pitch classes upwards from a lowest note: each the nearest note above the one before.
     std::vector<int> stackFrom (int lowest, const std::vector<int>& classes)
@@ -333,20 +274,6 @@ namespace
 
         std::sort (pitches.begin(), pitches.end());
         return pitches;
-    }
-
-    // A chord's fifth (the note 6, 7 or 8 semitones above its root, or a perfect fifth for a chord without one) as the
-    // first such note above a bass note; the octave above when the bass note is the fifth itself.
-    int getFifthAbove (const PlacedChord& chord, int bass)
-    {
-        auto interval = 7;
-
-        for (const auto candidate : getChordIntervals (chord.numeral.type))
-            if (candidate >= 6 && candidate <= 8)
-                interval = candidate;
-
-        const auto above = mod12 (getRootIn (chord.numeral, chord.key) + interval - bass);
-        return bass + (above == 0 ? 12 : above);
     }
 
     void addNote (std::vector<NoteData>& notes, ClipID clip, int pitch, BeatPosition start, BeatPosition end, int velocity)
@@ -572,59 +499,6 @@ std::optional<ChordType> findChordType (const juce::String& savedName)
 }
 
 //==============================================================================
-const std::vector<PartStyle>& getPartStyles()
-{
-    static const auto styles = []
-    {
-        std::vector<PartStyle> all;
-
-        for (const auto& entry : partStyles)
-            all.push_back (entry.style);
-
-        return all;
-    }();
-
-    return styles;
-}
-
-PartKind getPartKind (PartStyle style)
-{
-    return findStyle (style).kind;
-}
-
-juce::String getPartKindName (PartKind kind)
-{
-    switch (kind)
-    {
-        case PartKind::bass:
-            return "Bass";
-        case PartKind::arpeggio:
-            return "Arpeggio";
-        case PartKind::chords:
-        default:
-            return "Chords";
-    }
-}
-
-juce::String getPartStyleName (PartStyle style)
-{
-    return findStyle (style).name;
-}
-
-juce::String getSavedPartStyleName (PartStyle style)
-{
-    return findStyle (style).savedName;
-}
-
-std::optional<PartStyle> findPartStyle (const juce::String& savedName)
-{
-    for (const auto& entry : partStyles)
-        if (savedName == entry.savedName)
-            return entry.style;
-
-    return std::nullopt;
-}
-
 std::vector<NoteData> makePartNotes (const std::vector<PlacedChord>& chords, PartStyle style, BeatRange range, ClipID clip)
 {
     std::vector<NoteData> notes;
@@ -638,13 +512,11 @@ std::vector<NoteData> makePartNotes (const std::vector<PlacedChord>& chords, Par
         if (to <= from)
             continue;
 
-        const auto start = chord.range.getStart();
-        const auto classes = getPartPitchClasses (chord, style == PartStyle::sustainedSevenths);
+        const auto classes = getPitchClassesIn (chord.numeral, chord.key); // from the bass note up
 
         switch (style)
         {
             case PartStyle::sustainedTriads:
-            case PartStyle::sustainedSevenths:
             case PartStyle::spreadChords:
             {
                 const auto pitches = style == PartStyle::spreadChords ? voiceSpread (classes) : voiceClose (chord, classes, previous);
@@ -656,17 +528,15 @@ std::vector<NoteData> makePartNotes (const std::vector<PlacedChord>& chords, Par
                 break;
             }
 
-            case PartStyle::pulsingChords:
             case PartStyle::offbeatStabs:
             {
                 const auto pitches = voiceClose (chord, classes, previous);
-                const auto stabs = style == PartStyle::offbeatStabs;
 
-                playSteps (start, from, to, 1.0, stabs ? 0.5 : 0.0, stabs ? 0.25 : 0.9,
-                           [&] (int index, BeatPosition noteStart, BeatPosition noteEnd)
+                playSteps (chord.range.getStart(), from, to, 1.0, 0.5, 0.25,
+                           [&] (int, BeatPosition noteStart, BeatPosition noteEnd)
                            {
                                for (const auto pitch : pitches)
-                                   addNote (notes, clip, pitch, noteStart, noteEnd, stabs ? 96 : (index % 4 == 0 ? 96 : 84));
+                                   addNote (notes, clip, pitch, noteStart, noteEnd, 96);
                            });
 
                 previous = pitches;
@@ -674,58 +544,10 @@ std::vector<NoteData> makePartNotes (const std::vector<PlacedChord>& chords, Par
             }
 
             case PartStyle::bassRoots:
-            case PartStyle::bassPulses:
-            case PartStyle::bassRootFifth:
-            case PartStyle::bassOctaves:
-            {
-                // The chord's lowest note (its root, or the bass note of an inversion), from C2 up an octave.
-                const auto bass = lowestBassNote + classes.front();
-
-                if (style == PartStyle::bassRoots)
-                {
-                    addNote (notes, clip, bass, from, to, 100);
-                    break;
-                }
-
-                // The chord's own fifth (diminished, perfect or augmented), the first one above the bass note, or the octave
-                // when the bass note is the fifth.
-                const auto fifth = getFifthAbove (chord, bass);
-                const auto quarter = style == PartStyle::bassRootFifth;
-                playSteps (start, from, to, quarter ? 1.0 : 0.5, 0.0, quarter ? 0.9 : 0.45,
-                           [&] (int index, BeatPosition noteStart, BeatPosition noteEnd)
-                           {
-                               auto pitch = bass;
-
-                               if (style == PartStyle::bassRootFifth && index % 2 == 1)
-                                   pitch = fifth;
-                               else if (style == PartStyle::bassOctaves && index % 2 == 1)
-                                   pitch = bass + 12;
-
-                               addNote (notes, clip, pitch, noteStart, noteEnd, index % 2 == 0 ? 100 : 88);
-                           });
-                break;
-            }
-
-            case PartStyle::arpeggioUp:
-            case PartStyle::arpeggioDown:
-            case PartStyle::arpeggioUpDown:
             default:
-            {
-                // The chord's notes from middle C up, and its lowest note an octave higher at the top.
-                auto pitches = stackFrom (lowestArpeggioNote + classes.front(), classes);
-                pitches.push_back (pitches.front() + 12);
-
-                std::vector<int> order (pitches);
-
-                if (style == PartStyle::arpeggioDown)
-                    std::reverse (order.begin(), order.end());
-                else if (style == PartStyle::arpeggioUpDown)
-                    order.insert (order.end(), pitches.rbegin() + 1, pitches.rend() - 1);
-
-                playSteps (start, from, to, 0.5, 0.0, 0.45, [&] (int index, BeatPosition noteStart, BeatPosition noteEnd)
-                           { addNote (notes, clip, order[(size_t) index % order.size()], noteStart, noteEnd, index % 2 == 0 ? 96 : 84); });
+                // The chord's lowest note (its root, or the bass note of an inversion), from C2 up an octave.
+                addNote (notes, clip, lowestBassNote + classes.front(), from, to, 100);
                 break;
-            }
         }
     }
 

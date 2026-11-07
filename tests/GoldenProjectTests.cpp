@@ -107,6 +107,9 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     for (const auto start : { 1.0, 3.0 })
         phazite::addNote (song, beat, 38, beats (start), phazite::BeatDuration::fromBeats (0.25), 110);
 
+    // A name of its own, which the playlist shows over it; the other MIDI clips have none, and are called after their tracks.
+    phazite::renameClips (song, { beat }, "Groove");
+
     phazite::setDrumTrack (song, drums, true);
     const auto drumRows = phazite::ui::getDrumRows (phazite::getSamplerSounds (song, drums), phazite::getNoteNumbersPlayed (song, { beat }),
                                                     phazite::getDrumRowOrder (song, drums), phazite::getHiddenDrumRows (song, drums));
@@ -187,7 +190,7 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     phazite::loopBeats (song, { beats (4.0), beats (12.0) });
 
     // The chord lane: a progression in D minor over the intro and the drop, with a borrowed chord in its second inversion,
-    // a key change to F major for the outro, and a bass line made from the chords that follows them on a track of its own.
+    // and a key change to F major for the outro.
     const auto progression = phazite::Progression::fromJSON (
         juce::JSON::parse (R"({ "id": "golden", "name": "Golden", "scale": "minor", "chords": "i*2 VI VII/1 iim7b5 V7" })"));
     REQUIRE (progression.has_value());
@@ -197,7 +200,6 @@ void addRepresentativeContent (phazite::Project& project, const juce::File& scra
     phazite::putLaneChord (song, { at (20.0), at (24.0) }, { 2, -1, phazite::ChordType::majorSeventh, 2 });
     phazite::setLaneKey (song, at (24.0), { 5, phazite::Scale::major });
     phazite::putLaneChord (song, { at (24.0), at (32.0) }, { 1, 0, phazite::ChordType::suspendedFourth, 0 });
-    REQUIRE (phazite::addChordPart (song, phazite::PartStyle::bassRootFifth, { at (0.0), at (32.0) }, nullptr).isValid());
 }
 
 //==============================================================================

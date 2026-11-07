@@ -121,13 +121,14 @@ juce::String getPanelName (Panel);
 juce::String describePanel (Panel);
 
 //==============================================================================
-// The buttons in the lower panel's top right corner, as in the corner of VS Code's panel, which run its commands: Maximize
-// (or Restore the Panels), a window of its own, and Hide, an X. The side panels and the upper one have none: the activity
-// bar, the title bar's switches and their edges, dragged shut, hide them.
+// The buttons in a panel's top right corner, which run its commands: in the lower panel's, as in the corner of VS Code's
+// panel, Maximize (or Restore the Panels), a window of its own, and Hide, an X; in the inspector's, the X alone (the owner,
+// 2026-11-07). The left panel and the upper one have none: the activity bar, the title bar's switches and their edges,
+// dragged shut, hide them.
 class PanelButtons : public juce::Component
 {
 public:
-    PanelButtons (CommandBridge&, Panel);
+    PanelButtons (CommandBridge&, Panel); // the lower panel's or the inspector's
 
     void update (const PanelLayout&); // the first button maximizes the panel, or restores the others
     void refreshTooltips();           // with the commands' keys, after the keymap changed

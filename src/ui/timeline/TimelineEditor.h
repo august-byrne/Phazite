@@ -8,6 +8,7 @@
 #include "TimelineView.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/project/ProjectContext.h"
+#include "ui/components/ScrollBarFade.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
 
@@ -219,6 +220,7 @@ protected:
     juce::TextButton gridButton;
     TimelineRuler ruler { *this };
     juce::ScrollBar horizontalScrollBar { false }, verticalScrollBar { true };
+    ScrollBarFade verticalFade { verticalScrollBar, *this }; // the rows' bar, over them, shown while it is wanted
 
     // The room the vertical scroll bar takes: none while everything fits, when it hides (the editor is laid out again
     // when it shows or hides). The horizontal one always shows, as the time line goes on past the song.

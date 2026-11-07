@@ -285,7 +285,12 @@ namespace
             return property == schema::sendLevel ? juce::String ("send level") : withProperty ("send");
 
         if (element.hasType (schema::CLIP))
-            return withProperty ("clip \"" + element[schema::clipName].toString() + "\"");
+        {
+            // A clip without a name of its own is called after its track.
+            auto name = element[schema::clipName].toString();
+            name = name.isNotEmpty() ? name : element.getParent()[schema::trackName].toString();
+            return withProperty (name.isNotEmpty() ? "clip \"" + name + "\"" : juce::String ("a clip"));
+        }
 
         if (element.hasType (schema::NOTE))
             return property.isValid() ? "a note's " + property.toString() : juce::String ("a note");

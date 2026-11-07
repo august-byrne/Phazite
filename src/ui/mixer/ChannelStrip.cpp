@@ -144,7 +144,7 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
         slotHolder.addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &nameLabel, &inputLabel, &busButton, &slotView, &outputButton, &meter, &volume,
-                                                             &pan, &muteSolo, &cpuBar })
+                                                             &volumeScale, &pan, &muteSolo, &cpuBar })
         addAndMakeVisible (c);
 
     addChildComponent (arm);
@@ -448,10 +448,12 @@ void ChannelStrip::resized()
 
     inputLabel.setBounds (header);
 
-    // At the bottom: the fader with the meter, as tall in every strip, pan, and where the sound goes. The
+    // At the bottom: the fader with its scale and the meter, as tall in every strip, pan, and where the sound goes. The
     // instrument, effects and sends get what is left above them, and scroll. (The mixer keeps the strip at least
     // getMinimumHeight() tall.)
-    auto faderArea = area.removeFromBottom (faderHeight).withSizeKeepingCentre (std::min (area.getWidth(), 56), faderHeight);
+    auto faderArea = area.removeFromBottom (faderHeight)
+                         .withSizeKeepingCentre (std::min (area.getWidth(), faderWidth + FaderScaleTint::width), faderHeight);
+    volumeScale.setBounds (faderArea.removeFromLeft (FaderScaleTint::width));
     meter.setBounds (faderArea.removeFromRight (meterWidth));
     volume.setBounds (faderArea);
     area.removeFromBottom (Space::xs);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SectionsStrip.h"
+#include "ChordLane.h"
 #include "model/arrangement/Outlines.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -193,7 +194,7 @@ void SectionsStrip::mouseDown (const juce::MouseEvent& e)
         if (section.has_value() && ! selection.isSelected (section->id))
             selection.selectOnly (section->id);
 
-        showMenu (section, editor.getView().xToBeat (e.position.x));
+        getMenu (section, editor.getView().xToBeat (e.position.x)).showMenuAsync (juce::PopupMenu::Options());
         return;
     }
 
@@ -319,7 +320,7 @@ void SectionsStrip::addSectionAt (BeatPosition beat)
         range.clear();
 }
 
-void SectionsStrip::showMenuAt (BeatPosition where)
+juce::PopupMenu SectionsStrip::getMenuAt (BeatPosition where)
 {
     // As a right-click on the section there would.
     std::optional<SongSection> section;
@@ -331,7 +332,12 @@ void SectionsStrip::showMenuAt (BeatPosition where)
     if (section.has_value() && ! selection.isSelected (section->id))
         selection.selectOnly (section->id);
 
-    showMenu (section, where);
+    return getMenu (section, where);
+}
+
+void SectionsStrip::showMenuAt (BeatPosition where)
+{
+    getMenuAt (where).showMenuAsync (juce::PopupMenu::Options());
 }
 
 void SectionsStrip::startRenaming (SectionID id)
@@ -359,7 +365,7 @@ void SectionsStrip::renamed()
     repaint();
 }
 
-void SectionsStrip::showMenu (const std::optional<SongSection>& section, BeatPosition where)
+juce::PopupMenu SectionsStrip::getMenu (const std::optional<SongSection>& section, BeatPosition where)
 {
     auto& bridge = editor.getCommands();
     const juce::Component::SafePointer<SectionsStrip> safeThis (this);
@@ -405,6 +411,9 @@ void SectionsStrip::showMenu (const std::optional<SongSection>& section, BeatPos
                           safeThis->addSectionAt (where);
                   });
 
+    // A chord there: a song's first shows the chord lane.
+    menu.addSubMenu ("Add Chord Here", getAddChordMenu (context, where));
+
     // Each outline lays out the whole song; it replaces the sections there are.
     juce::PopupMenu outlines;
 
@@ -416,7 +425,7 @@ void SectionsStrip::showMenu (const std::optional<SongSection>& section, BeatPos
     // Where playback loops: the whole song, unless something else is looped on purpose.
     menu.addSeparator();
     addCommandItems (menu, bridge, { "transport.loop", "transport.loopSong", "transport.loopSelection" });
-    menu.showMenuAsync (juce::PopupMenu::Options());
+    return menu;
 }
 
 std::optional<BeatPosition> SectionsStrip::getDragTarget() const

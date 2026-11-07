@@ -88,7 +88,7 @@
            name="Group">
       <TRACK collapsed="0"
              fader="4"
-             height="80"
+             height="64"
              id="3"
              kind="track"
              name="One"
@@ -96,7 +96,6 @@
         <CLIP id="37"
               kind="midi"
               length="2"
-              name="One"
               start="0">
           <NOTE id="38"
                 length="0.25"
@@ -132,7 +131,6 @@
         <CLIP id="42"
               kind="midi"
               length="2"
-              name="One"
               start="4">
           <NOTE id="38"
                 length="0.5"
@@ -148,7 +146,6 @@
         <CLIP id="43"
               kind="midi"
               length="2"
-              name="One"
               offset="2"
               start="2">
           <NOTE id="38"
@@ -166,7 +163,7 @@
       <TRACK collapsed="0"
              colour="ff56b4e9"
              fader="6"
-             height="80"
+             height="64"
              id="5"
              kind="track"
              name="Two"/>

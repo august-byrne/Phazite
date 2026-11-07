@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Chords as plain values (docs/design.md, section 14; roadmap step 2.7): Phazite's own chord format, a Roman numeral
 // relative to a key, so that a chord follows the key when it changes; what a numeral is in a key (its root, notes and
-// name); and the parts made from chords: their styles, and their notes.
+// name); and chords written as notes.
 #pragma once
 
 #include "model/notes/NoteValues.h"
@@ -66,38 +66,15 @@ juce::String getSavedChordTypeName (ChordType);
 std::optional<ChordType> findChordType (const juce::String& savedName);
 
 //==============================================================================
-// Parts made from the chords (design.md, section 14): chords, a bass line or an arpeggio, voiced and played in a style.
-enum class PartKind
-{
-    chords,
-    bass,
-    arpeggio
-};
-
+// Chords written as notes, voiced and played in a style: for hearing a progression before it goes into the song (held
+// triads over their roots), and for the example songs' parts.
 enum class PartStyle
 {
     sustainedTriads, // chords, each held for its length
-    sustainedSevenths,
-    spreadChords,  // open: the root low, the other notes spread above it
-    pulsingChords, // a chord on every beat
-    offbeatStabs,  // short chords between the beats
-    bassRoots,     // the root, held
-    bassPulses,    // the root on every eighth note
-    bassRootFifth, // the root and its fifth, a beat each
-    bassOctaves,   // the root and the octave above it, an eighth note each
-    arpeggioUp,    // the chord's notes one at a time, eighth notes, going up
-    arpeggioDown,
-    arpeggioUpDown
+    spreadChords,    // open: the root low, the other notes spread above it
+    offbeatStabs,    // short chords between the beats
+    bassRoots        // the root, held
 };
-
-const std::vector<PartStyle>& getPartStyles(); // every style, in the order menus show them
-PartKind getPartKind (PartStyle);
-juce::String getPartKindName (PartKind);   // "Chords", "Bass", "Arpeggio"
-juce::String getPartStyleName (PartStyle); // "Sustained triads", "Root and fifth"
-
-// A style as projects save it ("bassRootFifth"...), and back: nothing for a name that isn't one.
-juce::String getSavedPartStyleName (PartStyle);
-std::optional<PartStyle> findPartStyle (const juce::String& savedName);
 
 // A chord over a stretch of the song, with the key it is in there.
 struct PlacedChord
@@ -107,8 +84,8 @@ struct PlacedChord
     Key key {};
 };
 
-// The notes of a part over some chords, from the range's start to its end, in song beats, to go in a clip: in a register
-// that suits the part (chords around middle C, a bass line an octave and a half under it), each chord voiced to move as
-// little as it can from the one before. Notes don't reach past their chord's end or the range's.
+// The notes of chords in a style, from the range's start to its end, in song beats, to go in a clip: in a register that suits
+// the style (chords around middle C, roots an octave and a half under it), each chord voiced to move as little as it can from
+// the one before. Notes don't reach past their chord's end or the range's.
 std::vector<NoteData> makePartNotes (const std::vector<PlacedChord>&, PartStyle, BeatRange, ClipID);
 } // namespace phazite

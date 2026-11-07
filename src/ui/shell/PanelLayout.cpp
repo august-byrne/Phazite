@@ -337,6 +337,9 @@ PanelButtons::PanelButtons (CommandBridge& bridge, Panel shownPanel)
 
 juce::Array<IconButton*> PanelButtons::getButtons()
 {
+    if (panel != Panel::editor)
+        return { &hideButton }; // the inspector's X
+
     return { &maximizeButton, &detachButton, &hideButton };
 }
 
@@ -373,7 +376,8 @@ void PanelButtons::refreshTooltips()
 
 int PanelButtons::getPreferredWidth() const noexcept
 {
-    return Shell::getPanelCornerWidth (Shell::panelCornerButtons) - Space::xs / 2; // its margin from the panel's edge aside
+    const auto buttons = panel == Panel::editor ? Shell::panelCornerButtons : 1;
+    return Shell::getPanelCornerWidth (buttons) - Space::xs / 2; // its margin from the panel's edge aside
 }
 
 void PanelButtons::resized()

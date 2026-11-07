@@ -105,7 +105,8 @@ struct ClipInfo
     TrackID track {};
     ClipType kind = ClipType::midi;
     juce::String name {};
-    BeatRange range {}; // where it is in the song
+    bool namedAfterTrack = false; // its name is its track's, as a new MIDI clip's is: the track's header says it already
+    BeatRange range {};           // where it is in the song
     bool muted = false;
     bool linked = false;       // an alias: what it plays is another clip's too
     bool followsTempo = false; // an audio clip that stretches with the song's tempo (AudioClipModel.h)
@@ -178,6 +179,11 @@ std::vector<ClipID> copyClips (ProjectContext&, const std::vector<ClipID>&, bool
 void deleteClips (ProjectContext&, const std::vector<ClipID>&, bool closeGap);
 void toggleClipsMuted (ProjectContext&, const std::vector<ClipID>&);
 void nudgeClips (ProjectContext&, const std::vector<ClipID>&, BeatDuration); // with the automation under them
+
+// A step of its own, "Rename Clip" ("Rename Clips" for several): the clips, and their aliases, which play what they play,
+// take the name, which the playlist shows over them. An empty name, or a clip's track's, leaves the clip called after its
+// track, which the playlist shows no name over (ClipInfo::namedAfterTrack).
+void renameClips (ProjectContext&, const std::vector<ClipID>&, const juce::String& name);
 
 // Automation goes with the clips above it (docs/design.md, section 10): after a drag moved or copied clips along their
 // tracks by a distance, the automation of each track's parameters under where they were goes the same way, in place of

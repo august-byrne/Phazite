@@ -39,12 +39,9 @@ namespace
         const auto track = getTrackID (clipState.getParent());
         const auto tracks = getTrackIDs (song);
         const auto row = (int) (std::find (tracks.begin(), tracks.end(), track) - tracks.begin());
-        return { getClipID (clipState),
-                 track,
-                 clipState[schema::clipName].toString(),
-                 getClipRange (clipState),
-                 getContentStart (clipState),
-                 getTrackColour (song, track, row) };
+        return { getClipID (clipState),         track,
+                 getClipName (song, clipState), getClipRange (clipState),
+                 getContentStart (clipState),   getTrackColour (song, track, row) };
     }
 } // namespace
 

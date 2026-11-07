@@ -28,6 +28,8 @@
 #include "ui/playlist/TrackHeights.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <array>
+
 namespace
 {
 phazite::BeatPosition beats (double b)
@@ -842,6 +844,64 @@ TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren'
     CHECK (image.getPixelAt (point.x, point.y) == phazite::ui::getPalette (screen.playlist).background);
 }
 
+TEST_CASE ("A clip fills its row down to the line under it, and the grid shows through it")
+{
+    // The owner, 2026-11-07: clips kept a wider gap under them than other DAWs do, and hid the grid, which shows through
+    // automation lanes.
+    PlaylistScreen screen;
+    const auto clip = screen.addClip (0, 0.0, 8.0);
+    const auto next = screen.addClip (1, 0.0, 8.0);
+    phazite::test::dispatchPendingMessages();
+
+    // From its row's top to the line under the row; the next track's clip starts right under that line.
+    const auto bounds = screen.boundsOf (clip);
+    CHECK (bounds.getY() == 0);
+    CHECK (bounds.getBottom() == phazite::ui::TrackHeight::standard - 1);
+    CHECK (screen.boundsOf (next).getY() == phazite::ui::TrackHeight::standard);
+
+    // Its track's colour, see-through: over the row as it shows without a clip, and with the bar line at beat 4 through it.
+    const auto image = screen.window.paintEverything();
+    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto xOf = [&screen, lanesAt] (double beat)
+    { return lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
+    const auto y = lanesAt.y + screen.at (0.0, 0).y; // under its name
+    const auto row = image.getPixelAt (xOf (10.37), y);
+    const auto colour = phazite::getTrackColour (screen.getSong(), screen.tracks[0], 0);
+    const auto expected = row.overlaidWith (colour.withAlpha (phazite::ui::ClipTint::body));
+    const auto shown = image.getPixelAt (xOf (2.37), y);
+    CHECK (std::abs ((int) shown.getRed() - (int) expected.getRed()) <= 2);
+    CHECK (std::abs ((int) shown.getGreen() - (int) expected.getGreen()) <= 2);
+    CHECK (std::abs ((int) shown.getBlue() - (int) expected.getBlue()) <= 2);
+    CHECK (image.getPixelAt (xOf (4.0), y) != shown);
+}
+
+TEST_CASE ("Clips side by side on a track have a line of what is behind them between them, not their two edges")
+{
+    // The owner, 2026-11-07: "the borders of the tracks, when sitting right next to each other, make that part of the border
+    // look thick. maybe a 1 px line between would help?"
+    PlaylistScreen screen;
+    screen.addClip (0, 0.0, 4.0);
+    screen.addClip (0, 4.0, 4.0);
+    phazite::test::dispatchPendingMessages();
+
+    const auto image = screen.window.paintEverything();
+    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto y = lanesAt.y + screen.at (0.0, 0).y;
+    const auto boundary = lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (4.0)));
+    const auto colour = phazite::getTrackColour (screen.getSong(), screen.tracks[0], 0);
+    const auto row = image.getPixelAt (lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (10.37))), y);
+    const auto near = [] (juce::Colour a, juce::Colour b)
+    {
+        return std::abs (a.getRed() - b.getRed()) <= 2 && std::abs (a.getGreen() - b.getGreen()) <= 2
+               && std::abs (a.getBlue() - b.getBlue()) <= 2;
+    };
+
+    // The first clip's edge, then the row as it shows without a clip, then the second clip's edge.
+    CHECK (near (image.getPixelAt (boundary - 2, y), colour));
+    CHECK (near (image.getPixelAt (boundary - 1, y), row));
+    CHECK (near (image.getPixelAt (boundary, y), colour));
+}
+
 TEST_CASE ("A folder's row shows its tracks' clips in their colors, collapsed too, with no components of its own")
 {
     PlaylistScreen screen;
@@ -977,10 +1037,10 @@ TEST_CASE ("Clips that overlap on a track show one under another, and each is gr
     const auto top = screen.boundsOf (first), bottom = screen.boundsOf (second), whole = screen.boundsOf (alone);
     REQUIRE_FALSE (top.isEmpty());
     REQUIRE_FALSE (bottom.isEmpty());
-    CHECK (top.getY() == 1);
+    CHECK (top.getY() == 0);
     CHECK (bottom.getY() == top.getBottom() + 1);
-    CHECK (bottom.getBottom() == phazite::ui::TrackHeight::standard - 2);
-    CHECK (whole.getHeight() == phazite::ui::TrackHeight::standard - 3);
+    CHECK (bottom.getBottom() == phazite::ui::TrackHeight::standard - 1);
+    CHECK (whole.getHeight() == phazite::ui::TrackHeight::standard - 1);
 
     // Where they overlap, each is clicked in its own half.
     phazite::test::Mouse mouse (*screen.lanes);
@@ -1452,4 +1512,168 @@ TEST_CASE ("A track without an instrument has an arm switch: with an input, a cl
     phazite::setArmed (screen.context, screen.tracks[0], false);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK_FALSE (arm->getToggleState());
+}
+
+TEST_CASE ("A clip shows a tag with its name only where that isn't its track's, and a link while it is an alias")
+{
+    // The owner, 2026-11-07: a strip along the top of every clip repeated its track's name, with a "*" after an alias's.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    PlaylistScreen screen;
+    auto& song = screen.getSong();
+    phazite::setTrackName (song, screen.tracks[0], "Keys");
+    const auto clip = screen.addClip (0, 0.0, 8.0);
+    const auto aliases = phazite::copyClips (song, { clip }, true);
+    REQUIRE (aliases.size() == 1);
+    phazite::moveClip (song, aliases[0], beats (16.0), screen.tracks[0]);
+    const auto alone = screen.addClip (1, 0.0, 8.0);
+    phazite::test::dispatchPendingMessages();
+
+    const auto componentOf = [&screen] (phazite::ClipID id) -> phazite::ui::ClipComponent*
+    {
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (component->getClip() == id)
+                return component;
+
+        return nullptr;
+    };
+
+    // Where its name's tag goes, at its top left, and its marks', at its top right: whether the tag's colour, opaque, shows
+    // there, or the clip see-through. (Inside each tag's edge, beside what is drawn on it.)
+    const auto tagShows = [&screen] (const phazite::ui::ClipComponent& shown, bool atRight)
+    {
+        const auto area = screen.playlist.getLocalArea (&shown, shown.getLocalBounds());
+        const auto x = atRight ? area.getRight() - 1 - phazite::ui::ClipLabelTint::margin - 2 * phazite::ui::ClipLabelTint::iconGap
+                                     - phazite::ui::ClipLabelTint::iconSize + 1
+                               : area.getX() + phazite::ui::ClipLabelTint::margin + 1;
+        const auto y = area.getY() + phazite::ui::ClipLabelTint::margin + phazite::ui::ClipLabelTint::height / 2;
+        return screen.window.paintEverything().getPixelAt (x, y) == shown.getColour();
+    };
+
+    // Called after its track: no name over it, which screen readers still read, as they read that it is an alias. The link
+    // shows on both aliases, not on the clip that is none.
+    auto* shown = componentOf (clip);
+    auto* other = componentOf (alone);
+    REQUIRE (shown != nullptr);
+    REQUIRE (other != nullptr);
+    CHECK (shown->getLabel().isEmpty());
+    CHECK (shown->getTitle() == juce::String ("Keys"));
+    CHECK (shown->getDescription().contains ("alias"));
+    CHECK_FALSE (tagShows (*shown, false));
+    CHECK (tagShows (*shown, true));
+    CHECK_FALSE (tagShows (*other, true));
+
+    // A name of its own: on it and its alias.
+    phazite::renameClips (screen.context, { clip }, "Verse");
+    phazite::test::dispatchPendingMessages();
+    CHECK (shown->getLabel() == juce::String ("Verse"));
+    REQUIRE (componentOf (aliases[0]) != nullptr);
+    CHECK (componentOf (aliases[0])->getLabel() == juce::String ("Verse"));
+    CHECK (tagShows (*shown, false));
+
+    // Made unique, the link goes; called after its track again, so does the name.
+    phazite::makeClipsUnique (song, { clip });
+    phazite::renameClips (screen.context, { clip }, {});
+    phazite::test::dispatchPendingMessages();
+    CHECK (shown->getLabel().isEmpty());
+    CHECK_FALSE (tagShows (*shown, true));
+}
+
+TEST_CASE ("A muted clip is drawn faint, all of it: its row shows through it more than through a clip that plays")
+{
+    // Known bug 11 until 2026-11-07: the playlist drew a muted clip as any other, though a folder's row and the overview
+    // showed it faint.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    PlaylistScreen screen;
+    const auto clip = screen.addClip (0, 0.0, 8.0);
+    phazite::test::dispatchPendingMessages();
+
+    // The middle of its row, between the grid's lines, in it and past its end.
+    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto inClip = lanesAt + screen.at (2.37, 0), pastIt = lanesAt + screen.at (12.37, 0);
+    const auto distance = [] (juce::Colour a, juce::Colour b)
+    {
+        return std::abs ((int) a.getRed() - (int) b.getRed()) + std::abs ((int) a.getGreen() - (int) b.getGreen())
+               + std::abs ((int) a.getBlue() - (int) b.getBlue());
+    };
+
+    auto image = screen.window.paintEverything();
+    const auto row = image.getPixelAt (pastIt.x, pastIt.y);
+    const auto playing = image.getPixelAt (inClip.x, inClip.y);
+
+    phazite::toggleClipsMuted (screen.getSong(), { clip });
+    phazite::test::dispatchPendingMessages();
+    image = screen.window.paintEverything();
+    const auto muted = image.getPixelAt (inClip.x, inClip.y);
+    CHECK (distance (muted, row) < distance (playing, row) / 2);
+    CHECK (muted != row); // faint, not gone
+
+    // Screen readers say so too.
+    const auto components = phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist);
+    REQUIRE (components.size() == 1);
+    CHECK (components.getFirst()->getDescription().contains ("Muted"));
+}
+
+TEST_CASE ("A track that isn't heard, muted or kept quiet by another's solo, shows its clips faint, as a muted clip shows")
+{
+    // The owner, 2026-11-07, as other DAWs dim a muted track's clips.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    PlaylistScreen screen;
+    const auto first = screen.addClip (0, 0.0, 8.0);
+    screen.addClip (1, 0.0, 8.0);
+    phazite::test::dispatchPendingMessages();
+
+    // How far a track's clip is from its row's colour past its end, in the middle of the row, between the grid's lines.
+    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto contrast = [&screen, lanesAt] (int track)
+    {
+        const auto image = screen.window.paintEverything();
+        const auto inClip = lanesAt + screen.at (2.37, track), pastIt = lanesAt + screen.at (12.37, track);
+        const auto a = image.getPixelAt (inClip.x, inClip.y), b = image.getPixelAt (pastIt.x, pastIt.y);
+        return std::abs ((int) a.getRed() - (int) b.getRed()) + std::abs ((int) a.getGreen() - (int) b.getGreen())
+               + std::abs ((int) a.getBlue() - (int) b.getBlue());
+    };
+
+    const std::array playing { contrast (0), contrast (1) }; // each in its track's colour
+    REQUIRE (playing[0] > 0);
+    REQUIRE (playing[1] > 0);
+    const auto isFaint = [&contrast, &playing] (int track)
+    {
+        const auto shown = contrast (track);
+        return shown > 0 && shown < playing[(size_t) track] / 2; // faint, not gone
+    };
+
+    const auto clipOf = [&screen] (phazite::ClipID clip) -> phazite::ui::ClipComponent*
+    {
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (component->getClip() == clip)
+                return component;
+
+        return nullptr;
+    };
+
+    // Muted, its clips are faint, and screen readers say why; unmuted, they are as they were.
+    phazite::toggleMute (screen.context, screen.tracks[0]);
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFaint (0));
+    REQUIRE (clipOf (first) != nullptr);
+    CHECK (clipOf (first)->getDescription().contains ("isn't heard"));
+    phazite::toggleMute (screen.context, screen.tracks[0]);
+    phazite::test::dispatchPendingMessages();
+    CHECK (contrast (0) == playing[0]);
+    CHECK_FALSE (clipOf (first)->getDescription().contains ("isn't heard"));
+
+    // The other track soloed: its clips play, and this one's are faint until the solo goes.
+    phazite::toggleSolo (screen.context, screen.tracks[1]);
+    phazite::test::dispatchPendingMessages();
+    CHECK (isFaint (0));
+    CHECK (contrast (1) == playing[1]);
+    phazite::toggleSolo (screen.context, screen.tracks[1]);
+    phazite::test::dispatchPendingMessages();
+    CHECK (contrast (0) == playing[0]);
 }

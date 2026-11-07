@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// A clip in the playlist: its name and color, and a preview of what it holds (an audio clip's waveform
-// and fades, a MIDI clip's notes). It only draws: the playlist handles the mouse, with the Smart Tool. The playlist makes
-// one only for a clip in view.
+// A clip in the playlist: in its track's color, a preview of what it holds (an audio clip's waveform and fades, a MIDI
+// clip's notes), which fills it, and over that its name where it says more than its track's header does, and marks for an
+// alias and for a sample that follows the tempo. It only draws: the playlist handles the mouse, with the Smart Tool. The
+// playlist makes one only for a clip in view.
 #pragma once
 
 #include "ClipWaveform.h"
@@ -32,8 +33,9 @@ public:
     // or nullptr.
     void showWaveform (ClipWaveform*);
 
-    // Shows it in its track's color, whether it is selected, and frosted if its track is frozen.
-    void showLook (juce::Colour, bool isSelected, bool isFrozen = false);
+    // Shows it in its track's color, whether it is selected, frosted if its track is frozen, and faint, as a muted clip is, while
+    // its track isn't heard (muted, or kept quiet by other tracks' solos).
+    void showLook (juce::Colour, bool isSelected, bool isFrozen = false, bool trackSilent = false);
 
     // While its render is being made (model/arrangement/AudioClipModel.h), how far it has come, from 0 to 1: its waveform
     // faint, as it is silent until then, and a bar along its bottom edge; nothing once it plays.
@@ -41,7 +43,13 @@ public:
     std::optional<double> getRendering() const noexcept { return rendering; }
     juce::Colour getColour() const noexcept { return colour; }
     bool isFrozen() const noexcept { return frozen; }
-    juce::Colour getInk() const; // what is drawn on it: its name and its notes
+    bool isFaint() const noexcept { return info.muted || trackSilent; } // muted, or on a track that isn't heard
+    juce::Colour getInk() const;                                        // what is drawn on it: its notes, its waveform
+
+    // What its tag at its top left says: its name where that isn't its track's, which the track's header shows (a sample's,
+    // or one given it), and the take a clip recorded round a loop plays, of how many; nothing for a clip called after its
+    // track, which shows no tag.
+    juce::String getLabel() const;
 
     void paint (juce::Graphics&) override;
 
@@ -51,13 +59,19 @@ private:
     ClipInfo info;
     std::vector<NoteShape> notes; // a MIDI clip's
     juce::Colour colour;
-    bool selected = false, frozen = false;
-    std::optional<double> rendering;                       // to a hundredth
-    ClipWaveform* waveform = nullptr;                      // an audio clip's, the playlist's
-    std::unique_ptr<juce::Drawable> tempoMark;             // the metronome a sample that follows the tempo shows, once drawn
-    juce::Colour tempoMarkColour { juce::Colours::black }; // the color the drawing is in now
+    bool selected = false, frozen = false, trackSilent = false;
+    std::optional<double> rendering;  // to a hundredth
+    ClipWaveform* waveform = nullptr; // an audio clip's, the playlist's
+
+    // The marks at its top right, once drawn, and the color each drawing is in now: an alias's link, and the metronome of a
+    // sample that follows the tempo.
+    std::unique_ptr<juce::Drawable> aliasMark, tempoMark;
+    juce::Colour aliasMarkColour { juce::Colours::black }, tempoMarkColour { juce::Colours::black };
 
     juce::Colour getFill() const;
+    void describe();                                              // what screen readers say of it besides its name
+    juce::Rectangle<int> getShape() const;                        // what it draws in: all of it but its last pixel's column
+    void paintTags (juce::Graphics&, juce::Rectangle<int> shape); // its name and its marks, over what it holds
     void paintFades (juce::Graphics&, juce::Rectangle<int>);
     void paintNotes (juce::Graphics&, juce::Rectangle<int>, juce::Colour);
 };

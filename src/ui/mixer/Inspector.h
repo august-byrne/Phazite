@@ -36,6 +36,12 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    // The row its title is in, across its width: the shell puts the panel's X at its right end (PanelButtons, in
+    // ui/shell/PanelLayout.h), and the title leaves it that much room from its right edge (none while the inspector is in a
+    // window of its own, which has no X).
+    juce::Rectangle<int> getTitleRow() const;
+    void setTitleRoom (int);
+
     // What is shown for one kind of thing: a title, then rows of a name and a value.
     struct Page;
 
@@ -70,6 +76,7 @@ private:
     juce::Viewport view; // scrolls the page up and down when the panel is shorter than it
     std::unique_ptr<Page> page;
     Target shown;
+    int titleRoom = 0; // setTitleRoom()
 
     Target getTarget() const;
     void showTarget(); // a new page if the selection points to something else

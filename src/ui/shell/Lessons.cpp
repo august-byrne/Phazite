@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Lessons.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/chords/ChordModel.h"
 #include "model/transport/RecordingModel.h"
 #include "ui/input/CommandUI.h"
 
@@ -133,16 +134,16 @@ const std::vector<Lessons::Lesson>& Lessons::getAll()
 
         { "chords",
           "Write Chords",
-          "Puts a chord progression on the chord lane, and makes parts that play it.",
-          { { .text = "{run:chords.progressions} to open Chord Progressions: listen to a few, and put one on the chord lane.",
-              .doneBy = { "chords.progressions" },
-              .target = "chordLane" },
+          "Puts a chord progression on the song's chord lane, and writes a part that plays it.",
+          { { .text = "{run:chords.progressions} to open Chord Progressions: listen to a few, and put one on the song. Its chords show "
+                      "in the chord lane, under the bar numbers.",
+              .isDone = [] (const ProjectContext& project) { return hasLaneChords (project); } },
             { .text = "Click a chord in the lane under the bar numbers to change it. Click Next when you like it.", .target = "chordLane" },
-            { .text = "{run:chords.makeChordPart} for a track that plays the chords, or {run:chords.makeBassLine} for a bass line.",
-              .doneBy = { "chords.make*" },
-              .target = "chordLane" },
+            { .text = "Double-click a row of a track with an instrument, under the chords, to add a clip. In the piano roll, the rows of "
+                      "the chord's notes are tinted: draw notes there. Click Next when you have some.",
+              .target = "pianoRoll" },
             { .text = "{run:transport.playStop} to hear them.", .doneBy = { "transport.playStop", "transport.playPause" } } },
-          "The parts follow the chords until you change their notes." },
+          "The chord lane is a guide: change a chord, and the piano roll tints its notes." },
     };
 
     return lessons;

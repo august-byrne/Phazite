@@ -557,6 +557,10 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Browser");
 
+    // Its icon gives it the keys (and a screen reader its name), not its search field, so that Space plays on; Tab goes on into
+    // its parts.
+    setWantsKeyboardFocus (true);
+
     searchField.setTitle ("Search sounds, instruments and effects");
     searchField.setTooltip ("Type to find sounds, presets, instruments and effects, the best matches first; Down or Enter goes to them");
     searchField.setFont (juce::FontOptions (TextSize::body));

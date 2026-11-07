@@ -481,6 +481,7 @@ juce_add_binary_data(phazite_data
         resources/logo/phazite.svg
         # Lucide 1.55.0 icons (ISC; those that come from Feather: MIT): resources/icons/lucide/LICENSE
         resources/icons/lucide/app-window.svg
+        resources/icons/lucide/arrow-up-to-line.svg
         resources/icons/lucide/audio-lines.svg
         resources/icons/lucide/check.svg
         resources/icons/lucide/chevron-down.svg
@@ -506,6 +507,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/layout-dashboard.svg
         resources/icons/lucide/library.svg
+        resources/icons/lucide/link.svg
         resources/icons/lucide/magnet.svg
         resources/icons/lucide/maximize-2.svg
         resources/icons/lucide/menu.svg
@@ -650,6 +652,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/PeakBar.h
     src/ui/components/PowerSwitch.cpp
     src/ui/components/PowerSwitch.h
+    src/ui/components/ScrollBarFade.cpp
+    src/ui/components/ScrollBarFade.h
     src/ui/components/SectionHeader.cpp
     src/ui/components/SectionHeader.h
     src/ui/components/TrackSwitch.cpp
@@ -732,6 +736,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/input/LibraryDrag.h
     src/ui/input/PluginKeys.cpp
     src/ui/input/PluginKeys.h
+    src/ui/input/TextFieldRelease.cpp
+    src/ui/input/TextFieldRelease.h
     src/ui/input/WindowKeys.cpp
     src/ui/input/WindowKeys.h
     src/ui/mixer/ChannelStrip.cpp
@@ -1160,6 +1166,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TempoTests.cpp
         tests/TestSong.cpp
         tests/TestSong.h
+        tests/TextFieldReleaseTests.cpp
         tests/TimelineGestureTests.cpp
         tests/TimelineModelTests.cpp
         tests/TimelineTests.cpp

@@ -3,8 +3,9 @@
 // tab while the selection is an audio clip or a track that holds audio, as the piano roll is for MIDI clips. It shows the
 // clip's whole audio file, as wide as the editor, and never scrolls or zooms (the owner, 2026-10-30): the clip's part of it
 // in its track's color, with what its edges trim off shaded; its ruler counts the song's bars where the audio plays, so
-// that what is trimmed lines up with the song. Down the left, how the clip plays it: its gain, its pitch and fine tuning,
-// Reverse, and Follow Tempo with the tempo the audio was played at. On the audio, the clip's edges, brackets with a grip,
+// that what is trimmed lines up with the song. Down the left, how the clip plays it: its gain, with Normalize beside it,
+// which sets the gain from the clip's loudest peak, its pitch and fine tuning, Reverse, and Follow Tempo with the tempo the
+// audio was played at. On the audio, the clip's edges, brackets with a grip,
 // trim it, the round handles at its top corners fade it, and a drag on the clip's part moves it along the audio, the clip
 // staying where it is in the song (as the Slip tool does in the playlist); a double-click on a fade's handle takes the fade
 // away. Each fade's curve bends by the handle in its middle, dragged up or down, as an automation lane's line bends: a
@@ -17,6 +18,7 @@
 #include "model/commands/SongGesture.h"
 #include "model/project/ProjectContext.h"
 #include "ui/components/Controls.h"
+#include "ui/theme/Icons.h"
 #include "ui/timeline/TimelineEditor.h"
 
 #include <memory>
@@ -74,6 +76,7 @@ private:
 
     juce::Label gainLabel, pitchLabel, fineLabel, tempoLabel, clipLabel;
     NumberField gainField, pitchField, fineField, tempoField;
+    IconButton normalizeButton { "Normalize", Icon::normalize }; // at the gain's right
     juce::TextButton reverseButton { "Reverse" }, followButton { "Follow tempo" };
     std::unique_ptr<SongGesture> fieldDrag; // while a field is dragged: the drag's one undo step
     std::unique_ptr<Waveform> waveform;

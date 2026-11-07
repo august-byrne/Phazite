@@ -40,8 +40,6 @@ public:
     VersionsView (CommandBridge&, ProjectContext&, Settings&);
     ~VersionsView() override;
 
-    // The keyboard to the commit's message, as showing the view gives it the keyboard.
-    void focusMessage();
     void refreshTooltips(); // with the commands' keys, after the keymap changed
 
     void paint (juce::Graphics&) override;

@@ -1102,9 +1102,9 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
             menu.addSubMenu ("Song Outline", outlines);
 
-            // The chord lane's progressions, and the parts made from its chords.
+            // The chord lane's progressions, which put chords on it: the playlist shows it once the song has some.
             menu.addSeparator();
-            add (menu, { "chords.progressions", "chords.makeChordPart", "chords.makeBassLine", "chords.makeArpeggio" });
+            add (menu, { "chords.progressions" });
             break;
         }
 

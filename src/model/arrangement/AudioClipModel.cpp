@@ -182,6 +182,11 @@ void setClipGain (ProjectContext& context, ClipID id, float decibels)
     changeClip (context, id, "Change Clip Gain", [id, decibels] (Song& song) { setClipGain (song, id, decibels); });
 }
 
+void normalizeClip (ProjectContext& context, ClipID id)
+{
+    changeClip (context, id, "Normalize Clip", [id] (Song& song) { normalizeClips (song, { id }); });
+}
+
 void setClipPitch (ProjectContext& context, ClipID id, float semitones)
 {
     changeClip (context, id, "Change Clip Pitch", [id, semitones] (Song& song) { setClipPitch (song, id, semitones); });

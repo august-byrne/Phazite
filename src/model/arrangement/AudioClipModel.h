@@ -16,6 +16,7 @@ namespace phazite
 {
 // What the editor offers.
 inline constexpr float minClipGain = -60.0f, maxClipGain = 24.0f;  // decibels
+inline constexpr float normalizedPeak = -1.0f;                     // decibels: where Normalize puts a clip's loudest peak
 inline constexpr float maxClipPitch = 48.0f;                       // semitones, up or down
 inline constexpr double minClipTempo = 20.0, maxClipTempo = 300.0; // beats per minute, as the song's tempo
 
@@ -85,6 +86,12 @@ void setClipsTo (ProjectContext&, const std::vector<ClipID>&, ClipProperty, doub
 //==============================================================================
 // "Change Clip Gain": in decibels, kept within the editor's range.
 void setClipGain (ProjectContext&, ClipID, float decibels);
+
+// "Normalize Clip": its gain set so that the loudest peak of the part of its file it plays plays at normalizedPeak, a
+// little under full scale, as Apple and Avid advise leaving room (docs/design.md, section 7); within the editor's range.
+// It reads the part as recorded (pitch and stretch barely move a peak, and fades only lower one); its file doesn't change.
+// A clip whose part is silent, or whose file can't be read, keeps its gain.
+void normalizeClip (ProjectContext&, ClipID);
 
 // "Change Clip Pitch": in semitones, with cents as hundredths, kept within the editor's range. The clip keeps its length.
 void setClipPitch (ProjectContext&, ClipID, float semitones);

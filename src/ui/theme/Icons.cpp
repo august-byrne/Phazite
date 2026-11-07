@@ -92,6 +92,10 @@ namespace
                 return "snowflake.svg";
             case Icon::lowLatency:
                 return "zap.svg";
+            case Icon::alias:
+                return "link.svg";
+            case Icon::normalize:
+                return "arrow-up-to-line.svg";
             case Icon::maximizePanel:
                 return "maximize-2.svg";
             case Icon::restorePanels:

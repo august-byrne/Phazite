@@ -336,7 +336,8 @@ void TopBar::paint (juce::Graphics& g)
 
 void TopBar::resized()
 {
-    auto area = getLocalBounds().reduced (Space::s, (getHeight() - controlHeight) / 2);
+    // Along its top, under the title bar's controls, with the room under them that Shell::transportBarHeight keeps.
+    auto area = getLocalBounds().reduced (Space::s, 0).removeFromTop (controlHeight);
 
     playButton.setBounds (area.removeFromLeft (44));
     recordButton.setBounds (area.removeFromLeft (44));

@@ -2,6 +2,7 @@
 // The playlist's tracks shown as rows, and their clips on them.
 #include "PlaylistParts.h"
 #include "TrackHeights.h"
+#include "model/mixer/MixerModel.h"
 
 namespace phazite::ui
 {
@@ -339,10 +340,13 @@ void Playlist::updateClips()
 
 void Playlist::showLookOf (ClipComponent& component) const
 {
-    // A clip shows in its track's colour, as the track's header does, frosted if the track is frozen.
-    const auto row = getRowOf (component.getInfo().track);
+    // A clip shows in its track's colour, as the track's header does, frosted if the track is frozen, and faint while the track
+    // isn't heard, muted or kept quiet by other tracks' solos, as other DAWs dim a muted track's clips (the owner, 2026-11-07).
+    const auto track = component.getInfo().track;
+    const auto row = getRowOf (track);
+    const auto state = getMuteSolo (context, track);
     component.showLook (row >= 0 ? rows[(size_t) row].track.colour : juce::Colours::grey, selection.isSelected (component.getClip()),
-                        row >= 0 && rows[(size_t) row].track.frozen);
+                        row >= 0 && rows[(size_t) row].track.frozen, state.has_value() && (state->muted || state->silencedBySolo));
 }
 
 juce::Rectangle<int> Playlist::getClipBounds (const ClipInfo& clip) const
@@ -357,13 +361,14 @@ juce::Rectangle<int> Playlist::getClipBounds (const ClipInfo& clip) const
     const auto left = juce::roundToInt (timeline.beatToX (clip.range.getStart()));
     const auto right = juce::roundToInt (timeline.beatToX (clip.range.getEnd()));
 
-    // Clips that overlap share the row out, one under another, a pixel apart.
+    // A clip fills its row down to the line under it (Lanes::paint()), which is all that keeps it apart from the next track's
+    // clips, as in FL Studio and Ableton Live. Clips that overlap share the row out, one under another, a pixel apart.
     const auto found = clipIndex.find (clip.id);
     const auto subRow = found != clipIndex.end() ? shownSubRows[found->second] : ClipSubRow();
-    const auto height = std::max (1, r.height - 3);
+    const auto height = std::max (1, r.height - 1);
     const auto top = height * subRow.index / subRow.count;
     const auto bottom = height * (subRow.index + 1) / subRow.count - (subRow.index + 1 < subRow.count ? 1 : 0);
-    return { left, getRowTop (r) + 1 + top, std::max (2, right - left), std::max (1, bottom - top) };
+    return { left, getRowTop (r) + top, std::max (2, right - left), std::max (1, bottom - top) };
 }
 
 const ClipInfo* Playlist::getClipAt (juce::Point<int> position) const

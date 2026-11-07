@@ -70,7 +70,8 @@ namespace
         info.id = getClipID (clipState);
         info.track = getTrackID (clipState.getParent());
         info.kind = isAudioState (clipState) ? ClipType::audio : ClipType::midi;
-        info.name = clipState[schema::clipName].toString();
+        info.name = getClipName (song, clipState);
+        info.namedAfterTrack = info.name == getTrackName (song, info.track);
         info.range = getClipRange (song, clipState);
         info.muted = clipState[schema::clipMute];
         info.linked = clipState.hasProperty (schema::clipLink);
@@ -502,6 +503,12 @@ void nudgeClips (ProjectContext& context, const std::vector<ClipID>& ids, BeatDu
 {
     if (auto* song = findSong (context))
         nudgeClips (*song, ids, step);
+}
+
+void renameClips (ProjectContext& context, const std::vector<ClipID>& ids, const juce::String& name)
+{
+    if (auto* song = findSong (context))
+        renameClips (*song, ids, name);
 }
 
 void moveAutomationWithClips (ProjectContext& context, const std::vector<ClipPlace>& places, BeatDuration distance, bool copied)

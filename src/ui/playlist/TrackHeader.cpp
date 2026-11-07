@@ -227,7 +227,9 @@ void TrackHeader::resized()
                     .withTrimmedLeft (getTrackStripsWidth (row) + Space::s)
                     .withTrimmedRight (PeakBarTint::width + Space::xs)
                     .withTrimmedBottom (1);
-    auto top = area.removeFromTop (juce::jmin (area.getHeight(), controlHeight + Space::xs));
+    // The name and the switches in a row as tall as a control, which leaves what an armed track records room under it in a
+    // track of TrackHeight::standard.
+    auto top = area.removeFromTop (juce::jmin (area.getHeight(), controlHeight));
 
     // The switches shrink to fit a collapsed row. A row shorter than that has room only for the name. The master's row
     // has its name only, for its lanes.

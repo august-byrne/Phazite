@@ -187,7 +187,7 @@ TEST_CASE ("The chords of a key's scale, and the key a progression plays in")
     CHECK (phazite::getKeyForProgression ({ 7, Scale::mixolydian }, Scale::minor) == aMinor);
 }
 
-TEST_CASE ("Chord kinds and part styles keep the names projects save them by")
+TEST_CASE ("Chord kinds keep the names projects save them by")
 {
     for (const auto& shape : phazite::getChordShapes())
     {
@@ -200,23 +200,9 @@ TEST_CASE ("Chord kinds and part styles keep the names projects save them by")
     CHECK (phazite::getSavedChordTypeName (ChordType::dominantSeventh) == juce::String ("dominantSeventh"));
     CHECK (phazite::getSavedChordTypeName (ChordType::halfDiminishedSeventh) == juce::String ("halfDiminishedSeventh"));
     CHECK_FALSE (phazite::findChordType ("seventh").has_value());
-
-    CHECK (phazite::getPartStyles().size() == 12);
-
-    for (const auto style : phazite::getPartStyles())
-    {
-        const auto saved = phazite::getSavedPartStyleName (style);
-        CHECK (phazite::findPartStyle (saved) == style);
-        CHECK (phazite::getPartStyleName (style).isNotEmpty());
-    }
-
-    CHECK (phazite::getSavedPartStyleName (PartStyle::bassRootFifth) == juce::String ("bassRootFifth"));
-    CHECK (phazite::getPartKind (PartStyle::offbeatStabs) == phazite::PartKind::chords);
-    CHECK (phazite::getPartKind (PartStyle::bassOctaves) == phazite::PartKind::bass);
-    CHECK (phazite::getPartKind (PartStyle::arpeggioUpDown) == phazite::PartKind::arpeggio);
 }
 
-TEST_CASE ("Parts made from chords: held chords that move little, around middle C")
+TEST_CASE ("Chords written as notes: held chords that move little, around middle C")
 {
     const phazite::ClipID clip = phazite::ClipID::fromRaw (7);
     const auto chords = bars ({ "I", "vi", "IV", "V" });
@@ -251,22 +237,14 @@ TEST_CASE ("Parts made from chords: held chords that move little, around middle 
         previous = pitches;
     }
 
-    // Sevenths add the scale's seventh above each triad: Cmaj7 in C major.
-    const auto sevenths = phazite::makePartNotes (bars ({ "I" }), PartStyle::sustainedSevenths, { beat (0.0), beat (4.0) }, clip);
-    CHECK (getPitchClasses (sevenths) == std::set<int> { 0, 4, 7, 11 });
-
     // Spread chords: the root low, with its fifth, and the rest an octave above (the fifth again among them).
     const auto spread = getPitches (phazite::makePartNotes (bars ({ "I" }), PartStyle::spreadChords, { beat (0.0), beat (4.0) }, clip));
     CHECK (spread == std::vector<int> { 48, 55, 64, 67 });
 }
 
-TEST_CASE ("Parts made from chords: rhythms, bass lines and arpeggios, cut at the range's edges")
+TEST_CASE ("Chords written as notes: offbeat stabs and roots, cut at the range's edges")
 {
     const phazite::ClipID clip = phazite::ClipID::fromRaw (7);
-
-    const auto pulses = phazite::makePartNotes (bars ({ "I" }), PartStyle::pulsingChords, { beat (0.0), beat (4.0) }, clip);
-    CHECK (pulses.size() == 12);
-    CHECK (notesFrom (1.0, 1.1, pulses).size() == 3);
 
     const auto stabs = phazite::makePartNotes (bars ({ "I" }), PartStyle::offbeatStabs, { beat (0.0), beat (4.0) }, clip);
     REQUIRE (stabs.size() == 12);
@@ -276,31 +254,6 @@ TEST_CASE ("Parts made from chords: rhythms, bass lines and arpeggios, cut at th
     // Bass: the root from C2 up, or an inversion's lowest note.
     const auto roots = phazite::makePartNotes (bars ({ "I", "vi", "IV", "V/1" }), PartStyle::bassRoots, { beat (0.0), beat (16.0) }, clip);
     CHECK (getPitches (roots) == std::vector<int> { 36, 45, 41, 47 });
-
-    const auto rootFifth = phazite::makePartNotes (bars ({ "vi" }), PartStyle::bassRootFifth, { beat (0.0), beat (4.0) }, clip);
-    CHECK (getPitches (rootFifth) == std::vector<int> { 45, 52, 45, 52 });
-
-    // The chord's own fifth: diminished over a half-diminished chord, and the octave over a chord with its fifth in the bass.
-    const auto halfDiminished = phazite::makePartNotes (bars ({ "viim7b5" }), PartStyle::bassRootFifth, { beat (0.0), beat (4.0) }, clip);
-    CHECK (getPitches (halfDiminished) == std::vector<int> { 47, 53, 47, 53 });
-    const auto fifthBelow = phazite::makePartNotes (bars ({ "I/2" }), PartStyle::bassRootFifth, { beat (0.0), beat (4.0) }, clip);
-    CHECK (getPitches (fifthBelow) == std::vector<int> { 43, 55, 43, 55 });
-
-    const auto octaves = phazite::makePartNotes (bars ({ "I" }), PartStyle::bassOctaves, { beat (0.0), beat (4.0) }, clip);
-    CHECK (getPitches (octaves) == std::vector<int> { 36, 48, 36, 48, 36, 48, 36, 48 });
-
-    const auto eighths = phazite::makePartNotes (bars ({ "I" }), PartStyle::bassPulses, { beat (0.0), beat (4.0) }, clip);
-    CHECK (eighths.size() == 8);
-
-    // Arpeggios: eighth notes from middle C, with the octave at the top.
-    const auto up = phazite::makePartNotes (bars ({ "I" }), PartStyle::arpeggioUp, { beat (0.0), beat (4.0) }, clip);
-    CHECK (getPitches (up) == std::vector<int> { 60, 64, 67, 72, 60, 64, 67, 72 });
-
-    const auto down = phazite::makePartNotes (bars ({ "I" }), PartStyle::arpeggioDown, { beat (0.0), beat (4.0) }, clip);
-    CHECK (getPitches (down) == std::vector<int> { 72, 67, 64, 60, 72, 67, 64, 60 });
-
-    const auto upDown = phazite::makePartNotes (bars ({ "I" }), PartStyle::arpeggioUpDown, { beat (0.0), beat (4.0) }, clip);
-    CHECK (getPitches (upDown) == std::vector<int> { 60, 64, 67, 72, 67, 64, 60, 64 });
 
     // A range that starts and ends inside chords: held notes are cut to it, and steps before it are left out.
     const auto cut = phazite::makePartNotes (bars ({ "I", "vi" }), PartStyle::sustainedTriads, { beat (2.0), beat (6.0) }, clip);
@@ -313,8 +266,8 @@ TEST_CASE ("Parts made from chords: rhythms, bass lines and arpeggios, cut at th
         CHECK (note.length.inBeats() == doctest::Approx (2.0));
     }
 
-    const auto cutPulses = phazite::makePartNotes (bars ({ "I" }), PartStyle::bassRootFifth, { beat (1.5), beat (4.0) }, clip);
-    CHECK (cutPulses.size() == 2);
+    const auto cutStabs = phazite::makePartNotes (bars ({ "I" }), PartStyle::offbeatStabs, { beat (1.5), beat (4.0) }, clip);
+    CHECK (cutStabs.size() == 9); // the three stabs from beat 1.5, of three notes each
 }
 
 TEST_CASE ("The progressions that ship with Phazite")

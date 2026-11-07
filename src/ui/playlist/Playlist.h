@@ -106,8 +106,10 @@ private:
     int scrollY = 0;
 
     SectionsStrip sectionsStrip; // in the time bar, above the ruler
-    ChordLane chordLane;         // under the time bar, above the tracks
+    ChordLane chordLane;         // under the time bar, above the tracks, while the song has chords
     ChordLaneHeader chordLaneHeader;
+    bool chordLaneShown = false;
+    void showChordLaneWithChords(); // shows the chord lane, or takes it away, as the song has chords or not
 
     IconButton addTrackButton { "Add track", Icon::plus };              // over the track headers, left of the time bar
     IconButton collapseAllButton { "Collapse all", Icon::collapseAll }; // beside it: every row thin, or every one expanded

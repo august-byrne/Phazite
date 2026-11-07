@@ -173,19 +173,24 @@ namespace ScrollTint
     inline constexpr int width = 8;
     inline constexpr float hoverAlpha = 1.08f, dragAlpha = 1.17f;
 
-    // One over what it scrolls, as the playlist's rows' is (as FL Studio's): thinner, its thumb this much fainter, over a
-    // track in the text colour this opaque.
-    inline constexpr int overlayWidth = 6;
-    inline constexpr float overlayThumb = 0.6f, overlayTrack = 0.06f;
+    // One over what it scrolls, as the playlist's rows' is (as FL Studio's): so wide, its thumb this much fainter, over a track
+    // in the text colour this opaque; shown while the pointer is over its editor, and for so long after it leaves, fading
+    // in and out over so long (milliseconds; ui/components/ScrollBarFade.h), a step at each of so many frames a second, and
+    // looked at so many times a second while it shows (the owner, 2026-11-07: "a bit wider, and slightly more opaque").
+    inline constexpr int overlayWidth = 10;
+    inline constexpr float overlayThumb = 0.85f, overlayTrack = 0.08f;
+    inline constexpr double fadeHoldMs = 1500.0, fadeInMs = 100.0, fadeOutMs = 300.0;
+    inline constexpr int fadeFramesPerSecond = 60, fadeChecksPerSecond = 4;
 } // namespace ScrollTint
 
 // The overview of the whole time line along the playlist's and the piano roll's time bars (ui/timeline/TimelineOverview.cpp:
 // TimelineEditor::Overview): its marks, the clips or the notes, this opaque, muted ones this, under the see-through thumb of
-// the part in view, in the text colour this opaque, brighter under the pointer, and its edge.
+// the part in view, in the text colour this opaque, brighter under the pointer, and its edge (stronger since 2026-11-07, the
+// owner: it "could also do to be a bit more visible").
 namespace OverviewTint
 {
     inline constexpr float clip = 0.85f, muted = 0.3f;
-    inline constexpr float thumb = 0.12f, thumbLit = 0.2f, thumbEdge = 0.3f;
+    inline constexpr float thumb = 0.2f, thumbLit = 0.3f, thumbEdge = 0.55f;
 } // namespace OverviewTint
 
 // A list's rows, as VS Code's: so tall, and their hover and selection washes inset this far from the list's sides, rounded
@@ -239,8 +244,12 @@ namespace KeyCap
 // The main window's bars and panels (ui/shell/AppShell.h, PanelLayout.h, TitleBar.h, StatusBar.h).
 namespace Shell
 {
-    inline constexpr int titleBarHeight = 35;     // the menus, Undo and Redo, the command search and the panels' switches
-    inline constexpr int transportBarHeight = 44; // play, record, the tempo and the master level
+    inline constexpr int titleBarHeight = 35; // the menus, Undo and Redo, the command search and the panels' switches
+
+    // Play, record, the tempo and the master level (ui/shell/TopBar.h): a row of controls right under the title bar's, and this
+    // much room under it, which with the cards' gap leaves as much room between it and the panels' cards as shows between the
+    // title bar's names and icons and it (the owner, 2026-11-07: centred in 44 pixels, it showed more room above than below).
+    inline constexpr int transportBarHeight = controlHeight + Space::s;
     inline constexpr int tempoStretchWidth = 320; // what a tempo change stretches, under the tempo field as it changes
     inline constexpr int tempoStretchSeconds = 4; // how long that stays once the tempo stops changing
 
@@ -539,6 +548,17 @@ namespace TrackDropTint
     inline constexpr float wash = 0.12f;
 } // namespace TrackDropTint
 
+// A clip in the playlist (ui/playlist/ClipComponent.h): its fill, in its track's colour, this opaque, so that the grid and the
+// sections' lines behind it show through, as they do through an automation lane (the owner, 2026-11-07; 0.7 at first, then
+// "more transparent"), inside an outline of the colour itself (an alpha); and a muted clip, or one on a track that isn't
+// heard, all of it but a selected one's outline, this opaque, faint as a folder's row and the overview draw a muted one
+// (FolderTint::mutedClip, OverviewTint::muted).
+namespace ClipTint
+{
+    inline constexpr float body = 0.5f;
+    inline constexpr float muted = 0.4f;
+} // namespace ClipTint
+
 // How a folder's row in the playlist shows its tracks' clips (model/arrangement/PlaylistModel.h: getFolderSummary()): a thin
 // lane for each track that holds clips, at most this tall (pixels), between this much room above and below; each clip a bar
 // in its track's color (alphas, a muted one fainter), a pixel apart from the next lane's.
@@ -640,7 +660,8 @@ namespace NoteMarkTint
 // How the chord lane shows the song's chords (ui/playlist/ChordLane.h): each a block in a wash of the accent color,
 // stronger under the pointer, with a line where it starts, and a line in the warning color where the key changes
 // (alphas); the piano roll's wash over the rows of the notes of the chord there (an alpha of the accent color); the
-// lane's height, and how near a chord's right edge a drag takes the edge (pixels).
+// lane's height, the sections band's (it shows only while the song has chords: the owner, 2026-11-07), and how near a
+// chord's right edge a drag takes the edge (pixels).
 namespace ChordTint
 {
     inline constexpr float block = 0.16f;
@@ -648,7 +669,7 @@ namespace ChordTint
     inline constexpr float edge = 0.7f;
     inline constexpr float keyChange = 0.9f;
     inline constexpr float pianoRollRows = 0.1f;
-    inline constexpr int laneHeight = 24;
+    inline constexpr int laneHeight = 18;
     inline constexpr int grabDistance = 6;
 } // namespace ChordTint
 
@@ -734,6 +755,29 @@ namespace SwitchTint
     inline constexpr int size = 20;
     inline constexpr float partOff = 0.45f; // a device's part while its switch is off (PowerSwitch.h), faint
 } // namespace SwitchTint
+
+// The decibels along a volume fader's travel in the mixer's strips (ui/components/Controls.h: FaderScale), as consoles print
+// them and Pro Tools draws them beside its faders (the owner, 2026-11-07): at these levels, and silence at the bottom, each a
+// tick so long towards the fader with its number left of it, so big, in the muted text colour; 0 dB in the text colour with a
+// longer tick. The scale is so wide (pixels).
+namespace FaderScaleTint
+{
+    inline constexpr float marks[] = { 6.0f, 0.0f, -6.0f, -12.0f, -18.0f, -24.0f, -36.0f };
+    inline constexpr int width = 24, tick = 3, unityTick = 6, gap = 2;
+    inline constexpr float textSize = 10.0f;
+} // namespace FaderScaleTint
+
+// What a clip in the playlist shows over its notes or its audio (ui/playlist/ClipComponent.h), without a strip of its own: its
+// name where that says more than its track's header does (its own name, a sample's, a take), in a tag at its top left, and
+// marks at its top right (an alias's link, the metronome of a sample that follows the tempo), each tag in the clip's colour, so
+// tall, its text and icons so far inside it and so big, kept in view as the clip scrolls past the playlist's edges; none on a
+// clip shorter than this (pixels; 2026-11-07, the owner: the name strip repeated the track's name over every clip).
+namespace ClipLabelTint
+{
+    inline constexpr int height = 16, inset = 4, iconSize = 12, iconGap = 2, margin = 2;
+    inline constexpr int minimumClipHeight = 24;
+    inline constexpr float corner = 3.0f;
+} // namespace ClipLabelTint
 
 // An audio clip in the playlist while its render is being made (roadmap step 2.18), silent until then: its waveform faint
 // (alpha), and a bar along its bottom edge of how far the render has come, over a track of the same ink (alpha, height).

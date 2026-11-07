@@ -41,6 +41,7 @@ private:
     juce::Viewport deviceView;
     LevelMeter meter { "Master level" };
     Fader volume { Fader::Direction::vertical, "Master volume", decibelsToFaderPosition (0.0f) };
+    FaderScale volumeScale { volume }; // the decibels along the fader, left of it
     ParameterAttachment volumeAttachment { volume };
     juce::Label loudness;
     juce::TextButton resetButton { "Reset" };

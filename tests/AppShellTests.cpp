@@ -126,7 +126,8 @@ TEST_CASE ("The window's content works without a screen: a project opens, the pa
     CHECK_FALSE (screen.session.getProject()->hasUnsavedChanges());
 }
 
-TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel's; the other panels have no buttons there")
+TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel's; the inspector's X hides it; the other "
+           "panels have no buttons there")
 {
     using phazite::ui::Panel;
     Screen screen;
@@ -139,24 +140,25 @@ TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel'
     auto& editor = screen.shell.getPanel (Panel::editor);
     auto& inspector = screen.shell.getPanel (Panel::inspector);
 
-    // The buttons in a panel's top right corner: the lower panel's only.
+    // The buttons in a panel's top right corner: the lower panel's and the inspector's only.
     const auto cornerOf = [&screen] (juce::Component& panel) -> juce::Component*
     {
         for (auto* buttons : phazite::test::findAll<phazite::ui::PanelButtons> (screen.shell))
-            if (buttons->isVisible() && panel.getScreenBounds().contains (buttons->getScreenBounds()))
+            if (buttons->isShowing() && panel.getScreenBounds().contains (buttons->getScreenBounds()))
                 return buttons;
 
         return nullptr;
     };
 
-    for (auto* panel : { &browser, &song, &inspector })
+    for (auto* panel : { &browser, &song })
         CHECK (cornerOf (*panel) == nullptr);
 
     REQUIRE (cornerOf (editor) != nullptr);
+    REQUIRE (cornerOf (inspector) != nullptr);
 
-    const auto click = [&cornerOf, &editor] (const juce::String& title)
+    const auto clickIn = [&cornerOf] (juce::Component& panel, const juce::String& title)
     {
-        auto* corner = cornerOf (editor);
+        auto* corner = cornerOf (panel);
         REQUIRE (corner != nullptr);
         auto* button = phazite::test::findComponentWithTitle (*corner, title);
         REQUIRE (button != nullptr);
@@ -164,6 +166,8 @@ TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel'
         mouse.click (button->getLocalBounds().getCentre());
         phazite::test::dispatchPendingMessages();
     };
+
+    const auto click = [&clickIn, &editor] (const juce::String& title) { clickIn (editor, title); };
 
     for (auto* panel : { &browser, &song, &editor, &inspector })
         CHECK (panel->isShowing());
@@ -196,12 +200,34 @@ TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel'
     CHECK (editor.isShowing());
     CHECK (editor.getHeight() == editorHeight);
 
-    // The inspector hides by its command (or its switch in the title bar).
-    REQUIRE (screen.registry.invoke ("view.toggleInspector"));
+    // The inspector's X, alone at the right end of its title (which stops short of it), hides it, as its command and its
+    // switch in the title bar do; they show it again (2026-11-07).
+    auto* inspectorCorner = cornerOf (inspector);
+    REQUIRE (inspectorCorner != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*inspectorCorner, "Maximize") == nullptr);
+    CHECK (inspectorCorner->getScreenBounds().getRight() == inspector.getScreenBounds().getRight() - phazite::ui::Space::xs);
+
+    for (auto* label : phazite::test::findAll<juce::Label> (inspector))
+        if (label->isShowing())
+            CHECK_FALSE (label->getScreenBounds().intersects (inspectorCorner->getScreenBounds()));
+
+    clickIn (inspector, "Hide");
     CHECK_FALSE (inspector.isShowing());
     CHECK (phazite::getCurrentName (*screen.registry.find ("view.toggleInspector")) == juce::String ("Show the Inspector"));
     REQUIRE (screen.registry.invoke ("view.toggleInspector"));
     CHECK (inspector.isShowing());
+    REQUIRE (screen.registry.invoke ("view.toggleInspector"));
+    CHECK_FALSE (inspector.isShowing());
+    REQUIRE (screen.registry.invoke ("view.toggleInspector"));
+    CHECK (inspector.isShowing());
+
+    // In a window of its own, it has no X: closing the window puts it back.
+    screen.shell.setDetached (Panel::inspector, true);
+    phazite::test::dispatchPendingMessages();
+    CHECK (cornerOf (inspector) == nullptr);
+    screen.shell.setDetached (Panel::inspector, false);
+    phazite::test::dispatchPendingMessages();
+    CHECK (cornerOf (inspector) != nullptr);
 
     // A divider dragged sizes the left panel, which keeps that width while it hides and shows, in the settings too.
     auto* divider = phazite::test::findComponentWithTitle (screen.shell, "Left panel's edge");

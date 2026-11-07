@@ -29,8 +29,8 @@ namespace strip
     inline constexpr int minSlotsHeight = headingHeight + buttonHeight;
 
     // A strip's fader and meter: as tall in every strip, however many devices and sends it shows above them, which scroll
-    // in what is left (the owner, 2026-10-30).
-    inline constexpr int faderHeight = 160;
+    // in what is left (the owner, 2026-10-30); the fader and the meter so wide together, with the fader's scale left of them.
+    inline constexpr int faderHeight = 160, faderWidth = 56;
     inline constexpr int loudnessHeight = 4 * 16 + buttonHeight + Space::xs; // the master's readout: four lines and Reset
     inline constexpr float relatedOutlineAlpha = 0.5f;                       // a channel the selected one feeds, or is fed by
 

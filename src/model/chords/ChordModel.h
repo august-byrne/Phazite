@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The chord lane as the UI reaches it (docs/design.md, section 14; roadmap step 2.7), by plain values: the song's chords,
-// each a numeral in the key there, which the playlist shows under its sections; the keys they are in; progressions laid
-// over a section, a range or the whole song; and parts (chords, a bass line or an arpeggio) made from them, which change
-// with the chords while their notes are the ones the lane made for them. Each edit is one named undo step. A chord is
-// named by its start, since chords don't overlap. Its insides, in the song, are internal/Chords.h.
+// each a numeral in the key there, which the playlist shows under its bar numbers while there are some; the keys they are
+// in; and progressions laid over a section, a range or the whole song. Each edit is one named undo step. A chord is named
+// by its start, since chords don't overlap. Its insides, in the song, are internal/Chords.h.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -14,7 +13,6 @@
 
 namespace phazite
 {
-class CommandRegistry;
 class ProjectContext;
 struct Progression;
 
@@ -44,7 +42,7 @@ std::vector<LaneKeyChange> getLaneKeyChanges (const ProjectContext&);
 Key getLaneKeyAt (const ProjectContext&, BeatPosition);
 
 //==============================================================================
-// Edits, each one undo step, which parts that follow the chords follow in the same step.
+// Edits, each one undo step.
 
 // "Apply Chord Progression": the progression over a range, from its start, repeated until the range is full, in place of
 // the chords there.
@@ -58,6 +56,10 @@ void changeLaneChord (ProjectContext&, BeatPosition chordStart, const Numeral&);
 
 // "Delete Chord".
 void deleteLaneChord (ProjectContext&, BeatPosition chordStart);
+
+// "Delete All Chords": every chord, and every key change after the song's start, which only the chords follow; the song's key
+// stays. The playlist then shows no chord lane.
+void deleteAllLaneChords (ProjectContext&);
 
 // "Change Chord Length": the chord that starts at a beat ends at another, over the chords after it if it grows.
 void setLaneChordEnd (ProjectContext&, BeatPosition chordStart, BeatPosition end);
@@ -74,7 +76,7 @@ void removeLaneKeyChange (ProjectContext&, BeatPosition at);
 std::vector<Numeral> getChordChoices (const ProjectContext&, BeatPosition);
 
 //==============================================================================
-// Where a progression or a part goes.
+// Where a progression goes.
 
 // The selected sections, from the first's start to the last's end; the time range selected across tracks; or the whole
 // song, from its start to the end of its last clip or section, which is nothing for an empty song.
@@ -82,40 +84,11 @@ std::optional<BeatRange> getSelectedSectionsRange (const ProjectContext&);
 std::optional<BeatRange> getSelectedTimeRange (const ProjectContext&);
 std::optional<BeatRange> getWholeSongRange (const ProjectContext&);
 
-// Where a part made from the chords goes: the time range selected, or else the selected sections, or else from the
-// lane's first chord to the end of its last. Nothing without chords there.
-std::optional<BeatRange> getChordPartRange (const ProjectContext&);
-
 // How many beats a progression lasts from a beat, in the time signature there.
 BeatDuration getProgressionLength (const ProjectContext&, const Progression&, BeatPosition from);
-
-//==============================================================================
-// Parts.
-
-// A step of its own, "Make Chord Part", "Make Bass Line" or "Make Arpeggio": a new track at the end of the song with
-// Phazite's synth set up for the part, and a clip on it over the range with the part's notes, which follow the chords.
-// The track is selected. Returns the clip, or nothing for an empty range.
-std::optional<ClipID> makeChordPart (ProjectContext&, PartStyle, BeatRange);
-juce::String getMakePartName (PartKind); // "Make Chord Part"...
-
-// The same where getChordPartRange() says, as the commands make parts; and whether there are chords there to make one.
-std::optional<ClipID> makeChordPartHere (ProjectContext&, PartStyle);
-bool canMakeChordPart (const ProjectContext&);
-
-// The style a clip was made in from the chord lane, if it was; and whether its notes still follow the chords (they stop
-// when they are edited).
-std::optional<PartStyle> getChordPart (const ProjectContext&, ClipID);
-bool followsChords (const ProjectContext&, ClipID);
-
-// A step of its own: a part follows the chords again, its notes made again from them, "Follow the Chords"; or it becomes a
-// clip like any other, "Stop Following the Chords".
-void setFollowsChords (ProjectContext&, ClipID, bool);
 
 //==============================================================================
 // Hearing a progression before it goes into the song: its chords as they would play from a beat, written to a MIDI file
 // for the previewer (model/engine/Preview.h), held chords in the key there. Returns false if the file can't be written.
 bool writeProgressionPreview (const ProjectContext&, const Progression&, BeatPosition from, const juce::File&);
-
-// The chord commands: the parts made from the chords over where getChordPartRange() says, in their first styles.
-void addChordCommands (CommandRegistry&, ProjectContext&);
 } // namespace phazite

@@ -31,8 +31,10 @@ public:
     // Shows the section's name in a text field, to rename it.
     void startRenaming (SectionID);
 
-    // The menu of the section at a place in the song, which it selects, or of none there: renaming and coloring it,
-    // adding one there, and the song outlines. The time bar's bar numbers show it too.
+    // The menu of the section at a place in the song, which it selects, or of none there: renaming and coloring it, adding a
+    // section or a chord there, and the song outlines. A right-click shows it, on the time bar's bar numbers too
+    // (showMenuAt()); tests run its items.
+    juce::PopupMenu getMenuAt (BeatPosition);
     void showMenuAt (BeatPosition);
 
     // While a section is dragged: where it would go (moving), or where its end would be (resizing). The
@@ -77,7 +79,7 @@ private:
     std::optional<SongSection> getSectionAt (juce::Point<int>) const;
     bool isOnRightEdge (const SongSection&, juce::Point<int>) const;
     BeatPosition findNearestBoundary (const SongSection&, double x) const;
-    void showMenu (const std::optional<SongSection>&, BeatPosition where);
+    juce::PopupMenu getMenu (const std::optional<SongSection>&, BeatPosition where);
     void addSectionAt (BeatPosition);
     void renamed(); // the name field closed
     void dragChanged();

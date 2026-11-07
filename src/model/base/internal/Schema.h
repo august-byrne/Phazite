@@ -568,7 +568,8 @@ inline const juce::Identifier clipKind { "kind" };
 inline constexpr const char* clipIsMidi = "midi";
 inline constexpr const char* clipIsAudio = "audio";
 
-// On CLIP: its name.
+// On CLIP, or none: its name. A clip without one (a new MIDI clip, at first) is called after its track, whatever the track is
+// called (model/arrangement/internal/Clips.h: getClipName()).
 inline const juce::Identifier clipName { "name" };
 
 // On CLIP. double, 0 or more: where it starts, in beats from the song's start. On a MIDI CLIP, double, more than 0: how long
@@ -587,12 +588,6 @@ inline const juce::Identifier clipMute { "mute" };
 // hold the same notes, with the same IDs: an edit to one clip's notes is made to each (model/notes/internal/Notes.h), as FL
 // Studio's pattern clips play one pattern.
 inline const juce::Identifier clipLink { "link" };
-
-// On a MIDI CLIP made from the chord lane: the part it is, "sustainedTriads", "sustainedSevenths", "spreadChords",
-// "pulsingChords", "offbeatStabs", "bassRoots", "bassPulses", "bassRootFifth", "bassOctaves", "arpeggioUp",
-// "arpeggioDown" or "arpeggioUpDown" (getSavedPartStyleName()). While its notes are the ones the lane makes for it, they
-// change with the chords.
-inline const juce::Identifier chordPart { "part" };
 
 // Child of a MIDI CLIP: a note, in no particular order.
 inline const juce::Identifier NOTE { "NOTE" };

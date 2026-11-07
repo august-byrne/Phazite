@@ -156,7 +156,7 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     { browser.showDevicePresetMenu (device, name, target); };
 
     for (auto* c : std::initializer_list<juce::Component*> { &titleBar, &topBar, &activityBar, &leftPanel, &leftDivider, &centre,
-                                                             &inspectorDivider, &inspector, &statusBar })
+                                                             &inspectorDivider, &inspector, &inspectorButtons, &statusBar })
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &upperRow, &editorDivider, &lowerRow, &editorButtons })
@@ -488,16 +488,15 @@ void AppShell::showLeftView (LeftView view)
 
     updateLayout();
 
-    // Showing a view gives it the keys, as the views in the centre get them: the browser's search, the commit's message, or
-    // the project's view itself (its notes are typed into once clicked, so that the keys' shortcuts work on meanwhile).
+    // Showing a view gives it the keys, as the views in the centre get them: the view itself, never a text field in it, so that
+    // the shortcuts work on (Space plays) until a field is clicked, or Search the Browser puts the cursor in the browser's
+    // search (the owner, 2026-11-07).
     if (leftPanel.isShowing())
     {
-        if (view == LeftView::versions)
-            versionsView.focusMessage();
-        else if (view == LeftView::project)
-            projectView.grabKeyboardFocus();
-        else
-            browser.focusSearch();
+        auto& shown = view == LeftView::versions  ? static_cast<juce::Component&> (versionsView)
+                      : view == LeftView::project ? static_cast<juce::Component&> (projectView)
+                                                  : static_cast<juce::Component&> (browser);
+        shown.grabKeyboardFocus();
     }
 }
 
@@ -619,6 +618,7 @@ void AppShell::setDetached (Panel which, bool detached)
         auto& parent = which == Panel::editor ? static_cast<juce::Component&> (centre) : static_cast<juce::Component&> (*this);
         parent.addChildComponent (panel);
         editorButtons.toFront (false);
+        inspectorButtons.toFront (false);
         keepOverlaysInFront();
     }
 
@@ -764,6 +764,8 @@ void AppShell::updateLayout()
     editorDivider.setVisible ((songDocked && editorDocked) || (centreDocked && dividerDragged == Panel::editor));
     editorButtons.setVisible (editorDocked);
     editorButtons.update (panels);
+    inspectorButtons.setVisible (inspectorDocked);
+    inspectorButtons.update (panels);
     titleBar.showPanels (panels);
 
     // (A sound the browser previews stops as the browser goes out of sight: Browser::visibilityChanged().)
@@ -1105,12 +1107,23 @@ void AppShell::layOutCentre()
 void AppShell::placePanelButtons()
 {
     // In the lower panel's top right corner while it is docked, in the centre's coordinates.
-    if (editorWindow != nullptr)
-        return;
+    if (editorWindow == nullptr)
+    {
+        const auto bounds = lowerRow.getBounds();
+        const auto width = editorButtons.getPreferredWidth();
+        editorButtons.setBounds (bounds.getRight() - width - Space::xs, bounds.getY() + Space::xs / 2, width, Shell::panelButtonSize);
+    }
 
-    const auto bounds = lowerRow.getBounds();
-    const auto width = editorButtons.getPreferredWidth();
-    editorButtons.setBounds (bounds.getRight() - width - Space::xs, bounds.getY() + Space::xs / 2, width, Shell::panelButtonSize);
+    // At the right end of the inspector's title while it is docked, as far from its edge, the title short of it.
+    if (inspectorWindow == nullptr)
+    {
+        const auto row = inspector.getTitleRow() + inspector.getPosition();
+        const auto width = inspectorButtons.getPreferredWidth();
+        inspectorButtons.setBounds (row.getRight() - width - Space::xs, row.getCentreY() - Shell::panelButtonSize / 2, width,
+                                    Shell::panelButtonSize);
+    }
+
+    inspector.setTitleRoom (inspectorWindow == nullptr ? inspectorButtons.getPreferredWidth() + 2 * Space::xs : 0);
 }
 
 //==============================================================================
@@ -1359,6 +1372,7 @@ void AppShell::refreshShortcutTexts()
         area->refreshTooltips (commands);
 
     editorButtons.refreshTooltips();
+    inspectorButtons.refreshTooltips();
     playlist.refreshShortcutTexts();
     pianoRoll.refreshShortcutTexts();
     audioClipEditor.refreshShortcutTexts();

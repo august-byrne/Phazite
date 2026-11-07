@@ -386,22 +386,26 @@ namespace
                     addLaneChord (context, { at (bar (each)), at (bar (each + 1)) }, *numeral);
         }
 
-        // A part made from the chord lane over bars, on a new track at the end with Phazite's synth (ChordModel.h), named and
-        // played with a preset.
+        // A part that plays the chord lane's chords over bars in a style (ChordValues.h: makePartNotes()), on a new track at the
+        // end with Phazite's synth, named and played with a preset.
         TrackID addPart (PartStyle style, int fromBar, int toBar, const juce::String& name, const char* colour, const char* preset)
         {
-            const auto clip = makeChordPart (context, style, { at (bar (fromBar)), at (bar (toBar)) });
-            const auto info = clip.has_value() ? getClip (context, *clip) : std::nullopt;
+            const auto track = addTrack (name, colour);
+            setInstrument (track, devices::Synth::typeID, preset);
+            const auto clip = addClip (track, bar (fromBar), bar (toBar) - bar (fromBar));
 
-            if (! info.has_value())
-                return {};
+            if (! clip.isValid())
+                return track;
 
-            nameTrack (info->track, name, colour);
+            std::vector<PlacedChord> chords;
 
-            if (const auto instrument = getInstrument (context, info->track))
-                loadPreset (instrument->id, preset);
+            for (const auto& chord : getLaneChords (context))
+                chords.push_back ({ chord.range, chord.numeral, chord.key });
 
-            return info->track;
+            for (const auto& made : makePartNotes (chords, style, { at (bar (fromBar)), at (bar (toBar)) }, clip))
+                note (clip, made.pitch, made.start.inBeats(), made.length.inBeats(), made.velocity);
+
+            return track;
         }
 
         // The song's sections, from its start.

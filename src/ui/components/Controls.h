@@ -104,6 +104,19 @@ public:
     Fader (Direction, const juce::String& title, double defaultValue);
 };
 
+// Left of a vertical volume fader (a fader's position from 0 to 1, model/mixer/MixerModel.h), the decibels along its travel,
+// where the fader puts them (FaderScaleTint). Only for the eye: it takes no clicks, and screen readers read the fader's value.
+class FaderScale : public juce::Component
+{
+public:
+    explicit FaderScale (const Fader&); // a fader that outlives it, which its parent lays it out beside
+
+    void paint (juce::Graphics&) override;
+
+private:
+    const Fader& fader;
+};
+
 // A number that is dragged up and down, scrolled, stepped with the arrow keys, or clicked and typed, such as the top
 // bar's tempo: its text is its face. Dragging (a fifth as far with Shift), the wheel and the keys move it in steps;
 // typing takes any value in its range, to a hundredth of a step. textFromValueFunction and valueFromTextFunction give
@@ -127,7 +140,8 @@ private:
     double wheelNotches = 0.0; // a trackpad's movements, added up until they make a step
 };
 
-// Shows and reads a slider's value, a volume fader's position from 0 to 1 (model/mixer/MixerModel.h), in decibels.
+// Shows and reads a slider's value, a volume fader's position from 0 to 1 (model/mixer/MixerModel.h), in decibels, and gives
+// the slider that range.
 void showAsDecibels (juce::Slider&);
 
 // Shows and reads a slider's value, from -1 (left) to 1 (right), as a pan position ("30% left").

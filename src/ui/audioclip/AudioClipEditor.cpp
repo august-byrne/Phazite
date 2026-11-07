@@ -536,6 +536,8 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
     tempoField.valueFromTextFunction = [this] (const juce::String& text) { return parseTempo (text).value_or (tempoField.getValue()); };
 
     gainField.setTooltip ("How loud the clip plays, in decibels: drag it up or down, scroll, or click it and type");
+    normalizeButton.setTooltip ("Normalize: sets the gain so that the clip's loudest peak plays at " + juce::String (normalizedPeak, 0)
+                                + " dB. Its audio file doesn't change");
     pitchField.setTooltip ("Moves the clip's pitch up or down in semitones, keeping its length");
     fineField.setTooltip ("Tunes the clip's pitch in cents, hundredths of a semitone");
     tempoField.setTooltip ("The tempo the clip's audio was played at. It plays at the song's tempo, so setting this right puts it "
@@ -549,6 +551,7 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
     setUpField (pitchField, "Change Clip Pitch", [this] { changePitch(); });
     setUpField (fineField, "Change Clip Pitch", [this] { changePitch(); });
     setUpField (tempoField, "Change Clip Tempo", [this] { setClipTempo (context, clip, tempoField.getValue()); });
+    normalizeButton.onClick = [this] { normalizeClip (context, clip); };
 
     reverseButton.setTitle ("Reverse");
     reverseButton.setClickingTogglesState (true);
@@ -568,8 +571,8 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
     clipLabel.setJustificationType (juce::Justification::centredRight);
     clipLabel.setFont (juce::FontOptions (TextSize::small));
 
-    for (auto* c : std::initializer_list<juce::Component*> { &gainField, &pitchField, &fineField, &tempoField, &reverseButton,
-                                                             &followButton, &clipLabel, waveform.get() })
+    for (auto* c : std::initializer_list<juce::Component*> { &gainField, &normalizeButton, &pitchField, &fineField, &tempoField,
+                                                             &reverseButton, &followButton, &clipLabel, waveform.get() })
         addAndMakeVisible (c);
 
     context.getSongSelection().addChangeListener (this);
@@ -682,6 +685,7 @@ void AudioClipEditor::updateControls()
 
     tempoField.setEnabled (shown && info->followsTempo);
     tempoLabel.setEnabled (tempoField.isEnabled());
+    normalizeButton.setEnabled (shown && info->state != AudioState::missing); // which it reads the peak of
 
     if (! shown)
     {
@@ -813,7 +817,11 @@ void AudioClipEditor::resized()
         field.setBounds (row);
     };
 
-    layOutField (gainLabel, gainField, nextRow());
+    // Normalize at the gain's right, which it sets.
+    auto gainRow = nextRow();
+    normalizeButton.setBounds (gainRow.removeFromRight (controlHeight));
+    gainRow.removeFromRight (Space::xs);
+    layOutField (gainLabel, gainField, gainRow);
     layOutField (pitchLabel, pitchField, nextRow());
     layOutField (fineLabel, fineField, nextRow());
     reverseButton.setBounds (nextRow());
