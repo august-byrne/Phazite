@@ -93,7 +93,7 @@
       "glide": 40.0,
       "bendRange": 2.0,
       "velocity": 0.6,
-      "level": -7.0
+      "level": -10.0
     },
     "sounds": {
       "osc1Wavetable": "Fold"

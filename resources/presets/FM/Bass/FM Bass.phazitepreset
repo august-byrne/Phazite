@@ -10,7 +10,7 @@
       "op1On": 1,
       "op1Wave": 0,
       "op1Feedback": 0.0,
-      "op1Ratio": 0.5,
+      "op1Ratio": 1.0,
       "op1Fine": 0.0,
       "op1Detune": 0.0,
       "op1Fixed": 0,
@@ -28,7 +28,7 @@
       "op2On": 1,
       "op2Wave": 0,
       "op2Feedback": 0.0,
-      "op2Ratio": 0.5,
+      "op2Ratio": 1.0,
       "op2Fine": 0.0,
       "op2Detune": 0.0,
       "op2Fixed": 0,
@@ -46,7 +46,7 @@
       "op3On": 0,
       "op3Wave": 0,
       "op3Feedback": 0.0,
-      "op3Ratio": 1.0,
+      "op3Ratio": 2.0,
       "op3Fine": 0.0,
       "op3Detune": 0.0,
       "op3Fixed": 0,
@@ -64,7 +64,7 @@
       "op4On": 0,
       "op4Wave": 0,
       "op4Feedback": 0.0,
-      "op4Ratio": 1.0,
+      "op4Ratio": 2.0,
       "op4Fine": 0.0,
       "op4Detune": 0.0,
       "op4Fixed": 0,
@@ -98,7 +98,7 @@
       "glide": 30.0,
       "bendRange": 2.0,
       "spread": 0.0,
-      "level": -6.0
+      "level": -4.5
     }
   }
 }

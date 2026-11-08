@@ -574,3 +574,230 @@ TEST_CASE ("A slide note glides the sounding notes to its pitch evenly over its 
     played = play (plain, mono, 48000, { noteOn (0, 60), noteOff (24000, 60), noteOn (24000, 72) });
     CHECK (measureFrequency (played, 24480, 30000) == doctest::Approx (523.25).epsilon (0.002));
 }
+
+TEST_CASE ("The synth's pitch envelope drops each note onto its pitch over its decay, as an 808 drops")
+{
+    // An octave up at the start, falling with a 20 ms time constant: near A5 in the first few milliseconds, A4 by 200 ms.
+    auto values = getSineValues();
+    values[Synth::pitchAmount] = 12.0f;
+    values[Synth::pitchDecay] = 20.0f;
+    Synth synth;
+    synth.prepare (testRate, testBlockSize);
+    const auto played = play (synth, values, 24000, { noteOn (0, 69) });
+    CHECK (measureFrequency (played, 0, 240) > 800.0);
+    CHECK (measureFrequency (played, 9600, 24000) == doctest::Approx (440.0).epsilon (0.002));
+
+    // And a legato note in mono mode doesn't start it again.
+    values[Synth::voiceMode] = 1.0f;
+    Synth mono;
+    mono.prepare (testRate, testBlockSize);
+    const auto legato = play (mono, values, 24000, { noteOn (0, 69), noteOn (9600, 57) });
+    CHECK (measureFrequency (legato, 9840, 24000) == doctest::Approx (220.0).epsilon (0.002));
+}
+
+TEST_CASE ("Osc 2 synced to osc 1 repeats at osc 1's pitch, and the filter envelope sweeps it")
+{
+    // Osc 2 alone, a fifth above osc 1: unsynced it plays its own pitch; synced, its cycle starts again with each of osc 1's,
+    // so what comes out repeats at osc 1's pitch (A3), with osc 2's harmonics around its own.
+    auto values = getSineValues();
+    values[Synth::osc2Wave] = 2.0f; // saw
+    values[Synth::osc2Pitch] = 7.0f;
+    values[Synth::osc2Detune] = 0.0f;
+    values[Synth::oscMix] = 1.0f;
+    const auto atPitch = [&values] (bool synced, double frequency)
+    {
+        auto set = values;
+        set[Synth::osc2Sync] = synced ? 1.0f : 0.0f;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        const auto played = play (synth, set, 24000, { noteOn (0, 57) });
+        return measureLevelAt (played, 4800, 24000, frequency);
+    };
+
+    CHECK (atPitch (false, 220.0) < 0.01);
+    CHECK (atPitch (true, 220.0) > 0.1);
+    CHECK (atPitch (false, 220.0 * std::exp2 (7.0 / 12.0)) > 0.3);
+
+    // Osc 2's envelope: the filter envelope, at its peak, takes osc 2 an octave up, then lets it back down to where it is set.
+    values[Synth::osc2Pitch] = 0.0f;
+    values[Synth::osc2Envelope] = 12.0f;
+    values[Synth::filterAttack] = 0.0f;
+    values[Synth::filterDecay] = 100.0f;
+    values[Synth::filterSustain] = 0.0f;
+    Synth swept;
+    swept.prepare (testRate, testBlockSize);
+    const auto played = play (swept, values, 48000, { noteOn (0, 57) });
+    CHECK (measureFrequency (played, 0, 480) > 380.0);
+    CHECK (measureFrequency (played, 24000, 48000) == doctest::Approx (220.0).epsilon (0.002));
+
+    // Switched off, the filter envelope doesn't sweep it.
+    values[Synth::filterEnvelopeOn] = 0.0f;
+    Synth still;
+    still.prepare (testRate, testBlockSize);
+    CHECK (measureFrequency (play (still, values, 4800, { noteOn (0, 57) }), 0, 4800) == doctest::Approx (220.0).epsilon (0.002));
+}
+
+TEST_CASE ("The synth's sub plays an octave or two down, as a sine, triangle, saw or square")
+{
+    auto values = getSineValues();
+    values[Synth::oscMix] = 0.0f;
+    values[Synth::subLevel] = 1.0f;
+    const auto subAt = [&values] (int octave, int shape, double frequency)
+    {
+        auto set = values;
+        set[Synth::subOctave] = (float) octave;
+        set[Synth::subShape] = (float) shape;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        return measureLevelAt (play (synth, set, 48000, { noteOn (0, 69) }), 4800, 48000, frequency);
+    };
+
+    CHECK (subAt (0, 0, 220.0) > 0.9);  // a sine an octave down, as always
+    CHECK (subAt (1, 0, 110.0) > 0.9);  // two octaves down
+    CHECK (subAt (1, 0, 220.0) < 0.01); // and not one
+    CHECK (subAt (0, 3, 660.0) > 0.3);  // a square: its third harmonic, a third of its first
+    CHECK (subAt (0, 0, 660.0) < 0.01); // which a sine hasn't
+}
+
+TEST_CASE ("In Legato glide mode only a note played while another is held glides, as a TB-303 slides")
+{
+    auto values = getSineValues();
+    values[Synth::voiceMode] = 1.0f;
+    values[Synth::glide] = 100.0f;
+    values[Synth::glideMode] = 1.0f; // legato
+
+    // C4, let go, then C5: no glide, C5 at once.
+    Synth apart;
+    apart.prepare (testRate, testBlockSize);
+    auto played = play (apart, values, 36000, { noteOn (0, 60), noteOff (12000, 60), noteOn (12000, 72) });
+    CHECK (measureFrequency (played, 12240, 14400) == doctest::Approx (523.25).epsilon (0.003));
+
+    // C4 held, then C5: it glides there.
+    Synth held;
+    held.prepare (testRate, testBlockSize);
+    played = play (held, values, 60000, { noteOn (0, 60), noteOn (12000, 72) });
+    CHECK (measureFrequency (played, 12240, 14400) < 480.0);
+    CHECK (measureFrequency (played, 50000, 60000) == doctest::Approx (523.25).epsilon (0.002));
+
+    // Always (as before), the note let go of still glides into the next.
+    values[Synth::glideMode] = 0.0f;
+    Synth always;
+    always.prepare (testRate, testBlockSize);
+    played = play (always, values, 36000, { noteOn (0, 60), noteOff (12000, 60), noteOn (12000, 72) });
+    CHECK (measureFrequency (played, 12240, 14400) < 480.0);
+}
+
+TEST_CASE ("The filter's velocity closes the cutoff for softer notes")
+{
+    // A saw through a low-pass at 2 kHz: at full velocity as set; at velocity 0.5 with full velocity tracking, two octaves
+    // lower, so its harmonics around 2 kHz are much weaker.
+    auto values = getDefaults();
+    values[Synth::osc1Wave] = 2.0f;
+    values[Synth::oscMix] = 0.0f;
+    values[Synth::cutoff] = 2000.0f;
+    values[Synth::filterEnvelope] = 0.0f;
+    values[Synth::keyTracking] = 0.0f;
+    values[Synth::velocity] = 0.0f;
+    values[Synth::filterVelocity] = 1.0f;
+    const auto bright = [&values] (float velocity)
+    {
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        const auto played = play (synth, values, 24000, { noteOn (0, 45, velocity) });
+        return measureLevelAt (played, 4800, 24000, 1980.0) / measureLevelAt (played, 4800, 24000, 110.0);
+    };
+
+    CHECK (bright (0.5f) < 0.2 * bright (1.0f));
+
+    // Off, velocity doesn't change the cutoff.
+    values[Synth::filterVelocity] = 0.0f;
+    CHECK (bright (0.5f) == doctest::Approx (bright (1.0f)).epsilon (0.01));
+}
+
+TEST_CASE ("The synth's LFO moves the pulse width, and comes in over its fade after each note starts")
+{
+    // A square whose width the LFO sweeps: its second harmonic, which a square at 50 % hasn't, comes in as it thins.
+    auto values = getSineValues();
+    values[Synth::osc1Wave] = 3.0f; // square
+    values[Synth::lfoOn] = 1.0f;
+    values[Synth::lfoTarget] = 3.0f; // pulse width
+    values[Synth::lfoShape] = 0.0f;
+    values[Synth::lfoRate] = 2.0f;
+    values[Synth::lfoDepth] = 1.0f;
+    Synth swept;
+    swept.prepare (testRate, testBlockSize);
+    const auto played = play (swept, values, 48000, { noteOn (0, 57) });
+    CHECK (measureLevelAt (played, 4000, 8000, 440.0) > 0.1); // a quarter of the LFO's cycle in: thin
+
+    values[Synth::lfoOn] = 0.0f;
+    Synth plain;
+    plain.prepare (testRate, testBlockSize);
+    CHECK (measureLevelAt (play (plain, values, 48000, { noteOn (0, 57) }), 4000, 8000, 440.0) < 0.01);
+
+    // Vibrato over a fade of half a second: none at first, all of it once the fade is done.
+    auto vibrato = getSineValues();
+    vibrato[Synth::lfoOn] = 1.0f;
+    vibrato[Synth::lfoTarget] = 0.0f; // pitch
+    vibrato[Synth::lfoShape] = 4.0f;  // square: a semitone up, then down
+    vibrato[Synth::lfoRate] = 1.0f;
+    vibrato[Synth::lfoDepth] = 1.0f;
+    vibrato[Synth::lfoFade] = 500.0f;
+    Synth faded;
+    faded.prepare (testRate, testBlockSize);
+    const auto heard = play (faded, vibrato, 48000, { noteOn (0, 69) });
+    CHECK (measureFrequency (heard, 0, 1200) == doctest::Approx (440.0).epsilon (0.01));
+    CHECK (measureFrequency (heard, 26400, 33600) == doctest::Approx (440.0 * std::exp2 (-1.0 / 12.0)).epsilon (0.003));
+}
+
+TEST_CASE ("Drift lets each voice's pitch wander a few cents, the same every time")
+{
+    auto values = getSineValues();
+    values[Synth::drift] = 1.0f;
+    Synth first, second;
+    first.prepare (testRate, testBlockSize);
+    second.prepare (testRate, testBlockSize);
+    const auto played = play (first, values, 48000, { noteOn (0, 69) });
+    CHECK (play (second, values, 48000, { noteOn (0, 69) }) == played);
+
+    // Off by a few cents, at most the drift's eight, and never quite where it was.
+    const auto cents = [] (double frequency) { return 1200.0 * std::log2 (frequency / 440.0); };
+    const auto early = cents (measureFrequency (played, 0, 9600)), late = cents (measureFrequency (played, 38400, 48000));
+    CHECK (std::abs (early) <= 8.5);
+    CHECK (std::abs (late) <= 8.5);
+    CHECK (std::abs (early - late) > 0.1);
+
+    // Without it, A4 exactly.
+    values[Synth::drift] = 0.0f;
+    Synth still;
+    still.prepare (testRate, testBlockSize);
+    CHECK (std::abs (cents (measureFrequency (play (still, values, 48000, { noteOn (0, 69) }), 0, 48000))) < 0.05);
+}
+
+TEST_CASE ("The synth's filter drive saturates what goes into the filter, adding harmonics to a sine, and only while the filter is on")
+{
+    // A sine through the open filter: driven 18 dB, it gains its third harmonic; at 0 dB, it plays as before, bit for bit.
+    auto values = getSineValues();
+    const auto thirdOf = [] (const std::vector<float>& played)
+    { return measureLevelAt (played, 4800, 24000, 660.0) / measureLevelAt (played, 4800, 24000, 220.0); };
+
+    Synth clean, driven;
+    clean.prepare (testRate, testBlockSize);
+    driven.prepare (testRate, testBlockSize);
+    const auto plain = play (clean, values, 24000, { noteOn (0, 57) });
+    CHECK (thirdOf (plain) < 0.001);
+
+    values[Synth::drive] = 18.0f;
+    CHECK (thirdOf (play (driven, values, 24000, { noteOn (0, 57) })) > 0.05);
+
+    values[Synth::drive] = 0.0f;
+    Synth again;
+    again.prepare (testRate, testBlockSize);
+    CHECK (play (again, values, 24000, { noteOn (0, 57) }) == plain);
+
+    // With the filter switched off, the drive is off with it.
+    values[Synth::drive] = 18.0f;
+    values[Synth::filterOn] = 0.0f;
+    Synth off;
+    off.prepare (testRate, testBlockSize);
+    CHECK (thirdOf (play (off, values, 24000, { noteOn (0, 57) })) < 0.001);
+}

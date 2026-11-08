@@ -256,6 +256,6 @@
     "trademarks": [
         { "text": "VST is a registered trademark of Steinberg Media Technologies GmbH." },
         { "text": "ASIO is a registered trademark of Steinberg Media Technologies GmbH.", "platforms": [ "windows" ] },
-        { "text": "Other names of products are their owners' trademarks, named only to say what Phazite works with." }
+        { "text": "Other names of products are their owners' trademarks, named only to say what Phazite works with or what a sound is like. Phazite isn't affiliated with their owners, and its presets hold no recordings of their instruments." }
     ]
 }

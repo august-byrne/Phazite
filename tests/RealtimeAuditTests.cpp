@@ -825,12 +825,44 @@ TEST_SUITE ("realtime-audit")
         TestSong song;
         const auto track = song.firstTrack;
         const auto synth = song.setInstrument (track, Synth::typeID);
+        song.setParameter (synth, "unisonOn", 1.0f);
         song.setParameter (synth, "unisonVoices", 6.0f); // seven
         song.setParameter (synth, "unisonDetune", 40.0f);
         addChords (song, track);
 
         const auto m = playAndMeasure (song);
         report ("Phazite's synth with seven unison voices, spread wide", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's synth with every part a classic sound needs: osc 2 synced and swept, a square sub two "
+               "octaves down, drift, its filter driven and following velocity, its LFO on the pulse width coming in, a pitch "
+               "envelope, unison, and legato glides in mono")
+    {
+        using phazite::devices::Synth;
+        TestSong song;
+        const auto track = song.firstTrack;
+        const auto synth = song.setInstrument (track, Synth::typeID);
+
+        // Osc 2 a square (its width moving), synced and swept; a square sub two octaves down; drift; the filter driven and
+        // following velocity; the LFO on the pulse width (3), coming in; a pitch envelope; unison; mono, gliding legato (1).
+        const std::pair<const char*, float> settings[] = {
+            { "osc2Wave", 3.0f },  { "osc2Sync", 1.0f },  { "osc2Envelope", 24.0f }, { "subLevel", 0.5f },       { "subOctave", 1.0f },
+            { "subShape", 3.0f },  { "drift", 1.0f },     { "drive", 18.0f },        { "filterVelocity", 0.5f }, { "lfoOn", 1.0f },
+            { "lfoTarget", 3.0f }, { "lfoFade", 300.0f }, { "pitchAmount", 12.0f },  { "unisonOn", 1.0f },       { "voiceMode", 1.0f },
+            { "glide", 50.0f },    { "glideMode", 1.0f },
+        };
+
+        for (const auto& [id, value] : settings)
+            song.setParameter (synth, id, value);
+
+        addChords (song, track);
+
+        const auto m = playAndMeasure (song);
+        report ("Phazite's synth with osc 2 synced and swept, a square sub, drift, drive, its LFO on the pulse width, a pitch "
+                "envelope, unison and legato glides",
+                m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
@@ -1057,7 +1089,7 @@ TEST_SUITE ("realtime-audit")
         // Sixteen equal slices of a crash, reversed, one a sixteenth, each cutting off the one before.
         const auto chops = song.firstTrack;
         const auto slicer = song.setInstrument (chops, Sampler::typeID);
-        phazite::setFactorySample (played, slicer, phazite::devices::findFactorySample ("808 Crash"));
+        phazite::setFactorySample (played, slicer, phazite::devices::findFactorySample ("808 Cymbal"));
         song.setParameter (slicer, "mode", (float) Sampler::Mode::slice);
         song.setParameter (slicer, "sliceBy", (float) Sampler::SliceBy::equal);
         song.setParameter (slicer, "sliceCount", 16.0f);

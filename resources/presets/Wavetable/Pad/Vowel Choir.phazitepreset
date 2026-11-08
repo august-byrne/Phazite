@@ -93,7 +93,7 @@
       "glide": 0.0,
       "bendRange": 2.0,
       "velocity": 0.3,
-      "level": -8.0
+      "level": -2.5
     },
     "sounds": {
       "osc1Wavetable": "Vowels",

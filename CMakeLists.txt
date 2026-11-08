@@ -97,6 +97,8 @@ target_sources(phazite_core PRIVATE
     src/devices/core/Spectrum.h
     src/devices/delay/Delay.cpp
     src/devices/delay/Delay.h
+    src/devices/drums/DrumMachines.cpp
+    src/devices/drums/DrumMachines.h
     src/devices/drums/DrumSampler.cpp
     src/devices/drums/DrumSampler.h
     src/devices/drums/DrumSynthesis.cpp
@@ -1153,6 +1155,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/PluginWindowTests.cpp
         tests/PlaylistTests.cpp
         tests/PopupsTests.cpp
+        tests/PresetReport.cpp
         tests/PresetTests.cpp
         tests/ProjectContentsTests.cpp
         tests/ProjectContextTests.cpp

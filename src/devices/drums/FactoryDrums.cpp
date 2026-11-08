@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "FactoryDrums.h"
+#include "DrumMachines.h"
 #include "DrumSynthesis.h"
 #include "devices/dsp/Math.h"
 
@@ -39,11 +40,6 @@ namespace
     }
 
     // Each kit's toms: one drum at six pitches, from General MIDI's low floor tom to its high tom.
-    Audio tom808 (double hz)
-    {
-        return makeKick (rate, hz * 1.3, hz, 0.08, 0.32, 1.2, 0.05, 1.15);
-    }
-
     Audio houseTom (double hz)
     {
         return makeKick (rate, hz * 1.4, hz, 0.04, 0.26, 0.75, 0.2, 1.6);
@@ -52,11 +48,6 @@ namespace
     Audio punchyTom (double hz)
     {
         return makeKick (rate, hz * 1.6, hz, 0.018, 0.17, 0.5, 0.6, 2.4);
-    }
-
-    Audio technoTom (double hz)
-    {
-        return makeKick (rate, hz * 1.7, hz, 0.025, 0.2, 0.6, 0.35, 2.2);
     }
 
     Audio tightTom (double hz)
@@ -139,57 +130,25 @@ namespace
         { "High Tom 2", [] { return tom (290.0, 190.0); } },
         { "Ride", [] { return hat (0.7, 1.8); } },
 
-        // The 808's: a long, deep kick, a tonal snare, its clap of several hands, sine toms and its six-oscillator
-        // metal, closed and open, and as a cymbal.
-        { "808 Kick", [] { return makeKick (rate, 110.0, 46.0, 0.045, 0.75, 2.2, 0.12, 1.3); } },
-        { "808 Rim", [] { return makeKick (rate, 1750.0, 1650.0, 0.002, 0.012, 0.09, 0.4, 3.0); } },
-        { "808 Snare",
-          []
-          {
-              return makeSnare (rate, { .lowHz = 238.0,
-                                        .highHz = 476.0,
-                                        .lowSeconds = 0.09,
-                                        .highSeconds = 0.05,
-                                        .snaresSeconds = 0.16,
-                                        .snaresLevel = 0.5,
-                                        .snaresLowCut = 1500.0,
-                                        .snaresHighCut = 9500.0,
-                                        .length = 0.55,
-                                        .drive = 1.4 });
-          } },
-        { "808 Clap",
-          [] { return makeClap (rate, { .centreHz = 1000.0, .q = 1.1, .lowCut = 600.0, .tailSeconds = 0.2, .length = 0.75 }); } },
-        { "808 Snare 2",
-          []
-          {
-              return makeSnare (rate, { .lowHz = 280.0,
-                                        .highHz = 560.0,
-                                        .lowSeconds = 0.06,
-                                        .highSeconds = 0.04,
-                                        .snaresSeconds = 0.2,
-                                        .snaresLevel = 0.7,
-                                        .snaresLowCut = 1800.0,
-                                        .snaresHighCut = 10000.0,
-                                        .length = 0.6,
-                                        .drive = 1.4 });
-          } },
-        { "808 Low Tom", [] { return tom808 (80.0); } },
-        { "808 Closed Hat", [] { return makeHat (rate, { .decaySeconds = 0.045, .length = 0.22 }); } },
-        { "808 Floor Tom", [] { return tom808 (95.0); } },
-        { "808 Pedal Hat", [] { return makeHat (rate, { .decaySeconds = 0.08, .length = 0.32 }); } },
-        { "808 Mid Tom", [] { return tom808 (115.0); } },
-        { "808 Open Hat", [] { return makeHat (rate, { .decaySeconds = 0.4, .length = 1.3 }); } },
-        { "808 Mid Tom 2", [] { return tom808 (135.0); } },
-        { "808 High Tom", [] { return tom808 (160.0); } },
-        { "808 Crash",
-          [] { return makeHat (rate, { .decaySeconds = 1.2, .length = 3.0, .noise = 0.1, .centreHz = 5200.0, .lowCut = 3200.0 }); } },
-        { "808 High Tom 2", [] { return tom808 (190.0); } },
-        { "808 Ride",
-          []
-          {
-              return makeHat (rate,
-                              { .decaySeconds = 0.8, .length = 2.2, .noise = 0.08, .centreHz = 8500.0, .lowCut = 5500.0, .pitch = 1.06 });
-          } },
+        // The 808's sixteen voices (DrumMachines.h), General MIDI's drums where it has them, its own where it hasn't: its
+        // claves for the second snare, its maracas for the pedal hat, its three congas between its three toms, its cymbal
+        // for the crash and its cowbell for the ride.
+        { "808 Kick", [] { return drums::make808Kick (rate); } },
+        { "808 Rim", [] { return drums::make808Rim (rate); } },
+        { "808 Snare", [] { return drums::make808Snare (rate); } },
+        { "808 Clap", [] { return drums::make808Clap (rate); } },
+        { "808 Claves", [] { return drums::make808Claves (rate); } },
+        { "808 Low Tom", [] { return drums::make808Tom (rate, 90.0, 0.2); } },
+        { "808 Closed Hat", [] { return drums::make808ClosedHat (rate); } },
+        { "808 Mid Tom", [] { return drums::make808Tom (rate, 135.0, 0.13); } },
+        { "808 Maracas", [] { return drums::make808Maracas (rate); } },
+        { "808 High Tom", [] { return drums::make808Tom (rate, 185.0, 0.1); } },
+        { "808 Open Hat", [] { return drums::make808OpenHat (rate); } },
+        { "808 Low Conga", [] { return drums::make808Conga (rate, 185.0, 0.18); } },
+        { "808 Mid Conga", [] { return drums::make808Conga (rate, 280.0, 0.1); } },
+        { "808 Cymbal", [] { return drums::make808Cymbal (rate); } },
+        { "808 High Conga", [] { return drums::make808Conga (rate, 400.0, 0.08); } },
+        { "808 Cowbell", [] { return drums::make808Cowbell (rate); } },
 
         // House: a round kick after the 909's, a big clap, crisp hats with a short open hat, and a bright ride.
         { "House Kick", [] { return makeKick (rate, 180.0, 54.0, 0.018, 0.34, 0.9, 0.35, 2.1); } },
@@ -420,80 +379,25 @@ namespace
                               { .decaySeconds = 0.5, .length = 1.5, .noise = 0.2, .centreHz = 9000.0, .lowCut = 6200.0, .pitch = 1.25 });
           } },
 
-        // Techno, after the 909: a kick swept fast and driven hard, noisy snares and claps, toms that fall far, and
-        // bright, noisy metal.
-        { "Techno Kick", [] { return makeKick (rate, 260.0, 50.0, 0.011, 0.3, 0.9, 0.7, 2.8); } },
-        { "Techno Rim", [] { return makeKick (rate, 2300.0, 1800.0, 0.001, 0.007, 0.06, 0.8, 3.5); } },
-        { "Techno Snare",
-          []
-          {
-              return makeSnare (rate, { .lowHz = 175.0,
-                                        .highHz = 320.0,
-                                        .lowSeconds = 0.05,
-                                        .highSeconds = 0.035,
-                                        .snaresSeconds = 0.13,
-                                        .snaresLevel = 0.85,
-                                        .snaresLowCut = 1800.0,
-                                        .snaresHighCut = 12000.0,
-                                        .length = 0.45,
-                                        .drive = 2.6 });
-          } },
-        { "Techno Clap",
-          []
-          {
-              return makeClap (rate,
-                               { .centreHz = 1500.0, .q = 1.8, .lowCut = 800.0, .spread = 0.75, .tailSeconds = 0.11, .length = 0.45 });
-          } },
-        { "Techno Snare 2",
-          []
-          {
-              return makeSnare (rate, { .lowHz = 200.0,
-                                        .highHz = 360.0,
-                                        .lowSeconds = 0.03,
-                                        .highSeconds = 0.02,
-                                        .snaresSeconds = 0.08,
-                                        .snaresLevel = 1.0,
-                                        .snaresLowCut = 2500.0,
-                                        .snaresHighCut = 14000.0,
-                                        .length = 0.3,
-                                        .drive = 3.2 });
-          } },
-        { "Techno Low Tom", [] { return technoTom (75.0); } },
-        { "Techno Closed Hat",
-          []
-          {
-              return makeHat (rate,
-                              { .decaySeconds = 0.03, .length = 0.14, .noise = 0.7, .centreHz = 9500.0, .lowCut = 8000.0, .pitch = 1.25 });
-          } },
-        { "Techno Floor Tom", [] { return technoTom (90.0); } },
-        { "Techno Pedal Hat",
-          []
-          {
-              return makeHat (rate,
-                              { .decaySeconds = 0.05, .length = 0.2, .noise = 0.7, .centreHz = 9500.0, .lowCut = 8000.0, .pitch = 1.25 });
-          } },
-        { "Techno Mid Tom", [] { return technoTom (108.0); } },
-        { "Techno Open Hat",
-          []
-          {
-              return makeHat (rate,
-                              { .decaySeconds = 0.28, .length = 0.9, .noise = 0.7, .centreHz = 9000.0, .lowCut = 7500.0, .pitch = 1.25 });
-          } },
-        { "Techno Mid Tom 2", [] { return technoTom (128.0); } },
-        { "Techno High Tom", [] { return technoTom (152.0); } },
-        { "Techno Crash",
-          []
-          {
-              return makeHat (rate,
-                              { .decaySeconds = 1.0, .length = 2.6, .noise = 0.8, .centreHz = 6500.0, .lowCut = 4000.0, .pitch = 1.1 });
-          } },
-        { "Techno High Tom 2", [] { return technoTom (180.0); } },
-        { "Techno Ride",
-          []
-          {
-              return makeHat (rate,
-                              { .decaySeconds = 0.9, .length = 2.4, .noise = 0.3, .centreHz = 10000.0, .lowCut = 7000.0, .pitch = 1.45 });
-          } },
+        // The 909's (DrumMachines.h): its analog kick, snare, toms, rim shot and clap, and its sampled hats, crash and ride;
+        // a snappier second snare, a shorter open hat for the pedal hat, and each tom tuned low and high, as its Tune knobs
+        // tune them.
+        { "909 Kick", [] { return drums::make909Kick (rate); } },
+        { "909 Rim", [] { return drums::make909Rim (rate); } },
+        { "909 Snare", [] { return drums::make909Snare (rate); } },
+        { "909 Clap", [] { return drums::make909Clap (rate); } },
+        { "909 Snare 2", [] { return drums::make909Snare (rate, 0.85, 0.95, 205.0); } },
+        { "909 Low Tom", [] { return drums::make909Tom (rate, 82.0, 0.42); } },
+        { "909 Closed Hat", [] { return drums::make909ClosedHat (rate); } },
+        { "909 Low Tom 2", [] { return drums::make909Tom (rate, 96.0, 0.4); } },
+        { "909 Pedal Hat", [] { return drums::make909OpenHat (rate, 0.12); } },
+        { "909 Mid Tom", [] { return drums::make909Tom (rate, 120.0, 0.36); } },
+        { "909 Open Hat", [] { return drums::make909OpenHat (rate, 0.6); } },
+        { "909 Mid Tom 2", [] { return drums::make909Tom (rate, 138.0, 0.34); } },
+        { "909 High Tom", [] { return drums::make909Tom (rate, 165.0, 0.3); } },
+        { "909 Crash", [] { return drums::make909Crash (rate); } },
+        { "909 High Tom 2", [] { return drums::make909Tom (rate, 190.0, 0.28); } },
+        { "909 Ride", [] { return drums::make909Ride (rate); } },
 
         // Tight: everything short and dry, a small kick, a snap of a snare and hats that barely ring.
         { "Tight Kick", [] { return makeKick (rate, 190.0, 62.0, 0.012, 0.12, 0.35, 0.55, 2.0); } },
@@ -628,6 +532,77 @@ namespace
               return wideHat (
                   { .decaySeconds = 0.8, .length = 2.2, .noise = 0.2, .centreHz = 9000.0, .lowCut = 6200.0, .pitch = 1.25, .seed = 7 });
           } },
+
+        // Trap: a short kick over a long 808 (G1), a crisp snare and a layered clap on the backbeat, tight hats for rolls, a
+        // snap, a rim, 808-style toms, a saturated cowbell as phonk plays it, and a shaker, tambourine and crash.
+        { "Trap Kick", [] { return drums::makePunchKick (rate); } },
+        { "Trap Rim", [] { return makeKick (rate, 1900.0, 1700.0, 0.001, 0.008, 0.06, 0.8, 3.0); } },
+        { "Trap Snare", [] { return drums::makeCrispSnare (rate); } },
+        { "Trap Clap", [] { return drums::makeLayeredClap (rate); } },
+        { "Trap Snap", [] { return drums::makeSnap (rate); } },
+        { "Trap 808", [] { return drums::makeLongBass808 (rate); } },
+        { "Trap Closed Hat", [] { return drums::makeTightHat (rate, 0.05); } },
+        { "Trap Low Tom", [] { return drums::make808Tom (rate, 100.0, 0.45); } },
+        { "Trap Roll Hat", [] { return drums::makeTightHat (rate, 0.025); } },
+        { "Trap High Tom", [] { return drums::make808Tom (rate, 150.0, 0.35); } },
+        { "Trap Open Hat", [] { return drums::makeTightHat (rate, 0.4); } },
+        { "Trap Cowbell", [] { return drums::make808Cowbell (rate, 2.5); } },
+        { "Trap Shaker", [] { return drums::makeShaker (rate); } },
+        { "Trap Crash", [] { return drums::make808Cymbal (rate, 1.2, 0.75); } },
+        { "Trap Perc", [] { return drums::makeWoodblock (rate, 1150.0); } },
+        { "Trap Tambourine", [] { return drums::makeTambourine (rate); } },
+
+        // A rhythm box, as the CR-78: its fourteen voices and its open hat, a second snare, General MIDI's drums where it has
+        // them and its own percussion between them (DrumMachines.h).
+        { "Rhythm Box Kick", [] { return drums::makeBoxKick (rate); } },
+        { "Rhythm Box Rim", [] { return drums::makeBoxRim (rate); } },
+        { "Rhythm Box Snare", [] { return drums::makeBoxSnare (rate); } },
+        { "Rhythm Box Claves", [] { return drums::makeBoxClaves (rate); } },
+        { "Rhythm Box Guiro", [] { return drums::makeBoxGuiro (rate); } },
+        { "Rhythm Box Conga", [] { return drums::makeBoxDrum (rate, 175.0, 0.25); } },
+        { "Rhythm Box Closed Hat", [] { return drums::makeBoxHat (rate, 0.06); } },
+        { "Rhythm Box Low Bongo", [] { return drums::makeBoxDrum (rate, 290.0, 0.14); } },
+        { "Rhythm Box Metal", [] { return drums::makeBoxMetal (rate); } },
+        { "Rhythm Box High Bongo", [] { return drums::makeBoxDrum (rate, 410.0, 0.1); } },
+        { "Rhythm Box Open Hat", [] { return drums::makeBoxHat (rate, 0.45); } },
+        { "Rhythm Box Tambourine", [] { return drums::makeBoxTambourine (rate); } },
+        { "Rhythm Box Maracas", [] { return drums::makeBoxMaracas (rate); } },
+        { "Rhythm Box Cymbal", [] { return drums::makeBoxCymbal (rate); } },
+        { "Rhythm Box Cowbell", [] { return drums::makeBoxCowbell (rate); } },
+        { "Rhythm Box Snare 2",
+          []
+          {
+              return makeSnare (rate, { .lowHz = 215.0,
+                                        .highHz = 390.0,
+                                        .lowSeconds = 0.03,
+                                        .highSeconds = 0.02,
+                                        .snaresSeconds = 0.06,
+                                        .snaresLevel = 0.9,
+                                        .snaresLowCut = 2500.0,
+                                        .snaresHighCut = 8000.0,
+                                        .length = 0.25,
+                                        .drive = 1.4,
+                                        .seed = 78 });
+          } },
+
+        // Hand percussion (DrumMachines.h): congas, open and slapped, bongos, timbales, agogo bells, woodblocks and claves,
+        // and what is shaken and struck: shaker, cabasa, tambourine and triangle.
+        { "Percussion Conga", [] { return drums::makeHandDrum (rate, 185.0, 0.32, false); } },
+        { "Percussion Slap", [] { return drums::makeHandDrum (rate, 245.0, 0.12, true); } },
+        { "Percussion High Conga", [] { return drums::makeHandDrum (rate, 280.0, 0.26, false); } },
+        { "Percussion Low Bongo", [] { return drums::makeHandDrum (rate, 340.0, 0.16, false); } },
+        { "Percussion High Bongo", [] { return drums::makeHandDrum (rate, 470.0, 0.12, false); } },
+        { "Percussion Low Timbale", [] { return drums::makeTimbale (rate, 330.0); } },
+        { "Percussion Shaker", [] { return drums::makeShaker (rate); } },
+        { "Percussion High Timbale", [] { return drums::makeTimbale (rate, 440.0); } },
+        { "Percussion Cabasa", [] { return drums::makeCabasa (rate); } },
+        { "Percussion Low Agogo", [] { return drums::makeAgogo (rate, 820.0); } },
+        { "Percussion Tambourine", [] { return drums::makeTambourine (rate); } },
+        { "Percussion High Agogo", [] { return drums::makeAgogo (rate, 1100.0); } },
+        { "Percussion Claves", [] { return drums::makeBoxClaves (rate, 2500.0, 0.08); } },
+        { "Percussion Low Woodblock", [] { return drums::makeWoodblock (rate, 700.0); } },
+        { "Percussion Triangle", [] { return drums::makeTriangle (rate, false); } },
+        { "Percussion High Woodblock", [] { return drums::makeWoodblock (rate, 1050.0); } },
     };
 
     constexpr auto numDrums = std::size (entries);

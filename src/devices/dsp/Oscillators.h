@@ -85,36 +85,38 @@ public:
 
     void setPhase (float newPhase) noexcept { phase = newPhase - std::floor (newPhase); }
     float getPhase() const noexcept { return phase; }
+    float getIncrement() const noexcept { return increment; } // of its phase each sample, from 0 to 0.49
 
-    float next (Waveform waveform, float pulseWidth = 0.5f) noexcept
+    // Its wave at a place in its cycle (from 0 to 1), as it plays at the frequency set last, without moving on: what hard
+    // sync reads, at a place that another oscillator's cycle gives.
+    float valueAt (Waveform waveform, float t, float pulseWidth = 0.5f) const noexcept
     {
-        const auto t = phase;
-        auto value = 0.0f;
-
         switch (waveform)
         {
             case Waveform::sine:
-                value = sineOfPhase (t);
-                break;
+                return sineOfPhase (t);
 
             case Waveform::triangle:
-                value = read (triangleLevel, t);
-                break;
+                return read (triangleLevel, t);
 
             case Waveform::saw:
-                value = read (sawLevel, t);
-                break;
+                return read (sawLevel, t);
 
             case Waveform::square:
             {
                 // Two saws a width apart, one taken from the other, so that the width can move: high for the width, then low.
                 const auto width = pulseWidth < 0.05f ? 0.05f : (pulseWidth > 0.95f ? 0.95f : pulseWidth);
                 const auto behind = t < width ? t - width + 1.0f : t - width;
-                value = read (sawLevel, behind) - read (sawLevel, t) + 2.0f * width - 1.0f;
-                break;
+                return read (sawLevel, behind) - read (sawLevel, t) + 2.0f * width - 1.0f;
             }
         }
 
+        return 0.0f;
+    }
+
+    float next (Waveform waveform, float pulseWidth = 0.5f) noexcept
+    {
+        const auto value = valueAt (waveform, phase, pulseWidth);
         phase += increment;
 
         if (phase >= 1.0f)

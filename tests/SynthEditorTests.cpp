@@ -104,38 +104,40 @@ TEST_CASE ("Narrower than its parts side by side, as the dock is, the synth's ed
     auto& layout = panel->getLayout();
     CHECK_FALSE (layout.usesPages());
 
-    for (int column = 0; column < 6; ++column)
+    for (int column = 0; column < 7; ++column)
         CHECK_FALSE (layout.usesTabs (column));
 
-    // As wide and as tall as the dock at the default window: in pages, two or three parts to each, every page whole.
+    // As wide and as tall as the dock at the default window: in pages, two columns to each, every page whole.
     constexpr int dockWidth = 552, dockHeight = 268; // beside the Devices view's column
     REQUIRE (panel->getMinimumHeightAtWidth (dockWidth) <= dockHeight);
     window.setSize (dockWidth, dockHeight);
     REQUIRE (layout.usesPages());
-    CHECK (layout.getNumPages() == 3);
+    CHECK (layout.getNumPages() == 4);
     CHECK (layout.getPageName (0) == juce::String::fromUTF8 ("Oscillators \xc2\xb7 Filter"));
+    CHECK (layout.getPageName (2) == juce::String::fromUTF8 ("LFO \xc2\xb7 Pitch"));
+    CHECK (layout.getPageName (3) == juce::String ("Unison"));
 
-    for (int column = 0; column < 6; ++column)
+    for (int column = 0; column < 7; ++column)
         CHECK_FALSE (layout.usesTabs (column));
 
     phazite::test::checkChildrenApart (*panel);
-    auto* unison = panel->findControl ("unisonVoices");
-    REQUIRE (unison != nullptr);
-    CHECK_FALSE (unison->isShowing());
+    auto* voiceMode = panel->findControl ("voiceMode");
+    REQUIRE (voiceMode != nullptr);
+    CHECK_FALSE (voiceMode->isShowing());
 
-    // The last page's tab shows the unison and how the synth plays, inside the editor.
+    // The last page's tab shows the pitch envelope and how the synth plays, inside the editor.
     juce::Button* tab = nullptr;
 
     for (auto* button : phazite::test::findAll<juce::Button> (*panel))
-        if (button->getTitle() == layout.getPageName (2))
+        if (button->getTitle() == layout.getPageName (3))
             tab = button;
 
     REQUIRE (tab != nullptr);
     phazite::test::Mouse mouse (*tab);
     mouse.click (tab->getLocalBounds().getCentre());
-    CHECK (layout.getShownPage() == 2);
-    CHECK (unison->isShowing());
-    CHECK (panel->getLocalBounds().contains (panel->getLocalArea (unison, unison->getLocalBounds())));
+    CHECK (layout.getShownPage() == 3);
+    CHECK (voiceMode->isShowing());
+    CHECK (panel->getLocalBounds().contains (panel->getLocalArea (voiceMode, voiceMode->getLocalBounds())));
     phazite::test::checkChildrenApart (*panel);
 
     // Narrower in a taller dock, its columns wrap into rows, every part showing.

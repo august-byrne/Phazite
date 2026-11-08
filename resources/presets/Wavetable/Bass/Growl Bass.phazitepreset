@@ -93,7 +93,7 @@
       "glide": 50.0,
       "bendRange": 2.0,
       "velocity": 0.6,
-      "level": -6.0
+      "level": -3.0
     },
     "sounds": {
       "osc1Wavetable": "Growl"

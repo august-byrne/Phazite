@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's synth (roadmap step 1.6): a subtractive synth with up to 16 voices. Each voice mixes two band-limited
-// oscillators (the second tuned and detuned against the first), a sine an octave down and noise, through a resonant
-// filter (one of the types of dsp/MultimodeFilter.h: low-pass, high-pass, band-pass or notch at 12 or 24 dB, comb, vowel,
-// phaser, sample and hold) that has an envelope of its own and follows the keys, then an amp envelope. One LFO moves the
-// pitch, the cutoff or the level; the mod wheel adds to it. In mono mode one voice plays, legato, gliding between the
-// keys held, as a bassline does. Pitch bend and the sustain pedal work as on a keyboard. Unison plays each oscillator up
-// to seven times at once, detuned against each other and spread across the stereo field, for a wide, thick sound (a
-// "supersaw"). Its noise and its unison's starting phases come from fixed seeds, so it renders the same every time.
+// oscillators (the second tuned and detuned against the first, and hard-synced to it if wanted, its pitch swept by the
+// filter envelope, as a Prophet-5's poly-mod sweeps its synced oscillator), a sub an octave or two down (a sine, triangle,
+// saw or square) and noise, through a resonant filter (one of the types of dsp/MultimodeFilter.h: low-pass, high-pass,
+// band-pass or notch at 12 or 24 dB, comb, vowel, phaser, sample and hold) that has an envelope of its own, follows the keys
+// and closes for softer notes as much as wanted, then an amp envelope. A pitch envelope drops each note onto its pitch,
+// for 808s, toms and zaps. One LFO moves the pitch, the cutoff, the level or the pulse width (a Juno's string pad), coming
+// in over a fade after each note starts as a Juno's LFO delay does; the mod wheel adds to it. Drift lets each voice's
+// oscillators and cutoff wander a little, as an analog synth's do. In mono mode one voice plays, legato, gliding between
+// the keys held, as a bassline does, every note or only those played over a held one (a TB-303's slides). Pitch bend and
+// the sustain pedal work as on a keyboard. Unison plays each oscillator up to seven times at once, detuned against each
+// other and spread across the stereo field, for a wide, thick sound (a "supersaw"). Its noise, its unison's starting
+// phases and its drift come from fixed seeds, so it renders the same every time.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -15,6 +20,7 @@
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
+#include "devices/dsp/Oversampling.h"
 #include "devices/dsp/Random.h"
 
 #include <array>
@@ -37,10 +43,15 @@ public:
         osc2Wave,
         osc2Pitch,
         osc2Detune,
+        osc2Sync,     // osc 2 starts its cycle again with each of osc 1's (hard sync)
+        osc2Envelope, // how far the filter envelope moves osc 2's pitch, in semitones: with Sync, the sync sweep
         oscMix,
         pulseWidth,
         subLevel,
+        subOctave, // one octave down, or two
+        subShape,  // a dsp::Waveform: sine, triangle, saw or square
         noiseLevel,
+        drift,        // how far each voice's oscillators and cutoff wander
         unisonVoices, // from one voice up to seven, detuned and spread
         unisonDetune,
         unisonSpread,
@@ -48,8 +59,10 @@ public:
         cutoff,
         resonance,
         filterSlope,
+        drive, // the filter's, saturating what goes into it, in decibels
         filterEnvelope,
         keyTracking,
+        filterVelocity, // how far a softer note's cutoff falls: at full, four octaves at velocity 0
         filterAttack,
         filterDecay,
         filterSustain,
@@ -68,8 +81,12 @@ public:
         lfoTarget,
         lfoRate,
         lfoDepth,
+        lfoFade,     // how long each note's LFO takes to come in, from nothing to its depth
+        pitchAmount, // the pitch envelope: semitones each note starts above (or below) its pitch,
+        pitchDecay,  // falling onto it over this time
         voiceMode,
         glide,
+        glideMode, // a GlideMode
         bendRange,
         velocity,
         level,
@@ -81,9 +98,16 @@ public:
 
     enum class LfoTarget
     {
-        pitch,  // up to a semitone either way
-        cutoff, // up to two octaves either way
-        level   // tremolo
+        pitch,     // up to a semitone either way
+        cutoff,    // up to two octaves either way
+        level,     // tremolo
+        pulseWidth // up to 45 % either way, as a Juno's PWM: a square's width, and so its colour, moving
+    };
+
+    enum class GlideMode
+    {
+        always, // every note glides from the one before
+        legato  // only a note played while another is held, as a TB-303 slides
     };
 
     static const DeviceInfo info;
@@ -119,6 +143,8 @@ private:
         bool held = false;      // its key is down
         bool sustained = false; // its key is up but the sustain pedal holds it
         float velocityGain = 1.0f;
+        float velocity = 1.0f;                             // its note's, from 0 to 1, which the filter's velocity takes
+        float pitchEnvelope = 0.0f;                        // the pitch envelope, from 1 as the note starts toward 0
         float pitch = 60.0f, target = 60.0f;               // in semitones, gliding to the target
         float slidePerSample = 0.0f;                       // while it slides there evenly (a slide or portamento note): semitones a sample
         std::uint64_t started = 0;                         // when it began, so that the oldest is taken first
@@ -126,10 +152,15 @@ private:
         dsp::Oscillator sub;
         dsp::Random unisonPhases; // where the unison's oscillators start, the same every time
         dsp::Random noise;
+        dsp::Random drifting;                         // where its drift wanders, the same every time
+        std::array<float, 3> driftNow {}, driftTo {}; // osc 1's, osc 2's and the cutoff's, from -1 to 1
+        int driftStepsLeft = 0;                       // control steps until it wanders toward new places
         dsp::Adsr amp, filterEnvelope;
-        std::array<dsp::MultimodeFilter, 2> filters; // the second only while unison spreads the voice across the stereo field
-        dsp::FilterSettings filterSettings {};       // what they were last set to,
-        bool filterIsSet = false;                    // if they were since the voice started
+        std::array<dsp::MultimodeFilter, 2> filters;  // the second only while unison spreads the voice across the stereo field
+        std::array<dsp::AntialiasedShaper, 2> drives; // the filter's drive, each side, at twice the rate
+        float driveBlend = 0.0f;                      // how far the sound goes through them: fades as the drive comes on or off
+        dsp::FilterSettings filterSettings {};        // what they were last set to,
+        bool filterIsSet = false;                     // if they were since the voice started
         float filterEnvelopeLevel = 0.0f;
         float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, or cut as playback stopped
         int age = 0;                        // the samples since its note began (up to a limit)
@@ -163,6 +194,9 @@ private:
     void releaseVoice (Voice&);
     Voice& findVoiceFor (int note);
     void stealVoice (Voice&);
+    bool isAnotherKeyHeld (int note) const noexcept; // a voice but one playing this note is held: a legato note glides
+    void startDrift (Voice&) noexcept;               // a note's drift, from somewhere new
+    void moveDrift (Voice&) noexcept;                // a control step on
     void render (float* left, float* right, int numSamples, std::span<const float> parameters);
 };
 } // namespace phazite::devices

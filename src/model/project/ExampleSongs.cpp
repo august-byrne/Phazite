@@ -443,7 +443,7 @@ namespace
     };
 
     //==============================================================================
-    // Trap at 140 BPM in C minor, 56 bars: an intro on iv and V that the hook's i resolves; drums in half time on the 808
+    // Trap at 140 BPM in C minor, 56 bars: an intro on iv and V that the hook's i resolves; drums in half time on the trap
     // kit, the snare and the clap on each bar's third beat, and hi-hat rolls in 32nds and triplets; an 808 whose slide notes
     // glide it up an octave and on to the next chord's root; FM bells, a dark pad and, in the verse, a pluck that answers
     // them; a noise riser into each hook and a crash on its first beat; and a plate and a ping-pong delay on returns.
@@ -494,7 +494,7 @@ namespace
         // open one in the hook; a roll of 32nds before the first bar's snare is done, and one at the end of the second bar,
         // in triplets, or for the last two bars of a part in 32nds without the kick, into the next.
         const auto drums = song.addTrack ("Drums", "Vermilion");
-        song.setInstrument (drums, devices::DrumSampler::typeID, "Drum Sampler/Kits/Deep 808 Kit");
+        song.setInstrument (drums, devices::DrumSampler::typeID, "Drum Sampler/Kits/Trap Kit");
 
         const auto roll = [&song] (ClipID clip, double start, double length, int count, int from, int to)
         {
@@ -543,19 +543,19 @@ namespace
 
         // A crash on the first beat of each part after the intro, and a riser into each hook.
         const auto crash = song.addTrack ("Crash", "Yellow");
-        song.repeat (song.addSample (crash, "Crash", getStereoFactoryDrum ("808 Crash"), bar (4)), { bar (20), bar (36) });
+        song.repeat (song.addSample (crash, "Crash", getStereoFactoryDrum ("Trap Crash"), bar (4)), { bar (20), bar (36) });
         song.setVolume (crash, -8.0f);
 
         const auto riser = song.addTrack ("Riser", "Gray");
         song.setInstrument (riser, devices::Synth::typeID, "Synth/FX/Noise Riser");
         song.note (song.addClip (riser, bar (2), bar (2)), 57, bar (2), bar (2), 90);
         song.note (song.addClip (riser, bar (34), bar (2)), 57, bar (34), bar (2), 90);
-        song.setVolume (riser, -10.0f);
+        song.setVolume (riser, -13.0f);
 
         // The 808: a note with each kick, held until the next, at the root of the chord it is under. In the hook a slide note
         // glides it up an octave and back in each chord's first bar, and another on to the next chord's root at its end.
         const auto bass = song.addTrack ("808", "Blue");
-        song.setInstrument (bass, devices::Synth::typeID, "Synth/Bass/808 Glide");
+        song.setInstrument (bass, devices::Synth::typeID, "Synth/Bass/Sine 808");
         song.addEffect (bass, devices::Saturator::typeID, "Saturator/Warmth/Subtle Drive");
 
         const auto add808 = [&] (double start, bool hook)
@@ -594,7 +594,7 @@ namespace
         // The bells: each chord's notes in a figure over its two bars, an eighth note at a time with rests: in the hooks, in
         // the intro (on iv and V) and in the outro (on i).
         const auto bells = song.addTrack ("Bells", "Sky blue");
-        song.setInstrument (bells, devices::WavetableSynth::typeID, "Wavetable/Keys/FM Bells");
+        song.setInstrument (bells, devices::WavetableSynth::typeID, "Wavetable/Keys/Glass Bells");
         constexpr int figure[16] = { 0, 1, 2, 1, 3, 2, 1, 2, 0, 1, 2, -1, 3, 2, 1, -1 }; // 3 is the lowest an octave up, -1 a rest
 
         const auto addFigure = [&song, &figure] (ClipID clip, double start, const Chord& chord)
@@ -621,7 +621,7 @@ namespace
 
         // A dark pad from the chord lane, under it all; and in the verse a pluck that answers, down the chord from its top.
         const auto pad = song.addPart (PartStyle::sustainedTriads, 0, 56, "Pad", "Reddish purple", "Synth/Pad/Dark Pad");
-        song.setVolume (pad, -12.0f);
+        song.setVolume (pad, -10.0f);
 
         const auto pluck = song.addTrack ("Pluck", "Bluish green");
         song.setInstrument (pluck, devices::WavetableSynth::typeID, "Wavetable/Pluck/Future Pluck");
@@ -824,6 +824,7 @@ namespace
         // to lead into the next four bars, through both drops, ducking under the kick.
         const auto bass = song.addTrack ("Bass", "Blue");
         song.setInstrument (bass, devices::Synth::typeID, "Synth/Bass/Pluck Bass");
+        song.setVolume (bass, -4.0f);
         const auto bassline = song.addClip (bass, bar (16), bar (4));
         constexpr int roots[4] = { 33, 29, 36, 31 }; // A, F, C and G: the chords i, VI, III and VII
 
@@ -860,7 +861,7 @@ namespace
 
         // A pad under the breakdown, its chords spread wide.
         const auto pad = song.addPart (PartStyle::spreadChords, 32, 40, "Pad", "Orange", "Synth/Pad/Warm Pad");
-        song.setVolume (pad, -8.0f);
+        song.setVolume (pad, -5.5f);
 
         // The lead's riff, four bars in A minor, through the first drop, and an octave up through the second.
         const auto lead = song.addTrack ("Lead", "Sky blue");
@@ -887,14 +888,14 @@ namespace
 
         song.repeat (addRiff (bar (16), 0), { bar (20), bar (24), bar (28) });
         song.repeat (addRiff (bar (40), 12), { bar (44), bar (48), bar (52) });
-        song.setVolume (lead, -4.0f);
+        song.setVolume (lead, -2.0f);
 
         // A noise riser held through the build-up and the breakdown's end, its volume rising each time (an automation lane).
         const auto riser = song.addTrack ("Riser", "Gray");
         song.setInstrument (riser, devices::Synth::typeID, "Synth/FX/Noise Riser");
         song.note (song.addClip (riser, bar (8), bar (8)), 57, bar (8), bar (8), 100);
         song.note (song.addClip (riser, bar (36), bar (4)), 57, bar (36), bar (4), 100);
-        const auto quiet = decibelsToFaderPosition (-24.0f), full = decibelsToFaderPosition (0.0f);
+        const auto quiet = decibelsToFaderPosition (-27.0f), full = decibelsToFaderPosition (-3.0f);
         song.automate (
             getVolume (song.context, riser).getRef(),
             { { at (bar (8)), quiet, -0.3f }, { at (bar (16)), full }, { at (bar (36)), quiet, -0.3f }, { at (bar (40)), full } });
@@ -1123,7 +1124,7 @@ namespace
             song.note (walk, next - 1, start + 3.5 + swing, 0.4, 76);
         }
 
-        song.setVolume (bass, -3.0f);
+        song.setVolume (bass, 1.5f);
 
         // A melody in the B parts, through a dub delay, and its answer in the second A part.
         const auto melody = song.addTrack ("Melody", "Sky blue");

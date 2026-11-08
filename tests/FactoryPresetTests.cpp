@@ -3,7 +3,8 @@
 // format (model/base/internal/Schema.h: schema::preset), in its device's folder, naming every parameter the device has
 // and no other, within their ranges, and tables it has, written as Save Preset writes them; and each one playing: an
 // instrument a chord and a bass note, an effect a beat and a tone, coming out with sound, without anything that isn't a
-// number, and without going far over full scale.
+// number, and without going far over full scale; and the instruments leveled alike, none of their notes or chords
+// peaking above -1 dBFS.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -28,6 +29,7 @@
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "engine/nodes/LoudnessMeter.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/DeviceHandle.h"
@@ -125,11 +127,8 @@ struct Played
     bool finite = true;
 };
 
-// Plays a device with a preset's values for a second and a half: an instrument a chord and a bass note for half a second
-// (a drum sampler each of its pads in turn, a 32nd note at 120 bpm apart, as a busy beat plays them), an effect a beat of
-// noise bursts over a low tone, with what went in mixed back as its mix says, as Phazite's engine plays it
-// (engine/nodes/DeviceRunner.h).
-Played play (const devices::DeviceInfo& info, const std::vector<float>& values, const juce::var& sounds)
+// A device for a preset, prepared, playing the preset's tables and sounds.
+std::unique_ptr<devices::Processor> makeLoaded (const devices::DeviceInfo& info, const juce::var& sounds)
 {
     auto processor = makeProcessor (info);
     REQUIRE (processor != nullptr);
@@ -149,6 +148,16 @@ Played play (const devices::DeviceInfo& info, const std::vector<float>& values, 
         if (const auto name = sounds[phazite::schema::samplerSample].toString(); name.isNotEmpty())
             sampler->setSound (devices::getFactorySample (devices::findFactorySample (name.toStdString())));
 
+    return processor;
+}
+
+// Plays a device with a preset's values for a second and a half: an instrument a chord and a bass note for half a second
+// (a drum sampler each of its pads in turn, a 32nd note at 120 bpm apart, as a busy beat plays them), an effect a beat of
+// noise bursts over a low tone, with what went in mixed back as its mix says, as Phazite's engine plays it
+// (engine/nodes/DeviceRunner.h).
+Played play (const devices::DeviceInfo& info, const std::vector<float>& values, const juce::var& sounds)
+{
+    auto processor = makeLoaded (info, sounds);
     const auto isInstrument = info.kind == devices::DeviceKind::instrument;
     const auto isDrums = toString (info.typeID) == devices::DrumSampler::typeID;
     const auto numSamples = (int) (1.5 * testRate), release = (int) (0.5 * testRate);
@@ -216,6 +225,72 @@ Played play (const devices::DeviceInfo& info, const std::vector<float>& values, 
 
     played.rms = std::sqrt (energy / (2.0 * testRate));
     return played;
+}
+
+// A preset's values: each parameter it names, the others at their defaults.
+std::vector<float> readValues (const devices::DeviceInfo& info, const juce::var& device)
+{
+    std::vector<float> values;
+
+    for (const auto& parameter : info.parameters)
+        values.push_back (parameter.defaultValue);
+
+    if (const auto* set = device[keys::parameters].getDynamicObject())
+        for (const auto& [id, value] : set->getProperties())
+            if (const auto index = devices::findParameter (info, id.toString().toStdString()); index >= 0)
+                values[(size_t) index] = devices::constrain (info.parameters[(size_t) index], (float) value);
+
+    return values;
+}
+
+// An instrument playing notes at velocity 100 for a while, then three seconds more: how high it peaks, and its loudest
+// momentary loudness (EBU R128, 400 ms), as the engine's meter finds it.
+struct Heard
+{
+    float peak = 0.0f, loudness = -99.0f;
+};
+
+Heard playNotes (const devices::DeviceInfo& info, const std::vector<float>& values, const juce::var& sounds,
+                 std::initializer_list<int> notes, double seconds)
+{
+    auto processor = makeLoaded (info, sounds);
+    phazite::engine::LoudnessMeter meter;
+    meter.prepare (testRate, testBlockSize);
+    const auto release = (int) (seconds * testRate), numSamples = release + (int) (3.0 * testRate);
+    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    Heard heard;
+
+    for (int done = 0; done < numSamples; done += testBlockSize)
+    {
+        std::vector<devices::NoteEvent> events;
+
+        for (const auto note : notes)
+        {
+            if (done == 0)
+                events.push_back ({ devices::NoteEvent::Type::noteOn, 0, note, 0.8f });
+
+            if (done <= release && done + testBlockSize > release)
+                events.push_back ({ devices::NoteEvent::Type::noteOff, release - done, note, 0.0f });
+        }
+
+        buffer.clear();
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = testBlockSize;
+        block.parameters = values;
+        block.events = events;
+        processor->process (block);
+        heard.peak = std::max (heard.peak, buffer.getMagnitude (0, testBlockSize));
+        const float* read[] = { buffer.getReadPointer (0), buffer.getReadPointer (1) };
+        meter.process (read, 2, testBlockSize);
+
+        if (const auto momentary = meter.getReadings().momentary)
+            heard.loudness = std::max (heard.loudness, *momentary);
+    }
+
+    return heard;
 }
 } // namespace
 
@@ -340,6 +415,61 @@ TEST_CASE ("Phazite's presets play: sound comes out, only numbers, and never far
     }
 }
 
+TEST_CASE ("Phazite's instrument presets are leveled alike, and none clips a note or a chord")
+{
+    // Each one's note at velocity 100, at its kind's pitch (a bass and a drum low, a pad in the middle, a sampler at its root
+    // or on its first slice), and, for one that plays chords (polyphonic, and not a bass, a drum or an effect), the chord the
+    // test above plays: none of them peaks above -1 dBFS, as factory libraries keep their presets (docs/presets.md); and each
+    // note's loudness is within 12 LU of its device's presets' median, so that switching presets doesn't jump far in level.
+    std::map<juce::String, std::vector<std::pair<juce::String, float>>> loudness; // each device's presets, by their names
+
+    for (const auto& file : getPresetFiles())
+    {
+        const auto device = phazite::readPreset (file)[keys::device];
+        const auto* info = findDevice (device[keys::type].toString());
+        REQUIRE (info != nullptr);
+
+        if (info->kind != devices::DeviceKind::instrument || toString (info->typeID) == devices::DrumSampler::typeID)
+            continue;
+
+        const auto name = file.getRelativePathFrom (getFactoryPresets());
+        CAPTURE (name.toStdString());
+        const auto values = readValues (*info, device);
+        const auto value = [&] (std::string_view id) { return values[(size_t) devices::findParameter (*info, id)]; };
+        const auto kind = file.getParentDirectory().getFileName();
+        const auto isSampler = toString (info->typeID) == devices::Sampler::typeID;
+
+        auto note = kind == "Bass" || kind == "Percussion" ? 36 : (kind == "Pad" || kind == "Strings" ? 48 : 60);
+
+        if (isSampler)
+            note = juce::roundToInt (value ("mode")) == (int) devices::Sampler::Mode::slice ? devices::Sampler::firstSliceNote
+                                                                                            : juce::roundToInt (value ("root"));
+
+        const auto heard = playNotes (*info, values, device[keys::sounds], { note }, 2.0);
+        CHECK (heard.peak <= juce::Decibels::decibelsToGain (-1.0f));
+        loudness[toString (info->name)].push_back ({ name, heard.loudness });
+
+        const auto playsChords = juce::roundToInt (value ("voiceMode")) != 1 && kind != "Bass" && kind != "Percussion" && kind != "FX";
+
+        if (playsChords)
+            CHECK (playNotes (*info, values, device[keys::sounds], { 36, 48, 52, 55 }, 0.5).peak <= juce::Decibels::decibelsToGain (-1.0f));
+    }
+
+    for (auto& [device, presets] : loudness)
+    {
+        auto sorted = presets;
+        std::sort (sorted.begin(), sorted.end(), [] (const auto& a, const auto& b) { return a.second < b.second; });
+        const auto median = sorted[sorted.size() / 2].second;
+
+        for (const auto& [name, each] : presets)
+        {
+            CAPTURE (name.toStdString());
+            CAPTURE (median);
+            CHECK (std::abs (each - median) <= 12.0f);
+        }
+    }
+}
+
 TEST_CASE ("Phazite's drum kits each play sounds of their own on every pad, named after the kit, none of them another kit's")
 {
     const auto names = devices::getFactoryDrumNames();
@@ -362,7 +492,7 @@ TEST_CASE ("Phazite's drum kits each play sounds of their own on every pad, name
             const auto name = device[keys::sounds][phazite::schema::getPadSound (pad)].toString();
             CAPTURE (name.toStdString());
             CHECK (devices::findFactoryDrum (name.toStdString()) >= devices::DrumSampler::numPads); // a kit's, not the default's
-            CHECK (kit.contains (name.upToFirstOccurrenceOf (" ", false, false)));                  // "808 Kick" in "Deep 808 Kit"
+            CHECK (kit.contains (name.upToFirstOccurrenceOf (" ", false, false)));                  // "808 Kick" in "808 Kit"
             CHECK (kitOf.count (name) == 0);
             kitOf[name] = kit;
         }
@@ -384,9 +514,9 @@ TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the s
     CHECK (device.getPadName (0) == juce::String ("Kick"));
 
     // The 808's on every pad, and in the sampler the engine plays once it has the song again.
-    REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("Deep 808 Kit.phazitepreset")));
+    REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("808 Kit.phazitepreset")));
     CHECK (device.getPadName (0) == juce::String ("808 Kick"));
-    CHECK (device.getPadName (15) == juce::String ("808 Ride"));
+    CHECK (device.getPadName (15) == juce::String ("808 Cowbell"));
     phazite::getSession (song.context)->update();
     auto* sampler = device.getProcessor<devices::DrumSampler>();
     REQUIRE (sampler != nullptr);
@@ -403,8 +533,8 @@ TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the s
     CHECK (device.getPadName (0) == juce::String ("808 Kick"));
 
     // Another kit in its place, and Undo step by step back to the default kit.
-    REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("Techno Kit.phazitepreset")));
-    CHECK (device.getPadName (6) == juce::String ("Techno Closed Hat"));
+    REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("909 Kit.phazitepreset")));
+    CHECK (device.getPadName (6) == juce::String ("909 Closed Hat"));
 
     for (const auto* expected : { "808 Kick", "Boom", "808 Kick", "Kick" })
     {
