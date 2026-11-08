@@ -234,7 +234,7 @@ float getCentroid (const Audio& audio, double seconds)
         return 0.0f;
 
     juce::dsp::FFT fft (order);
-    std::vector<float> data (2 * size, 0.0f);
+    std::vector<float> data ((size_t) (2 * size), 0.0f);
 
     for (int i = 0; i < size; ++i)
     {

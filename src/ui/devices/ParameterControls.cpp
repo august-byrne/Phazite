@@ -249,9 +249,9 @@ void ParameterControls::resized()
 }
 
 //==============================================================================
-ParameterSwitch::ParameterSwitch (const DeviceHandle& device, std::string_view parameterID, const juce::String& text,
+ParameterSwitch::ParameterSwitch (const DeviceHandle& device, std::string_view parameterID, const juce::String& buttonText,
                                   const juce::String& tooltip)
-    : juce::TextButton (text),
+    : juce::TextButton (buttonText),
       DisplayTicker::Display (static_cast<juce::Component&> (*this))
 {
     if (const auto* info = device.getInfo())

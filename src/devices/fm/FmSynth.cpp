@@ -834,10 +834,11 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
             for (int i = 0; i < numOperators; ++i)
             {
                 const auto at = [i, &values] (Field field) { return values[(size_t) getParameterIndex (i, field)]; };
-                auto& level = voice.levels[(size_t) i];
-                level.gain = level.noteGain * getCarrierGain (at (Field::level));
-                level.depth = roles.carries[(size_t) i] ? level.gain : level.noteGain * getModulationIndex (at (Field::level)) * timbreNow;
-                level.feedback = std::clamp (at (Field::feedback) * timbreNow, -1.0f, 1.0f) * strongestFeedback;
+                auto& levels = voice.levels[(size_t) i];
+                levels.gain = levels.noteGain * getCarrierGain (at (Field::level));
+                levels.depth =
+                    roles.carries[(size_t) i] ? levels.gain : levels.noteGain * getModulationIndex (at (Field::level)) * timbreNow;
+                levels.feedback = std::clamp (at (Field::feedback) * timbreNow, -1.0f, 1.0f) * strongestFeedback;
                 const auto tuned = at (Field::fixed) > 0.5f ? (double) at (Field::frequency)
                                                             : noteFrequency * (double) (at (Field::ratio) + at (Field::fine));
 
@@ -857,9 +858,9 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
             if (filtered)
             {
                 const auto moves = values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
-                const auto frequency = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
+                const auto cutoffHertz = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
                 const dsp::FilterSettings settings { .mode = filterMode,
-                                                     .frequency = frequency,
+                                                     .frequency = cutoffHertz,
                                                      .resonance = values[resonance],
                                                      .steep = steep,
                                                      .q = q };

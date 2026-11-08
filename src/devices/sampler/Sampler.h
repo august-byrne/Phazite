@@ -183,7 +183,7 @@ public:
     // Plays a note at the next block as if it came in, and lets it go: for the editor (a slice clicked, the sound played).
     // Message thread, lock-free. One that waited longer than longestAuditionWait for a block is dropped, as the drum
     // sampler's pads are.
-    void audition (int note, float velocity);
+    void audition (int note, float strength); // a velocity, from 0 to 1
     void stopAudition (int note);
     bool isWaitingToPlay() const noexcept override;
 

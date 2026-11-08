@@ -305,19 +305,19 @@ void findRootKey (Song& song, DeviceID id)
 std::shared_ptr<const Sampler::Sound> readSampleSound (const juce::File& file)
 {
     // Each file read once, while anything holds what was read: by its path, its size and when it was last written.
-    struct Key
+    struct FileKey
     {
         juce::String path;
         juce::int64 size = 0, written = 0;
 
-        bool operator< (const Key& other) const
+        bool operator< (const FileKey& other) const
         {
             return std::tie (path, size, written) < std::tie (other.path, other.size, other.written);
         }
     };
 
-    static std::map<Key, std::weak_ptr<const Sampler::Sound>> read;
-    const Key key { file.getFullPathName(), file.getSize(), file.getLastModificationTime().toMilliseconds() };
+    static std::map<FileKey, std::weak_ptr<const Sampler::Sound>> read;
+    const FileKey key { file.getFullPathName(), file.getSize(), file.getLastModificationTime().toMilliseconds() };
 
     if (const auto found = read.find (key); found != read.end())
         if (auto sound = found->second.lock())

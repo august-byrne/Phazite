@@ -68,7 +68,7 @@ struct PluginWindowServices
     ProjectContext& context;
     Library& library;
     Settings& settings;
-    std::function<void (DeviceID, int pad)> swap;
+    std::function<void (DeviceID, int pad)> swap {};
 };
 
 void setPluginWindowServices (const PluginWindowServices*);

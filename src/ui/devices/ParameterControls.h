@@ -72,7 +72,7 @@ class ParameterSwitch : public juce::TextButton,
                         private DisplayTicker::Display
 {
 public:
-    ParameterSwitch (const DeviceHandle&, std::string_view parameterID, const juce::String& text, const juce::String& tooltip);
+    ParameterSwitch (const DeviceHandle&, std::string_view parameterID, const juce::String& buttonText, const juce::String& tooltip);
     ~ParameterSwitch() override;
 
     int getPreferredWidth();

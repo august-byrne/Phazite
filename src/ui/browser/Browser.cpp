@@ -1191,10 +1191,10 @@ juce::PopupMenu Browser::getPlaceMenu (const BrowserPlace& place)
                               return;
 
                           const juce::TreeViewItem* row = nullptr;
-                          auto& tree = *safeThis->tree;
+                          auto& places = *safeThis->tree;
 
-                          for (int i = 0; i < tree.getNumRowsInTree() && row == nullptr; ++i)
-                              if (auto* node = dynamic_cast<PlaceNode*> (tree.getItemOnRow (i));
+                          for (int i = 0; i < places.getNumRowsInTree() && row == nullptr; ++i)
+                              if (auto* node = dynamic_cast<PlaceNode*> (places.getItemOnRow (i));
                                   node != nullptr && node->place.kind == BrowserPlace::Kind::collection && node->place.name == name)
                                   row = node;
 

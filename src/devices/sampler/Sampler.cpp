@@ -341,12 +341,12 @@ void Sampler::setManualSlices (std::shared_ptr<const ManualSlices> slices)
     playingSlices = std::move (slices);
 }
 
-void Sampler::audition (int note, float velocity)
+void Sampler::audition (int note, float strength)
 {
     const auto scope = auditionFifo.write (1);
 
     if (scope.blockSize1 > 0)
-        auditions[(size_t) scope.startIndex1] = { note, std::max (velocity, 0.001f), juce::Time::getMillisecondCounter() };
+        auditions[(size_t) scope.startIndex1] = { note, std::max (strength, 0.001f), juce::Time::getMillisecondCounter() };
 }
 
 void Sampler::stopAudition (int note)
