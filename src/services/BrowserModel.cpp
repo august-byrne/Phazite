@@ -165,6 +165,34 @@ std::vector<BrowserPlace> BrowserModel::getPlaces (const BrowserFilters& filters
     return filtered;
 }
 
+std::vector<BrowserPlace> BrowserModel::getPresetPlaces (const juce::String& folderName) const
+{
+    using Kind = BrowserPlace::Kind;
+    std::vector<BrowserPlace> found;
+
+    if (folderName.isEmpty())
+        return found;
+
+    for (auto& place : getPlaces())
+    {
+        if ((place.kind != Kind::factoryPresets && place.kind != Kind::presets) || place.folder == juce::File())
+            continue;
+
+        place.folder = place.folder.getChildFile (folderName);
+        place.count = 0;
+
+        if (place.folder.isDirectory())
+            for ([[maybe_unused]] const auto& entry :
+                 juce::RangedDirectoryIterator (place.folder, true, juce::String ("*") + presetExtension, juce::File::findFiles))
+                ++place.count;
+
+        if (place.count > 0)
+            found.push_back (std::move (place));
+    }
+
+    return found;
+}
+
 std::vector<LibraryItem> BrowserModel::getIndexedIn (const juce::File& folder, const BrowserFilters& filters) const
 {
     std::vector<LibraryItem> items;

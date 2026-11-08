@@ -27,6 +27,16 @@ namespace
         return juce::jmax (0, depth);
     }
 
+    // Opens a row, and each folder in it and in those, as their rows are made.
+    void openWithFolders (juce::TreeViewItem& row)
+    {
+        row.setOpen (true);
+
+        for (int i = 0; i < row.getNumSubItems(); ++i)
+            if (auto* inside = row.getSubItem (i); inside->mightContainSubItems())
+                openWithFolders (*inside);
+    }
+
     Icon getIconFor (const LibraryItem& item)
     {
         switch (item.kind)
@@ -487,21 +497,19 @@ struct Browser::Tree : public juce::TreeView
             return true;
         }
 
-        // Down with nothing selected goes to the first row that can be, and plays it (or tries it, swapping).
+        // Down with nothing selected goes to the first row that can be (swapping, the first it can try), and plays it, or
+        // tries it.
         if (key == juce::KeyPress::downKey && before == nullptr)
         {
-            for (int row = 0; row < getNumRowsInTree(); ++row)
+            if (auto* first = browser.findFirstRow())
             {
-                if (auto* node = dynamic_cast<Node*> (getItemOnRow (row)); node != nullptr && node->canBeSelected())
-                {
-                    node->setSelected (true, true);
-                    scrollToKeepItemVisible (node);
+                first->setSelected (true, true);
+                scrollToKeepItemVisible (first);
 
-                    if (const auto* item = node->getItem())
-                        browser.preview (*item);
+                if (const auto* item = first->getItem())
+                    browser.preview (*item);
 
-                    return true;
-                }
+                return true;
             }
         }
 
@@ -941,9 +949,10 @@ void Browser::updateSearch()
     searchDelay.stopTimer();
     const auto query = searchField.getText().trim();
 
+    // The places; or while a device's presets are swapped, they alone.
     if (query.isEmpty())
     {
-        tree->setRootItem (placesRoot.get());
+        tree->setRootItem (swapRoot != nullptr ? swapRoot.get() : placesRoot.get());
         return;
     }
 
@@ -963,17 +972,13 @@ void Browser::focusSearch()
 
 void Browser::focusTree()
 {
-    // The first row that can be selected, unless one is.
+    // The first row that can be selected (swapping, the first it can try), unless one is.
     if (tree->getNumSelectedItems() == 0)
     {
-        for (int row = 0; row < tree->getNumRowsInTree(); ++row)
+        if (auto* first = findFirstRow())
         {
-            if (auto* item = tree->getItemOnRow (row); item != nullptr && item->canBeSelected())
-            {
-                item->setSelected (true, true);
-                tree->scrollToKeepItemVisible (item);
-                break;
-            }
+            first->setSelected (true, true);
+            tree->scrollToKeepItemVisible (first);
         }
     }
 
@@ -982,6 +987,30 @@ void Browser::focusTree()
     if (auto* node = dynamic_cast<Node*> (tree->getSelectedItem (0)))
         if (const auto* item = node->getItem())
             preview (*item);
+}
+
+Browser::Node* Browser::findFirstRow() const
+{
+    Node* first = nullptr;
+
+    for (int row = 0; row < tree->getNumRowsInTree(); ++row)
+    {
+        auto* node = dynamic_cast<Node*> (tree->getItemOnRow (row));
+
+        if (node == nullptr || ! node->canBeSelected())
+            continue;
+
+        if (! isSwapping())
+            return node;
+
+        if (const auto* item = node->getItem(); item != nullptr && canTryInSwap (*item))
+            return node;
+
+        if (first == nullptr)
+            first = node;
+    }
+
+    return first;
 }
 
 void Browser::textEditorEscapeKeyPressed (juce::TextEditor&)
@@ -1359,6 +1388,8 @@ void Browser::startSwap (DeviceID device, int pad)
         endSwap();
     }
 
+    endedSwapRoot = nullptr;
+
     if (same)
         return;
 
@@ -1373,11 +1404,15 @@ void Browser::startSwap (DeviceID device, int pad)
     }
 
     previewer.stop();
+    treeBeforeSwap = tree->getOpennessState (false); // with the row selected
+    scrollBeforeSwap = tree->getViewport()->getViewPositionY();
     searchBeforeSwap = searchField.getText();
     filtersBeforeSwap = filters;
     searchField.setText ({}, false);
 
-    // What fits: a pad's sounds of its sound's type, where there are some; a device's presets, in their folders, opened.
+    // What fits, from the tree's top: a pad's sounds of its sound's type, where there are some, by the filters; a device's
+    // presets alone, every folder of them open, as Ableton Live's Hot-Swap opens the device's folder, and with nothing
+    // else around them to get lost in (they are made once the filters are gone, which would hide them).
     BrowserFilters fitting;
 
     if (pad >= 0)
@@ -1391,16 +1426,15 @@ void Browser::startSwap (DeviceID device, int pad)
     }
 
     setFilters (fitting);
-    updateSearch();
 
     if (pad < 0)
-    {
-        const auto folder = getPresetFolderName (projectContext, device);
-        openFolderIn (BrowserPlace::Kind::factoryPresets, folder);
-        openFolderIn (BrowserPlace::Kind::presets, folder);
-    }
+        swapRoot = makeSwapRoot (device);
 
+    updateSearch();
+    scrollTreeTo (0);
     tree->clearSelectedItems();
+    selectionMoved();
+    filterBar.setVisible (swapRoot == nullptr); // presets have none of the filters' values, which would hide them
     swapStrip->update();
     swapStrip->setVisible (true);
     resized();
@@ -1436,40 +1470,59 @@ void Browser::endSwap()
     swap = nullptr; // puts back what is tried, unless it was kept
     swapStrip->setVisible (false);
 
-    // As the browser was before it.
+    // As the browser was before it: its search and its filters, and its tree as it was, its folders open, the row selected
+    // and how far it was scrolled; a device's presets gone from it, their rows kept until the next swap, as it can end in
+    // one of their own callbacks (Enter or a double-click on a preset keeps it).
+    endedSwapRoot = std::move (swapRoot);
     searchField.setText (searchBeforeSwap, false);
     setFilters (filtersBeforeSwap);
     updateSearch();
+
+    if (const auto before = std::move (treeBeforeSwap))
+        tree->restoreOpennessState (*before, true);
+
+    scrollTreeTo (scrollBeforeSwap);
+    selectionMoved();
+    filterBar.setVisible (true);
     showFilters();
     resized();
     tree->repaint();
     repaint (statusArea);
 }
 
-void Browser::openFolderIn (BrowserPlace::Kind kind, const juce::String& folderName)
+void Browser::layOutTreeNow()
 {
-    if (placesRoot == nullptr || folderName.isEmpty())
-        return;
-
-    for (int i = 0; i < placesRoot->getNumSubItems(); ++i)
+    // JUCE's tree lays its rows out on the next message after they change, and a scroll before then goes by where they were,
+    // or is lost while the old rows fit in view: given its root again, it lays them out at once.
+    if (auto* root = tree->getRootItem())
     {
-        auto* place = dynamic_cast<PlaceNode*> (placesRoot->getSubItem (i));
-
-        if (place == nullptr || place->place.kind != kind)
-            continue;
-
-        place->setOpen (true);
-
-        for (int j = 0; j < place->getNumSubItems(); ++j)
-        {
-            if (auto* node = dynamic_cast<Node*> (place->getSubItem (j)); node != nullptr && node->getText() == folderName)
-            {
-                node->setOpen (true);
-                tree->scrollToKeepItemVisible (node);
-                return;
-            }
-        }
+        tree->setRootItem (nullptr);
+        tree->setRootItem (root);
     }
+}
+
+void Browser::scrollTreeTo (int y)
+{
+    layOutTreeNow();
+    tree->getViewport()->setViewPosition (0, y);
+}
+
+std::unique_ptr<Browser::RootNode> Browser::makeSwapRoot (DeviceID device)
+{
+    auto root = std::make_unique<RootNode> (*this);
+    const auto places = model.getPresetPlaces (getPresetFolderName (projectContext, device));
+
+    for (const auto& place : places)
+    {
+        auto* node = new PlaceNode (*this, place);
+        root->addSubItem (node);
+        openWithFolders (*node); // so that every preset is there for Down to go to
+    }
+
+    if (root->getNumSubItems() == 0)
+        root->addSubItem (new MessageNode (*this, "No presets for " + swap->getTargetName() + " yet"));
+
+    return root;
 }
 
 void Browser::chooseFolderToAdd()
@@ -1731,6 +1784,7 @@ void Browser::reveal (BrowserPlace::Kind kind, const juce::File& file)
                 if (item->file == file)
                 {
                     node->setSelected (true, true);
+                    layOutTreeNow(); // the folders just opened
                     tree->scrollToKeepItemVisible (node);
                     return;
                 }
@@ -1835,10 +1889,13 @@ void Browser::resized()
     const auto search = fromSides (area.removeFromTop (SideBar::inputRowHeight));
     searchField.setBounds (search.withSizeKeepingCentre (search.getWidth(), SideBar::controlHeight));
 
-    // The filters under it, in as many rows as they need.
-    const auto filtersWidth = fromSides (area).getWidth();
-    filterBar.setBounds (fromSides (area.removeFromTop (filterBar.getHeightForWidth (filtersWidth))));
-    area.removeFromTop (Space::xs);
+    // The filters under it, in as many rows as they need, while they show.
+    if (filterBar.isVisible())
+    {
+        const auto filtersWidth = fromSides (area).getWidth();
+        filterBar.setBounds (fromSides (area.removeFromTop (filterBar.getHeightForWidth (filtersWidth))));
+        area.removeFromTop (Space::xs);
+    }
 
     auto footer = fromSides (area.removeFromBottom (SideBar::buttonRowHeight));
     footer = footer.withSizeKeepingCentre (footer.getWidth(), SideBar::controlHeight);

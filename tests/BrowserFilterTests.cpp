@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The browser grown on its folders (docs/design.md, section 11; roadmap, After v1): its filters, which narrow a big folder to
 // the kicks in one key alone; what its index reads of loop data, once; collections kept by file, a renamed sound in them
-// still; and Swap, which tries a pad's kicks in place with the keys and keeps one, or puts the old one back.
+// still; and Swap, which tries a pad's kicks in place with the keys and keeps one, or puts the old one back, and shows a
+// device's presets alone to try them.
 #include "SoundPackTestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/reverb/Reverb.h"
+#include "devices/synth/Synth.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/SwapModel.h"
@@ -134,6 +137,33 @@ juce::Rectangle<int> getRow (phazite::ui::Browser& browser, const juce::String& 
 
     FAIL_CHECK ("no row called " << name);
     return {};
+}
+
+// The rows of a browser's tree that are in view, from the top of the view, as screen readers read them.
+juce::StringArray getRowsInView (phazite::ui::Browser& browser)
+{
+    juce::StringArray rows;
+    auto& tree = browser.getTree();
+    const auto* viewport = tree.getViewport();
+    const auto top = viewport->getViewPositionY(), bottom = top + viewport->getViewHeight();
+
+    for (int i = 0; i < tree.getNumRowsInTree(); ++i)
+        if (auto* item = tree.getItemOnRow (i))
+            if (const auto y = item->getItemPosition (false).getY(); y >= top && y + item->getItemHeight() <= bottom)
+                rows.add (item->getAccessibilityName());
+
+    return rows;
+}
+
+// A device's preset, as Save Preset writes one: the values of some of its parameters ("\"cutoff\": 400"), each other at
+// its default.
+void writeDevicePreset (const juce::File& file, const char* type, const juce::String& name, bool instrument,
+                        const juce::String& parameters = {})
+{
+    REQUIRE (file.getParentDirectory().createDirectory());
+    REQUIRE (file.replaceWithText ("{ \"kind\": \"device\", \"device\": { \"type\": \"" + juce::String (type) + "\", \"name\": \"" + name
+                                   + "\", \"instrument\": " + (instrument ? "true" : "false") + ", \"parameters\": { " + parameters
+                                   + " } } }"));
 }
 } // namespace
 
@@ -557,4 +587,124 @@ TEST_CASE ("A drum pad's Swap asks for its pad, and is lit while that pad is bei
     CHECK (editor.getSwapButton().getToggleState());
     editor.selectPad (3);
     CHECK_FALSE (editor.getSwapButton().getToggleState());
+}
+
+TEST_CASE ("A device's Swap shows its presets alone, from the top, Down trying each; then the browser is as it was")
+{
+    phazite::test::TestSong song;
+    const auto synth = song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+    const auto reverb = song.addEffect (song.firstTrack, phazite::devices::Reverb::typeID);
+
+    // Phazite's presets, a folder for each of many devices before the synth's (as they come with Phazite, it far down the
+    // tree), the synth's by kind of sound; and the user's, one of them the synth's. None for the reverb.
+    phazite::test::TemporaryFolder temp;
+    const auto factory = temp.folder.getChildFile ("Factory"), own = temp.folder.getChildFile ("Presets");
+
+    for (const auto* other : { "Chorus", "Compressor", "Delay", "Drum Sampler", "EQ", "Filter", "Flanger", "FM", "Limiter", "Multiband",
+                               "Phaser", "Sampler", "Saturator", "Stereo Expander" })
+        writeDevicePreset (factory.getChildFile (other).getChildFile ("Default").getChildFile (juce::String (other) + " One.phazitepreset"),
+                           "phaziteEq", "EQ", false);
+
+    const auto synthPreset = [&] (const juce::String& path) { return factory.getChildFile ("Synth/" + path + ".phazitepreset"); };
+
+    auto cutoff = 0; // each its own, so that each one tried changes the synth
+
+    for (const auto* path : { "Bass/Acid Bass", "Bass/Deep Sub", "Lead/Saw Lead", "Pad/Warm Pad" })
+        writeDevicePreset (synthPreset (path), phazite::devices::Synth::typeID, "Synth", true,
+                           "\"cutoff\": " + juce::String (cutoff += 500));
+
+    writeDevicePreset (own.getChildFile ("Synth/My Synth.phazitepreset"), phazite::devices::Synth::typeID, "Synth", true);
+    writeDevicePreset (own.getChildFile ("EQ/Mine.phazitepreset"), "phaziteEq", "EQ", false);
+
+    phazite::SoundPack sounds { temp.folder.getChildFile ("Packs") }; // not installed
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings, {}, own, factory);
+    REQUIRE (waitForIndex (library));
+
+    // The places that hold a device's presets, each as its folder for the device, with how many: both of them for the synth,
+    // neither for the reverb.
+    const phazite::BrowserModel model { library, sounds };
+    const auto places = model.getPresetPlaces ("Synth");
+    REQUIRE (places.size() == 2);
+    CHECK (places[0].kind == Kind::factoryPresets);
+    CHECK (places[0].folder == factory.getChildFile ("Synth"));
+    CHECK (places[0].count == 4);
+    CHECK (places[1].kind == Kind::presets);
+    CHECK (places[1].folder == own.getChildFile ("Synth"));
+    CHECK (places[1].count == 1);
+    CHECK (model.getPresetPlaces ("Reverb").empty());
+
+    const auto previewerOwner = phazite::createPreviewer (phazite::test::getEngineContext());
+    phazite::ui::Browser browser (library, *previewerOwner, sounds, settings, song.context);
+    phazite::test::TestWindow window (browser, 240, 420); // narrow and short, as a side panel on a small screen
+    auto& tree = browser.getTree();
+    auto& viewport = *tree.getViewport();
+    phazite::test::dispatchPendingMessages(); // the tree makes its rows' components
+
+    // The browser as it is used: Phazite Presets opened with a click, and scrolled down some.
+    phazite::test::Mouse mouse (tree);
+    mouse.click (getRow (browser, "Phazite Presets").getCentre());
+    phazite::test::dispatchPendingMessages();
+    viewport.setViewPosition (0, 4 * phazite::ui::Browser::rowHeight);
+    REQUIRE (viewport.getViewPositionY() == 4 * phazite::ui::Browser::rowHeight);
+    const auto rowsBefore = getRows (browser);
+    const auto inViewBefore = getRowsInView (browser);
+    REQUIRE (tree.getSelectedItem (0) != nullptr);
+    CHECK (tree.getSelectedItem (0)->getAccessibilityName() == juce::String ("Phazite Presets"));
+
+    // The synth's Swap: its presets alone, Phazite's then the user's, every folder open, in view from the top.
+    browser.startSwap (synth);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (browser.isSwapping());
+    const juce::StringArray presets { "Phazite Presets, 4", "Bass", "Acid Bass, Synth", "Deep Sub, Synth", "Lead",
+                                      "Saw Lead, Synth",    "Pad",  "Warm Pad, Synth",  "Presets, 1",      "My Synth, Synth" };
+    CHECK (getRows (browser) == presets);
+    CHECK (viewport.getViewPositionY() == 0);
+    const auto inView = getRowsInView (browser);
+    REQUIRE (inView.size() >= 4);
+    CHECK (inView[0] == juce::String ("Phazite Presets, 4"));
+    CHECK (inView.contains ("Acid Bass, Synth"));
+    CHECK (tree.getNumSelectedItems() == 0);
+    CHECK (tree.hasKeyboardFocus (true));
+    CHECK_FALSE (browser.getFilterBar().isVisible()); // presets have none of the filters' values
+
+    // Down goes to the first preset and tries it, then on through the next, past a kind's folder.
+    const auto tried = [&browser] { return browser.getSwap() != nullptr ? browser.getSwap()->getTried() : juce::File(); };
+    window.pressKey (downKey);
+    CHECK (tried() == synthPreset ("Bass/Acid Bass"));
+    window.pressKey (downKey);
+    CHECK (tried() == synthPreset ("Bass/Deep Sub"));
+    window.pressKey (downKey);
+    CHECK (tried() == synthPreset ("Bass/Deep Sub")); // on Lead's folder
+    window.pressKey (downKey);
+    CHECK (tried() == synthPreset ("Lead/Saw Lead"));
+
+    // Esc puts the old one back, and the browser is as it was: the same rows, the same one selected, scrolled as far.
+    window.pressKey (escapeKey);
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (browser.isSwapping());
+    CHECK (getRows (browser) == rowsBefore);
+    CHECK (viewport.getViewPositionY() == 4 * phazite::ui::Browser::rowHeight);
+    CHECK (getRowsInView (browser) == inViewBefore);
+    REQUIRE (tree.getSelectedItem (0) != nullptr);
+    CHECK (tree.getSelectedItem (0)->getAccessibilityName() == juce::String ("Phazite Presets"));
+    CHECK (browser.getFilterBar().isVisible());
+
+    // A device without presets says so, with nothing of the synth's left over.
+    browser.startSwap (reverb);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (browser.isSwapping());
+    CHECK (getRows (browser) == juce::StringArray { "No presets for Reverb yet" });
+    window.pressKey (escapeKey);
+    phazite::test::dispatchPendingMessages();
+    CHECK (getRows (browser) == rowsBefore);
+
+    // A double-click on one keeps it, as one step, ending the swap in its row's own callback.
+    browser.startSwap (synth);
+    phazite::test::dispatchPendingMessages();
+    mouse.doubleClick (getRow (browser, "Warm Pad").getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (browser.isSwapping());
+    CHECK (song.context.getUndoManager()->getUndoDescription() == juce::String ("Load Preset Warm Pad"));
+    CHECK (getRows (browser) == rowsBefore);
 }

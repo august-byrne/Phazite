@@ -35,7 +35,7 @@ struct BrowserPlace
     Kind kind = Kind::favorites;
     juce::String name; // as its row shows it; for a collection, its name
     juce::File folder; // Phazite Sounds', or the user's folder
-    int count = -1;    // while filters are set, how many of its sounds have their values; else -1
+    int count = -1;    // how many of its sounds have the filters' values, or of a device's presets it holds; else -1
 
     juce::String getTooltip() const;
     juce::String getKey() const; // the same for the same place each time the browser lists it
@@ -98,6 +98,11 @@ public:
     std::vector<BrowserPlace> getPlaces (const BrowserFilters& = {}) const;
     BrowserContents getContents (const BrowserPlace&, const BrowserFilters& = {}) const;
     BrowserContents getContents (const LibraryItem& folder) const;
+
+    // A device's presets, as its swap shows them alone (model/devices/SwapModel.h): Phazite Presets, then Presets, each as
+    // its folder for the device, by the folder's name (model/presets/PresetModel.h: getPresetFolderName()), with how many
+    // presets it holds, while it holds any. Nothing for a device without presets.
+    std::vector<BrowserPlace> getPresetPlaces (const juce::String& folderName) const;
 
     // What search finds in all the places, with the filters' values, or why it finds nothing; and a line when it covers only
     // part of the sounds.

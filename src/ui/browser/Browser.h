@@ -96,9 +96,11 @@ public:
     // preset of one of Phazite's own devices, tried in place as the browser moves to each, heard in the beat; Enter or Keep
     // keeps one as one undo step, Esc or Put Back puts the old one back, and starting another, or anything else that changes
     // the song, keeps what was tried. Meanwhile a strip over the search says what is swapped, previews stay silent, and
-    // the filters and the search show what fits: a pad's sounds of its type ("Kick", by its sound's name), or the device's
-    // presets, their folders opened; once it ends, they are as they were. onSwapStarted shows the browser, which then has
-    // the keys. Asked again for what it swaps (its Swap button clicked again), it keeps what is in its place.
+    // the tree shows what fits, from its top: a pad's sounds of its type ("Kick", by its sound's name), by the filters; or
+    // the device's presets alone, Phazite's and the user's, every folder of them open, so that Down goes from one to the
+    // next, the filters hidden (presets have none of their values). Once it ends, the browser is as it was: its search, its
+    // filters, its folders open, the row selected and how far it was scrolled. onSwapStarted shows the browser, which then has the keys. Asked again for what it swaps (its Swap
+    // button clicked again), it keeps what is in its place.
     void startSwap (DeviceID, int pad = -1);
     bool isSwapping() const;
     void keepSwap();
@@ -155,13 +157,18 @@ private:
     std::unique_ptr<juce::XmlElement> opennessUnfiltered; // the places' folders open before filters were set
     std::unique_ptr<Tree> tree;
     std::unique_ptr<RootNode> placesRoot, searchRoot;
+    std::unique_ptr<RootNode> swapRoot;      // while a device's presets are swapped, they alone (makeSwapRoot())
+    std::unique_ptr<RootNode> endedSwapRoot; // the last swap's, until the next starts (endSwap())
 
-    // The swap open, the strip that shows it, and the search and the filters as they were before it; and which files it can
-    // try, by path, as the rows ask at every paint (a preset is read to know).
+    // The swap open, the strip that shows it, and the search, the filters and the tree as they were before it (its folders
+    // open, the row selected and how far it was scrolled); and which files it can try, by path, as the rows ask at every
+    // paint (a preset is read to know).
     std::unique_ptr<Swap> swap;
     std::unique_ptr<SwapStrip> swapStrip;
     juce::String searchBeforeSwap;
     BrowserFilters filtersBeforeSwap;
+    std::unique_ptr<juce::XmlElement> treeBeforeSwap;
+    int scrollBeforeSwap = 0;
     mutable std::map<juce::String, bool> triable;
 
     // The field that names a new collection, or renames one, over its row.
@@ -191,11 +198,13 @@ private:
     void saveSelectedTrackPreset();
     void choosePresetFile (const juce::String& folder, const juce::String& name, std::function<bool (const juce::File&)> save);
     void presetSaved (const juce::File&);
-    void reveal (BrowserPlace::Kind, const juce::File&);                    // a file in a place: its folders opened, and it selected
-    void openFolderIn (BrowserPlace::Kind, const juce::String& folderName); // a place's folder of that name, opened
+    void reveal (BrowserPlace::Kind, const juce::File&); // a file in a place: its folders opened, and it selected
     void addRows (juce::TreeViewItem& parent, const BrowserContents&);
     void updateSearch();
     void focusTree();
+    Node* findFirstRow() const; // the first row that can be selected; swapping, the first it can try, while one shows
+    void layOutTreeNow();       // the tree's rows where they are now, for a scroll to go by (JUCE's tree waits a message)
+    void scrollTreeTo (int y);  // the tree scrolled so far down, its rows laid out as they are now
     void showMenu (const LibraryItem&, bool canRemoveFolder);
     void toggleFavorite (const LibraryItem&);
     void noteUsed (const LibraryItem&);
@@ -205,6 +214,7 @@ private:
     void showFilters();    // the filter bar as the filters and the search are now
     void endSwap();        // once it is kept, put back, or closed by something else: the browser as it was before it
     bool canTryInSwap (const LibraryItem&) const;
+    std::unique_ptr<RootNode> makeSwapRoot (DeviceID); // a device's presets, its folders open, or a line that it has none
 
     // Asks for a collection's name in a field over a row of the tree (from the browser's top while it has none), named as
     // given at first; done gets the name typed, as Enter or a click elsewhere leaves it, unless Esc does.
