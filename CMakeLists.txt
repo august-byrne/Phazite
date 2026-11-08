@@ -138,6 +138,8 @@ target_sources(phazite_core PRIVATE
     src/devices/eq/Equalizer.h
     src/devices/filter/FilterEffect.cpp
     src/devices/filter/FilterEffect.h
+    src/devices/fm/FmSynth.cpp
+    src/devices/fm/FmSynth.h
     src/devices/modulation/Modulation.cpp
     src/devices/modulation/Modulation.h
     src/devices/modulation/Modulators.cpp
@@ -148,6 +150,12 @@ target_sources(phazite_core PRIVATE
     src/devices/motion/Phaser.h
     src/devices/reverb/Reverb.cpp
     src/devices/reverb/Reverb.h
+    src/devices/sampler/FactorySamples.cpp
+    src/devices/sampler/FactorySamples.h
+    src/devices/sampler/SampleAnalysis.cpp
+    src/devices/sampler/SampleAnalysis.h
+    src/devices/sampler/Sampler.cpp
+    src/devices/sampler/Sampler.h
     src/devices/saturation/Saturator.cpp
     src/devices/saturation/Saturator.h
     src/devices/stereo/StereoExpander.cpp
@@ -287,6 +295,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/ParameterHandle.h
     src/model/devices/ParameterRef.h
     src/model/devices/Parameters.cpp
+    src/model/devices/SamplerSound.cpp
     src/model/devices/Swap.cpp
     src/model/devices/SwapModel.h
     src/model/devices/Wavetables.cpp
@@ -296,6 +305,7 @@ target_sources(phazite_core PRIVATE
     src/model/devices/internal/DrumKit.h
     src/model/devices/internal/ParameterHandle.h
     src/model/devices/internal/Parameters.h
+    src/model/devices/internal/SamplerSound.h
     src/model/devices/internal/Swap.h
     src/model/devices/internal/Wavetables.h
     src/model/engine/AppInfo.cpp
@@ -697,6 +707,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/FilterEditor.h
     src/ui/devices/FlangerEditor.cpp
     src/ui/devices/FlangerEditor.h
+    src/ui/devices/FmEditor.cpp
+    src/ui/devices/FmEditor.h
     src/ui/devices/LevelHistoryView.cpp
     src/ui/devices/LevelHistoryView.h
     src/ui/devices/LimiterEditor.cpp
@@ -711,6 +723,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/PhaserEditor.h
     src/ui/devices/ReverbEditor.cpp
     src/ui/devices/ReverbEditor.h
+    src/ui/devices/SamplerEditor.cpp
+    src/ui/devices/SamplerEditor.h
     src/ui/devices/SaturatorEditor.cpp
     src/ui/devices/SaturatorEditor.h
     src/ui/devices/SidechainMenus.cpp
@@ -1091,6 +1105,8 @@ if(PHAZITE_BUILD_TESTS)
         tests/ExampleSongTests.cpp
         tests/ExportTests.cpp
         tests/FactoryPresetTests.cpp
+        tests/FmEditorTests.cpp
+        tests/FmSynthTests.cpp
         tests/FrameLogTests.cpp
         tests/FreezeTests.cpp
         tests/GoldenFiles.cpp
@@ -1151,6 +1167,9 @@ if(PHAZITE_BUILD_TESTS)
         tests/RoutingTests.cpp
         tests/ReverbEditorTests.cpp
         tests/ReverbTests.cpp
+        tests/SamplerEditorTests.cpp
+        tests/SamplerModelTests.cpp
+        tests/SamplerTests.cpp
         tests/SandboxBenchmarks.cpp
         tests/SandboxTests.cpp
         tests/SandboxedPluginTests.cpp

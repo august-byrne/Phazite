@@ -16,9 +16,12 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/fm/FmSynth.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/sampler/FactorySamples.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
@@ -81,6 +84,10 @@ std::unique_ptr<devices::Processor> makeProcessor (const devices::DeviceInfo& in
         return std::make_unique<devices::Synth>();
     if (type == devices::WavetableSynth::typeID)
         return std::make_unique<devices::WavetableSynth>();
+    if (type == devices::FmSynth::typeID)
+        return std::make_unique<devices::FmSynth>();
+    if (type == devices::Sampler::typeID)
+        return std::make_unique<devices::Sampler>();
     if (type == devices::DrumSampler::typeID)
         return std::make_unique<devices::DrumSampler>();
     if (type == devices::Equalizer::typeID)
@@ -137,6 +144,10 @@ Played play (const devices::DeviceInfo& info, const std::vector<float>& values, 
         for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
             if (const auto name = sounds[phazite::schema::getPadSound (pad)].toString(); name.isNotEmpty())
                 drums->setSound (pad, devices::getFactoryDrum (devices::findFactoryDrum (name.toStdString())));
+
+    if (auto* sampler = dynamic_cast<devices::Sampler*> (processor.get()))
+        if (const auto name = sounds[phazite::schema::samplerSample].toString(); name.isNotEmpty())
+            sampler->setSound (devices::getFactorySample (devices::findFactorySample (name.toStdString())));
 
     const auto isInstrument = info.kind == devices::DeviceKind::instrument;
     const auto isDrums = toString (info.typeID) == devices::DrumSampler::typeID;
@@ -255,12 +266,13 @@ TEST_CASE ("Phazite's presets: each a device's, in its folder, with parameters a
         // saves does.
         CHECK (values->getProperties().size() == (int) info->parameters.size());
 
-        // A wavetable synth's tables and a drum sampler's pads' sounds by their names; no sound files, which aren't in
-        // Phazite's repository.
+        // A wavetable synth's tables, a drum sampler's pads' sounds and a sampler's sound by their names; no sound files,
+        // which aren't in Phazite's repository.
         if (const auto* sounds = device[keys::sounds].getDynamicObject())
         {
             const auto isDrums = toString (info->typeID) == devices::DrumSampler::typeID;
-            CHECK ((isDrums || toString (info->typeID) == devices::WavetableSynth::typeID));
+            const auto isSampler = toString (info->typeID) == devices::Sampler::typeID;
+            CHECK ((isDrums || isSampler || toString (info->typeID) == devices::WavetableSynth::typeID));
 
             for (const auto& [property, name] : sounds->getProperties())
             {
@@ -269,6 +281,11 @@ TEST_CASE ("Phazite's presets: each a device's, in its folder, with parameters a
                     CHECK (property.toString().startsWith ("pad"));
                     CHECK (property.toString().endsWith ("Sound"));
                     CHECK (devices::findFactoryDrum (name.toString().toStdString()) >= 0);
+                }
+                else if (isSampler)
+                {
+                    CHECK (property == phazite::schema::samplerSample);
+                    CHECK (devices::findFactorySample (name.toString().toStdString()) >= 0);
                 }
                 else
                 {
@@ -280,12 +297,14 @@ TEST_CASE ("Phazite's presets: each a device's, in its folder, with parameters a
         }
     }
 
-    // A good few for each instrument, and some for each effect.
+    // A good few for each instrument, and some for each effect and for each sampler, whose presets set up the ways to play
+    // the sounds that come with Phazite (the user's own sounds aren't in its repository).
     for (const auto* info : phazite::getOwnDevices())
     {
         CAPTURE (std::string (info->name));
-        CHECK (perDevice[toString (info->name)]
-               >= (info->kind == devices::DeviceKind::instrument && toString (info->typeID) != devices::DrumSampler::typeID ? 12 : 3));
+        const auto isSampler =
+            toString (info->typeID) == devices::DrumSampler::typeID || toString (info->typeID) == devices::Sampler::typeID;
+        CHECK (perDevice[toString (info->name)] >= (info->kind == devices::DeviceKind::instrument && ! isSampler ? 12 : 3));
     }
 }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongPlayer.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "internal/PlaybackHost.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -10,6 +11,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
+#include "model/devices/internal/SamplerSound.h"
 #include "model/devices/internal/Wavetables.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/MixerModel.h"
@@ -918,8 +920,8 @@ void SongPlayer::setValues (engine::DeviceNode& node, const juce::ValueTree& dev
 
 void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& deviceState)
 {
-    // What a drum sampler's pads and a wavetable synth's oscillators play: the song's SOUNDS name it as the plug-in's state
-    // does.
+    // What a drum sampler's pads, a wavetable synth's oscillators and a sampler play: the song's SOUNDS name it as the
+    // plug-in's state does.
     const auto sounds = deviceState.getChildWithName (schema::SOUNDS);
     auto& processor = node.getRunner().getProcessor();
     const auto type = node.getDeviceInfo().typeID;
@@ -931,6 +933,12 @@ void SongPlayer::loadSounds (engine::DeviceNode& node, const juce::ValueTree& de
     if (type == devices::WavetableSynth::typeID)
         for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
             loadOscillatorTable (static_cast<devices::WavetableSynth&> (processor), song, sounds, osc);
+
+    if (type == devices::Sampler::typeID)
+    {
+        loadSamplerSound (static_cast<devices::Sampler&> (processor), song, sounds);
+        loadSamplerSlices (static_cast<devices::Sampler&> (processor), sounds);
+    }
 }
 
 void SongPlayer::loadSound (engine::DeviceNode& node, const juce::ValueTree& deviceState, const juce::Identifier& property)
@@ -963,6 +971,13 @@ void SongPlayer::loadSound (engine::DeviceNode& node, const juce::ValueTree& dev
                 return;
             }
         }
+    }
+
+    // A sampler's slices by hand, which change as they are dragged, without reading its sound again.
+    if (type == devices::Sampler::typeID && (property == schema::samplerSlices || property == schema::samplerSlicesRemoved))
+    {
+        loadSamplerSlices (static_cast<devices::Sampler&> (processor), sounds);
+        return;
     }
 
     loadSounds (node, deviceState);

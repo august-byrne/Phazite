@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The sound files Phazite's own devices play, which their states keep by path: a drum sampler's pads (DrumKit.h) and a
-// wavetable synth's oscillators (Wavetables.h). A project keeps its own copy of each, in its Audio folder
+// The sound files Phazite's own devices play, which their states keep by path: a drum sampler's pads (DrumKit.h), a
+// wavetable synth's oscillators (Wavetables.h) and a sampler's sound (SamplerSound.h). A project keeps its own copy of each,
+// in its Audio folder
 // (model/arrangement/internal/Import.h), named by its path within the project's folder.
 #pragma once
 
@@ -11,8 +12,8 @@
 
 namespace phazite
 {
-// What of one of Phazite's own devices' states names a sound file, a factory sound or a table, besides its parameters: a
-// drum sampler's pads', a wavetable synth's oscillators' (Schema.h). None for other devices.
+// What of one of Phazite's own devices' states names a sound file, a factory sound, a table or slices, besides its
+// parameters: a drum sampler's pads', a wavetable synth's oscillators', a sampler's (Schema.h). None for other devices.
 std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo&);
 
 // The path a device keeps for a file: within the project's folder, written the same on every system, or the file's full

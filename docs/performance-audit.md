@@ -818,3 +818,44 @@ between frames. The mouse adds nothing to a frame's paint.
 frames missed in 1,175 (20 s), where the two runs before the fix missed 54 in 140 s and 105 in 33 s; the song stood still
 in none, and JUCE put off one frame in 84, as in the second log. The owner: "it works well". What is left is JUCE's (G5),
 for 8, should the owner still see it.
+
+## 17. The sampler and the FM synth (2026-11-07)
+
+Roadmap steps 4.6 and 4.7 added two instruments. This is what they cost, from "Benchmark: each device's CPU, latency and
+time to sound" in the `windows-profile` build, on the owner's PC: notes held from the start, three semitones apart from
+C3 up, the sampler on its 808 at C2, looping, so that its notes play pitched up an octave to nearly five.
+
+| `windows-profile`, % of a core | 1 note | 8 notes | 16 notes, filtered |
+|---|---|---|---|
+| Sampler, its sound read only as it is | 0.90 | 13.6 | 40.4 |
+| Sampler, pitched up from its octaves | 0.09 | 4.5 | 12.2 |
+| FM (its operators' sustain at full) | 0.64 | 5.4 | 12.0 |
+| Synth, for comparison | 0.13 | 0.81 | 1.60 (16 notes, 7-voice unison) |
+
+Idle, each costs 0.03 %, and each sounds 0.04 to 0.06 ms after its note (-60 dB).
+
+**The sampler's octaves.** The sampler reads its sound by the drum sampler's windowed sinc, whose kernel stretches to as
+many samples as it steps over, so that a note pitched up doesn't alias: two octaves up, 128 taps a sample on each channel.
+Each sound now has its octaves, made as it loads: the sound an octave, two and three down, each at half the rate of the one
+before, by the same kernel at half its band (a half-band filter, its every other tap zero), and a voice pitched up an
+octave or more reads the one under its pitch at less than twice its step, at most 64 taps a sample; an octave up exactly,
+at the sound's own rate, it plays the octave's samples as they are. They sound the same: a test compares a note read from
+an octave with the same note read from the sound, within -40 dB of its level, and the golden renders didn't change. They take seven eighths of the
+sound's memory more, and time as it loads ("Benchmark: a sound made ready for the sampler as it loads"): for a minute of
+stereo sound at 48 kHz, 90 ms, after the 225 ms that finding its hits takes. Both run on the message thread as a sound is
+put on the sampler or the song opens, which a long sound shows as a pause: loading sounds in the background is the next
+step if that bothers anyone.
+
+**The FM synth** costs its four operators at twice the rate, each a sine from its polynomial, and the half-band filters
+back down: about 130 ns a voice a sample. An inline floor in place of `std::floor` in the operators' loop changed nothing
+measurable, so it went. What would help: four voices at once in SIMD registers, or skipping operators whose envelopes have
+ended. Neither is built; 16 voices at once cost 12 % of a core.
+
+**2026-11-08, the FM synth's Spread, feedback on every operator and DC blocker.** Spread plays each note twice (two lanes
+of operators, half-band filters and filter a voice, sharing its envelopes), so it costs twice as much while it is on: 8
+notes held, 12.5 % of a core against 6.0 % without it, in the same run. Off, nothing more runs. The rest measured the
+same against the other instruments within the run-to-run noise (that day's runs were 10 to 15 % above the table's for every
+instrument alike: the synth's 16 voices in unison 1.80 to 1.86 %, the sampler's 16 notes 14.0 to 14.4 %, the FM synth's
+16 notes 13.6 to 13.7 %, each the same share of the others as before). The larger voices made the FM synth's idle cost
+0.07 %, as every idle voice still set its envelopes each block; now only those sounding do (a note sets its own as it
+starts), and it is 0.03 % again.

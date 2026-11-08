@@ -24,6 +24,7 @@ enum class Unit
     percent, // a fraction shown as a percentage: 0.35 is "35 %"
     semitones,
     cents,
+    note,   // a note's number, in whole steps: 60 is middle C, shown as "C4"
     ratio,  // a compressor's ratio: 4 is "4:1"
     pan,    // from -1 (left) to 1 (right): "Center", "30% left"
     choice, // a whole number that picks one of the parameter's choices

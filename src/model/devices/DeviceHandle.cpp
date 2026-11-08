@@ -4,6 +4,7 @@
 #include "internal/Devices.h"
 #include "internal/DrumKit.h"
 #include "internal/ParameterHandle.h"
+#include "internal/SamplerSound.h"
 #include "internal/Swap.h"
 #include "internal/Wavetables.h"
 #include "model/base/internal/Schema.h"
@@ -139,6 +140,84 @@ bool DeviceHandle::setWavetableFile (int osc, const juce::File& file) const
 {
     auto* song = songOf (impl);
     return song != nullptr && phazite::setWavetableFile (*song, impl->id, osc, file);
+}
+
+juce::String DeviceHandle::getSampleName() const
+{
+    auto* song = songOf (impl);
+    return song != nullptr ? phazite::getSampleName (*song, impl->id) : juce::String();
+}
+
+bool DeviceHandle::hasSampleFile() const
+{
+    auto* song = songOf (impl);
+    return song != nullptr && phazite::hasSampleFile (*song, impl->id);
+}
+
+int DeviceHandle::getFactorySample() const
+{
+    auto* song = songOf (impl);
+    return song != nullptr ? getFactorySampleIndex (*song, impl->id) : -1;
+}
+
+bool DeviceHandle::setSampleFile (const juce::File& file) const
+{
+    auto* song = songOf (impl);
+    return song != nullptr && phazite::setSampleFile (*song, impl->id, file);
+}
+
+void DeviceHandle::setFactorySample (int index) const
+{
+    if (auto* song = songOf (impl))
+        phazite::setFactorySample (*song, impl->id, index);
+}
+
+void DeviceHandle::findRootKey() const
+{
+    if (auto* song = songOf (impl))
+        phazite::findRootKey (*song, impl->id);
+}
+
+std::shared_ptr<const devices::Sampler::Sound> DeviceHandle::getSampleSound() const
+{
+    auto* song = songOf (impl);
+    return song != nullptr ? phazite::getSampleSound (*song, impl->id) : nullptr;
+}
+
+devices::Sampler::ManualSlices DeviceHandle::getManualSlices() const
+{
+    auto* song = songOf (impl);
+    return song != nullptr ? phazite::getManualSlices (*song, impl->id) : devices::Sampler::ManualSlices();
+}
+
+std::vector<float> DeviceHandle::getSlicePositions() const
+{
+    auto* song = songOf (impl);
+    return song != nullptr ? phazite::getSlicePositions (*song, impl->id) : std::vector<float>();
+}
+
+void DeviceHandle::moveSlice (int slice, float position) const
+{
+    if (auto* song = songOf (impl))
+        phazite::moveSlice (*song, impl->id, slice, position);
+}
+
+void DeviceHandle::addSlice (float position) const
+{
+    if (auto* song = songOf (impl))
+        phazite::addSlice (*song, impl->id, position);
+}
+
+void DeviceHandle::removeSlice (int slice) const
+{
+    if (auto* song = songOf (impl))
+        phazite::removeSlice (*song, impl->id, slice);
+}
+
+void DeviceHandle::writeSliceNotes() const
+{
+    if (auto* song = songOf (impl))
+        phazite::writeSliceNotes (*song, impl->id, nullptr);
 }
 
 devices::DeviceScope* DeviceHandle::getScope() const

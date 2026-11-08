@@ -303,9 +303,10 @@ TEST_CASE ("The device list offers Phazite's own devices, instruments first, the
 
     CHECK (pluginAfterThem);
     CHECK (own
-           == juce::StringArray { "phaziteSynth", "phaziteWavetable", "phaziteDrums", "phaziteEq", "phaziteFilter", "phaziteCompressor",
-                                  "phaziteMultiband", "phaziteLimiter", "phaziteSaturator", "phaziteDelay", "phaziteReverb",
-                                  "phazitePhaser", "phaziteFlanger", "phaziteVocoder", "phaziteStereoExpander" });
+           == juce::StringArray { "phaziteSynth", "phaziteWavetable", "phaziteFM", "phaziteSampler", "phaziteDrums", "phaziteEq",
+                                  "phaziteFilter", "phaziteCompressor", "phaziteMultiband", "phaziteLimiter", "phaziteSaturator",
+                                  "phaziteDelay", "phaziteReverb", "phazitePhaser", "phaziteFlanger", "phaziteVocoder",
+                                  "phaziteStereoExpander" });
 }
 
 TEST_CASE ("Phazite's effects have a mix of their own, and no key controls")

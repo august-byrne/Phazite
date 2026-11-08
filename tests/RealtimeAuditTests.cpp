@@ -25,9 +25,12 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/fm/FmSynth.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/sampler/FactorySamples.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
@@ -39,6 +42,7 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/devices/internal/SamplerSound.h"
 #include "model/devices/internal/Wavetables.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/EngineContext.h"
@@ -1038,6 +1042,113 @@ TEST_SUITE ("realtime-audit")
             dynamic_cast<DrumSampler&> (getPlayed (song, sampler).getProcessor()).audition (3, 1.0f);
         });
         report ("A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's sampler, a crash chopped into reversed slices that choke each other, an 808 gliding "
+               "in mono through its filter, a loop crossfading under more notes than voices, a slice played from its editor")
+    {
+        using phazite::devices::Sampler;
+        using phazite::test::at, phazite::test::lasting;
+        TestSong song;
+        auto& played = getSong (song);
+
+        // Sixteen equal slices of a crash, reversed, one a sixteenth, each cutting off the one before.
+        const auto chops = song.firstTrack;
+        const auto slicer = song.setInstrument (chops, Sampler::typeID);
+        phazite::setFactorySample (played, slicer, phazite::devices::findFactorySample ("808 Crash"));
+        song.setParameter (slicer, "mode", (float) Sampler::Mode::slice);
+        song.setParameter (slicer, "sliceBy", (float) Sampler::SliceBy::equal);
+        song.setParameter (slicer, "sliceCount", 16.0f);
+        song.setParameter (slicer, "reverse", 1.0f);
+        const auto chopped = phazite::test::addMidiClip (played, chops, { at (0.0), at (8.0) }, "Chops");
+        REQUIRE (chopped.isValid());
+
+        for (int i = 0; i < 32; ++i)
+            phazite::test::addMidiNote (played, chopped, Sampler::firstSliceNote + (i * 5) % 16, at (i * 0.25), lasting (0.25), 100);
+
+        // The 808 it starts with, in mono, gliding between overlapping notes through its filter and its envelope, the LFO
+        // on its pitch.
+        const auto bass = song.addTrack ("808");
+        const auto glider = song.setInstrument (bass, Sampler::typeID);
+        song.setParameter (glider, "voiceMode", 1.0f);
+        song.setParameter (glider, "glide", 80.0f);
+        song.setParameter (glider, "filterOn", 1.0f);
+        song.setParameter (glider, "filterEnvelopeOn", 1.0f);
+        song.setParameter (glider, "lfoOn", 1.0f);
+        const auto line = phazite::test::addMidiClip (played, bass, { at (0.0), at (8.0) }, "Line");
+        REQUIRE (line.isValid());
+
+        for (int i = 0; i < 16; ++i)
+            phazite::test::addMidiNote (played, line, 36 + (i * 7) % 12, at (i * 0.5), lasting (0.75), 110);
+
+        // A loop crossfading at its seam, more notes held than voices, so that some are taken for others.
+        const auto pad = song.addTrack ("Loop");
+        const auto looper = song.setInstrument (pad, Sampler::typeID);
+        phazite::setFactorySample (played, looper, phazite::devices::findFactorySample ("808 Mid Tom"));
+        song.setParameter (looper, "loopOn", 1.0f);
+        song.setParameter (looper, "loopStart", 0.2f);
+        song.setParameter (looper, "loopEnd", 0.6f);
+        song.setParameter (looper, "loopCrossfade", 0.5f);
+        song.setParameter (looper, "release", 400.0f);
+        const auto held = phazite::test::addMidiClip (played, pad, { at (0.0), at (8.0) }, "Held");
+        REQUIRE (held.isValid());
+
+        for (int i = 0; i < 20; ++i)
+            phazite::test::addMidiNote (played, held, 60 + i, at (i * 0.125), lasting (4.0), 90);
+
+        const auto m = playAndMeasure (song, [&song, slicer] { // a slice, as a press on the drawing plays it
+            dynamic_cast<Sampler&> (getPlayed (song, slicer).getProcessor()).audition (Sampler::firstSliceNote + 3, 1.0f);
+        });
+        report ("Phazite's sampler, a crash chopped into reversed slices that choke each other, an 808 gliding in mono through "
+                "its filter, a loop crossfading under more notes than voices, a slice played from its editor",
+                m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's FM synth, a stack at full feedback, chords a sixteenth apart, its LFO on Timbre, a "
+               "pitch envelope, and four operators side by side, one fixed, one fed back toward a square, spread, gliding in mono")
+    {
+        using phazite::devices::FmSynth;
+        TestSong song;
+
+        // The stack, every operator deep, its feedback at full, the LFO moving every modulator.
+        const auto keys = song.firstTrack;
+        const auto stack = song.setInstrument (keys, FmSynth::typeID);
+        song.setParameter (stack, "algorithm", 0.0f);
+        song.setParameter (stack, "op4Feedback", 1.0f);
+        song.setParameter (stack, "timbre", 1.5f);
+        song.setParameter (stack, "op2Wave", (float) FmSynth::Wave::saw);
+        song.setParameter (stack, "pitchAmount", 12.0f);
+        song.setParameter (stack, "filterOn", 1.0f);
+        song.setParameter (stack, "lfoOn", 1.0f);
+        song.setParameter (stack, "lfoTarget", (float) FmSynth::LfoTarget::timbre);
+        song.setParameter (stack, "phase", (float) FmSynth::Phase::free);
+        addChords (song, keys);
+
+        // Four side by side, one at a fixed frequency, one fed back toward a square, each note spread, in mono, gliding.
+        const auto bass = song.addTrack ("FM Bass");
+        const auto organ = song.setInstrument (bass, FmSynth::typeID);
+        song.setParameter (organ, "algorithm", 7.0f);
+        song.setParameter (organ, "op3Fixed", 1.0f);
+        song.setParameter (organ, "op3Frequency", 2000.0f);
+        song.setParameter (organ, "op1Feedback", -1.0f);
+        song.setParameter (organ, "spread", 12.0f);
+        song.setParameter (organ, "voiceMode", 1.0f);
+        song.setParameter (organ, "glide", 60.0f);
+        using phazite::test::at, phazite::test::lasting;
+        const auto line = phazite::test::addMidiClip (getSong (song), bass, { at (0.0), at (8.0) }, "Line");
+        REQUIRE (line.isValid());
+
+        for (int i = 0; i < 16; ++i)
+            phazite::test::addMidiNote (getSong (song), line, 36 + (i * 5) % 12, at (i * 0.5), lasting (0.75), 110);
+
+        const auto m = playAndMeasure (song);
+        report ("Phazite's FM synth, a stack at full feedback, chords a sixteenth apart, its LFO on Timbre, a pitch envelope, and "
+                "four operators side by side, one fixed, one fed back toward a square, spread, gliding in mono",
+                m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }

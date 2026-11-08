@@ -9,6 +9,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/DeviceScope.h"
 #include "devices/core/Processor.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/wavetable/Wavetable.h"
 #include "model/base/IDs.h"
 #include "model/mixer/SidechainChoice.h"
@@ -53,6 +54,25 @@ public:
     std::shared_ptr<const devices::Wavetable> getWavetable (int osc) const;
     void setFactoryWavetable (int osc, int index) const;
     bool setWavetableFile (int osc, const juce::File&) const;
+
+    // The sampler's sound (model/devices/internal/SamplerSound.h): what it plays, which factory sound (-1 while a file), and
+    // putting a sound file or one of its factory sounds on it, and finding its root key again, as undo steps; where it is
+    // sliced, as parts of the sound's length, and its slices moved, added and taken away by hand (counted from 1), each an
+    // undo step; and its slices written as notes into a new clip on its track at the play start, as an undo step.
+    // setSampleFile() returns false for a file that isn't a sound.
+    juce::String getSampleName() const;
+    bool hasSampleFile() const;
+    int getFactorySample() const;
+    bool setSampleFile (const juce::File&) const;
+    void setFactorySample (int index) const;
+    void findRootKey() const;
+    std::shared_ptr<const devices::Sampler::Sound> getSampleSound() const; // for drawing it; nullptr for another device
+    devices::Sampler::ManualSlices getManualSlices() const;
+    std::vector<float> getSlicePositions() const;
+    void moveSlice (int slice, float position) const;
+    void addSlice (float position) const;
+    void removeSlice (int slice) const;
+    void writeSliceNotes() const;
 
     // What goes into the device and comes out, for its editor's displays (devices/core/DeviceScope.h); nullptr once the
     // device is gone. Ask each time: never keep the pointer.

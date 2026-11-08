@@ -259,8 +259,9 @@ inline const juce::Identifier deviceWindowY { "windowY" };
 
 // Children of one of Phazite's own devices' DEVICE: VALUES, its parameters' values as they were set by hand (not as
 // automation or a modulator moves them), each a property named by the parameter's ID in the device's description, none
-// for one that was never set (at its default); and SOUNDS, the factory sounds, files and tables it plays, as properties
-// named by getPadSound(), getPadSoundFile(), getOscillatorWavetable() and getOscillatorWavetableFile() (below).
+// for one that was never set (at its default); and SOUNDS, the factory sounds, files, tables and slices it plays, as
+// properties named by getPadSound(), getPadSoundFile(), getOscillatorWavetable(), getOscillatorWavetableFile(),
+// samplerSample, samplerSampleFile, samplerSlices and samplerSlicesRemoved (below).
 inline const juce::Identifier VALUES { "VALUES" };
 inline const juce::Identifier SOUNDS { "SOUNDS" };
 
@@ -731,14 +732,26 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
     return names[juce::jlimit (0, 1, osc)];
 }
 
-// What of a SOUNDS element names a sound file, rather than a factory sound or a table: a pad's file or an oscillator's.
+// Phazite's sampler (devices/sampler/Sampler.h) keeps in its DEVICE's SOUNDS what it plays: "sample" names one of its
+// factory sounds (devices/sampler/FactorySamples.h: "808 Bass"; with none, or a name that is none of theirs, the first),
+// "sampleFile" a sound file it plays instead while it is there: a path relative to the project's folder ("Audio/Vox.wav"),
+// or in a preset its full path; "sampleSlices" the slices put in by hand, which stay whatever slices it, their starts as
+// parts of the sound's length from 0 to 1, in order, a space between them ("0.125 0.25"); and "sampleSlicesRemoved" where
+// slices it found were taken away by hand, the same way. None for none.
+inline const juce::Identifier samplerSample { "sample" };
+inline const juce::Identifier samplerSampleFile { "sampleFile" };
+inline const juce::Identifier samplerSlices { "sampleSlices" };
+inline const juce::Identifier samplerSlicesRemoved { "sampleSlicesRemoved" };
+
+// What of a SOUNDS element names a sound file, rather than a factory sound or a table: a pad's file, an oscillator's or the
+// sampler's.
 inline bool isSoundFileProperty (const juce::Identifier& property)
 {
     for (int pad = 0; pad < 16; ++pad)
         if (property == getPadSoundFile (pad))
             return true;
 
-    return property == getOscillatorWavetableFile (0) || property == getOscillatorWavetableFile (1);
+    return property == getOscillatorWavetableFile (0) || property == getOscillatorWavetableFile (1) || property == samplerSampleFile;
 }
 
 //==============================================================================
@@ -754,9 +767,10 @@ inline bool isSoundFileProperty (const juce::Identifier& property)
 //
 //   DEVICE, one of Phazite's own: { "type": its type ID, "name", "instrument": true or false,
 //       "parameters": { parameter ID: value, ... }, every one of them, its mix too,
-//       "sounds": { what names a file, a factory sound or a table (getPadSound(), getPadSoundFile(),
-//                   getOscillatorWavetable(), getOscillatorWavetableFile()): a file's full path, or the factory sound's or
-//                   table's name } }
+//       "sounds": { what names a file, a factory sound, a table or slices (getPadSound(), getPadSoundFile(),
+//                   getOscillatorWavetable(), getOscillatorWavetableFile(), samplerSample, samplerSampleFile,
+//                   samplerSlices, samplerSlicesRemoved): a file's full path, the factory sound's or table's name, or the
+//                   slices } }
 //     or a plug-in: { "plugin": { "format", "name", "manufacturer", "identifier", "uid" }, "name", "instrument",
 //       "state": its own settings, in base 64, "program": its program, "mix": 0 to 1 }
 //   CONTAINER: { "name", "mix": 0 to 1, "devices": [ DEVICE, ... ], "macros": [ MACRO, ... ] }

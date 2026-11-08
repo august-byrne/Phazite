@@ -249,6 +249,28 @@ void ParameterControls::resized()
 }
 
 //==============================================================================
+ParameterSwitch::ParameterSwitch (const DeviceHandle& device, std::string_view parameterID, const juce::String& text,
+                                  const juce::String& tooltip)
+    : juce::TextButton (text),
+      DisplayTicker::Display (static_cast<juce::Component&> (*this))
+{
+    if (const auto* info = device.getInfo())
+        if (const auto index = devices::findParameter (*info, parameterID); index >= 0)
+            setTitle (toString (info->parameters[(size_t) index].name));
+
+    setTooltip (tooltip);
+    setClickingTogglesState (true);
+    attachment.setParameter (device.getParameter (parameterID));
+}
+
+ParameterSwitch::~ParameterSwitch() = default;
+
+int ParameterSwitch::getPreferredWidth()
+{
+    return getBestWidthForHeight (controlHeight);
+}
+
+//==============================================================================
 ChoiceButtons::ChoiceButtons (const DeviceHandle& device, std::string_view parameterID, Direction d,
                               const std::vector<juce::String>& tooltips)
     : DisplayTicker::Display (static_cast<juce::Component&> (*this)),

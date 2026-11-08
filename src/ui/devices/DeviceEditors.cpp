@@ -6,10 +6,12 @@
 #include "EqEditor.h"
 #include "FilterEditor.h"
 #include "FlangerEditor.h"
+#include "FmEditor.h"
 #include "LimiterEditor.h"
 #include "MultibandEditor.h"
 #include "PhaserEditor.h"
 #include "ReverbEditor.h"
+#include "SamplerEditor.h"
 #include "SaturatorEditor.h"
 #include "StereoExpanderEditor.h"
 #include "SynthEditor.h"
@@ -22,9 +24,11 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/fm/FmSynth.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
@@ -72,6 +76,12 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::WavetableSynth::typeID)
         return std::make_unique<WavetableEditor> (device);
+
+    if (info->typeID == devices::Sampler::typeID)
+        return std::make_unique<SamplerEditor> (device);
+
+    if (info->typeID == devices::FmSynth::typeID)
+        return std::make_unique<FmEditor> (device);
 
     if (info->typeID == devices::Delay::typeID)
         return std::make_unique<DelayEditor> (device);

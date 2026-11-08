@@ -882,7 +882,7 @@ TEST_CASE ("At the default window size, every built-in instrument and effect sho
     phazite::chooseInstrument (context, track, findType ("phaziteSynth"));
     REQUIRE (screen.registry.invoke ("view.instrument"));
 
-    for (const auto* type : { "phaziteSynth", "phaziteWavetable", "phaziteDrums" })
+    for (const auto* type : { "phaziteSynth", "phaziteWavetable", "phaziteFM", "phaziteSampler", "phaziteDrums" })
     {
         phazite::chooseInstrument (context, track, findType (type));
         checkWhole (type);

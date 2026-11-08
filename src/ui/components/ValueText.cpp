@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ValueText.h"
 
+#include <juce_audio_basics/juce_audio_basics.h>
+
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
@@ -46,6 +48,43 @@ namespace
             return size;
 
         return (value > 0.0 ? "+" : "-") + size;
+    }
+
+    // A note's name as Phazite writes them, middle C (60) as "C4", in sharps; or the note a name or a number gives: "C4",
+    // "f#1", "Bb2", "60".
+    juce::String formatNote (float value)
+    {
+        return juce::MidiMessage::getMidiNoteName (juce::roundToInt (value), true, true, 4);
+    }
+
+    std::optional<double> parseNote (const juce::String& text)
+    {
+        if (const auto number = parseNumber (text))
+            return number;
+
+        static constexpr int steps[] = { 9, 11, 0, 2, 4, 5, 7 }; // A to G, from C
+        const auto t = text.trim().toUpperCase();
+
+        if (t.isEmpty() || t[0] < 'A' || t[0] > 'G')
+            return {};
+
+        auto note = steps[t[0] - 'A'];
+        auto rest = t.substring (1);
+
+        if (rest.startsWithChar ('#'))
+            ++note;
+        else if (rest.startsWithChar ('B'))
+            --note;
+
+        if (rest.startsWithChar ('#') || rest.startsWithChar ('B'))
+            rest = rest.substring (1);
+
+        const auto octave = parseNumber (rest);
+
+        if (! octave.has_value())
+            return {};
+
+        return note + 12.0 * (*octave + 1.0);
     }
 
     // The text without the first of these endings that it has, and whether it had one.
@@ -224,6 +263,9 @@ juce::String formatParameterValue (const devices::ParameterInfo& parameter, floa
         case Unit::cents:
             return withSign (std::round (value), 0) + " ct";
 
+        case Unit::note:
+            return formatNote (value);
+
         case Unit::ratio:
             return juce::String (value, 1) + ":1";
 
@@ -334,6 +376,10 @@ std::optional<float> parseParameterValue (const devices::ParameterInfo& paramete
         case Unit::cents:
             removeEnding (t, { "cents", "ct" });
             value = parseNumber (t);
+            break;
+
+        case Unit::note:
+            value = parseNote (t);
             break;
 
         case Unit::ratio:

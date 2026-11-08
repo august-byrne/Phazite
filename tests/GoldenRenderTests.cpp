@@ -8,7 +8,9 @@
 #include "TestSong.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/fm/FmSynth.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
@@ -24,6 +26,7 @@ using phazite::test::TestSong;
 namespace
 {
 using phazite::test::describeLevels;
+using phazite::test::estimateFrequency;
 using phazite::test::floorDb;
 using phazite::test::formatLevel;
 using phazite::test::getPower;
@@ -278,6 +281,124 @@ bool soundsLikeTheDrums (const Fingerprint& fingerprint, const juce::AudioBuffer
     CHECK_MESSAGE (
         kick, ("0.00-0.10 s: the kick should peak above -18 dBFS; it peaks at " + formatLevel (fingerprint.front().peak[0])).toStdString());
     return hits && kick;
+}
+
+//==============================================================================
+// Phazite's sampler as it is made, playing its 808 at 120 BPM: C2, its root, from 0 to 0.75 s, C3 from 1 to 1.75 s and G2
+// from 2 to 2.75 s.
+void addSamplerSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::Sampler::typeID);
+    const auto clip = song.addMidiClip (track, 0.0, 6.0);
+    song.addNote (clip, 36, 0.0, 1.5);
+    song.addNote (clip, 48, 2.0, 1.5);
+    song.addNote (clip, 43, 4.0, 1.5);
+}
+
+// Whether a stretch of a render plays a pitch, within a share of it either way.
+bool playsPitch (const juce::AudioBuffer<float>& audio, double startSeconds, double seconds, double hertz, double within,
+                 const juce::String& why)
+{
+    const auto measured = estimateFrequency (audio, 0, phazite::test::renderSampleRate, startSeconds, seconds);
+    const auto inTune = std::abs (measured / hertz - 1.0) < within;
+    CHECK_MESSAGE (inTune, (juce::String (startSeconds, 2) + "-" + juce::String (startSeconds + seconds, 2) + " s: " + why + " at "
+                            + juce::String (hertz, 1) + " Hz; it plays " + juce::String (measured, 1) + " Hz")
+                               .toStdString());
+    return inTune;
+}
+
+// Each note in tune against the root key, nothing between them, and nothing once the last has let go.
+bool soundsLikeTheSampler (const Fingerprint& fingerprint, const juce::AudioBuffer<float>& audio)
+{
+    auto ok = playsPitch (audio, 0.25, 0.45, 65.41, 0.05, "C2, the 808's root, should play it as it is");
+    ok = playsPitch (audio, 1.25, 0.45, 130.81, 0.05, "C3 should play it an octave up") && ok;
+    ok = playsPitch (audio, 2.25, 0.45, 98.0, 0.05, "G2 should play it a fifth up") && ok;
+    ok = isLouder (fingerprint, 10, 8, 20.0f, "a note let go stops, and the next starts") && ok;
+    return isBetween (fingerprint, 35, -100.0f, -60.0f, "nothing plays after the last note") && ok;
+}
+
+// Four hits a quarter of a second apart, at 900, 600, 450 and 300 Hz, each dying away within it, at 48 kHz: what the
+// sampler slices.
+juce::File writeHits (const juce::File& file)
+{
+    constexpr double sampleRate = 48000.0;
+    constexpr double pitches[] = { 900.0, 600.0, 450.0, 300.0 };
+    const auto spacing = (int) (0.25 * sampleRate);
+    juce::AudioBuffer<float> buffer (1, 4 * spacing);
+
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+    {
+        const auto t = (i % spacing) / sampleRate;
+        const auto pitch = pitches[i / spacing];
+        buffer.setSample (0, i, (float) (0.6 * std::exp (-t / 0.03) * std::sin (juce::MathConstants<double>::twoPi * pitch * t)));
+    }
+
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+    auto writer = juce::WavAudioFormat().createWriterFor (
+        stream, juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels (1).withBitsPerSample (24));
+    REQUIRE (writer != nullptr);
+    writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+    return file;
+}
+
+// The hits on the sampler, sliced where each begins, at 120 BPM: the last slice on the first beat, then the third, the
+// second and the first, each on its note.
+void addSliceSong (TestSong& song)
+{
+    using phazite::devices::Sampler;
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    const auto sampler = song.setInstrument (track, Sampler::typeID);
+    REQUIRE (phazite::getDeviceHandle (song.context, sampler).setSampleFile (writeHits (song.getSoundsFolder().getChildFile ("Hits.wav"))));
+    song.setParameter (sampler, "mode", (float) Sampler::Mode::slice);
+    song.setParameter (sampler, "sensitivity", 1.0f);
+    const auto clip = song.addMidiClip (track, 0.0, 4.0);
+
+    for (int slice = 0; slice < 4; ++slice)
+        song.addNote (clip, Sampler::firstSliceNote + 3 - slice, slice, 0.5);
+}
+
+// Each note plays its slice's hit: 300 Hz first, then 450, 600 and 900; a slice ends where the next hit begins.
+bool soundsLikeTheSlices (const Fingerprint& fingerprint, const juce::AudioBuffer<float>& audio)
+{
+    auto ok = playsPitch (audio, 0.01, 0.1, 300.0, 0.03, "the first note should play the fourth slice");
+    ok = playsPitch (audio, 0.51, 0.1, 450.0, 0.03, "the second should play the third") && ok;
+    ok = playsPitch (audio, 1.01, 0.1, 600.0, 0.03, "the third should play the second") && ok;
+    ok = playsPitch (audio, 1.51, 0.1, 900.0, 0.03, "the fourth should play the first") && ok;
+    ok = isLouder (fingerprint, 5, 8, 30.0f, "the second note's slice ends where the next hit begins, a quarter second in") && ok;
+    return isBetween (fingerprint, 25, -100.0f, -60.0f, "nothing plays after the last slice") && ok;
+}
+
+//==============================================================================
+// Phazite's FM synth as it is made, its electric piano: three chords of two beats each at 120 BPM, C, F and G major, then
+// their release.
+void addFmSong (TestSong& song)
+{
+    song.setTempo (120.0);
+    const auto track = song.firstTrack;
+    song.setInstrument (track, phazite::devices::FmSynth::typeID);
+    const auto clip = song.addMidiClip (track, 0.0, 6.0);
+    song.addChord (clip, { 48, 52, 55 }, 0.0, 2.0);
+    song.addChord (clip, { 53, 57, 60 }, 2.0, 2.0);
+    song.addChord (clip, { 55, 59, 62 }, 4.0, 2.0);
+}
+
+// The chords play, each struck louder than the last was as it ended (the piano dies away as it is held), and they ring
+// out after their release.
+bool soundsLikeTheEPiano (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+{
+    auto ok = true;
+
+    for (size_t block = 1; block < 29; ++block)
+        ok = isBetween (fingerprint, block, -40.0f, 0.0f, "the chords play") && ok;
+
+    ok = isLouder (fingerprint, 10, 9, 1.0f, "the second chord is struck") && ok;
+    ok = isLouder (fingerprint, 20, 19, 1.0f, "the third chord is struck") && ok;
+    return isLouder (fingerprint, 15, 39, 20.0f, "their release has rung out") && ok;
 }
 
 //==============================================================================
@@ -628,6 +749,30 @@ TEST_SUITE ("golden")
     {
         renders (addDrumSong,
                  golden ("drums", "two bars of kick, snare and hi-hat on Phazite's drum sampler with its kit.", 4.0, soundsLikeTheDrums));
+    }
+
+    TEST_CASE ("Golden render: Phazite's sampler as it is made, its 808 at its root key, an octave and a fifth up")
+    {
+        renders (addSamplerSong, golden ("sampler",
+                                         "Phazite's sampler as it is made, its 808 bass played at its root key, C2, then an octave "
+                                         "and a fifth up.",
+                                         4.0, soundsLikeTheSampler));
+    }
+
+    TEST_CASE ("Golden render: four hits in a sound file sliced on Phazite's sampler, each slice on its note")
+    {
+        renders (addSliceSong, golden ("sampler-slices",
+                                       "four hits in a sound file at 48 kHz, sliced where each begins on Phazite's sampler, "
+                                       "played last to first, each slice on its note.",
+                                       3.0, soundsLikeTheSlices));
+    }
+
+    TEST_CASE ("Golden render: three chords on Phazite's FM synth as it is made, its electric piano")
+    {
+        renders (addFmSong, golden ("fm",
+                                    "three chords on Phazite's FM synth as it is made, its electric piano of two pairs of "
+                                    "operators, then their release.",
+                                    4.0, soundsLikeTheEPiano));
     }
 
     TEST_CASE ("Golden render: a tone played plain, then 6 dB quieter by its clip's gain")

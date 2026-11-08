@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/DeviceFiles.h"
 #include "devices/drums/DrumSampler.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/base/internal/Schema.h"
@@ -31,6 +32,7 @@ namespace
         for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
             properties.push_back (schema::getOscillatorWavetableFile (osc));
 
+        properties.push_back (schema::samplerSampleFile);
         return properties;
     }
 } // namespace
@@ -55,6 +57,14 @@ std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo& inf
             properties.push_back (schema::getOscillatorWavetable (osc));
             properties.push_back (schema::getOscillatorWavetableFile (osc));
         }
+    }
+
+    if (info.typeID == std::string_view (devices::Sampler::typeID))
+    {
+        properties.push_back (schema::samplerSample);
+        properties.push_back (schema::samplerSampleFile);
+        properties.push_back (schema::samplerSlices);
+        properties.push_back (schema::samplerSlicesRemoved);
     }
 
     return properties;

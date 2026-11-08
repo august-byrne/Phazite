@@ -19,9 +19,11 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/fm/FmSynth.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/stretch/Stretch.h"
@@ -249,6 +251,46 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Wavetable, idle", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 0 },
         { "Drum Sampler, 4 pads every 16th", maker<dev::DrumSampler>(), &dev::DrumSampler::info, 4 },
         { "Drum Sampler, idle", maker<dev::DrumSampler>(), &dev::DrumSampler::info, 0 },
+        { "Sampler, 1 note, looping", maker<dev::Sampler>(), &dev::Sampler::info, 1,
+          [] (std::vector<float>& v) { v[dev::Sampler::loopOn] = 1.0f; } },
+        { "Sampler, 8 notes, looping", maker<dev::Sampler>(), &dev::Sampler::info, 8,
+          [] (std::vector<float>& v) { v[dev::Sampler::loopOn] = 1.0f; } },
+        { "Sampler, 16 notes, looping, filtered", maker<dev::Sampler>(), &dev::Sampler::info, 16,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Sampler::loopOn] = 1.0f;
+              v[dev::Sampler::filterOn] = 1.0f;
+          } },
+        { "Sampler, idle", maker<dev::Sampler>(), &dev::Sampler::info, 0 },
+        { "FM, 1 note, held", maker<dev::FmSynth>(), &dev::FmSynth::info, 1,
+          [] (std::vector<float>& v)
+          {
+              for (int op = 0; op < dev::FmSynth::numOperators; ++op)
+                  v[(size_t) dev::FmSynth::getParameterIndex (op, dev::FmSynth::sustain)] = 1.0f;
+          } },
+        { "FM, 8 notes, held", maker<dev::FmSynth>(), &dev::FmSynth::info, 8,
+          [] (std::vector<float>& v)
+          {
+              for (int op = 0; op < dev::FmSynth::numOperators; ++op)
+                  v[(size_t) dev::FmSynth::getParameterIndex (op, dev::FmSynth::sustain)] = 1.0f;
+          } },
+        { "FM, 8 notes, held, spread", maker<dev::FmSynth>(), &dev::FmSynth::info, 8,
+          [] (std::vector<float>& v)
+          {
+              for (int op = 0; op < dev::FmSynth::numOperators; ++op)
+                  v[(size_t) dev::FmSynth::getParameterIndex (op, dev::FmSynth::sustain)] = 1.0f;
+
+              v[dev::FmSynth::spread] = 12.0f;
+          } },
+        { "FM, 16 notes, held, filtered", maker<dev::FmSynth>(), &dev::FmSynth::info, 16,
+          [] (std::vector<float>& v)
+          {
+              for (int op = 0; op < dev::FmSynth::numOperators; ++op)
+                  v[(size_t) dev::FmSynth::getParameterIndex (op, dev::FmSynth::sustain)] = 1.0f;
+
+              v[dev::FmSynth::filterOn] = 1.0f;
+          } },
+        { "FM, idle", maker<dev::FmSynth>(), &dev::FmSynth::info, 0 },
         { "EQ", maker<dev::Equalizer>(), &dev::Equalizer::info },
         { "Filter", maker<dev::FilterEffect>(), &dev::FilterEffect::info },
         { "Compressor", maker<dev::Compressor>(), &dev::Compressor::info },
@@ -297,6 +339,24 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
     }
 
     MESSAGE (report);
+}
+
+TEST_CASE ("Benchmark: a sound made ready for the sampler as it loads, a minute of it in stereo" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // Noise with a hit every half second, at 48 kHz: where its hits begin found, then its octaves made.
+    dev::Sampler::Sound sound;
+    sound.audio.setSize (2, (int) (60.0 * benchRate));
+    juce::Random random (7);
+
+    for (int channel = 0; channel < 2; ++channel)
+        for (int i = 0; i < sound.audio.getNumSamples(); ++i)
+            sound.audio.setSample (channel, i, (random.nextFloat() - 0.5f) * (i % 24000 < 2400 ? 1.0f : 0.05f));
+
+    const auto hits = millisecondsOf ([&] { sound.onsets = dev::detectOnsets (sound.audio, benchRate); });
+    const auto octaves = millisecondsOf ([&] { dev::Sampler::makeOctaves (sound); });
+    CHECK (sound.onsets.size() > 1);
+    MESSAGE ("Its hits found: " << milliseconds (hits, 1) << "; its octaves made: " << milliseconds (octaves, 1));
 }
 
 TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::test_suite ("benchmark") * doctest::skip())

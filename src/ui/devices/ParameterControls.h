@@ -65,6 +65,25 @@ private:
 juce::String getShownName (const juce::String& name, const juce::String& partTitle);
 
 //==============================================================================
+// A switch as a button with its text, down while the switch is on, for a row of a part's own controls (an FM operator's
+// Fixed, the sampler's Reverse): a click switches it, as one undo step. Titled with the parameter's name; the
+// DisplayTicker shows changes made elsewhere (automation, undo).
+class ParameterSwitch : public juce::TextButton,
+                        private DisplayTicker::Display
+{
+public:
+    ParameterSwitch (const DeviceHandle&, std::string_view parameterID, const juce::String& text, const juce::String& tooltip);
+    ~ParameterSwitch() override;
+
+    int getPreferredWidth();
+
+private:
+    ToggleAttachment attachment { *this };
+
+    void tick() override { attachment.update(); }
+};
+
+//==============================================================================
 // A choice's options as buttons, side by side or one above another (a switch's positions), the one chosen lit: a click picks
 // one, as one undo step, as a compressor's characters and a multiband's band modes are picked. The DisplayTicker shows
 // changes made elsewhere (automation, undo).
