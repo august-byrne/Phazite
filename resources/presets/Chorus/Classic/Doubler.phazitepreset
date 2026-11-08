@@ -1,0 +1,22 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Chorus",
+    "instrument": false,
+    "type": "phaziteChorus",
+    "parameters": {
+      "mode": 0,
+      "delay": 20.0,
+      "depth": 0.05,
+      "sync": 0,
+      "division": 13,
+      "rate": 0.2,
+      "shape": 0,
+      "feedback": 0.0,
+      "stereo": 1.0,
+      "highCut": 20000.0,
+      "safeBass": 20.0,
+      "mix": 0.5
+    }
+  }
+}

@@ -8,6 +8,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
+#include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
@@ -27,11 +28,11 @@ std::span<const devices::DeviceInfo* const> getOwnDevices()
     // In the order menus list them: the instruments, then the effects by what they do (tone, dynamics, colour, space,
     // motion, the voice, and the stereo expander last).
     static const devices::DeviceInfo* const own[] = {
-        &devices::Synth::info,          &devices::WavetableSynth::info, &devices::FmSynth::info,      &devices::Sampler::info,
-        &devices::DrumSampler::info,    &devices::Equalizer::info,      &devices::FilterEffect::info, &devices::Compressor::info,
-        &devices::Multiband::info,      &devices::Limiter::info,        &devices::Saturator::info,    &devices::Delay::info,
-        &devices::Reverb::info,         &devices::Phaser::info,         &devices::Flanger::info,      &devices::Vocoder::info,
-        &devices::StereoExpander::info,
+        &devices::Synth::info,       &devices::WavetableSynth::info, &devices::FmSynth::info,      &devices::Sampler::info,
+        &devices::DrumSampler::info, &devices::Equalizer::info,      &devices::FilterEffect::info, &devices::Compressor::info,
+        &devices::Multiband::info,   &devices::Limiter::info,        &devices::Saturator::info,    &devices::Delay::info,
+        &devices::Reverb::info,      &devices::Phaser::info,         &devices::Flanger::info,      &devices::Chorus::info,
+        &devices::Vocoder::info,     &devices::StereoExpander::info,
     };
     return own;
 }
@@ -66,6 +67,7 @@ namespace
         { &devices::Reverb::info, make<devices::Reverb> },
         { &devices::Phaser::info, make<devices::Phaser> },
         { &devices::Flanger::info, make<devices::Flanger> },
+        { &devices::Chorus::info, make<devices::Chorus> },
         { &devices::Vocoder::info, make<devices::Vocoder> },
         { &devices::StereoExpander::info, make<devices::StereoExpander> },
     };

@@ -20,6 +20,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
+#include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
@@ -304,6 +305,7 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Phaser, six notches", maker<dev::Phaser>(), &dev::Phaser::info, 0,
           [] (std::vector<float>& v) { v[dev::Phaser::notches] = 5.0f; } },
         { "Flanger", maker<dev::Flanger>(), &dev::Flanger::info },
+        { "Chorus, Ensemble", maker<dev::Chorus>(), &dev::Chorus::info, 0, [] (std::vector<float>& v) { v[dev::Chorus::mode] = 1.0f; } },
         { "Vocoder, 40 bands", maker<dev::Vocoder>(), &dev::Vocoder::info, 0,
           [] (std::vector<float>& v) { v[dev::Vocoder::bands] = 5.0f; } },
         { "Reverb, silence in", maker<dev::Reverb>(), &dev::Reverb::info, 0, {}, true },

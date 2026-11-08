@@ -26,6 +26,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
+#include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
@@ -68,6 +69,7 @@
 #include "model/versions/internal/VersionHistory.h"
 
 #include <chrono>
+#include <string_view>
 #include <thread>
 
 using phazite::test::AudioThreadMonitor;
@@ -902,31 +904,40 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and limiter in a row, "
-               "the filter swept")
+    TEST_CASE ("Real-time audit: Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus, stereo expander and limiter "
+               "in a row, the filter swept")
     {
         TestSong song;
         const auto track = song.firstTrack;
         addTone (song, track);
 
-        phazite::DeviceID filter;
+        phazite::DeviceID filter, chorus;
 
         for (const auto* type :
              { phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID, phazite::devices::Multiband::typeID,
                phazite::devices::Delay::typeID, phazite::devices::Phaser::typeID, phazite::devices::Flanger::typeID,
-               phazite::devices::StereoExpander::typeID, phazite::devices::Limiter::typeID })
+               phazite::devices::Chorus::typeID, phazite::devices::StereoExpander::typeID, phazite::devices::Limiter::typeID })
         {
             const auto device = song.addEffect (track, type);
 
             if (! filter.isValid())
                 filter = device;
+
+            if (std::string_view (type) == phazite::devices::Chorus::typeID)
+                chorus = device;
         }
 
-        // The filter swept by a lane, a cycle a beat, so its cutoff glides all the time; the others well into their work.
+        // The filter swept by a lane, a cycle a beat, so its cutoff glides all the time; the others well into their work, the
+        // chorus in Ensemble with its feedback, High Cut and Safe Bass on.
         sweepCutoff (song, filter, 200.0f, 8000.0f);
 
+        for (const auto& [id, value] :
+             { std::pair<const char*, float> { "mode", 1.0f }, { "feedback", 0.4f }, { "highCut", 6000.0f }, { "safeBass", 150.0f } })
+            song.setParameter (chorus, id, value);
+
         const auto m = playAndMeasure (song);
-        report ("Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and limiter in a row, the filter swept",
+        report ("Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus, stereo expander and limiter in a row, the filter "
+                "swept",
                 m);
         CHECK (m.peakLevel > 0.001f);
         CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // the limiter's ceiling

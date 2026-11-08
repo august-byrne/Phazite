@@ -305,7 +305,7 @@ TEST_CASE ("The device list offers Phazite's own devices, instruments first, the
     CHECK (own
            == juce::StringArray { "phaziteSynth", "phaziteWavetable", "phaziteFM", "phaziteSampler", "phaziteDrums", "phaziteEq",
                                   "phaziteFilter", "phaziteCompressor", "phaziteMultiband", "phaziteLimiter", "phaziteSaturator",
-                                  "phaziteDelay", "phaziteReverb", "phazitePhaser", "phaziteFlanger", "phaziteVocoder",
+                                  "phaziteDelay", "phaziteReverb", "phazitePhaser", "phaziteFlanger", "phaziteChorus", "phaziteVocoder",
                                   "phaziteStereoExpander" });
 }
 

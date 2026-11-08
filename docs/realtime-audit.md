@@ -57,7 +57,7 @@ Every scenario plays as the app plays: its song opened as a project, the tests' 
 | Phazite's synth with seven unison voices, spread wide, playing chords a sixteenth apart | 0 | 0 |
 | Phazite's synth with osc 2 synced and swept, a square sub, drift, drive, its LFO on the pulse width, a pitch envelope, unison and legato glides (2026-11-08) | 0 | 0 |
 | Phazite's wavetable synth with eight unison voices and two oscillators warped, an envelope sweeping each note's table | 0 | 0 |
-| Phazite's filter, saturator, multiband, delay, phaser, flanger, stereo expander and limiter in a row on a tone, the filter swept by a lane | 0 | 0 |
+| Phazite's filter, saturator, multiband, delay, phaser, flanger, chorus (in Ensemble, with feedback, High Cut and Safe Bass; 2026-11-08), stereo expander and limiter in a row on a tone, the filter swept by a lane | 0 | 0 |
 | Phazite's EQ, filter, saturator, compressor, multiband, delay, reverb, phaser and limiter in a row on a tone, every one's editor's displays listening | 0 | 0 |
 | Phazite's synth's Comb +, swept by its filter envelope, chords a sixteenth apart, and its filter's Comb - on a tone | 0 | 0 |
 | Phazite's wavetable synth's Comb +, swept by an envelope at each note, chords a sixteenth apart | 0 | 0 |

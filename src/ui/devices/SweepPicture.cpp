@@ -70,9 +70,17 @@ juce::Rectangle<float> SweepPicture::getLfoArea() const
 
 float SweepPicture::getLfoValue (int channel) const
 {
-    const auto shape = values[(size_t) shapeIndex] > 0.5f ? Lfo::Shape::triangle : Lfo::Shape::sine;
-    const auto offset = channel == 1 ? 0.5 * (double) values[(size_t) stereoIndex] : 0.0;
-    return Lfo::getValue (shape, (double) phase + offset);
+    return getSweepValue (getVoicePhase (channel, 0));
+}
+
+double SweepPicture::getVoicePhase (int channel, int) const
+{
+    return (double) phase + (channel == 1 ? 0.5 * (double) values[(size_t) stereoIndex] : 0.0);
+}
+
+float SweepPicture::getSweepValue (double at) const
+{
+    return Lfo::getValue (values[(size_t) shapeIndex] > 0.5f ? Lfo::Shape::triangle : Lfo::Shape::sine, at);
 }
 
 double SweepPicture::getSampleRate() const
@@ -117,29 +125,30 @@ void SweepPicture::paintLfo (juce::Graphics& g, const Palette& p, juce::Colour t
     const auto area = getLfoArea();
     graph::paintBackground (g, p, area);
 
-    // One cycle of its shape, the bottom of the sweep at the bottom.
+    // One cycle of its sweep, the bottom of the sweep at the bottom.
     const auto curveArea = area.reduced ((float) Space::s, lfoDotRadius + 2.0f);
-    const auto shape = values[(size_t) shapeIndex] > 0.5f ? Lfo::Shape::triangle : Lfo::Shape::sine;
     const auto yFor = [&curveArea] (float value) { return curveArea.getCentreY() - value * curveArea.getHeight() * 0.5f; };
-    const auto curve = graph::makeCurve (
-        curveArea, [&] (float x) { return yFor (Lfo::getValue (shape, (double) ((x - curveArea.getX()) / curveArea.getWidth()))); });
+    const auto curve = graph::makeCurve (curveArea, [&] (float x)
+                                         { return yFor (getSweepValue ((double) ((x - curveArea.getX()) / curveArea.getWidth()))); });
     g.setColour (tint.withAlpha (GraphTint::marker));
     g.strokePath (curve, juce::PathStrokeType (1.5f));
 
-    // Each side where it is now: the left filled, the right a ring.
+    // Each side's copies where they are now: the left's filled, the right's rings.
     for (int channel = 1; channel >= 0; --channel)
     {
-        const auto offset = channel == 1 ? 0.5f * values[(size_t) stereoIndex] : 0.0f;
-        auto at = phase + offset;
-        at -= std::floor (at);
-        const auto dot = juce::Rectangle<float> (2.0f * lfoDotRadius, 2.0f * lfoDotRadius)
-                             .withCentre ({ curveArea.getX() + at * curveArea.getWidth(), yFor (getLfoValue (channel)) });
-        g.setColour (tint);
+        for (int voice = 0; voice < getNumVoices(); ++voice)
+        {
+            auto at = getVoicePhase (channel, voice);
+            at -= std::floor (at);
+            const auto dot = juce::Rectangle<float> (2.0f * lfoDotRadius, 2.0f * lfoDotRadius)
+                                 .withCentre ({ curveArea.getX() + (float) at * curveArea.getWidth(), yFor (getSweepValue (at)) });
+            g.setColour (tint);
 
-        if (channel == 0)
-            g.fillEllipse (dot);
-        else
-            g.drawEllipse (dot, 1.5f);
+            if (channel == 0)
+                g.fillEllipse (dot);
+            else
+                g.drawEllipse (dot, 1.5f);
+        }
     }
 
     graph::paintReadout (g, p, area, getRateText(), juce::Justification::centredRight);

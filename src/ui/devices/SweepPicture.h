@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the pictures of the effects that sweep share (the phaser's and the flanger's, devices/motion/): their response over
-// the spectrum of what they play (lit) and of what comes in (faint), drawn where their LFO has swept each side now, and
-// under it a strip of the LFO, one cycle of its shape with a dot for each side (the right a part of a cycle ahead) and its
-// rate, as Ableton's Phaser-Flanger shows its LFO, so that the sweep moves with the sound and a knob's turn shows at once.
+// What the pictures of the effects that sweep share (the phaser's, the flanger's and the chorus's, devices/motion/): their
+// response over the spectrum of what they play (lit) and of what comes in (faint), drawn where their LFO has swept each side
+// now, and under it a strip of the LFO, one cycle of its sweep with a dot for each side's copy (the right a part of a cycle
+// ahead) and its rate, as Ableton's Phaser-Flanger shows its LFO, so that the sweep moves with the sound and a knob's turn
+// shows at once.
 // The device's own picture draws its response and its handles; a strip between the two may show more of it.
 #pragma once
 
@@ -34,6 +35,13 @@ public:
     // at, and the shape and stereo offset set now, so that a turn of those shows even while nothing plays.
     float getLfoValue (int channel) const;
 
+    // How many copies each side sweeps, a dot each on the LFO's strip (the chorus's Ensemble has three; one at first); where
+    // a side's copy is in the LFO's cycle now (whole cycles in or not: the right side a part of a cycle ahead); and the
+    // sweep at a point in its cycle, from -1 to 1 (the LFO's shape at first).
+    virtual int getNumVoices() const { return 1; }
+    virtual double getVoicePhase (int channel, int voice) const;
+    virtual float getSweepValue (double phase) const;
+
     void paint (juce::Graphics&) override;
 
     static constexpr int lfoHeight = 30;
@@ -45,6 +53,7 @@ protected:
 
     double getSampleRate() const;
     void readValues();
+    double getLfoPhase() const noexcept { return (double) phase; } // as the device last played, from 0 to 1
 
     // A parameter's index, by ID.
     int indexOf (std::string_view parameterID) const;

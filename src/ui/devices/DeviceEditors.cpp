@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceEditors.h"
+#include "ChorusEditor.h"
 #include "CompressorEditor.h"
 #include "DelayEditor.h"
 #include "DrumSamplerEditor.h"
@@ -25,6 +26,7 @@
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/fm/FmSynth.h"
+#include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
@@ -103,6 +105,9 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
 
     if (info->typeID == devices::Flanger::typeID)
         return std::make_unique<FlangerEditor> (device);
+
+    if (info->typeID == devices::Chorus::typeID)
+        return std::make_unique<ChorusEditor> (device);
 
     if (info->typeID == devices::Vocoder::typeID)
         return std::make_unique<VocoderEditor> (device);

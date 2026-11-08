@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The phaser's and the flanger's DSP (src/devices/motion/): their notches where their responses say and as deep, what they
-// play matching those responses, their sweeps and the right side's lead, feedback that rings without running away, the
-// flanger's sign turning without a click, Safe Bass, and their LFOs in time with the song, the same at each render.
+// The phaser's, the flanger's and the chorus's DSP (src/devices/motion/): their notches where their responses say and as
+// deep, what they play matching those responses, their sweeps and the right side's lead, the chorus's three copies a side in
+// Ensemble, feedback that rings without running away, the flanger's sign and the chorus's mode turning without a click, Safe
+// Bass, and their LFOs in time with the song, the same at each render.
 #include "TestHelpers.h"
+#include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -14,6 +17,7 @@
 namespace
 {
 namespace devices = phazite::devices;
+using devices::Chorus;
 using devices::Flanger;
 using devices::Phaser;
 
@@ -506,4 +510,227 @@ TEST_CASE ("The phaser's and the flanger's LFOs follow the song while it plays: 
     phaserValues[Phaser::rate] = 2.0f;
     play (stopped, phaserValues, makeNoise (12000));
     CHECK (stopped.getPhase().get() == doctest::Approx (0.5).epsilon (0.001)); // a quarter of a second: half a cycle
+}
+
+//==============================================================================
+TEST_CASE ("The chorus describes itself: a copy a side at first, swept as the Juno-60's mode I, half and half with the sound")
+{
+    CHECK (devices::isValid (Chorus::info));
+    auto values = getDefaults (Chorus::info);
+    CHECK (values[(size_t) devices::findParameter (Chorus::info, devices::mixParameterID)] == doctest::Approx (0.5f));
+    CHECK (values[Chorus::sync] == doctest::Approx (0.0f)); // in hertz at first
+    CHECK (Chorus::getNumVoices (values) == 1);
+
+    // Its triangle at the bottom of the sweep at first: the copy at the delay less its depth (1.75 ms), the right side half a
+    // cycle ahead, at the top (5.25 ms).
+    CHECK (Chorus::getVoiceDelay (values, Chorus::getVoicePhase (values, 0.0, 0, 0)) == doctest::Approx (1.75));
+    CHECK (Chorus::getVoiceDelay (values, Chorus::getVoicePhase (values, 0.0, 1, 0)) == doctest::Approx (5.25));
+
+    values[Chorus::mode] = 1.0f;
+    CHECK (Chorus::getNumVoices (values) == Chorus::mostVoices);
+    CHECK (std::string_view (Chorus::typeID) != std::string_view (Flanger::typeID));
+
+    // Half and half with the sound, a copy 2.5 ms behind: notches at the odd multiples of half the delay's frequency (200 Hz,
+    // 600 Hz...), as deep as nothing, and the sound as loud as it was between them.
+    values = getDefaults (Chorus::info);
+    values[Chorus::depth] = 0.0f;
+    const std::vector<double> copy { 2.5 };
+
+    for (const auto hertz : { 200.0, 600.0, 1000.0 })
+        CHECK (Chorus::getMagnitude (values, copy, hertz, rate) < 0.01);
+
+    for (const auto hertz : { 400.0, 800.0 })
+        CHECK (Chorus::getMagnitude (values, copy, hertz, rate) == doctest::Approx (1.0).epsilon (0.01));
+}
+
+TEST_CASE ("The chorus plays what its response says: its copies standing still, one or three a side, fed back and darkened")
+{
+    auto values = getDefaults (Chorus::info);
+    values[Chorus::depth] = 0.0f; // the copies standing still at the delay
+    values[Chorus::delay] = 2.5f; // 120 samples
+    values[Chorus::mix] = 1.0f;   // its response with its copies alone, as it plays them (its runner mixes in the sound)
+
+    for (const auto mode : { 0.0f, 1.0f })
+    {
+        for (const auto feedback : { 0.0f, 0.6f })
+        {
+            for (const auto highCut : { 20000.0f, 3000.0f })
+            {
+                values[Chorus::mode] = mode;
+                values[Chorus::feedback] = feedback;
+                values[Chorus::highCut] = highCut;
+                const std::vector<double> copies ((size_t) Chorus::getNumVoices (values), 2.5);
+
+                for (const auto hertz : { 100.0, 200.0, 400.0, 1500.0, 5000.0 })
+                {
+                    CAPTURE (mode);
+                    CAPTURE (feedback);
+                    CAPTURE (highCut);
+                    CAPTURE (hertz);
+                    Chorus chorus;
+                    chorus.prepare (rate, blockSize);
+                    const auto expected = Chorus::getMagnitude (values, copies, hertz, rate);
+                    const auto played = amplitudeAt (play (chorus, values, makeSine (hertz, 48000)), hertz) / 0.5;
+                    CHECK (toDecibels (played) == doctest::Approx (toDecibels (expected)).epsilon (0.03));
+                }
+            }
+        }
+    }
+
+    // Three copies together where they line up (here, standing still at one delay, everywhere): 4.8 dB louder than one.
+    values[Chorus::mode] = 1.0f;
+    values[Chorus::feedback] = 0.0f;
+    values[Chorus::highCut] = 20000.0f;
+    CHECK (toDecibels (Chorus::getMagnitude (values, std::vector<double> (3, 2.5), 1000.0, rate)) == doctest::Approx (4.77).epsilon (0.01));
+}
+
+TEST_CASE ("The chorus sweeps its copies each way by its depth, the sides opposite, and three a side a third of a cycle apart")
+{
+    Chorus chorus;
+    chorus.prepare (rate, blockSize);
+    auto values = getDefaults (Chorus::info);
+    values[Chorus::rate] = 5.0f;
+    values[Chorus::shape] = 0.0f; // a sine
+    values[Chorus::delay] = 4.0f;
+    values[Chorus::depth] = 0.5f;
+
+    auto shortest = 1.0e9, longest = 0.0, widestMismatch = 0.0;
+    play (chorus, values, makeNoise (48000), nullptr, {},
+          [&] (int)
+          {
+              const auto left = (double) chorus.getDelay (0, 0).get(), right = (double) chorus.getDelay (1, 0).get();
+              shortest = std::min (shortest, left);
+              longest = std::max (longest, left);
+
+              // Opposite sides of the sweep: as far each way from its middle.
+              widestMismatch = std::max (widestMismatch, std::abs (left + right - 8.0));
+          });
+
+    CHECK (shortest == doctest::Approx (2.0).epsilon (0.01));
+    CHECK (longest == doctest::Approx (6.0).epsilon (0.01));
+    CHECK (widestMismatch < 0.001);
+
+    // In Ensemble, three copies a side a third of a cycle apart, the fast sine on each: their sweeps cancel, so that together
+    // they keep to the middle, spread either way of it.
+    values[Chorus::mode] = 1.0f;
+    values[Chorus::rate] = 0.7f;
+    chorus.prepare (rate, blockSize);
+    auto worstMiddle = 0.0, widestSpread = 0.0;
+    play (chorus, values, makeNoise (48000), nullptr, {},
+          [&] (int)
+          {
+              for (int channel = 0; channel < 2; ++channel)
+              {
+                  auto sum = 0.0, low = 1.0e9, high = 0.0;
+
+                  for (int voice = 0; voice < Chorus::mostVoices; ++voice)
+                  {
+                      const auto lag = (double) chorus.getDelay (channel, voice).get();
+                      sum += lag;
+                      low = std::min (low, lag);
+                      high = std::max (high, lag);
+                  }
+
+                  worstMiddle = std::max (worstMiddle, std::abs (sum / Chorus::mostVoices - 4.0));
+                  widestSpread = std::max (widestSpread, high - low);
+              }
+          });
+
+    CHECK (worstMiddle < 0.001);
+    CHECK (widestSpread > 2.0);
+}
+
+TEST_CASE ("The chorus's feedback never runs away, its mode changes without a click, and it rings no longer than its tail")
+{
+    // At its most, swept fast, it stays within bounds.
+    Chorus chorus;
+    auto values = getDefaults (Chorus::info);
+    values[Chorus::depth] = 1.0f;
+    values[Chorus::rate] = 20.0f;
+    values[Chorus::feedback] = 0.9f;
+
+    for (const auto mode : { 0.0f, 1.0f })
+    {
+        for (const auto delay : { 1.0f, 25.0f })
+        {
+            for (const auto highCut : { 20000.0f, 2000.0f })
+            {
+                CAPTURE (mode);
+                CAPTURE (delay);
+                CAPTURE (highCut);
+                values[Chorus::mode] = mode;
+                values[Chorus::delay] = delay;
+                values[Chorus::highCut] = highCut;
+                chorus.prepare (rate, blockSize);
+                CHECK (isFiniteAndBelow (play (chorus, values, makeNoise (96000)), 8.0f));
+            }
+        }
+    }
+
+    // From Classic to Ensemble and back while a tone plays: the copies fade in and out, so no sample jumps from the one before
+    // by much more than it does while the mode stays.
+    values = getDefaults (Chorus::info);
+    chorus.prepare (rate, blockSize);
+    const auto out = play (chorus, values, makeSine (300.0, 48000), nullptr, {},
+                           [&] (int block)
+                           {
+                               if (block == 19)
+                                   values[Chorus::mode] = 1.0f;
+
+                               if (block == 59)
+                                   values[Chorus::mode] = 0.0f;
+                           });
+    const auto largestStep = [&out] (int from, int to)
+    {
+        auto largest = 0.0f;
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = from; i < to; ++i)
+                largest = std::max (largest, std::abs (out.getSample (channel, i) - out.getSample (channel, i - 1)));
+
+        return largest;
+    };
+
+    const auto steady = std::max ({ largestStep (4800, 9600), largestStep (19200, 28800), largestStep (38400, 48000) });
+    CHECK (largestStep (9600, 14400) < 3.0f * steady);
+    CHECK (largestStep (28800, 33600) < 3.0f * steady);
+
+    // After the sound stops, what rings has fallen by more than 54 dB by the end of its tail.
+    values[Chorus::feedback] = 0.8f;
+    values[Chorus::delay] = 10.0f;
+    chorus.prepare (rate, blockSize);
+    auto sound = makeNoise (4800);
+    sound.resize (96000, 0.0f);
+    const auto rung = play (chorus, values, sound);
+    const auto tailEnd = 4800 + (int) std::ceil (chorus.getTailSeconds() * rate);
+    REQUIRE (tailEnd < rung.getNumSamples());
+    CHECK (rung.getMagnitude (0, tailEnd, rung.getNumSamples() - tailEnd) < 0.002f * rung.getMagnitude (0, 0, 4800 + blockSize));
+}
+
+TEST_CASE ("The chorus's Safe Bass leaves what is below it as it was, and its LFO follows the song in time with it")
+{
+    // Half and half with copies 12.5 ms behind: a notch at 40 Hz, which hollows out a bass note; unless the bass is kept.
+    auto values = getDefaults (Chorus::info);
+    values[Chorus::depth] = 0.0f;
+    values[Chorus::delay] = 12.5f;
+    const std::vector<double> copy { 12.5 };
+    CHECK (Chorus::getMagnitude (values, copy, 40.0, rate) < 0.01);
+    values[Chorus::safeBass] = 200.0f;
+    CHECK (Chorus::getMagnitude (values, copy, 40.0, rate) > 0.95);
+
+    // And it plays so: its copies alone, with the bass around them, are what its response says.
+    values[Chorus::mix] = 1.0f;
+    Chorus chorus;
+    chorus.prepare (rate, blockSize);
+    const auto expected = Chorus::getMagnitude (values, copy, 40.0, rate);
+    const auto played = amplitudeAt (play (chorus, values, makeSine (40.0, 96000)), 40.0) / 0.5;
+    CHECK (toDecibels (played) == doctest::Approx (toDecibels (expected)).epsilon (0.03));
+
+    // In time with the song at a bar a cycle: from beat 2, half way round.
+    values = getDefaults (Chorus::info);
+    values[Chorus::sync] = 1.0f;
+    chorus.prepare (rate, blockSize);
+    play (chorus, values, makeNoise (blockSize), nullptr, { .playing = true, .startBeat = 2.0 });
+    const auto perBlock = blockSize / rate * 2.0 / 4.0; // a cycle is 4 beats; 2 beats a second
+    CHECK (chorus.getPhase().get() == doctest::Approx (0.5 + perBlock).epsilon (0.001));
 }

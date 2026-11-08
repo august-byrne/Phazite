@@ -146,6 +146,8 @@ target_sources(phazite_core PRIVATE
     src/devices/modulation/Modulation.h
     src/devices/modulation/Modulators.cpp
     src/devices/modulation/Modulators.h
+    src/devices/motion/Chorus.cpp
+    src/devices/motion/Chorus.h
     src/devices/motion/Flanger.cpp
     src/devices/motion/Flanger.h
     src/devices/motion/Phaser.cpp
@@ -681,6 +683,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/ValueText.h
     src/ui/components/ViewTitle.cpp
     src/ui/components/ViewTitle.h
+    src/ui/devices/ChorusEditor.cpp
+    src/ui/devices/ChorusEditor.h
     src/ui/devices/CompressorEditor.cpp
     src/ui/devices/CompressorEditor.h
     src/ui/devices/DelayEditor.cpp

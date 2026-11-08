@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Filter's, the saturator's, the delay's, the stereo expander's, the phaser's, the flanger's and the vocoder's editors
-// (src/ui/devices/): a control for each parameter but the mix (the header's), what their pictures show, and the drags on
-// them, each one undo step.
+// The Filter's, the saturator's, the delay's, the stereo expander's, the phaser's, the flanger's, the chorus's and the
+// vocoder's editors (src/ui/devices/): a control for each parameter but the mix (the header's), what their pictures show,
+// and the drags on them, each one undo step.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/saturation/Saturator.h"
@@ -25,6 +26,7 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "ui/devices/ChorusEditor.h"
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceWindowContent.h"
@@ -280,6 +282,57 @@ TEST_CASE ("The flanger's editor shows how far each side's copy lags, and its do
     mouse.dragTo ({ editor.getDotPosition().roundToInt().x, picture.getHeight() });
     mouse.release();
     CHECK (song.valueOf ("feedback") == doctest::Approx (-1.0f));
+}
+
+TEST_CASE ("The chorus's editor shows how far each copy lags, three a side in Ensemble, and its dot drags the delay and depth")
+{
+    using phazite::devices::Chorus;
+    Song song (Chorus::typeID);
+    const auto device = song.getDevice();
+    CHECK (dynamic_cast<phazite::ui::ChorusEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
+
+    phazite::ui::ChorusEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    checkEveryParameterButMixHasAControl (editor, Chorus::info);
+    phazite::test::checkChildrenApart (editor);
+
+    // Its triangle at the start of its cycle: the left side's copy at the bottom of its sweep (3.5 ms, half of it shorter),
+    // the right side's half a cycle ahead, at the top.
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (editor.getShownVoices() == 1);
+    CHECK (editor.getShownDelay (0, 0) == doctest::Approx (1.75).epsilon (0.001));
+    CHECK (editor.getShownDelay (1, 0) == doctest::Approx (5.25).epsilon (0.001));
+
+    // In Ensemble, three copies a side, each a third of a cycle after the one before, with the fast sine on it.
+    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "mode" }, 1.0f);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (editor.getShownVoices() == Chorus::mostVoices);
+    std::vector<float> values;
+
+    for (const auto& parameter : Chorus::info.parameters)
+        values.push_back (parameter.defaultValue);
+
+    values[Chorus::mode] = 1.0f;
+
+    for (int voice = 0; voice < Chorus::mostVoices; ++voice)
+        CHECK (editor.getShownDelay (0, voice) == doctest::Approx (Chorus::getVoiceDelay (values, voice / 3.0)).epsilon (0.001));
+
+    // The dot at the delay's frequency (286 Hz, for 3.5 ms) dragged right and up: a shorter delay, more depth, one step.
+    auto& picture = editor.getPicture();
+    phazite::test::Mouse mouse (picture);
+    const auto dot = editor.getDotPosition().roundToInt();
+    mouse.press (dot);
+    mouse.dragTo (dot + juce::Point<int> (30, 0));
+    mouse.dragTo (dot + juce::Point<int> (50, -30));
+    mouse.release();
+    CHECK (song.valueOf ("delay") < 3.0f);
+    CHECK (song.valueOf ("depth") > 0.6f);
+    CHECK (song.describeUndo() == juce::String ("Undo Change Delay"));
+
+    // The wheel turns the rate faster.
+    mouse.pause();
+    mouse.wheel (picture.getLocalBounds().getCentre(), 0.5f);
+    CHECK (song.valueOf ("rate") > 0.5f);
 }
 
 TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its bands moves the formant as one undo step")

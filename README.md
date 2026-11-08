@@ -22,7 +22,7 @@ What works today, on Windows:
 
 - **Arrange:** a playlist of tracks, folders and clips, song sections and outlines, a chord lane with 40 progressions, automation lanes, and Cut, Copy, Paste and Undo throughout.
 - **Write:** a piano roll with a drum mode, keys and scales, chord stamps and transforms; audio clips that follow the tempo, change pitch or play backwards.
-- **Sound:** Phazite's own instruments (Synth, Wavetable, Drum Sampler, Sampler, FM) and effects (EQ, Filter, Compressor, Multiband, Limiter, Saturator, Delay, Reverb, Phaser, Flanger, Vocoder, Stereo Expander), and your VST3 plug-ins, each plug-in in a process of its own: one that crashes or hangs says so in its slot, with Reload, and Phazite plays on.
+- **Sound:** Phazite's own instruments (Synth, Wavetable, Drum Sampler, Sampler, FM) and effects (EQ, Filter, Compressor, Multiband, Limiter, Saturator, Delay, Reverb, Phaser, Flanger, Chorus, Vocoder, Stereo Expander), and your VST3 plug-ins, each plug-in in a process of its own: one that crashes or hangs says so in its slot, with Reload, and Phazite plays on.
 - **Mix:** a mixer with buses, sends, sidechains, effect containers, modulators and macros, freeze and bounce in place, and a loudness meter.
 - **Record:** MIDI from a keyboard or the computer keyboard, audio from an interface (ASIO®) with count-in and punch-in, and Capture, which turns what you just played into a clip.
 - **Finish:** export the song, or its stems, to WAV or FLAC, the song normalized to a loudness if you like.

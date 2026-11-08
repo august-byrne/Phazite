@@ -893,7 +893,7 @@ TEST_CASE ("At the default window size, every built-in instrument and effect sho
 
     for (const auto* type :
          { "phaziteEq", "phaziteCompressor", "phaziteLimiter", "phaziteMultiband", "phaziteSaturator", "phaziteFilter", "phaziteDelay",
-           "phaziteReverb", "phazitePhaser", "phaziteFlanger", "phaziteStereoExpander", "phaziteVocoder" })
+           "phaziteReverb", "phazitePhaser", "phaziteFlanger", "phaziteChorus", "phaziteStereoExpander", "phaziteVocoder" })
     {
         phazite::addEffect (context, track, findType (type));
         phazite::test::dispatchPendingMessages();

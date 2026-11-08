@@ -11,6 +11,7 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
@@ -295,6 +296,12 @@ TEST_SUITE ("golden")
     {
         checkEffect (phazite::devices::Flanger::typeID, "effect-flanger", {},
                      "Phazite's flanger as it is made, on a beat and chord stabs.");
+    }
+
+    TEST_CASE ("Golden render: Phazite's chorus on a beat and stabs")
+    {
+        checkEffect (phazite::devices::Chorus::typeID, "effect-chorus", { { "mode", 1.0f } },
+                     "Phazite's chorus in Ensemble, its three copies a side, on a beat and chord stabs.");
     }
 
     TEST_CASE ("Golden render: Phazite's phaser on a beat and stabs")

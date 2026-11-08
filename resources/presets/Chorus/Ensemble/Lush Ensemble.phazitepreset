@@ -1,18 +1,20 @@
 {
   "kind": "device",
   "device": {
-    "name": "Flanger",
+    "name": "Chorus",
     "instrument": false,
-    "type": "phaziteFlanger",
+    "type": "phaziteChorus",
     "parameters": {
+      "mode": 1,
       "delay": 12.0,
-      "depth": 0.12,
+      "depth": 0.2,
       "sync": 0,
-      "division": 14,
-      "rate": 0.6,
+      "division": 13,
+      "rate": 0.35,
       "shape": 0,
       "feedback": 0.0,
       "stereo": 1.0,
+      "highCut": 20000.0,
       "safeBass": 20.0,
       "mix": 0.6
     }

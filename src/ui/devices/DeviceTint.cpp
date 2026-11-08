@@ -6,6 +6,7 @@
 #include "devices/dynamics/Multiband.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
@@ -25,12 +26,13 @@ DeviceFamily getDeviceFamily (std::string_view typeID)
     };
 
     static const Entry entries[] = {
-        { devices::Compressor::typeID, DeviceFamily::dynamics },   { devices::Limiter::typeID, DeviceFamily::dynamics },
-        { devices::Multiband::typeID, DeviceFamily::dynamics },    { devices::Equalizer::typeID, DeviceFamily::tone },
-        { devices::FilterEffect::typeID, DeviceFamily::tone },     { devices::Saturator::typeID, DeviceFamily::drive },
-        { devices::Delay::typeID, DeviceFamily::space },           { devices::Reverb::typeID, DeviceFamily::space },
-        { devices::Phaser::typeID, DeviceFamily::motion },         { devices::Flanger::typeID, DeviceFamily::motion },
-        { devices::StereoExpander::typeID, DeviceFamily::stereo }, { devices::Vocoder::typeID, DeviceFamily::voice },
+        { devices::Compressor::typeID, DeviceFamily::dynamics }, { devices::Limiter::typeID, DeviceFamily::dynamics },
+        { devices::Multiband::typeID, DeviceFamily::dynamics },  { devices::Equalizer::typeID, DeviceFamily::tone },
+        { devices::FilterEffect::typeID, DeviceFamily::tone },   { devices::Saturator::typeID, DeviceFamily::drive },
+        { devices::Delay::typeID, DeviceFamily::space },         { devices::Reverb::typeID, DeviceFamily::space },
+        { devices::Phaser::typeID, DeviceFamily::motion },       { devices::Flanger::typeID, DeviceFamily::motion },
+        { devices::Chorus::typeID, DeviceFamily::motion },       { devices::StereoExpander::typeID, DeviceFamily::stereo },
+        { devices::Vocoder::typeID, DeviceFamily::voice },
     };
 
     for (const auto& entry : entries)
