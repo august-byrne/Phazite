@@ -382,7 +382,9 @@ struct DevicesView::Slot : public juce::Component
 
     void paint (juce::Graphics& g) override
     {
-        // Its line: lit while it shows, a wash under the pointer, outlined in the accent while it is selected, as a list's row.
+        // Its line: lit while it shows, a wash under the pointer; while it is selected, washed in the accent as a mixer slot is
+        // (DeviceSlots), and outlined in it, as a list's row, so that effects Ctrl- or Shift-clicked to group stand out as much
+        // as the one that shows (the owner, 2026-11-08).
         const auto& p = getPalette (*this);
         const auto line = getLocalBounds().removeFromTop (slotHeight + (hasExtras() ? extrasHeight : 0)).toFloat();
 
@@ -399,6 +401,8 @@ struct DevicesView::Slot : public juce::Component
 
         if (view.context.getSongSelection().isSelected (shown.id))
         {
+            g.setColour (p.accent.withAlpha (selectionWash));
+            g.fillRoundedRectangle (line, cornerRadius);
             g.setColour (p.accent);
             g.drawRoundedRectangle (line.reduced (0.5f), cornerRadius, 1.0f);
         }
@@ -1247,7 +1251,9 @@ void DevicesView::showBody()
         std::unique_ptr<juce::Component> shown;
         const auto& p = getPalette (*this);
 
-        if (device->isContainer)
+        if (device->isContainer && getContainerDevices (context, device->id).empty()) // made empty, from the effects' menu
+            shown = makeNote ("It holds no effects yet: + Effect under it, at the left, adds one, which plays in it.");
+        else if (device->isContainer)
             shown = makeNote ("Its devices are under it, at the left: click one to show it here, beside the container's macros.");
         else if (device->windowOpen)
             shown = makeNote ("It shows in a window of its own: its button at the left brings the window to the front.");

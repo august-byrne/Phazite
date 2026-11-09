@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The menus that add devices (docs/design.md, section 8): an instrument, which turns a track's notes into sound,
-// and effects, which change a sound. Built-in devices come first, then the plug-ins found by scanning, by maker.
+// and effects, which change a sound. Built-in devices come first (the effects' after an empty container), then the
+// plug-ins found by scanning, by maker.
 // What is chosen goes in as one named undo step (model/mixer/MixerModel.h).
 #pragma once
 
@@ -21,8 +22,12 @@ class CommandBridge;
 // The instruments. The one chosen replaces the track's instrument, if it has one.
 void showInstrumentMenu (ProjectContext&, TrackID, juce::Component& target);
 
-// The effects. The one chosen goes on the track, or with an empty ID on the master, after its other effects.
+// The effects. The one chosen goes on the track, or with an empty ID on the master, after its other effects; an empty
+// container comes first (addContainer()). makeEffectMenu() is the menu it shows: an item of one of types (as
+// getDeviceTypes() lists them) has its index in types, plus one, as its ID; the others act themselves, while target is
+// there.
 void showEffectMenu (ProjectContext&, TrackID, juce::Component& target);
+juce::PopupMenu makeEffectMenu (ProjectContext&, TrackID, juce::Component& target, const std::vector<DeviceType>& types);
 
 // The effects, for one to replace: the one chosen takes its place (replaceEffect()).
 void showReplaceEffectMenu (ProjectContext&, DeviceID effect, juce::Component& target);

@@ -26,6 +26,17 @@ DeviceID groupIntoContainer (ProjectContext& context, const std::vector<DeviceID
     return groupIntoContainer (*song, ids);
 }
 
+DeviceID addContainer (ProjectContext& context, TrackID channel)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr || ! findChainState (*song, channel).isValid())
+        return {};
+
+    const UndoStep step (*song, "Add Container");
+    return addContainer (*song, channel);
+}
+
 void ungroupContainer (ProjectContext& context, DeviceID id)
 {
     if (auto* song = findSong (context); song != nullptr && isContainer (*song, id))

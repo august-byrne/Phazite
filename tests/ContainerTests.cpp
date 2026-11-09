@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Containers by IDs (src/model/mixer/ContainerModel.h; roadmap step 2.4): effects grouped into a container and back as
-// named undo steps, the container's row of devices and its eight macros, which modulate its devices only, its devices
-// reached by the mixer's functions, a duplicated track's containers with devices and macros of their own, and the
-// commands that group and ungroup the selected devices.
+// named undo steps, an empty one added, the container's row of devices and its eight macros, which modulate its devices
+// only, its devices reached by the mixer's functions, a duplicated track's containers with devices and macros of their
+// own, and the commands that group and ungroup the selected devices.
 #include "EnginePlayback.h"
 #include "TestHelpers.h"
 #include "model/arrangement/SongSelection.h"
@@ -187,6 +187,59 @@ TEST_CASE ("Effects of one channel group into a container in the first one's pla
     CHECK (phazite::getContainerDevices (context, container).empty());
     phazite::undo (*tracks.song);
     CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "Container", "Compressor" });
+}
+
+TEST_CASE ("An empty container goes after a track's effects, or the master's, as one undo step, for effects to be added to it")
+{
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    const auto names = tracks.effectNamesOf (tracks.a);
+
+    // After the track's effects, holding nothing, with eight macros at 0, as a grouped one has.
+    const auto container = phazite::addContainer (context, tracks.a);
+    REQUIRE (container.isValid());
+    CHECK (tracks.describeUndo() == juce::String ("Undo Add Container"));
+    CHECK (tracks.effectNamesOf (tracks.a) == std::vector<juce::String> { "EQ", "Compressor", "Reverb", "Container" });
+    CHECK (phazite::getEffects (context, tracks.a).back().id == container);
+    CHECK (phazite::getEffects (context, tracks.a).back().isContainer);
+    CHECK (phazite::getContainerDevices (context, container).empty());
+    const auto macros = phazite::getContainerMacros (context, container);
+    REQUIRE (macros.size() == 8);
+    CHECK (macros[0].name == juce::String ("Macro 1"));
+    CHECK (macros[7].name == juce::String ("Macro 8"));
+    CHECK (macros[0].container == container);
+    CHECK (macros[0].track == tracks.a);
+    CHECK (phazite::getModulatorValue (context, macros[0].id) == doctest::Approx (0.0f));
+
+    // An effect added to it plays in it, and its macros reach it.
+    phazite::addEffectToContainer (context, container, tracks.find ("phaziteDelay"));
+    const auto inside = phazite::getContainerDevices (context, container);
+    REQUIRE (inside.size() == 1);
+    CHECK (inside[0].name == juce::String ("Delay"));
+    CHECK (phazite::getContainerOf (context, inside[0].id) == container);
+    const auto delayParameters = phazite::getAutomationTargets (context, inside[0].id);
+    REQUIRE_FALSE (delayParameters.empty());
+    CHECK (phazite::canModulate (context, macros[0].id, delayParameters[0].parameter));
+
+    // Another is named apart; the master has one too, and a track that isn't there none.
+    CHECK (phazite::addContainer (context, tracks.b).isValid());
+    CHECK (tracks.effectNamesOf (tracks.b) == std::vector<juce::String> { "EQ", "Container 2" });
+    const auto master = phazite::addContainer (context, {});
+    REQUIRE (master.isValid());
+    CHECK (phazite::getEffects (context, {}).back().id == master);
+    CHECK (phazite::getContainerMacros (context, master)[0].track == phazite::getMasterTrack (context));
+    CHECK_FALSE (phazite::addContainer (context, TrackID::fromRaw (999999)).isValid());
+    CHECK (tracks.describeUndo() == juce::String ("Undo Add Container")); // nothing added: no step
+
+    // Undo takes each away; redo brings A's back, empty.
+    for (int step = 0; step < 4; ++step) // the master's, B's, the delay, A's
+        phazite::undo (*tracks.song);
+
+    CHECK (tracks.effectNamesOf (tracks.a) == names);
+    CHECK (tracks.effectNamesOf (tracks.b) == std::vector<juce::String> { "EQ" });
+    phazite::redo (*tracks.song);
+    CHECK (tracks.effectNamesOf (tracks.a).back() == juce::String ("Container"));
+    CHECK (phazite::getContainerDevices (context, container).empty());
 }
 
 TEST_CASE ("A container's devices move, come and go as the mixer's devices do")

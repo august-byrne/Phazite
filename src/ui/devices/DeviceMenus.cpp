@@ -12,11 +12,11 @@ namespace phazite::ui
 {
 namespace
 {
-    // The device types of one kind: the built-in ones, then the plug-ins in a submenu for each maker. An item's ID
-    // is its type's index in types, plus one.
-    juce::PopupMenu makeMenu (const std::vector<DeviceType>& types, bool instruments, const juce::String& noPluginsText)
+    // The device types of one kind, after what the menu holds already: the built-in ones, then the plug-ins in a submenu
+    // for each maker. An item's ID is its type's index in types, plus one.
+    juce::PopupMenu makeMenu (const std::vector<DeviceType>& types, bool instruments, const juce::String& noPluginsText,
+                              juce::PopupMenu menu = {})
     {
-        juce::PopupMenu menu;
         std::map<juce::String, juce::PopupMenu> plugins;
 
         for (size_t i = 0; i < types.size(); ++i)
@@ -67,10 +67,23 @@ void showInstrumentMenu (ProjectContext& context, TrackID track, juce::Component
           [&context, track] (const DeviceType& type) { chooseInstrument (context, track, type); });
 }
 
-void showEffectMenu (ProjectContext& context, TrackID track, juce::Component& target)
+juce::PopupMenu makeEffectMenu (ProjectContext& context, TrackID track, juce::Component& target, const std::vector<DeviceType>& types)
 {
-    auto types = getDeviceTypes (context);
-    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them");
+    const juce::Component::SafePointer<juce::Component> safeTarget (&target);
+
+    // An empty container first, as Ableton Live's Audio Effect Rack comes first among its effects, for effects to be added
+    // to; the Devices view shows it (grouping effects already there makes one too: "Group into Container").
+    juce::PopupMenu start;
+    start.addItem ("Container",
+                   [&context, track, safeTarget]
+                   {
+                       if (safeTarget != nullptr)
+                           addContainer (context, track);
+                   });
+    start.addSeparator();
+
+    auto menu = makeMenu (types, false, "No effect plug-ins yet: Scan for Plug-ins, in the gear's menu at the bottom left, finds them",
+                          std::move (start));
 
     // Effects change a sound. A track whose notes have no instrument makes none for them to change, so the menu
     // offers the instrument first, and the effects after it.
@@ -80,7 +93,7 @@ void showEffectMenu (ProjectContext& context, TrackID track, juce::Component& ta
         menu = juce::PopupMenu();
         menu.addSectionHeader ("Notes make no sound without an instrument");
         menu.addItem ("Choose Instrument...",
-                      [&context, track, safeTarget = juce::Component::SafePointer<juce::Component> (&target)]
+                      [&context, track, safeTarget]
                       {
                           if (safeTarget != nullptr)
                               showInstrumentMenu (context, track, *safeTarget);
@@ -89,6 +102,13 @@ void showEffectMenu (ProjectContext& context, TrackID track, juce::Component& ta
         menu.addSubMenu ("Effects, Which Change the Sound", effects);
     }
 
+    return menu;
+}
+
+void showEffectMenu (ProjectContext& context, TrackID track, juce::Component& target)
+{
+    auto types = getDeviceTypes (context);
+    auto menu = makeEffectMenu (context, track, target, types);
     show (std::move (menu), target, std::move (types), [&context, track] (const DeviceType& type) { addEffect (context, track, type); });
 }
 

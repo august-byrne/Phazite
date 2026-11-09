@@ -32,6 +32,10 @@ DeviceID findContainerOf (const Song&, DeviceID device);
 bool canGroupIntoContainer (const Song&, const std::vector<DeviceID>& effects);
 DeviceID groupIntoContainer (Song&, const std::vector<DeviceID>& effects);
 
+// An empty container after a channel's effects, or the master's with an empty ID, made as grouping makes one, for effects
+// to be added to (insertIntoContainer()). Returns it, or none. Joins the caller's step.
+DeviceID addContainer (Song&, TrackID channel);
+
 // Puts a container's devices back on its channel in its place, in their order, and removes the container with its
 // macros and what they modulated. Joins the caller's step.
 void ungroupContainer (Song&, DeviceID container);
@@ -45,7 +49,10 @@ void setContainerName (Song&, DeviceID container, const juce::String&);
 DeviceID insertIntoContainer (Song&, DeviceID container, juce::ValueTree device, int index = -1);
 void moveInContainer (Song&, DeviceID device, int newIndex);
 
-// A new container's name: "Container", or "Container 2" and on while the song has one of that name.
+// A new container's element, in no channel yet: a new ID, its name (makeContainerName()) and its eight macros, "Macro 1"
+// to "Macro 8", each at 0, and no devices. And a new container's name: "Container", or "Container 2" and on while the
+// song has one of that name.
+juce::ValueTree makeContainerState (Song&);
 juce::String makeContainerName (const Song&);
 
 //==============================================================================

@@ -21,6 +21,10 @@ namespace phazite
 bool canGroupIntoContainer (const ProjectContext&, const std::vector<DeviceID>&);
 DeviceID groupIntoContainer (ProjectContext&, const std::vector<DeviceID>&);
 
+// An empty container after a track's effects, or the master's with an empty ID ("Add Container"), for effects to be added
+// to (addEffectToContainer()), as the effects' menu offers one. Returns it, or none for a track that isn't there.
+DeviceID addContainer (ProjectContext&, TrackID channel);
+
 // Puts a container's devices back on its channel in its place, without the container and its macros ("Ungroup
 // Container").
 void ungroupContainer (ProjectContext&, DeviceID);

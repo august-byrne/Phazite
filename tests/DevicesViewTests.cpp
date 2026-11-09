@@ -23,6 +23,7 @@
 #include "ui/components/ModulatorDrag.h"
 #include "ui/components/PowerSwitch.h"
 #include "ui/devices/CompressorEditor.h"
+#include "ui/devices/DeviceMenus.h"
 #include "ui/devices/EqEditor.h"
 #include "ui/devices/ModulatorEditor.h"
 #include "ui/devices/SynthEditor.h"
@@ -70,6 +71,32 @@ juce::StringArray showingKnobs (juce::Component& component)
             titles.add (knob->getTitle());
 
     return titles;
+}
+
+// How many of a component's pixels, as it paints with what is in it, are the accent's colour at any opacity: a selected
+// device's wash and outline in the Devices view's column, or its wash in a mixer strip.
+int countAccentPixels (juce::Component& component)
+{
+    const auto accent = phazite::ui::getPalette (component).accent;
+    juce::Image image (juce::Image::ARGB, component.getWidth(), component.getHeight(), true, juce::SoftwareImageType());
+
+    {
+        juce::Graphics g (image);
+        component.paintEntireComponent (g, false);
+    }
+
+    auto count = 0;
+
+    for (int y = 0; y < image.getHeight(); ++y)
+        for (int x = 0; x < image.getWidth(); ++x)
+            if (const auto pixel = image.getPixelAt (x, y); pixel.getAlpha() > 40
+                                                            && std::abs (pixel.getRed() - accent.getRed())
+                                                                       + std::abs (pixel.getGreen() - accent.getGreen())
+                                                                       + std::abs (pixel.getBlue() - accent.getBlue())
+                                                                   < 24)
+                ++count;
+
+    return count;
 }
 
 // A device's name in its panel's header (the panel has the same title, for screen readers).
@@ -248,6 +275,123 @@ TEST_CASE ("The Effects tab stacks the selected track's effects in the column, a
     const auto delay = phazite::getEffects (screen.context, screen.track (0)).back().id;
     CHECK (view.isOpen (delay));
     CHECK_FALSE (view.isOpen (effects[2]));
+}
+
+TEST_CASE ("Effects Ctrl- or Shift-clicked are selected together and drawn so, in the column and in a mixer strip, to be grouped")
+{
+    // The owner (2026-11-08): grouping effects into a container starts with selecting them, which has to show.
+    Screen screen;
+    auto& view = screen.view;
+    auto& selection = screen.context.getSongSelection();
+    const auto effects = screen.effects (0);
+    const auto slots = phazite::getEffects (screen.context, screen.track (0));
+    REQUIRE (effects.size() == 3);
+
+    // A click on an effect's name in the column, with keys held, as the user makes it; and how much of its line is drawn in
+    // the accent's colour.
+    const auto clickInColumn = [&] (size_t index, juce::ModifierKeys mods)
+    {
+        auto* name = findNameButton (*view.findPanel (effects[index]), slots[index].name);
+        REQUIRE (name != nullptr);
+        phazite::test::Mouse mouse (*name);
+        mouse.click (name->getLocalBounds().getCentre(), mods);
+        phazite::test::dispatchPendingMessages();
+    };
+    const auto litInColumn = [&] (size_t index) { return countAccentPixels (*view.findPanel (effects[index])); };
+    const auto outlined = view.findPanel (effects[1])->getWidth(); // as many pixels as the outline's top edge: fewer than all of it
+
+    // The EQ clicked alone: selected, and the others not; as they are then, unselected.
+    clickInColumn (0, {});
+    REQUIRE (selection.getDevices() == std::vector { effects[0] });
+    const auto compressorUnselected = litInColumn (1), pluginUnselected = litInColumn (2);
+
+    // Shift adds the compressor, Ctrl the plug-in: each outlined in the accent, the EQ still too.
+    clickInColumn (1, juce::ModifierKeys::shiftModifier);
+    CHECK (selection.getDevices() == std::vector { effects[0], effects[1] });
+    CHECK (litInColumn (1) > compressorUnselected + outlined);
+    CHECK (litInColumn (2) < pluginUnselected + outlined / 4); // (the pointer's wash shifts a knob's edges a little)
+    clickInColumn (2, juce::ModifierKeys::commandModifier);
+    CHECK (selection.getDevices() == std::vector { effects[0], effects[1], effects[2] });
+    CHECK (litInColumn (2) > pluginUnselected + outlined);
+
+    // Ctrl takes one out again, and its outline goes; the EQ's, taken out and put back, goes and comes back.
+    clickInColumn (2, juce::ModifierKeys::commandModifier);
+    CHECK (selection.getDevices() == std::vector { effects[0], effects[1] });
+    CHECK (litInColumn (2) < pluginUnselected + outlined / 4);
+    const auto eqSelected = litInColumn (0);
+    clickInColumn (0, juce::ModifierKeys::commandModifier);
+    CHECK (selection.getDevices() == std::vector { effects[1] });
+    CHECK (litInColumn (0) < eqSelected - outlined);
+    clickInColumn (0, juce::ModifierKeys::commandModifier);
+    CHECK (litInColumn (0) > eqSelected - outlined / 4);
+
+    // A plain click on the EQ, which shows already, selects it alone; the compressor, untouched, is asked to repaint, so that
+    // the screen shows its outline go.
+    screen.window.takeRepaintedArea();
+    clickInColumn (0, {});
+    CHECK (selection.getDevices() == std::vector { effects[0] });
+    auto* compressorPanel = view.findPanel (effects[1]);
+    CHECK (screen.window.takeRepaintedArea().containsRectangle (
+        screen.window.getLocalArea (compressorPanel, compressorPanel->getLocalBounds())));
+    CHECK (litInColumn (1) < compressorUnselected + outlined / 4);
+
+    // In the track's mixer strip too: its slots washed in the accent while selected, Ctrl and Shift adding to the selection
+    // there, which the column shows as well.
+    phazite::ui::ChannelStrip strip { screen.commands, screen.context };
+    phazite::test::TestWindow stripWindow { strip, phazite::ui::ChannelStrip::width, 700 };
+    strip.setTrack (screen.track (0));
+    phazite::test::dispatchPendingMessages();
+    const auto slotInStrip = [&] (size_t index) -> juce::Component&
+    {
+        auto* name = phazite::test::findComponentWithTitle (strip, slots[index].name);
+        REQUIRE (name != nullptr);
+        REQUIRE (name->getParentComponent() != nullptr);
+        return *name->getParentComponent();
+    };
+    const auto clickInStrip = [&] (size_t index, juce::ModifierKeys mods)
+    {
+        auto* name = phazite::test::findComponentWithTitle (slotInStrip (index), slots[index].name);
+        phazite::test::Mouse mouse (*name);
+        mouse.click (name->getLocalBounds().getCentre(), mods);
+        phazite::test::dispatchPendingMessages();
+    };
+
+    // The EQ, selected from the column, washed there; Ctrl takes it out, and none is.
+    std::vector<int> unselectedInStrip;
+    const auto washed = slotInStrip (0).getWidth() * slotInStrip (0).getHeight() / 4; // a quarter of a slot, at the least
+    const auto eqWashed = countAccentPixels (slotInStrip (0));
+    clickInStrip (0, juce::ModifierKeys::commandModifier);
+    REQUIRE (selection.getDevices().empty());
+
+    for (size_t index = 0; index < effects.size(); ++index)
+        unselectedInStrip.push_back (countAccentPixels (slotInStrip (index)));
+
+    CHECK (eqWashed > unselectedInStrip[0] + washed);
+
+    // A plain click selects the compressor, Ctrl adds the EQ and Shift the plug-in: each washed, and outlined in the column.
+    clickInStrip (1, {});
+    clickInStrip (0, juce::ModifierKeys::commandModifier);
+    clickInStrip (2, juce::ModifierKeys::shiftModifier);
+    CHECK (selection.getDevices() == std::vector { effects[1], effects[0], effects[2] });
+
+    for (size_t index = 0; index < effects.size(); ++index)
+    {
+        CAPTURE (index);
+        CHECK (countAccentPixels (slotInStrip (index)) > unselectedInStrip[index] + washed);
+    }
+
+    CHECK (litInColumn (2) > pluginUnselected + outlined);
+
+    // And so selected, they group into one container, in their order.
+    REQUIRE (phazite::canGroupIntoContainer (screen.context, selection.getDevices()));
+    const auto container = phazite::groupIntoContainer (screen.context, selection.getDevices());
+    REQUIRE (container.isValid());
+    std::vector<DeviceID> inside;
+
+    for (const auto& device : phazite::getContainerDevices (screen.context, container))
+        inside.push_back (device.id);
+
+    CHECK (inside == effects);
 }
 
 TEST_CASE (
@@ -603,6 +747,55 @@ TEST_CASE ("A container lists its devices under it in the column; one shown show
         {
             const auto inside = phazite::getContainerDevices (screen.context, container);
             return inside.size() == 3 && screen.view.findPanel (inside.back().id) != nullptr && screen.view.isOpen (inside.back().id);
+        }));
+}
+
+TEST_CASE ("The effects' menu offers an empty container first, which shows in the column with its own + Effect and a word on it")
+{
+    Screen screen;
+    auto& view = screen.view;
+    auto* add = phazite::test::findComponentWithTitle (view, "Add effect"); // the track's: it has no container yet
+    REQUIRE (add != nullptr);
+
+    // First in the menu, before the effects, apart from them.
+    const auto types = phazite::getDeviceTypes (screen.context);
+    const auto menu = phazite::ui::makeEffectMenu (screen.context, screen.track (0), *add, types);
+    juce::PopupMenu::MenuItemIterator first (menu);
+    REQUIRE (first.next());
+    CHECK (first.getItem().text == juce::String ("Container"));
+    REQUIRE (first.next());
+    CHECK (first.getItem().isSeparator);
+
+    // Chosen, it goes after the track's effects, empty, and shows: open, with its macros beside the column and a word on
+    // adding effects to it, which its own + Effect under it does.
+    REQUIRE (phazite::test::runMenuItem (menu, { "Container" }));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Container"));
+    const auto effects = phazite::getEffects (screen.context, screen.track (0));
+    REQUIRE (effects.size() == 4);
+    REQUIRE (effects.back().isContainer);
+    const auto container = effects.back().id;
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr && view.isOpen (container); }));
+
+    auto* frame = view.getShownBody();
+    REQUIRE (frame != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 1") != nullptr);
+    const auto labels = phazite::test::findAll<juce::Label> (*frame);
+    CHECK (std::any_of (labels.begin(), labels.end(),
+                        [] (juce::Label* label) { return label->getText().startsWith ("It holds no effects yet"); }));
+
+    auto* panel = view.findPanel (container);
+    auto* inside = phazite::test::findComponentWithTitle (*panel, "Add effect");
+    REQUIRE (inside != nullptr);
+    CHECK (inside->isShowing());
+    CHECK (inside != add);
+
+    // An effect added there plays in it and shows in its place beside the column.
+    phazite::addEffectToContainer (screen.context, container, screen.find ("phaziteReverb"));
+    CHECK (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            const auto devices = phazite::getContainerDevices (screen.context, container);
+            return devices.size() == 1 && view.findPanel (devices[0].id) != nullptr && view.isOpen (devices[0].id);
         }));
 }
 

@@ -75,23 +75,10 @@ DeviceID groupIntoContainer (Song& song, const std::vector<DeviceID>& effects)
         if (std::find (effects.begin(), effects.end(), getDeviceID (state)) != effects.end())
             grouped.push_back (state);
 
-    // The song's container, with a new ID and name, and its eight macros; the devices' elements go into it, with what they
-    // hold of their states (which an undo brings back).
+    // A new container; the devices' elements go into it, with what they hold of their states (which an undo brings back).
     auto* undo = &song.getUndoManager();
     song.storeDeviceStates (getTrackID (chain).getRaw());
-    const auto id = DeviceID::fromRaw (song.makeID());
-    juce::ValueTree container (schema::CONTAINER);
-    container.setProperty (schema::deviceID, (juce::int64) id.getRaw(), nullptr);
-    container.setProperty (schema::containerName, makeContainerName (song), nullptr);
-
-    for (int number = 1; number <= macrosPerContainer; ++number)
-    {
-        juce::ValueTree macro (schema::MACRO);
-        macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
-        macro.setProperty (schema::macroName, "Macro " + juce::String (number), nullptr);
-        container.appendChild (macro, nullptr);
-    }
-
+    auto container = makeContainerState (song);
     chain.addChild (container, chain.indexOf (grouped.front()), undo);
 
     for (auto state : grouped)
@@ -101,7 +88,12 @@ DeviceID groupIntoContainer (Song& song, const std::vector<DeviceID>& effects)
         container.appendChild (state, undo);
     }
 
-    return id;
+    return getDeviceID (container);
+}
+
+DeviceID addContainer (Song& song, TrackID channel)
+{
+    return insertDeviceState (song, channel, makeContainerState (song));
 }
 
 void ungroupContainer (Song& song, DeviceID id)
@@ -156,6 +148,23 @@ void moveInContainer (Song& song, DeviceID device, int newIndex)
     const auto devices = getDeviceStates (container);
     const auto& target = devices[(size_t) juce::jlimit (0, (int) devices.size() - 1, newIndex)];
     container.moveChild (container.indexOf (state), container.indexOf (target), &song.getUndoManager());
+}
+
+juce::ValueTree makeContainerState (Song& song)
+{
+    juce::ValueTree container (schema::CONTAINER);
+    container.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
+    container.setProperty (schema::containerName, makeContainerName (song), nullptr);
+
+    for (int number = 1; number <= macrosPerContainer; ++number)
+    {
+        juce::ValueTree macro (schema::MACRO);
+        macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
+        macro.setProperty (schema::macroName, "Macro " + juce::String (number), nullptr);
+        container.appendChild (macro, nullptr);
+    }
+
+    return container;
 }
 
 juce::String makeContainerName (const Song& song)
