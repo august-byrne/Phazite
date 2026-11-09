@@ -9,6 +9,21 @@ namespace phazite::ui
 {
 namespace strip
 {
+    void FlatName::paintButton (juce::Graphics& g, bool, bool)
+    {
+        const auto& p = getPalette (*this);
+
+        if (hasKeyboardFocus (false))
+        {
+            g.setColour (p.focus);
+            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), cornerRadius, 1.0f);
+        }
+
+        g.setColour ((getToggleState() ? p.textBright : p.text).withMultipliedAlpha (isEnabled() ? 1.0f : 0.5f));
+        g.setFont (juce::FontOptions (TextSize::body));
+        g.drawText (getButtonText(), getLocalBounds().withTrimmedLeft (Space::xs), juce::Justification::centredLeft, true);
+    }
+
     void showOutputMenu (ProjectContext& context, CommandBridge& commands, TrackID track, juce::Component& target)
     {
         juce::PopupMenu menu;

@@ -110,6 +110,26 @@ juce::Component* findNameButton (juce::Component& panel, const juce::String& nam
     return nullptr;
 }
 
+// A container's chains, as the Devices view shows them beside the column with its macros, or nullptr.
+phazite::ui::ContainerEditor* findChains (phazite::ui::DevicesView& view)
+{
+    auto* shown = view.getShownBody();
+    return shown != nullptr ? phazite::test::findAll<phazite::ui::ContainerEditor> (*shown).getFirst() : nullptr;
+}
+
+// A click on a device's name in its chain's card, as the user makes one.
+void clickDeviceInChains (phazite::ui::DevicesView& view, DeviceID device, const juce::String& name)
+{
+    auto* chains = findChains (view);
+    REQUIRE (chains != nullptr);
+    auto* line = chains->findDevice (device);
+    REQUIRE (line != nullptr);
+    auto* button = findNameButton (*line, name);
+    REQUIRE (button != nullptr);
+    phazite::test::Mouse mouse (*button);
+    mouse.click (button->getLocalBounds().getCentre());
+}
+
 // A project context's devices' windows as the app shows them, while this lives, without any on the screen: which ones show.
 struct ShownWindows final : phazite::DeviceWindowHost
 {
@@ -675,83 +695,105 @@ TEST_CASE ("The Devices view follows the selection, and a click on a device's na
     setSong (screen.context, screen.song.get());
 }
 
-TEST_CASE ("A container lists its devices under it in the column; one shown shows beside the container's macros, which drop on its knobs")
+TEST_CASE ("A container is one line in the column; beside it, its macros and its chains with their devices, one of which clicked "
+           "shows in their place under where it is")
 {
     Screen screen;
+    auto& view = screen.view;
+    auto& context = screen.context;
     const auto effects = screen.effects (0);
-    const auto container = phazite::groupIntoContainer (screen.context, { effects[0], effects[1] });
+    const auto container = phazite::groupIntoContainer (context, { effects[0], effects[1] });
     REQUIRE (container.isValid());
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return screen.view.findPanel (container) != nullptr; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr; }));
 
-    // Its devices under it in its slot, indented, one under another. Grouped, it shows: its eight macros beside the column,
-    // with a word on where its devices are.
-    auto* panel = screen.view.findPanel (container);
-    auto* eq = screen.view.findPanel (effects[0]);
-    auto* compressor = screen.view.findPanel (effects[1]);
-    REQUIRE (eq != nullptr);
-    REQUIRE (compressor != nullptr);
-    CHECK (panel->isParentOf (eq));
-    CHECK (eq->getScreenY() < compressor->getScreenY());
-    CHECK (eq->getScreenX() > panel->getScreenX());
-    CHECK (screen.view.isOpen (container));
-    auto* frame = screen.view.getShownBody();
+    // In the column, the container alone (the owner, 2026-11-09: its devices under it there were clutter); grouped, it shows
+    // beside the column: its eight macros, and its one chain with the EQ over the compressor.
+    auto* panel = view.findPanel (container);
+    CHECK (view.findPanel (effects[0]) == nullptr);
+    CHECK (view.findPanel (effects[1]) == nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*panel, "Add effect") == nullptr);
+    CHECK (view.isOpen (container));
+    auto* frame = view.getShownBody();
     REQUIRE (frame != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 1") != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 8") != nullptr);
     phazite::test::checkChildrenApart (*frame);
-
-    // Its compressor shown: its editor beside the container's macros, the first of which, dropped on its makeup gain,
-    // modulates it.
-    screen.view.setOpen (effects[1], true);
-    CHECK (screen.view.isOpen (effects[1]));
-    CHECK (screen.view.isOpen (container));
-    auto* editor = dynamic_cast<phazite::ui::CompressorEditor*> (screen.view.getShownBody());
-    REQUIRE (editor != nullptr);
-    auto* holder = editor->getParentComponent();
-    REQUIRE (holder != nullptr);
-    CHECK (phazite::test::findComponentWithTitle (*holder, "Macro 1") != nullptr);
-    phazite::test::checkChildrenApart (*holder);
-    const auto macro = phazite::getContainerMacros (screen.context, container)[0].id;
-    auto* knob = dynamic_cast<phazite::ui::Knob*> (phazite::test::findComponentWithTitle (*editor, "Makeup"));
-    REQUIRE (knob != nullptr);
-    juce::Component source;
-    const juce::DragAndDropTarget::SourceDetails drop { phazite::ui::makeModulatorDrag (macro), &source, {} };
-    REQUIRE (knob->isInterestedInDragSource (drop));
-    knob->itemDropped (drop);
-    CHECK (phazite::getModulations (screen.context, macro).size() == 1);
+    auto* chains = findChains (view);
+    REQUIRE (chains != nullptr);
+    auto* eqLine = chains->findDevice (effects[0]);
+    auto* compressorLine = chains->findDevice (effects[1]);
+    REQUIRE (eqLine != nullptr);
+    REQUIRE (compressorLine != nullptr);
+    CHECK (eqLine->isShowing());
+    CHECK (eqLine->getScreenY() < compressorLine->getScreenY());
+    CHECK (chains->findChain (phazite::getChainOf (context, effects[0]))->isParentOf (eqLine));
 
     // Renamed by typing: the container's name, over its macros.
     juce::Label* name = nullptr;
 
-    for (auto* label : phazite::test::findAll<juce::Label> (*holder))
+    for (auto* label : phazite::test::findAll<juce::Label> (*frame))
         if (label->getText() == "Container" && label->isEditableOnDoubleClick())
             name = label;
 
     REQUIRE (name != nullptr);
     name->setText ("Glue", juce::sendNotification);
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Rename Container"));
-    CHECK (phazite::getEffects (screen.context, screen.track (0))[0].name == juce::String ("Glue"));
+    CHECK (phazite::getEffects (context, screen.track (0))[0].name == juce::String ("Glue"));
+    phazite::test::dispatchPendingMessages();
 
-    // Its chevron folds its devices under it, and shows them again.
-    panel = screen.view.findPanel (container);
-    REQUIRE (panel != nullptr);
-    auto* fold = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "Fold its devices"));
-    REQUIRE (fold != nullptr);
-    phazite::test::Mouse foldMouse (*fold);
-    foldMouse.click (fold->getLocalBounds().getCentre());
-    CHECK_FALSE (screen.view.findPanel (effects[0])->isShowing());
+    // The compressor's name clicked in its chain: selected, its editor in the chains' place beside the container's macros,
+    // under where it is: the container, its chain and itself.
+    clickDeviceInChains (view, effects[1], "Compressor");
+    CHECK (view.isOpen (effects[1]));
+    CHECK (view.isOpen (container));
+    CHECK (context.getSongSelection().getDevices() == std::vector { effects[1] });
+    auto* editor = dynamic_cast<phazite::ui::CompressorEditor*> (view.getShownBody());
+    REQUIRE (editor != nullptr);
+    auto* holder = editor->getParentComponent();
+    REQUIRE (holder != nullptr);
+    CHECK (findChains (view) == nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*holder, "Macro 1") != nullptr);
+    auto* containerStep = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*holder, "Back to Glue"));
+    auto* chainStep = phazite::test::findComponentWithTitle (*holder, "Back to Chain 1");
+    REQUIRE (containerStep != nullptr);
+    REQUIRE (chainStep != nullptr);
+    CHECK (containerStep->getButtonText() == juce::String ("Glue"));
+    CHECK (containerStep->getScreenX() < chainStep->getScreenX());
+    CHECK (chainStep->getBottom() <= editor->getY());
+    CHECK (phazite::test::findComponentWithTitle (*holder, "Presets") != nullptr);
+    phazite::test::checkChildrenApart (*holder);
 
-    // A device added to it shows in it, and shows beside the column.
-    phazite::addEffectToContainer (screen.context, container, screen.find ("phaziteReverb"));
+    // The first macro, dropped on its makeup gain, modulates it.
+    const auto macro = phazite::getContainerMacros (context, container)[0].id;
+    auto* knob = dynamic_cast<phazite::ui::Knob*> (phazite::test::findComponentWithTitle (*editor, "Makeup"));
+    REQUIRE (knob != nullptr);
+    juce::Component source;
+    const juce::DragAndDropTarget::SourceDetails drop { phazite::ui::makeModulatorDrag (macro), &source, {} };
+    REQUIRE (knob->isInterestedInDragSource (drop));
+    knob->itemDropped (drop);
+    CHECK (phazite::getModulations (context, macro).size() == 1);
+
+    // The container's step leads back to its chains.
+    phazite::test::Mouse stepMouse (*containerStep);
+    stepMouse.click (containerStep->getLocalBounds().getCentre());
+    CHECK (view.isOpen (container));
+    CHECK_FALSE (view.isOpen (effects[1]));
+    REQUIRE (findChains (view) != nullptr);
+    CHECK (findChains (view)->findDevice (effects[1]) != nullptr);
+
+    // A device added to it shows in its chain, and the chains stay, to go on laying them out.
+    phazite::addEffectToContainer (context, container, screen.find ("phaziteReverb"));
     CHECK (phazite::test::dispatchMessagesUntil (
         [&]
         {
-            const auto inside = phazite::getContainerDevices (screen.context, container);
-            return inside.size() == 3 && screen.view.findPanel (inside.back().id) != nullptr && screen.view.isOpen (inside.back().id);
+            const auto inside = phazite::getContainerDevices (context, container);
+            return inside.size() == 3 && findChains (view) != nullptr && findChains (view)->findDevice (inside.back().id) != nullptr;
         }));
+    CHECK (view.isOpen (container));
+    CHECK_FALSE (view.isOpen (phazite::getContainerDevices (context, container).back().id));
 }
 
-TEST_CASE ("The effects' menu offers an empty container first, which shows in the column with its own + Effect and a word on it")
+TEST_CASE ("The effects' menu offers an empty container first, which shows its one chain beside the column, with its own + Effect")
 {
     Screen screen;
     auto& view = screen.view;
@@ -768,7 +810,7 @@ TEST_CASE ("The effects' menu offers an empty container first, which shows in th
     CHECK (first.getItem().isSeparator);
 
     // Chosen, it goes after the track's effects, empty, and shows: open, with its macros and its one chain beside the column
-    // and a word on adding effects to it, which its own + Effect under it does.
+    // and a word on adding effects to it, which the chain's own + Effect does; nothing of it under its line in the column.
     REQUIRE (phazite::test::runMenuItem (menu, { "Container" }));
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Container"));
     const auto effects = phazite::getEffects (screen.context, screen.track (0));
@@ -781,24 +823,22 @@ TEST_CASE ("The effects' menu offers an empty container first, which shows in th
     REQUIRE (frame != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 1") != nullptr);
     const auto labels = phazite::test::findAll<juce::Label> (*frame);
-    CHECK (
-        std::any_of (labels.begin(), labels.end(), [] (juce::Label* label)
-                     { return label->isVisible() && label->getText().contains ("+ Effect, under a chain at the left, adds an effect"); }));
-    CHECK (phazite::test::findComponentWithTitle (*frame, "Chain 1") != nullptr);
-
-    auto* panel = view.findPanel (container);
-    auto* inside = phazite::test::findComponentWithTitle (*panel, "Add effect");
+    CHECK (std::any_of (labels.begin(), labels.end(), [] (juce::Label* label)
+                        { return label->isShowing() && label->getText().contains ("+ Effect, in a chain, adds an effect to it"); }));
+    auto* chain = phazite::test::findComponentWithTitle (*frame, "Chain 1");
+    REQUIRE (chain != nullptr);
+    auto* inside = phazite::test::findComponentWithTitle (*chain, "Add effect");
     REQUIRE (inside != nullptr);
     CHECK (inside->isShowing());
-    CHECK (inside != add);
+    CHECK (phazite::test::findComponentWithTitle (*view.findPanel (container), "Add effect") == nullptr);
 
-    // An effect added there plays in it and shows in its place beside the column.
+    // An effect added there plays in it and shows in its chain.
     phazite::addEffectToContainer (screen.context, container, screen.find ("phaziteReverb"));
     CHECK (phazite::test::dispatchMessagesUntil (
         [&]
         {
             const auto devices = phazite::getContainerDevices (screen.context, container);
-            return devices.size() == 1 && view.findPanel (devices[0].id) != nullptr && view.isOpen (devices[0].id);
+            return devices.size() == 1 && findChains (view) != nullptr && findChains (view)->findDevice (devices[0].id) != nullptr;
         }));
 }
 
@@ -1101,9 +1141,26 @@ TEST_CASE ("At the default window size, every built-in instrument and effect sho
         checkWhole (type);
         phazite::removeDevice (context, effects.back().id);
     }
+
+    // A container of three chains of two effects each, as a multiband or parallel chain has them: its macros and its chains
+    // whole beside the column (the chains scroll sideways, within it, where they are wider).
+    const auto container = phazite::addContainer (context, track);
+    REQUIRE (container.isValid());
+
+    while (phazite::getChains (context, container).size() < 3)
+        phazite::addChain (context, container);
+
+    for (const auto& chain : phazite::getChains (context, container))
+        for (const auto* type : { "phaziteEq", "phaziteCompressor" })
+            phazite::addEffectToChain (context, chain.id, findType (type));
+
+    auto* view = phazite::test::findAll<phazite::ui::DevicesView> (screen.shell).getFirst();
+    REQUIRE (view != nullptr);
+    view->setOpen (container, true);
+    checkWhole ("container");
 }
 
-TEST_CASE ("A container's chains show under it in the column, each under its line with its own + Effect; beside it, a mixer of them")
+TEST_CASE ("Beside a container, its chains side by side, each a card with its switch, its knobs, its devices and its own + Effect")
 {
     Screen screen;
     auto& view = screen.view;
@@ -1111,54 +1168,52 @@ TEST_CASE ("A container's chains show under it in the column, each under its lin
     const auto effects = screen.effects (0);
     const auto container = phazite::groupIntoContainer (context, { effects[0] });
     REQUIRE (container.isValid());
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr && view.isOpen (container); }));
 
-    // One chain: its devices under the container alone, then + Effect and + Chain.
-    auto* panel = view.findPanel (container);
-    CHECK (phazite::test::findComponentWithTitle (*panel, "Chain 1") == nullptr);
-    auto* addChain = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "Add chain"));
+    // One chain, with + Chain after it; nothing of them in the column.
+    CHECK (phazite::test::findComponentWithTitle (*view.findPanel (container), "Chain 1") == nullptr);
+    auto* frame = view.getShownBody();
+    REQUIRE (frame != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*frame, "Chain 1") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*frame, "Chain 2") == nullptr);
+    auto* addChain = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*frame, "Add chain"));
     REQUIRE (addChain != nullptr);
     CHECK (addChain->isShowing());
 
-    // Another chain: each under its line, with its own + Effect.
+    // Another chain: beside the first, with its own + Effect.
     phazite::test::Mouse addMouse (*addChain);
     addMouse.click (addChain->getLocalBounds().getCentre());
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Chain"));
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {
-            auto* shown = view.findPanel (container);
+            auto* shown = view.getShownBody();
             return shown != nullptr && phazite::test::findComponentWithTitle (*shown, "Chain 2") != nullptr;
         }));
-    panel = view.findPanel (container);
-    auto* firstLine = phazite::test::findComponentWithTitle (*panel, "Chain 1");
-    auto* secondLine = phazite::test::findComponentWithTitle (*panel, "Chain 2");
-    REQUIRE (firstLine != nullptr);
-    REQUIRE (secondLine != nullptr);
-    CHECK (firstLine->getScreenY() < view.findPanel (effects[0])->getScreenY());
-    CHECK (view.findPanel (effects[0])->getScreenY() < secondLine->getScreenY());
+    frame = view.getShownBody();
+    auto* firstCard = phazite::test::findComponentWithTitle (*frame, "Chain 1");
+    auto* secondCard = phazite::test::findComponentWithTitle (*frame, "Chain 2");
+    REQUIRE (firstCard != nullptr);
+    REQUIRE (secondCard != nullptr);
+    CHECK (firstCard->getRight() < secondCard->getX());
+    CHECK (firstCard->getY() == secondCard->getY());
+    CHECK (firstCard->getHeight() == secondCard->getHeight());
+    CHECK (findChains (view)->findDevice (effects[0])->getParentComponent() == firstCard);
     auto adds = 0;
 
-    for (auto* button : phazite::test::findAll<juce::TextButton> (*panel))
-        if (button->getTitle() == "Add effect")
+    for (auto* button : phazite::test::findAll<juce::TextButton> (*frame))
+        if (button->getTitle() == "Add effect" && button->isShowing())
             ++adds;
 
     CHECK (adds == 2);
-
-    // Beside the column, its chains as a small mixer beside its macros: each a row with its knobs and its switch.
-    view.setOpen (container, true);
-    auto* frame = view.getShownBody();
-    REQUIRE (frame != nullptr);
-    CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 1") != nullptr);
-    auto* row = phazite::test::findComponentWithTitle (*frame, "Chain 2");
-    REQUIRE (row != nullptr);
-    CHECK (showingKnobs (*row).contains ("Volume"));
-    CHECK (showingKnobs (*row).contains ("Pan"));
-    CHECK_FALSE (showingKnobs (*row).contains ("Crossover"));
+    CHECK (showingKnobs (*secondCard).contains ("Volume"));
+    CHECK (showingKnobs (*secondCard).contains ("Pan"));
+    CHECK_FALSE (showingKnobs (*secondCard).contains ("Crossover"));
+    phazite::test::checkChildrenApart (*secondCard);
 
     // Its switch mutes the chain at a click, and solos it at a right-click; neither is an undo step.
     const auto second = phazite::getChains (context, container)[1].id;
-    auto* power = phazite::test::findAll<phazite::ui::ChainSwitch> (*row).getFirst();
+    auto* power = phazite::test::findAll<phazite::ui::ChainSwitch> (*secondCard).getFirst();
     REQUIRE (power != nullptr);
     phazite::test::Mouse powerMouse (*power);
     powerMouse.click (power->getLocalBounds().getCentre());
@@ -1167,7 +1222,7 @@ TEST_CASE ("A container's chains show under it in the column, each under its lin
     CHECK (phazite::getChain (context, second)->soloed);
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Chain"));
 
-    // Split into bands, the second chain's row has its crossover.
+    // Split into bands, the second chain's card has its crossover, and both say what part of the sound they play.
     auto* split = dynamic_cast<juce::ComboBox*> (phazite::test::findComponentWithTitle (*frame, "Split"));
     REQUIRE (split != nullptr);
     split->setSelectedId ((int) phazite::ContainerSplit::bands + 1, juce::sendNotificationSync);
@@ -1176,12 +1231,26 @@ TEST_CASE ("A container's chains show under it in the column, each under its lin
         [&]
         {
             auto* shown = view.getShownBody();
-            auto* chainRow = shown != nullptr ? phazite::test::findComponentWithTitle (*shown, "Chain 2") : nullptr;
-            return chainRow != nullptr && showingKnobs (*chainRow).contains ("Crossover");
+            auto* card = shown != nullptr ? phazite::test::findComponentWithTitle (*shown, "Chain 2") : nullptr;
+            return card != nullptr && showingKnobs (*card).contains ("Crossover");
         }));
+    secondCard = phazite::test::findComponentWithTitle (*view.getShownBody(), "Chain 2");
+    const auto texts = phazite::test::findAll<juce::Label> (*secondCard);
+    CHECK (std::any_of (texts.begin(), texts.end(),
+                        [] (juce::Label* label) { return label->isShowing() && label->getText().startsWith ("Above"); }));
+
+    // The chain's step, from a device of it, shows its card.
+    view.setOpen (effects[0], true);
+    auto* step = phazite::test::findComponentWithTitle (*view.getShownBody()->getParentComponent(), "Back to Chain 1");
+    REQUIRE (step != nullptr);
+    phazite::test::Mouse stepMouse (*step);
+    stepMouse.click (step->getLocalBounds().getCentre());
+    CHECK (view.isOpen (container));
+    REQUIRE (findChains (view) != nullptr);
+    CHECK (findChains (view)->findChain (phazite::getChains (context, container)[0].id)->isShowing());
 }
 
-TEST_CASE ("An effect dragged by its name into another chain of its container moves there")
+TEST_CASE ("An effect dragged by its name onto another chain of its container moves there")
 {
     Screen screen;
     auto& view = screen.view;
@@ -1192,27 +1261,39 @@ TEST_CASE ("An effect dragged by its name into another chain of its container mo
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {
-            auto* panel = view.findPanel (container);
-            return panel != nullptr && phazite::test::findComponentWithTitle (*panel, "Chain 2") != nullptr;
+            auto* chains = findChains (view);
+            return chains != nullptr && chains->findChain (second) != nullptr;
         }));
 
-    // The second chain's devices, which are none, under its line: the compressor's name dropped there goes there.
-    auto* panel = view.findPanel (container);
-    const auto below = phazite::test::findComponentWithTitle (*panel, "Chain 2")->getScreenY();
-    juce::DragAndDropTarget* target = nullptr;
-
-    for (auto* each : phazite::test::findAll<juce::Component> (*panel))
-        if (auto* candidate = dynamic_cast<juce::DragAndDropTarget*> (each);
-            candidate != nullptr && each->getTitle() == "Chain's devices" && each->getScreenY() > below)
-            target = candidate;
-
+    // The second chain's card, which has no devices: the compressor's name dropped on it goes there.
+    auto* target = dynamic_cast<juce::DragAndDropTarget*> (findChains (view)->findChain (second));
     REQUIRE (target != nullptr);
     juce::Component source;
-    const juce::DragAndDropTarget::SourceDetails drag { phazite::ui::describeEffectDrag (effects[1]), &source, { 4, 4 } };
-    REQUIRE (target->isInterestedInDragSource (drag));
-    target->itemDropped (drag);
+    const juce::DragAndDropTarget::SourceDetails dropped { phazite::ui::describeEffectDrag (effects[1]), &source, { 4, 4 } };
+    REQUIRE (target->isInterestedInDragSource (dropped));
+    target->itemDropped (dropped);
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Move Device"));
     CHECK (phazite::getChainOf (context, effects[1]) == second);
+
+    // An effect of the channel isn't the container's: its chains don't take it.
+    const juce::DragAndDropTarget::SourceDetails outside { phazite::ui::describeEffectDrag (effects[2]), &source, { 4, 4 } };
+    CHECK_FALSE (target->isInterestedInDragSource (outside));
+
+    // Dragged with the mouse, back before the EQ in the first chain.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return findChains (view)->findDevice (effects[1]) != nullptr; }));
+    auto* line = findChains (view)->findDevice (effects[1]);
+    auto* eq = findChains (view)->findDevice (effects[0]);
+    REQUIRE (eq != nullptr);
+    auto* name = findNameButton (*line, "Compressor");
+    REQUIRE (name != nullptr);
+    phazite::test::Mouse mouse (*name);
+    drag (mouse, name->getLocalBounds().getCentre(), name->getLocalPoint (eq, juce::Point<int> (eq->getWidth() / 2, 2)));
+    CHECK (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            const auto devices = phazite::getContainerDevices (context, container);
+            return devices.size() == 2 && devices[0].id == effects[1] && devices[1].id == effects[0];
+        }));
 }
 
 TEST_CASE (
@@ -1236,50 +1317,49 @@ TEST_CASE (
     REQUIRE (first.next());
     CHECK (first.getItem().isSeparator);
 
-    // Chosen, the synth goes into its first chain, and the container is the track's instrument, on the Instrument page.
+    // Chosen, the synth goes into its first chain, and the container is the track's instrument, on the Instrument page: in
+    // the column alone, its chains beside it.
     REQUIRE (phazite::test::runMenuItem (menu, { "Container" }));
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Instrument Container"));
     const auto container = phazite::getInstrument (context, track)->id;
     REQUIRE (phazite::isInstrumentContainer (context, container));
-    REQUIRE (
-        phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr && view.findPanel (synth) != nullptr; }));
-    CHECK (view.findPanel (container)->isParentOf (view.findPanel (synth)));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr; }));
+    CHECK (view.findPanel (synth) == nullptr);
+    view.setOpen (container, true);
+    REQUIRE (findChains (view) != nullptr);
+    CHECK (findChains (view)->findDevice (synth) != nullptr);
 
-    // A second chain, without an instrument: a button that chooses one for it, until it has one.
+    // A second chain, without an instrument: a button in its card that chooses one, until it has one.
     const auto second = phazite::addChain (context, container);
     const auto chooseShows = [&]
     {
-        auto* panel = view.findPanel (container);
-
-        if (panel != nullptr)
-            for (auto* button : phazite::test::findAll<juce::TextButton> (*panel))
-                if (button->getTitle() == "Add instrument" && button->isShowing())
-                    return true;
+        if (auto* chains = findChains (view))
+            if (auto* card = chains->findChain (second))
+                for (auto* button : phazite::test::findAll<juce::TextButton> (*card))
+                    if (button->getTitle() == "Add instrument" && button->isShowing())
+                        return true;
 
         return false;
     };
-
-    CHECK_FALSE (chooseShows()); // the first chain has the synth
 
     REQUIRE (phazite::test::dispatchMessagesUntil (chooseShows));
     phazite::chooseChainInstrument (context, second, screen.find ("phaziteSynth"));
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! chooseShows(); }));
 
-    // The synth shown: its editor beside the container's macros, on the Instrument page.
-    view.setOpen (synth, true);
+    // The chains' cards, with their keys and velocities.
+    auto* card = findChains (view)->findChain (second);
+    REQUIRE (card != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*card, "Keys") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*card, "Velocities") != nullptr);
+    phazite::test::checkChildrenApart (*card);
+
+    // The first synth clicked: its editor beside the container's macros, on the Instrument page.
+    clickDeviceInChains (view, synth, "Synth");
     CHECK (view.getPage() == phazite::ui::DevicesView::Page::instrument);
     CHECK (view.isOpen (synth));
     CHECK (view.isOpen (container));
     auto* editor = dynamic_cast<phazite::ui::SynthEditor*> (view.getShownBody());
     REQUIRE (editor != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*editor->getParentComponent(), "Macro 1") != nullptr);
-
-    // The container shown: its chains' rows, with their keys and velocities.
-    view.setOpen (container, true);
-    auto* frame = view.getShownBody();
-    REQUIRE (frame != nullptr);
-    auto* row = phazite::test::findComponentWithTitle (*frame, "Chain 2");
-    REQUIRE (row != nullptr);
-    CHECK (phazite::test::findComponentWithTitle (*row, "Keys") != nullptr);
-    CHECK (phazite::test::findComponentWithTitle (*row, "Velocities") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*editor->getParentComponent(), "Back to Chain 1") != nullptr);
 }

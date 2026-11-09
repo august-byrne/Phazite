@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ContainerEditor.h"
+#include "DeviceSlots.h"
 #include "StripParts.h"
+#include "model/arrangement/SongSelection.h"
 #include "model/commands/SongGesture.h"
+#include "model/project/ProjectContext.h"
+#include "ui/components/PowerSwitch.h"
 #include "ui/components/TrackSwitch.h"
 #include "ui/components/ValueText.h"
+#include "ui/devices/DeviceMenus.h"
+#include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
@@ -15,13 +21,16 @@ using namespace strip;
 
 namespace
 {
-    constexpr int rowHeight = 40, rowGap = Space::xs;       // a chain's row
-    constexpr int switchWidth = 20, nameWidth = 132;        // its switch and its name, with its part under it
-    constexpr int chainKnobSize = 32, knobColumnWidth = 60; // its crossover, volume and pan, each under its column's title
-    constexpr int keysMinimum = 220, velocitiesMinimum = 120, rulerHeight = 14;
-    constexpr int splitLabelWidth = 40, splitWidth = 180, addWidth = 96; // the split's choice, and + Chain
-    constexpr int effectsWidth = switchWidth + nameWidth + 3 * knobColumnWidth + 2 * Space::s;
-    constexpr int instrumentsWidth = switchWidth + nameWidth + 2 * knobColumnWidth + keysMinimum + velocitiesMinimum + 4 * Space::s;
+    constexpr int cardWidth = 184, cardGap = Space::s, cardPadding = Space::s; // a chain's card
+    constexpr int cardHeaderHeight = 24, switchSize = 20, menuButtonSize = 20; // its switch, name and menu's button
+    constexpr int partHeight = 16;                                             // what part of the sound it plays
+    constexpr int titleHeight = 14, chainKnobSize = 32, knobRowHeight = 36;    // its knobs, each under its title
+    constexpr int rangeHeight = 22, rangeLabelWidth = 56;                      // an instrument container's chain's keys and velocities
+    constexpr int separatorHeight = Space::s + 1;                              // a line between its parts and its devices
+    constexpr int lineHeight = 24, lineGap = 2;                                // a device's line
+    constexpr int mixSize = 20;                                                // an effect's mix, a small knob at its line's end
+    constexpr int splitLabelWidth = 40, splitWidth = 180, addWidth = 96;       // the split's choice, and + Chain
+    constexpr int dragThreshold = 5;     // pixels a press on a name moves before it carries the device
     constexpr float silentAlpha = 0.55f; // a chain that isn't heard, muted or soloed out
 
     constexpr devices::ParameterInfo keyInfo { .id = "key",
@@ -144,11 +153,11 @@ void showChainMenu (ProjectContext& context, DeviceID chain, juce::Component& ta
     menu.addItem ("Duplicate", canAddChain (context, container), false,
                   act ([&projectContext, chain] { duplicateChain (projectContext, chain); }));
 
-    // A container split into bands keeps its chains in their bands' order.
+    // A container split into bands keeps its chains in their bands' order. Side by side, they move left and right.
     if (canMoveChains (context, container))
     {
-        menu.addItem ("Move Up", index > 0, false, act ([&projectContext, chain] { moveChain (projectContext, chain, -1); }));
-        menu.addItem ("Move Down", index < (int) chains.size() - 1, false,
+        menu.addItem ("Move Left", index > 0, false, act ([&projectContext, chain] { moveChain (projectContext, chain, -1); }));
+        menu.addItem ("Move Right", index < (int) chains.size() - 1, false,
                       act ([&projectContext, chain] { moveChain (projectContext, chain, 1); }));
     }
 
@@ -218,8 +227,8 @@ void RangeBar::paint (juce::Graphics& g)
     // Its scale as a groove, and the range a bar along it, from half a step before its low end to half a step past its high
     // end, with its ends' grips and, where it fits, what it plays.
     const auto& p = getPalette (*this);
-    const auto groove = getLocalBounds().toFloat().reduced (0.0f, 6.0f);
-    g.setColour (p.surfaceRaised);
+    const auto groove = getLocalBounds().toFloat().reduced (0.0f, 3.0f);
+    g.setColour (p.surface);
     g.fillRoundedRectangle (groove, cornerRadius);
 
     const auto positionOf = [this, &groove] (double value)
@@ -237,16 +246,25 @@ void RangeBar::paint (juce::Graphics& g)
         g.fillRect (juce::Rectangle<float> (x - 1.0f, bar.getY() + 3.0f, 2.0f, bar.getHeight() - 6.0f));
     }
 
+    // What it plays: in the bar where it fits, else beside it, where the groove has more room.
     const auto low = (int) std::lround (getMinValue()), high = (int) std::lround (getMaxValue());
     const auto text =
         low == high ? describe (kind, low) : describe (kind, low) + juce::String::fromUTF8 (" \xe2\x80\x93 ") + describe (kind, high);
     const auto font = juce::FontOptions (TextSize::small);
+    const auto textWidth = juce::GlyphArrangement::getStringWidth (font, text) + 2.0f * Space::xs;
+    g.setFont (font);
 
-    if (juce::GlyphArrangement::getStringWidth (font, text) + 2.0f * Space::xs < bar.getWidth())
+    if (textWidth < bar.getWidth())
     {
         g.setColour (p.textBright);
-        g.setFont (font);
         g.drawText (text, bar, juce::Justification::centred, false);
+    }
+    else
+    {
+        const auto before = bar.getX() - groove.getX(), after = groove.getRight() - bar.getRight();
+        const auto room = before > after ? groove.withRight (bar.getX()) : groove.withLeft (bar.getRight());
+        g.setColour (p.textMuted);
+        g.drawText (text, room, juce::Justification::centred, true);
     }
 
     if (hasKeyboardFocus (false))
@@ -257,31 +275,189 @@ void RangeBar::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-// A chain's row: its switch, its name over what part of the sound it plays, its knobs (a band's crossover, its volume and its
-// pan) and an instrument container's chain's keys and velocities. Faint while it isn't heard.
-struct ContainerEditor::Row : public juce::Component
+// A device's line in its chain's card: an effect's switch, its name (click to show it in the chains' place and select it,
+// right-click for its menu, drag to move it) and its mix; under the pointer a wash, and while selected the accent's, as the
+// column's lines. An instrument container's chain's instrument has no switch (the chain's mutes it), and stays first.
+struct ContainerEditor::DeviceLine : public juce::Component
 {
-    Row (ProjectContext& projectContext, const ChainInfo& info, bool instrumentContainer)
-        : context (projectContext),
-          chain (info.id),
-          power (projectContext)
+    DeviceLine (ContainerEditor& e, const DeviceSlot& device, bool chainInstrument)
+        : editor (e),
+          isChainInstrument (chainInstrument),
+          shown (device)
     {
-        setTitle (info.name);
+        setRepaintsOnMouseActivity (true);
+        power.setTooltip ("Turns the device on or off");
+        power.onClick = [this] { setDeviceOn (editor.context, shown.id, power.getToggleState()); };
+
+        name.onClickedWith = [this] (const juce::ModifierKeys& mods)
+        {
+            if (std::exchange (dragged, false)) // a drag that moved it, let go over its name
+                return;
+
+            // Shown, it takes the chains' place, and this line with them: what that needs is copied first.
+            auto& owner = editor;
+            const auto device = shown;
+
+            if (mods.isPopupMenu())
+            {
+                owner.showDeviceMenu (device, name);
+            }
+            else if (owner.onDeviceClicked != nullptr)
+            {
+                const auto clicked = owner.onDeviceClicked;
+                clicked (device, mods);
+            }
+        };
+
+        // An effect's switch, and a drag on its name moves it; the chain's instrument has neither.
+        if (! isChainInstrument)
+        {
+            addAndMakeVisible (power);
+            name.addMouseListener (this, false);
+        }
+
+        if (device.hasMix)
+            addMixKnob (*this, mixKnob, mixAttachment, editor.context, device);
+
+        addAndMakeVisible (name);
+        show (device);
+    }
+
+    void show (const DeviceSlot& device)
+    {
+        shown = device;
+        setTitle (device.name);
+        name.setButtonText (device.name);
+        name.setTitle (device.name);
+        const auto moves = isChainInstrument ? juce::String() : juce::String ("; drag it to move it, into another chain too");
+        name.setTooltip (device.frozen        ? "Frozen with its track: unfreeze the track (its snowflake) to change it"
+                         : device.opensWindow ? "Click to show its key knobs and open its window; right-click for its menu" + moves
+                                              : "Click to show it; right-click for its menu" + moves);
+        power.setToggleState (device.isOn, juce::dontSendNotification);
+        power.setEnabled (! device.frozen);
+
+        for (auto* knob : mixKnob)
+            knob->setEnabled (! device.frozen);
+
+        repaint();
+    }
+
+    void updateValues()
+    {
+        if (mixAttachment != nullptr)
+            mixAttachment->update();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto& p = getPalette (*this);
+        const auto line = getLocalBounds().toFloat();
+
+        if (isMouseOver (true))
+        {
+            g.setColour (p.hover);
+            g.fillRoundedRectangle (line, cornerRadius);
+        }
+
+        if (editor.context.getSongSelection().isSelected (shown.id))
+        {
+            g.setColour (p.accent.withAlpha (selectionWash));
+            g.fillRoundedRectangle (line, cornerRadius);
+            g.setColour (p.accent);
+            g.drawRoundedRectangle (line.reduced (0.5f), cornerRadius, 1.0f);
+        }
+    }
+
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        // A frozen device shows faint.
+        if (shown.frozen)
+            g.fillAll (getPalette (*this).surfaceRaised.withAlpha (1.0f - FrozenTint::frozenDevice));
+    }
+
+    void resized() override
+    {
+        auto line = getLocalBounds().reduced (Space::xs, 2);
+
+        if (power.isVisible())
+            power.setBounds (line.removeFromLeft (line.getHeight()));
+
+        if (! mixKnob.isEmpty())
+        {
+            mixKnob.getFirst()->setBounds (line.removeFromRight (mixSize).withSizeKeepingCentre (mixSize, mixSize));
+            line.removeFromRight (Space::xs);
+        }
+
+        name.setBounds (line);
+    }
+
+    // A drag on its name, past a few pixels, carries it to another place in its chain or another (ChainCard::itemDropped()).
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (e.eventComponent != &name || dragged || ! e.mods.isLeftButtonDown() || shown.frozen
+            || e.getDistanceFromDragStart() < dragThreshold)
+            return;
+
+        if (auto* dragContainer = juce::DragAndDropContainer::findParentDragContainerFor (this))
+        {
+            dragged = true;
+            dragContainer->startDragging (describeEffectDrag (shown.id), &name);
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        // Let go away from its name, the button hears no click to forget.
+        if (e.eventComponent == &name && ! name.getLocalBounds().contains (e.getPosition()))
+            dragged = false;
+    }
+
+    ContainerEditor& editor;
+    const bool isChainInstrument;
+    DeviceSlot shown;
+    bool dragged = false; // its name dragged since the mouse went down: the click that ends it isn't one
+    PowerSwitch power;
+    FlatName name;
+    juce::OwnedArray<Knob> mixKnob;
+    std::unique_ptr<MixAttachment> mixAttachment;
+};
+
+//==============================================================================
+// A chain's card: its switch, its name and its menu's button; what part of the sound it plays; its knobs (a band's crossover,
+// its volume and its pan), each under its title; an instrument container's chain's keys and velocities; then its devices
+// (an instrument container's chain's instrument first, or a button that chooses one) and a button that adds an effect. An
+// effect dragged onto it goes where the line shows meanwhile. Faint while it isn't heard.
+struct ContainerEditor::ChainCard : public juce::Component,
+                                    public juce::DragAndDropTarget
+{
+    ChainCard (ContainerEditor& e, const ChainInfo& info, bool showsParts, bool crossoverColumn)
+        : editor (e),
+          context (e.context),
+          chain (info.id),
+          power (e.context),
+          showsPart (showsParts),
+          showsCrossoverColumn (crossoverColumn)
+    {
         power.setChain (chain);
         addAndMakeVisible (power);
 
         name.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
         name.setMinimumHorizontalScale (1.0f);
         name.setEditable (false, true, false);
+        name.setTitle ("Name");
         name.setTooltip ("The chain's name: double-click to rename it, right-click for its menu");
         name.onTextChange = [this] { renameChain (context, chain, name.getText()); };
         name.addMouseListener (this, false);
+        addAndMakeVisible (name);
+
+        menuButton.setTooltip ("The chain's menu: rename it, duplicate it, move it or remove it");
+        menuButton.onClick = [this] { showMenu (menuButton); };
+        addAndMakeVisible (menuButton);
+
         part.setFont (juce::FontOptions (TextSize::small));
         part.setMinimumHorizontalScale (1.0f);
         part.setInterceptsMouseClicks (false, false);
-
-        for (auto* label : { &name, &part })
-            addAndMakeVisible (label);
+        addChildComponent (part);
 
         // A band's crossover (but the first's), its volume and its pan, which macros and automation move as a device's knobs.
         crossover = addParameterKnob (*this, knobs, attachments, getChainCrossover (context, chain));
@@ -291,18 +467,40 @@ struct ContainerEditor::Row : public juce::Component
         if (crossover != nullptr)
             crossover->setTooltip ("Where this chain's band starts: below it, the sound goes to the chains before it");
 
-        if (instrumentContainer)
+        if (editor.instrument)
         {
             keys = std::make_unique<RangeBar> (context, chain, RangeBar::Kind::keys);
             velocities = std::make_unique<RangeBar> (context, chain, RangeBar::Kind::velocities);
             addAndMakeVisible (*keys);
             addAndMakeVisible (*velocities);
+
+            for (auto* label : { &keysLabel, &velocitiesLabel })
+            {
+                label->setFont (juce::FontOptions (TextSize::small));
+                label->setInterceptsMouseClicks (false, false);
+                label->setAccessible (false); // the bars beside them have the names
+                addAndMakeVisible (label);
+            }
+
+            chooseButton = std::make_unique<juce::TextButton> ("+ Instrument");
+            chooseButton->setTitle ("Add instrument");
+            chooseButton->setTooltip ("Chooses the instrument this chain plays its notes on: a synth or a sampler, built in or a plug-in");
+            chooseButton->onClick = [this] { showChainInstrumentMenu (context, chain, *chooseButton); };
+            addChildComponent (*chooseButton);
         }
 
-        setThemeColour (part, juce::Label::textColourId, &Palette::textMuted);
+        addEffectButton.setTitle ("Add effect");
+        addEffectButton.setTooltip ("Adds an effect to this chain, after its devices");
+        addEffectButton.onClick = [this] { showChainEffectMenu (context, chain, addEffectButton); };
+        addAndMakeVisible (addEffectButton);
+
+        for (auto* label : { &part, &keysLabel, &velocitiesLabel })
+            setThemeColour (*label, juce::Label::textColourId, &Palette::textMuted);
+
         show (info);
     }
 
+    // Shows it as it is now: its devices' lines made again if they changed, else shown again.
     void show (const ChainInfo& info)
     {
         setTitle (info.name);
@@ -310,9 +508,8 @@ struct ContainerEditor::Row : public juce::Component
         if (! name.isBeingEdited())
             name.setText (info.name, juce::dontSendNotification);
 
-        name.setTitle (info.name);
         part.setText (info.part, juce::dontSendNotification);
-        part.setVisible (info.part.isNotEmpty());
+        part.setVisible (showsPart);
         power.update();
 
         if (keys != nullptr)
@@ -320,6 +517,25 @@ struct ContainerEditor::Row : public juce::Component
 
         if (velocities != nullptr)
             velocities->show (info.velocities);
+
+        hasInstrument = info.hasInstrument;
+
+        if (chooseButton != nullptr)
+            chooseButton->setVisible (! hasInstrument);
+
+        if (getIDs (info.devices) != order)
+        {
+            lines.clear();
+            order = getIDs (info.devices);
+
+            for (size_t i = 0; i < info.devices.size(); ++i)
+                addAndMakeVisible (lines.add (new DeviceLine (editor, info.devices[i], hasInstrument && i == 0)));
+        }
+        else
+        {
+            for (size_t i = 0; i < info.devices.size(); ++i)
+                lines[(int) i]->show (info.devices[i]);
+        }
 
         if (heard != info.heard)
         {
@@ -335,84 +551,230 @@ struct ContainerEditor::Row : public juce::Component
         for (auto* attachment : attachments)
             attachment->update();
 
+        for (auto* line : lines)
+            line->updateValues();
+
         power.update();
+    }
+
+    // As tall as its parts, its devices and its buttons.
+    int getPartsHeight() const
+    {
+        return cardPadding + cardHeaderHeight + (showsPart ? partHeight : 0) + Space::xs + titleHeight + knobRowHeight
+               + (keys != nullptr ? Space::xs + 2 * rangeHeight : 0) + separatorHeight;
+    }
+
+    int getPreferredHeight() const
+    {
+        return getPartsHeight() + (chooseButton != nullptr && ! hasInstrument ? controlHeight + lineGap : 0)
+               + lines.size() * (lineHeight + lineGap) + controlHeight + cardPadding;
+    }
+
+    void showMenu (juce::Component& target)
+    {
+        const juce::Component::SafePointer<ChainCard> safeThis (this);
+        const juce::Component::SafePointer<ContainerEditor> safeEditor (&editor);
+        showChainMenu (
+            context, chain, target,
+            [safeThis]
+            {
+                if (safeThis != nullptr)
+                    safeThis->name.showEditor();
+            },
+            [safeEditor]
+            {
+                if (safeEditor != nullptr)
+                    safeEditor->changed();
+            });
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        if (e.eventComponent != &name || ! e.mods.isPopupMenu())
+        if (e.eventComponent == &name && e.mods.isPopupMenu())
+            showMenu (name);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto& p = getPalette (*this);
+        const auto bounds = getLocalBounds().toFloat();
+        g.setColour (p.surfaceRaised);
+        g.fillRoundedRectangle (bounds, cardCornerRadius);
+        g.setColour (p.border);
+        g.drawRoundedRectangle (bounds.reduced (0.5f), cardCornerRadius, 1.0f);
+
+        // Over each knob, its title.
+        g.setFont (juce::FontOptions (TextSize::small));
+        g.setColour (p.textMuted);
+
+        for (const auto& [knob, text] :
+             std::initializer_list<std::pair<Knob*, const char*>> { { crossover, "Crossover" }, { volume, "Volume" }, { pan, "Pan" } })
+            if (knob != nullptr)
+                g.drawText (text, knob->getBounds().withSizeKeepingCentre (cellWidth, titleHeight).withY (titlesTop),
+                            juce::Justification::centred, false);
+
+        // The line between its parts and its devices.
+        g.setColour (p.border);
+        g.fillRect (cardPadding, devicesTop - separatorHeight / 2 - 1, getWidth() - 2 * cardPadding, 1);
+    }
+
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        // Where a dragged effect would go: a line between the devices.
+        if (dropIndex < 0)
             return;
 
-        const juce::Component::SafePointer<Row> safeThis (this);
-        showChainMenu (context, chain, name,
-                       [safeThis]
-                       {
-                           if (safeThis != nullptr)
-                               safeThis->name.showEditor();
-                       },
-                       {});
+        const auto y = dropIndex < lines.size() ? lines[dropIndex]->getY() - lineGap / 2
+                       : lines.isEmpty()        ? devicesTop
+                                                : lines.getLast()->getBottom() + lineGap / 2;
+        g.setColour (getPalette (*this).accent);
+        g.fillRect (cardPadding, y - 1, getWidth() - 2 * cardPadding, 2);
     }
 
     void resized() override
     {
-        auto area = getLocalBounds();
-        power.setBounds (area.removeFromLeft (switchWidth).withSizeKeepingCentre (switchWidth, switchWidth));
-        area.removeFromLeft (Space::xs);
-        auto names = area.removeFromLeft (nameWidth);
+        auto area = getLocalBounds().reduced (cardPadding);
+        auto header = area.removeFromTop (cardHeaderHeight);
+        power.setBounds (header.removeFromLeft (switchSize).withSizeKeepingCentre (switchSize, switchSize));
+        header.removeFromLeft (Space::xs);
+        menuButton.setBounds (header.removeFromRight (menuButtonSize).withSizeKeepingCentre (menuButtonSize, menuButtonSize));
+        header.removeFromRight (Space::xs);
+        name.setBounds (header);
 
-        if (part.isVisible())
-        {
-            name.setBounds (names.removeFromTop (names.getHeight() / 2 + 2));
-            part.setBounds (names);
-        }
-        else
-        {
-            name.setBounds (names);
-        }
+        if (showsPart)
+            part.setBounds (area.removeFromTop (partHeight).withTrimmedLeft (switchSize + Space::xs));
 
-        // The knobs in their columns, a crossover's left empty for the first band, so that each column lines up.
-        const auto placeKnob = [&area] (Knob* knob)
+        // The knobs in their cells, a crossover's left empty for the first band, so that the cards' knobs line up.
+        area.removeFromTop (Space::xs);
+        titlesTop = area.getY();
+        area.removeFromTop (titleHeight);
+        auto knobRow = area.removeFromTop (knobRowHeight);
+        const auto cells = crossover != nullptr || showsCrossoverColumn ? 3 : 2;
+        cellWidth = knobRow.getWidth() / cells;
+
+        const auto placeKnob = [&knobRow, this] (Knob* knob)
         {
-            const auto cell = area.removeFromLeft (knobColumnWidth);
+            const auto cell = knobRow.removeFromLeft (cellWidth);
 
             if (knob != nullptr)
                 knob->setBounds (cell.withSizeKeepingCentre (chainKnobSize, chainKnobSize));
         };
 
-        if (crossover != nullptr || showsCrossoverColumn)
+        if (cells == 3)
             placeKnob (crossover);
 
         placeKnob (volume);
         placeKnob (pan);
 
+        // An instrument container's chain's keys and velocities, each beside its name.
         if (keys != nullptr && velocities != nullptr)
         {
-            area.removeFromLeft (Space::s);
-            const auto velocitiesWidth = std::max (velocitiesMinimum, area.getWidth() / 3);
-            auto bars = area;
-            velocities->setBounds (bars.removeFromRight (velocitiesWidth));
-            bars.removeFromRight (Space::s);
-            keys->setBounds (bars);
+            area.removeFromTop (Space::xs);
+
+            for (const auto& [label, bar] :
+                 std::initializer_list<std::pair<juce::Label*, RangeBar*>> { { &keysLabel, keys.get() },
+                                                                             { &velocitiesLabel, velocities.get() } })
+            {
+                auto row = area.removeFromTop (rangeHeight);
+                label->setBounds (row.removeFromLeft (rangeLabelWidth));
+                bar->setBounds (row);
+            }
+        }
+
+        area.removeFromTop (separatorHeight);
+        devicesTop = area.getY();
+
+        if (chooseButton != nullptr && chooseButton->isVisible())
+        {
+            chooseButton->setBounds (area.removeFromTop (controlHeight).reduced (0, 2));
+            area.removeFromTop (lineGap);
+        }
+
+        for (auto* line : lines)
+        {
+            line->setBounds (area.removeFromTop (lineHeight));
+            area.removeFromTop (lineGap);
+        }
+
+        addEffectButton.setBounds (area.removeFromTop (controlHeight).reduced (0, 2));
+    }
+
+    // An effect of its container, dragged by its name, goes before the device at the line under the pointer (after its
+    // instrument, in an instrument container's chain).
+    bool isInterestedInDragSource (const SourceDetails& details) override
+    {
+        const auto effect = getDraggedEffect (details.description);
+        return effect.has_value() && getContainerOf (context, *effect) == editor.container;
+    }
+
+    int getDropIndex (juce::Point<int> position) const
+    {
+        const auto first = hasInstrument ? 1 : 0;
+
+        for (int i = 0; i < lines.size(); ++i)
+            if (position.y < lines[i]->getY() + lineHeight / 2)
+                return std::max (i, first);
+
+        return lines.size();
+    }
+
+    void itemDragMove (const SourceDetails& details) override
+    {
+        if (const auto index = getDropIndex (details.localPosition); index != dropIndex)
+        {
+            dropIndex = index;
+            repaint();
         }
     }
 
+    void itemDragExit (const SourceDetails&) override
+    {
+        dropIndex = -1;
+        repaint();
+    }
+
+    void itemDropped (const SourceDetails& details) override
+    {
+        const auto index = getDropIndex (details.localPosition);
+        dropIndex = -1;
+        repaint();
+
+        if (const auto effect = getDraggedEffect (details.description))
+        {
+            moveEffectToChain (context, *effect, chain, index < lines.size() ? index : -1);
+            editor.changed(); // at once, before the song's change comes
+        }
+    }
+
+    ContainerEditor& editor;
     ProjectContext& context;
     const DeviceID chain;
     ChainSwitch power;
     juce::Label name, part;
+    IconButton menuButton { "Chain's menu", Icon::moreActions };
     juce::OwnedArray<Knob> knobs;
     juce::OwnedArray<ParameterAttachment> attachments;
     Knob* crossover = nullptr;
     Knob* volume = nullptr;
     Knob* pan = nullptr;
     std::unique_ptr<RangeBar> keys, velocities; // an instrument container's chain's
+    juce::Label keysLabel { {}, "Keys" }, velocitiesLabel { {}, "Velocity" };
+    std::unique_ptr<juce::TextButton> chooseButton; // an instrument container's chain's, while it has no instrument
+    juce::OwnedArray<DeviceLine> lines;
+    std::vector<DeviceID> order;
+    juce::TextButton addEffectButton { "+ Effect" };
+    const bool showsPart;            // its container splits the sound into parts, which its chains play
+    const bool showsCrossoverColumn; // the first band's, in a container split into bands
+    bool hasInstrument = false;
     bool heard = true;
-    bool showsCrossoverColumn = false; // the first band's row, in a container split into bands
+    int titlesTop = 0, cellWidth = 0, devicesTop = 0;
+    int dropIndex = -1;
 };
 
 //==============================================================================
-ContainerEditor::ContainerEditor (ProjectContext& projectContext, DeviceID id)
+ContainerEditor::ContainerEditor (ProjectContext& projectContext, CommandBridge& bridge, DeviceID id)
     : context (projectContext),
+      commands (bridge),
       container (id),
       instrument (isInstrumentContainer (projectContext, id))
 {
@@ -441,9 +803,10 @@ ContainerEditor::ContainerEditor (ProjectContext& projectContext, DeviceID id)
 
     hint.setFont (juce::FontOptions (TextSize::small));
     hint.setJustificationType (juce::Justification::centredLeft);
-    hint.setText (instrument ? "Each chain plays its instrument on the notes in its keys and velocities: + Instrument, under a chain "
-                               "at the left, chooses one."
-                             : "Its chains play side by side and add up: + Effect, under a chain at the left, adds an effect to it.",
+    hint.setMinimumHorizontalScale (1.0f);
+    hint.setText (instrument ? "Each chain plays its instrument on the notes in its keys and velocities: + Instrument, in a chain, "
+                               "chooses one."
+                             : "Its chains play side by side and add up: + Effect, in a chain, adds an effect to it.",
                   juce::dontSendNotification);
     addChildComponent (hint);
 
@@ -453,13 +816,22 @@ ContainerEditor::ContainerEditor (ProjectContext& projectContext, DeviceID id)
     addButton.onClick = [this] { addChain (context, container); };
     addAndMakeVisible (addButton);
 
+    chainsRow.setTitle ("Chains side by side");
+    chainsView.setTitle ("Chains"); // what screen readers say as the keys go to them, to scroll them
+    chainsView.setViewedComponent (&chainsRow, false);
+    chainsView.setScrollBarsShown (true, true);
+    addAndMakeVisible (chainsView);
+
     for (auto* label : { &splitLabel, &hint })
         setThemeColour (*label, juce::Label::textColourId, &Palette::textMuted);
 
     refresh();
 }
 
-ContainerEditor::~ContainerEditor() = default;
+ContainerEditor::~ContainerEditor()
+{
+    chainsView.setViewedComponent (nullptr, false);
+}
 
 void ContainerEditor::refresh()
 {
@@ -468,24 +840,21 @@ void ContainerEditor::refresh()
 
     if (getIDs (chains) != shownChains || split != shownSplit)
     {
-        rows.clear();
+        // Every card keeps a line for its part where the sound is split into parts, and a cell for the bands' crossovers.
+        cards.clear();
+        const auto showsParts = std::any_of (chains.begin(), chains.end(), [] (const ChainInfo& chain) { return chain.part.isNotEmpty(); });
+        const auto bands = split == ContainerSplit::bands && chains.size() > 1;
 
         for (const auto& chain : chains)
-            addAndMakeVisible (rows.add (new Row (context, chain, instrument)));
+            chainsRow.addAndMakeVisible (cards.add (new ChainCard (*this, chain, showsParts, bands)));
 
         shownChains = getIDs (chains);
         shownSplit = split;
-
-        // Every row keeps a column for the bands' crossovers, the first band's empty.
-        const auto bands = split == ContainerSplit::bands && chains.size() > 1;
-
-        for (auto* row : rows)
-            row->showsCrossoverColumn = bands;
     }
     else
     {
         for (size_t i = 0; i < chains.size(); ++i)
-            rows[(int) i]->show (chains[i]);
+            cards[(int) i]->show (chains[i]);
     }
 
     showSplit();
@@ -508,122 +877,164 @@ void ContainerEditor::showSplit()
 
 void ContainerEditor::updateValues()
 {
-    for (auto* row : rows)
-        row->updateValues();
+    for (auto* card : cards)
+        card->updateValues();
 }
 
-juce::Component* ContainerEditor::findRow (DeviceID chain) const
+void ContainerEditor::showChain (DeviceID chain)
 {
-    for (auto* row : rows)
-        if (row->chain == chain)
-            return row;
+    if (auto* card = dynamic_cast<ChainCard*> (findChain (chain)))
+    {
+        auto x = chainsView.getViewPositionX();
+
+        if (card->getRight() > x + chainsView.getViewWidth())
+            x = card->getRight() - chainsView.getViewWidth();
+
+        if (card->getX() < x)
+            x = card->getX();
+
+        chainsView.setViewPosition (std::max (0, x), 0);
+    }
+}
+
+juce::Component* ContainerEditor::findChain (DeviceID chain) const
+{
+    for (auto* card : cards)
+        if (card->chain == chain)
+            return card;
 
     return nullptr;
 }
 
+juce::Component* ContainerEditor::findDevice (DeviceID device) const
+{
+    for (auto* card : cards)
+        for (auto* line : card->lines)
+            if (line->shown.id == device)
+                return line;
+
+    return nullptr;
+}
+
+void ContainerEditor::showDeviceMenu (const DeviceSlot& device, juce::Component& target)
+{
+    // Its place among its chain's effects, which follow its instrument in an instrument container's, for the menu's moves.
+    auto index = 0, count = 1;
+
+    if (const auto chain = getChain (context, getChainOf (context, device.id)))
+    {
+        std::vector<DeviceID> effects;
+
+        for (size_t i = chain->hasInstrument ? 1 : 0; i < chain->devices.size(); ++i)
+            effects.push_back (chain->devices[i].id);
+
+        index = (int) (std::find (effects.begin(), effects.end(), device.id) - effects.begin());
+        count = (int) effects.size();
+    }
+
+    const juce::Component::SafePointer<ContainerEditor> safeThis (this);
+    ui::showDeviceMenu (context, commands, device, DevicePlace::inContainer, getDeviceChannel (context, container).value_or (TrackID()),
+                        index, count, false, target,
+                        [safeThis]
+                        {
+                            if (safeThis != nullptr)
+                                safeThis->changed();
+                        });
+}
+
+void ContainerEditor::changed()
+{
+    if (onChanged != nullptr)
+    {
+        const auto callback = onChanged; // what it shows may take this editor away
+        callback();
+    }
+}
+
+int ContainerEditor::getTopHeight() const
+{
+    return controlHeight + Space::s;
+}
+
+int ContainerEditor::getCardsHeight() const
+{
+    auto height = controlHeight;
+
+    for (auto* card : cards)
+        height = std::max (height, card->getPreferredHeight());
+
+    return height;
+}
+
+int ContainerEditor::getStripWidth() const
+{
+    return std::max (0, cards.size() * (cardWidth + cardGap) - cardGap);
+}
+
 int ContainerEditor::getMinimumHeight() const
 {
-    return controlHeight + Space::s + rulerHeight + rows.size() * (rowHeight + rowGap) + Space::xs + controlHeight
-           + (hint.isVisible() ? controlHeight : 0) + Space::s;
+    // Its top line, and room for its chains' cards to show their parts at least: their devices scroll up and down, within it,
+    // where the dock is shorter than they are, as they scroll sideways where it is narrower.
+    auto parts = controlHeight;
+
+    for (auto* card : cards)
+        parts = std::max (parts, card->getPartsHeight() + lineHeight + cardPadding);
+
+    return getTopHeight() + std::min (parts, getCardsHeight());
 }
 
 int ContainerEditor::getWidthForHeight (int) const
 {
-    return instrument ? instrumentsWidth : effectsWidth;
+    return getStripWidth();
 }
 
-int ContainerEditor::getMinimumHeightAtWidth (int) const
+int ContainerEditor::getMinimumHeightAtWidth (int width) const
 {
-    return getMinimumHeight();
-}
-
-void ContainerEditor::paint (juce::Graphics& g)
-{
-    if (rows.isEmpty())
-        return;
-
-    // Over the rows, each column's title: a band's crossover, the volume, the pan and an instrument container's velocities.
-    const auto& p = getPalette (*this);
-    const auto top = rows.getFirst()->getY() - rowGap - rulerHeight;
-    g.setFont (juce::FontOptions (TextSize::small));
-    g.setColour (p.textMuted);
-
-    const auto title = [&] (const juce::Component* part, const char* text)
-    {
-        if (part == nullptr)
-            return;
-
-        const auto bounds = getLocalArea (part->getParentComponent(), part->getBounds());
-        g.drawText (text, juce::Rectangle<int> (bounds.getCentreX() - knobColumnWidth / 2, top, knobColumnWidth, rulerHeight - 2),
-                    juce::Justification::centred, false);
-    };
-
-    const Knob* crossover = nullptr;
-
-    for (auto* row : rows)
-        crossover = crossover != nullptr ? crossover : row->crossover;
-
-    title (crossover, "Crossover");
-    title (rows.getFirst()->volume, "Volume");
-    title (rows.getFirst()->pan, "Pan");
-
-    // An instrument container's keyboard, along its chains' keys: a mark at each C, named every two octaves.
-    if (! instrument || rows.getFirst()->keys == nullptr)
-        return;
-
-    const auto* keys = rows.getFirst()->keys.get();
-    const auto* velocities = rows.getFirst()->velocities.get();
-    g.drawText ("Velocity",
-                getLocalArea (velocities->getParentComponent(), velocities->getBounds()).withY (top).withHeight (rulerHeight - 2),
-                juce::Justification::centred, false);
-    const auto bounds = getLocalArea (keys, keys->getLocalBounds());
-
-    for (int key = 0; key <= 120; key += 12)
-    {
-        const auto x = (float) bounds.getX() + (float) keys->getPositionOfValue (key);
-        g.setColour (p.border);
-        g.fillRect (juce::Rectangle<float> (x, (float) top + rulerHeight - 4.0f, 1.0f, 4.0f));
-
-        if (key % 24 == 0)
-        {
-            g.setColour (p.textMuted);
-            g.drawText (RangeBar::describe (RangeBar::Kind::keys, key),
-                        juce::Rectangle<float> (x - 20.0f, (float) top, 40.0f, rulerHeight - 3.0f), juce::Justification::centred, false);
-        }
-    }
+    // Where the chains are wider than it, their scroll bar under them.
+    return getMinimumHeight() + (getStripWidth() > width ? chainsView.getScrollBarThickness() : 0);
 }
 
 void ContainerEditor::resized()
 {
-    auto area = getLocalBounds().reduced (Space::s, 0);
-    area.removeFromTop (Space::s);
+    // Along its top, beside the container's name: a container of effects' split, + Chain, and while its chains are empty, what
+    // to do with them.
+    auto area = getLocalBounds();
     auto top = area.removeFromTop (controlHeight);
+    area.removeFromTop (Space::s);
 
-    if (instrument)
-    {
-        hint.setBounds (top);
-    }
-    else
+    if (! instrument)
     {
         splitLabel.setBounds (top.removeFromLeft (splitLabelWidth));
         top.removeFromLeft (Space::xs);
-        splitChoice.setBounds (top.removeFromLeft (splitWidth));
+        splitChoice.setBounds (top.removeFromLeft (splitWidth).reduced (0, 2));
+        top.removeFromLeft (Space::m);
     }
 
-    // The columns' titles (and an instrument container's keyboard) over the rows.
-    area.removeFromTop (rulerHeight);
+    addButton.setBounds (top.removeFromLeft (addWidth).reduced (0, 2));
+    top.removeFromLeft (Space::m);
+    hint.setBounds (top);
 
-    for (auto* row : rows)
+    chainsView.setBounds (area);
+    layOutCards();
+}
+
+void ContainerEditor::layOutCards()
+{
+    // The cards side by side, each as tall as the tallest, or as the room there; each scroll bar takes room from the other way.
+    const auto width = getStripWidth(), tallest = getCardsHeight();
+    const auto thickness = chainsView.getScrollBarThickness();
+    const auto roomWidth = chainsView.getWidth(), roomHeight = chainsView.getHeight();
+    const auto scrollsDown = tallest > roomHeight || (width > roomWidth && tallest > roomHeight - thickness);
+    const auto scrollsAcross = width > roomWidth - (scrollsDown ? thickness : 0);
+    const auto height = std::max (tallest, roomHeight - (scrollsAcross ? thickness : 0));
+    auto x = 0;
+
+    for (auto* card : cards)
     {
-        area.removeFromTop (rowGap);
-        row->setBounds (area.removeFromTop (rowHeight));
+        card->setBounds (x, 0, cardWidth, height);
+        x += cardWidth + cardGap;
     }
 
-    area.removeFromTop (Space::xs);
-    auto bottom = area.removeFromTop (controlHeight);
-    addButton.setBounds (bottom.removeFromLeft (addWidth));
-
-    if (! instrument && hint.isVisible())
-        hint.setBounds (area.removeFromTop (controlHeight));
+    chainsRow.setSize (width, height);
 }
 } // namespace phazite::ui

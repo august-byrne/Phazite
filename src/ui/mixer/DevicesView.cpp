@@ -28,18 +28,17 @@ namespace
     constexpr int columnWidth = 168;            // the channel's name, its devices and its modulators
     constexpr int slotHeight = 24, slotGap = 2; // a device's line in the column
     constexpr int extrasHeight = 26;            // under it while it shows: its Presets, its window's button and its sidechain
-    constexpr int indent = Space::m;            // a container's devices under it
     constexpr int mixSize = 20;                 // an effect's mix, a small knob at its line's end
-    constexpr int presetsWidth = 60, windowButtonWidth = 24, foldWidth = 16;
-    constexpr int keyKnobColumns = 4, maxKeyKnobs = 8; // a plug-in's key knobs
-    constexpr int labelHeight = 18;                    // a knob's name under it
-    constexpr int nameHeight = 20, kindHeight = 16;    // the channel's name and kind, atop the column
-    constexpr int areaMargin = Space::xs;              // around what shows beside the column, as the dock is short
-    constexpr int macroWidth = 64, macroKnobSize = 36; // a container's macros
-    constexpr int macroHeight = macroKnobSize + labelHeight;
-    constexpr int dragThreshold = 5;          // pixels a press on a name moves before it carries the device
-    constexpr int chainHeaderHeight = 20;     // a container's chain's line, over its devices
-    constexpr float chainSilentAlpha = 0.55f; // a chain that isn't heard, muted or soloed out
+    constexpr int presetsWidth = 60, windowButtonWidth = 24;
+    constexpr int keyKnobColumns = 4, maxKeyKnobs = 8;                        // a plug-in's key knobs
+    constexpr int labelHeight = 18;                                           // a knob's name under it
+    constexpr int nameHeight = 20, kindHeight = 16;                           // the channel's name and kind, atop the column
+    constexpr int areaMargin = Space::xs;                                     // around what shows beside the column, as the dock is short
+    constexpr int macroWidth = 64, macroKnobSize = 32, macroLabelHeight = 16; // a container's macros, in four rows of two
+    constexpr int macroHeight = macroKnobSize + macroLabelHeight, macroGap = 2;
+    constexpr int dragThreshold = 5;                     // pixels a press on a name moves before it carries the device
+    constexpr int pathHeight = controlHeight + Space::s; // where a container's device is, along its top, with a line under it
+    constexpr int separatorWidth = 14;                   // between its steps: "›"
 
     //==============================================================================
     // A plug-in's key knobs, which the model offers, each named (its mix is in its slot): its own controls are in its window.
@@ -132,7 +131,7 @@ namespace
         void resized() override
         {
             auto area = getLocalBounds();
-            label.setBounds (area.removeFromBottom (labelHeight));
+            label.setBounds (area.removeFromBottom (macroLabelHeight));
             grip.setBounds (area.removeFromLeft (ModulatorGrip::width));
             knob.setBounds (area.withSizeKeepingCentre (macroKnobSize, macroKnobSize));
         }
@@ -146,26 +145,6 @@ namespace
     };
 
     //==============================================================================
-    // A device's name in its line, flat, as a list's row is: its line shows it under the pointer and while it shows.
-    struct FlatName : public MenuButton
-    {
-        void paintButton (juce::Graphics& g, bool, bool) override
-        {
-            const auto& p = getPalette (*this);
-
-            if (hasKeyboardFocus (false))
-            {
-                g.setColour (p.focus);
-                g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), cornerRadius, 1.0f);
-            }
-
-            g.setColour ((getToggleState() ? p.textBright : p.text).withMultipliedAlpha (isEnabled() ? 1.0f : 0.5f));
-            g.setFont (juce::FontOptions (TextSize::body));
-            g.drawText (getButtonText(), getLocalBounds().withTrimmedLeft (Space::xs), juce::Justification::centredLeft, true);
-        }
-    };
-
-    //==============================================================================
     // A word in place of a device beside the column: why nothing shows, or what to do.
     std::unique_ptr<juce::Label> makeNote (const juce::String& text)
     {
@@ -175,25 +154,59 @@ namespace
         note->setSize (360, 60);
         return note;
     }
+
+    //==============================================================================
+    // A step of the path along the top of a container's device: the container's name or its chain's, which leads back to the
+    // container's chains. Muted, and lit under the pointer, as VS Code's breadcrumbs are.
+    struct Crumb : public juce::Button
+    {
+        Crumb()
+            : juce::Button ({})
+        {
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        }
+
+        void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override
+        {
+            const auto& p = getPalette (*this);
+            const auto area = getLocalBounds().toFloat();
+            const auto lit = isHighlighted || isDown;
+
+            if (lit)
+            {
+                g.setColour (p.hover);
+                g.fillRoundedRectangle (area, cornerRadius);
+            }
+
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (p.focus);
+                g.drawRoundedRectangle (area.reduced (0.5f), cornerRadius, 1.0f);
+            }
+
+            g.setColour (lit ? p.textBright : p.textMuted);
+            g.setFont (juce::FontOptions (TextSize::body));
+            g.drawText (getButtonText(), getLocalBounds().reduced (Space::xs, 0), juce::Justification::centredLeft, true);
+        }
+    };
 } // namespace
 
 //==============================================================================
 // A list of devices in the column, one under another as FL Studio's mixer stacks its slots: a channel's effects, with a
-// button after them that adds one; or a container's chain's devices, under the container's line, indented, with its own
-// button (and an instrument container's chain without an instrument, a button that chooses one, first). A device's name
-// dragged moves it among its neighbours, or into another chain of its container, a line showing where meanwhile.
+// button after them that adds one. A container is one of them, alone: its chains and their devices are beside the column,
+// where it shows (ContainerEditor.h; the owner, 2026-11-09: in the column they made it "very busy and cluttered"). A device's
+// name dragged moves it among its neighbours, a line showing where meanwhile.
 struct DevicesView::DeviceList : public juce::Component,
                                  public juce::DragAndDropTarget
 {
-    DeviceList (DevicesView&, TrackID channelTrack, DeviceID container, DeviceID chain);
+    DeviceList (DevicesView&, TrackID channelTrack);
 
     void refresh(); // slots for the devices as they are now: new ones if they changed, else shown again
     void updateValues();
     int getPreferredHeight() const;
     void resized() override;
 
-    std::vector<DeviceSlot> getDevices() const;
-    Slot* findSlot (DeviceID) const; // here or in a container here
+    Slot* findSlot (DeviceID) const;
 
     bool isInterestedInDragSource (const SourceDetails&) override;
     void itemDragMove (const SourceDetails&) override;
@@ -204,61 +217,18 @@ struct DevicesView::DeviceList : public juce::Component,
 
     DevicesView& view;
     const TrackID track;
-    const DeviceID container, chain; // a container's chain's, or none for a channel's effects
     juce::OwnedArray<Slot> slots;
     std::vector<DeviceID> order;
     bool refreshed = false; // once: then a device that appears is one just added, and shows
-    juce::TextButton addButton { "+ Effect" }, instrumentButton { "+ Instrument" };
+    juce::TextButton addButton { "+ Effect" };
     int dropIndex = -1;
 };
 
 //==============================================================================
-// A container's chain's line in the column, over its devices, while the container has more than one: its switch for mute
-// and solo, as a track's, and its name (click to show the container's chains beside the column, double-click to rename it,
-// right-click for its menu), with what part of the sound it plays in its tooltip (the column is narrow; the chains beside it
-// show it).
-struct DevicesView::ChainHeader : public juce::Component
-{
-    ChainHeader (DevicesView&, DeviceID container, const ChainInfo&);
-
-    void show (const ChainInfo&);
-    void mouseDown (const juce::MouseEvent&) override;
-    void paint (juce::Graphics&) override;
-    void resized() override;
-
-    DevicesView& view;
-    const DeviceID container, chain;
-    ChainSwitch power;
-    juce::Label name;
-};
-
-//==============================================================================
-// A container's chains in the column, under its line, indented: each chain's devices, under its line while there are more
-// chains than one (ChainHeader); then a button that adds a chain.
-struct DevicesView::ContainerChains : public juce::Component
-{
-    ContainerChains (DevicesView&, TrackID channelTrack, DeviceID container);
-
-    void refresh(); // lists and lines for the chains as they are now: new ones if they changed, else shown again
-    void updateValues();
-    int getPreferredHeight() const;
-    void resized() override;
-    Slot* findSlot (DeviceID) const;
-
-    DevicesView& view;
-    const TrackID track;
-    const DeviceID container;
-    juce::OwnedArray<ChainHeader> headers; // while there are more chains than one
-    juce::OwnedArray<DeviceList> lists;
-    std::vector<DeviceID> shown;
-    juce::TextButton addButton { "+ Chain" };
-};
-
-//==============================================================================
-// A device's line in the column: an effect's switch, a container's chevron, its name (click to show it beside the column
-// and select it, right-click for its menu, drag to move it) and its mix; while it shows, lit, with its Presets, its window's
-// button and its sidechain under them. An instrument's has no switch (its track's mutes it) and shows its extras always, as
-// it is alone. A container's devices follow under it, indented, until its chevron folds them.
+// A device's line in the column: an effect's switch, its name (click to show it beside the column and select it, right-click
+// for its menu, drag to move it) and its mix; while it shows, lit (a container's while it or a device of it shows), with its
+// Presets, its window's button and its sidechain under them. An instrument's has no switch (its track's mutes it) and shows
+// its extras always, as it is alone.
 struct DevicesView::Slot : public juce::Component
 {
     Slot (DevicesView& v, const DeviceSlot& device, DevicePlace p, TrackID channelTrack)
@@ -283,9 +253,8 @@ struct DevicesView::Slot : public juce::Component
                 view.select (shown, mods);
         };
 
-        // An effect's switch, and a drag on its name moves it; an instrument has neither (a track's switch mutes it, or its
-        // chain's, an instrument container's chain's instrument, which stays first in its chain).
-        if (place != DevicePlace::instrument && ! device.isInstrument)
+        // An effect's switch, and a drag on its name moves it; an instrument has neither (its track's switch mutes it).
+        if (place != DevicePlace::instrument)
         {
             addAndMakeVisible (power);
             nameButton.addMouseListener (this, false);
@@ -294,23 +263,6 @@ struct DevicesView::Slot : public juce::Component
         // Every device's mix, in one place: its line, as FL Studio's mixer slots have it.
         if (device.hasMix)
             addMixKnob (*this, mixKnob, mixAttachment, view.context, device);
-
-        // A container's chevron, which folds its devices' lines under it.
-        if (device.isContainer)
-        {
-            foldButton = std::make_unique<IconButton> ("Fold its devices", Icon::expanded);
-            foldButton->setQuiet (true);
-            foldButton->onClick = [this]
-            {
-                if (view.foldedContainers.erase (shown.id) == 0)
-                    view.foldedContainers.insert (shown.id);
-
-                view.refresh();
-            };
-            addAndMakeVisible (*foldButton);
-            inside = std::make_unique<ContainerChains> (view, track, device.id);
-            addAndMakeVisible (*inside);
-        }
 
         // Its presets, Phazite's and the user's, and Save Preset... (a container's load as new ones, from the browser).
         if (! device.isContainer)
@@ -385,14 +337,6 @@ struct DevicesView::Slot : public juce::Component
                                                         : "Shows it in a window of its own, out of the dock");
         }
 
-        if (foldButton != nullptr)
-        {
-            const auto folded = isFolded();
-            foldButton->setIcon (folded ? Icon::folded : Icon::expanded);
-            foldButton->setTitle (folded ? "Show its devices" : "Fold its devices");
-            foldButton->setTooltip (folded ? "Shows the container's devices under it" : "Folds the container's devices under it");
-        }
-
         // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
         for (auto* control :
              std::initializer_list<juce::Component*> { &power, windowButton.get(), sidechainButton.get(), presetsButton.get() })
@@ -402,29 +346,19 @@ struct DevicesView::Slot : public juce::Component
         for (auto* knob : mixKnob)
             knob->setEnabled (! device.frozen);
 
-        if (inside != nullptr)
-            inside->refresh();
-
         repaint();
     }
 
-    bool isShownBeside() const { return view.getShownDevice() == shown.id; }
+    // Lit while it shows beside the column: a container while it or a device of it shows (DevicesView::isOpen()).
+    bool isShownBeside() const { return view.isOpen (shown.id); }
     bool hasExtras() const { return (place == DevicePlace::instrument || isShownBeside()) && ! shown.isContainer; } // a container has none
-    bool isFolded() const { return view.foldedContainers.count (shown.id) > 0; }
 
-    int getPreferredHeight() const
-    {
-        return slotHeight + (hasExtras() ? extrasHeight : 0)
-               + (inside != nullptr && ! isFolded() ? slotGap + inside->getPreferredHeight() : 0);
-    }
+    int getPreferredHeight() const { return slotHeight + (hasExtras() ? extrasHeight : 0); }
 
     void updateValues()
     {
         if (mixAttachment != nullptr)
             mixAttachment->update();
-
-        if (inside != nullptr)
-            inside->updateValues();
     }
 
     void paint (juce::Graphics& g) override
@@ -468,9 +402,6 @@ struct DevicesView::Slot : public juce::Component
         auto line = area.removeFromTop (slotHeight).reduced (Space::xs, 2);
         nameButton.setToggleState (isShownBeside(), juce::dontSendNotification);
 
-        if (foldButton != nullptr)
-            foldButton->setBounds (line.removeFromLeft (foldWidth));
-
         if (power.isVisible())
             power.setBounds (line.removeFromLeft (line.getHeight()));
 
@@ -508,18 +439,9 @@ struct DevicesView::Slot : public juce::Component
             if (sidechainButton != nullptr)
                 sidechainButton->setBounds (row);
         }
-
-        // A container's devices under it, indented, unless they are folded.
-        if (inside != nullptr)
-        {
-            inside->setVisible (! isFolded());
-            area.removeFromTop (slotGap);
-            inside->setBounds (area.withTrimmedLeft (indent).withHeight (inside->getPreferredHeight()));
-        }
     }
 
-    // A drag on its name, past a few pixels, carries it to another place among its neighbours, or into another chain of its
-    // container (DeviceList::itemDropped()).
+    // A drag on its name, past a few pixels, carries it to another place among its neighbours (DeviceList::itemDropped()).
     void mouseDrag (const juce::MouseEvent& e) override
     {
         if (e.eventComponent != &nameButton || dragged || ! e.mods.isLeftButtonDown() || shown.frozen
@@ -549,54 +471,27 @@ struct DevicesView::Slot : public juce::Component
     FlatName nameButton;
     juce::OwnedArray<Knob> mixKnob;
     std::unique_ptr<MixAttachment> mixAttachment;
-    std::unique_ptr<IconButton> foldButton;           // a container's
     std::unique_ptr<juce::TextButton> presetsButton;  // a device's, not a container's
     std::unique_ptr<IconButton> windowButton;         // a plug-in's, or one of Phazite's own that pops out
     std::unique_ptr<SidechainButton> sidechainButton; // a device's that has a sidechain
-    std::unique_ptr<ContainerChains> inside;          // a container's chains, with their devices
 };
 
 //==============================================================================
-DevicesView::DeviceList::DeviceList (DevicesView& v, TrackID channelTrack, DeviceID containerID, DeviceID chainID)
+DevicesView::DeviceList::DeviceList (DevicesView& v, TrackID channelTrack)
     : view (v),
-      track (channelTrack),
-      container (containerID),
-      chain (chainID)
+      track (channelTrack)
 {
-    setTitle (chain.isValid() ? "Chain's devices" : "Effects");
-    addButton.onClick = [this]
-    {
-        if (chain.isValid())
-            showChainEffectMenu (view.context, chain, addButton);
-        else
-            showEffectMenu (view.context, track, addButton);
-    };
+    setTitle ("Effects");
+    addButton.onClick = [this] { showEffectMenu (view.context, track, addButton); };
     addButton.setTitle ("Add effect");
-    addButton.setTooltip (chain.isValid() ? "Adds an effect after the chain's devices: built in or a plug-in"
-                                          : "Adds an effect, which changes the sound, such as a reverb: built in or a plug-in");
+    addButton.setTooltip ("Adds an effect, which changes the sound, such as a reverb: built in or a plug-in");
     addAndMakeVisible (addButton);
-
-    // An instrument container's chain without an instrument: a button that chooses one, first.
-    instrumentButton.setTitle ("Add instrument");
-    instrumentButton.setTooltip ("Chooses this chain's instrument, which plays the notes in its keys and velocities: a synth or a "
-                                 "sampler, built in or a plug-in");
-    instrumentButton.onClick = [this] { showChainInstrumentMenu (view.context, chain, instrumentButton); };
-    addChildComponent (instrumentButton);
     refresh();
-}
-
-std::vector<DeviceSlot> DevicesView::DeviceList::getDevices() const
-{
-    if (! chain.isValid())
-        return getEffects (view.context, track);
-
-    const auto info = getChain (view.context, chain);
-    return info.has_value() ? info->devices : std::vector<DeviceSlot>();
 }
 
 void DevicesView::DeviceList::refresh()
 {
-    const auto devices = getDevices();
+    const auto devices = getEffects (view.context, track);
 
     if (getIDs (devices) != order)
     {
@@ -613,13 +508,10 @@ void DevicesView::DeviceList::refresh()
         order = getIDs (devices);
 
         for (const auto& device : devices)
-            addAndMakeVisible (
-                slots.add (new Slot (view, device, chain.isValid() ? DevicePlace::inContainer : DevicePlace::effect, track)));
+            addAndMakeVisible (slots.add (new Slot (view, device, DevicePlace::effect, track)));
 
-        // On its page: an instrument container's chains' are on the Instrument page, the others on the Effects page.
         if (added.has_value())
-            view.rememberShown (*added,
-                                chain.isValid() && isInstrumentContainer (view.context, container) ? Page::instrument : Page::effects);
+            view.rememberShown (*added, Page::effects);
     }
     else
     {
@@ -629,9 +521,6 @@ void DevicesView::DeviceList::refresh()
 
     refreshed = true;
     addButton.setEnabled (view.context.hasProject());
-    instrumentButton.setVisible (
-        chain.isValid() && isInstrumentContainer (view.context, container)
-        && std::none_of (devices.begin(), devices.end(), [] (const DeviceSlot& device) { return device.isInstrument; }));
     resized();
 }
 
@@ -644,21 +533,15 @@ void DevicesView::DeviceList::updateValues()
 DevicesView::Slot* DevicesView::DeviceList::findSlot (DeviceID id) const
 {
     for (auto* slot : slots)
-    {
         if (slot->shown.id == id)
             return slot;
-
-        if (slot->inside != nullptr)
-            if (auto* found = slot->inside->findSlot (id))
-                return found;
-    }
 
     return nullptr;
 }
 
 int DevicesView::DeviceList::getPreferredHeight() const
 {
-    auto height = instrumentButton.isVisible() ? controlHeight + slotGap : 0;
+    auto height = 0;
 
     for (auto* slot : slots)
         height += slot->getPreferredHeight() + slotGap;
@@ -669,12 +552,6 @@ int DevicesView::DeviceList::getPreferredHeight() const
 void DevicesView::DeviceList::resized()
 {
     auto area = getLocalBounds();
-
-    if (instrumentButton.isVisible())
-    {
-        instrumentButton.setBounds (area.removeFromTop (controlHeight).reduced (0, 2));
-        area.removeFromTop (slotGap);
-    }
 
     for (auto* slot : slots)
     {
@@ -688,14 +565,8 @@ void DevicesView::DeviceList::resized()
 
 bool DevicesView::DeviceList::isInterestedInDragSource (const SourceDetails& details)
 {
-    // One of its own, or an effect of another chain of its container.
     const auto effect = getDraggedEffect (details.description);
-
-    if (! effect.has_value())
-        return false;
-
-    return std::find (order.begin(), order.end(), *effect) != order.end()
-           || (chain.isValid() && getContainerOf (view.context, *effect) == container);
+    return effect.has_value() && std::find (order.begin(), order.end(), *effect) != order.end();
 }
 
 int DevicesView::DeviceList::getDropIndex (juce::Point<int> position) const
@@ -728,210 +599,23 @@ void DevicesView::DeviceList::itemDropped (const SourceDetails& details)
     dropIndex = -1;
     repaint();
 
-    const auto effect = getDraggedEffect (details.description);
-
-    if (! effect.has_value())
-        return;
-
-    // Among its neighbours, or from another chain of the container into this one, before the device there.
-    if (std::find (order.begin(), order.end(), *effect) == order.end())
-        moveEffectToChain (view.context, *effect, chain, index < (int) order.size() ? index : -1);
-    else if (const auto places = getPlacesMoved (order, *effect, index); places != 0)
-        moveEffect (view.context, *effect, places);
-    else
-        return;
-
-    view.songChanged ({ .devices = true }); // at once, before the song's change comes
+    if (const auto effect = getDraggedEffect (details.description))
+        if (const auto places = getPlacesMoved (order, *effect, index); places != 0)
+        {
+            moveEffect (view.context, *effect, places);
+            view.songChanged ({ .devices = true }); // at once, before the song's change comes
+        }
 }
 
 void DevicesView::DeviceList::paintOverChildren (juce::Graphics& g)
 {
-    // Where a dragged effect would go: a line between the slots (in an empty chain, along its top).
-    if (dropIndex < 0)
+    // Where a dragged effect would go: a line between the slots.
+    if (dropIndex < 0 || slots.isEmpty())
         return;
 
-    const auto y = slots.isEmpty()            ? slotGap / 2
-                   : dropIndex < slots.size() ? slots[dropIndex]->getY() - slotGap / 2
-                                              : slots.getLast()->getBottom() + slotGap / 2;
+    const auto y = dropIndex < slots.size() ? slots[dropIndex]->getY() - slotGap / 2 : slots.getLast()->getBottom() + slotGap / 2;
     g.setColour (getPalette (*this).accent);
-    g.fillRect (0, std::max (1, y) - 1, getWidth(), 2);
-}
-
-//==============================================================================
-DevicesView::ChainHeader::ChainHeader (DevicesView& v, DeviceID containerID, const ChainInfo& info)
-    : view (v),
-      container (containerID),
-      chain (info.id),
-      power (v.context)
-{
-    setTitle (info.name);
-    power.setChain (chain);
-    addAndMakeVisible (power);
-
-    name.setFont (juce::FontOptions (TextSize::small, juce::Font::bold));
-    name.setMinimumHorizontalScale (1.0f);
-    name.setEditable (false, true, false);
-    name.onTextChange = [this] { renameChain (view.context, chain, name.getText()); };
-    name.addMouseListener (this, false);
-    addAndMakeVisible (name);
-    show (info);
-}
-
-void DevicesView::ChainHeader::show (const ChainInfo& info)
-{
-    setTitle (info.name);
-
-    if (! name.isBeingEdited())
-        name.setText (info.name, juce::dontSendNotification);
-
-    name.setTitle (info.name);
-    name.setTooltip ((info.part.isNotEmpty() ? info.part + ". " : juce::String())
-                     + "A chain of the container's, which plays beside its others: click to show them all beside, double-click "
-                       "to rename it, right-click for its menu");
-    power.update();
-    setAlpha (info.heard ? 1.0f : chainSilentAlpha);
-}
-
-void DevicesView::ChainHeader::mouseDown (const juce::MouseEvent& e)
-{
-    if (e.eventComponent != &name)
-        return;
-
-    // A right-click: its menu; a click: the container's chains, beside the column.
-    if (e.mods.isPopupMenu())
-    {
-        const juce::Component::SafePointer<ChainHeader> safeThis (this);
-        const juce::Component::SafePointer<DevicesView> safeView (&view);
-        showChainMenu (
-            view.context, chain, name,
-            [safeThis]
-            {
-                if (safeThis != nullptr)
-                    safeThis->name.showEditor();
-            },
-            [safeView]
-            {
-                if (safeView != nullptr)
-                    safeView->songChanged ({ .devices = true });
-            });
-        return;
-    }
-
-    view.context.getSongSelection().selectOnly (container);
-    view.setOpen (container, true);
-}
-
-void DevicesView::ChainHeader::paint (juce::Graphics& g)
-{
-    // A line along its top, which sets it off from the chain above.
-    g.setColour (getPalette (*this).border);
-    g.fillRect (0, 0, getWidth(), 1);
-}
-
-void DevicesView::ChainHeader::resized()
-{
-    auto area = getLocalBounds().withTrimmedTop (1);
-    power.setBounds (area.removeFromLeft (area.getHeight()));
-    area.removeFromLeft (Space::xs);
-    name.setBounds (area);
-}
-
-//==============================================================================
-DevicesView::ContainerChains::ContainerChains (DevicesView& v, TrackID channelTrack, DeviceID containerID)
-    : view (v),
-      track (channelTrack),
-      container (containerID)
-{
-    setTitle ("Container's chains");
-    addButton.setTitle ("Add chain");
-    addButton.setTooltip ("Adds a chain to the container, which plays beside its others, with its own devices, volume, pan, mute "
-                          "and solo");
-    addButton.onClick = [this]
-    {
-        addChain (view.context, container);
-        view.songChanged ({ .devices = true }); // at once, before the song's change comes
-    };
-    addAndMakeVisible (addButton);
-    refresh();
-}
-
-void DevicesView::ContainerChains::refresh()
-{
-    // A line over each chain's devices while there are more chains than one: one chain is the container's devices alone.
-    const auto chains = getChains (view.context, container);
-
-    if (getIDs (chains) != shown)
-    {
-        headers.clear();
-        lists.clear();
-        shown = getIDs (chains);
-
-        for (const auto& chain : chains)
-        {
-            if (chains.size() > 1)
-                addAndMakeVisible (headers.add (new ChainHeader (view, container, chain)));
-
-            addAndMakeVisible (lists.add (new DeviceList (view, track, container, chain.id)));
-        }
-    }
-    else
-    {
-        for (size_t i = 0; i < chains.size(); ++i)
-        {
-            if ((int) i < headers.size())
-                headers[(int) i]->show (chains[i]);
-
-            lists[(int) i]->refresh();
-        }
-    }
-
-    addButton.setEnabled (canAddChain (view.context, container));
-    resized();
-}
-
-void DevicesView::ContainerChains::updateValues()
-{
-    for (auto* list : lists)
-        list->updateValues();
-}
-
-DevicesView::Slot* DevicesView::ContainerChains::findSlot (DeviceID id) const
-{
-    for (auto* list : lists)
-        if (auto* found = list->findSlot (id))
-            return found;
-
-    return nullptr;
-}
-
-int DevicesView::ContainerChains::getPreferredHeight() const
-{
-    auto height = headers.size() * (chainHeaderHeight + slotGap);
-
-    for (auto* list : lists)
-        height += list->getPreferredHeight() + slotGap;
-
-    return height + controlHeight;
-}
-
-void DevicesView::ContainerChains::resized()
-{
-    auto area = getLocalBounds();
-
-    for (int i = 0; i < lists.size(); ++i)
-    {
-        if (i < headers.size())
-        {
-            headers[i]->setBounds (area.removeFromTop (chainHeaderHeight));
-            area.removeFromTop (slotGap);
-        }
-
-        lists[i]->setBounds (area.removeFromTop (lists[i]->getPreferredHeight()));
-        lists[i]->resized();
-        area.removeFromTop (slotGap);
-    }
-
-    addButton.setBounds (area.removeFromTop (controlHeight).reduced (0, 2));
+    g.fillRect (0, y - 1, getWidth(), 2);
 }
 
 //==============================================================================
@@ -984,7 +668,7 @@ struct DevicesView::Column : public juce::Component
         if (! view.channel.has_value())
             effects = nullptr;
         else if (effects == nullptr || effects->track != channelTrack)
-            addAndMakeVisible (*(effects = std::make_unique<DeviceList> (view, channelTrack, DeviceID(), DeviceID())));
+            addAndMakeVisible (*(effects = std::make_unique<DeviceList> (view, channelTrack)));
         else
             effects->refresh();
 
@@ -1085,21 +769,34 @@ struct DevicesView::Column : public juce::Component
 };
 
 //==============================================================================
-// What shows a container, or a device in one, beside the column: the container's name (double-click to rename it) and its
-// eight macros, which a grip drags onto a knob of its devices, as Ableton's racks show theirs; beside them, the device of it
-// that shows, or for the container itself, a word on where its devices are.
+// What shows a container, or a device in one, beside the column. Along its top, where it is: the container's name (double-
+// click to rename it); for a device in it, the container's name and its chain's, each a step back to the container's chains,
+// then the device's, with its sidechain, its Presets and its window's button at the end, as its line in the column would
+// have them (the owner, 2026-11-09: so that "you can also see that you are modifying an effect inside of a
+// container/chain"). Under it, the container's eight macros, which a grip drags onto a knob of its devices or its chains, as
+// Ableton's racks show theirs; beside them, the container's chains (ContainerEditor.h), or the device of it that shows.
 struct DevicesView::ContainerFrame : public juce::Component
 {
-    ContainerFrame (ProjectContext& c, DeviceID id, std::unique_ptr<juce::Component> shownInside)
-        : context (c),
+    ContainerFrame (DevicesView& v, DeviceID id, std::optional<DeviceSlot> shownDevice, std::unique_ptr<juce::Component> shownInside)
+        : view (v),
+          context (v.context),
           container (id),
+          device (std::move (shownDevice)),
           inner (std::move (shownInside))
     {
-        setTitle ("Container");
+        setTitle (device.has_value() ? "Device in a container" : "Container");
         name.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
-        name.setEditable (false, true, false);
-        name.setTooltip ("The container's name: double-click to rename it");
-        name.onTextChange = [this] { renameContainer (context, container, name.getText()); };
+        name.setMinimumHorizontalScale (1.0f);
+
+        if (device.has_value())
+            addPath();
+        else
+        {
+            name.setEditable (false, true, false);
+            name.setTooltip ("The container's name: double-click to rename it");
+            name.onTextChange = [this] { renameContainer (context, container, name.getText()); };
+        }
+
         addAndMakeVisible (name);
 
         for (const auto& macro : getContainerMacros (context, container))
@@ -1111,10 +808,116 @@ struct DevicesView::ContainerFrame : public juce::Component
         refresh();
     }
 
+    // For a device in it: the way back to the container's chains, and the device's own buttons.
+    void addPath()
+    {
+        // Each step shows the container's chains in the device's place, which takes this frame away: what that needs is
+        // copied first. The chain's step shows its chain's card, where the chains are more than the dock shows.
+        for (auto* crumb : { &containerCrumb, &chainCrumb })
+        {
+            crumb->onClick = [this, crumb]
+            {
+                auto& owner = view;
+                const auto id = container;
+                const auto chain = crumb == &chainCrumb ? getChainOf (context, device->id) : DeviceID();
+                owner.context.getSongSelection().selectOnly (id);
+                owner.setOpen (id, true);
+
+                if (auto* frame = dynamic_cast<ContainerFrame*> (owner.body.get()))
+                    if (auto* chains = dynamic_cast<ContainerEditor*> (frame->inner.get()))
+                        chains->showChain (chain);
+            };
+
+            addAndMakeVisible (crumb);
+        }
+
+        for (auto* separator : { &firstSeparator, &secondSeparator })
+        {
+            separator->setText (juce::String::fromUTF8 ("\xe2\x80\xba"), juce::dontSendNotification); // ›
+            separator->setJustificationType (juce::Justification::centred);
+            separator->setInterceptsMouseClicks (false, false);
+            separator->setAccessible (false);
+            setThemeColour (*separator, juce::Label::textColourId, &Palette::textMuted);
+            addAndMakeVisible (separator);
+        }
+
+        // What its sidechain listens to (ui/devices/SidechainMenus.h), its presets and its window, at the path's end.
+        if (device->hasSidechain)
+        {
+            sidechainButton = std::make_unique<SidechainButton> (context, device->id);
+            sidechainButton->show (device->sidechain);
+            const juce::Component::SafePointer<DevicesView> safeView (&view);
+            sidechainButton->onChange = [safeView]
+            {
+                if (safeView != nullptr)
+                    safeView->songChanged ({ .devices = true });
+            };
+            addAndMakeVisible (*sidechainButton);
+        }
+
+        if (! device->isContainer)
+        {
+            presetsButton = std::make_unique<juce::TextButton> ("Presets");
+            presetsButton->setTitle ("Presets");
+            presetsButton->setTooltip ("Phazite's presets for it, by kind of sound, and yours: the one you pick takes the place of its "
+                                       "settings. And Save Preset...");
+            presetsButton->onClick = [this]
+            {
+                if (view.onShowPresets != nullptr)
+                    view.onShowPresets (device->id, device->name, *presetsButton);
+            };
+            addAndMakeVisible (*presetsButton);
+        }
+
+        if (device->opensWindow)
+        {
+            windowButton = std::make_unique<IconButton> ("Open its window", Icon::detach);
+            windowButton->setTooltip ("Opens the plug-in's own window, with all its controls");
+            windowButton->onClick = [this] { showDeviceWindow (context, device->id); };
+        }
+        else if (device->popsOut)
+        {
+            windowButton = std::make_unique<IconButton> ("Open in a window", Icon::detach);
+            windowButton->setClickingTogglesState (false);
+            windowButton->setToggleState (device->windowOpen, juce::dontSendNotification);
+            windowButton->setTooltip (device->windowOpen ? "It is in its own window: click to bring the window to the front"
+                                                         : "Shows it in a window of its own, out of the dock");
+            windowButton->onClick = [this]
+            {
+                // In its window, its editor here gives way to a word, and this frame to another.
+                auto& owner = view;
+                const auto shown = *device;
+                owner.popOut (shown);
+            };
+        }
+
+        if (windowButton != nullptr)
+            addAndMakeVisible (*windowButton);
+    }
+
     void refresh()
     {
-        if (! name.isBeingEdited())
-            name.setText (getContainerName (context, container), juce::dontSendNotification);
+        // Where it is, as the song names it now.
+        const auto containerName = getContainerName (context, container);
+
+        if (device.has_value())
+        {
+            const auto chain = getChain (context, getChainOf (context, device->id));
+            containerCrumb.setButtonText (containerName);
+            containerCrumb.setTitle ("Back to " + containerName);
+            containerCrumb.setTooltip ("The container it is in: click to show its chains");
+            chainCrumb.setButtonText (chain.has_value() ? chain->name : juce::String());
+            chainCrumb.setTitle (chain.has_value() ? "Back to " + chain->name : juce::String());
+            chainCrumb.setTooltip ("The chain it is in"
+                                   + (chain.has_value() && chain->part.isNotEmpty() ? " (" + chain->part + ")" : juce::String())
+                                   + ": click to show the container's chains");
+            name.setText (device->name, juce::dontSendNotification);
+            name.setTitle (device->name);
+        }
+        else if (! name.isBeingEdited())
+        {
+            name.setText (containerName, juce::dontSendNotification);
+        }
 
         const auto infos = getContainerMacros (context, container);
 
@@ -1124,6 +927,26 @@ struct DevicesView::ContainerFrame : public juce::Component
         // The container itself: its chains, as they are now.
         if (auto* chains = dynamic_cast<ContainerEditor*> (inner.get()))
             chains->refresh();
+
+        resized();
+    }
+
+    // A frozen track's: its macros and what shows beside them are off, faint; the way back to the chains isn't.
+    void setFrozen (bool frozen)
+    {
+        for (auto* part :
+             std::initializer_list<juce::Component*> { inner.get(), sidechainButton.get(), presetsButton.get(), windowButton.get() })
+            if (part != nullptr)
+                part->setEnabled (! frozen);
+
+        for (auto* macro : macros)
+        {
+            macro->setEnabled (! frozen);
+            macro->setAlpha (frozen ? FrozenTint::frozenDevice : 1.0f);
+        }
+
+        if (inner != nullptr)
+            inner->setAlpha (frozen ? FrozenTint::frozenDevice : 1.0f);
     }
 
     void updateValues()
@@ -1139,34 +962,95 @@ struct DevicesView::ContainerFrame : public juce::Component
 
     bool showsWord() const { return dynamic_cast<juce::Label*> (inner.get()) != nullptr; }
 
-    // The macros in two columns beside a device of it, in four beside the word for the container alone.
+    // The container itself: its chains, whose own top line is beside its name, over its macros.
+    bool showsChains() const { return dynamic_cast<ContainerEditor*> (inner.get()) != nullptr; }
+
+    // The macros in two columns beside a device of it or its chains, in four beside a word.
     int getMacroColumns() const { return showsWord() ? 4 : 2; }
     int getMacrosWidth() const { return 2 * Space::s + getMacroColumns() * macroWidth; }
 
+    int getMacrosHeight() const
+    {
+        const auto rows = (macros.size() + getMacroColumns() - 1) / getMacroColumns();
+        return 2 * Space::s + rows * (macroHeight + macroGap) - macroGap;
+    }
+
     void paint (juce::Graphics& g) override
     {
-        // The macros' panel, behind them.
-        g.setColour (getPalette (*this).surfaceRaised);
-        g.fillRoundedRectangle (getLocalBounds().removeFromLeft (getMacrosWidth()).toFloat().reduced (1.0f), cardCornerRadius);
+        // A line under where it is; under it, the macros' panel behind them.
+        const auto& p = getPalette (*this);
+        g.setColour (p.border);
+        g.fillRect (0, controlHeight + Space::s / 2, getWidth(), 1);
+
+        auto area = getLocalBounds();
+        area.removeFromTop (pathHeight);
+        g.setColour (p.surfaceRaised);
+        g.fillRoundedRectangle (area.removeFromLeft (getMacrosWidth()).toFloat().reduced (1.0f), cardCornerRadius);
     }
 
     void resized() override
     {
+        // Along the top, where it is; for the container itself, its name over its macros alone, its chains' own top line
+        // beside it.
         auto area = getLocalBounds();
+        auto top = area.removeFromTop (controlHeight);
+        auto path = (showsChains() ? top.withWidth (getMacrosWidth()) : top).reduced (Space::s, 0);
+        area.removeFromTop (pathHeight - controlHeight);
+
+        // Where it is: the container's name, or the way back to it, its chain, and the device's name, with the device's
+        // sidechain, Presets and window's button at the end.
+        if (device.has_value())
+        {
+            if (windowButton != nullptr)
+            {
+                windowButton->setBounds (
+                    path.removeFromRight (windowButtonWidth).withSizeKeepingCentre (windowButtonWidth, windowButtonWidth));
+                path.removeFromRight (Space::xs);
+            }
+
+            if (presetsButton != nullptr)
+            {
+                presetsButton->setBounds (path.removeFromRight (presetsWidth).reduced (0, 2));
+                path.removeFromRight (Space::xs);
+            }
+
+            if (sidechainButton != nullptr)
+            {
+                sidechainButton->setBounds (path.removeFromRight (columnWidth).reduced (0, 2));
+                path.removeFromRight (Space::s);
+            }
+
+            const auto crumbWidth = [&path] (const juce::Button& crumb)
+            {
+                const auto wanted = juce::GlyphArrangement::getStringWidth (juce::FontOptions (TextSize::body), crumb.getButtonText());
+                return std::min (juce::roundToInt (wanted) + 2 * Space::xs + 1, path.getWidth() / 3);
+            };
+
+            containerCrumb.setBounds (path.removeFromLeft (crumbWidth (containerCrumb)).reduced (0, 2));
+            firstSeparator.setBounds (path.removeFromLeft (separatorWidth));
+            chainCrumb.setBounds (path.removeFromLeft (crumbWidth (chainCrumb)).reduced (0, 2));
+            secondSeparator.setBounds (path.removeFromLeft (separatorWidth));
+        }
+
+        name.setBounds (path);
+
+        // The macros, then beside them the chains or the device.
         auto left = area.removeFromLeft (getMacrosWidth()).reduced (Space::s);
-        name.setBounds (left.removeFromTop (controlHeight));
-        left.removeFromTop (Space::xs);
         const auto columns = getMacroColumns();
 
         for (int i = 0; i < macros.size(); ++i)
-            macros[i]->setBounds (left.getX() + (i % columns) * macroWidth, left.getY() + (i / columns) * (macroHeight + Space::xs),
+            macros[i]->setBounds (left.getX() + (i % columns) * macroWidth, left.getY() + (i / columns) * (macroHeight + macroGap),
                                   macroWidth, macroHeight);
 
-        // The device beside them, as tall as it needs at its width, as one shows beside the column alone.
+        // The device beside them, as tall as it needs at its width, as one shows beside the column alone; the chains from the
+        // top, as tall as all of it.
         if (inner == nullptr)
             return;
 
         area.removeFromLeft (Space::s);
+
+        if (showsChains())
+            area = area.withTop (0);
 
         if (auto* flexible = dynamic_cast<const FlexibleHeight*> (inner.get()))
             inner->setBounds (area.withHeight (std::max (area.getHeight(), flexible->getMinimumHeightAtWidth (area.getWidth()))));
@@ -1176,23 +1060,31 @@ struct DevicesView::ContainerFrame : public juce::Component
             inner->setTopLeftPosition (area.getTopLeft());
     }
 
-    // As tall as the device needs at the width it has, or the macros.
+    // As tall as where it is with the macros under it, and the device under it needs at the width it has (the chains, from
+    // the top).
     int getNeededHeight (int width) const
     {
-        const auto rows = (macros.size() + getMacroColumns() - 1) / getMacroColumns();
-        auto needed = 2 * Space::s + controlHeight + Space::xs + rows * (macroHeight + Space::xs);
+        auto needed = pathHeight + getMacrosHeight();
+        const auto innerTop = showsChains() ? 0 : pathHeight;
 
         if (auto* flexible = dynamic_cast<const FlexibleHeight*> (inner.get()))
-            needed = std::max (needed, flexible->getMinimumHeightAtWidth (width - getMacrosWidth() - Space::s));
+            needed = std::max (needed, innerTop + flexible->getMinimumHeightAtWidth (width - getMacrosWidth() - Space::s));
         else if (inner != nullptr && ! showsWord())
-            needed = std::max (needed, inner->getHeight());
+            needed = std::max (needed, innerTop + inner->getHeight());
 
         return needed;
     }
 
+    DevicesView& view;
     ProjectContext& context;
     const DeviceID container;
-    juce::Label name;
+    const std::optional<DeviceSlot> device; // the device of it that shows; none for the container itself
+    juce::Label name;                       // the container's, or the device's
+    Crumb containerCrumb, chainCrumb;
+    juce::Label firstSeparator, secondSeparator;
+    std::unique_ptr<SidechainButton> sidechainButton;
+    std::unique_ptr<juce::TextButton> presetsButton;
+    std::unique_ptr<IconButton> windowButton;
     juce::OwnedArray<Macro> macros;
     std::unique_ptr<juce::Component> inner;
 };
@@ -1256,19 +1148,29 @@ void DevicesView::lookAndFeelChanged()
 
 juce::Component* DevicesView::findPanel (DeviceID id) const
 {
-    // On the Instrument page, the instrument, or a device of its instrument container.
+    // On the Instrument page, the instrument; on the Effects page, an effect. A container's devices are in its chains, beside
+    // the column where it shows.
     if (page == Page::instrument)
-    {
-        if (column->instrument == nullptr)
-            return nullptr;
-
-        if (column->instrument->shown.id == id)
-            return column->instrument.get();
-
-        return column->instrument->inside != nullptr ? column->instrument->inside->findSlot (id) : nullptr;
-    }
+        return column->instrument != nullptr && column->instrument->shown.id == id ? column->instrument.get() : nullptr;
 
     return column->effects != nullptr ? column->effects->findSlot (id) : nullptr;
+}
+
+std::optional<DeviceSlot> DevicesView::findDeviceSlot (DeviceID id) const
+{
+    if (! id.isValid())
+        return {};
+
+    // In the column, its slot's; in a container there, the container's chains'.
+    if (auto* slot = static_cast<Slot*> (findPanel (id)))
+        return slot->shown;
+
+    if (const auto container = getContainerOf (context, id); container.isValid() && findPanel (container) != nullptr)
+        for (const auto& device : getContainerDevices (context, container))
+            if (device.id == id)
+                return device;
+
+    return {};
 }
 
 juce::Component* DevicesView::getShownBody() const
@@ -1304,20 +1206,20 @@ DeviceID DevicesView::getShownDevice() const
         if (column->instrument == nullptr)
             return {};
 
-        if (const auto found = shownInstrumentParts.find (*channel); found != shownInstrumentParts.end() && found->second.isValid()
-                                                                     && column->instrument->inside != nullptr
-                                                                     && column->instrument->inside->findSlot (found->second) != nullptr)
+        if (const auto found = shownInstrumentParts.find (*channel);
+            found != shownInstrumentParts.end() && found->second.isValid() && findDeviceSlot (found->second).has_value())
             return found->second;
 
         return column->instrument->shown.id;
     }
 
-    // The effect remembered, while it is still there; else the first that isn't a plug-in (a plug-in shows when chosen).
+    // The effect remembered, or a device of a container among them, while it is still there; else the first that isn't a
+    // plug-in (a plug-in shows when chosen).
     if (column->effects == nullptr)
         return {};
 
     if (const auto found = shownEffects.find (*channel); found != shownEffects.end())
-        return found->second.isValid() && column->effects->findSlot (found->second) != nullptr ? found->second : DeviceID();
+        return found->second.isValid() && findDeviceSlot (found->second).has_value() ? found->second : DeviceID();
 
     for (auto* slot : column->effects->slots)
         if (! slot->shown.opensWindow)
@@ -1364,16 +1266,9 @@ void DevicesView::setOpen (DeviceID id, bool open)
     }
 
     if (open)
-    {
         rememberShown (id, page);
-
-        for (auto inside = getContainerOf (context, id); inside.isValid(); inside = getContainerOf (context, inside))
-            foldedContainers.erase (inside);
-    }
     else if (isOpen (id))
-    {
         rememberShown ({}, page);
-    }
 
     refresh();
 }
@@ -1383,11 +1278,15 @@ void DevicesView::showDevice (DeviceID id)
     if (const auto deviceChannel = getDeviceChannel (context, id))
         setChannel (deviceChannel);
 
-    // On its page, beside the column; and its slot in view in the column.
+    // On its page, beside the column; and its slot in view in the column, or its container's.
     showPage (getPageOf (id));
     setOpen (id, true);
+    auto* slot = findPanel (id);
 
-    if (auto* slot = findPanel (id))
+    if (slot == nullptr)
+        slot = findPanel (getContainerOf (context, id));
+
+    if (slot != nullptr)
     {
         const auto bounds = column->getLocalArea (slot, slot->getLocalBounds());
         auto y = columnView.getViewPositionY();
@@ -1521,12 +1420,11 @@ void DevicesView::refresh()
 void DevicesView::showBody()
 {
     const auto id = getShownDevice();
-    auto* slot = id.isValid() ? static_cast<Slot*> (findPanel (id)) : nullptr;
-    const auto* device = slot != nullptr ? &slot->shown : nullptr;
-    const auto inWindow = device != nullptr && device->windowOpen;
-    const auto frozen = device != nullptr && device->frozen;
+    const auto device = findDeviceSlot (id);
+    const auto inWindow = device.has_value() && device->windowOpen;
+    const auto frozen = device.has_value() && device->frozen;
 
-    // The same device as it was: only its container's names, which may have changed.
+    // The same device as it was: only its container's names and chains, which may have changed.
     if (body != nullptr && id == bodyDevice && inWindow == bodyInWindow && frozen == bodyFrozen)
     {
         if (auto* frame = dynamic_cast<ContainerFrame*> (body.get()))
@@ -1542,20 +1440,30 @@ void DevicesView::showBody()
     bodyInWindow = inWindow;
     bodyFrozen = frozen;
 
-    if (device != nullptr)
+    if (device.has_value())
     {
         // What shows it: one of Phazite's own devices' editor (in its window, a word that says so), a plug-in's key knobs;
-        // with its container's macros beside it, if it is in one; a container alone, its chains beside its macros, with a
-        // word on where their devices are while they have none.
+        // with its container's macros beside it, and where it is along their top, if it is in one; a container alone, its
+        // chains beside its macros.
         std::unique_ptr<juce::Component> shown;
         const auto& p = getPalette (*this);
 
         if (device->isContainer)
-            shown = std::make_unique<ContainerEditor> (context, device->id);
+        {
+            // A device's name clicked in a chain shows it here, as a click in the column does; an edit there shows at once.
+            auto chains = std::make_unique<ContainerEditor> (context, commands, device->id);
+            chains->onDeviceClicked = [this] (const DeviceSlot& clicked, const juce::ModifierKeys& mods) { select (clicked, mods); };
+            chains->onChanged = [this] { songChanged ({ .devices = true }); };
+            shown = std::move (chains);
+        }
         else if (device->windowOpen)
-            shown = makeNote ("It shows in a window of its own: its button at the left brings the window to the front.");
+        {
+            shown = makeNote ("It shows in a window of its own: its button brings the window to the front.");
+        }
         else if (! device->opensWindow)
+        {
             shown = createDeviceEditor (getDeviceHandle (context, device->id));
+        }
 
         // A drum sampler's Swap tries the browser's sounds on a pad (onSwap: the app's browser).
         if (auto* drums = dynamic_cast<DrumSamplerEditor*> (shown.get()); drums != nullptr && onSwap != nullptr)
@@ -1571,10 +1479,20 @@ void DevicesView::showBody()
         if (auto* note = dynamic_cast<juce::Label*> (shown.get()))
             note->setColour (juce::Label::textColourId, p.textMuted);
 
-        const auto container = device->isContainer ? device->id : getContainerOf (context, device->id);
-        body = container.isValid() ? std::make_unique<ContainerFrame> (context, container, std::move (shown)) : std::move (shown);
-        body->setEnabled (! device->frozen);
-        body->setAlpha (device->frozen ? FrozenTint::frozenDevice : 1.0f);
+        // A frozen device's controls are off until its track is unfrozen; in a container, the way back to its chains isn't.
+        if (const auto container = device->isContainer ? device->id : getContainerOf (context, device->id); container.isValid())
+        {
+            auto frame =
+                std::make_unique<ContainerFrame> (*this, container, device->isContainer ? std::nullopt : device, std::move (shown));
+            frame->setFrozen (frozen);
+            body = std::move (frame);
+        }
+        else
+        {
+            body = std::move (shown);
+            body->setEnabled (! frozen);
+            body->setAlpha (frozen ? FrozenTint::frozenDevice : 1.0f);
+        }
     }
 
     bodyView.setViewedComponent (body.get(), false);
@@ -1659,34 +1577,22 @@ void DevicesView::showChannelName()
 
 bool DevicesView::windowsChanged() const
 {
-    // A device's window, or one of a container's chains' devices', closed since it showed (they open only from popOut()).
-    std::function<bool (const DeviceList&)> search;
+    // A device's window closed since it showed (they open only from popOut()): one in the column, or the one in a container
+    // whose word shows beside the macros meanwhile.
+    const auto closed = [this] (const DeviceSlot& device) { return device.windowOpen && ! isDeviceWindowOpen (context, device.id); };
 
-    const auto searchInside = [&search] (const Slot& slot)
-    {
-        if (slot.inside != nullptr)
-            for (auto* list : slot.inside->lists)
-                if (search (*list))
-                    return true;
-
-        return false;
-    };
-
-    search = [&searchInside, this] (const DeviceList& list)
-    {
-        for (auto* slot : list.slots)
-            if ((slot->shown.windowOpen && ! isDeviceWindowOpen (context, slot->shown.id)) || searchInside (*slot))
-                return true;
-
-        return false;
-    };
-
-    if (auto* instrument = column->instrument.get();
-        instrument != nullptr
-        && ((instrument->shown.windowOpen && ! isDeviceWindowOpen (context, instrument->shown.id)) || searchInside (*instrument)))
+    if (bodyInWindow && ! isDeviceWindowOpen (context, bodyDevice))
         return true;
 
-    return column->effects != nullptr && search (*column->effects);
+    if (column->instrument != nullptr && closed (column->instrument->shown))
+        return true;
+
+    if (column->effects != nullptr)
+        for (auto* slot : column->effects->slots)
+            if (closed (slot->shown))
+                return true;
+
+    return false;
 }
 
 void DevicesView::paint (juce::Graphics& g)
@@ -1741,7 +1647,6 @@ void DevicesView::projectChanged()
 {
     shownEffects.clear(); // another project's devices can have the same IDs
     shownInstrumentParts.clear();
-    foldedContainers.clear();
     channel.reset();
     bodyView.setViewedComponent (nullptr, false);
     body = nullptr;
@@ -1779,21 +1684,13 @@ void DevicesView::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     followSelection();
 
-    // The slots show which devices are selected, those in containers too.
-    const std::function<void (juce::Component&)> repaintSlots = [&repaintSlots] (juce::Component& parent)
-    {
-        for (auto* child : parent.getChildren())
-        {
-            if (dynamic_cast<Slot*> (child) != nullptr)
-                child->repaint();
+    // The slots show which devices are selected, and a container's chains which of theirs are.
+    for (auto* list : std::initializer_list<juce::Component*> { column->instrument.get(), column->effects.get() })
+        if (list != nullptr)
+            list->repaint();
 
-            if (dynamic_cast<Slot*> (child) != nullptr || dynamic_cast<DeviceList*> (child) != nullptr
-                || dynamic_cast<ContainerChains*> (child) != nullptr)
-                repaintSlots (*child);
-        }
-    };
-
-    repaintSlots (*column);
+    if (auto* frame = dynamic_cast<ContainerFrame*> (body.get()); frame != nullptr && dynamic_cast<ContainerEditor*> (frame->inner.get()))
+        frame->inner->repaint();
 }
 
 void DevicesView::timerCallback()

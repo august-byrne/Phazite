@@ -7,12 +7,14 @@
 // another, as FL Studio's mixer stacks its slots, scrolled up and down when they are many (the owner, 2026-11-06: in a row,
 // the more there were, the less room each had): each an on/off switch, its name (click to show it, right-click for its
 // menu, drag to move it) and its mix; the one that shows, its Presets, its window's button and its sidechain under them;
-// a container's chains under it, indented, each its devices under its line (while there are more than one), with a button
-// after them that adds an effect, then a button that adds a chain; an instrument container's on the Instrument page. Beside
-// the column, the whole rest of the dock: the device that shows, whole (one of Phazite's own's editor; a container's
-// macros, beside the editor of the device inside it that shows, or beside its chains for the container itself:
-// ContainerEditor.h; a plug-in's key knobs, its own controls being in its window), its editor's graphs narrowing, then its
-// parts in pages where the dock is narrower, so that it shows without scrolling.
+// with a button after them that adds an effect. A container is one of them, alone, as is an instrument container on the
+// Instrument page (the owner, 2026-11-09: its chains and their devices under it made the column "very busy and
+// cluttered"). Beside the column, the whole rest of the dock: the device that shows, whole (one of Phazite's own's editor;
+// a plug-in's key knobs, its own controls being in its window), its editor's graphs narrowing, then its parts in pages
+// where the dock is narrower, so that it shows without scrolling. A container shows its macros there, beside its chains
+// side by side, each with its devices (ContainerEditor.h); a device of it clicked there shows beside the macros in their
+// place, with where it is along their top: the container, its chain, then the device, the first two each a step back to
+// the chains.
 #pragma once
 
 #include "DeviceSlots.h"
@@ -24,7 +26,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <set>
 
 namespace phazite::ui
 {
@@ -49,7 +50,8 @@ public:
     // The channel shown: a track, or the master (an empty ID); nothing without a project.
     std::optional<TrackID> getChannel() const noexcept { return channel; }
 
-    // A device's slot in the column, or nullptr if it isn't shown there; for tests.
+    // A device's slot in the column, or nullptr if it isn't shown there (a container's devices are in its chains, beside the
+    // column where it shows: ContainerEditor::findDevice()); for tests.
     juce::Component* findPanel (DeviceID) const;
 
     // What shows the device beside the column (an editor, a container's macros, a plug-in's key knobs), or nullptr.
@@ -67,14 +69,16 @@ public:
     Page getPageOf (DeviceID) const;
 
     // Whether a device shows beside the column, whole, on the page shown: one does at a time, in its channel (one in a
-    // container, beside the container's macros; the container itself, its chains beside them), remembered for the session,
-    // an effect on the Effects page, the instrument or a device of its instrument container on the Instrument page. Shown, it
-    // opens the containers it is in; and none shows with false (the instrument, then, on the Instrument page).
+    // container, beside the container's macros, in their chains' place; the container itself, its chains beside them),
+    // remembered for the session, an effect on the Effects page, the instrument or a device of its instrument container on
+    // the Instrument page; and none shows with false (the instrument, then, on the Instrument page). A container is open
+    // while it or a device of it shows.
     bool isOpen (DeviceID) const;
     void setOpen (DeviceID, bool);
 
-    // A device's Presets button, under its name while it shows (an instrument's always), was clicked: shows its presets' menu
-    // over the button (the app's browser does: Browser::showDevicePresetMenu()).
+    // A device's Presets button, under its name while it shows (an instrument's always; a container's device's along the top
+    // of its macros), was clicked: shows its presets' menu over the button (the app's browser does:
+    // Browser::showDevicePresetMenu()).
     std::function<void (DeviceID, const juce::String& deviceName, juce::Component& target)> onShowPresets;
 
     // A drum sampler's Swap, in its editor, was clicked for a pad: the app's browser swaps its sound (Browser::startSwap()).
@@ -90,8 +94,6 @@ public:
 
     struct Slot;
     struct DeviceList;
-    struct ChainHeader;
-    struct ContainerChains;
     struct Column;
     struct ContainerFrame;
 
@@ -102,7 +104,6 @@ private:
     Page page = Page::effects;
     std::map<TrackID, DeviceID> shownEffects;         // the effect each channel shows, remembered for the session
     std::map<TrackID, DeviceID> shownInstrumentParts; // the device of each track's instrument container that shows, likewise
-    std::set<DeviceID> foldedContainers;              // whose devices' slots are hidden under them
 
     juce::Label nameLabel, kindLabel; // the channel's
     juce::Viewport columnView;        // the column's devices and modulators, scrolled up and down when they don't fit
@@ -114,9 +115,10 @@ private:
     bool bodyFrozen = false;   // that it is frozen
     juce::Label hint;          // with nothing to show: why, or what to do
 
-    DeviceID getShownDevice() const;     // the instrument (or a device of its instrument container), or the effect that shows
-    void rememberShown (DeviceID, Page); // the device that shows on a page, for the channel shown
-    void followSelection();              // shows the channel the selection points to
+    DeviceID getShownDevice() const; // the instrument (or a device of its instrument container), or the effect that shows
+    std::optional<DeviceSlot> findDeviceSlot (DeviceID) const; // a device in the column, or in a container there
+    void rememberShown (DeviceID, Page);                       // the device that shows on a page, for the channel shown
+    void followSelection();                                    // shows the channel the selection points to
     void setChannel (std::optional<TrackID>);
     void refresh();  // the column's slots, and what shows beside it, as the song is now
     void showBody(); // what shows the shown device, made again if that changed

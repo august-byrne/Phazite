@@ -62,6 +62,13 @@ namespace strip
         }
     };
 
+    // A device's name in its line, flat, as a list's row is (the Devices view's column, a container's chains): its line
+    // shows it under the pointer and while it shows; bright while ticked.
+    struct FlatName : public MenuButton
+    {
+        void paintButton (juce::Graphics&, bool, bool) override;
+    };
+
     // The menu of where a channel's sound goes (MixerModel.h: getOutputChoices()): the master, or a bus, which the track
     // then goes into; and a new bus from the selected tracks, this one among them.
     void showOutputMenu (ProjectContext&, CommandBridge&, TrackID, juce::Component& target);
