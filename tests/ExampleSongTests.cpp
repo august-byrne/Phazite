@@ -175,10 +175,10 @@ TEST_CASE ("Exodus shows a song by someone else, its notes from a file in clips 
         return phazite::getNotes (context, clips);
     };
 
-    // The notes of its file (resources/songs/Exodus.mid) that its recording plays, without the project's bars 24 to 32,
-    // each part on its own track.
-    for (const auto& [name, count] : { std::pair ("Drums", 579 + 28), std::pair ("Sub", 37), std::pair ("Bass", 1612),
-                                       std::pair ("Arp", 1744), std::pair ("Arp Pad", 1744), std::pair ("Sparkle", 1744) })
+    // The notes of its file (resources/songs/Exodus.mid) that its recording plays, without the project's bars 24 to 32: the
+    // drums; the sub's roots, which the bass holds, its own sub where the original's was; and the arpeggio's loudest
+    // layer, which the arp's sound doubles an octave up.
+    for (const auto& [name, count] : { std::pair ("Drums", 579 + 28), std::pair ("Bass", 37), std::pair ("Arp", 1744) })
     {
         CAPTURE (name);
         CHECK (notesOf (name).size() == (size_t) count);
@@ -221,26 +221,22 @@ TEST_CASE ("Exodus shows a song by someone else, its notes from a file in clips 
         CHECK (chord.numeral.accidental == 0);
     }
 
-    // Every other track and the plate duck under the drums; the bass, the sub and the arpeggio's third layer send to the
-    // plate, and the drums and the arpeggio's first two layers stay dry; and the master's high-pass and low-pass sweep in
-    // automation lanes before its limiter.
-    for (const auto* ducked : { "Sub", "Bass", "Arp", "Arp Pad", "Sparkle", "Reverb" })
+    // The bass, the arpeggio and the plate duck under the drums (the arpeggio under all of them, its key the whole drum
+    // track's, as the original's ducks under the claps too); the bass and the arpeggio send to the plate and the drums stay
+    // dry; and the master's high-pass and low-pass sweep in automation lanes before its limiter.
+    for (const auto* ducked : { "Bass", "Arp", "Reverb" })
     {
         CAPTURE (ducked);
         CHECK (example.listens (ducked, "Drums"));
     }
 
-    for (const auto* wet : { "Bass", "Sub", "Sparkle" })
+    for (const auto* wet : { "Bass", "Arp" })
     {
         CAPTURE (wet);
         CHECK (example.sends (wet, "Reverb"));
     }
 
-    for (const auto* dry : { "Drums", "Arp", "Arp Pad" })
-    {
-        CAPTURE (dry);
-        CHECK_FALSE (example.sends (dry, "Reverb"));
-    }
+    CHECK_FALSE (example.sends ("Drums", "Reverb"));
     const auto master = phazite::getEffects (context, {});
     std::vector<phazite::DeviceID> filters;
 

@@ -173,6 +173,54 @@ int ParameterControls::getWidthOf (const Control& control) const
     return control.box != nullptr ? getCellWidth (Size::compact) * 3 / 2 + Space::s : getCellWidth (size);
 }
 
+void ParameterControls::showParameters (const DeviceHandle& device, const std::vector<std::string_view>& parameterIDs)
+{
+    const auto* info = device.getInfo();
+
+    for (size_t n = 0; n < controls.size() && n < parameterIDs.size(); ++n)
+    {
+        const auto index = info != nullptr ? devices::findParameter (*info, parameterIDs[n]) : -1;
+
+        if (index < 0)
+        {
+            jassertfalse; // the device has no such parameter
+            continue;
+        }
+
+        const auto& parameter = info->parameters[(size_t) index];
+        auto& control = *controls[n];
+        const auto fullName = toString (parameter.name);
+        auto handle = device.getParameter (parameter.id);
+        const auto help = describe (parameter, handle);
+        control.id = parameter.id;
+
+        if (control.box != nullptr)
+        {
+            jassert (parameter.unit == devices::Unit::choice);
+            control.box->setTitle (fullName);
+            control.box->setTooltip (help);
+            control.boxAttachment->setParameter (std::move (handle));
+        }
+        else if (control.toggle != nullptr)
+        {
+            jassert (parameter.unit == devices::Unit::toggle);
+            control.toggle->setTitle (fullName);
+            control.toggle->setTooltip (help);
+            control.toggleAttachment->setParameter (std::move (handle));
+        }
+        else
+        {
+            control.knob->setTitle (fullName);
+            control.knob->setTooltip (help);
+            control.knob->setDoubleClickReturnValue (true, parameter.defaultValue);
+            showAsParameter (*control.knob, parameter);
+            control.knobAttachment->setParameter (std::move (handle));
+        }
+    }
+
+    refresh();
+}
+
 juce::Component* ParameterControls::findControl (std::string_view parameterID) const
 {
     for (const auto& control : controls)

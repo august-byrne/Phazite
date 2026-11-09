@@ -27,7 +27,8 @@ namespace
             return properties;
 
         for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-            properties.push_back (schema::getPadSoundFile (pad));
+            for (int layer = 0; layer < devices::DrumSampler::numLayers; ++layer)
+                properties.push_back (schema::getPadSoundFile (pad, layer));
 
         for (int osc = 0; osc < devices::WavetableSynth::numOscillators; ++osc)
             properties.push_back (schema::getOscillatorWavetableFile (osc));
@@ -45,8 +46,11 @@ std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo& inf
     {
         for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
         {
-            properties.push_back (schema::getPadSound (pad));
-            properties.push_back (schema::getPadSoundFile (pad));
+            for (int layer = 0; layer < devices::DrumSampler::numLayers; ++layer)
+            {
+                properties.push_back (schema::getPadSound (pad, layer));
+                properties.push_back (schema::getPadSoundFile (pad, layer));
+            }
         }
     }
 

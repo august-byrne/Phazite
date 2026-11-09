@@ -143,6 +143,7 @@ namespace
                               : property == schema::keyRoot || property == schema::keyScale           ? "key"
                               : property == schema::trackInput || property == schema::trackMonitoring ? "input"
                               : property == schema::trackFrozen                                       ? "freeze"
+                              : property == schema::trackPadDevice || property == schema::trackPad    ? "pad"
                               : property == schema::folderBus || property == schema::channelFader || property == schema::channelVCA
                                   ? "bus"
                                   : "settings";

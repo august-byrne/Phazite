@@ -29,7 +29,10 @@ void DeviceNode::setValue (int parameter, float value) noexcept
     const auto& parameters = getDeviceInfo().parameters;
 
     if (juce::isPositiveAndBelow (parameter, (int) parameters.size()))
+    {
         values[(size_t) parameter].store (devices::constrain (parameters[(size_t) parameter], value), std::memory_order_relaxed);
+        valuesVersion.fetch_add (1, std::memory_order_release); // after the value, which a block that sees it then reads
+    }
 }
 
 float DeviceNode::getValue (int parameter) const noexcept
@@ -78,8 +81,18 @@ bool DeviceNode::takeBlock (DeviceRunner::Block& block, std::span<const Paramete
     if (! isOnNow)
         return false;
 
-    for (size_t i = 0; i < blockValues.size(); ++i)
-        blockValues[i] = values[i].load (std::memory_order_relaxed);
+    // The values set by hand, read again only when one was set since the last block took them.
+    const auto version = valuesVersion.load (std::memory_order_acquire);
+    block.valuesChanged = ! valuesTaken || version != takenVersion;
+
+    if (block.valuesChanged)
+    {
+        for (size_t i = 0; i < blockValues.size(); ++i)
+            blockValues[i] = values[i].load (std::memory_order_relaxed);
+
+        takenVersion = version;
+        valuesTaken = true;
+    }
 
     // Its automation, but where a parameter is written by hand (at most one curve a parameter: the reserve holds them).
     automated.clear();
@@ -141,7 +154,10 @@ void DeviceNode::process (juce::AudioBuffer<float>& buffer, int start, int numSa
     runner.process (buffer, start, numSamples, block);
     measure (ticksBefore + juce::Time::getHighResolutionTicks() - began, numSamples);
 
-    // What it played, for the controls.
+    // What it played, for the controls, unless nothing moved since the last block, which stored it.
+    if (runner.isSettled())
+        return;
+
     const auto playedValues = runner.getValues();
     const auto baseValues = runner.getBaseValues();
 

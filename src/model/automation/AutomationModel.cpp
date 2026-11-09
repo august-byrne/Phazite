@@ -4,6 +4,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Containers.h"
@@ -35,6 +36,32 @@ namespace
         return ParameterKind::other;
     }
 
+    // The pad a drum sampler's parameter is a pad's, or -1 (its output, or another device's).
+    int getDrumPad (const Song& song, const ParameterRef& parameter)
+    {
+        using devices::DrumSampler;
+
+        if (! isDrumSampler (findDeviceState (song, parameter.device)))
+            return -1;
+
+        const auto index = devices::findParameter (DrumSampler::info, parameter.parameter.toStdString());
+        return index >= 0 && index < DrumSampler::outputParameter ? index / DrumSampler::fieldsPerPad : -1;
+    }
+
+    // A drum pad's parameter in its pad's group, "Pad 36: Kick", named without its pad: "Level".
+    void addDrumPadGroup (const Song& song, AutomationTarget& target)
+    {
+        const auto pad = getDrumPad (song, target.parameter);
+
+        if (pad < 0)
+            return;
+
+        const auto padName = "Pad " + juce::String (pad);
+        const auto sound = getPadName (song, target.parameter.device, pad);
+        target.group = sound.isNotEmpty() ? padName + ": " + sound : padName;
+        target.name = target.name.fromFirstOccurrenceOf (padName + " ", false, false);
+    }
+
     AutomationTarget makeTarget (const Song& song, const ParameterRef& parameter, TrackID track)
     {
         AutomationTarget target;
@@ -44,7 +71,15 @@ namespace
         target.name = getParameterName (song, parameter);
         target.kind = getKind (song, parameter);
         target.automated = hasPoints (song, parameter);
+        addDrumPadGroup (song, target);
         return target;
+    }
+
+    // Menus list every parameter but a drum sampler's empty pads', unless one has automation.
+    bool isListed (const Song& song, const ParameterRef& parameter)
+    {
+        const auto pad = getDrumPad (song, parameter);
+        return pad < 0 || ! isPadEmpty (song, parameter.device, pad) || hasPoints (song, parameter);
     }
 
     // A lane that shows needs its track, and the folders it is in, open (view state, without undo steps).
@@ -116,7 +151,8 @@ std::vector<AutomationTarget> getAutomationTargets (const ProjectContext& contex
 
     if (auto* song = findSong (context))
         for (const auto& parameter : getAutomatableParameters (*song, id))
-            targets.push_back (makeTarget (*song, parameter, id));
+            if (isListed (*song, parameter))
+                targets.push_back (makeTarget (*song, parameter, id));
 
     return targets;
 }
@@ -130,7 +166,7 @@ std::vector<AutomationTarget> getAutomationTargets (const ProjectContext& contex
     // A container's are its chains' volumes, pans and crossovers.
     if (track.isValid())
         for (const auto& parameter : getAutomatableParameters (*song, track))
-            if (parameter.device == device || getChainContainer (*song, parameter.device) == device)
+            if ((parameter.device == device || getChainContainer (*song, parameter.device) == device) && isListed (*song, parameter))
                 targets.push_back (makeTarget (*song, parameter, track));
 
     return targets;

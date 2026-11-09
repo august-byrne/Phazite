@@ -155,7 +155,7 @@ std::unique_ptr<devices::Processor> makeLoaded (const devices::DeviceInfo& info,
 }
 
 // Plays a device with a preset's values for a second and a half: an instrument a chord and a bass note for half a second
-// (a drum sampler each of its pads in turn, a 32nd note at 120 bpm apart, as a busy beat plays them), an effect a beat of
+// (a drum sampler each of its kit's pads in turn, a 32nd note at 120 bpm apart, as a busy beat plays them), an effect a beat of
 // noise bursts over a low tone, with what went in mixed back as its mix says, as Phazite's engine plays it
 // (engine/nodes/DeviceRunner.h).
 Played play (const devices::DeviceInfo& info, const std::vector<float>& values, const juce::var& sounds)
@@ -178,9 +178,9 @@ Played play (const devices::DeviceInfo& info, const std::vector<float>& values, 
 
         if (isDrums)
         {
-            for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-                if (const auto at = pad * padSpacing; at >= done && at < done + testBlockSize)
-                    events.push_back ({ devices::NoteEvent::Type::noteOn, at - done, devices::DrumSampler::firstNote + pad, 0.8f });
+            for (int index = 0; index < devices::DrumSampler::kitPads; ++index)
+                if (const auto at = index * padSpacing; at >= done && at < done + testBlockSize)
+                    events.push_back ({ devices::NoteEvent::Type::noteOn, at - done, devices::DrumSampler::kitFirstNote + index, 0.8f });
         }
         else if (isInstrument && done == 0)
         {
@@ -490,11 +490,11 @@ TEST_CASE ("Phazite's drum kits each play sounds of their own on every pad, name
         CAPTURE (kit.toStdString());
         ++kits;
 
-        for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+        for (int pad = devices::DrumSampler::kitFirstNote; pad < devices::DrumSampler::kitFirstNote + devices::DrumSampler::kitPads; ++pad)
         {
             const auto name = device[keys::sounds][phazite::schema::getPadSound (pad)].toString();
             CAPTURE (name.toStdString());
-            CHECK (devices::findFactoryDrum (name.toStdString()) >= devices::DrumSampler::numPads); // a kit's, not the default's
+            CHECK (devices::findFactoryDrum (name.toStdString()) >= devices::DrumSampler::kitPads); // a kit's, not the default's
             CHECK (kit.contains (name.upToFirstOccurrenceOf (" ", false, false)));                  // "808 Kick" in "808 Kit"
             CHECK (kitOf.count (name) == 0);
             kitOf[name] = kit;
@@ -502,9 +502,9 @@ TEST_CASE ("Phazite's drum kits each play sounds of their own on every pad, name
     }
 
     // A kit for every sound past the default kit's.
-    CHECK (kits == (int) names.size() / devices::DrumSampler::numPads - 1);
+    CHECK (kits == (int) names.size() / devices::DrumSampler::kitPads - 1);
 
-    for (size_t i = devices::DrumSampler::numPads; i < names.size(); ++i)
+    for (size_t i = devices::DrumSampler::kitPads; i < names.size(); ++i)
         CHECK (kitOf.count (toString (names[i])) == 1);
 }
 
@@ -514,35 +514,35 @@ TEST_CASE ("A kit's preset puts its sounds on a drum sampler's pads, which the s
     const auto drums = song.setInstrument (song.firstTrack, devices::DrumSampler::typeID);
     const auto device = phazite::getDeviceHandle (song.context, drums);
     const auto kitsFolder = getFactoryPresets().getChildFile ("Drum Sampler").getChildFile ("Kits");
-    CHECK (device.getPadName (0) == juce::String ("Kick"));
+    CHECK (device.getPadName (36) == juce::String ("Kick"));
 
     // The 808's on every pad, and in the sampler the engine plays once it has the song again.
     REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("808 Kit.phazitepreset")));
-    CHECK (device.getPadName (0) == juce::String ("808 Kick"));
-    CHECK (device.getPadName (15) == juce::String ("808 Cowbell"));
+    CHECK (device.getPadName (36) == juce::String ("808 Kick"));
+    CHECK (device.getPadName (51) == juce::String ("808 Cowbell"));
     phazite::getSession (song.context)->update();
     auto* sampler = device.getProcessor<devices::DrumSampler>();
     REQUIRE (sampler != nullptr);
-    CHECK (&sampler->getPadSound (0) == devices::getFactoryDrum (devices::findFactoryDrum ("808 Kick")).get());
+    CHECK (sampler->getPadSound (36) == devices::getFactoryDrum (devices::findFactoryDrum ("808 Kick")).get());
 
     // The song keeps them by their names, and a project's file is the song.
     const auto sounds = phazite::findDeviceState (*phazite::findSong (song.context), drums).getChildWithName (phazite::schema::SOUNDS);
-    CHECK (sounds[phazite::schema::getPadSound (0)].toString() == juce::String ("808 Kick"));
+    CHECK (sounds[phazite::schema::getPadSound (36)].toString() == juce::String ("808 Kick"));
 
     // A file put on a pad plays instead, until Reset brings the kit's sound back.
-    REQUIRE (device.setPadSound (0, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Boom.wav"), 0.2)));
-    CHECK (device.getPadName (0) == juce::String ("Boom"));
-    device.clearPadSound (0);
-    CHECK (device.getPadName (0) == juce::String ("808 Kick"));
+    REQUIRE (device.setPadSound (36, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Boom.wav"), 0.2)));
+    CHECK (device.getPadName (36) == juce::String ("Boom"));
+    device.clearPadSound (36);
+    CHECK (device.getPadName (36) == juce::String ("808 Kick"));
 
     // Another kit in its place, and Undo step by step back to the default kit.
     REQUIRE (phazite::loadPresetInto (song.context, drums, kitsFolder.getChildFile ("909 Kit.phazitepreset")));
-    CHECK (device.getPadName (6) == juce::String ("909 Closed Hat"));
+    CHECK (device.getPadName (42) == juce::String ("909 Closed Hat"));
 
     for (const auto* expected : { "808 Kick", "Boom", "808 Kick", "Kick" })
     {
         song.run ("edit.undo");
-        CHECK (device.getPadName (0) == juce::String (expected));
+        CHECK (device.getPadName (36) == juce::String (expected));
     }
 }
 

@@ -43,6 +43,8 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/devices/internal/DrumKit.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/devices/internal/SamplerSound.h"
 #include "model/devices/internal/Wavetables.h"
 #include "model/engine/AudioFiles.h"
@@ -1130,12 +1132,22 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: a beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor")
+    TEST_CASE ("Real-time audit: a beat on Phazite's drum sampler, its hats choking each other, its snare in two layers in turn, its "
+               "kick on a track of its own, a pad played from its editor")
     {
         using phazite::devices::DrumSampler;
         TestSong song;
         const auto track = song.firstTrack;
         const auto sampler = song.setInstrument (track, DrumSampler::typeID);
+
+        // The snare's second layer a clap, the two in turn; and the kick on a track of its own (step 4.12).
+        {
+            auto& model = getSong (song);
+            phazite::setDeviceSound (model, sampler, phazite::schema::getPadSound (38, 1), "909 Clap");
+            phazite::setValueSetByHand (model, phazite::ParameterRef { sampler, "pad38LayerMode" },
+                                        (float) DrumSampler::LayerMode::roundRobin);
+            REQUIRE (phazite::givePadItsOwnTrack (model, sampler, 36).isValid());
+        }
 
         // Kick and snare, closed hats on the eighths and an open hat the next one chokes.
         auto& played = getSong (song);
@@ -1154,9 +1166,11 @@ TEST_SUITE ("realtime-audit")
         }
 
         const auto m = playAndMeasure (song, [&song, sampler] { // the clap, as a click on its pad plays it
-            dynamic_cast<DrumSampler&> (getPlayed (song, sampler).getProcessor()).audition (3, 1.0f);
+            dynamic_cast<DrumSampler&> (getPlayed (song, sampler).getProcessor()).audition (39, 1.0f);
         });
-        report ("A beat on Phazite's drum sampler, its hats choking each other, a pad played from its editor", m);
+        report ("A beat on Phazite's drum sampler, its hats choking each other, its snare in two layers in turn, its kick on a "
+                "track of its own, a pad played from its editor",
+                m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }

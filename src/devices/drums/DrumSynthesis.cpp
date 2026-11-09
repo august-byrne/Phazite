@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumSynthesis.h"
 
+#include <juce_dsp/juce_dsp.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
+#include <vector>
 
 namespace phazite::devices::drums
 {
@@ -167,6 +171,127 @@ Sound makeStereo (const Sound& left, const Sound& right)
     return sound;
 }
 
+Sound addGatedReverb (const Sound& drum, double rate, const GatedReverbShape& shape)
+{
+    const auto onset = std::max (1, (int) std::lround (shape.onsetSeconds * rate));
+    const auto gate = std::max (1, (int) std::lround (shape.gateSeconds * rate));
+    const auto close = std::max (1, (int) std::lround (shape.closeSeconds * rate));
+    const auto shut = onset + gate + close;                                   // where the gate has shut, from the hit
+    const auto length = std::max (drum.getNumSamples(), (int) (shut / 0.65)); // a kit's sound fades over its last 30 %
+    auto order = 1;
+
+    while ((1 << order) < drum.getNumSamples() + shut)
+        ++order;
+
+    const auto size = (size_t) 1 << order;
+    const juce::dsp::FFT fft (order);
+
+    // The drum's spectrum, both its sides as one; each side's room is the drum played through dense noise in the room's
+    // band, falling slowly, so that the room has the drum's colour.
+    std::vector<float> drumSpectrum (size * 2, 0.0f);
+
+    for (int channel = 0; channel < drum.getNumChannels(); ++channel)
+        for (int i = 0; i < drum.getNumSamples(); ++i)
+            drumSpectrum[(size_t) i] += drum.getSample (channel, i) / (float) drum.getNumChannels();
+
+    fft.performRealOnlyForwardTransform (drumSpectrum.data());
+
+    // The gate, opened by the hit: in over the onset, held, then shut, each a half cosine.
+    const auto gateAt = [&] (int i)
+    {
+        if (i < onset)
+            return 0.5 * (1.0 - std::cos (juce::MathConstants<double>::pi * i / onset));
+
+        if (i < onset + gate)
+            return 1.0;
+
+        return i < shut ? 0.5 * (1.0 + std::cos (juce::MathConstants<double>::pi * (i - onset - gate) / close)) : 0.0;
+    };
+
+    juce::Random random (shape.seed);
+    std::array<std::vector<float>, 2> rooms;
+    auto loudest = 0.0f;
+
+    for (auto& room : rooms)
+    {
+        room.assign (size * 2, 0.0f);
+        juce::IIRFilter lowCut, highCut;
+        lowCut.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, shape.lowCut, 0.707));
+        highCut.setCoefficients (juce::IIRCoefficients::makeLowPass (rate, shape.highCut, 0.707));
+
+        for (int i = 0; i < shut; ++i)
+        {
+            const auto level = std::pow (10.0, -shape.fallDecibels * i / (onset + gate) / 20.0);
+            room[(size_t) i] = (float) level * highCut.processSingleSampleRaw (lowCut.processSingleSampleRaw (noise (random)));
+        }
+
+        fft.performRealOnlyForwardTransform (room.data());
+
+        for (size_t bin = 0; bin < size; ++bin)
+        {
+            const std::complex<float> product = std::complex<float> (drumSpectrum[2 * bin], drumSpectrum[2 * bin + 1])
+                                                * std::complex<float> (room[2 * bin], room[2 * bin + 1]);
+            room[2 * bin] = product.real();
+            room[2 * bin + 1] = product.imag();
+        }
+
+        fft.performRealOnlyInverseTransform (room.data());
+
+        for (int i = 0; i < shut; ++i)
+        {
+            room[(size_t) i] *= (float) gateAt (i);
+            loudest = std::max (loudest, std::abs (room[(size_t) i]));
+        }
+    }
+
+    Sound sound (2, length);
+    sound.clear();
+
+    for (int side = 0; side < 2; ++side)
+        sound.copyFrom (side, 0, drum, std::min (side, drum.getNumChannels() - 1), 0, drum.getNumSamples());
+
+    const auto gain = loudest > 0.0f ? (float) shape.level * drum.getMagnitude (0, drum.getNumSamples()) / loudest : 0.0f;
+
+    for (int side = 0; side < 2; ++side)
+        for (int i = 0; i < shut; ++i)
+            sound.addSample (side, i, gain * rooms[(size_t) side][(size_t) i]);
+
+    return sound;
+}
+
+Sound makeSimmons (double rate, const SimmonsShape& shape)
+{
+    Sound sound (1, (int) (shape.length * rate));
+    juce::Random random (shape.seed);
+    juce::IIRFilter clickFilter;
+    clickFilter.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 2000.0, 0.707));
+    std::array<double, 4> poles {}; // the noise's four-pole low-pass, each pole a one-pole filter
+    auto phase = 0.0;
+
+    for (int i = 0; i < sound.getNumSamples(); ++i)
+    {
+        const auto t = i / rate;
+        phase += (shape.endHz + (shape.startHz - shape.endHz) * std::exp (-t / shape.bendSeconds)) / rate;
+        const auto triangle = 4.0 * std::abs (phase - std::floor (phase) - 0.5) - 1.0;
+        const auto tone = triangle * std::exp (-t / shape.toneSeconds);
+
+        const auto cutoff = shape.noiseToHz + (shape.noiseFromHz - shape.noiseToHz) * std::exp (-t / shape.sweepSeconds);
+        const auto step = 1.0 - std::exp (-juce::MathConstants<double>::twoPi * cutoff / rate);
+        double hiss = noise (random);
+
+        for (auto& pole : poles)
+            hiss = pole += step * (hiss - pole);
+
+        // The four poles take the noise's level down a good deal; made up so that the share of noise is what it says.
+        const auto breath = 3.0 * hiss * std::exp (-t / shape.noiseSeconds);
+        const auto snap = shape.click * clickFilter.processSingleSampleRaw (noise (random)) * std::exp (-t / 0.0004);
+        const auto onset = juce::jmin (1.0, t / 0.0005);
+        sound.setSample (0, i, softClip (onset * ((1.0 - shape.noise) * tone + shape.noise * breath) + snap, shape.drive));
+    }
+
+    return sound;
+}
+
 void makeDusty (Sound& sound, double rate, const DustShape& shape)
 {
     const auto step = shape.heldRate / rate;
@@ -185,11 +310,23 @@ void makeDusty (Sound& sound, double rate, const DustShape& shape)
 
         for (int i = 0; i < sound.getNumSamples(); ++i)
         {
-            // A reading each 1 / heldRate seconds, rounded to the bits it has, held until the next.
+            // A reading each 1 / heldRate seconds, rounded to the bits it has, held until the next; companded, rounded as
+            // mu-law (mu 255) codes it, its steps finer the quieter it is.
             if ((phase += step) >= 1.0)
             {
                 phase -= 1.0;
-                held = (float) (std::round (samples[i] * levels) / levels);
+
+                if (shape.muLaw)
+                {
+                    constexpr double mu = 255.0;
+                    const auto x = (double) juce::jlimit (-1.0f, 1.0f, samples[i]);
+                    const auto coded = std::round (std::log1p (mu * std::abs (x)) / std::log1p (mu) * levels) / levels;
+                    held = (float) std::copysign ((std::pow (1.0 + mu, coded) - 1.0) / mu, x);
+                }
+                else
+                {
+                    held = (float) (std::round (samples[i] * levels) / levels);
+                }
             }
 
             auto x = held;

@@ -41,6 +41,10 @@ public:
     // A parameter's control: a Knob, a juce::ComboBox or a juce::ToggleButton; nullptr if it has none.
     juce::Component* findControl (std::string_view parameterID) const;
 
+    // Shows other parameters of the device in the same controls, in the same order, each of the same kind as the one it
+    // replaces (the drum sampler's pad shown, say): each control then changes its new parameter, titled after it.
+    void showParameters (const DeviceHandle&, const std::vector<std::string_view>& parameterIDs);
+
     // Shows the values as they are now; the ticker does it.
     void refresh();
 

@@ -249,6 +249,15 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     const auto channels = getChannels();
     std::map<std::int64_t, int> places; // each channel's strip, by its ID
 
+    // The pads on mixer channels of their own, by their samplers, which play each into an output of its own.
+    separatedPads.clear();
+    partLatencies.clear();
+    usedPartOutputs.clear();
+
+    for (const auto& channel : channels)
+        if (channel.pad >= 0 && channel.padSource != 0 && ! channel.refuses (channel.padSource))
+            separatedPads[channel.padDevice].insert (channel.pad);
+
     for (const auto& channel : channels)
     {
         engine::Plan::Strip strip;
@@ -280,6 +289,18 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
                     inputs.push_back ({ places[other.id], nullptr, beforeFader, getSendLevel (send) });
                     plan->strips[(size_t) places[other.id]].feedsBeforeFader |= beforeFader;
                 }
+            }
+        }
+
+        // A pad track adds up its sampler's pad, as the sampler plays it into an output of its own; the sampler's track then
+        // plays while it is muted, so that the pad follows its own track's mute.
+        if (channel.pad >= 0 && places.contains (channel.padSource) && ! channel.refuses (channel.padSource))
+        {
+            if (const auto output = partOutputs.find ({ channel.padDevice, channel.pad });
+                output != partOutputs.end() && usedPartOutputs.contains (output->first))
+            {
+                inputs.push_back ({ places[channel.padSource], nullptr, false, nullptr, output->second });
+                plan->strips[(size_t) places[channel.padSource]].feedsParts = true;
             }
         }
 
@@ -374,6 +395,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::erase_if (sendLevels, [this] (const auto& level) { return usedSends.count (level.first) == 0; });
     std::erase_if (containers, [this] (const auto& container) { return usedContainers.count (container.first) == 0; });
     std::erase_if (chains, [this] (const auto& chain) { return usedChains.count (chain.first) == 0; });
+    std::erase_if (partOutputs, [this] (const auto& output) { return ! usedPartOutputs.contains (output.first); });
     return plan;
 }
 
@@ -500,6 +522,24 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
             heard.feedsSidechain = true;
             device.sidechain = places.at (source);
             device.sidechainDelay = getDelay ({ (std::int64_t) id, source }, strip.latency - heard.latency);
+        }
+
+        // Its pads on mixer channels of their own, each played into an output of its own, as late as the device's sound comes.
+        if (const auto pads = separatedPads.find ((std::int64_t) id); pads != separatedPads.end())
+        {
+            for (const auto pad : pads->second)
+            {
+                const std::pair key ((std::int64_t) id, pad);
+                auto& output = partOutputs[key];
+
+                if (output == nullptr || output->getMaximumBlockSize() != preparedBlockSize)
+                    output = std::make_shared<engine::PartOutput> (pad, preparedBlockSize);
+
+                usedPartOutputs.insert (key);
+                partLatencies[output.get()] = strip.latency + latency;
+                device.partOutputs.push_back (output);
+                device.parts.push_back (output->describe());
+            }
         }
 
         strip.latency += latency;
@@ -660,6 +700,14 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
             if (child.hasType (schema::SEND))
                 info.sends.push_back (child);
 
+        // A pad track plays its drum sampler's pad, after the sampler's track.
+        if (state.hasProperty (schema::trackPad))
+        {
+            info.padDevice = getID (state, schema::trackPadDevice);
+            info.pad = (int) state[schema::trackPad];
+            info.padSource = (std::int64_t) getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) info.padDevice)).getRaw();
+        }
+
         infos.push_back (std::move (info));
     }
 
@@ -695,6 +743,9 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
         };
 
         addSidechains (info.state, addSidechains);
+
+        if (info.padSource != 0)
+            info.needs.push_back (info.padSource);
     }
 
     // In an order in which each comes after what it takes in; what would feed itself (a sidechain or a send round a loop)
@@ -735,14 +786,26 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
 
 void SongPlayer::addInputs (engine::Plan& plan, engine::Plan::Strip& strip, std::vector<engine::Plan::Input> inputs)
 {
+    // How late each comes: a strip's sound after its devices; a device's part as late as the device's sound comes out of it.
+    const auto getLatency = [this, &plan] (const engine::Plan::Input& input)
+    {
+        if (input.part != nullptr)
+            if (const auto found = partLatencies.find (input.part.get()); found != partLatencies.end())
+                return found->second;
+
+        return plan.strips[(size_t) input.strip].latency;
+    };
+
     // Each lined up with the latest (delay compensation): the strip's own sound comes in as late as that.
     for (const auto& input : inputs)
-        strip.latency = std::max (strip.latency, plan.strips[(size_t) input.strip].latency);
+        strip.latency = std::max (strip.latency, getLatency (input));
 
     for (auto& input : inputs)
     {
         const auto& from = plan.strips[(size_t) input.strip];
-        input.delay = getDelay ({ strip.id, from.id * 2 + (input.beforeFader ? 1 : 0) }, strip.latency - from.latency);
+        const auto key = input.part != nullptr ? std::pair (strip.id, -1 - (from.id * engine::maximumParts + input.part->getPart()))
+                                               : std::pair (strip.id, from.id * 2 + (input.beforeFader ? 1 : 0));
+        input.delay = getDelay (key, strip.latency - getLatency (input));
         strip.inputs.push_back (std::move (input));
     }
 }
@@ -1065,10 +1128,13 @@ void SongPlayer::loadSound (engine::DeviceNode& node, const juce::ValueTree& dev
     {
         for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
         {
-            if (property == schema::getPadSound (pad) || property == schema::getPadSoundFile (pad))
+            for (int layer = 0; layer < devices::DrumSampler::numLayers; ++layer)
             {
-                loadPadSound (static_cast<devices::DrumSampler&> (processor), song, sounds, pad);
-                return;
+                if (property == schema::getPadSound (pad, layer) || property == schema::getPadSoundFile (pad, layer))
+                {
+                    loadPadSound (static_cast<devices::DrumSampler&> (processor), song, sounds, pad);
+                    return;
+                }
             }
         }
     }
@@ -1115,7 +1181,7 @@ void SongPlayer::setChannel (const juce::ValueTree& channelState, bool isMaster)
 void SongPlayer::updateAudibility()
 {
     // A track is heard unless it is muted, or in a muted folder, or other tracks are soloed and neither it nor a folder it is
-    // in is (a return is never silenced by a solo).
+    // in is (a return is never silenced by a solo); a pad's track, as its sampler's track is too.
     const auto trackStates = getTrackStates (song);
     const auto anySoloed =
         std::any_of (trackStates.begin(), trackStates.end(), [] (const auto& state) { return (bool) state[schema::trackSolo]; });
@@ -1138,12 +1204,21 @@ void SongPlayer::updateAudibility()
             continue;
 
         auto muted = false, soloed = false;
-
-        for (auto track = state; track.hasType (schema::TRACK); track = track.getParent())
+        const auto addFrom = [&muted, &soloed] (const juce::ValueTree& from)
         {
-            muted = muted || (bool) track[schema::trackMute];
-            soloed = soloed || (bool) track[schema::trackSolo];
-        }
+            for (auto track = from; track.hasType (schema::TRACK); track = track.getParent())
+            {
+                muted = muted || (bool) track[schema::trackMute];
+                soloed = soloed || (bool) track[schema::trackSolo];
+            }
+        };
+
+        addFrom (state);
+
+        // A pad's track as its sampler's track is too, whose mute and solo cover its pads on tracks of their own.
+        if (state.hasProperty (schema::trackPad))
+            addFrom (
+                findTrackState (song, getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) getID (state, schema::trackPadDevice)))));
 
         soloed = soloed || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
         strip->getChannel().setAudible (! muted && (! anySoloed || soloed || isReturnState (state)));

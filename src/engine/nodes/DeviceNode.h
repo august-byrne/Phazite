@@ -68,6 +68,9 @@ private:
     std::unique_ptr<std::atomic<float>[]> values, played, playedBase;
     std::unique_ptr<std::atomic<bool>[]> writing;
     std::vector<float> blockValues;                 // as a block starts, for the runner
+    std::atomic<std::uint32_t> valuesVersion { 0 }; // moves on with each value set by hand
+    std::uint32_t takenVersion = 0;                 // the audio thread's: the one blockValues were taken at
+    bool valuesTaken = false;
     std::vector<DeviceRunner::Automated> automated; // the audio thread's, for each block: as long as there are parameters
     std::atomic<bool> on { true };
     bool wasOn = true;                                                                          // the audio thread's

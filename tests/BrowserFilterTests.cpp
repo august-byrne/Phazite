@@ -507,12 +507,12 @@ TEST_CASE ("A pad's kick is swapped for another and back with the keys, kept wit
     browser.onSwapStarted = [&started] { ++started; };
 
     const auto handle = phazite::getDeviceHandle (song.context, drums);
-    const auto before = handle.getPadName (0);
+    const auto before = handle.getPadName (36);
     auto& undo = *song.context.getUndoManager();
-    const auto padName = [&handle] { return handle.getPadName (0); };
+    const auto padName = [&handle] { return handle.getPadName (36); };
 
     // Swap on the kick's pad: the browser shows kicks, its strip says what it swaps, and it has the keys.
-    browser.startSwap (drums, 0);
+    browser.startSwap (drums, 36);
     phazite::test::dispatchPendingMessages();
     REQUIRE (browser.isSwapping());
     CHECK (started == 1);
@@ -542,10 +542,10 @@ TEST_CASE ("A pad's kick is swapped for another and back with the keys, kept wit
     CHECK_FALSE (browser.getSwapStrip().isVisible());
     CHECK (browser.getFilters().isEmpty());
     CHECK (padName() == juce::String ("Kick One"));
-    CHECK (undo.getUndoDescription() == juce::String ("Put Kick One on Pad 1"));
+    CHECK (undo.getUndoDescription() == juce::String ("Put Kick One on Pad 36"));
 
     // Again, and Esc puts the one before back, adding no step.
-    browser.startSwap (drums, 0);
+    browser.startSwap (drums, 36);
     phazite::test::dispatchPendingMessages();
     mouse.click (getRow (browser, "Pack").getCentre());
     phazite::test::dispatchPendingMessages();
@@ -556,7 +556,7 @@ TEST_CASE ("A pad's kick is swapped for another and back with the keys, kept wit
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (browser.isSwapping());
     CHECK (padName() == juce::String ("Kick One"));
-    CHECK (undo.getUndoDescription() == juce::String ("Put Kick One on Pad 1"));
+    CHECK (undo.getUndoDescription() == juce::String ("Put Kick One on Pad 36"));
 
     phazite::undo (*phazite::findSong (song.context));
     CHECK (padName() == before);
@@ -577,15 +577,15 @@ TEST_CASE ("A drum pad's Swap asks for its pad, and is lit while that pad is bei
     editor.refresh();
     REQUIRE (editor.getSwapButton().isVisible());
 
-    editor.selectPad (2);
-    phazite::test::Mouse mouse (editor);
-    mouse.click (editor.getSwapButton().getBounds().getCentre());
-    CHECK (asked == 2);
+    editor.selectPad (38);
+    phazite::test::Mouse mouse (editor.getSwapButton());
+    mouse.click (editor.getSwapButton().getLocalBounds().getCentre());
+    CHECK (asked == 38);
 
-    phazite::Swap swap (song.context, drums, 2);
+    phazite::Swap swap (song.context, drums, 38);
     editor.refresh();
     CHECK (editor.getSwapButton().getToggleState());
-    editor.selectPad (3);
+    editor.selectPad (39);
     CHECK_FALSE (editor.getSwapButton().getToggleState());
 }
 

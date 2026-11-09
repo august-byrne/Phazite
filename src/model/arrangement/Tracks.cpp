@@ -5,7 +5,9 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumKit.h"
 #include "model/mixer/internal/Buses.h"
+#include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
 
@@ -242,6 +244,27 @@ namespace
         return false;
     }
 
+    // The track whose drum sampler a pad's track plays a pad of (model/devices/internal/DrumKit.h), whose mute and solo cover
+    // it as a folder's cover its tracks; none for any other track.
+    juce::ValueTree findPadSamplerTrack (const Song& song, const juce::ValueTree& state)
+    {
+        if (! state.hasProperty (schema::trackPad))
+            return {};
+
+        const auto sampler =
+            findTrackState (song, getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) (juce::int64) state[schema::trackPadDevice])));
+        return sampler != state ? sampler : juce::ValueTree();
+    }
+
+    bool isMutedOrInMutedFolder (const juce::ValueTree& state)
+    {
+        for (auto element = state; element.hasType (schema::TRACK); element = element.getParent())
+            if ((bool) element[schema::trackMute])
+                return true;
+
+        return false;
+    }
+
     // A track the song gives a key: the key set last on any of its tracks (model/notes/internal/Notes.h).
     TrackID madeWithLastKey (Song& song, TrackID id)
     {
@@ -390,11 +413,13 @@ std::vector<TrackID> getTracksInFolder (const Song& song, TrackID folder)
 
 bool isTrackMuted (const Song& song, TrackID id, bool orInMutedFolder)
 {
-    for (auto state = findTrackState (song, id); state.hasType (schema::TRACK); state = state.getParent())
-        if ((bool) state[schema::trackMute] || ! orInMutedFolder)
-            return state[schema::trackMute];
+    const auto state = findTrackState (song, id);
 
-    return false;
+    if (! orInMutedFolder)
+        return state[schema::trackMute];
+
+    // A pad's track is muted with its sampler's track, as a track is with its folder.
+    return isMutedOrInMutedFolder (state) || isMutedOrInMutedFolder (findPadSamplerTrack (song, state));
 }
 
 bool isTrackSoloed (const Song& song, TrackID id)
@@ -533,7 +558,8 @@ void toggleSoloAlone (Song& song, TrackID id)
 bool isSilencedBySolo (const Song& song, TrackID id)
 {
     const auto state = findTrackState (song, id);
-    return areAnyTracksSoloed (song) && ! isSoloedOrInSoloedFolder (state) && ! isReturnState (state) && ! isTrackMuted (song, id, false);
+    return areAnyTracksSoloed (song) && ! isSoloedOrInSoloedFolder (state) && ! isSoloedOrInSoloedFolder (findPadSamplerTrack (song, state))
+           && ! isReturnState (state) && ! isTrackMuted (song, id, false);
 }
 
 //==============================================================================
@@ -887,12 +913,13 @@ std::vector<TrackID> duplicateTracks (Song& song, const std::vector<TrackID>& tr
         auto copy = original.createCopy();
         const auto copied = giveNewIDs (song, copy);
 
-        copy.removeProperty (schema::trackFrozen, nullptr);
-        std::vector<juce::ValueTree> inside;
+        std::vector<juce::ValueTree> inside { copy };
         collectTrackStates (copy, inside);
 
+        // Nor does a copy of a pad's track play the pad, which plays on the original.
         for (auto state : inside)
-            state.removeProperty (schema::trackFrozen, nullptr);
+            for (const auto* property : { &schema::trackFrozen, &schema::trackPadDevice, &schema::trackPad })
+                state.removeProperty (*property, nullptr);
 
         auto parent = original.getParent();
         parent.addChild (copy, parent.indexOf (original) + 1, &song.getUndoManager());

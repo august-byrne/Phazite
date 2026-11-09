@@ -11,6 +11,7 @@
 
 #include "model/base/Song.h"
 
+#include <array>
 #include <map>
 
 namespace phazite::schema
@@ -184,6 +185,13 @@ inline const juce::Identifier keyScale { "keyScale" };
 // On TRACK (model/transport/RecordingModel.h; roadmap step 3.4). The audio device's input the track records (AudioInput::id):
 // a channel, counted from 1 ("1"), or a pair of neighbours from an odd-numbered one ("1+2"); none for no input.
 inline const juce::Identifier trackInput { "input" };
+
+// On a TRACK that plays a drum sampler's pad on a mixer channel of its own (roadmap step 4.12;
+// model/devices/internal/DrumKit.h), as FL Studio's FPC sends a pad to a mixer track: the sampler, by its device's ID
+// (DeviceID, int64), and the pad, by its note (int, 0 to 127). The pad's sound leaves the sampler's track for it. None for
+// any other track.
+inline const juce::Identifier trackPadDevice { "padDevice" };
+inline const juce::Identifier trackPad { "pad" };
 
 // On TRACK. When the track's input is heard through it: monitorAlways, monitorNever, or none, while it is armed.
 inline const juce::Identifier trackMonitoring { "monitoring" };
@@ -747,26 +755,37 @@ inline const juce::Identifier clipTake { "take" };
 // double, more than 0: how long each take is, in seconds: the looped range's length when it was recorded.
 inline const juce::Identifier clipTakeLength { "takeLength" };
 
-// Phazite's drum sampler (devices/drums/DrumSampler.h) keeps in its DEVICE's SOUNDS what each pad plays: "pad1Sound" up to
-// "pad16Sound" name one of its factory sounds (devices/drums/FactoryDrums.h: "808 Kick"; with none, or a name that is none
-// of theirs, the pad's own in the default kit), and "pad1SoundFile" up to "pad16SoundFile" a sound file it plays instead
-// while they are there: a path relative to the project's folder ("Audio/Kick 01.wav"), or in a preset its full path. pad
-// counts from 0.
-inline const juce::Identifier& getPadSound (int pad)
+// Phazite's drum sampler (devices/drums/DrumSampler.h) keeps in its DEVICE's SOUNDS what each pad's layers play, its pad
+// named by its note (0 to 127): "pad36Sound" names one of its factory sounds for the first layer (devices/drums/
+// FactoryDrums.h: "808 Kick"; with none, or a name that is none of theirs, the pad's own in the default kit, and nothing
+// off the default kit's sixteen pads), and "pad36SoundFile" a sound file it plays instead while it is there: a path
+// relative to the project's folder ("Audio/Kick 01.wav"), or in a preset its full path; "pad36Sound2" to "pad36Sound4" and
+// "pad36SoundFile2" to "pad36SoundFile4" the same for its other layers, which play nothing without them.
+inline constexpr int drumPads = 128, drumLayers = 4; // as devices::DrumSampler::numPads and numLayers
+
+// "pad36Sound", or for another layer than the first, "pad36Sound2", after a pad's note and its layer (from 0).
+inline std::array<juce::Identifier, drumPads * drumLayers> makePadSoundNames (const juce::String& kind)
 {
-    static const juce::Identifier names[] = { "pad1Sound",  "pad2Sound",  "pad3Sound",  "pad4Sound",  "pad5Sound",  "pad6Sound",
-                                              "pad7Sound",  "pad8Sound",  "pad9Sound",  "pad10Sound", "pad11Sound", "pad12Sound",
-                                              "pad13Sound", "pad14Sound", "pad15Sound", "pad16Sound" };
-    return names[juce::jlimit (0, 15, pad)];
+    std::array<juce::Identifier, drumPads * drumLayers> made;
+
+    for (int pad = 0; pad < drumPads; ++pad)
+        for (int layer = 0; layer < drumLayers; ++layer)
+            made[(size_t) (pad * drumLayers + layer)] =
+                "pad" + juce::String (pad) + kind + (layer > 0 ? juce::String (layer + 1) : juce::String());
+
+    return made;
 }
 
-inline const juce::Identifier& getPadSoundFile (int pad)
+inline const juce::Identifier& getPadSound (int pad, int layer = 0)
 {
-    static const juce::Identifier names[] = { "pad1SoundFile",  "pad2SoundFile",  "pad3SoundFile",  "pad4SoundFile",
-                                              "pad5SoundFile",  "pad6SoundFile",  "pad7SoundFile",  "pad8SoundFile",
-                                              "pad9SoundFile",  "pad10SoundFile", "pad11SoundFile", "pad12SoundFile",
-                                              "pad13SoundFile", "pad14SoundFile", "pad15SoundFile", "pad16SoundFile" };
-    return names[juce::jlimit (0, 15, pad)];
+    static const auto names = makePadSoundNames ("Sound");
+    return names[(size_t) (juce::jlimit (0, drumPads - 1, pad) * drumLayers + juce::jlimit (0, drumLayers - 1, layer))];
+}
+
+inline const juce::Identifier& getPadSoundFile (int pad, int layer = 0)
+{
+    static const auto names = makePadSoundNames ("SoundFile");
+    return names[(size_t) (juce::jlimit (0, drumPads - 1, pad) * drumLayers + juce::jlimit (0, drumLayers - 1, layer))];
 }
 
 // Phazite's wavetable synth (devices/wavetable/WavetableSynth.h) keeps in its DEVICE's SOUNDS what each of its two
@@ -801,9 +820,10 @@ inline const juce::Identifier samplerSlicesRemoved { "sampleSlicesRemoved" };
 // sampler's.
 inline bool isSoundFileProperty (const juce::Identifier& property)
 {
-    for (int pad = 0; pad < 16; ++pad)
-        if (property == getPadSoundFile (pad))
-            return true;
+    for (int pad = 0; pad < drumPads; ++pad)
+        for (int layer = 0; layer < drumLayers; ++layer)
+            if (property == getPadSoundFile (pad, layer))
+                return true;
 
     return property == getOscillatorWavetableFile (0) || property == getOscillatorWavetableFile (1) || property == samplerSampleFile;
 }

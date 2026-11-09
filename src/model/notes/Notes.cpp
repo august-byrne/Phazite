@@ -1176,7 +1176,7 @@ void setDrumTrack (Song& song, TrackID track, bool isDrums)
 
 std::optional<std::vector<DrumRow>> getSamplerSounds (const Song& song, TrackID track)
 {
-    // A row for each of the drum sampler's pads.
+    // A row for each of the drum sampler's pads that plays a sound, by their notes.
     for (const auto& device : getDeviceStates (findTrackState (song, track)))
     {
         if (isDrumSampler (device))
@@ -1184,7 +1184,8 @@ std::optional<std::vector<DrumRow>> getSamplerSounds (const Song& song, TrackID 
             std::vector<DrumRow> pads;
 
             for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
-                pads.push_back ({ devices::DrumSampler::firstNote + pad, getPadName (song, device, pad) });
+                if (! isPadEmpty (song, device, pad))
+                    pads.push_back ({ devices::DrumSampler::firstNote + pad, getPadName (song, device, pad) });
 
             return pads;
         }

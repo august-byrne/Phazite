@@ -513,15 +513,45 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
         menu.addItem ("On", true, device.isOn, act ([&projectContext, id, on = device.isOn] { setDeviceOn (projectContext, id, ! on); }));
 
     // Its parameters, each of which shows its automation lane under the track in the playlist (those with automation
-    // ticked). A plug-in's own window can't offer this: Automate Last Touched does, for the knob moved last.
-    juce::PopupMenu automate;
+    // ticked), those of a group (a drum pad's) in a submenu of their own. A plug-in's own window can't offer this: Automate
+    // Last Touched does, for the knob moved last.
+    juce::PopupMenu automate, groupPart;
+    juce::String group;
+    auto groupAutomated = false;
+
+    const auto addGroup = [&automate, &groupPart, &group, &groupAutomated]
+    {
+        if (groupPart.getNumItems() > 0)
+            automate.addSubMenu (group, groupPart, true, nullptr, groupAutomated);
+
+        groupPart = {};
+        groupAutomated = false;
+    };
 
     for (const auto& automated : getAutomationTargets (projectContext, id))
-        automate.addItem (
-            juce::PopupMenu::Item (automated.name)
-                .setTicked (automated.automated)
-                .setAction ([&projectContext, parameter = automated.parameter] { showAutomationLane (projectContext, parameter); }));
+    {
+        if (automated.group != group)
+        {
+            addGroup();
+            group = automated.group;
+        }
 
+        auto item = juce::PopupMenu::Item (automated.name)
+                        .setTicked (automated.automated)
+                        .setAction ([&projectContext, parameter = automated.parameter] { showAutomationLane (projectContext, parameter); });
+
+        if (group.isEmpty())
+        {
+            automate.addItem (std::move (item));
+        }
+        else
+        {
+            groupAutomated = groupAutomated || automated.automated;
+            groupPart.addItem (std::move (item));
+        }
+    }
+
+    addGroup();
     menu.addSubMenu ("Automate", automate, automate.getNumItems() > 0);
 
     menu.addSeparator();

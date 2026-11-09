@@ -13,6 +13,7 @@
 #include "devices/motion/Chorus.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
+#include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "internal/ExampleSongs.h"
@@ -593,9 +594,9 @@ namespace
     // project by tools/lmms-to-midi.ps1), played on Phazite's instruments in F major, 112 bars, as its recording plays them,
     // with its tempo (the tempo lane): a tape speeding up from 50 BPM to 114 over the intro, held through the themes (111 in
     // the last), and spinning up to 260 BPM over each breakdown before it drops to 50 and ramps back up over the build-up.
-    // An arpeggio of seventh chords in sixteenths on three layers, an octave and two up; a bass pulsing in sixteenths and a
-    // sub under them, B flat, G and A, which the chord lane follows; 80s drums on the Synthwave Kit, a fill closing every
-    // eighth bar; everything else pumping under the drums through sidechains; and the master's high-pass and low-pass in
+    // An arpeggio of seventh chords in sixteenths, doubled an octave up; a bass holding each chord's root, B flat, G and A,
+    // which the chord lane follows; 80s drums on the Synthwave Kit, a fill closing every eighth bar; the bass pumping
+    // under the kick and the arpeggio ducking under every drum, through sidechains; and the master's high-pass and low-pass in
     // automation lanes, as the recording's: the low-pass darkens the intro and opens into the theme, the high-pass sweeps
     // into each theme, and both thin the breakdowns and the build-ups and close over the outro. Its credit is in the
     // project's notes, so that it stays with what is made from it.
@@ -686,160 +687,56 @@ namespace
                          "(https://lmms.io/lsp/?action=show&file=12900) under the Creative Commons Attribution 4.0 license "
                          "(CC BY 4.0: https://creativecommons.org/licenses/by/4.0/).\n"
                          "Phazite plays its notes on its own instruments as its recording plays them, with its tempo, its first "
-                         "theme 24 bars long and everything a fourth higher than the project's; the sounds, the effects and "
-                         "the mix are Phazite's, not the original's. If you share something made from it, credit XCALIBUR.");
+                         "theme 24 bars long and everything a fourth higher than the project's; its bass holds each chord's root, "
+                         "where the original plays the fifth over a sub, and its arpeggio's three layers are one sound. The "
+                         "sounds, the effects and the mix are Phazite's, not the original's. If you share something made from it, "
+                         "credit XCALIBUR.");
 
-        // The drums: a kick on every beat and a snare on two and four, a fill closing every eighth bar, and a pickup into the
-        // first theme and each build-up, on the Synthwave Kit, whose sounds were made after the original's five samples
-        // (from the free 80s Retro Futuristic Drum Pack), measured: a kick whose pitch falls from about 250 Hz to 65 Hz,
-        // held 45 ms and then cut short; a snare whose 160 Hz tone carries most of it under bright noise; a clap around
-        // 1.1 kHz over a long tail; a woody knock for the percussion; and a bright open hat that darkens as it rings. The
-        // snare's and the clap's long tails spread wide, as the samples' do, and the drums stay dry, as the original's do.
+        // Every track plays one of Phazite's presets as it comes, and the song mixes them: their levels, the plate they share,
+        // the pumping under the kick and the master's chain. The drums: a kick on every beat and a snare on two and four, a
+        // fill of rim shots and claps closing every eighth bar, and a pickup into the first theme and each build-up, on the
+        // Synthwave Kit; and, as the recording plays it, the kick on every beat of the intro, under the master's high-pass as
+        // it opens, up to the pickup.
         const auto drums = song.addTrack ("Drums", "Vermilion");
         song.setInstrument (drums, devices::DrumSampler::typeID, "Drum Sampler/Kits/Synthwave Kit");
         auto drumNotes = part ("Drums", 0);
 
-        // The recording's kick on every beat of the intro, under the master's high-pass as it opens, up to the pickup.
         for (int beat = 0; beat < 7 * 4; ++beat)
             drumNotes.push_back ({ .start = beat * notes.ticksPerBeat, .length = notes.ticksPerBeat / 4, .pitch = 36, .velocity = 100 });
 
         song.addNotes (drums, notes, drumNotes, 8);
         song.setVolume (drums, -3.0f);
 
-        // Its low mids a little down, where the kit rings more than the original's drums do in its mix.
-        const auto drumsEq = song.addEffect (drums, devices::Equalizer::typeID);
+        // The bass: one continuous note on each chord's root, pumping under the kick, as the recording's bass and sub sound
+        // together, on the Synthwave Bass, whose own sub is where the original's sub plays (so its notes go an octave up).
+        // The original's bass plays each chord's fifth over its sub; one sound with its own sub keeps the root instead.
+        const auto bass = song.addTrack ("Bass", "Blue");
+        song.setInstrument (bass, devices::WavetableSynth::typeID, "Wavetable/Bass/Synthwave Bass");
+        song.addNotes (bass, notes, part ("Sub", up + 12), 4);
+        song.setVolume (bass, -3.0f);
 
-        // An EQ's band: on, its type (0 a low cut, 1 a low shelf, 2 a bell), its frequency, gain and Q.
-        const auto setBand = [&song] (DeviceID eq, int band, float type, float hertz, float decibels, float q)
-        {
-            const auto prefix = "band" + juce::String (band);
-            song.set (eq, (prefix + "On").toRawUTF8(), 1.0f);
-            song.set (eq, (prefix + "Type").toRawUTF8(), type);
-            song.set (eq, (prefix + "Frequency").toRawUTF8(), hertz);
-            song.set (eq, (prefix + "Gain").toRawUTF8(), decibels);
-            song.set (eq, (prefix + "Q").toRawUTF8(), q);
-        };
-
-        setBand (drumsEq, 3, 2.0f, 500.0f, -3.0f, 0.8f);
-
-        // The sub, on the chords' roots, as the original's: three saws a few cents apart through a 12 dB low-pass, which each
-        // note opens to about 2.7 kHz and which closes over a second and a half to 170 Hz (the original's falls from 6 kHz to
-        // about 155 Hz, further than the synth's envelope reaches), with no envelope on its level; then an ensemble chorus,
-        // a little drive (the original clips at -3 dB) and the original's EQ, which lifts 31, 125 and 250 Hz.
-        const auto sub = song.addTrack ("Sub", "Blue");
-        const auto subSynth = song.setInstrument (sub, devices::Synth::typeID, "Synth/Bass/Reese Bass");
-
-        for (const auto& [parameter, value] : { std::pair ("oscMix", 0.0f),
-                                                std::pair ("subLevel", 0.0f),
-                                                std::pair ("unisonOn", 1.0f),
-                                                std::pair ("unisonVoices", 2.0f),
-                                                std::pair ("unisonDetune", 17.0f),
-                                                std::pair ("unisonSpread", 0.8f),
-                                                std::pair ("lfoOn", 0.0f),
-                                                std::pair ("filterOn", 1.0f),
-                                                std::pair ("filterType", 0.0f),
-                                                std::pair ("filterSlope", 0.0f),
-                                                std::pair ("cutoff", 170.0f),
-                                                std::pair ("resonance", 0.35f),
-                                                std::pair ("keyTracking", 0.0f),
-                                                std::pair ("filterEnvelopeOn", 1.0f),
-                                                std::pair ("filterEnvelope", 48.0f),
-                                                std::pair ("filterAttack", 1.0f),
-                                                std::pair ("filterDecay", 1528.0f),
-                                                std::pair ("filterSustain", 0.0f),
-                                                std::pair ("filterRelease", 100.0f),
-                                                std::pair ("filterDecayCurve", 0.5f),
-                                                std::pair ("attack", 2.0f),
-                                                std::pair ("sustain", 1.0f),
-                                                std::pair ("release", 60.0f),
-                                                std::pair ("voiceMode", 0.0f),
-                                                std::pair ("glide", 0.0f) })
-            song.set (subSynth, parameter, value);
-
-        song.addEffect (sub, devices::Chorus::typeID, "Chorus/Ensemble/Lush Ensemble");
-        song.addEffect (sub, devices::Saturator::typeID, "Saturator/Warmth/Subtle Drive");
-        const auto subEq = song.addEffect (sub, devices::Equalizer::typeID);
-        setBand (subEq, 2, 2.0f, 31.0f, 11.9f, 1.4f);
-        setBand (subEq, 3, 2.0f, 125.0f, 6.7f, 1.4f);
-        setBand (subEq, 4, 2.0f, 250.0f, 8.6f, 1.4f);
-        song.addNotes (sub, notes, part ("Sub", up), 4);
-
-        // Brighter through the intro, as the recording's, whose strongest notes there are the sub's harmonics.
-        song.automate ({ subSynth, "cutoff" }, { { recorded (0), 900.0f }, { recorded (7.7), 900.0f }, { recorded (8), 170.0f } });
-        song.setVolume (sub, -9.0f);
-
-        // The bass's sixteenths over it, as the original's: a saw whose phase two waves move (LMMS's phase modulation, by a
-        // sine a fourth above and a wave at the saw's own pitch, each at a third of full: an index of about 2), which the FM
-        // synth plays as a saw carrier with two sines under it; its level falls to nothing in 192 ms while its tone holds;
-        // then the original's EQ, which lifts everything under 150 Hz by 7 dB.
-        const auto bass = song.addTrack ("Bass", "Sky blue");
-        const auto bassSynth = song.setInstrument (bass, devices::FmSynth::typeID, "FM/Bass/FM Bass");
-
-        for (const auto& [parameter, value] :
-             { std::pair ("algorithm", 3.0f),    std::pair ("voiceMode", 0.0f),     std::pair ("glide", 0.0f),
-               std::pair ("op1Wave", 2.0f),      std::pair ("op1Ratio", 1.0f),      std::pair ("op1Level", 1.0f),
-               std::pair ("op1Attack", 0.5f),    std::pair ("op1Decay", 192.0f),    std::pair ("op1Sustain", 0.0f),
-               std::pair ("op1Release", 100.0f), std::pair ("op1DecayCurve", 0.0f), std::pair ("op1ReleaseCurve", 0.0f),
-               std::pair ("op2Wave", 0.0f),      std::pair ("op2Ratio", 1.0f),      std::pair ("op2Fine", 0.33f),
-               std::pair ("op2Detune", 6.0f),    std::pair ("op2Level", 0.41f),     std::pair ("op2Velocity", 0.0f),
-               std::pair ("op2KeyScale", 0.0f),  std::pair ("op2Attack", 0.5f),     std::pair ("op2Decay", 0.0f),
-               std::pair ("op2Sustain", 1.0f),   std::pair ("op2Release", 300.0f),  std::pair ("op3On", 1.0f),
-               std::pair ("op3Wave", 0.0f),      std::pair ("op3Ratio", 1.0f),      std::pair ("op3Level", 0.41f),
-               std::pair ("op3Velocity", 0.0f),  std::pair ("op3KeyScale", 0.0f),   std::pair ("op3Attack", 0.5f),
-               std::pair ("op3Decay", 0.0f),     std::pair ("op3Sustain", 1.0f),    std::pair ("op3Release", 300.0f),
-               std::pair ("op4On", 0.0f) })
-            song.set (bassSynth, parameter, value);
-
-        const auto bassEq = song.addEffect (bass, devices::Equalizer::typeID);
-        setBand (bassEq, 2, 1.0f, 150.0f, 7.0f, 0.71f);
-        setBand (bassEq, 3, 2.0f, 400.0f, 2.5f, 0.7f);
-        song.addNotes (bass, notes, part ("Bass", up), 4);
-        song.setVolume (bass, -7.0f);
-
-        // The arpeggio, and its second layer an octave up, the loudest of the three, each dry through a tape's wobble, as the
-        // original's channel plays them through a vinyl record's warp. The second is the original's pad sound plucked, as
-        // its envelope plays it: in 25 ms, and down 40 dB over 270 ms, so that each sixteenth fades before the next.
+        // The arpeggio, its three layers in one sound: the Synthwave Arp, which doubles itself an octave up, on the line of
+        // the original's loudest layer, through a tape's wobble and spread wide.
         const auto arp = song.addTrack ("Arp", "Bluish green");
-        song.setInstrument (arp, devices::Synth::typeID, "Synth/Pluck/Bright Pluck");
+        song.setInstrument (arp, devices::WavetableSynth::typeID, "Wavetable/Pluck/Synthwave Arp");
         song.addEffect (arp, devices::Chorus::typeID, "Chorus/Creative/Tape Wobble");
-        song.addNotes (arp, notes, part ("Arp", up), 4);
-        song.setVolume (arp, -8.0f);
+        song.addEffect (arp, devices::StereoExpander::typeID, "Stereo Expander/Width/Wide Stereo");
+        song.addNotes (arp, notes, part ("Arp Pad", up), 4);
+        song.setVolume (arp, -5.0f);
 
-        const auto arpPad = song.addTrack ("Arp Pad", "Reddish purple");
-        song.setInstrument (arpPad, devices::WavetableSynth::typeID, "Wavetable/Pluck/Harmonic Pluck");
-        const auto padWobble = song.addEffect (arpPad, devices::Chorus::typeID, "Chorus/Creative/Tape Wobble");
-        song.set (padWobble, "stereo", 0.6f); // the original's pad is stereo
-
-        // Both warmer, as the original's are: their notes' own octave up a little and the upper mids well down.
-        for (const auto layer : { arp, arpPad })
-        {
-            const auto warmth = song.addEffect (layer, devices::Equalizer::typeID);
-            setBand (warmth, 3, 2.0f, 870.0f, 2.0f, 1.0f);
-            setBand (warmth, 5, 2.0f, 2670.0f, -8.0f, 0.8f);
-        }
-        song.addNotes (arpPad, notes, part ("Arp Pad", up), 4);
-        song.setVolume (arpPad, 3.5f);
-
-        // Its third layer two octaves up, a glassy pluck, which carries the intro and the breakdowns through the high-pass.
-        const auto sparkle = song.addTrack ("Sparkle", "Yellow");
-        song.setInstrument (sparkle, devices::FmSynth::typeID, "FM/Pluck/Glass Pluck");
-        song.addNotes (sparkle, notes, part ("Sparkle", up), 4);
-        song.setVolume (sparkle, -7.0f);
-
-        // A plate under the bass, the sub and the third layer, a quarter of them wet, as the original's channel of them plays
-        // them; the drums and the arpeggio's first two layers stay dry, as the original's do.
+        // A plate under the bass, a quarter of it wet, and a little of the arpeggio, as the original's glassy layer had; the
+        // drums stay dry, as the original's do.
         const auto plate = song.addReturn (bass, devices::Reverb::typeID, "Reverb/Plates/Vocal Plate", -10.0f);
+        song.send (arp, plate, -16.0f);
 
-        if (const auto reverbs = getEffects (song.context, plate); ! reverbs.empty())
-            song.set (reverbs.front().id, "lowCut", 40.0f); // as the original's plate, which keeps the bass's lows
-        song.send (sub, plate, -10.0f);
-        song.send (sparkle, plate, -10.0f);
-
-        // Everything but the drums pumps hard under the kick, the plate too, as the original's channels do, keyed by its
-        // peak controller: down about 30 dB at the beat, back in about 200 ms.
-        for (const auto ducked : { sub, bass, arp, arpPad, sparkle, plate })
+        // The bass and the plate pump under the kick; the arpeggio ducks under every drum, the snare and the claps too, as
+        // the original's do.
+        for (const auto ducked : { bass, plate })
             if (const auto pump = duckUnder (song.context, ducked, drums); pump.isValid())
                 song.loadPreset (pump, "Compressor/Sidechain/Sidechain Pump");
+
+        if (const auto duck = duckUnder (song.context, arp, drums); duck.isValid())
+            song.loadPreset (duck, "Compressor/Sidechain/Sidechain Duck");
 
         // The chord lane: each of the sub's notes is its chord's root, in F major.
         setLaneKey (song.context, BeatPosition(), key);
@@ -854,6 +751,18 @@ namespace
         // The original's master EQ, warm and dark: its ten bands lift the lows and take the rest down a little, and its DJ EQ
         // takes the lows and the highs down, which leaves the lows a little up and the highs well down.
         const auto masterEq = song.addEffect ({}, devices::Equalizer::typeID);
+
+        // An EQ's band: on, its type (0 a low cut, 1 a low shelf, 2 a bell, 4 a high shelf), its frequency, gain and Q.
+        const auto setBand = [&song] (DeviceID eq, int band, float type, float hertz, float decibels, float q)
+        {
+            const auto prefix = "band" + juce::String (band);
+            song.set (eq, (prefix + "On").toRawUTF8(), 1.0f);
+            song.set (eq, (prefix + "Type").toRawUTF8(), type);
+            song.set (eq, (prefix + "Frequency").toRawUTF8(), hertz);
+            song.set (eq, (prefix + "Gain").toRawUTF8(), decibels);
+            song.set (eq, (prefix + "Q").toRawUTF8(), q);
+        };
+
         setBand (masterEq, 2, 1.0f, 150.0f, 2.5f, 0.71f);
         setBand (masterEq, 3, 2.0f, 400.0f, -3.0f, 1.4f);
         setBand (masterEq, 4, 2.0f, 1600.0f, -4.0f, 0.7f);
@@ -944,6 +853,7 @@ namespace
         // The drums: a beat on the drum sampler's house kit, and samples placed in the playlist, as FL Studio users place them.
         const auto beat = song.addTrack ("Beat", "Vermilion");
         song.setInstrument (beat, devices::DrumSampler::typeID, "Drum Sampler/Kits/House Kit");
+        song.setVolume (beat, 2.2f); // the kick where it was, before the kit's pads were leveled as a kit (docs/presets.md)
         constexpr int ride = 51;
 
         // The intro's and the outro's bar: the kick on every beat, a closed hat between.
@@ -1214,6 +1124,7 @@ namespace
         // bars, the same ending in a fill of snare and toms.
         const auto beat = song.addTrack ("Beat", "Vermilion");
         song.setInstrument (beat, devices::DrumSampler::typeID, "Drum Sampler/Kits/Lo-Fi Kit");
+        song.setVolume (beat, 2.5f);   // the kick where it was, before the kit's pads were leveled as a kit (docs/presets.md)
         constexpr double swing = 0.08; // how late the offbeats are, in beats
         constexpr double lazy = 0.03;  // how late the snare is
         constexpr int lowTom = 45, midTom = 47, highTom = 50;
@@ -1447,9 +1358,9 @@ const std::vector<ExampleSong>& getExampleSongs()
 {
     static const std::vector<ExampleSong> songs {
         { "exodus", "Exodus",
-          "Synthwave at 111 BPM: Exodus by XCALIBUR (CC BY 4.0), its notes on Phazite's instruments, its tempo speeding up and "
-          "slowing down in the tempo lane: an arpeggio of seventh chords on three layers, a bass in sixteenths and a sub, 80s "
-          "drums, everything pumping under them through sidechains, and the master's filters sweeping in automation lanes.",
+          "Synthwave at 114 BPM: Exodus by XCALIBUR (CC BY 4.0), its notes on Phazite's instruments, its tempo speeding up and "
+          "slowing down in the tempo lane: an arpeggio of seventh chords doubled an octave up, a bass pumping under the kick, "
+          "80s drums with gated snares, and the master's filters sweeping in automation lanes.",
           "Arp" },
         { "loFiBeat", "Lo-fi Beat",
           "A lo-fi beat at 82 BPM: a lazy, swung kit with fills, shaker, vinyl and rain samples, ninth chords on a wobbling "

@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // What each instrument preset that comes with Phazite (resources/presets) sounds like, in numbers, for whoever makes or
 // checks them (docs/presets.md): each played as one note at its kind's pitch, at velocity 100 and again at 50 (for what
-// velocity does), measured for its level, loudness, attack, decay, release, brightness as it goes on, pitch and width; and
-// each kit's pads one at a time. It writes a report and WAV files to listen to: the note, and a phrase of its kind of sound
-// (a bass line, a melody, chords, an arpeggio, a beat). ctest and CI skip it; run it from a build in the repository with
+// velocity does), measured for its level, loudness, attack, decay, release, brightness as it goes on, pitch and width; each
+// kit's pads one at a time; and how far and how long each sidechain preset ducks a sound under each kit's kick. It writes a
+// report and WAV files to listen to: the note, and a phrase of its kind of sound (a bass line, a melody, chords, an
+// arpeggio, a beat), and a pad pumping under each kick. ctest and CI skip it; run it from a build in the repository with
 //   phazite_tests.exe --test-suite=preset-report --no-skip
 // with the environment variable PHAZITE_PRESET_REPORT naming the folder for report.md and the WAV files (else a temporary
 // folder, which it names).
 #include "TestHelpers.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
+#include "devices/dynamics/Compressor.h"
 #include "devices/fm/FmSynth.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/SampleAnalysis.h"
 #include "devices/sampler/Sampler.h"
+#include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
@@ -67,13 +70,13 @@ struct Preset
     }
 };
 
-std::optional<Preset> readPreset (const juce::File& file)
+std::optional<Preset> readPreset (const juce::File& file, devices::DeviceKind kind = devices::DeviceKind::instrument)
 {
     const auto device = phazite::readPreset (file)[keys::device];
 
     for (const auto* info : phazite::getOwnDevices())
     {
-        if (toString (info->typeID) != device[keys::type].toString() || info->kind != devices::DeviceKind::instrument)
+        if (toString (info->typeID) != device[keys::type].toString() || info->kind != kind)
             continue;
 
         Preset preset;
@@ -446,7 +449,7 @@ Events getBeat (int& numSamples)
     Events events;
     constexpr double step = 60.0 / 100.0 / 4.0;
     constexpr int kicks[] = { 0, 6, 8, 16, 19, 24, 26 };
-    const auto pad = [] (int index) { return devices::DrumSampler::firstNote + index; };
+    const auto pad = [] (int index) { return devices::DrumSampler::kitFirstNote + index; };
 
     for (const auto each : kicks)
         note (events, each * step, step, pad (0));
@@ -459,11 +462,161 @@ Events getBeat (int& numSamples)
     for (int each = 0; each < 32; each += 2)
         note (events, each * step, step, each % 16 == 14 ? pad (10) : pad (6), each % 4 == 0 ? 0.8f : 0.55f);
 
-    for (int index = 0; index < devices::DrumSampler::numPads; ++index)
+    for (int index = 0; index < devices::DrumSampler::kitPads; ++index)
         note (events, (32 + index * 2) * step, step, pad (index));
 
-    numSamples = at ((32 + 2 * devices::DrumSampler::numPads) * step + 2.0);
+    numSamples = at ((32 + 2 * devices::DrumSampler::kitPads) * step + 2.0);
     return events;
+}
+
+//==============================================================================
+// The sidechain presets (the compressor's Sidechain kind), each ducking a sound under a kit's kick on every beat at 120 bpm.
+constexpr double pumpBeat = 0.5; // seconds: a beat at 120 bpm
+constexpr int pumpBeats = 8;
+
+// The kit's kick on every beat, as its drum sampler plays it, at its kit's levels: what a sidechain hears of a drum track.
+Audio renderKicks (const Preset& kit)
+{
+    Events kicks;
+
+    for (int beat = 0; beat < pumpBeats; ++beat)
+        note (kicks, beat * pumpBeat, 0.1, devices::DrumSampler::kitFirstNote);
+
+    return render (kit, kicks, at (pumpBeat * pumpBeats));
+}
+
+// What the compressor's preset makes of a sound, with a key in its sidechain.
+Audio compress (const Preset& preset, Audio audio, const Audio& key)
+{
+    devices::Compressor compressor;
+    compressor.prepare (rate, blockSize);
+
+    for (int done = 0; done < audio.getNumSamples(); done += blockSize)
+    {
+        const auto length = std::min (blockSize, audio.getNumSamples() - done);
+        float* channels[] = { audio.getWritePointer (0, done), audio.getWritePointer (1, done) };
+        const float* sidechain[] = { key.getReadPointer (0, done), key.getReadPointer (1, done) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = length;
+        context.sidechain = sidechain;
+        context.numSidechainChannels = 2;
+        context.parameters = preset.values;
+        context.isPlaying = true;
+        compressor.process (context);
+    }
+
+    return audio;
+}
+
+// How a steady tone (a sine at -12 dBFS) ducks under the key: how far down at the beat, and how long from the beat until it
+// is back within 3 dB and within 1 dB (at most the beat's 500 ms), averaged over the third to the eighth beats, once settled.
+struct Pump
+{
+    float depth = 0.0f, within3 = 0.0f, within1 = 0.0f;
+};
+
+Pump measurePump (const Preset& preset, const Audio& key)
+{
+    Audio tone (2, key.getNumSamples());
+
+    for (int i = 0; i < tone.getNumSamples(); ++i)
+        for (int channel = 0; channel < 2; ++channel)
+            tone.setSample (channel, i, 0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * 440.0 * i / rate));
+
+    const auto in = getEnvelope (tone), out = getEnvelope (compress (preset, tone, key));
+    constexpr auto hopsPerBeat = (int) (pumpBeat * rate) / hop;
+    Pump sum;
+    auto beats = 0;
+
+    for (int beat = 2; beat < pumpBeats; ++beat)
+    {
+        const auto reduction = [&] (int step)
+        {
+            const auto index = (size_t) (beat * hopsPerBeat + step);
+            return in[index] - out[index];
+        };
+
+        auto deepest = 0.0f;
+        auto deepestAt = 0;
+
+        for (int step = 0; step < hopsPerBeat; ++step)
+        {
+            if (reduction (step) > deepest)
+            {
+                deepest = reduction (step);
+                deepestAt = step;
+            }
+        }
+
+        const auto backWithin = [&] (float decibels)
+        {
+            for (auto step = deepestAt; step < hopsPerBeat; ++step)
+                if (reduction (step) <= decibels)
+                    return (float) (step * hop) * 1000.0f / (float) rate;
+
+            return (float) pumpBeat * 1000.0f;
+        };
+
+        sum.depth += deepest;
+        sum.within3 += backWithin (3.0f);
+        sum.within1 += backWithin (1.0f);
+        ++beats;
+    }
+
+    return { sum.depth / (float) beats, sum.within3 / (float) beats, sum.within1 / (float) beats };
+}
+
+//==============================================================================
+// The saturator's presets: how much each colours a sine at a level, as its total harmonic distortion (the second to the
+// tenth harmonics against the fundamental, in decibels), measured over 8192 samples after half a second, the sine on a
+// bin of the transform so that each harmonic falls on one.
+float measureDistortion (const Preset& preset, float peakDecibels)
+{
+    constexpr int order = 13, size = 1 << order, cycles = 37; // 216.8 Hz at 48 kHz
+    const auto numSamples = at (0.5) + size;
+    Audio audio (2, numSamples);
+    const auto amplitude = juce::Decibels::decibelsToGain (peakDecibels);
+
+    for (int i = 0; i < numSamples; ++i)
+        for (int channel = 0; channel < 2; ++channel)
+            audio.setSample (channel, i, amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * cycles * i / size));
+
+    devices::Saturator saturator;
+    saturator.prepare (rate, blockSize);
+
+    for (int done = 0; done < numSamples; done += blockSize)
+    {
+        float* channels[] = { audio.getWritePointer (0, done), audio.getWritePointer (1, done) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = std::min (blockSize, numSamples - done);
+        context.parameters = preset.values;
+        context.isPlaying = true;
+        saturator.process (context);
+    }
+
+    std::vector<float> spectrum ((size_t) size * 2, 0.0f);
+    const auto start = numSamples - size;
+
+    for (int i = 0; i < size; ++i)
+        spectrum[(size_t) i] =
+            audio.getSample (0, start + i) * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * i / size));
+
+    juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (spectrum.data());
+    const auto energyAt = [&spectrum] (int bin) // the window spreads a harmonic over its bin and the two beside it
+    {
+        return (double) spectrum[(size_t) bin - 1] * spectrum[(size_t) bin - 1] + (double) spectrum[(size_t) bin] * spectrum[(size_t) bin]
+               + (double) spectrum[(size_t) bin + 1] * spectrum[(size_t) bin + 1];
+    };
+    auto harmonics = 0.0;
+
+    for (int harmonic = 2; harmonic <= 10; ++harmonic)
+        harmonics += energyAt (harmonic * cycles);
+
+    return toDecibels (std::sqrt (harmonics / energyAt (cycles)));
 }
 } // namespace
 
@@ -552,10 +705,11 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
             const auto beat = getBeat (numSamples);
             writeWav (render (*preset, beat, numSamples), out.getChildFile (preset->name + " - beat.wav"));
 
-            for (int pad = 0; pad < devices::DrumSampler::numPads; ++pad)
+            for (int pad = devices::DrumSampler::kitFirstNote; pad < devices::DrumSampler::kitFirstNote + devices::DrumSampler::kitPads;
+                 ++pad)
             {
                 Events hit;
-                note (hit, 0.0, 0.1, devices::DrumSampler::firstNote + pad);
+                note (hit, 0.0, 0.1, pad);
                 const auto audio = render (*preset, hit, at (3.0));
                 const auto envelope = getEnvelope (audio);
                 const auto highest = *std::max_element (envelope.begin(), envelope.end());
@@ -571,7 +725,7 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
                 }
 
                 const auto pitch = devices::detectPitch (audio, rate);
-                drumLines.add ("| " + preset->name + " | " + juce::String (pad + 1) + " | "
+                drumLines.add ("| " + preset->name + " | " + juce::String (pad) + " | "
                                + preset->sounds[phazite::schema::getPadSound (pad)].toString() + " | "
                                + decibels (toDecibels (audio.getMagnitude (0, audio.getNumSamples()))) + " | "
                                + decibels (getLoudness (audio).momentary) + " | " + juce::String (length) + " | "
@@ -619,7 +773,89 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
                    + decibels (chordPeak) + " |");
     }
 
+    // The sidechain presets, each under every kit's kick (the kits whatever PHAZITE_PRESET_FILTER says), and the Warm Pad's
+    // chord pumping under it, with the kick, to listen to.
+    std::vector<Preset> kits, sidechains;
+
+    for (const auto& file : files)
+    {
+        if (auto kit = readPreset (file); kit.has_value() && kit->device == "Drum Sampler")
+            kits.push_back (std::move (*kit));
+        else if (auto effect = readPreset (file, devices::DeviceKind::effect);
+                 effect.has_value() && toString (effect->info->typeID) == devices::Compressor::typeID && effect->kind == "Sidechain"
+                 && file.getRelativePathFrom (root).replaceCharacter ('\\', '/').contains (filter))
+            sidechains.push_back (std::move (*effect));
+    }
+
+    juce::StringArray pumpLines;
+    pumpLines.add ({});
+    pumpLines.add ("## Sidechain presets, pumping");
+    pumpLines.add ({});
+    pumpLines.add ("Each ducks a steady tone (a sine at -12 dBFS) under a kit's kick on every beat at 120 bpm (a beat is 500 ms), "
+                   "the kick as the kit's drum sampler plays it: Depth = how far down at the beat; Back 3/1 dB = how long from the "
+                   "beat until the tone is back within 3 dB and within 1 dB (500 = not within the beat); the averages of the third to "
+                   "the eighth beats. Beside it, a WAV of the Warm Pad's chord pumping under each kit's kick.");
+    pumpLines.add ({});
+    pumpLines.add ("| Preset | Kit's kick | Depth dB | Back 3 dB ms | Back 1 dB ms |");
+    pumpLines.add ("|---|---|---|---|---|");
+
+    const auto pad = readPreset (root.getChildFile ("Synth/Pad/Warm Pad" + juce::String (phazite::presetExtension)));
+    Events chord;
+
+    for (const auto tone : { 48, 55, 60, 64 })
+        note (chord, 0.0, pumpBeat * pumpBeats, tone);
+
+    const auto padAudio = pad.has_value() ? render (*pad, chord, at (pumpBeat * pumpBeats)) : Audio();
+    std::vector<Audio> keys;
+
+    for (const auto& kit : kits)
+        keys.push_back (renderKicks (kit));
+
+    for (const auto& sidechain : sidechains)
+    {
+        for (size_t k = 0; k < kits.size(); ++k)
+        {
+            const auto pump = measurePump (sidechain, keys[k]);
+            pumpLines.add ("| " + sidechain.name + " | " + kits[k].name + " | " + decibels (pump.depth) + " | "
+                           + juce::String (juce::roundToInt (pump.within3)) + " | " + juce::String (juce::roundToInt (pump.within1))
+                           + " |");
+
+            if (padAudio.getNumSamples() > 0)
+            {
+                auto pumped = compress (sidechain, padAudio, keys[k]);
+
+                for (int channel = 0; channel < 2; ++channel)
+                    pumped.addFrom (channel, 0, keys[k], channel, 0, keys[k].getNumSamples());
+
+                writeWav (pumped, folder.getChildFile ("Compressor")
+                                      .getChildFile ("Sidechain")
+                                      .getChildFile (sidechain.name + " - " + kits[k].name + ".wav"));
+            }
+        }
+    }
+
+    // The saturator's presets, each on a sine at three levels.
+    juce::StringArray driveLines;
+    driveLines.add ({});
+    driveLines.add ("## Saturator presets, colour");
+    driveLines.add ({});
+    driveLines.add ("Each on a sine at 217 Hz peaking at -18, -12 and -6 dBFS: its total harmonic distortion, the second to the tenth "
+                    "harmonics against the fundamental, in dB (-40 dB is 1 %, -20 dB is 10 %).");
+    driveLines.add ({});
+    driveLines.add ("| Preset | THD at -18 | THD at -12 | THD at -6 |");
+    driveLines.add ("|---|---|---|---|");
+
+    for (const auto& file : files)
+        if (auto effect = readPreset (file, devices::DeviceKind::effect);
+            effect.has_value() && toString (effect->info->typeID) == devices::Saturator::typeID
+            && file.getRelativePathFrom (root).replaceCharacter ('\\', '/').contains (filter))
+            driveLines.add ("| " + effect->kind + " / " + effect->name + " | " + decibels (measureDistortion (*effect, -18.0f)) + " | "
+                            + decibels (measureDistortion (*effect, -12.0f)) + " | " + decibels (measureDistortion (*effect, -6.0f))
+                            + " |");
+
     lines.addArray (drumLines);
+    lines.addArray (pumpLines);
+    lines.addArray (driveLines);
     const auto report = folder.getChildFile ("report.md");
     REQUIRE (report.replaceWithText (lines.joinIntoString ("\n") + "\n"));
     MESSAGE ("The preset report is in " << folder.getFullPathName().toStdString());

@@ -28,7 +28,7 @@
       "drive": 0.0,
       "filterEnvelope": 40.0,
       "keyTracking": 0.0,
-      "filterVelocity": 0.0,
+      "filterVelocity": 0.25,
       "filterAttack": 0.0,
       "filterDecay": 630.0,
       "filterSustain": 0.1,

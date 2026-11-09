@@ -86,14 +86,50 @@ Sound makeCowbell (double sampleRate);
 // Two mono sounds as one stereo sound, the left and the right, as long as the longer.
 Sound makeStereo (const Sound& left, const Sound& right);
 
+// A gated reverb, as the 80s gave their snares, claps and toms (Hugh Padgham's compressed room on Phil Collins's drums, and
+// the AMS RMX16's Nonlin programs after it): the drum played into a dense, bright room, whose sound a gate the hit opens
+// lets through, coming in over onsetSeconds (so that the drum is heard first), falling only by fallDecibels while it holds
+// for gateSeconds, then cut in closeSeconds, so that the drum sounds huge yet stops dead, whatever its own decay. The room
+// is at its level against the drum's peak, through its band (the RMX16 keeps it under 8 kHz), each side a room of its own
+// so that it spreads wide. A mono drum comes back stereo, long enough for its fade (FactoryDrums.h) to come after the gate.
+struct GatedReverbShape
+{
+    double onsetSeconds = 0.012, gateSeconds = 0.25, closeSeconds = 0.05;
+    double fallDecibels = 3.0;
+    double level = 0.5; // the room's peak against the drum's
+    double lowCut = 250.0, highCut = 8000.0;
+    int seed = 1;
+};
+
+Sound addGatedReverb (const Sound& drum, double sampleRate, const GatedReverbShape&);
+
+// A drum as the Simmons SDS-V makes its toms and snares: a triangle wave whose pitch bends down only, from startHz to endHz
+// (bendSeconds its time constant), fading over toneSeconds; noise through a four-pole low-pass without resonance, as the
+// SDS-V's toms have none, its cutoff sweeping from noiseFromHz down to noiseToHz (sweepSeconds) as it fades over
+// noiseSeconds; and a millisecond's click, as its Click control adds.
+struct SimmonsShape
+{
+    double startHz = 200.0, endHz = 100.0, bendSeconds = 0.15;
+    double toneSeconds = 0.15;
+    double noise = 0.15; // the noise's share, against the tone's
+    double noiseFromHz = 4000.0, noiseToHz = 600.0, sweepSeconds = 0.15, noiseSeconds = 0.1;
+    double click = 0.3;
+    double length = 1.0, drive = 1.2;
+    int seed = 1;
+};
+
+Sound makeSimmons (double sampleRate, const SimmonsShape&);
+
 // A drum as an old sampler played it back: read at heldRate with bits of resolution, its top cut at cutoffHz, and
-// saturated with drive. In place.
+// saturated with drive. In place. Companded (muLaw), its steps grow with its level, as the LinnDrum's and the Oberheim
+// DMX's 8-bit samples' did, so that a quiet tail stays clean while the hit is gritty.
 struct DustShape
 {
     double heldRate = 22050.0;
     int bits = 12;
     double cutoffHz = 6000.0;
     double drive = 1.5;
+    bool muLaw = false;
 };
 
 void makeDusty (Sound&, double sampleRate, const DustShape&);

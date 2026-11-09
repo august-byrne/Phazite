@@ -12,6 +12,7 @@
 #include "engine/nodes/Container.h"
 #include "engine/nodes/DeviceNode.h"
 #include "engine/nodes/NoteSequence.h"
+#include "engine/nodes/PartOutput.h"
 #include "engine/nodes/Strip.h"
 
 #include <cstdint>
@@ -37,13 +38,15 @@ struct Plan
     bool metronome = false;
 
     // A strip whose sound another adds up: after its fader, or before it (a send before the fader); at a send's level (or
-    // as it is); lined up with the others there by a delay (none when it needs none).
+    // as it is); lined up with the others there by a delay (none when it needs none). Or one of its devices' parts, which
+    // that device plays into an output of its own (a drum sampler's pad on a track of its own), from where the device is.
     struct Input
     {
         int strip = 0;
         std::shared_ptr<Delay> delay {};
         bool beforeFader = false;
         std::shared_ptr<SendLevel> level {};
+        std::shared_ptr<PartOutput> part {};
     };
 
     // A device, with the parameters its automation moves, which follow the song as late as the sound comes into it (from
@@ -61,6 +64,11 @@ struct Plan
         // delay (none when it needs none); or none.
         int sidechain = -1;
         std::shared_ptr<Delay> sidechainDelay {};
+
+        // Its parts that play into outputs of their own, which other strips add up (Input::part): each one's buffer, and the
+        // same as the device takes them; none for most devices.
+        std::vector<std::shared_ptr<PartOutput>> partOutputs {};
+        std::vector<devices::PartOutput> parts {};
     };
 
     // A modulator moving a fader's volume or pan (a channel's, or a container's chain's) or a chain's crossover, by its place
@@ -121,8 +129,9 @@ struct Plan
         std::vector<Container> containers; // in their order among its devices
 
         // Whether another strip takes its sound before its fader (a send), or after its fader and before its mute (a
-        // sidechain), which it then plays even while it is muted.
-        bool feedsBeforeFader = false, feedsSidechain = false;
+        // sidechain), which it then plays even while it is muted; and whether another adds up one of its devices' parts
+        // (Input::part), which it then plays while it is muted too, so that the part follows its own channel's mute.
+        bool feedsBeforeFader = false, feedsSidechain = false, feedsParts = false;
 
         // Whether its instrument is handed its blocks early (devices::Processor::startsEarly(), without a sidechain), its
         // notes and modulators taken first: the engine's, as it is given the plan.

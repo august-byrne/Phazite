@@ -35,12 +35,19 @@ public:
     // The track its sidechain listens to, or none.
     SidechainChoice getSidechainSource() const;
 
-    // The drum sampler's pads (model/devices/internal/DrumKit.h): what each plays, and putting a sound file on one, or the kit's
-    // sound back, as undo steps. setPadSound() returns false for a file that isn't a sound.
-    juce::String getPadName (int pad) const;
-    bool hasPadSound (int pad) const;
-    bool setPadSound (int pad, const juce::File&) const;
-    void clearPadSound (int pad) const;
+    // The drum sampler's pads by their notes, and their layers (model/devices/internal/DrumKit.h): what each plays, whether it
+    // plays a file or the pad nothing, and putting a sound file on one, or taking it off, as undo steps. setPadSound() returns
+    // false for a file that isn't a sound.
+    juce::String getPadName (int pad, int layer = 0) const;
+    bool hasPadSound (int pad, int layer = 0) const;
+    bool isPadEmpty (int pad) const;
+    bool setPadSound (int pad, const juce::File&, int layer = 0) const;
+    void clearPadSound (int pad, int layer = 0) const;
+
+    // The track that plays a drum sampler's pad on a mixer channel of its own, or none; and giving the pad one, or bringing it
+    // back to the sampler's track, deleting its track, each as an undo step.
+    TrackID getPadTrack (int pad) const;
+    void setPadOnOwnTrack (int pad, bool) const;
 
     // The swap open on the device (model/devices/SwapModel.h): the pad it tries sounds on, or -1 while it tries the device's
     // presets; none while none is.

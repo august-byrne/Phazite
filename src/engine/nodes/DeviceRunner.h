@@ -110,6 +110,14 @@ public:
         bool isRendering = false;             // a render, which never sleeps: it plays everything as the song has it
         bool hasSidechain = false;            // the buffer's third and fourth channels hold the sidechain's sound
 
+        // Whether a value set by hand may have changed since the last block (the device's node knows; true where it isn't known).
+        bool valuesChanged = true;
+
+        // Outputs of their own that some of its parts play into (devices::ProcessContext::partOutputs), each from outputOffset,
+        // where the block starts in them.
+        std::span<const devices::PartOutput> partOutputs;
+        int outputOffset = 0;
+
         // The parameters automation moves, in place of their values: while the song plays, each at its curve's value on
         // each control point; stopped, at its value where the song is, gliding there as a value set by hand does. Where
         // the automation is as the block starts, in beats and in samples (from which control points are counted): the
@@ -133,6 +141,10 @@ public:
     std::span<const float> getValues() const noexcept { return currentValues; }
     std::span<const float> getBaseValues() const noexcept { return baseValues; }
 
+    // Whether the last block found nothing moved since the one before (no value set by hand, no automation, modulation,
+    // glide or stretch in either): its values were as they had been, and went untouched (the audio thread's).
+    bool isSettled() const noexcept { return lastSettled; }
+
 private:
     const devices::DeviceInfo& info;
     std::unique_ptr<devices::Processor> processor;
@@ -146,6 +158,7 @@ private:
     std::vector<juce::NormalisableRange<float>> ranges;
     std::vector<float> offsets;
     bool hasPreviousValues = false;
+    bool lastMoved = true, lastSettled = false; // the last block moved its values (automation, a glide, a stretch); or settled
     void keepValues() noexcept;
     void startModulation (Modulation&) noexcept;
     void setStretchValues (const Block&, bool automationMoves, int controlPoint, int stretch, int done, int length, int numSamples,
@@ -175,7 +188,8 @@ private:
     // takes what it played.
     struct Begun
     {
-        bool slept = false; // asleep, it played nothing
+        bool slept = false;   // asleep, it played nothing
+        bool settled = false; // nothing moved since the last block: its values as they were, untouched
         bool automationMoves = false, inStretches = false, isMixMoved = false, hasSidechain = false, quietIn = false;
         float targetMix = 1.0f;
     };

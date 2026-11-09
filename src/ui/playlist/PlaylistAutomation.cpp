@@ -1060,15 +1060,28 @@ void Playlist::AutomationLaneHeader::mouseDoubleClick (const juce::MouseEvent& e
 
 void Playlist::AutomationLaneHeader::showParameterMenu()
 {
-    // The track's parameters, a submenu for each of its devices, the one shown ticked. Choosing one shows it here.
+    // The track's parameters, a submenu for each of its devices (and in it, for each of its groups, such as a drum sampler's
+    // pads), the one shown ticked. Choosing one shows it here.
     juce::PopupMenu menu;
-    juce::PopupMenu devicePart;
-    juce::String device;
+    juce::PopupMenu devicePart, groupPart;
+    juce::String device, group;
+    auto groupShown = false;
     auto& projectContext = playlist.context;
     const auto shown = parameter;
 
-    const auto addDevice = [&menu, &devicePart, &device]
+    const auto addGroup = [&devicePart, &groupPart, &group, &groupShown]
     {
+        if (groupPart.getNumItems() > 0)
+            devicePart.addSubMenu (group, groupPart, true, nullptr, groupShown);
+
+        groupPart = {};
+        groupShown = false;
+    };
+
+    const auto addDevice = [&menu, &devicePart, &device, &addGroup]
+    {
+        addGroup();
+
         if (devicePart.getNumItems() > 0)
             menu.addSubMenu (device, devicePart);
 
@@ -1081,13 +1094,29 @@ void Playlist::AutomationLaneHeader::showParameterMenu()
         {
             addDevice();
             device = target.deviceName;
+            group = {};
+        }
+
+        if (target.group != group)
+        {
+            addGroup();
+            group = target.group;
         }
 
         const auto chosen = target.parameter;
-        devicePart.addItem (
-            juce::PopupMenu::Item (target.name)
-                .setTicked (chosen == shown)
-                .setAction ([&projectContext, shown, chosen] { setAutomationLaneParameter (projectContext, shown, chosen); }));
+        auto item = juce::PopupMenu::Item (target.name)
+                        .setTicked (chosen == shown)
+                        .setAction ([&projectContext, shown, chosen] { setAutomationLaneParameter (projectContext, shown, chosen); });
+
+        if (group.isEmpty())
+        {
+            devicePart.addItem (std::move (item));
+        }
+        else
+        {
+            groupShown = groupShown || chosen == shown;
+            groupPart.addItem (std::move (item));
+        }
     }
 
     addDevice();

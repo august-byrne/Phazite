@@ -189,26 +189,26 @@ TEST_CASE ("Swap tries sounds on a drum pad and keeps one as one undo step, copi
     const auto handle = phazite::getDeviceHandle (song.context, drums);
     const auto audio = song.getProject().getFile().getSiblingFile ("Audio");
     auto& undo = *song.context.getUndoManager();
-    const auto before = handle.getPadName (0);
+    const auto before = handle.getPadName (36);
 
     {
-        phazite::Swap swap (song.context, drums, 0);
+        phazite::Swap swap (song.context, drums, 36);
         REQUIRE (swap.isOpen());
-        CHECK (swap.getTargetName() == juce::String ("Pad 1"));
+        CHECK (swap.getTargetName() == juce::String ("Pad 36"));
         CHECK (swap.getOldName() == before);
-        CHECK (handle.getSwap() == std::optional<int> (0)); // the editor lights the pad
-        CHECK (phazite::findOpenSwap (song.context, drums) == std::optional<int> (0));
+        CHECK (handle.getSwap() == std::optional<int> (36)); // the editor lights the pad
+        CHECK (phazite::findOpenSwap (song.context, drums) == std::optional<int> (36));
 
         // Each sound in its place, played from where it is; a preset or anything else isn't a sound to try.
         CHECK (swap.canTry (one));
         CHECK_FALSE (swap.canTry (song.getSoundsFolder().getChildFile ("Missing.wav")));
         CHECK (swap.tryFile (one));
-        CHECK (handle.getPadName (0) == juce::String ("Kick One"));
+        CHECK (handle.getPadName (36) == juce::String ("Kick One"));
         CHECK (swap.tryFile (two));
-        CHECK (handle.getPadName (0) == juce::String ("Kick Two"));
+        CHECK (handle.getPadName (36) == juce::String ("Kick Two"));
         CHECK (swap.getTried() == two);
         CHECK_FALSE (audio.getChildFile ("Kick Two.wav").existsAsFile());
-        CHECK (undo.getUndoDescription() == juce::String ("Put Kick Two on Pad 1"));
+        CHECK (undo.getUndoDescription() == juce::String ("Put Kick Two on Pad 36"));
 
         swap.keep();
         CHECK_FALSE (swap.isOpen());
@@ -216,32 +216,32 @@ TEST_CASE ("Swap tries sounds on a drum pad and keeps one as one undo step, copi
     }
 
     // One step, its sound copied into the project as a sound put on a pad is; undone, the old one is back.
-    CHECK (handle.getPadName (0) == juce::String ("Kick Two"));
-    CHECK (handle.hasPadSound (0));
+    CHECK (handle.getPadName (36) == juce::String ("Kick Two"));
+    CHECK (handle.hasPadSound (36));
     CHECK (audio.getChildFile ("Kick Two.wav").existsAsFile());
     CHECK_FALSE (audio.getChildFile ("Kick One.wav").existsAsFile());
-    CHECK (undo.getUndoDescription() == juce::String ("Put Kick Two on Pad 1"));
+    CHECK (undo.getUndoDescription() == juce::String ("Put Kick Two on Pad 36"));
     phazite::undo (*phazite::findSong (song.context));
-    CHECK (handle.getPadName (0) == before);
+    CHECK (handle.getPadName (36) == before);
 
     // Put back: as it was, and what was there to redo is there still.
     {
-        phazite::Swap swap (song.context, drums, 0);
+        phazite::Swap swap (song.context, drums, 36);
         swap.tryFile (one);
         swap.putBack();
         CHECK_FALSE (swap.isOpen());
     }
 
-    CHECK (handle.getPadName (0) == before);
-    CHECK (undo.getRedoDescription() == juce::String ("Put Kick Two on Pad 1"));
+    CHECK (handle.getPadName (36) == before);
+    CHECK (undo.getRedoDescription() == juce::String ("Put Kick Two on Pad 36"));
 
     // A swap ended without either puts back what it tried.
     {
-        phazite::Swap swap (song.context, drums, 0);
+        phazite::Swap swap (song.context, drums, 36);
         swap.tryFile (one);
     }
 
-    CHECK (handle.getPadName (0) == before);
+    CHECK (handle.getPadName (36) == before);
 }
 
 TEST_CASE ("Anything else that changes the song keeps what a swap tries, as a step of its own, and ends the swap")
@@ -250,38 +250,38 @@ TEST_CASE ("Anything else that changes the song keeps what a swap tries, as a st
     const auto drums = song.setInstrument (song.firstTrack, phazite::devices::DrumSampler::typeID);
     const auto kick = phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Kick One.wav"), 0.2);
     const auto handle = phazite::getDeviceHandle (song.context, drums);
-    const auto before = handle.getPadName (0);
+    const auto before = handle.getPadName (36);
     auto& undo = *song.context.getUndoManager();
     auto& model = *phazite::findSong (song.context);
 
     SUBCASE ("Another change")
     {
-        phazite::Swap swap (song.context, drums, 0);
+        phazite::Swap swap (song.context, drums, 36);
         swap.tryFile (kick);
         song.rename (song.firstTrack, "Beat");
         CHECK_FALSE (swap.isOpen());
-        CHECK (handle.getPadName (0) == juce::String ("Kick One"));
+        CHECK (handle.getPadName (36) == juce::String ("Kick One"));
 
         phazite::undo (model); // the rename
-        CHECK (handle.getPadName (0) == juce::String ("Kick One"));
-        CHECK (undo.getUndoDescription() == juce::String ("Put Kick One on Pad 1"));
+        CHECK (handle.getPadName (36) == juce::String ("Kick One"));
+        CHECK (undo.getUndoDescription() == juce::String ("Put Kick One on Pad 36"));
         phazite::undo (model);
-        CHECK (handle.getPadName (0) == before);
+        CHECK (handle.getPadName (36) == before);
     }
 
     SUBCASE ("An undo, which then takes it back")
     {
-        phazite::Swap swap (song.context, drums, 0);
+        phazite::Swap swap (song.context, drums, 36);
         swap.tryFile (kick);
         phazite::undo (model);
         CHECK_FALSE (swap.isOpen());
-        CHECK (handle.getPadName (0) == before);
-        CHECK (undo.getRedoDescription() == juce::String ("Put Kick One on Pad 1"));
+        CHECK (handle.getPadName (36) == before);
+        CHECK (undo.getRedoDescription() == juce::String ("Put Kick One on Pad 36"));
     }
 
     SUBCASE ("A save, which saves it kept, copied into the project")
     {
-        phazite::Swap swap (song.context, drums, 0);
+        phazite::Swap swap (song.context, drums, 36);
         swap.tryFile (kick);
         REQUIRE (song.getProject().save().wasOk());
         CHECK_FALSE (swap.isOpen());
@@ -290,7 +290,7 @@ TEST_CASE ("Anything else that changes the song keeps what a swap tries, as a st
 
     SUBCASE ("Its device going")
     {
-        phazite::Swap swap (song.context, drums, 0);
+        phazite::Swap swap (song.context, drums, 36);
         song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
         CHECK_FALSE (swap.isOpen());
         CHECK_FALSE (swap.tryFile (kick));
@@ -352,7 +352,7 @@ TEST_CASE ("A swap is in progress for Auto Save, which waits for it, once it has
     const auto kick = phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Kick One.wav"), 0.2);
     auto& model = *phazite::findSong (song.context);
 
-    phazite::Swap swap (song.context, drums, 0);
+    phazite::Swap swap (song.context, drums, 36);
     CHECK_FALSE (phazite::Trial::isInProgress (model)); // nothing tried yet
     swap.tryFile (kick);
     CHECK (phazite::Trial::isInProgress (model));

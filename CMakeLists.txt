@@ -218,6 +218,7 @@ target_sources(phazite_core PRIVATE
     src/engine/nodes/LoudnessMeter.h
     src/engine/nodes/NoteSequence.cpp
     src/engine/nodes/NoteSequence.h
+    src/engine/nodes/PartOutput.h
     src/engine/nodes/Strip.cpp
     src/engine/nodes/Strip.h
     src/engine/transport/Click.cpp

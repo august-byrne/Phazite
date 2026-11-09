@@ -42,6 +42,15 @@ struct ParameterChange
     float value = 0.0f; // in its range
 };
 
+// An output of a device's own besides its channels, for a part of what it plays that goes to a mixer channel of its own (a
+// drum sampler's pad on a track of its own, as FL Studio's FPC sends a pad to a mixer track): the part, by the device's
+// own number for it (a pad's note), and its two channels, from the block's start.
+struct PartOutput
+{
+    int part = -1;
+    float* channels[2] {};
+};
+
 // One block to process.
 struct ProcessContext
 {
@@ -53,6 +62,11 @@ struct ProcessContext
     // A sidechain's audio, for a device that has one and a source feeding it; otherwise none.
     const float* const* sidechain = nullptr;
     int numSidechainChannels = 0;
+
+    // Outputs of their own that some of its parts play into, adding to what is there, rather than into its channels, each
+    // from outputOffset (where this block starts in them); none for most devices, which have no parts.
+    std::span<const PartOutput> partOutputs {};
+    int outputOffset = 0;
 
     std::span<const NoteEvent> events {}; // in time order
     std::span<const float> parameters {}; // each parameter's value now, in the order and ranges of the device's DeviceInfo

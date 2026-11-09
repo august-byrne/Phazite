@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The sounds that come with Phazite's drum sampler (docs/design.md, section 9), synthesized the first time each is needed
 // (DrumSynthesis.h, DrumMachines.h), so that Phazite ships no sound files. The first sixteen are the default kit, in the
-// pads' order: what each pad of a new sampler plays. Then come the kits of Phazite's drum presets (resources/presets/Drum
-// Sampler/Kits), each sixteen sounds of its own in the same order: the 808's sixteen voices, a house kit, a lo-fi kit as an
-// old sampler plays it back, a punchy kit, the 909's, a tight kit, a wide one in stereo, a trap kit, a rhythm box's (the
-// CR-78's), hand percussion and 80s synthwave drums. Projects and presets keep a pad's factory sound by its name.
+// pads' order: what a new sampler's sixteen pads from DrumSampler::kitFirstNote (General MIDI's kick, 36) play. Then come
+// the kits of Phazite's drum presets (resources/presets/Drum Sampler/Kits), each sixteen sounds of its own in the same
+// order: the 808's sixteen voices, a house kit, a lo-fi kit as an old sampler plays it back, a punchy kit, the 909's, a
+// tight kit, a wide one in stereo, a trap kit, a rhythm box's (the CR-78's), hand percussion and 80s synthwave drums.
+// Projects and presets keep a pad's factory sound by its name.
 #pragma once
 
 #include "DrumSampler.h"
@@ -15,7 +16,7 @@
 
 namespace phazite::devices
 {
-// Every factory sound's name ("808 Kick"), in the order menus list them: a pad's default is the one at its index.
+// Every factory sound's name ("808 Kick"), in the order menus list them: the default kit's pads' sounds first.
 std::span<const std::string_view> getFactoryDrumNames();
 
 // The index of the factory sound with that name, or -1.

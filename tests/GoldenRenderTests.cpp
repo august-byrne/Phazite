@@ -114,9 +114,9 @@ bool soundsLikeTheMix (const Fingerprint& fingerprint, const juce::AudioBuffer<f
 //==============================================================================
 constexpr double exodusSeconds = 24.0; // its intro, 8 bars speeding up from 50 BPM to 111 (22.66 s), and the theme's first beats
 
-// Something in every block of its 24 seconds (the arpeggio, the sub and a kick play through the intro, darkened by the
-// master's filters), and the intro swelling into the theme, quieter at first, as its recording's does; and the theme's
-// first kick, with the bass and the filters open, peaking high.
+// Something in every block of its 24 seconds (the arpeggio and a kick play through the intro, darkened by the master's
+// filters, the sub coming in as the high-pass opens), and the intro swelling into the theme, quieter at first, as its
+// recording's does; and the theme's first kick, with the bass and the filters open, peaking high.
 bool soundsLikeExodus (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
 {
     REQUIRE (fingerprint.size() == (size_t) std::lround (exodusSeconds * 10.0));
@@ -723,12 +723,12 @@ TEST_SUITE ("golden")
         phazite::test::settle();
         phazite::test::checkGoldenRender (song.context, golden ("exodus",
                                                                 "the Exodus example song's intro (its notes from a MIDI file, its tempo "
-                                                                "ramping from 50 BPM to 111: an arpeggio on the synth, the wavetable "
-                                                                "and FM, a sub, a plate on a return, the master's EQ, and its "
-                                                                "high-pass and low-pass in automation lanes before its limiter) "
-                                                                "and the start of its theme at 114 BPM (the Synthwave Kit, the FM "
-                                                                "bass, and five tracks and the plate pumping under the drums "
-                                                                "through sidechains).",
+                                                                "ramping from 50 BPM to 111: an arpeggio on the wavetable doubled "
+                                                                "an octave up, a bass on the wavetable, a plate on a return, the "
+                                                                "master's EQ, and its high-pass and low-pass in automation lanes "
+                                                                "before its limiter) and the start of its theme at 114 BPM (the "
+                                                                "Synthwave Kit, the bass and the plate pumping under the kick and "
+                                                                "the arpeggio ducking under the drums, through sidechains).",
                                                                 exodusSeconds, soundsLikeExodus));
     }
 

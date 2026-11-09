@@ -103,39 +103,77 @@ namespace
         return drums::makeStereo (makeHat (rate, shape), makeHat (rate, right));
     }
 
-    // The synthwave kit's snare and clap in stereo, as its samples are: each side its own noise, and the snare's tone a
-    // little apart, so that their tails spread wide.
-    Audio synthwaveStereo (const Audio& left, const Audio& right)
+    // The synthwave kit (docs/presets.md): the 80s' digital drum machines as synthwave plays them. Its hits as the LinnDrum
+    // and the Oberheim DMX played theirs, 8-bit mu-law samples at 28 kHz, a little clipped; the gated rooms of the 80s on its
+    // snares, claps and toms; Simmons SDS-V toms and second snare; and the 909's and the 707's 6-bit hats and cymbals.
+    Audio linnGrit (Audio sound)
     {
-        return drums::makeStereo (left, right);
-    }
-
-    // The synthwave kit's hats: a bright layer that dies quickly over a darker one that rings on, so that the hat darkens as
-    // it rings, as a sampled one does.
-    Audio layeredHat (const HatShape& bright, const HatShape& dark, float darkLevel)
-    {
-        auto sound = makeHat (rate, bright);
-        const auto under = makeHat (rate, dark);
-        sound.addFrom (0, 0, under, 0, 0, std::min (sound.getNumSamples(), under.getNumSamples()), darkLevel);
+        drums::makeDusty (sound, rate, { .heldRate = 28000.0, .bits = 8, .cutoffHz = 12000.0, .drive = 1.0, .muLaw = true });
         return sound;
     }
 
-    // The synthwave kit's toms, as the 80s' electronic kits' sound: a sine swept down an octave over a tenth of a second,
-    // a breath of noise and a stick's click.
-    Audio synthwaveTom (double hz)
+    Audio gated (const Audio& drum, const drums::GatedReverbShape& shape)
     {
-        return makeKick (rate, { .startHz = hz * 2.0,
-                                 .endHz = hz,
-                                 .pitchSeconds = 0.06,
-                                 .decaySeconds = 0.2,
-                                 .click = 0.3,
-                                 .clickHz = 3000.0,
-                                 .noise = 0.25,
-                                 .noiseHz = 5000.0,
-                                 .noiseSeconds = 0.08,
-                                 .length = 0.9,
-                                 .drive = 1.3,
-                                 .seed = (int) hz });
+        return drums::addGatedReverb (drum, rate, shape);
+    }
+
+    // Its toms, as the SDS-V's: each settles at its pitch from an octave above (the high ones from three quarters of one),
+    // the low ones bending slower and ringing longer, with a little noise darkening as it fades and a click; in a gated room
+    // 12 dB under the hit, under 6 kHz, held 280 ms. The place is 0 for the lowest tom and 1 for the highest.
+    Audio synthwaveTom (double hz, double place)
+    {
+        const auto tom = drums::makeSimmons (rate, { .startHz = hz * std::pow (2.0, (12.0 - 3.0 * place) / 12.0),
+                                                     .endHz = hz,
+                                                     .bendSeconds = 0.18 - 0.07 * place,
+                                                     .toneSeconds = 0.16 - 0.07 * place,
+                                                     .noise = 0.15,
+                                                     .noiseFromHz = 4000.0,
+                                                     .noiseToHz = 600.0,
+                                                     .sweepSeconds = 0.15,
+                                                     .noiseSeconds = 0.08,
+                                                     .click = 0.4,
+                                                     .length = 1.2 - 0.5 * place,
+                                                     .drive = 1.2,
+                                                     .seed = (int) hz });
+        return gated (tom, { .gateSeconds = 0.28, .level = 0.25, .highCut = 6000.0, .seed = (int) hz + 1 });
+    }
+
+    // Its hats and cymbals, as the 909's and the 707's: their metal (the 808's six squares through its bands) held at one
+    // level, sampled at six bits and 25 kHz, and the envelope put on after, as their VCAs did, so that the grit fades with
+    // the sound. Each layer at its level.
+    struct MetalLayer
+    {
+        HatShape shape;
+        float level = 1.0f;
+    };
+
+    Audio sampledMetal (std::initializer_list<MetalLayer> layers, double attackSeconds, double decaySeconds, double length)
+    {
+        Audio sound (1, (int) (length * rate));
+        sound.clear();
+
+        for (const auto& layer : layers)
+        {
+            auto held = layer.shape;
+            held.decaySeconds = 1000.0; // the envelope comes after
+            held.length = length;
+            sound.addFrom (0, 0, makeHat (rate, held), 0, 0, sound.getNumSamples(), layer.level);
+        }
+
+        // At full scale, as their ROMs held them, so that the six bits span the sound.
+        if (const auto peak = sound.getMagnitude (0, sound.getNumSamples()); peak > 0.0f)
+            sound.applyGain (0.95f / peak);
+
+        drums::makeDusty (sound, rate, { .heldRate = 25000.0, .bits = 6, .cutoffHz = 11000.0, .drive = 0.5 });
+
+        for (int i = 0; i < sound.getNumSamples(); ++i)
+        {
+            const auto t = i / rate;
+            const auto envelope = (attackSeconds > 0.0 ? std::min (1.0, t / attackSeconds) : 1.0) * std::exp (-t / decaySeconds);
+            sound.setSample (0, i, sound.getSample (0, i) * (float) envelope);
+        }
+
+        return sound;
     }
 
     //==============================================================================
@@ -639,151 +677,127 @@ namespace
         { "Percussion Triangle", [] { return drums::makeTriangle (rate, false); } },
         { "Percussion High Woodblock", [] { return drums::makeWoodblock (rate, 1050.0); } },
 
-        // Synthwave: the 80s' electronic drums as synthwave plays them, after the samples of the Exodus example's original
-        // (docs/presets.md), measured: a kick whose pitch falls from about 250 Hz to 65 Hz, held 45 ms and then cut short; a
-        // snare whose 160 Hz tone carries three quarters of it under bright noise, with a long tail; a clap of hands around
-        // 1.1 kHz over a long, quieter tail; a woody knock for the rim; bright, noisy hats; and swept synth toms.
+        // Synthwave: the 80s' digital drum machines as synthwave plays them (docs/presets.md, after what its producers and its
+        // sample packs say defines it): a LinnDrum's or DMX's punchy kick over a sub, snare, clap and rim, 8-bit; the gated
+        // rooms of the 80s on the snares, the clap and the toms; the Simmons SDS-V's second snare and toms; and the 909's and
+        // the 707's 6-bit hats and cymbals, the open hat choked by the closed and the pedal.
         { "Synthwave Kick",
           []
           {
-              return makeKick (rate, { .chirpHz = 1200.0,
-                                       .chirpSeconds = 0.002,
-                                       .startHz = 280.0,
-                                       .endHz = 64.0,
-                                       .pitchSeconds = 0.011,
-                                       .holdSeconds = 0.04,
-                                       .decaySeconds = 0.014,
-                                       .click = 1.2,
-                                       .clickHz = 2000.0,
-                                       .clickSeconds = 0.005,
-                                       .length = 0.35,
-                                       .drive = 1.6 });
+              // A sine falling from 190 to 52 Hz (the sub under the punch), a wooden knock falling from 400 to 200 Hz 12 dB
+              // under it and a click above 3 kHz, clipped a little; then a gated room 24 dB under it, under 5 kHz, for a tenth
+              // of a second.
+              auto kick = makeKick (rate, { .startHz = 190.0,
+                                            .endHz = 52.0,
+                                            .pitchSeconds = 0.025,
+                                            .decaySeconds = 0.055,
+                                            .click = 0.6,
+                                            .clickHz = 4000.0,
+                                            .clickSeconds = 0.0007,
+                                            .length = 0.45,
+                                            .drive = 1.4,
+                                            .seed = 91 });
+              const auto knock = makeKick (rate, { .startHz = 400.0,
+                                                   .endHz = 200.0,
+                                                   .pitchSeconds = 0.006,
+                                                   .decaySeconds = 0.012,
+                                                   .click = 0.0,
+                                                   .length = 0.1,
+                                                   .drive = 1.0 });
+              kick.addFrom (0, 0, knock, 0, 0, knock.getNumSamples(), 0.25f);
+              return gated (linnGrit (kick), { .gateSeconds = 0.1, .closeSeconds = 0.03, .level = 0.06, .highCut = 5000.0, .seed = 92 });
           } },
         { "Synthwave Rim",
           []
           {
-              return makeKick (rate, { .startHz = 1750.0,
-                                       .endHz = 1100.0,
-                                       .pitchSeconds = 0.008,
-                                       .decaySeconds = 0.021,
-                                       .click = 0.5,
-                                       .clickHz = 4000.0,
-                                       .clickSeconds = 0.002,
-                                       .noise = 1.0,
-                                       .noiseHz = 2500.0,
-                                       .noiseSeconds = 0.025,
-                                       .length = 0.25,
-                                       .drive = 1.4,
-                                       .seed = 91 });
+              // A rim shot's two partials, 480 Hz and 1.6 kHz, with a click.
+              return linnGrit (makeSnare (rate, { .lowHz = 480.0,
+                                                  .highHz = 1600.0,
+                                                  .lowSeconds = 0.012,
+                                                  .highSeconds = 0.008,
+                                                  .snaresSeconds = 0.003,
+                                                  .snaresLevel = 0.3,
+                                                  .snaresLowCut = 2000.0,
+                                                  .snaresHighCut = 9000.0,
+                                                  .length = 0.12,
+                                                  .drive = 1.2,
+                                                  .seed = 93,
+                                                  .lowLevel = 0.6,
+                                                  .highLevel = 0.5 }));
           } },
         { "Synthwave Snare",
           []
           {
-              return synthwaveStereo (makeSnare (rate, { .lowHz = 162.0,
-                                                         .highHz = 175.0,
-                                                         .lowSeconds = 0.115,
-                                                         .highSeconds = 0.012,
-                                                         .snaresSeconds = 0.1,
-                                                         .snaresLevel = 0.55,
-                                                         .snaresLowCut = 3000.0,
-                                                         .snaresHighCut = 7500.0,
-                                                         .length = 0.9,
-                                                         .drive = 1.2,
-                                                         .seed = 92,
-                                                         .lowLevel = 0.5,
-                                                         .highLevel = 0.6 }),
-                                      makeSnare (rate, { .lowHz = 164.5,
-                                                         .highHz = 177.5,
-                                                         .lowSeconds = 0.115,
-                                                         .highSeconds = 0.012,
-                                                         .snaresSeconds = 0.1,
-                                                         .snaresLevel = 0.55,
-                                                         .snaresLowCut = 3000.0,
-                                                         .snaresHighCut = 7500.0,
-                                                         .length = 0.9,
-                                                         .drive = 1.2,
-                                                         .seed = 192,
-                                                         .lowLevel = 0.5,
-                                                         .highLevel = 0.6 }));
+              // A LinnDrum's snare, its shell at 175 and 320 Hz under its snares' noise from 1.5 to 9 kHz; in the gated room
+              // the 80s gave it, 6 dB under the hit, held a quarter of a second and then shut.
+              const auto snare = makeSnare (rate, { .lowHz = 175.0,
+                                                    .highHz = 320.0,
+                                                    .lowSeconds = 0.04,
+                                                    .highSeconds = 0.025,
+                                                    .snaresSeconds = 0.05,
+                                                    .snaresLevel = 0.7,
+                                                    .snaresLowCut = 1500.0,
+                                                    .snaresHighCut = 9000.0,
+                                                    .length = 0.35,
+                                                    .drive = 1.3,
+                                                    .seed = 94 });
+              return gated (linnGrit (snare), { .gateSeconds = 0.25, .level = 0.5, .seed = 95 });
           } },
         { "Synthwave Clap",
           []
           {
-              return synthwaveStereo (makeClap (rate, { .centreHz = 1150.0,
-                                                        .q = 1.0,
-                                                        .lowCut = 400.0,
-                                                        .spread = 1.0,
-                                                        .tailSeconds = 0.12,
-                                                        .length = 0.85,
-                                                        .seed = 93,
-                                                        .tailLevel = 0.4 }),
-                                      makeClap (rate, { .centreHz = 1150.0,
-                                                        .q = 1.0,
-                                                        .lowCut = 400.0,
-                                                        .spread = 1.15,
-                                                        .tailSeconds = 0.12,
-                                                        .length = 0.85,
-                                                        .seed = 193,
-                                                        .tailLevel = 0.4 }));
+              // The 808's clap, its four bursts 9 ms apart through a band at 1.1 kHz; in a gated room 9 dB under it, held 150 ms.
+              const auto clap = makeClap (
+                  rate, { .centreHz = 1100.0, .q = 1.5, .lowCut = 400.0, .spread = 0.857, .tailSeconds = 0.05, .length = 0.3, .seed = 96 });
+              return gated (linnGrit (clap), { .gateSeconds = 0.15, .level = 0.355, .seed = 97 });
           } },
         { "Synthwave Snare 2",
           []
           {
-              return makeSnare (rate, { .lowHz = 190.0,
-                                        .highHz = 380.0,
-                                        .lowSeconds = 0.06,
-                                        .highSeconds = 0.025,
-                                        .snaresSeconds = 0.14,
-                                        .snaresLevel = 0.6,
-                                        .snaresLowCut = 2000.0,
-                                        .snaresHighCut = 11000.0,
-                                        .length = 0.6,
-                                        .drive = 1.6,
-                                        .seed = 94 });
+              // The SDS-V's snare: a triangle at 210 Hz bending down seven semitones in about 50 ms under mostly noise, whose
+              // low-pass falls from 10 kHz to 2.5 kHz, and a click; in a gated room 8 dB under it, held 200 ms.
+              const auto snare = drums::makeSimmons (rate, { .startHz = 210.0,
+                                                             .endHz = 210.0 * std::pow (2.0, -7.0 / 12.0),
+                                                             .bendSeconds = 0.017,
+                                                             .toneSeconds = 0.06,
+                                                             .noise = 0.7,
+                                                             .noiseFromHz = 10000.0,
+                                                             .noiseToHz = 2500.0,
+                                                             .sweepSeconds = 0.05,
+                                                             .noiseSeconds = 0.07,
+                                                             .click = 0.5,
+                                                             .length = 0.4,
+                                                             .drive = 1.3,
+                                                             .seed = 98 });
+              return gated (snare, { .gateSeconds = 0.2, .level = 0.4, .seed = 99 });
           } },
-        { "Synthwave Low Tom", [] { return synthwaveTom (82.0); } },
+        { "Synthwave Low Tom", [] { return synthwaveTom (70.0, 0.0); } },
         { "Synthwave Closed Hat",
-          []
-          {
-              return layeredHat (
-                  { .decaySeconds = 0.045, .length = 0.28, .noise = 0.8, .centreHz = 12500.0, .lowCut = 7500.0, .pitch = 1.3, .seed = 95 },
-                  { .decaySeconds = 0.05, .length = 0.28, .noise = 0.8, .centreHz = 6500.0, .lowCut = 5000.0, .pitch = 1.3, .seed = 195 },
-                  0.8f);
-          } },
-        { "Synthwave Floor Tom", [] { return synthwaveTom (98.0); } },
+          [] { return sampledMetal ({ { { .noise = 0.2, .centreHz = 7100.0, .lowCut = 8000.0, .seed = 100 } } }, 0.0, 0.015, 0.2); } },
+        { "Synthwave Floor Tom", [] { return synthwaveTom (85.0, 0.2); } },
         { "Synthwave Pedal Hat",
-          []
-          {
-              return layeredHat (
-                  { .decaySeconds = 0.05, .length = 0.32, .noise = 0.8, .centreHz = 12000.0, .lowCut = 7000.0, .pitch = 1.3, .seed = 96 },
-                  { .decaySeconds = 0.1, .length = 0.32, .noise = 0.8, .centreHz = 6800.0, .lowCut = 4800.0, .pitch = 1.3, .seed = 196 },
-                  0.55f);
-          } },
-        { "Synthwave Mid Tom", [] { return synthwaveTom (116.0); } },
+          [] { return sampledMetal ({ { { .noise = 0.2, .centreHz = 7100.0, .lowCut = 8000.0, .seed = 101 } } }, 0.003, 0.03, 0.3); } },
+        { "Synthwave Mid Tom", [] { return synthwaveTom (100.0, 0.4); } },
         { "Synthwave Open Hat",
-          []
-          {
-              return layeredHat (
-                  { .decaySeconds = 0.08, .length = 0.33, .noise = 0.8, .centreHz = 12000.0, .lowCut = 8000.0, .pitch = 1.3, .seed = 97 },
-                  { .decaySeconds = 0.3, .length = 0.33, .noise = 0.8, .centreHz = 6000.0, .lowCut = 4000.0, .pitch = 1.3, .seed = 197 },
-                  0.6f);
-          } },
-        { "Synthwave Mid Tom 2", [] { return synthwaveTom (138.0); } },
-        { "Synthwave High Tom", [] { return synthwaveTom (165.0); } },
+          [] { return sampledMetal ({ { { .noise = 0.2, .centreHz = 7100.0, .lowCut = 8000.0, .seed = 102 } } }, 0.0, 0.1, 0.65); } },
+        { "Synthwave Mid Tom 2", [] { return synthwaveTom (120.0, 0.6); } },
+        { "Synthwave High Tom", [] { return synthwaveTom (145.0, 0.8); } },
         { "Synthwave Crash",
           []
           {
-              return makeHat (
-                  rate,
-                  { .decaySeconds = 0.6, .length = 2.0, .noise = 0.6, .centreHz = 7500.0, .lowCut = 3500.0, .pitch = 1.1, .seed = 98 });
+              // The 808's metal through both its cymbal's bands, 7.1 and 3.44 kHz, with noise, ringing nearly two seconds.
+              return sampledMetal ({ { { .noise = 0.5, .centreHz = 7100.0, .lowCut = 5000.0, .seed = 103 }, 1.0f },
+                                     { { .noise = 0.5, .centreHz = 3440.0, .lowCut = 2500.0, .seed = 104 }, 0.8f } },
+                                   0.0, 0.4, 2.2);
           } },
-        { "Synthwave High Tom 2", [] { return synthwaveTom (196.0); } },
+        { "Synthwave High Tom 2", [] { return synthwaveTom (175.0, 1.0); } },
         { "Synthwave Ride",
           []
           {
-              return makeHat (
-                  rate,
-                  { .decaySeconds = 0.55, .length = 1.6, .noise = 0.25, .centreHz = 9000.0, .lowCut = 6000.0, .pitch = 1.35, .seed = 99 });
+              // Its 3.44 kHz band forward, with less noise, ringing a second and a half.
+              return sampledMetal ({ { { .noise = 0.15, .centreHz = 3440.0, .lowCut = 2800.0, .seed = 105 }, 1.0f },
+                                     { { .noise = 0.15, .centreHz = 7100.0, .lowCut = 6000.0, .seed = 106 }, 0.5f } },
+                                   0.0, 0.33, 1.8);
           } },
     };
 
@@ -821,7 +835,7 @@ namespace
         sound->sampleRate = rate;
 
         // The default kit's as songs have played them since it was made; the kits' end in a fade.
-        if (index >= (size_t) DrumSampler::numPads)
+        if (index >= (size_t) DrumSampler::kitPads)
             fadeOut (sound->audio);
 
         if (const auto peak = sound->audio.getMagnitude (0, sound->audio.getNumSamples()); peak > 0.0f)
@@ -849,7 +863,7 @@ std::shared_ptr<const DrumSampler::Sound> getFactoryDrum (int index)
     // Each one made once, while something holds it; the default kit's for good, as every new sampler plays it.
     static std::mutex lock;
     static std::array<std::weak_ptr<const DrumSampler::Sound>, numDrums> made;
-    static std::array<std::shared_ptr<const DrumSampler::Sound>, DrumSampler::numPads> defaultKit;
+    static std::array<std::shared_ptr<const DrumSampler::Sound>, DrumSampler::kitPads> defaultKit;
     const std::scoped_lock scope (lock);
 
     if (auto sound = made[at].lock())

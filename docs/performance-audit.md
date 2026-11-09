@@ -890,3 +890,30 @@ instrument alike: the synth's 16 voices in unison 1.80 to 1.86 %, the sampler's 
 16 notes 13.6 to 13.7 %, each the same share of the others as before). The larger voices made the FM synth's idle cost
 0.07 %, as every idle voice still set its envelopes each block; now only those sounding do (a note sets its own as it
 starts), and it is 0.03 % again.
+
+## 18. The drum sampler's 128 pads (2026-11-09)
+
+Roadmap step 4.12 gave the drum sampler a pad on every note, each with its envelope, sweep, filter, four layers, mute and
+solo: 25 parameters a pad, 3,201 in all, where it had 97. Measured from `windows-profile` before and after, in the same
+sitting ("Benchmark: each device's CPU" and "Benchmark: a project's CPU, stopped and playing", which now has a song of
+20 drum samplers, each a beat of a kick, a snare and sixteenth hats).
+
+**The device.** Four pads every sixteenth: 0.259 % of a core before, 0.312 % after; idle, 0.001 % and 0.003 %. What a
+voice does now (its envelope, its sweep while it sweeps, its filter while it is on, its level and filter followed each
+block) and the 128 pads' playheads each block, where there were 16. Nothing to do about it.
+
+**The parameters.** Phazite's engine went through every parameter of every device each block, whether anything had moved
+or not: each copied from the values set by hand (`DeviceNode`), kept to its range, checked for a glide and set again
+(`DeviceRunner::begin()`), kept as the block before, and stored for the controls. For 3,201 parameters that is most of
+the cost of a drum sampler that isn't playing: 20 of them cost 7.51 % of a core stopped and 10.41 % playing, on one
+thread (2.71 % and 3.45 % on four), against 0.4 % for 20 empty tracks. Now a block in which nothing has moved (no value
+set by hand since the last, which a version that moves with each one tells; no automation now or in the block before;
+no modulation; no glide or stretch in the block before) leaves the values as they are, which the loops would only have
+set again, and doesn't store them for the controls again: 0.68 % stopped and 2.96 % playing on one thread, 0.59 % and
+1.29 % on four, measured while another build ran, so if anything high. The golden renders didn't change, and every
+plug-in with many parameters gains the same: 20 synths' tracks stopped went from 1.93 to 1.39 %.
+
+**Finding a parameter.** `devices::findParameter()` searched a device's parameters in order, which every handle a control
+holds did 30 times a second for each control; and `isValid()` searched for each parameter, five million comparisons for the
+drum sampler's 3,201 parameters. A device can now find its parameters itself (`DeviceInfo::findByID`): the drum sampler reads
+the pad and the field from the ID at once. `isValid()` sorts the IDs instead.

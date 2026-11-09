@@ -80,6 +80,10 @@ struct DeviceInfo
     // Whether the device listens to a sidechain: another track's sound, such as a kick that a compressor turns a bass
     // down to. Its runner hands it the sound of the track picked as the source (ProcessContext::sidechain).
     bool hasSidechain = false;
+
+    // For a device with many parameters, such as the drum sampler's thousands: how it finds one by its ID at once, rather than
+    // by a search through them all (findParameter()); -1 for none. Nothing for the others.
+    int (*findByID) (std::string_view id) = nullptr;
 };
 
 // An effect's parameter with this ID is its mix: how much of what it puts out is its effect, from 0 (only what comes

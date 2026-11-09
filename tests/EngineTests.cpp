@@ -534,6 +534,33 @@ TEST_CASE ("A device's node keeps its values set by hand in their ranges, plays 
     node.process (buffer, 0, deviceBlock, {});
     CHECK (gain.processed > played);
     CHECK (buffer.getSample (0, 0) == doctest::Approx (-0.5f).epsilon (0.001));
+
+    // Once nothing has moved for a block, it leaves its values as they are; a value set by hand then still comes in, gliding
+    // there over a block, and is what it plays, and keeps for the controls, from the next.
+    for (int block = 0; block < 3; ++block)
+    {
+        buffer = makeLevel (2, deviceBlock, 1.0f);
+        node.process (buffer, 0, deviceBlock, {});
+    }
+
+    CHECK (node.getRunner().isSettled());
+    CHECK (buffer.getSample (0, deviceBlock - 1) == doctest::Approx (-0.5f).epsilon (0.001));
+    node.setValue (0, 0.0f);
+    buffer = makeLevel (2, deviceBlock, 1.0f);
+    node.process (buffer, 0, deviceBlock, {});
+    CHECK_FALSE (node.getRunner().isSettled());
+    CHECK (buffer.getSample (0, deviceBlock - 1) == doctest::Approx (-1.0f).epsilon (0.001));
+    CHECK (node.getPlayedValue (0) == doctest::Approx (0.0f));
+
+    for (int block = 0; block < 2; ++block)
+    {
+        buffer = makeLevel (2, deviceBlock, 1.0f);
+        node.process (buffer, 0, deviceBlock, {});
+    }
+
+    CHECK (node.getRunner().isSettled());
+    CHECK (buffer.getSample (0, 0) == doctest::Approx (-1.0f).epsilon (0.001));
+    CHECK (node.getPlayedValue (0) == doctest::Approx (0.0f));
 }
 
 //==============================================================================

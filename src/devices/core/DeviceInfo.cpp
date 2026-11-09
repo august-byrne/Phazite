@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceInfo.h"
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace phazite::devices
 {
@@ -84,6 +86,9 @@ float constrain (const ParameterInfo& parameter, float value)
 
 int findParameter (const DeviceInfo& device, std::string_view id)
 {
+    if (device.findByID != nullptr)
+        return device.findByID (id);
+
     for (size_t i = 0; i < device.parameters.size(); ++i)
         if (device.parameters[i].id == id)
             return (int) i;
@@ -96,11 +101,21 @@ bool isValid (const DeviceInfo& device)
     if (device.typeID.empty() || device.name.empty())
         return false;
 
-    // Each parameter is valid, and the first with its ID is itself.
+    // Each parameter is valid, with an ID of its own, which a device that finds its parameters itself finds it by.
+    std::vector<std::string_view> ids;
+    ids.reserve (device.parameters.size());
+
     for (size_t i = 0; i < device.parameters.size(); ++i)
-        if (! isValid (device.parameters[i]) || findParameter (device, device.parameters[i].id) != (int) i)
+    {
+        const auto& parameter = device.parameters[i];
+
+        if (! isValid (parameter) || parameter.id.empty() || (device.findByID != nullptr && device.findByID (parameter.id) != (int) i))
             return false;
 
-    return true;
+        ids.push_back (parameter.id);
+    }
+
+    std::sort (ids.begin(), ids.end());
+    return std::adjacent_find (ids.begin(), ids.end()) == ids.end();
 }
 } // namespace phazite::devices

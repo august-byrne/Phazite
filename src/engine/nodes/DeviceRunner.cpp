@@ -132,17 +132,26 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
     auto gliding = false;
     begun.automationMoves = in.beatsPerSample > 0.0 && ! in.automation.empty();
 
-    for (size_t i = 0; i < targetValues.size(); ++i)
-        targetValues[i] = devices::constrain (info.parameters[i], in.values[i]);
+    // Nothing moved since the last block, which ended at its values: no value set by hand, no automation now or then, no
+    // modulation, and no glide or stretch then. Its values are as these loops would make them again, which a device of
+    // thousands of parameters (the drum sampler's) would go through each block for nothing.
+    begun.settled =
+        hasPreviousValues && ! in.valuesChanged && in.automation.empty() && ! lastMoved && (plan == nullptr || plan->routes.empty());
 
-    for (const auto& automated : in.automation)
-        targetValues[(size_t) automated.parameter] =
-            devices::constrain (info.parameters[(size_t) automated.parameter], automated.curve->getValueAt (in.automationBeat));
-
-    for (size_t i = 0; i < targetValues.size(); ++i)
+    if (! begun.settled)
     {
-        currentValues[i] = baseValues[i] = targetValues[i];
-        gliding = gliding || (glides[i] && hasPreviousValues && ! juce::exactlyEqual (previousValues[i], targetValues[i]));
+        for (size_t i = 0; i < targetValues.size(); ++i)
+            targetValues[i] = devices::constrain (info.parameters[i], in.values[i]);
+
+        for (const auto& automated : in.automation)
+            targetValues[(size_t) automated.parameter] =
+                devices::constrain (info.parameters[(size_t) automated.parameter], automated.curve->getValueAt (in.automationBeat));
+
+        for (size_t i = 0; i < targetValues.size(); ++i)
+        {
+            currentValues[i] = baseValues[i] = targetValues[i];
+            gliding = gliding || (glides[i] && hasPreviousValues && ! juce::exactlyEqual (previousValues[i], targetValues[i]));
+        }
     }
 
     // Modulated, it plays in stretches too, each with its modulators where it is.
@@ -150,6 +159,8 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
         startModulation (*plan);
 
     begun.inStretches = gliding || begun.automationMoves || (plan != nullptr && ! plan->routes.empty());
+    lastMoved = begun.inStretches || ! in.automation.empty();
+    lastSettled = begun.settled;
     begun.targetMix = mixIndex >= 0 ? targetValues[(size_t) mixIndex] : 1.0f;
     begun.isMixMoved = mixIndex >= 0
                        && ((plan != nullptr && plan->isModulated[(size_t) mixIndex])
@@ -174,7 +185,9 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
         for (int channel = 2; channel < buffer.getNumChannels(); ++channel)
             buffer.clear (channel, start, numSamples);
 
-        keepValues();
+        if (! begun.settled)
+            keepValues();
+
         begun.slept = true;
         return begun;
     }
@@ -203,7 +216,8 @@ void DeviceRunner::end (juce::AudioBuffer<float>& buffer, int start, int numSamp
         for (const auto& automated : in.automation)
             targetValues[(size_t) automated.parameter] = baseValues[(size_t) automated.parameter];
 
-    keepValues();
+    if (! begun.settled)
+        keepValues();
 
     // Silent in and out long enough: asleep from the next block.
     if (begun.quietIn && isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence))
@@ -224,6 +238,8 @@ devices::ProcessContext DeviceRunner::makeContext (const Block& in) const noexce
 {
     devices::ProcessContext block;
     block.parameters = currentValues;
+    block.partOutputs = in.partOutputs;
+    block.outputOffset = in.outputOffset;
     block.isPlaying = in.isPlaying;
     block.isRendering = in.isRendering;
     block.tempo = in.tempo;
@@ -355,6 +371,7 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         block.channels = channels;
         block.numChannels = 2;
         block.numSamples = length;
+        block.outputOffset = in.outputOffset + done;
         block.events = in.events.subspan ((size_t) firstEvent, (size_t) (nextEvent - firstEvent));
         block.changes = changes;
 

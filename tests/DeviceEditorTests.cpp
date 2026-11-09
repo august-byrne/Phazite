@@ -20,6 +20,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/DisplayTicker.h"
+#include "ui/devices/DeviceEditorBase.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceGraph.h"
 #include "ui/devices/DeviceLayout.h"
@@ -139,10 +140,15 @@ TEST_CASE ("Every device's editor rests while nothing it shows moves, and shows 
             tick (30);
             CHECK (window.takeRepaintedArea().isEmpty());
 
-            // A value turned elsewhere (automation, say), other than the mix, which the header shows: its control at least
-            // shows it.
+            // A value turned elsewhere (automation, say), other than the mix, which the header shows, and one the editor has a
+            // control for now (the drum sampler's show its selected pad's): its control at least shows it.
+            const auto* base = dynamic_cast<const phazite::ui::DeviceEditorBase*> (editor.get());
             const auto shown = std::find_if (info->parameters.begin(), info->parameters.end(),
-                                             [] (const auto& parameter) { return parameter.id != phazite::devices::mixParameterID; });
+                                             [base] (const auto& parameter)
+                                             {
+                                                 return parameter.id != phazite::devices::mixParameterID
+                                                        && (base == nullptr || base->findControl (parameter.id) != nullptr);
+                                             });
             REQUIRE (shown != info->parameters.end());
             const phazite::ParameterRef parameter { song.id, juce::String (shown->id.data(), shown->id.size()) };
             REQUIRE (phazite::describeParameter (*song.song, parameter).has_value());

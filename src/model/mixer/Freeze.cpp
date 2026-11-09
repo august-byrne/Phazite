@@ -13,6 +13,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumKit.h"
 #include "model/engine/internal/AudioIO.h"
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackHost.h"
@@ -75,6 +76,10 @@ namespace
 
         if (isRecording (*song))
             return "Stop recording first.";
+
+        // A drum sampler's pads on tracks of their own leave its track, so its render would leave them out.
+        if (hasPadsOnOwnTracks (*song, track))
+            return getTrackName (*song, track) + " has pads on tracks of their own: bring them back to it first.";
 
         if (getClipStates (state).empty())
             return getTrackName (*song, track) + " has nothing to " + verb + ": it has no clips.";

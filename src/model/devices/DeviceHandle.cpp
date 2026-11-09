@@ -82,28 +82,51 @@ SidechainChoice DeviceHandle::getSidechainSource() const
     return song != nullptr ? describeSidechainSource (*song, impl->id) : SidechainChoice();
 }
 
-juce::String DeviceHandle::getPadName (int pad) const
+juce::String DeviceHandle::getPadName (int pad, int layer) const
 {
     auto* song = songOf (impl);
-    return song != nullptr ? phazite::getPadName (*song, impl->id, pad) : juce::String();
+    return song != nullptr ? phazite::getPadName (*song, impl->id, pad, layer) : juce::String();
 }
 
-bool DeviceHandle::hasPadSound (int pad) const
+bool DeviceHandle::hasPadSound (int pad, int layer) const
 {
     auto* song = songOf (impl);
-    return song != nullptr && phazite::hasPadSound (*song, impl->id, pad);
+    return song != nullptr && phazite::hasPadSound (*song, impl->id, pad, layer);
 }
 
-bool DeviceHandle::setPadSound (int pad, const juce::File& file) const
+bool DeviceHandle::isPadEmpty (int pad) const
 {
     auto* song = songOf (impl);
-    return song != nullptr && phazite::setPadSound (*song, impl->id, pad, file);
+    return song == nullptr || phazite::isPadEmpty (*song, impl->id, pad);
 }
 
-void DeviceHandle::clearPadSound (int pad) const
+bool DeviceHandle::setPadSound (int pad, const juce::File& file, int layer) const
+{
+    auto* song = songOf (impl);
+    return song != nullptr && phazite::setPadSound (*song, impl->id, pad, file, layer);
+}
+
+void DeviceHandle::clearPadSound (int pad, int layer) const
 {
     if (auto* song = songOf (impl))
-        phazite::clearPadSound (*song, impl->id, pad);
+        phazite::clearPadSound (*song, impl->id, pad, layer);
+}
+
+TrackID DeviceHandle::getPadTrack (int pad) const
+{
+    auto* song = songOf (impl);
+    return song != nullptr ? findPadTrack (*song, impl->id, pad) : TrackID();
+}
+
+void DeviceHandle::setPadOnOwnTrack (int pad, bool onOwnTrack) const
+{
+    if (auto* song = songOf (impl))
+    {
+        if (onOwnTrack)
+            givePadItsOwnTrack (*song, impl->id, pad);
+        else
+            bringPadBack (*song, impl->id, pad);
+    }
 }
 
 std::optional<int> DeviceHandle::getSwap() const

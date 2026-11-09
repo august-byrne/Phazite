@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Browser.h"
 #include "model/mixer/ContainerModel.h"
+#include "model/notes/NoteValues.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/LookAndFeel.h"
@@ -1417,7 +1418,9 @@ void Browser::startSwap (DeviceID device, int pad)
 
     if (pad >= 0)
     {
-        const auto types = getSoundTypesIn (swap->getOldName());
+        // An empty pad's, the drum General MIDI puts on its note.
+        const auto old = swap->getOldName();
+        const auto types = getSoundTypesIn (old.isNotEmpty() || pad < 35 || pad > 81 ? old : getDrumName (pad));
         const auto options = model.getFilterOptions ({}, {});
 
         for (const auto& [type, count] : options.types)

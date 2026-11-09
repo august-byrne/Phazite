@@ -260,6 +260,7 @@ namespace
                : property == schema::trackAutomationMode                               ? "automation mode"
                : property == schema::keyRoot || property == schema::keyScale           ? "key"
                : property == schema::trackInput || property == schema::trackMonitoring ? "input"
+               : property == schema::trackPadDevice || property == schema::trackPad    ? "pad"
                                                                                        : property.toString();
     }
 

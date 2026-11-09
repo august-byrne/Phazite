@@ -35,12 +35,14 @@ struct AutomationTarget
     TrackID track {};           // whose device it is: a track, a folder, a return or the master (getMasterTrack())
     juce::String deviceName {}; // "Synth", or "Mixer" for the track's own volume, pan and sends
     juce::String name {};       // "Cutoff"
+    juce::String group {};      // the part of the device menus show it in: a drum pad's, "Pad 36: Kick"; none for most
     ParameterKind kind = ParameterKind::other;
     bool automated = false; // it has automation points
 };
 
 // The parameters of a track's devices that can be automated, in the mixer's order: its volume and pan, its sends'
-// levels, then its instrument's and its effects' parameters. The master's: its volume, then its effects'.
+// levels, then its instrument's and its effects' parameters. The master's: its volume, then its effects'. A drum
+// sampler's empty pads' are left out, but for those with automation.
 std::vector<AutomationTarget> getAutomationTargets (const ProjectContext&, TrackID);
 std::vector<AutomationTarget> getAutomationTargets (const ProjectContext&,
                                                     DeviceID); // one device's (a container's, its chains'), as its menu lists them

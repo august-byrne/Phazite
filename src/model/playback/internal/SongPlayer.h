@@ -136,6 +136,13 @@ private:
     std::map<std::int64_t, std::shared_ptr<engine::ChainState>> chains; // each container's chain's, by its ID
     std::set<std::pair<std::int64_t, std::int64_t>> usedDelays;
     std::set<std::int64_t> usedSends, usedContainers, usedChains;
+
+    // The outputs of pads on mixer channels of their own (engine/nodes/PartOutput.h), by their samplers' IDs and their pads:
+    // those of this plan, by their samplers, and how late each comes out of its sampler (for its channel's delay).
+    std::map<std::pair<std::int64_t, int>, std::shared_ptr<engine::PartOutput>> partOutputs;
+    std::set<std::pair<std::int64_t, int>> usedPartOutputs;
+    std::map<std::int64_t, std::set<int>> separatedPads; // each pad once, however many tracks name it
+    std::map<const engine::PartOutput*, int> partLatencies;
     std::set<std::int64_t> used; // the devices the plan being compiled plays
     bool lowLatency = false;     // as the plan being compiled sees it
 
@@ -204,6 +211,9 @@ private:
         std::vector<juce::ValueTree> sends {}; // its SEND children, looked for once
         std::vector<std::int64_t> needs {};
         std::set<std::int64_t> refused {};
+        std::int64_t padDevice = 0; // a pad track's drum sampler, by its ID, and its pad (schema::trackPadDevice, trackPad)
+        int pad = -1;
+        std::int64_t padSource = 0; // the track the sampler is on
 
         bool refuses (std::int64_t other) const { return refused.contains (other); }
     };

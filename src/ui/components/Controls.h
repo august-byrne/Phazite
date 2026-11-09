@@ -117,6 +117,10 @@ private:
     const Fader& fader;
 };
 
+// One notch of a mouse wheel, as JUCE reports it on Windows (juce::MouseWheelDetails), which a trackpad's smaller movements
+// add up to: what scrolls a step.
+inline constexpr double wheelNotch = 60.0 / 256.0;
+
 // A number that is dragged up and down, scrolled, stepped with the arrow keys, or clicked and typed, such as the top
 // bar's tempo: its text is its face. Dragging (a fifth as far with Shift), the wheel and the keys move it in steps;
 // typing takes any value in its range, to a hundredth of a step. textFromValueFunction and valueFromTextFunction give
@@ -135,7 +139,6 @@ public:
 
 private:
     static constexpr int pixelsPerStep = 2;
-    static constexpr double wheelNotch = 60.0 / 256.0; // one notch of a mouse wheel, as JUCE reports it on Windows
     const double step;
     double wheelNotches = 0.0; // a trackpad's movements, added up until they make a step
 };

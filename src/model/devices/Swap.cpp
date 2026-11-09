@@ -91,11 +91,11 @@ struct Swap::Impl : private juce::Timer
         return findOwnDevice (state[schema::deviceType].toString().toStdString()) != nullptr ? s : nullptr;
     }
 
-    // The step's name, after what it tries: "Put Kick 03 on Pad 1", "Load Preset Warm Pad".
+    // The step's name, after what it tries: "Put Kick 03 on Pad 36", "Load Preset Warm Pad".
     juce::String getStepName() const
     {
         const auto triedName = tried.getFileNameWithoutExtension();
-        return pad >= 0 ? "Put " + triedName + " on Pad " + juce::String (pad + 1) : "Load Preset " + triedName;
+        return pad >= 0 ? "Put " + triedName + " on Pad " + juce::String (pad) : "Load Preset " + triedName;
     }
 
     // Copies in what it tried, and names the step after it.
@@ -154,7 +154,7 @@ struct Swap::Impl : private juce::Timer
         {
             stopNote();
             noteTrack = getDeviceChannel (s, device);
-            const auto note = isDrumSampler (state) ? devices::DrumSampler::firstNote : instrumentNote;
+            const auto note = isDrumSampler (state) ? devices::DrumSampler::kitFirstNote : instrumentNote;
             session->playGuideNotes ((std::int64_t) noteTrack.getRaw(), { note }, noteVelocity);
             startTimer (noteMilliseconds);
         }
@@ -203,8 +203,7 @@ Swap::Swap (ProjectContext& context, DeviceID device, int pad)
     impl->oldName = pad >= 0 ? getPadName (*song, device, pad) : juce::String();
 
     // Something else that changes the song keeps what is tried first, as a step of its own, and ends the swap.
-    impl->trial =
-        std::make_unique<Trial> (*song, pad >= 0 ? "Swap Pad " + juce::String (pad + 1) : "Swap Preset", [this] { impl->keep(); });
+    impl->trial = std::make_unique<Trial> (*song, pad >= 0 ? "Swap Pad " + juce::String (pad) : "Swap Preset", [this] { impl->keep(); });
 }
 
 Swap::~Swap()
@@ -231,7 +230,7 @@ int Swap::getPad() const
 juce::String Swap::getTargetName() const
 {
     if (impl->pad >= 0)
-        return "Pad " + juce::String (impl->pad + 1);
+        return "Pad " + juce::String (impl->pad);
 
     auto* song = impl->song.get();
     return song != nullptr ? getDeviceName (*song, impl->device) : juce::String();

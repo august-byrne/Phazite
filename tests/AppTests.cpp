@@ -141,7 +141,7 @@ TEST_CASE ("An example song opens as a new untitled project, with the computer k
     for (const auto& row : phazite::getPlaylistRows (context))
         names.add (row.name);
 
-    CHECK (names.joinIntoString (", ") == "Drums, Sub, Bass, Arp, Arp Pad, Sparkle");
+    CHECK (names.joinIntoString (", ") == "Drums, Bass, Arp");
 
     // The computer keyboard plays the arpeggio's sound: its track is selected, and live MIDI follows the selection.
     const auto selected = context.getSongSelection().getTracks();

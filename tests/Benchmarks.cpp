@@ -418,14 +418,41 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
 {
     HostedDevice device;
 
-    const auto makeSong = [] (int numTracks, bool withDevices)
+    enum class Kind
+    {
+        empty,
+        synths,
+        drums
+    };
+
+    const auto makeSong = [] (int numTracks, Kind kind)
     {
         auto song = phazite::createSong();
 
         for (const auto track : phazite::ensureTracks (*song, numTracks))
         {
-            if (! withDevices)
+            if (kind == Kind::empty)
                 continue;
+
+            // A drum sampler with all its pads' parameters: a beat of a kick, a snare and sixteenth hats, the hats choking.
+            if (kind == Kind::drums)
+            {
+                addDevice (*song, track, dev::DrumSampler::typeID);
+                const auto clip =
+                    phazite::test::addMidiClip (*song, track, { phazite::BeatPosition(), phazite::BeatPosition::fromBeats (32.0) }, "Beat");
+
+                for (int sixteenth = 0; sixteenth < 128; ++sixteenth)
+                {
+                    const auto at = phazite::BeatPosition::fromBeats (sixteenth * 0.25);
+                    const auto length = phazite::BeatDuration::fromBeats (0.2);
+                    phazite::test::addMidiNote (*song, clip, sixteenth % 8 == 6 ? 46 : 42, at, length, 90);
+
+                    if (sixteenth % 4 == 0)
+                        phazite::test::addMidiNote (*song, clip, sixteenth % 8 == 0 ? 36 : 38, at, length, 110);
+                }
+
+                continue;
+            }
 
             for (const auto* type : { dev::Synth::typeID, dev::Equalizer::typeID, dev::Compressor::typeID, dev::Reverb::typeID })
                 addDevice (*song, track, type);
@@ -471,12 +498,12 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
         return 100.0 * (phazite::test::getProcessCpuSeconds() - cpuBefore) / seconds;
     };
 
-    for (const auto& [numTracks, withDevices] : { std::pair (20, false), std::pair (20, true) })
+    for (const auto& [numTracks, kind] : { std::pair (20, Kind::empty), std::pair (20, Kind::synths), std::pair (20, Kind::drums) })
     {
         for (const auto numThreads : { 1, 4 })
         {
             playing.setNumThreads (numThreads); // while no block plays
-            auto song = makeSong (numTracks, withDevices);
+            auto song = makeSong (numTracks, kind);
             phazite::ProjectContext context { phazite::test::getEngineContext() };
             phazite::setSong (context, song.get());
             phazite::routeLiveMidiInput (*song);
@@ -489,8 +516,10 @@ TEST_CASE ("Benchmark: a project's CPU, stopped and playing" * doctest::test_sui
             phazite::stopAndReturn (*song);
             phazite::test::settle (300);
             report << "| " << numTracks
-                   << (withDevices ? " tracks, each a synth, an EQ, a compressor and a reverb, chords" : " empty tracks") << " | "
-                   << numThreads << " | " << juce::String (stopped, 2) << " % | " << juce::String (played, 2) << " % | "
+                   << (kind == Kind::synths  ? " tracks, each a synth, an EQ, a compressor and a reverb, chords"
+                       : kind == Kind::drums ? " tracks, each a drum sampler, a beat"
+                                             : " empty tracks")
+                   << " | " << numThreads << " | " << juce::String (stopped, 2) << " % | " << juce::String (played, 2) << " % | "
                    << juce::String (processCpu, 1) << " % |\n";
             phazite::setSong (context, nullptr);
             song = nullptr;

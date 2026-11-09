@@ -75,14 +75,15 @@ void Engine::setPlan (std::unique_ptr<Plan> plan)
 void Engine::findEarlyStarts (Plan& plan)
 {
     // An instrument handed its blocks early (a plug-in in its helper), but one whose sidechain listens to another strip,
-    // which it would wait for, and an instrument container's, whose chains share out the notes.
+    // which it would wait for, an instrument container's, whose chains share out the notes, and one that plays parts into
+    // outputs of their own, which its strip clears as it starts.
     plan.earlyStrips.clear();
 
     for (size_t i = 0; i < plan.strips.size(); ++i)
     {
         auto& strip = plan.strips[i];
         strip.startsEarly = strip.hasInstrument && ! strip.devices.empty() && strip.devices.front().sidechain < 0
-                            && (strip.containers.empty() || strip.containers.front().first > 0)
+                            && strip.devices.front().parts.empty() && (strip.containers.empty() || strip.containers.front().first > 0)
                             && strip.devices.front().node->getRunner().getProcessor().startsEarly();
 
         if (strip.startsEarly)
@@ -574,10 +575,11 @@ void Engine::takeEvents (const Span& span, const Plan::Strip& strip) noexcept
 bool Engine::isSilent (const Plan::Strip& strip) noexcept
 {
     // A channel muted (or soloed out) plays nothing, and its devices start from silence when it is heard again; but one a
-    // sidechain listens to plays on, which hears it before its mute.
+    // sidechain listens to plays on, which hears it before its mute, and so does one whose devices' parts other channels add
+    // up, each of which follows its own mute.
     auto& state = *strip.state;
 
-    if (state.getChannel().isSilenced() && ! strip.feedsSidechain)
+    if (state.getChannel().isSilenced() && ! strip.feedsSidechain && ! strip.feedsParts)
     {
         state.wasSilenced = true;
         return true;
@@ -673,6 +675,9 @@ void Engine::playDevice (const Span& span, const Plan::Strip& strip, size_t inde
     const auto offset = span.offset, numSamples = span.numSamples;
     auto block = getDeviceBlock (span, strip, index);
     block.events = events;
+
+    block.partOutputs = device.parts;
+    block.outputOffset = offset;
 
     // What its sidechain listens to: another strip after its fader and before its mute, lined up with its sound.
     if (device.sidechain >= 0)
@@ -786,6 +791,13 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
     const auto& plan = *span.plan;
     const auto& strip = plan.strips[index];
     const auto offset = span.offset, numSamples = span.numSamples;
+
+    // Its devices' parts' own outputs, silent until they play into them: a device that doesn't play in a block (asleep,
+    // muted, in a chain that is muted) would leave what it played before for a part's track to add again.
+    for (const auto& device : strip.devices)
+        for (const auto& part : device.partOutputs)
+            part->clear (offset, numSamples);
+
     const auto beat = span.beat, beatsPerSample = span.beatsPerSample;
     const auto gridSample = span.gridSample;
     const auto getAutomationBeat = [this, &plan, beat] (int latency)
@@ -822,7 +834,8 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
         {
             const auto& from = *plan.strips[(size_t) input.strip].state;
             const auto& sound = input.beforeFader ? from.beforeFader : from.buffer;
-            const float* sides[] = { sound.getReadPointer (0, offset), sound.getReadPointer (1, offset) };
+            const float* sides[] = { input.part != nullptr ? input.part->getChannel (0) + offset : sound.getReadPointer (0, offset),
+                                     input.part != nullptr ? input.part->getChannel (1) + offset : sound.getReadPointer (1, offset) };
             const auto [startGain, endGain] = input.level != nullptr ? input.level->moveOn() : std::pair (1.0f, 1.0f);
             (input.delay != nullptr ? *input.delay : noDelay).addDelayed (sides, channels, numSamples, startGain, endGain);
         }

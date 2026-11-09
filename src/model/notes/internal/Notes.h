@@ -122,7 +122,7 @@ bool isDrumTrack (const Song&, TrackID);
 void setDrumTrack (Song&, TrackID, bool);
 
 // What a drum track's rows come from (the piano roll lays them out: ui/pianoroll/DrumRows.h): Phazite's drum sampler's
-// pads, named after what each plays, or nothing for a track without one.
+// pads that play a sound, by their notes, each named after what it plays, or nothing for a track without one.
 std::optional<std::vector<DrumRow>> getSamplerSounds (const Song&, TrackID);
 std::vector<int> getNoteNumbersPlayed (const Song&, const std::vector<ClipID>&); // from low to high, each once
 
