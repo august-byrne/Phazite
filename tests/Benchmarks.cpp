@@ -12,6 +12,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "app/ClipWaveforms.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -1042,8 +1043,8 @@ TEST_CASE ("Benchmark: a song scrolling continuously as it plays, each frame pai
            * doctest::test_suite ("benchmark") * doctest::skip())
 {
     // Each frame painted as the window paints it on Windows: what it asked to repaint, into one native image (Direct2D's, its
-    // device held as the window holds it), in the app's look and feel, at the owner's screen size (docs/performance-audit.md,
-    // section 16, options 15 and 16).
+    // device held as the window holds it), in the app's look and feel, with its audio clips' waveforms, at the owner's
+    // screen size (docs/performance-audit.md, section 16, options 15 and 16).
     juce::Image frameImage (juce::Image::ARGB, 1920, 1080, true);
     {
         juce::Graphics g (frameImage);
@@ -1051,6 +1052,7 @@ TEST_CASE ("Benchmark: a song scrolling continuously as it plays, each frame pai
 
     phazite::ui::LookAndFeel lookAndFeel;
     juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    phazite::ui::setClipWaveformMaker (phazite::getClipWaveformMaker());
     juce::String report;
 
     {
@@ -1215,6 +1217,7 @@ TEST_CASE ("Benchmark: a song scrolling continuously as it plays, each frame pai
                << ", of which kept as pictures: " << kept << "\n";
     }
 
+    phazite::ui::setClipWaveformMaker ({});
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     MESSAGE (report);
 }

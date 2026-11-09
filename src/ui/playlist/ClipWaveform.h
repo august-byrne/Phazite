@@ -20,9 +20,10 @@ class ProjectContext;
 
 namespace phazite::ui
 {
-// It keeps the levels it drew last, for one area and stretch of the file, and draws of them only what the Graphics
-// context's clip region asks for: give it the same area while the view stays the same (the part of the clip in view, not
-// the part being painted), and a strip that repaints, such as under the playhead, reads nothing again.
+// It keeps what it drew last, for one area and stretch of the file, as a mask that it fills with the current colour, and
+// draws of it only what the Graphics context's clip region asks for: give it the same area while the view stays the same
+// (the part of the clip in view, not the part being painted), and a strip that repaints, such as under the playhead,
+// reads nothing again. It looks the same wherever a part of a pixel moves it, as the playlist moves the song it glides.
 class ClipWaveform
 {
 public:
@@ -34,6 +35,10 @@ public:
     // Draws what the clip's audio file plays over a stretch of the song, which can reach past the clip's edges to the audio
     // trimmed off it: the stretch's start at the area's left, its end at its right. Nothing where the file has no audio.
     virtual void paintSpan (juce::Graphics&, juce::Rectangle<int> area, BeatRange span) = 0;
+
+    // Lets go of what it keeps of what it drew last, while nothing shows it (the playlist's clip left the view): it draws
+    // it again when it next paints.
+    virtual void forgetDrawing() {}
 };
 
 // Makes the waveform of an audio clip of the open project, which calls loaded() on the message thread as more of its levels

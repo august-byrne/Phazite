@@ -1555,6 +1555,55 @@ TEST_CASE ("The Smart Tool finds where two audio clips meet as the mouse moves, 
     CHECK_FALSE (crossfadesAt (6.0)); // the first ends at 4, two beats before it
 }
 
+TEST_CASE ("An audio clip's waveform stays while its clip leaves the view, and lets go of what it drew")
+{
+    // The app's waveforms keep what they drew, as large as the part of the clip in view (src/app/ClipWaveforms.cpp). The
+    // playlist keeps a clip's waveform, so that its levels don't load again as it comes back into view, and what it drew only
+    // while it shows, so that a long song's don't add up.
+    struct Waveform : phazite::ui::ClipWaveform
+    {
+        void paint (juce::Graphics&, juce::Rectangle<int>, int) override { ++paints; }
+        void paintSpan (juce::Graphics&, juce::Rectangle<int>, phazite::BeatRange) override {}
+        void forgetDrawing() override { ++forgotten; }
+        int paints = 0, forgotten = 0;
+    };
+
+    std::vector<Waveform*> made;
+
+    struct NoMaker
+    {
+        ~NoMaker() { phazite::ui::setClipWaveformMaker ({}); } // however the test ends, before what it made goes
+    } noMaker;
+
+    phazite::ui::setClipWaveformMaker (
+        [&made] (phazite::ProjectContext&, phazite::ClipID, std::function<void()>) -> std::unique_ptr<phazite::ui::ClipWaveform>
+        {
+            auto waveform = std::make_unique<Waveform>();
+            made.push_back (waveform.get());
+            return waveform;
+        });
+
+    PlaylistScreen screen;
+    phazite::test::TemporaryFolder temp;
+    const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Tone.wav"), 2.0); // 4 beats
+    REQUIRE (phazite::importFiles (screen.context, { file.getFullPathName() }, screen.tracks[0], beats (0.0)).size() == 1);
+    phazite::test::dispatchPendingMessages();
+    screen.window.paintEverything();
+    REQUIRE (made.size() == 1);
+    CHECK (made[0]->paints > 0);
+    CHECK (made[0]->forgotten == 0);
+
+    // Scrolled past it, its waveform forgets what it drew; back in view, the same waveform draws it again.
+    screen.playlist.setViewStart (beats (64.0));
+    CHECK (made[0]->forgotten == 1);
+    const auto paints = made[0]->paints;
+    screen.playlist.setViewStart ({});
+    screen.window.paintEverything();
+    CHECK (made.size() == 1);
+    CHECK (made[0]->paints > paints);
+    CHECK (made[0]->forgotten == 1);
+}
+
 TEST_CASE ("The playhead drags along the ruler to the grid; a song playing is silent until it is let go, then plays on from there")
 {
     PlaylistScreen screen;

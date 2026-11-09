@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -68,17 +69,58 @@ namespace
             }
         }
 
+        void forgetDrawing() override { mask = {}; }
+
     private:
         ProjectContext& context;
         const ClipID clipID;
         std::function<void()> loaded; // called as more of the levels load
         juce::SharedResourcePointer<Levels> levels;
         std::unique_ptr<juce::AudioThumbnail> thumbnail;
-        juce::File shownFile; // what it shows
+        juce::File shownFile;  // what it shows
+        int levelsChanged = 0; // how often the thumbnail's levels changed: more of them read, or another file's
+
+        // A stretch of the file that plays straight, where it is drawn: the file's times at its left and its right (the later
+        // one at its left while the clip plays backwards), and the clip's gain.
+        struct Stretch
+        {
+            juce::Rectangle<int> area;
+            double from = 0.0, to = 0.0;
+            float gain = 1.0f;
+            bool backwards = false;
+
+            bool isSameAs (const Stretch& other) const noexcept
+            {
+                return area == other.area && juce::exactlyEqual (from, other.from) && juce::exactlyEqual (to, other.to)
+                       && juce::exactlyEqual (gain, other.gain) && backwards == other.backwards;
+            }
+        };
+
+        // The waveform as it was drawn last: a mask over the area it was drawn in and a pixel more all round, see-through,
+        // so that its edges stay whole wherever a part of a pixel moves it, at the display's scale; and what it shows.
+        struct Mask
+        {
+            juce::Image image;
+            juce::Rectangle<int> area;
+            float scale = 0.0f;
+            std::vector<Stretch> stretches;
+            int levelsChanged = -1;
+
+            bool shows (juce::Rectangle<int> shownArea, float shownScale, const std::vector<Stretch>& shown, int changes) const
+            {
+                return image.isValid() && area == shownArea && juce::exactlyEqual (scale, shownScale) && levelsChanged == changes
+                       && std::equal (stretches.begin(), stretches.end(), shown.begin(), shown.end(),
+                                      [] (const Stretch& a, const Stretch& b) { return a.isSameAs (b); });
+            }
+        };
+
+        Mask mask;
 
         // More of the file has been read: what shows it shows it.
         void changeListenerCallback (juce::ChangeBroadcaster*) override
         {
+            ++levelsChanged;
+
             if (loaded != nullptr)
                 loaded();
         }
@@ -92,9 +134,13 @@ namespace
         }
 
         // Draws the file over the part of an area that it has audio for, given the song beat at each x: over all of the area,
-        // not only the part being painted. The thumbnail keeps the levels it drew last, for one width and time range, and
-        // draws only what is being painted of them, so a strip that repaints under the playhead reads nothing again, while
-        // an area as wide as the part being painted would read them all at each paint (docs/performance-audit.md, section 8).
+        // not only the part being painted, as a mask kept while what it shows stays the same, filled with the colour set. A
+        // strip that repaints, such as under the playhead, draws of the mask and reads nothing again, while an area as wide
+        // as the part being painted would read the levels at each paint (docs/performance-audit.md, section 8). JUCE draws a
+        // waveform as a list of rectangles a pixel wide, which its Direct2D renderer draws sharp or soft by how the rounding
+        // of their edges falls, where a part of a pixel moves them: as the playlist glides the song under the playhead, a clip
+        // it paints afresh at each frame (one that the view's edge cuts) blinked fainter about one frame in four (the owner,
+        // 2026-11-09). JUCE's software renderer draws the mask the same every time, and moving it moves it whole.
         void draw (const juce::ValueTree& clipState, juce::Graphics& g, juce::Rectangle<int> area,
                    const std::function<BeatPosition (int)>& beatAt)
         {
@@ -103,9 +149,27 @@ namespace
 
             const auto& song = *findSong (context);
             showFileOf (song, clipState);
+            const auto stretches = findStretches (song, area, beatAt);
 
-            // Between two of the clip's warp markers its file plays straight: each stretch between them is drawn on its own,
-            // from the file's time at each end (without markers, all of it at once).
+            if (stretches.empty())
+                return;
+
+            const auto scale = g.getInternalContext().getPhysicalPixelScaleFactor();
+
+            if (! mask.shows (area, scale, stretches, levelsChanged))
+                drawMask (area, scale, stretches);
+
+            // Its alpha filled with the colour set.
+            const auto padded = area.expanded (1);
+            const auto placed = juce::AffineTransform::scale (1.0f / scale).translated ((float) padded.getX(), (float) padded.getY());
+            g.drawImageTransformed (mask.image, placed, true);
+        }
+
+        // The stretches of an area that the file plays straight, between two of the clip's warp markers (without markers, all
+        // of it at once), each over the part of it that the file has audio for.
+        std::vector<Stretch> findStretches (const Song& song, juce::Rectangle<int> area,
+                                            const std::function<BeatPosition (int)>& beatAt) const
+        {
             const auto left = beatAt (area.getX()).inBeats(), right = beatAt (area.getRight()).inBeats();
             std::vector<int> edges { area.getX() };
 
@@ -115,18 +179,20 @@ namespace
 
             edges.push_back (area.getRight());
             std::sort (edges.begin(), edges.end());
+            std::vector<Stretch> stretches;
 
             for (size_t i = 0; i + 1 < edges.size(); ++i)
                 if (edges[i + 1] > edges[i])
-                    drawStraight (song, g, area.withX (edges[i]).withRight (edges[i + 1]), beatAt);
+                    if (const auto stretch = findStretch (song, area.withX (edges[i]).withRight (edges[i + 1]), beatAt))
+                        stretches.push_back (*stretch);
+
+            return stretches;
         }
 
-        // Draws a stretch the file plays straight, over the part of an area that it has audio for.
-        void drawStraight (const Song& song, juce::Graphics& g, juce::Rectangle<int> area, const std::function<BeatPosition (int)>& beatAt)
+        // A stretch the file plays straight, over the part of an area that it has audio for: nothing if it has none there.
+        std::optional<Stretch> findStretch (const Song& song, juce::Rectangle<int> area,
+                                            const std::function<BeatPosition (int)>& beatAt) const
         {
-            if (! area.intersects (g.getClipBounds()))
-                return;
-
             // The time in the file at an x, as the clip plays it: stretched to the song's tempo, say, or going back from
             // its end while the clip plays backwards.
             const auto fileTime = [&] (int x) { return getFileTimeAt (song, clipID, beatAt (x)); };
@@ -139,7 +205,7 @@ namespace
                 const auto left = fileTime (drawn.getX()), right = fileTime (drawn.getRight());
 
                 if (juce::exactlyEqual (left, right) || std::max (left, right) <= 0.0 || std::min (left, right) >= length)
-                    return;
+                    return {};
 
                 const auto xAt = [&] (double time)
                 { return drawn.getX() + (int) std::round ((time - left) / (right - left) * drawn.getWidth()); };
@@ -151,17 +217,38 @@ namespace
             }
 
             if (drawn.getWidth() <= 0)
-                return;
+                return {};
 
             // Backwards, the file is drawn from its later time to its earlier, mirrored into place.
-            const auto from = fileTime (backwards ? drawn.getRight() : drawn.getX());
-            const auto to = fileTime (backwards ? drawn.getX() : drawn.getRight());
-            const juce::Graphics::ScopedSaveState saved (g);
+            return Stretch { drawn, fileTime (backwards ? drawn.getRight() : drawn.getX()),
+                             fileTime (backwards ? drawn.getX() : drawn.getRight()),
+                             juce::Decibels::decibelsToGain (getClipGain (song, clipID)), backwards };
+        }
 
-            if (backwards)
-                g.addTransform (juce::AffineTransform::scale (-1.0f, 1.0f, drawn.toFloat().getCentreX(), 0.0f));
+        // Draws the stretches into a new mask, through JUCE's software renderer, at the display's scale.
+        void drawMask (juce::Rectangle<int> area, float scale, const std::vector<Stretch>& stretches)
+        {
+            const auto padded = area.expanded (1);
+            juce::Image drawn (juce::Image::SingleChannel, std::max (1, (int) std::ceil ((float) padded.getWidth() * scale)),
+                               std::max (1, (int) std::ceil ((float) padded.getHeight() * scale)), true, juce::SoftwareImageType());
+            {
+                juce::Graphics g (drawn);
+                g.addTransform (juce::AffineTransform::translation ((float) -padded.getX(), (float) -padded.getY()).scaled (scale));
+                g.setColour (juce::Colours::white);
 
-            thumbnail->drawChannels (g, drawn, from, to, juce::Decibels::decibelsToGain (getClipGain (song, clipID)));
+                for (const auto& stretch : stretches)
+                {
+                    const juce::Graphics::ScopedSaveState saved (g);
+
+                    if (stretch.backwards)
+                        g.addTransform (juce::AffineTransform::scale (-1.0f, 1.0f, stretch.area.toFloat().getCentreX(), 0.0f));
+
+                    thumbnail->drawChannels (g, stretch.area, stretch.from, stretch.to, stretch.gain);
+                }
+            }
+
+            // As the display's own image, which the graphics card keeps from one paint to the next.
+            mask = { juce::NativeImageType().convert (drawn), area, scale, stretches, levelsChanged };
         }
 
         // The file the clip's audio comes from. Not the render it plays while stretched, pitched or reversed, which may not
@@ -174,6 +261,7 @@ namespace
                 return;
 
             shownFile = file;
+            ++levelsChanged;
 
             if (thumbnail == nullptr)
             {

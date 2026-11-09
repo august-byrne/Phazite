@@ -327,6 +327,12 @@ void Playlist::layOutClips()
         partsInView[clip.id] = part;
     }
 
+    // What is left are the clips that left the view: their waveforms, which stay, let go of what they drew, as large as the
+    // part of the clip that was in view, so that a long song's don't add up.
+    for (const auto& gone : clipComponents)
+        if (const auto found = waveforms.find (gone.first); found != waveforms.end() && found->second != nullptr)
+            found->second->forgetDrawing();
+
     clipComponents = std::move (inView);
     shownParts = std::move (partsInView);
 }

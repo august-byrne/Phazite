@@ -70,3 +70,76 @@ TEST_CASE ("A clip's waveform loads in the background and draws where its file h
 
     setSong (context, nullptr);
 }
+
+TEST_CASE ("A clip's waveform draws the same at every part of a pixel the playlist moves it by")
+{
+    // The owner, 2026-11-09: near the lo-fi example's end, the rain sample's waveform blinked. The view's left edge was
+    // crossing its clip, which the playlist then paints afresh at each frame while the song glides under the playhead by
+    // parts of a pixel (TimelineEditor::setSubPixel()). JUCE's Direct2D renderer drew the waveform's columns, a list of
+    // rectangles a pixel wide, sharp at most of those parts and soft at some, as their edges' rounding fell: about one frame
+    // in four looked fainter. On Linux, JUCE's software renderer draws the same at every part, before and after the fix.
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (temp.folder, "Waves", error);
+    REQUIRE (project != nullptr);
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, &project->getSong());
+
+    // Two seconds of a quiet tone, as thin a waveform as the rain's.
+    const auto file = phazite::test::writeSound (temp.folder.getChildFile ("Rain.wav"), 2.0, 220.0, 0.05f);
+    const auto track = phazite::getTrackIDs (project->getSong()).front();
+    const auto clips = phazite::importFiles (context, { file.getFullPathName() }, track, phazite::BeatPosition());
+    REQUIRE (clips.size() == 1);
+    auto waveform = phazite::getClipWaveformMaker() (context, clips[0], {});
+    REQUIRE (waveform != nullptr);
+
+    // Painted as the playlist paints a clip: the lanes placed in the window, moved by a part of a pixel, and the clip in them,
+    // across x = 512, where a column's edges round differently either side.
+    const auto paintAt = [&waveform] (float part)
+    {
+        juce::Image image (juce::Image::ARGB, 1100, 40, true);
+        juce::Graphics g (image);
+        g.setOrigin ({ 3, 0 });
+        g.addTransform (juce::AffineTransform::translation (-part, 0.0f));
+        g.setOrigin ({ 487, 0 });
+        g.setColour (juce::Colours::white);
+        waveform->paint (g, { 0, 0, 400, 40 }, 400);
+        return image;
+    };
+
+    const auto drawn = [] (const juce::Image& image)
+    {
+        const juce::Image::BitmapData data (image, juce::Image::BitmapData::readOnly);
+        auto total = 0.0;
+
+        for (int y = 0; y < data.height; ++y)
+            for (int x = 0; x < data.width; ++x)
+                total += data.getPixelColour (x, y).getFloatAlpha();
+
+        return total;
+    };
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return countLit (paintAt (0.0f), 490, 890) > 400; }, 10000));
+    phazite::test::dispatchPendingMessages(); // every level loaded
+
+    // How much it draws in all is the same at every part of a pixel.
+    const auto whole = drawn (paintAt (0.0f));
+    juce::Random random (7);
+    juce::String report;
+    auto most = 0.0;
+
+    for (int i = 0; i < 48; ++i)
+    {
+        const auto part = random.nextFloat();
+        const auto total = drawn (paintAt (part));
+        report << juce::String (part, 4) << ": " << juce::String (total, 1) << "\n";
+        most = std::max (most, std::abs (total - whole));
+    }
+
+    CAPTURE (whole);
+    CAPTURE (report.toStdString());
+    CHECK (whole > 400.0);
+    CHECK (most < whole * 0.002);
+
+    setSong (context, nullptr);
+}

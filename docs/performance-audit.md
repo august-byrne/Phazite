@@ -819,6 +819,37 @@ frames missed in 1,175 (20 s), where the two runs before the fix missed 54 in 14
 in none, and JUCE put off one frame in 84, as in the second log. The owner: "it works well". What is left is JUCE's (G5),
 for 8, should the owner still see it.
 
+**The rain that blinked** (2026-11-09). The owner, of the lo-fi example: "near the end ... the rain sample shown in the
+playlist visually blinked a little bit". Painted frame by frame as the window paints them (Direct2D, the app's waveforms,
+scrolling continuously at 24 pixels a beat, 1920 x 1080), a rain clip looked the same at every frame while it was kept as
+a picture; from the frame the view's left edge cut it (at bar 46 there), when the playlist paints it afresh at each frame,
+its waveform drew faint and soft at about one frame in four. JUCE draws a waveform (`juce::AudioThumbnail`) as a list of
+rectangles a pixel wide, which its Direct2D renderer fills as one batch of sprites, sharp, only while every rectangle is at
+least a pixel wide and tall; otherwise it fills them one by one with soft edges, over any batch it had drawn already.
+Moved by a part of a pixel, a column comes out 0.99994 of a pixel wide where the rounding of its edges falls badly, as it
+does near x = 512 and 1024: the same 40 columns, moved by 64 parts of a pixel across 512, drew soft at 13 of them. Every
+column of the rain's thin band was tall enough to draw sharp, so it changed most; the vinyl's, thinner, drew soft always,
+and only shimmered.
+
+Now the app's waveform draws through JUCE's software renderer, which draws each column the same every time, into a mask
+that it keeps while it shows the same part of the file, filled with the colour set (`src/app/ClipWaveforms.cpp`): moved
+by a part of a pixel, it moves whole, as a clip's picture does. The playlist has a waveform let go of its mask when its
+clip leaves the view. In the same frames, the rain clip painted afresh now keeps its mean brightness within 0.1 % from
+frame to frame, as its picture does, where it fell by up to 1.2 % (all of it in the waveform's few pixels), and the
+vinyl's within 0.1 %, where it varied by 0.7 %. A test paints a waveform moved by 48 parts of a pixel across x = 512 and
+finds the same drawn at each (`tests/ClipWaveformTests.cpp`): before, some drew 11 % more.
+
+The benchmark of a song scrolling continuously now paints the app's waveforms, as the window does, so its figures aren't
+those of the table above. With them, two runs each (`windows-profile`):
+
+| Each of 600 frames, House Groove at 22 pixels a beat | Before: two runs | With the masks: two runs |
+|---|---|---|
+| Its paint, mean / 95th percentile | 5.74 / 7.35 and 6.44 / 7.87 ms | 5.13 / 6.08 and 5.44 / 6.92 ms |
+| ... the audio clips, mean / 95th percentile | 0.44 / 0.79 and 0.49 / 0.93 ms | 0.44 / 0.74 and 0.47 / 0.87 ms |
+| The first frame, which makes the pictures | 51.8 and 53.5 ms | 34.8 and 40.0 ms |
+
+The audio clips take as long as before; the rest varies more from run to run than it differs.
+
 ## 17. The sampler and the FM synth (2026-11-07)
 
 Roadmap steps 4.6 and 4.7 added two instruments. This is what they cost, from "Benchmark: each device's CPU, latency and
