@@ -200,12 +200,13 @@ namespace schema
             return holders;
         }
 
-        // What names an ID of the song's.
+        // What names an ID of the song's: a send's return, a sidechain's track, the device of a lane, a curve or what a
+        // modulator moves, and the drum sampler whose pad a track plays.
         const std::vector<Property>& getIDNamers()
         {
             static const std::vector<Property> namers {
                 { &SEND, &sendTo },       { &DEVICE, &deviceSidechain },    { &LANE, &laneDevice },
-                { &CURVE, &curveDevice }, { &MODULATES, &modulatesDevice },
+                { &CURVE, &curveDevice }, { &MODULATES, &modulatesDevice }, { &TRACK, &trackPadDevice },
             };
             return namers;
         }

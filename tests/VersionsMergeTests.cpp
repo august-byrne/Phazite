@@ -5,11 +5,13 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
+#include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
@@ -452,4 +454,47 @@ TEST_CASE ("The renumberings that apply are those of this line's merges since th
     REQUIRE (renumbering.size() == 1);
     CHECK (renumbering[0].from == 20);
     CHECK (renumbering[0].to == 21);
+}
+
+TEST_CASE ("A drum sampler a merge gives a new ID keeps its pads' tracks, which name it by the new one")
+{
+    Sides sides;
+
+    // Each side adds a device, both counting on from the same place: one ID for this side's synth and the other side's drum
+    // sampler, whose pad 36 the other side gave a track of its own.
+    const auto synth =
+        phazite::setInstrument (*sides.ours, sides.tracks[0], phazite::makeOwnDeviceState (*sides.ours, phazite::devices::Synth::typeID));
+    const auto drums = phazite::setInstrument (*sides.theirs, sides.tracks[1],
+                                               phazite::makeOwnDeviceState (*sides.theirs, phazite::devices::DrumSampler::typeID));
+    REQUIRE (synth.isValid());
+    REQUIRE (drums.isValid());
+    REQUIRE (synth.getRaw() == drums.getRaw());
+    REQUIRE (phazite::givePadItsOwnTrack (*sides.theirs, drums, 36).isValid());
+
+    const auto merged = sides.merge();
+    CHECK (merged.clashes.empty());
+
+    // The drum sampler, given a new ID, and the pad's track, which names it by that one, not by the synth's.
+    juce::ValueTree sampler, padTrack;
+    const std::function<void (const juce::ValueTree&)> find = [&] (const juce::ValueTree& tree)
+    {
+        for (const auto& child : tree)
+        {
+            if (child.hasType (schema::DEVICE) && child[schema::deviceType].toString() == phazite::devices::DrumSampler::typeID)
+                sampler = child;
+
+            if (child.hasType (schema::TRACK) && child.hasProperty (schema::trackPadDevice))
+                padTrack = child;
+
+            find (child);
+        }
+    };
+
+    find (merged.song);
+    REQUIRE (sampler.isValid());
+    REQUIRE (padTrack.isValid());
+    CHECK (phazite::readID (sampler[schema::deviceID]) != drums.getRaw());
+    CHECK (phazite::readID (padTrack[schema::trackPadDevice]) == phazite::readID (sampler[schema::deviceID]));
+    CHECK ((int) padTrack[schema::trackPad] == 36);
+    checkIDs (merged.song);
 }
