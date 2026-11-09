@@ -296,16 +296,16 @@ struct ContainerEditor::DeviceLine : public juce::Component
 
             // Shown, it takes the chains' place, and this line with them: what that needs is copied first.
             auto& owner = editor;
-            const auto device = shown;
+            const auto slot = shown;
 
             if (mods.isPopupMenu())
             {
-                owner.showDeviceMenu (device, name);
+                owner.showDeviceMenu (slot, name);
             }
             else if (owner.onDeviceClicked != nullptr)
             {
                 const auto clicked = owner.onDeviceClicked;
-                clicked (device, mods);
+                clicked (slot, mods);
             }
         };
 
