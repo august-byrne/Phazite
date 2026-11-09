@@ -33,7 +33,7 @@ namespace
         return block;
     }
 
-    // The plug-ins' elements in a part of the song (a track's element, with its containers'), in their order.
+    // The plug-ins' elements in a part of the song (a track's element, with its containers' chains'), in their order.
     void findPlugins (const juce::ValueTree& tree, std::vector<juce::ValueTree>& found)
     {
         for (const auto& child : tree)
@@ -43,7 +43,7 @@ namespace
                 if (isPluginState (child))
                     found.push_back (child);
             }
-            else if (child.hasType (schema::CONTAINER))
+            else if (child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
             {
                 findPlugins (child, found);
             }

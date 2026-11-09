@@ -759,6 +759,51 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: containers' chains: three bands, their crossover modulated, layers muted, and two synths split by keys")
+    {
+        TestSong song;
+        auto& context = song.context;
+        const auto track = song.firstTrack;
+        addTone (song, track);
+
+        // A container of effects split into three bands, an effect in each, the second band's crossover moved by the track's
+        // LFO and the third chain's volume by a macro (model/mixer/ContainerModel.h).
+        const auto bands = phazite::addContainer (context, track);
+        REQUIRE (phazite::addChain (context, bands).isValid());
+        REQUIRE (phazite::addChain (context, bands).isValid());
+        phazite::setContainerSplit (context, bands, phazite::ContainerSplit::bands);
+        const auto chains = phazite::getChains (context, bands);
+        REQUIRE (chains.size() == 3);
+        phazite::addEffectToChain (context, chains[0].id, song.findDeviceType (phazite::devices::Compressor::typeID));
+        phazite::addEffectToChain (context, chains[1].id, song.findDeviceType (phazite::devices::Equalizer::typeID));
+        phazite::addEffectToChain (context, chains[2].id, song.findDeviceType (phazite::devices::Reverb::typeID));
+        song.modulate (song.addModulator (track, phazite::ModulatorType::lfo), { chains[1].id, "crossover" }, 0.3f);
+        const auto macro = phazite::getContainerMacros (context, bands)[0].id;
+        song.modulate (macro, { chains[2].id, "volume" }, -0.3f);
+        song.setMacroValue (macro, 0.5f);
+
+        // After it, a container of two layers, the first muted, the second a delay.
+        const auto layers = phazite::addContainer (context, track);
+        const auto delayed = phazite::addChain (context, layers);
+        phazite::addEffectToChain (context, delayed, song.findDeviceType (phazite::devices::Delay::typeID));
+        phazite::toggleChainMute (context, phazite::getChains (context, layers)[0].id);
+
+        // On another track, an instrument container of two synths split by keys, a chord across both.
+        const auto keys = song.addTrack ("Keys");
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto instruments = phazite::addInstrumentContainer (context, keys);
+        const auto high = phazite::addChain (context, instruments);
+        phazite::chooseChainInstrument (context, high, song.findDeviceType (phazite::devices::Synth::typeID));
+        phazite::setChainKeys (context, phazite::getChains (context, instruments)[0].id, { 0, 59 });
+        phazite::setChainKeys (context, high, { 60, 127 });
+        song.addChord (song.addMidiClip (keys, 0.0, 16.0), { 48, 55, 64, 67 }, 0.0, 16.0);
+
+        const auto m = playAndMeasure (song);
+        report ("Containers' chains: three bands, their crossover modulated, layers muted, and two synths split by keys", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: Phazite's compressor, ducked by another track at 70 % mix, with its meters read")
     {
         using phazite::devices::Compressor;

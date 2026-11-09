@@ -3,7 +3,8 @@
 // presets reach them: what each is, its value set by hand and the value it plays.
 // A reference names one of a device's parameters (one of Phazite's own devices', by its ID in their description, or a
 // plug-in's, by the plug-in's own ID for it), a channel's fader's volume or pan, a send's level (Schema.h: faderVolume to
-// sendLevelParameter), or, by the modulator's or the macro's ID, a modulator's parameter or a macro's value (by the
+// sendLevelParameter), by a container's chain's ID its volume, pan or crossover (chainVolumeParameter to
+// crossoverParameter), or, by the modulator's or the macro's ID, a modulator's parameter or a macro's value (by the
 // macro's ID as its parameter's). The song holds every value set by hand, but a plug-in's that no control set, which its
 // instance holds (and the song stores as it saves). For the model, the app and tests. Message thread only.
 #pragma once
@@ -18,13 +19,16 @@ namespace phazite
 {
 enum class ParameterSource
 {
-    device,    // one of Phazite's own devices' (DeviceInfo.h)
-    plugin,    // a plug-in's, which its instance holds
-    volume,    // a fader's volume (or a plain folder's VCA's), as the fader's position, from 0 to 1
-    pan,       // a fader's pan, from -1 (left) to 1 (right)
-    send,      // a send's level, as a fader's position
-    modulator, // one of a modulator's parameters
-    macro      // a track's or a container's macro's value, from 0 to 1
+    device,      // one of Phazite's own devices' (DeviceInfo.h)
+    plugin,      // a plug-in's, which its instance holds
+    volume,      // a fader's volume (or a plain folder's VCA's), as the fader's position, from 0 to 1
+    pan,         // a fader's pan, from -1 (left) to 1 (right)
+    send,        // a send's level, as a fader's position
+    modulator,   // one of a modulator's parameters
+    macro,       // a track's or a container's macro's value, from 0 to 1
+    chainVolume, // a container's chain's volume, as a fader's position, from 0 to 1
+    chainPan,    // a container's chain's pan, from -1 (left) to 1 (right)
+    crossover    // where the band of a chain of a container split into bands starts, in hertz (not the first chain's)
 };
 
 // What a parameter is: what it is of, its name, its range (with its skew and steps) and its default; and for one of Phazite's

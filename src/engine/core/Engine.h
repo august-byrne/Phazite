@@ -242,7 +242,16 @@ private:
     void takeEvents (const Span&, const Plan::Strip&) noexcept; // its instrument's notes and live notes, then its modulators
     bool isSilent (const Plan::Strip&) noexcept;                // and its devices reset as it is heard again
     static void flushStrip (const Plan::Strip&) noexcept;       // its devices reset, and the delays that line it up
-    DeviceRunner::Block getDeviceBlock (const Span&, const Plan::Strip&, size_t device) noexcept;
+    static void resetContainers (const Plan::Strip&) noexcept;  // nothing its containers kept, nor their chains
+    DeviceRunner::Block getDeviceBlock (const Span&, const Plan::Strip&, size_t device) noexcept; // without its notes
+
+    // A strip's device played in a buffer (its strip's or its chain's), given its notes (an instrument's); and a container's
+    // chains, side by side, each on its part of what the strip's buffer holds, added up into it. Whether a strip's first
+    // device is an instrument container.
+    void playDevice (const Span&, const Plan::Strip&, size_t device, juce::AudioBuffer<float>&,
+                     std::span<devices::NoteEvent> notes) noexcept;
+    void playContainer (const Span&, const Plan::Strip&, const Plan::Container&, float* const* channels) noexcept;
+    static bool hasInstrumentContainer (const Plan::Strip&) noexcept;
     void addInput (const Plan::Strip&, float* const* channels, int offset, int numSamples) noexcept;
     void addNotes (const Plan::Strip&, const Plan&, int numSamples) noexcept;
 

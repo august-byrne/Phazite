@@ -425,10 +425,16 @@ bool canModulate (const Song& song, ModulatorID id, const ParameterRef& paramete
     if (! found.has_value() || found->source == ParameterSource::modulator || found->source == ParameterSource::macro)
         return false;
 
-    // A container's macros modulate the devices in it.
+    // A container's macros modulate the devices in it, and its chains' volumes, pans and crossovers.
     if (const auto owner = state.getParent(); owner.hasType (schema::CONTAINER))
-        return (found->source == ParameterSource::device || found->source == ParameterSource::plugin)
-               && findContainerOf (song, parameter.device) == getDeviceID (owner);
+    {
+        if (found->source == ParameterSource::device || found->source == ParameterSource::plugin)
+            return findContainerOf (song, parameter.device) == getDeviceID (owner);
+
+        return (found->source == ParameterSource::chainVolume || found->source == ParameterSource::chainPan
+                || found->source == ParameterSource::crossover)
+               && getChainContainer (song, parameter.device) == getDeviceID (owner);
+    }
 
     const auto track = getModulatorTrack (song, id);
     return track.isValid() && getParameterTrack (song, parameter) == track;

@@ -331,8 +331,13 @@ std::vector<ModulatorInfo> getModulatorsFor (const ParameterHandle& handle)
 
     const auto& [song, ref] = *target;
 
-    // A device's in a container: its container's macros first.
-    if (const auto container = findContainerOf (*song, ref.device); container.isValid())
+    // A device's in a container, or a container's chain's: its container's macros first.
+    auto container = findContainerOf (*song, ref.device);
+
+    if (! container.isValid())
+        container = getChainContainer (*song, ref.device);
+
+    if (container.isValid())
         for (const auto macro : getContainerMacros (*song, container))
             modulators.push_back (makeInfo (*song, macro));
 

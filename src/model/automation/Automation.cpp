@@ -307,7 +307,8 @@ namespace
     }
 
     // The devices whose parameters a track's lanes show, in the order the lanes of their automation come: its channel's
-    // fader (or a plain folder's VCA), its sends, then its devices, those in its containers in their place.
+    // fader (or a plain folder's VCA), its sends, then its devices, a container's chains in its place, each before its
+    // devices (a chain's volume, pan and crossover are its own).
     std::vector<DeviceID> getLaneDevices (const Song& song, TrackID track)
     {
         std::vector<DeviceID> ids;
@@ -324,10 +325,18 @@ namespace
         for (const auto& device : getDeviceStates (state))
         {
             if (! device.hasType (schema::CONTAINER))
+            {
                 ids.push_back (getDeviceID (device));
+                continue;
+            }
 
-            for (const auto& inside : getDeviceStates (device))
-                ids.push_back (getDeviceID (inside));
+            for (const auto& chain : getChainStates (device))
+            {
+                ids.push_back (DeviceID::fromRaw ((std::uint64_t) (juce::int64) chain[schema::chainID]));
+
+                for (const auto& inside : getDeviceStates (chain))
+                    ids.push_back (getDeviceID (inside));
+            }
         }
 
         return ids;
@@ -449,6 +458,10 @@ TrackID getParameterTrack (const Song& song, const ParameterRef& parameter)
             return getTrackID (found->state);
         case ParameterSource::send:
             return getTrackID (found->state.getParent());
+        case ParameterSource::chainVolume:
+        case ParameterSource::chainPan:
+        case ParameterSource::crossover:
+            return getDeviceChannel (song, getChainContainer (song, parameter.device)); // its container's
         case ParameterSource::modulator:
         case ParameterSource::macro:
             break;
@@ -507,8 +520,16 @@ std::vector<ParameterRef> getAutomatableParameters (const Song& song, TrackID tr
     {
         addParametersOf (device);
 
-        for (const auto inside : getContainerDevices (song, device))
-            addParametersOf (inside);
+        // A container's chains, each its volume and pan (and a band's crossover), then its devices'.
+        for (const auto containerChain : getChains (song, device))
+        {
+            for (const auto* parameter : { schema::chainVolumeParameter, schema::chainPanParameter, schema::crossoverParameter })
+                if (locateParameter (song, { containerChain, parameter }).has_value())
+                    parameters.push_back ({ containerChain, parameter });
+
+            for (const auto inside : getChainDevices (song, containerChain))
+                addParametersOf (inside);
+        }
     }
 
     return parameters;
@@ -542,6 +563,12 @@ juce::String getParameterName (const Song& song, const ParameterRef& parameter)
         case ParameterSource::pan:
             return "Pan";
 
+        // A chain's, by its name: "Chain 2 Volume".
+        case ParameterSource::chainVolume:
+        case ParameterSource::chainPan:
+        case ParameterSource::crossover:
+            return found->state[schema::chainName].toString() + " " + describeParameter (song, *found).name;
+
         case ParameterSource::device:
         case ParameterSource::plugin:
         case ParameterSource::modulator:
@@ -550,6 +577,18 @@ juce::String getParameterName (const Song& song, const ParameterRef& parameter)
     }
 
     return describeParameter (song, *found).name;
+}
+
+juce::String getParameterDeviceName (const Song& song, const ParameterRef& parameter)
+{
+    if (isMixerControl (song, parameter))
+        return "Mixer";
+
+    // A container's chain's parameters are its container's.
+    if (const auto container = getChainContainer (song, parameter.device); container.isValid())
+        return getDeviceName (song, container);
+
+    return getDeviceName (song, parameter.device);
 }
 
 //==============================================================================

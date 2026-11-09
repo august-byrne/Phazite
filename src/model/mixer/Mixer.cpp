@@ -138,6 +138,18 @@ std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain)
 {
     std::vector<juce::ValueTree> devices;
 
+    // A container's are its chains', in their order.
+    if (isContainerState (chain))
+    {
+        for (const auto& child : chain)
+            if (child.hasType (schema::CHAIN))
+                for (const auto& device : child)
+                    if (device.hasType (schema::DEVICE))
+                        devices.push_back (device);
+
+        return devices;
+    }
+
     for (const auto& child : chain)
         if (isDeviceElement (child))
             devices.push_back (child);
@@ -193,6 +205,9 @@ bool isInstrumentState (const juce::ValueTree& deviceState)
     if (isPluginState (deviceState))
         return deviceState[schema::pluginInstrument];
 
+    if (isContainerState (deviceState))
+        return deviceState[schema::containerInstrument];
+
     const auto* own = findOwnInfo (deviceState);
     return own != nullptr && own->kind == devices::DeviceKind::instrument;
 }
@@ -228,9 +243,10 @@ bool hasInstrument (const Song& song, TrackID track)
 
 TrackID getDeviceChannel (const Song& song, DeviceID device)
 {
+    // Out of its chain and its container, for a device in one.
     auto parent = findDeviceState (song, device).getParent();
 
-    if (isContainerState (parent))
+    while (parent.hasType (schema::CHAIN) || isContainerState (parent))
         parent = parent.getParent();
 
     return getTrackID (parent);
@@ -418,7 +434,7 @@ bool hasMix (const Song& song, DeviceID id)
     if (const auto* own = findOwnInfo (state))
         return own->kind != devices::DeviceKind::instrument && devices::findParameter (*own, devices::mixParameterID) >= 0;
 
-    return isContainerState (state) || (isPluginState (state) && ! isInstrumentState (state));
+    return (isContainerState (state) || isPluginState (state)) && ! isInstrumentState (state);
 }
 
 float getMix (const Song& song, DeviceID id)
@@ -505,8 +521,7 @@ DeviceID placeDevice (Song& song, TrackID track, juce::ValueTree device, Selecti
         if (! target.isValid())
             return {};
 
-        const auto* own = findOwnInfo (device);
-        const auto name = own != nullptr ? getOwnName (*own) : device[schema::pluginName].toString();
+        const auto name = getDeviceName (device);
         setTrackName (song, target, name);
 
         if (const auto colour = getColourForName (name))

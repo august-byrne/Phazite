@@ -24,8 +24,9 @@ namespace
             if (isOfKind && (std::uint64_t) (juce::int64) child.getProperty (schema::trackID, (juce::int64) 0) == id)
                 return true;
 
-            // Into what holds items: the track list, tracks and containers, not clips' notes or devices' values.
-            if ((child.hasType (schema::TRACKS) || isTrack || child.hasType (schema::CONTAINER)) && holds (child, kind, id))
+            // Into what holds items: the track list, tracks, containers and their chains, not clips' notes or devices' values.
+            if ((child.hasType (schema::TRACKS) || isTrack || child.hasType (schema::CONTAINER) || child.hasType (schema::CHAIN))
+                && holds (child, kind, id))
                 return true;
         }
 

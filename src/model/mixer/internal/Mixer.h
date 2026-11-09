@@ -29,8 +29,9 @@ struct DeviceSlot;
 
 //==============================================================================
 // The song's devices: the element that holds a channel's chain (its TRACK, or MASTER for the master or none); a chain's
-// devices' elements, in order (or a container's, given its element); a device's element, on a chain or in a container,
-// invalid for one the song hasn't; the ID an element names; and what it is.
+// devices' elements, in order (a container's chain's, given its CHAIN; or all a container's chains', in their order, given
+// its CONTAINER); a device's element, on a chain or in a container, invalid for one the song hasn't; the ID an element
+// names; and what it is.
 juce::ValueTree findChainState (const Song&, TrackID channel);
 std::vector<juce::ValueTree> getDeviceStates (const juce::ValueTree& chain);
 juce::ValueTree findDeviceState (const Song&, DeviceID);
@@ -38,8 +39,8 @@ DeviceID getDeviceID (const juce::ValueTree& deviceState);
 bool isPluginState (const juce::ValueTree& deviceState);
 bool isContainerState (const juce::ValueTree& deviceState);
 
-// Whether a device's element is an instrument's, which turns notes into sound: one of Phazite's own instruments, or a plug-in
-// that is one (Schema.h: pluginInstrument).
+// Whether a device's element is an instrument's, which turns notes into sound: one of Phazite's own instruments, a plug-in
+// that is one (Schema.h: pluginInstrument), or an instrument container (containerInstrument).
 bool isInstrumentState (const juce::ValueTree& deviceState);
 
 // A channel's devices, in their order: a track's instrument, if it has one (its first device), then its effects, which
@@ -105,8 +106,8 @@ std::optional<juce::Point<int>> getWindowPosition (const Song&, DeviceID);
 
 // An effect's mix: how much of what it puts out is its effect, from 0 (only the sound that comes into it, "dry") to 1
 // (only the effect, "wet"), as FL Studio's mixer slots and REAPER's effect chains have for every effect: one of Phazite's
-// own effects' mix parameter, or a plug-in's or a container's mix (Schema.h: deviceMix). An instrument has none. Set in
-// the caller's step.
+// own effects' mix parameter, or a plug-in's or a container of effects' mix (Schema.h: deviceMix). An instrument (an
+// instrument container too) has none. Set in the caller's step.
 bool hasMix (const Song&, DeviceID);
 float getMix (const Song&, DeviceID); // 1 for a device without a mix
 void setMix (Song&, DeviceID, float mix);

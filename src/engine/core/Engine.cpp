@@ -75,13 +75,14 @@ void Engine::setPlan (std::unique_ptr<Plan> plan)
 void Engine::findEarlyStarts (Plan& plan)
 {
     // An instrument handed its blocks early (a plug-in in its helper), but one whose sidechain listens to another strip,
-    // which it would wait for.
+    // which it would wait for, and an instrument container's, whose chains share out the notes.
     plan.earlyStrips.clear();
 
     for (size_t i = 0; i < plan.strips.size(); ++i)
     {
         auto& strip = plan.strips[i];
         strip.startsEarly = strip.hasInstrument && ! strip.devices.empty() && strip.devices.front().sidechain < 0
+                            && (strip.containers.empty() || strip.containers.front().first > 0)
                             && strip.devices.front().node->getRunner().getProcessor().startsEarly();
 
         if (strip.startsEarly)
@@ -539,7 +540,9 @@ void Engine::startStrip (const Span& span, size_t index) noexcept
     if (! state.startedSilent)
     {
         const auto& instrument = strip.devices.front();
-        instrument.node->start (state.buffer, span.offset, span.numSamples, getDeviceBlock (span, strip, 0), instrument.automation);
+        auto block = getDeviceBlock (span, strip, 0);
+        block.events = std::span (state.events.data(), (size_t) state.numEvents);
+        instrument.node->start (state.buffer, span.offset, span.numSamples, block, instrument.automation);
     }
 
     state.startedPass.store (span.pass, std::memory_order_release);
@@ -585,10 +588,28 @@ bool Engine::isSilent (const Plan::Strip& strip) noexcept
         for (const auto& device : strip.devices)
             device.node->getRunner().reset();
 
+        // Nor do its containers keep what came in before.
+        resetContainers (strip);
         state.wasSilenced = false;
     }
 
     return false;
+}
+
+void Engine::resetContainers (const Plan::Strip& strip) noexcept
+{
+    for (const auto& container : strip.containers)
+    {
+        container.state->reset();
+
+        for (const auto& chain : container.chains)
+        {
+            chain.state->reset();
+
+            if (chain.delay != nullptr)
+                chain.delay->reset();
+        }
+    }
 }
 
 void Engine::flushStrip (const Plan::Strip& strip) noexcept
@@ -607,8 +628,7 @@ void Engine::flushStrip (const Plan::Strip& strip) noexcept
         if (input.delay != nullptr)
             input.delay->reset();
 
-    for (const auto& container : strip.containers)
-        container.state->reset();
+    resetContainers (strip);
 }
 
 DeviceRunner::Block Engine::getDeviceBlock (const Span& span, const Plan::Strip& strip, size_t index) noexcept
@@ -637,10 +657,128 @@ DeviceRunner::Block Engine::getDeviceBlock (const Span& span, const Plan::Strip&
         block.modulation = modulation;
     }
 
-    if (index == 0 && strip.hasInstrument)
-        block.events = std::span (strip.state->events.data(), (size_t) strip.state->numEvents);
-
     return block;
+}
+
+bool Engine::hasInstrumentContainer (const Plan::Strip& strip) noexcept
+{
+    return ! strip.containers.empty() && strip.containers.front().first == 0 && strip.containers.front().instrument;
+}
+
+void Engine::playDevice (const Span& span, const Plan::Strip& strip, size_t index, juce::AudioBuffer<float>& buffer,
+                         std::span<devices::NoteEvent> events) noexcept
+{
+    const auto& plan = *span.plan;
+    const auto& device = strip.devices[index];
+    const auto offset = span.offset, numSamples = span.numSamples;
+    auto block = getDeviceBlock (span, strip, index);
+    block.events = events;
+
+    // What its sidechain listens to: another strip after its fader and before its mute, lined up with its sound.
+    if (device.sidechain >= 0)
+    {
+        const auto& heard = plan.strips[(size_t) device.sidechain].state->beforeMute;
+        const float* from[] = { heard.getReadPointer (0, offset), heard.getReadPointer (1, offset) };
+        float* into[] = { buffer.getWritePointer (2, offset), buffer.getWritePointer (3, offset) };
+        juce::FloatVectorOperations::clear (into[0], numSamples);
+        juce::FloatVectorOperations::clear (into[1], numSamples);
+        (device.sidechainDelay != nullptr ? *device.sidechainDelay : noDelay).addDelayed (from, into, numSamples);
+        block.hasSidechain = true;
+    }
+
+    device.node->process (buffer, offset, numSamples, block, device.automation);
+}
+
+void Engine::playContainer (const Span& span, const Plan::Strip& strip, const Plan::Container& container, float* const* channels) noexcept
+{
+    const auto offset = span.offset, numSamples = span.numSamples;
+    auto& kept = *container.state;
+    const auto count = std::min (container.chains.size(), (size_t) maximumChains);
+
+    // What comes in, kept to mix with what the chains put out (an instrument container's chains start from silence).
+    if (! container.instrument)
+        kept.keepDry (channels, numSamples);
+
+    // Each chain's part of it in its buffer; an instrument container's, its instrument's notes, those in its ranges.
+    std::array<ChainPart, maximumChains> parts {};
+
+    for (size_t c = 0; c < count; ++c)
+    {
+        const auto& chain = container.chains[c];
+        auto& state = *chain.state;
+        parts[c] = { &state, chain.crossover.get(), {} };
+
+        if (container.split == Split::bands && ! chain.crossoverModulation.empty())
+            parts[c].crossoverModulation = getFaderModulation (strip, chain.crossoverModulation, state.crossoverModulation);
+
+        if (container.instrument)
+        {
+            juce::FloatVectorOperations::clear (state.buffer.getWritePointer (0, offset), numSamples);
+            juce::FloatVectorOperations::clear (state.buffer.getWritePointer (1, offset), numSamples);
+            state.numEvents = 0;
+
+            for (int e = 0; e < strip.state->numEvents; ++e)
+                if (const auto& event = strip.state->events[(size_t) e]; state.takes (event) && state.numEvents < (int) state.events.size())
+                    state.events[(size_t) state.numEvents++] = event;
+        }
+    }
+
+    if (! container.instrument)
+        splitIntoParts (container.split, channels, offset, numSamples, std::span (parts.data(), count),
+                        { span.beat, span.beatsPerSample, span.gridSample });
+
+    // Each through its devices and its fader, lined up with the latest and added up. One muted (or soloed out) plays
+    // nothing once it has faded out, and its devices start from silence when it is heard again.
+    juce::FloatVectorOperations::clear (channels[0], numSamples);
+    juce::FloatVectorOperations::clear (channels[1], numSamples);
+
+    for (size_t c = 0; c < count; ++c)
+    {
+        const auto& chain = container.chains[c];
+        auto& state = *chain.state;
+        auto& fader = state.getFader();
+
+        if (fader.isSilenced())
+        {
+            state.wasSilenced = true;
+            continue;
+        }
+
+        if (std::exchange (state.wasSilenced, false))
+        {
+            for (int d = chain.first; d < chain.first + chain.count; ++d)
+                strip.devices[(size_t) d].node->getRunner().reset();
+
+            if (chain.delay != nullptr)
+                chain.delay->reset();
+        }
+
+        for (int d = chain.first; d < chain.first + chain.count; ++d)
+        {
+            const auto events = container.instrument && d == chain.first ? std::span (state.events.data(), (size_t) state.numEvents)
+                                                                         : std::span<devices::NoteEvent>();
+            playDevice (span, strip, (size_t) d, state.buffer, events);
+        }
+
+        float* sides[] = { state.buffer.getWritePointer (0, offset), state.buffer.getWritePointer (1, offset) };
+        Channel::Automation automation;
+        automation.volume = chain.volume.get();
+        automation.pan = chain.pan.get();
+        automation.beatsPerSample = span.beatsPerSample;
+        automation.sample = span.gridSample;
+        automation.beat =
+            chain.volume != nullptr || chain.pan != nullptr
+                ? (transport.playing && chain.latency > 0 ? span.plan->tempo.toBeats ((double) (transport.sample - chain.latency))
+                                                          : span.beat)
+                : span.beat;
+        automation.volumeModulation = getFaderModulation (strip, chain.volumeModulation, state.volumeModulation);
+        automation.panModulation = getFaderModulation (strip, chain.panModulation, state.panModulation);
+        fader.process (sides, 2, numSamples, automation);
+        (chain.delay != nullptr ? *chain.delay : noDelay).addDelayed (sides, channels, numSamples);
+    }
+
+    if (! container.instrument)
+        kept.mix (channels, numSamples);
 }
 
 void Engine::playStrip (const Span& span, size_t index) noexcept
@@ -704,42 +842,49 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
                         region.play (channels, transport.sample, numSamples, sampleRate, rendering || playingAsRender, state.scratch);
             };
 
+            auto audioPlayed = false;
+
             if (! strip.hasInstrument)
             {
                 addInput (strip, channels, offset, numSamples);
                 playAudio();
+                audioPlayed = true;
             }
 
-            for (size_t i = 0; i < strip.devices.size(); ++i)
-            {
-                auto block = getDeviceBlock (span, strip, i);
+            // Its devices in their order, a container's chains side by side in buffers of their own; its instrument (or its
+            // instrument container) first, given its notes, and its audio clips after it.
+            const auto instrumentContainer = hasInstrumentContainer (strip);
+            auto container = strip.containers.begin();
 
-                // What its sidechain listens to: another strip after its fader and before its mute, lined up with its sound.
-                if (const auto& device = strip.devices[i]; device.sidechain >= 0)
+            for (size_t i = 0;;)
+            {
+                if (container != strip.containers.end() && container->first == (int) i)
                 {
-                    const auto& heard = plan.strips[(size_t) device.sidechain].state->beforeMute;
-                    const float* from[] = { heard.getReadPointer (0, offset), heard.getReadPointer (1, offset) };
-                    float* into[] = { state.buffer.getWritePointer (2, offset), state.buffer.getWritePointer (3, offset) };
-                    juce::FloatVectorOperations::clear (into[0], numSamples);
-                    juce::FloatVectorOperations::clear (into[1], numSamples);
-                    (device.sidechainDelay != nullptr ? *device.sidechainDelay : noDelay).addDelayed (from, into, numSamples);
-                    block.hasSidechain = true;
+                    playContainer (span, strip, *container, channels);
+                    i += (size_t) container->count;
+                    ++container;
+                }
+                else if (i < strip.devices.size())
+                {
+                    const auto isInstrument = i == 0 && strip.hasInstrument && ! instrumentContainer;
+                    playDevice (span, strip, i, state.buffer,
+                                isInstrument ? std::span (state.events.data(), (size_t) state.numEvents) : std::span<devices::NoteEvent>());
+                    ++i;
+                }
+                else
+                {
+                    break;
                 }
 
-                // A container keeps what comes into its first device, to mix with what its last puts out.
-                for (const auto& container : strip.containers)
-                    if (container.first == (int) i)
-                        container.state->keepDry (channels, numSamples);
-
-                strip.devices[i].node->process (state.buffer, offset, numSamples, block, strip.devices[i].automation);
-
-                for (const auto& container : strip.containers)
-                    if (container.last == (int) i)
-                        container.state->mix (channels, numSamples);
-
-                if (i == 0 && strip.hasInstrument)
+                if (! audioPlayed)
+                {
                     playAudio();
+                    audioPlayed = true;
+                }
             }
+
+            if (! audioPlayed)
+                playAudio();
         }
 
         // What it sends before its fader (nothing while it is muted).

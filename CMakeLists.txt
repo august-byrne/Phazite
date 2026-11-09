@@ -206,6 +206,8 @@ target_sources(phazite_core PRIVATE
     src/engine/nodes/Channel.h
     src/engine/nodes/Comparison.cpp
     src/engine/nodes/Comparison.h
+    src/engine/nodes/Container.cpp
+    src/engine/nodes/Container.h
     src/engine/nodes/DeviceNode.cpp
     src/engine/nodes/DeviceNode.h
     src/engine/nodes/DeviceRunner.cpp
@@ -341,6 +343,7 @@ target_sources(phazite_core PRIVATE
     src/model/mixer/Buses.cpp
     src/model/mixer/ContainerModel.cpp
     src/model/mixer/ContainerModel.h
+    src/model/mixer/ContainerValues.h
     src/model/mixer/Containers.cpp
     src/model/mixer/DeviceType.h
     src/model/mixer/Freeze.cpp
@@ -779,6 +782,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/input/WindowKeys.h
     src/ui/mixer/ChannelStrip.cpp
     src/ui/mixer/ChannelStrip.h
+    src/ui/mixer/ContainerEditor.cpp
+    src/ui/mixer/ContainerEditor.h
     src/ui/mixer/DeviceSlots.cpp
     src/ui/mixer/DeviceSlots.h
     src/ui/mixer/DevicesView.cpp
@@ -1102,6 +1107,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/CompressorTests.cpp
         tests/ComputerKeyboardTests.cpp
         tests/ConsolidateTests.cpp
+        tests/ContainerChainTests.cpp
         tests/ContainerTests.cpp
         tests/ContainerUiTests.cpp
         tests/ControlsTests.cpp

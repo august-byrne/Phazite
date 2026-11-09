@@ -535,6 +535,16 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
                               showInstrumentMenu (projectContext, track, *safeTarget);
                       });
     }
+    else if (device.isInstrument)
+    {
+        // An instrument container's chain's instrument, replaced in its chain; it stays first, before the chain's effects.
+        menu.addItem ("Replace...",
+                      [&projectContext, id, safeTarget]
+                      {
+                          if (safeTarget != nullptr)
+                              showChainInstrumentMenu (projectContext, getChainOf (projectContext, id), *safeTarget);
+                      });
+    }
     else
     {
         // An effect is replaced in its place by another (a container holds devices of its own, which stay its own).
@@ -551,12 +561,27 @@ void showDeviceMenu (ProjectContext& context, CommandBridge& commands, const Dev
                       act ([&projectContext, id] { moveEffect (projectContext, id, -1); }));
         menu.addItem (inRow ? "Move Right" : "Move Down", index < count - 1, false,
                       act ([&projectContext, id] { moveEffect (projectContext, id, 1); }));
+
+        // Into another chain of its container, after its devices.
+        if (place == DevicePlace::inContainer)
+        {
+            juce::PopupMenu chains;
+            const auto own = getChainOf (projectContext, id);
+
+            for (const auto& chain : getChains (projectContext, getContainerOf (projectContext, id)))
+                if (chain.id != own)
+                    chains.addItem (chain.name,
+                                    act ([&projectContext, id, to = chain.id] { moveEffectToChain (projectContext, id, to, -1); }));
+
+            menu.addSubMenu ("Move to Chain", chains, chains.getNumItems() > 0);
+        }
     }
 
-    // The selected devices' commands: a container of the effects, or its devices back; and a preset of this one.
+    // The selected devices' commands: a container of the effects (or of the instrument with them), or its devices back;
+    // and a preset of this one.
     menu.addSeparator();
 
-    if (place == DevicePlace::effect)
+    if (place != DevicePlace::inContainer)
         addCommandItem (menu, commands, device.isContainer ? "device.ungroup" : "device.group");
 
     addCommandItem (menu, commands, "device.savePreset");

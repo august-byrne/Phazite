@@ -360,7 +360,8 @@ namespace
             if (child.hasType (schema::TRACK) || child.hasType (schema::CLIP))
                 continue;
 
-            for (const auto* type : { &schema::DEVICE, &schema::CONTAINER, &schema::SEND, &schema::MODULATOR, &schema::MACRO })
+            for (const auto* type :
+                 { &schema::DEVICE, &schema::CONTAINER, &schema::CHAIN, &schema::SEND, &schema::MODULATOR, &schema::MACRO })
                 if (child.hasType (*type))
                     ids.insert (readID (child[schema::deviceID]));
 

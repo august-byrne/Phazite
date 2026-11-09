@@ -6,6 +6,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/ParameterHandle.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
@@ -17,16 +18,17 @@ namespace phazite
 {
 namespace
 {
-    // How a lane shows a parameter's values: a pan as a pan; a fader's volume, a folder's VCA and a send's level as
-    // decibels from a fader's positions.
+    // How a lane shows a parameter's values: a pan as a pan (a container's chain's too); a fader's volume, a folder's VCA,
+    // a send's level and a chain's volume as decibels from a fader's positions.
     ParameterKind getKind (const Song& song, const ParameterRef& parameter)
     {
         if (const auto found = locateParameter (song, parameter))
         {
-            if (found->source == ParameterSource::pan)
+            if (found->source == ParameterSource::pan || found->source == ParameterSource::chainPan)
                 return ParameterKind::pan;
 
-            if (found->source == ParameterSource::volume || found->source == ParameterSource::send)
+            if (found->source == ParameterSource::volume || found->source == ParameterSource::send
+                || found->source == ParameterSource::chainVolume)
                 return ParameterKind::volume;
         }
 
@@ -38,7 +40,7 @@ namespace
         AutomationTarget target;
         target.parameter = parameter;
         target.track = track;
-        target.deviceName = isMixerControl (song, parameter) ? juce::String ("Mixer") : getDeviceName (song, parameter.device);
+        target.deviceName = getParameterDeviceName (song, parameter);
         target.name = getParameterName (song, parameter);
         target.kind = getKind (song, parameter);
         target.automated = hasPoints (song, parameter);
@@ -125,9 +127,10 @@ std::vector<AutomationTarget> getAutomationTargets (const ProjectContext& contex
     auto* song = findSong (context);
     const auto track = song != nullptr ? findChannel (*song, device) : TrackID();
 
+    // A container's are its chains' volumes, pans and crossovers.
     if (track.isValid())
         for (const auto& parameter : getAutomatableParameters (*song, track))
-            if (parameter.device == device)
+            if (parameter.device == device || getChainContainer (*song, parameter.device) == device)
                 targets.push_back (makeTarget (*song, parameter, track));
 
     return targets;

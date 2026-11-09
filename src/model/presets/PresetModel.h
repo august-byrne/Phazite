@@ -27,8 +27,8 @@ enum class PresetKind
 struct PresetInfo
 {
     PresetKind kind = PresetKind::device;
-    juce::String device {};    // a device preset's device: "EQ", or a plug-in's name
-    bool isInstrument = false; // a device preset's device is an instrument
+    juce::String device {};    // a device preset's device: "EQ", or a plug-in's name; a container preset's container's name
+    bool isInstrument = false; // a device preset's device is an instrument, or a container preset's an instrument container
 };
 
 inline constexpr const char* presetExtension = ".phazitepreset";

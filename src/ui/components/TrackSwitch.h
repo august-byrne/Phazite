@@ -45,4 +45,8 @@ private:
 
     using juce::Button::clicked;
 };
+
+// The light of a switch for mute and solo, a track's or a container's chain's (ui/mixer/ContainerEditor.h), as it shows
+// a state: lit, hollow while muted, ringed while soloed, faint while others' solos silence it; a wash under the pointer.
+void paintMuteSoloLight (juce::Graphics&, const juce::Component&, const MuteSolo&, bool isHighlighted, bool isDown);
 } // namespace phazite::ui

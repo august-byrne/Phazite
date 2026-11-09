@@ -278,6 +278,10 @@ namespace
         if (element.hasType (schema::DEVICE) || element.hasType (schema::CONTAINER))
             return property == schema::pluginState ? getDeviceName (element) + " settings" : withProperty (getDeviceName (element));
 
+        // A container's chain, by its container's name and its own ("Container: Chain 2").
+        if (element.hasType (schema::CHAIN))
+            return withProperty (getDeviceName (element.getParent()) + ": " + element[schema::chainName].toString());
+
         if (element.hasType (schema::VALUE))
             return getDeviceName (element.getParent()) + ": " + element[schema::valueParameter].toString();
 

@@ -20,21 +20,24 @@ namespace phazite
 {
 //==============================================================================
 // The track whose device, fader or send a parameter is: the master's ID for the master's fader and effects, and a
-// container's track for its devices'. None for others.
+// container's track for its devices' and its chains'. None for others.
 TrackID getParameterTrack (const Song&, const ParameterRef&);
 
 // The parameters of a track's channel and devices that can be automated, in the mixer's order: its fader's volume and pan
-// (a plain folder's VCA's volume), its sends, then its devices', those of the devices in its containers after each
-// container (AutomationModel.h: getAutomationTargets()): one of Phazite's own devices' in its description's order, a
-// plug-in's as its instance lists those it lets be automated, by their own IDs (none while it doesn't load).
+// (a plain folder's VCA's volume), its sends, then its devices', after each container its chains', each one's volume and
+// pan (and a band's crossover) then its devices' (AutomationModel.h: getAutomationTargets()): one of Phazite's own devices'
+// in its description's order, a plug-in's as its instance lists those it lets be automated, by their own IDs (none while
+// it doesn't load).
 std::vector<ParameterRef> getAutomatableParameters (const Song&, TrackID);
 
 // The track's own volume, pan and sends are the mixer's controls, not a device's.
 bool isMixerControl (const Song&, const ParameterRef&);
 
-// A parameter's name as menus, lanes and undo steps show it: "Volume", "Pan", "Send to Reverb", or the device's own name
-// for it.
+// A parameter's name as menus, lanes and undo steps show it: "Volume", "Pan", "Send to Reverb", a container's chain's by
+// the chain's name ("Chain 2 Volume"), or the device's own name for it. And the name of what it is of, as lanes show it:
+// "Mixer" for the mixer's controls, a chain's container's name, or its device's.
 juce::String getParameterName (const Song&, const ParameterRef&);
+juce::String getParameterDeviceName (const Song&, const ParameterRef&);
 
 //==============================================================================
 // A parameter's curve as points in song beats, and edits of it. They change the song through its undo manager without

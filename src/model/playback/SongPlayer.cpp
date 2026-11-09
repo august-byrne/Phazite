@@ -15,6 +15,7 @@
 #include "model/devices/internal/Wavetables.h"
 #include "model/engine/AudioFiles.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
@@ -215,6 +216,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         strips.clear();
         delays.clear();
         modulators.clear();
+        chains.clear();
         preparedRate = sampleRate;
         preparedBlockSize = maximumBlockSize;
     }
@@ -237,6 +239,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     usedRegions.clear();
     usedNotes.clear();
     usedModulators.clear();
+    usedChains.clear();
     modulated.clear();
     readCurves();
 
@@ -370,6 +373,7 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     std::erase_if (delays, [this] (const auto& delay) { return usedDelays.count (delay.first) == 0; });
     std::erase_if (sendLevels, [this] (const auto& level) { return usedSends.count (level.first) == 0; });
     std::erase_if (containers, [this] (const auto& container) { return usedContainers.count (container.first) == 0; });
+    std::erase_if (chains, [this] (const auto& chain) { return usedChains.count (chain.first) == 0; });
     return plan;
 }
 
@@ -515,30 +519,124 @@ std::vector<std::int64_t> SongPlayer::addDevices (engine::Plan& plan, const std:
         }
         else if (deviceState.hasType (schema::CONTAINER) && ! (bool) deviceState[schema::deviceOff] && ! isFrozen (deviceState))
         {
-            // A container: its devices, then its mix of their sound with what came in, delayed as much as they delay it.
-            const auto first = (int) strip.devices.size();
-            const auto latencyBefore = strip.latency;
-
-            for (const auto& inside : deviceState)
-                if (inside.hasType (schema::DEVICE))
-                    add (inside);
-
-            if ((int) strip.devices.size() > first)
-            {
-                const auto id = getID (deviceState, schema::deviceID);
-                auto& kept = containers[id];
-
-                if (kept == nullptr || kept->getLatency() != strip.latency - latencyBefore)
-                    kept = std::make_shared<engine::ContainerState> (preparedBlockSize, strip.latency - latencyBefore);
-
-                kept->setMix ((float) deviceState.getProperty (schema::deviceMix, 1.0f));
-                usedContainers.insert (id);
-                strip.containers.push_back ({ first, (int) strip.devices.size() - 1, kept });
-            }
+            addContainer (strip, deviceState, add);
         }
     }
 
     return ids;
+}
+
+void SongPlayer::addContainer (engine::Plan::Strip& strip, const juce::ValueTree& containerState,
+                               const std::function<void (const juce::ValueTree&)>& add)
+{
+    // Its chains side by side, each its devices from the sound as it comes in, as late as it comes there, lined up with the
+    // latest; then its mix of what they put out with what came in, delayed as much. An instrument container is its strip's
+    // instrument.
+    engine::Plan::Container container;
+    container.first = (int) strip.devices.size();
+    container.instrument = (bool) containerState[schema::containerInstrument];
+    const auto split = containerState[schema::containerSplit].toString();
+    container.split = split == schema::splitBands       ? engine::Split::bands
+                      : split == schema::splitMidSide   ? engine::Split::midSide
+                      : split == schema::splitLeftRight ? engine::Split::leftRight
+                                                        : engine::Split::layers;
+    const auto latencyBefore = strip.latency;
+    auto latest = 0;
+
+    if (container.instrument && container.first == 0)
+        strip.hasInstrument = true;
+
+    for (const auto& chainState : getChainStates (containerState))
+    {
+        if ((int) container.chains.size() == engine::maximumChains)
+            break;
+
+        engine::Plan::Container::Chain chain;
+        chain.id = getID (chainState, schema::chainID);
+        chain.first = (int) strip.devices.size();
+        strip.latency = latencyBefore;
+
+        for (const auto& inside : chainState)
+            if (inside.hasType (schema::DEVICE))
+                add (inside);
+
+        chain.count = (int) strip.devices.size() - chain.first;
+        chain.latency = strip.latency;
+        latest = std::max (latest, strip.latency - latencyBefore);
+        chain.state = getChain (chainState);
+        chain.volume = findCurve ((std::uint64_t) chain.id, schema::chainVolumeParameter);
+        chain.pan = findCurve ((std::uint64_t) chain.id, schema::chainPanParameter);
+        chain.crossover = findCurve ((std::uint64_t) chain.id, schema::crossoverParameter);
+        container.chains.push_back (std::move (chain));
+    }
+
+    for (auto& chain : container.chains)
+        chain.delay = getDelay ({ chain.id, 0 }, latencyBefore + latest - chain.latency);
+
+    strip.latency = latencyBefore + latest;
+    container.count = (int) strip.devices.size() - container.first;
+
+    const auto id = getID (containerState, schema::deviceID);
+    auto& kept = containers[id];
+
+    if (kept == nullptr || kept->getLatency() != latest)
+        kept = std::make_shared<engine::ContainerState> (preparedBlockSize, latest);
+
+    kept->setMix ((float) containerState.getProperty (schema::deviceMix, 1.0f));
+    container.state = kept;
+    usedContainers.insert (id);
+    updateChainAudibility (containerState);
+    strip.containers.push_back (std::move (container));
+}
+
+std::shared_ptr<engine::ChainState> SongPlayer::getChain (const juce::ValueTree& chainState)
+{
+    const auto id = getID (chainState, schema::chainID);
+    auto& chain = chains[id];
+
+    if (chain == nullptr)
+    {
+        chain = std::make_shared<engine::ChainState>();
+        chain->prepare (preparedRate, preparedBlockSize);
+    }
+
+    setChainValues (*chain, chainState);
+    usedChains.insert (id);
+    return chain;
+}
+
+void SongPlayer::setChainValues (engine::ChainState& chain, const juce::ValueTree& chainState)
+{
+    // Its fader's volume and pan, as a channel's; its crossover, the default for its place where it has none of its own; and
+    // the notes it plays.
+    auto& fader = chain.getFader();
+    fader.setVolume (std::max ((float) chainState.getProperty (schema::channelVolume, 0.0f), engine::Channel::silenceDb));
+    fader.setPan ((float) chainState.getProperty (schema::channelPan, 0.0f));
+
+    const auto siblings = getChainStates (chainState.getParent());
+    const auto index = (int) (std::find (siblings.begin(), siblings.end(), chainState) - siblings.begin());
+    chain.setCrossover ((float) chainState.getProperty (schema::chainCrossover, getDefaultCrossover (index, (int) siblings.size())));
+    chain.setNotes ((int) chainState.getProperty (schema::chainLowKey, allKeys.low),
+                    (int) chainState.getProperty (schema::chainHighKey, allKeys.high),
+                    (int) chainState.getProperty (schema::chainLowVelocity, allVelocities.low),
+                    (int) chainState.getProperty (schema::chainHighVelocity, allVelocities.high));
+}
+
+void SongPlayer::updateChainAudibility (const juce::ValueTree& containerState)
+{
+    // A chain is heard unless it is muted, or another of its container's chains is soloed and it isn't.
+    const auto states = getChainStates (containerState);
+    const auto anySoloed = std::any_of (states.begin(), states.end(), [] (const auto& state) { return (bool) state[schema::chainSolo]; });
+
+    for (const auto& state : states)
+        if (const auto found = chains.find (getID (state, schema::chainID)); found != chains.end())
+            found->second->getFader().setAudible (! (bool) state[schema::chainMute] && (! anySoloed || (bool) state[schema::chainSolo]));
+}
+
+engine::ChainState* SongPlayer::findChain (std::int64_t id) const
+{
+    const auto found = chains.find (id);
+    return found != chains.end() ? found->second.get() : nullptr;
 }
 
 std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
@@ -589,7 +687,7 @@ std::vector<SongPlayer::ChannelInfo> SongPlayer::getChannels() const
                     if (const auto source = getID (device, schema::deviceSidechain); source != 0)
                         info.needs.push_back (source);
                 }
-                else if (device.hasType (schema::CONTAINER))
+                else if (device.hasType (schema::CONTAINER) || device.hasType (schema::CHAIN))
                 {
                     addInside (device, addInside);
                 }
@@ -780,6 +878,19 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTre
                 continue;
             }
 
+            // A container's chain's volume, pan or crossover.
+            if (auto* chain = findPlannedChain (strip, device))
+            {
+                if (target.parameter == schema::chainVolumeParameter)
+                    chain->volumeModulation.push_back ({ (int) source, amount });
+                else if (target.parameter == schema::chainPanParameter)
+                    chain->panModulation.push_back ({ (int) source, amount });
+                else if (target.parameter == schema::crossoverParameter)
+                    chain->crossoverModulation.push_back ({ (int) source, amount });
+
+                continue;
+            }
+
             const auto place = std::find (deviceIDs.begin(), deviceIDs.end(), device);
 
             if (place == deviceIDs.end())
@@ -803,6 +914,16 @@ void SongPlayer::addModulation (engine::Plan::Strip& strip, const juce::ValueTre
             entry.modulation->isModulated[(size_t) index] = true;
         }
     }
+}
+
+engine::Plan::Container::Chain* SongPlayer::findPlannedChain (engine::Plan::Strip& strip, std::int64_t id)
+{
+    for (auto& container : strip.containers)
+        for (auto& chain : container.chains)
+            if (chain.id == id)
+                return &chain;
+
+    return nullptr;
 }
 
 void SongPlayer::tellWhatMoves (const engine::Plan::Strip& strip)
@@ -1068,6 +1189,21 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
 
         return true;
     }
+
+    // A container's chain's volume, pan and crossover, its mute and solo and the notes it plays, at once; its name changes
+    // nothing that plays, nor a container's.
+    if (tree.hasType (schema::CHAIN))
+    {
+        if (property == schema::chainMute || property == schema::chainSolo)
+            updateChainAudibility (tree.getParent());
+        else if (const auto found = chains.find (getID (tree, schema::chainID)); found != chains.end())
+            setChainValues (*found->second, tree);
+
+        return true;
+    }
+
+    if (tree.hasType (schema::CONTAINER) && property == schema::containerName)
+        return true;
 
     // A plain folder's VCA turns the tracks in it.
     if (tree.hasType (schema::TRACK) && isFolderState (tree) && ! tree.hasProperty (schema::channelFader)
@@ -1335,6 +1471,21 @@ std::optional<float> SongPlayer::getPlayedValue (const ParameterRef& parameter, 
         return {};
     }
 
+    // A container's chain's volume, pan and crossover.
+    if (const auto* chain = findChain (id))
+    {
+        if (parameter.parameter == schema::chainVolumeParameter)
+            return decibelsToFaderPosition (chain->getFader().getPlayedVolume (withModulation));
+
+        if (parameter.parameter == schema::chainPanParameter)
+            return chain->getFader().getPlayedPan (withModulation);
+
+        if (parameter.parameter == schema::crossoverParameter)
+            return chain->getPlayedCrossover (withModulation);
+
+        return {};
+    }
+
     const auto fader = faders.find (parameter.device.getRaw());
     auto* strip = fader != faders.end() ? findStrip (fader->second) : nullptr;
 
@@ -1364,6 +1515,18 @@ void SongPlayer::setWriting (const ParameterRef& parameter, bool isWriting)
             processor->getInstance().setMovedByEngine (index,
                                                        (! isWriting && findCurve (parameter) != nullptr)
                                                            || modulated.contains ({ parameter.device.getRaw(), parameter.parameter }));
+
+        return;
+    }
+
+    if (auto* chain = findChain (id))
+    {
+        if (parameter.parameter == schema::chainVolumeParameter)
+            chain->getFader().setVolumeWriting (isWriting);
+        else if (parameter.parameter == schema::chainPanParameter)
+            chain->getFader().setPanWriting (isWriting);
+        else if (parameter.parameter == schema::crossoverParameter)
+            chain->setCrossoverWriting (isWriting);
 
         return;
     }

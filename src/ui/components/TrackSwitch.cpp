@@ -86,22 +86,26 @@ void TrackSwitch::clicked (const juce::ModifierKeys& mods)
 
 void TrackSwitch::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown)
 {
-    if (! shown.has_value())
-        return;
+    if (shown.has_value())
+        paintMuteSoloLight (g, *this, *shown, isHighlighted, isDown);
+}
 
-    const auto& p = getPalette (*this);
-    const auto size = (float) std::min (getWidth(), getHeight()) * SwitchTint::light;
-    const auto light = getLocalBounds().toFloat().withSizeKeepingCentre (size, size);
+void paintMuteSoloLight (juce::Graphics& g, const juce::Component& component, const MuteSolo& state, bool isHighlighted, bool isDown)
+{
+    const auto& p = getPalette (component);
+    const auto bounds = component.getLocalBounds().toFloat();
+    const auto size = std::min (bounds.getWidth(), bounds.getHeight()) * SwitchTint::light;
+    const auto light = bounds.withSizeKeepingCentre (size, size);
 
     if (isHighlighted || isDown)
     {
         g.setColour (isDown ? p.background : p.surface);
-        g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
+        g.fillRoundedRectangle (bounds, cornerRadius);
     }
 
     // Muted: the light out, a hollow ring. Otherwise lit, on an edge that keeps it apart from a tinted header: faint while
-    // other tracks' solos silence the track, in the solo colour while it is soloed.
-    if (shown->muted)
+    // others' solos silence it, in the solo colour while it is soloed.
+    if (state.muted)
     {
         g.setColour (isHighlighted ? p.text : p.textMuted);
         g.drawEllipse (light.reduced (SwitchTint::ring / 2.0f), SwitchTint::ring);
@@ -110,12 +114,12 @@ void TrackSwitch::paintButton (juce::Graphics& g, bool isHighlighted, bool isDow
     {
         g.setColour (p.background);
         g.fillEllipse (light.expanded (SwitchTint::edge));
-        g.setColour (shown->soloed ? p.soloed : p.playing.withMultipliedAlpha (shown->silencedBySolo ? SwitchTint::silenced : 1.0f));
+        g.setColour (state.soloed ? p.soloed : p.playing.withMultipliedAlpha (state.silencedBySolo ? SwitchTint::silenced : 1.0f));
         g.fillEllipse (light);
     }
 
     // Soloed: a ring around it.
-    if (shown->soloed)
+    if (state.soloed)
     {
         g.setColour (p.soloed);
         g.drawEllipse (light.expanded (SwitchTint::ringGap + SwitchTint::ring / 2.0f), SwitchTint::ring);

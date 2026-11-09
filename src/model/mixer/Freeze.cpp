@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Freeze.h"
 #include "FreezeModel.h"
+#include "internal/Containers.h"
 #include "internal/Mixer.h"
 #include "internal/Sidechain.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -137,6 +138,10 @@ namespace
 
             for (const auto& inside : getDeviceStates (device))
                 devices.insert (getDeviceID (inside));
+
+            // A container's chains, whose volume, pan and crossover are automated by their IDs.
+            for (const auto& chain : getChainStates (device))
+                devices.insert (DeviceID::fromRaw ((std::uint64_t) (juce::int64) chain[schema::chainID]));
         }
 
         for (const auto& child : state)
@@ -294,8 +299,8 @@ bool isFrozenDevice (const Song& song, DeviceID id)
     auto device = findDeviceState (song, id);
 
     // A device in a container is frozen with its container.
-    if (isContainerState (device.getParent()))
-        device = device.getParent();
+    if (const auto container = getOwningContainer (device); container.isValid())
+        device = container;
 
     const auto track = device.getParent();
 

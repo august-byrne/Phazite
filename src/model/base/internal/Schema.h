@@ -297,11 +297,52 @@ inline const juce::Identifier VALUE { "VALUE" };
 inline const juce::Identifier valueParameter { "parameter" };
 inline const juce::Identifier valueSetByHand { "value" };
 
-// Child of TRACK and of MASTER, among its devices: a container of effects (model/mixer/internal/Containers.h), with its ID,
-// deviceOff and deviceMix, as a device has them, and its name; its devices (DEVICE) are its children, in the order its
-// sound goes through them, and so are its macros (MACRO), with what they modulate.
+// Child of TRACK and of MASTER, among its devices: a container (model/mixer/internal/Containers.h), with its ID, deviceOff
+// and deviceMix, as a device has them, and its name. Its children are its chains (CHAIN), one at least, in their order, each
+// with its devices, and its macros (MACRO), with what they modulate. A container of effects plays its chains side by side,
+// each on its part of the sound that comes in (containerSplit), and adds up what they put out; an instrument container
+// (containerInstrument), which is a track's instrument, plays its chains' instruments, each on the notes in its ranges.
 inline const juce::Identifier CONTAINER { "CONTAINER" };
 inline const juce::Identifier containerName { "name" };
+
+// On a CONTAINER of effects: what part of the sound each chain plays: splitBands, a band of it, low to high in the chains'
+// order, each from its chain's crossover (the first from the bottom); splitMidSide, the first its middle (what its sides
+// share) and the second its side (what they don't); splitLeftRight, the first its left and the second its right; none for
+// all of it, each chain a layer. The parts add up to the sound, so chains with nothing in them pass it as it came, but
+// layers, which add up as many times.
+inline const juce::Identifier containerSplit { "split" };
+inline constexpr const char* splitBands = "bands";
+inline constexpr const char* splitMidSide = "midSide";
+inline constexpr const char* splitLeftRight = "leftRight";
+
+// On a CONTAINER. true, or none: it is an instrument container, a track's instrument, each of whose chains holds an
+// instrument first and the effects after it, and plays the notes in its ranges.
+inline const juce::Identifier containerInstrument { "instrument" };
+
+// Child of CONTAINER: a chain, in their order, its devices (DEVICE) its children in the order its sound goes through them. On
+// CHAIN: its ID (DeviceID, of the song's), which its parameters' curves, lanes and modulations name; its name; its volume
+// and pan (channelVolume, channelPan), as a channel's; chainMute and chainSolo, true or none, set as a track's mute and solo
+// are, without undo steps; on a container split into bands, its chainCrossover, in hertz (float): where its band starts,
+// the first chain's from the bottom, none for its place's default (model/mixer/internal/Containers.h:
+// getDefaultCrossover()); and on an instrument container's, the notes it plays: chainLowKey and chainHighKey (int 0..127,
+// none for 0 and 127) and chainLowVelocity and chainHighVelocity (int 1..127, none for 1 and 127).
+inline const juce::Identifier CHAIN { "CHAIN" };
+inline const juce::Identifier chainID { "id" };
+inline const juce::Identifier chainName { "name" };
+inline const juce::Identifier chainMute { "mute" };
+inline const juce::Identifier chainSolo { "solo" };
+inline const juce::Identifier chainCrossover { "crossover" };
+inline const juce::Identifier chainLowKey { "lowKey" };
+inline const juce::Identifier chainHighKey { "highKey" };
+inline const juce::Identifier chainLowVelocity { "lowVelocity" };
+inline const juce::Identifier chainHighVelocity { "highVelocity" };
+
+// The parameters of a container's chain, by the IDs their curves, lanes and modulations name them with, the chain's ID
+// being their device's: its volume, as a fader's position from 0 to 1; its pan, from -1 to 1; and its crossover, in hertz.
+// song
+inline constexpr const char* chainVolumeParameter = "volume";
+inline constexpr const char* chainPanParameter = "pan";
+inline constexpr const char* crossoverParameter = "crossover";
 
 // Child of a track's TRACK: a send to a return, in the order the track's sends were added (model/mixer/internal/Mixer.h).
 // On SEND: its ID (DeviceID, of the song's); the return it sends to, by the return's track's ID (sendTo); its level in
@@ -406,16 +447,17 @@ bool isCounted (const juce::ValueTree&, const juce::Identifier& property);
 // How the versions (model/versions/) compare two songs, merge them, and make one like the other.
 
 // What tells an element of one song for the same element of another, among its parent's children: its type and its key.
-// An item by its ID (each kind's is named "id": TRACK, MASTER, DEVICE, CONTAINER, SEND, MODULATOR, MACRO, CLIP, NOTE,
-// SECTION); a curve, a lane and a modulation by their device and parameter; a plug-in's VALUE by its parameter; a tempo,
+// An item by its ID (each kind's is named "id": TRACK, MASTER, DEVICE, CONTAINER, CHAIN, SEND, MODULATOR, MACRO, CLIP,
+// NOTE, SECTION); a curve, a lane and a modulation by their device and parameter; a plug-in's VALUE by its parameter; a tempo,
 // a time signature, a chord and a key by where they start; and an element there is one of in its parent (TEMPOMAP, TRACKS,
 // VALUES, SOUNDS...) by its type alone. Empty for what has no key of its own: a curve's points and a clip's controller
 // events, which their parent's elements of that kind hold as a whole.
 juce::String getElementKey (const juce::ValueTree&);
 
 // Whether the order of an element among its parent's elements means something, and which order it is in: the same name
-// for the elements of one order ("chain" for a track's or a container's devices and containers, in the order its sound goes
-// through them), and empty for those in no particular order (clips, notes, curves, sections, chords, tempos).
+// for the elements of one order ("chain" for a track's devices and containers, or a container's chain's devices, in the
+// order its sound goes through them; "chains" for a container's chains), and empty for those in no particular order (clips,
+// notes, curves, sections, chords, tempos).
 juce::String getOrderGroup (const juce::ValueTree&);
 
 // The properties that hold an ID of the song's: an item's own (each kind's "id", a note's too), a channel's fader and VCA,
@@ -774,7 +816,7 @@ inline bool isSoundFileProperty (const juce::Identifier& property)
 // docs/design.md: none while Phazite is pre-alpha).
 //
 //   { "kind": "device", "device": DEVICE }            an instrument or an effect
-//   { "kind": "container", "container": CONTAINER }   a container of effects
+//   { "kind": "container", "container": CONTAINER }   a container of effects, or an instrument container
 //   { "kind": "track", "track": TRACK }               a track's devices, modulators and mix
 //
 //   DEVICE, one of Phazite's own: { "type": its type ID, "name", "instrument": true or false,
@@ -785,18 +827,22 @@ inline bool isSoundFileProperty (const juce::Identifier& property)
 //                   slices } }
 //     or a plug-in: { "plugin": { "format", "name", "manufacturer", "identifier", "uid" }, "name", "instrument",
 //       "state": its own settings, in base 64, "program": its program, "mix": 0 to 1 }
-//   CONTAINER: { "name", "mix": 0 to 1, "devices": [ DEVICE, ... ], "macros": [ MACRO, ... ] }
+//   CONTAINER: { "name", "mix": 0 to 1, "instrument": true for an instrument container, "split": what containerSplit
+//                names (none for layers), "chains": [ CHAIN, ... ], "macros": [ MACRO, ... ] }
+//   CHAIN: { "name", "volume": in decibels, "pan": -1 to 1, "mute", "solo", "crossover": in hertz (a band's),
+//            "lowKey", "highKey", "lowVelocity", "highVelocity" (an instrument container's), "devices": [ DEVICE, ... ] }
 //   MACRO: { "name", "value": 0 to 1, "modulates": [ TARGET, ... ] }
 //   TRACK: { "name", "colour": its ARGB in hex, "volume": in decibels, "pan": -1 to 1, "drumMode", "drumOrder",
-//            "drumHidden" (its drum rows' view state, as the project keeps them), "instrument": DEVICE,
-//            "effects": [ DEVICE or { "container": CONTAINER }, ... ], "modulators": [ MODULATOR, ... ],
-//            "macros": [ MACRO, ... ] }
+//            "drumHidden" (its drum rows' view state, as the project keeps them), "instrument": DEVICE or
+//            { "container": CONTAINER }, "effects": [ DEVICE or { "container": CONTAINER }, ... ],
+//            "modulators": [ MODULATOR, ... ], "macros": [ MACRO, ... ] }
 //   MODULATOR: { "type": one of modulatorTypeNames, "parameters": { parameter ID: value, ... },
 //                "steps": [ value, ... ] (a step sequencer's), "modulates": [ TARGET, ... ] }
 //   TARGET: what a modulator or a macro modulates, by an amount from -1 to 1: { "parameter": ID, "amount", and where:
-//           a container's macro's, "device": its index among the container's devices; a track's, "instrument": true,
-//           or "effect": its index among the track's effects (with "inside": its index in that container, for a device
-//           in one), or "mixer": true with "parameter" "volume" or "pan" }
+//           a container's macro's, "chain": its chain's index in the container, with "device": its index among the chain's
+//           devices, or none for the chain's own volume, pan or crossover; a track's, "instrument": true, or "effect": its
+//           index among the track's effects (with "chain" and "inside", a device's index in that chain, for what is in a
+//           container, as a container's macro names it), or "mixer": true with "parameter" "volume" or "pan" }
 namespace preset
 {
     inline const juce::Identifier kind { "kind" }, device { "device" }, container { "container" }, track { "track" };
@@ -807,6 +853,9 @@ namespace preset
     inline const juce::Identifier devices { "devices" }, macros { "macros" }, value { "value" }, modulates { "modulates" };
     inline const juce::Identifier parameter { "parameter" }, amount { "amount" }, effect { "effect" }, inside { "inside" },
         mixer { "mixer" };
+    inline const juce::Identifier chains { "chains" }, chain { "chain" }, split { "split" }, mute { "mute" }, solo { "solo" },
+        crossover { "crossover" }, lowKey { "lowKey" }, highKey { "highKey" }, lowVelocity { "lowVelocity" },
+        highVelocity { "highVelocity" };
     inline const juce::Identifier colour { "colour" }, volume { "volume" }, pan { "pan" }, drumMode { "drumMode" },
         drumOrder { "drumOrder" }, drumHidden { "drumHidden" }, effects { "effects" }, modulators { "modulators" }, steps { "steps" };
 

@@ -99,7 +99,8 @@ struct DeviceSlot
     bool isOn = true;
     bool hasMix = false;         // an effect's mix (getMix())
     double latencySeconds = 0.0; // how late its sound comes out
-    bool isContainer = false;    // a container of effects (ContainerModel.h)
+    bool isContainer = false;    // a container (ContainerModel.h): of effects, or an instrument container
+    bool isInstrument = false;   // an instrument (a track's, or an instrument container's chain's) or an instrument container
 
     // A plug-in: its own controls are in a window of its own (showDeviceWindow()). Phazite's own devices show whole in the
     // Devices view, and in a window of their own too when the user wants (popsOut); containers only there.

@@ -9,6 +9,7 @@
 #include "TempoMap.h"
 #include "engine/audio/AudioRegion.h"
 #include "engine/nodes/Comparison.h"
+#include "engine/nodes/Container.h"
 #include "engine/nodes/DeviceNode.h"
 #include "engine/nodes/NoteSequence.h"
 #include "engine/nodes/Strip.h"
@@ -62,18 +63,39 @@ struct Plan
         std::shared_ptr<Delay> sidechainDelay {};
     };
 
-    // A container of effects among a strip's devices: from its first to its last, and its mix with what came in.
-    struct Container
-    {
-        int first = 0, last = 0;
-        std::shared_ptr<ContainerState> state;
-    };
-
-    // A modulator moving a fader's volume or pan, by its place among its strip's, by an amount from -1 to 1.
+    // A modulator moving a fader's volume or pan (a channel's, or a container's chain's) or a chain's crossover, by its place
+    // among its strip's, by an amount from -1 to 1.
     struct Route
     {
         int source = 0;
         float amount = 0.0f;
+    };
+
+    // A container among a strip's devices (nodes/Container.h): all its chains' devices, in their order, so many from its
+    // first among the strip's; each chain a run of them, which plays its part of the sound coming in (an instrument
+    // container's, the strip's notes in its ranges, from silence) through its fader, whose volume and pan, and its
+    // crossover, follow their automation (as late as its sound comes out of it) and its strip's modulators; each lined up
+    // with the latest chain by a delay (none when it needs none). What came in, kept and delayed as much, mixes with what
+    // they put out by the container's mix (an instrument container's has none).
+    struct Container
+    {
+        int first = 0, count = 0;
+        Split split = Split::layers;
+        bool instrument = false;
+        std::shared_ptr<ContainerState> state;
+
+        struct Chain
+        {
+            std::int64_t id = 0; // the chain's
+            int first = 0, count = 0;
+            int latency = 0; // how late its sound comes out of it, in samples, from the strip's start
+            std::shared_ptr<ChainState> state;
+            std::shared_ptr<Delay> delay {};
+            std::shared_ptr<const Curve> volume {}, pan {}, crossover {}; // or none
+            std::vector<Route> volumeModulation {}, panModulation {}, crossoverModulation {};
+        };
+
+        std::vector<Chain> chains;
     };
 
     // A track, or the master: what it plays (its notes into its instrument, or the strips it adds up), through its devices

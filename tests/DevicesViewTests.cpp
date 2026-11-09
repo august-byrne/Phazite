@@ -29,6 +29,7 @@
 #include "ui/devices/SynthEditor.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/ChannelStrip.h"
+#include "ui/mixer/ContainerEditor.h"
 #include "ui/mixer/DevicesView.h"
 #include "ui/mixer/MixerView.h"
 #include "ui/mixer/ModulatorSlots.h"
@@ -766,8 +767,8 @@ TEST_CASE ("The effects' menu offers an empty container first, which shows in th
     REQUIRE (first.next());
     CHECK (first.getItem().isSeparator);
 
-    // Chosen, it goes after the track's effects, empty, and shows: open, with its macros beside the column and a word on
-    // adding effects to it, which its own + Effect under it does.
+    // Chosen, it goes after the track's effects, empty, and shows: open, with its macros and its one chain beside the column
+    // and a word on adding effects to it, which its own + Effect under it does.
     REQUIRE (phazite::test::runMenuItem (menu, { "Container" }));
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Container"));
     const auto effects = phazite::getEffects (screen.context, screen.track (0));
@@ -780,8 +781,10 @@ TEST_CASE ("The effects' menu offers an empty container first, which shows in th
     REQUIRE (frame != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 1") != nullptr);
     const auto labels = phazite::test::findAll<juce::Label> (*frame);
-    CHECK (std::any_of (labels.begin(), labels.end(),
-                        [] (juce::Label* label) { return label->getText().startsWith ("It holds no effects yet"); }));
+    CHECK (
+        std::any_of (labels.begin(), labels.end(), [] (juce::Label* label)
+                     { return label->isVisible() && label->getText().contains ("+ Effect, under a chain at the left, adds an effect"); }));
+    CHECK (phazite::test::findComponentWithTitle (*frame, "Chain 1") != nullptr);
 
     auto* panel = view.findPanel (container);
     auto* inside = phazite::test::findComponentWithTitle (*panel, "Add effect");
@@ -1098,4 +1101,185 @@ TEST_CASE ("At the default window size, every built-in instrument and effect sho
         checkWhole (type);
         phazite::removeDevice (context, effects.back().id);
     }
+}
+
+TEST_CASE ("A container's chains show under it in the column, each under its line with its own + Effect; beside it, a mixer of them")
+{
+    Screen screen;
+    auto& view = screen.view;
+    auto& context = screen.context;
+    const auto effects = screen.effects (0);
+    const auto container = phazite::groupIntoContainer (context, { effects[0] });
+    REQUIRE (container.isValid());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr; }));
+
+    // One chain: its devices under the container alone, then + Effect and + Chain.
+    auto* panel = view.findPanel (container);
+    CHECK (phazite::test::findComponentWithTitle (*panel, "Chain 1") == nullptr);
+    auto* addChain = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "Add chain"));
+    REQUIRE (addChain != nullptr);
+    CHECK (addChain->isShowing());
+
+    // Another chain: each under its line, with its own + Effect.
+    phazite::test::Mouse addMouse (*addChain);
+    addMouse.click (addChain->getLocalBounds().getCentre());
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Chain"));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            auto* shown = view.findPanel (container);
+            return shown != nullptr && phazite::test::findComponentWithTitle (*shown, "Chain 2") != nullptr;
+        }));
+    panel = view.findPanel (container);
+    auto* firstLine = phazite::test::findComponentWithTitle (*panel, "Chain 1");
+    auto* secondLine = phazite::test::findComponentWithTitle (*panel, "Chain 2");
+    REQUIRE (firstLine != nullptr);
+    REQUIRE (secondLine != nullptr);
+    CHECK (firstLine->getScreenY() < view.findPanel (effects[0])->getScreenY());
+    CHECK (view.findPanel (effects[0])->getScreenY() < secondLine->getScreenY());
+    auto adds = 0;
+
+    for (auto* button : phazite::test::findAll<juce::TextButton> (*panel))
+        if (button->getTitle() == "Add effect")
+            ++adds;
+
+    CHECK (adds == 2);
+
+    // Beside the column, its chains as a small mixer beside its macros: each a row with its knobs and its switch.
+    view.setOpen (container, true);
+    auto* frame = view.getShownBody();
+    REQUIRE (frame != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*frame, "Macro 1") != nullptr);
+    auto* row = phazite::test::findComponentWithTitle (*frame, "Chain 2");
+    REQUIRE (row != nullptr);
+    CHECK (showingKnobs (*row).contains ("Volume"));
+    CHECK (showingKnobs (*row).contains ("Pan"));
+    CHECK_FALSE (showingKnobs (*row).contains ("Crossover"));
+
+    // Its switch mutes the chain at a click, and solos it at a right-click; neither is an undo step.
+    const auto second = phazite::getChains (context, container)[1].id;
+    auto* power = phazite::test::findAll<phazite::ui::ChainSwitch> (*row).getFirst();
+    REQUIRE (power != nullptr);
+    phazite::test::Mouse powerMouse (*power);
+    powerMouse.click (power->getLocalBounds().getCentre());
+    CHECK (phazite::getChain (context, second)->muted);
+    powerMouse.click (power->getLocalBounds().getCentre(), juce::ModifierKeys::rightButtonModifier);
+    CHECK (phazite::getChain (context, second)->soloed);
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Chain"));
+
+    // Split into bands, the second chain's row has its crossover.
+    auto* split = dynamic_cast<juce::ComboBox*> (phazite::test::findComponentWithTitle (*frame, "Split"));
+    REQUIRE (split != nullptr);
+    split->setSelectedId ((int) phazite::ContainerSplit::bands + 1, juce::sendNotificationSync);
+    CHECK (phazite::getContainerSplit (context, container) == phazite::ContainerSplit::bands);
+    CHECK (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            auto* shown = view.getShownBody();
+            auto* chainRow = shown != nullptr ? phazite::test::findComponentWithTitle (*shown, "Chain 2") : nullptr;
+            return chainRow != nullptr && showingKnobs (*chainRow).contains ("Crossover");
+        }));
+}
+
+TEST_CASE ("An effect dragged by its name into another chain of its container moves there")
+{
+    Screen screen;
+    auto& view = screen.view;
+    auto& context = screen.context;
+    const auto effects = screen.effects (0);
+    const auto container = phazite::groupIntoContainer (context, { effects[0], effects[1] });
+    const auto second = phazite::addChain (context, container);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&]
+        {
+            auto* panel = view.findPanel (container);
+            return panel != nullptr && phazite::test::findComponentWithTitle (*panel, "Chain 2") != nullptr;
+        }));
+
+    // The second chain's devices, which are none, under its line: the compressor's name dropped there goes there.
+    auto* panel = view.findPanel (container);
+    const auto below = phazite::test::findComponentWithTitle (*panel, "Chain 2")->getScreenY();
+    juce::DragAndDropTarget* target = nullptr;
+
+    for (auto* each : phazite::test::findAll<juce::Component> (*panel))
+        if (auto* candidate = dynamic_cast<juce::DragAndDropTarget*> (each);
+            candidate != nullptr && each->getTitle() == "Chain's devices" && each->getScreenY() > below)
+            target = candidate;
+
+    REQUIRE (target != nullptr);
+    juce::Component source;
+    const juce::DragAndDropTarget::SourceDetails drag { phazite::ui::describeEffectDrag (effects[1]), &source, { 4, 4 } };
+    REQUIRE (target->isInterestedInDragSource (drag));
+    target->itemDropped (drag);
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Move Device"));
+    CHECK (phazite::getChainOf (context, effects[1]) == second);
+}
+
+TEST_CASE (
+    "The instruments' menu offers a container first, which takes the track's instrument into its first chain; the Instrument page shows its chains")
+{
+    Screen screen;
+    auto& view = screen.view;
+    auto& context = screen.context;
+    const auto track = screen.track (0);
+    phazite::chooseInstrument (context, track, screen.find ("phaziteSynth"));
+    const auto synth = phazite::getInstrument (context, track)->id;
+    view.showPage (phazite::ui::DevicesView::Page::instrument);
+    phazite::test::dispatchPendingMessages();
+
+    // First in the menu, apart from the instruments.
+    const auto types = phazite::getDeviceTypes (context);
+    const auto menu = phazite::ui::makeInstrumentMenu (context, track, view, types);
+    juce::PopupMenu::MenuItemIterator first (menu);
+    REQUIRE (first.next());
+    CHECK (first.getItem().text == juce::String ("Container"));
+    REQUIRE (first.next());
+    CHECK (first.getItem().isSeparator);
+
+    // Chosen, the synth goes into its first chain, and the container is the track's instrument, on the Instrument page.
+    REQUIRE (phazite::test::runMenuItem (menu, { "Container" }));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Add Instrument Container"));
+    const auto container = phazite::getInstrument (context, track)->id;
+    REQUIRE (phazite::isInstrumentContainer (context, container));
+    REQUIRE (
+        phazite::test::dispatchMessagesUntil ([&] { return view.findPanel (container) != nullptr && view.findPanel (synth) != nullptr; }));
+    CHECK (view.findPanel (container)->isParentOf (view.findPanel (synth)));
+
+    // A second chain, without an instrument: a button that chooses one for it, until it has one.
+    const auto second = phazite::addChain (context, container);
+    const auto chooseShows = [&]
+    {
+        auto* panel = view.findPanel (container);
+
+        if (panel != nullptr)
+            for (auto* button : phazite::test::findAll<juce::TextButton> (*panel))
+                if (button->getTitle() == "Add instrument" && button->isShowing())
+                    return true;
+
+        return false;
+    };
+
+    CHECK_FALSE (chooseShows()); // the first chain has the synth
+
+    REQUIRE (phazite::test::dispatchMessagesUntil (chooseShows));
+    phazite::chooseChainInstrument (context, second, screen.find ("phaziteSynth"));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! chooseShows(); }));
+
+    // The synth shown: its editor beside the container's macros, on the Instrument page.
+    view.setOpen (synth, true);
+    CHECK (view.getPage() == phazite::ui::DevicesView::Page::instrument);
+    CHECK (view.isOpen (synth));
+    CHECK (view.isOpen (container));
+    auto* editor = dynamic_cast<phazite::ui::SynthEditor*> (view.getShownBody());
+    REQUIRE (editor != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*editor->getParentComponent(), "Macro 1") != nullptr);
+
+    // The container shown: its chains' rows, with their keys and velocities.
+    view.setOpen (container, true);
+    auto* frame = view.getShownBody();
+    REQUIRE (frame != nullptr);
+    auto* row = phazite::test::findComponentWithTitle (*frame, "Chain 2");
+    REQUIRE (row != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*row, "Keys") != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*row, "Velocities") != nullptr);
 }

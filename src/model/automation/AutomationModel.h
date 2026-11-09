@@ -42,7 +42,8 @@ struct AutomationTarget
 // The parameters of a track's devices that can be automated, in the mixer's order: its volume and pan, its sends'
 // levels, then its instrument's and its effects' parameters. The master's: its volume, then its effects'.
 std::vector<AutomationTarget> getAutomationTargets (const ProjectContext&, TrackID);
-std::vector<AutomationTarget> getAutomationTargets (const ProjectContext&, DeviceID); // one device's, as its menu lists them
+std::vector<AutomationTarget> getAutomationTargets (const ProjectContext&,
+                                                    DeviceID); // one device's (a container's, its chains'), as its menu lists them
 std::optional<AutomationTarget> getAutomationTarget (const ProjectContext&, const ParameterRef&);
 
 // The parameter itself: its range, value and texts, and changing it as a control does.

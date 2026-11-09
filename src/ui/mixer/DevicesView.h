@@ -7,10 +7,12 @@
 // another, as FL Studio's mixer stacks its slots, scrolled up and down when they are many (the owner, 2026-11-06: in a row,
 // the more there were, the less room each had): each an on/off switch, its name (click to show it, right-click for its
 // menu, drag to move it) and its mix; the one that shows, its Presets, its window's button and its sidechain under them;
-// a container's devices under it, indented, and a button after them that adds an effect. Beside the column, the whole
-// rest of the dock: the device that shows, whole (one of Phazite's own's editor; a container's macros, beside the editor
-// of the device inside it that shows; a plug-in's key knobs, its own controls being in its window), its editor's graphs
-// narrowing, then its parts in pages where the dock is narrower, so that it shows without scrolling.
+// a container's chains under it, indented, each its devices under its line (while there are more than one), with a button
+// after them that adds an effect, then a button that adds a chain; an instrument container's on the Instrument page. Beside
+// the column, the whole rest of the dock: the device that shows, whole (one of Phazite's own's editor; a container's
+// macros, beside the editor of the device inside it that shows, or beside its chains for the container itself:
+// ContainerEditor.h; a plug-in's key knobs, its own controls being in its window), its editor's graphs narrowing, then its
+// parts in pages where the dock is narrower, so that it shows without scrolling.
 #pragma once
 
 #include "DeviceSlots.h"
@@ -64,8 +66,10 @@ public:
     Page getPage() const noexcept { return page; }
     Page getPageOf (DeviceID) const;
 
-    // Whether an effect shows beside the column, whole; one does at a time, in its channel (one in a container, beside the
-    // container's macros), remembered for the session. Shown, it opens the containers it is in; and none shows with false.
+    // Whether a device shows beside the column, whole, on the page shown: one does at a time, in its channel (one in a
+    // container, beside the container's macros; the container itself, its chains beside them), remembered for the session,
+    // an effect on the Effects page, the instrument or a device of its instrument container on the Instrument page. Shown, it
+    // opens the containers it is in; and none shows with false (the instrument, then, on the Instrument page).
     bool isOpen (DeviceID) const;
     void setOpen (DeviceID, bool);
 
@@ -85,7 +89,9 @@ public:
     void dragOperationEnded (const juce::DragAndDropTarget::SourceDetails&) override;
 
     struct Slot;
-    struct Chain;
+    struct DeviceList;
+    struct ChainHeader;
+    struct ContainerChains;
     struct Column;
     struct ContainerFrame;
 
@@ -94,8 +100,9 @@ private:
     ProjectContext& context;
     std::optional<TrackID> channel;
     Page page = Page::effects;
-    std::map<TrackID, DeviceID> shownEffects; // the effect each channel shows, remembered for the session
-    std::set<DeviceID> foldedContainers;      // whose devices' slots are hidden under them
+    std::map<TrackID, DeviceID> shownEffects;         // the effect each channel shows, remembered for the session
+    std::map<TrackID, DeviceID> shownInstrumentParts; // the device of each track's instrument container that shows, likewise
+    std::set<DeviceID> foldedContainers;              // whose devices' slots are hidden under them
 
     juce::Label nameLabel, kindLabel; // the channel's
     juce::Viewport columnView;        // the column's devices and modulators, scrolled up and down when they don't fit
@@ -107,8 +114,9 @@ private:
     bool bodyFrozen = false;   // that it is frozen
     juce::Label hint;          // with nothing to show: why, or what to do
 
-    DeviceID getShownDevice() const; // the instrument, or the effect that shows
-    void followSelection();          // shows the channel the selection points to
+    DeviceID getShownDevice() const;     // the instrument (or a device of its instrument container), or the effect that shows
+    void rememberShown (DeviceID, Page); // the device that shows on a page, for the channel shown
+    void followSelection();              // shows the channel the selection points to
     void setChannel (std::optional<TrackID>);
     void refresh();  // the column's slots, and what shows beside it, as the song is now
     void showBody(); // what shows the shown device, made again if that changed

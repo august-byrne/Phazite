@@ -36,7 +36,7 @@ private:
 using TrackID = ItemID<struct TrackKind>;     // a track, a folder or a return track
 using ClipID = ItemID<struct ClipKind>;       // an audio or MIDI clip
 using SectionID = ItemID<struct SectionKind>; // a section of the song (model/arrangement/internal/Sections.h)
-using DeviceID = ItemID<struct DeviceKind>;   // a device on a track or on the master, or a send
+using DeviceID = ItemID<struct DeviceKind>;   // a device on a track or on the master, a send, or a container's chain
 
 // A modulator on a track, or one of its macros (model/modulation/ModulationModel.h).
 using ModulatorID = ItemID<struct ModulatorKind>;

@@ -9,7 +9,7 @@ namespace phazite
 namespace
 {
     // The largest ID in a part of the song: its items' (each kind's is named "id": trackID, clipID, noteID, deviceID,
-    // sendID, modulatorID, sectionID), its channels' faders and VCAs, and its alias groups (clipLink).
+    // chainID, sendID, modulatorID, sectionID), its channels' faders and VCAs, and its alias groups (clipLink).
     std::uint64_t findLargestID (const juce::ValueTree& tree)
     {
         std::uint64_t largest = 0;
@@ -150,7 +150,7 @@ namespace schema
 
         bool isItem (const juce::ValueTree& element)
         {
-            for (const auto* type : { &TRACK, &DEVICE, &CONTAINER, &SEND, &MODULATOR, &MACRO, &CLIP, &NOTE, &SECTION })
+            for (const auto* type : { &TRACK, &DEVICE, &CONTAINER, &CHAIN, &SEND, &MODULATOR, &MACRO, &CLIP, &NOTE, &SECTION })
                 if (element.hasType (*type))
                     return true;
 
@@ -194,6 +194,9 @@ namespace schema
 
         if (element.hasType (DEVICE) || element.hasType (CONTAINER))
             return "chain";
+
+        if (element.hasType (CHAIN))
+            return "chains";
 
         for (const auto* type : { &SEND, &MODULATOR, &MACRO, &MODULATES, &POINT, &CONTROL, &WARP, &LANE })
             if (element.hasType (*type))

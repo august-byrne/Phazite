@@ -70,10 +70,11 @@ public:
     // needs a new plan.
     bool takeValue (const juce::ValueTree& tree, const juce::Identifier& property);
 
-    // What plays a device (by its ID), and a track's strip (by its ID; 0 for the master's), for what shows them (meters,
-    // editors' displays); nullptr for none.
+    // What plays a device (by its ID), a track's strip (by its ID; 0 for the master's) and a container's chain (by its ID),
+    // for what shows them (meters, editors' displays); nullptr for none.
     engine::DeviceNode* findDevice (std::int64_t id) const;
     engine::StripState* findStrip (std::int64_t id) const;
+    engine::ChainState* findChain (std::int64_t id) const;
 
     // A parameter's automation as the plan has it, or nullptr; and its value as the engine played it last, with its
     // modulation or without (nothing for one it doesn't play). A fader's volume is in its positions, as its automation is.
@@ -126,13 +127,15 @@ private:
     std::set<std::pair<std::uint64_t, juce::String>> modulated;         // the parameters the plan being compiled modulates
     std::map<std::int64_t, std::shared_ptr<engine::StripState>> strips; // the master's under 0
     // What joins paths, kept by where they join: each delay by what it delays into what (a strip's ID, or a device's for
-    // its sidechain, then the strip it takes in: twice its ID, plus one before its fader); each send's level and each
-    // container's mix by their IDs.
+    // its sidechain, then the strip it takes in: twice its ID, plus one before its fader; or a container's chain's ID, then
+    // 0, for the delay that lines it up with its container's latest chain); each send's level and each container's mix by
+    // their IDs.
     std::map<std::pair<std::int64_t, std::int64_t>, std::shared_ptr<engine::Delay>> delays;
     std::map<std::int64_t, std::shared_ptr<engine::SendLevel>> sendLevels;
     std::map<std::int64_t, std::shared_ptr<engine::ContainerState>> containers;
+    std::map<std::int64_t, std::shared_ptr<engine::ChainState>> chains; // each container's chain's, by its ID
     std::set<std::pair<std::int64_t, std::int64_t>> usedDelays;
-    std::set<std::int64_t> usedSends, usedContainers;
+    std::set<std::int64_t> usedSends, usedContainers, usedChains;
     std::set<std::int64_t> used; // the devices the plan being compiled plays
     bool lowLatency = false;     // as the plan being compiled sees it
 
@@ -212,6 +215,16 @@ private:
     std::vector<std::int64_t> addDevices (engine::Plan&, const std::map<std::int64_t, int>& places, const ChannelInfo&,
                                           engine::Plan::Strip&, const juce::ValueTree& channelState, bool skipFrozen = false,
                                           const std::set<std::int64_t>* only = nullptr); // their IDs
+
+    // A container on a strip, its chains' devices each added as add() adds a device; each chain's state, kept by its ID,
+    // with its values set (its fader's volume and pan, its crossover, the notes it plays), and whether each is heard; and
+    // a chain of the plan being compiled, by its ID, or nullptr.
+    void addContainer (engine::Plan::Strip&, const juce::ValueTree& containerState,
+                       const std::function<void (const juce::ValueTree&)>& add);
+    std::shared_ptr<engine::ChainState> getChain (const juce::ValueTree& chainState);
+    void setChainValues (engine::ChainState&, const juce::ValueTree& chainState);
+    void updateChainAudibility (const juce::ValueTree& containerState);
+    static engine::Plan::Container::Chain* findPlannedChain (engine::Plan::Strip&, std::int64_t id);
     std::shared_ptr<engine::ModulatorNode> getModulator (const juce::ValueTree& modulatorState);
     void setModulatorValues (engine::ModulatorNode&, const juce::ValueTree& modulatorState);
     void addModulation (engine::Plan::Strip&, const juce::ValueTree& channelState, const std::vector<std::int64_t>& deviceIDs);

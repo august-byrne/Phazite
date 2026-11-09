@@ -137,6 +137,7 @@ DeviceSlot makeDeviceSlot (const ProjectContext& context, DeviceID id)
              .hasMix = hasMix (*song, id),
              .latencySeconds = getLatencySeconds (*song, id, getPlaybackHost (getEngineContext (context))),
              .isContainer = isContainer (*song, id),
+             .isInstrument = isInstrumentState (findDeviceState (*song, id)),
              .opensWindow = opensWindow (*song, id),
              .popsOut = popsOut (*song, id),
              .windowOpen = popsOut (*song, id) && windows != nullptr && windows->isOpen (id),
@@ -384,16 +385,17 @@ void moveEffect (ProjectContext& context, DeviceID id, int places)
     const auto indexOf = [] (const std::vector<DeviceID>& devices, DeviceID device)
     { return (int) std::distance (devices.begin(), std::find (devices.begin(), devices.end(), device)); };
 
-    // Among its container's devices.
-    if (const auto container = findContainerOf (*song, id); container.isValid())
+    // Among its chain's devices, in a container (after its instrument, in an instrument container's).
+    if (const auto chain = findChainOf (*song, id); chain.isValid())
     {
-        const auto devices = getContainerDevices (*song, container);
+        const auto devices = getChainDevices (*song, chain);
+        const auto first = getChainInstrument (*song, chain).isValid() ? 1 : 0;
         const auto target = indexOf (devices, id) + places;
 
-        if (juce::isPositiveAndBelow (target, (int) devices.size()))
+        if (target >= first && target < (int) devices.size() && id != getChainInstrument (*song, chain))
         {
             const UndoStep step (*song, "Move Device");
-            moveInContainer (*song, id, target);
+            moveInChain (*song, id, target);
         }
 
         return;
@@ -428,8 +430,8 @@ void replaceEffect (ProjectContext& context, DeviceID id, const DeviceType& type
     { return (int) std::distance (devices.begin(), std::find (devices.begin(), devices.end(), device)); };
 
     // The new one where the old one is, then the old one out (a bus keeps a device all along).
-    if (const auto container = findContainerOf (*song, id); container.isValid())
-        insertIntoContainer (*song, container, replacement, indexOf (getContainerDevices (*song, container), id));
+    if (const auto chain = findChainOf (*song, id); chain.isValid())
+        insertIntoChain (*song, chain, replacement, indexOf (getChainDevices (*song, chain), id));
     else if (const auto channel = getDeviceChannel (*song, id); channel.isValid())
         insertDeviceState (*song, channel, replacement, indexOf (getDevices (*song, channel), id));
 

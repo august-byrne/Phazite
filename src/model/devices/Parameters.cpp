@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Parameters.h"
 #include "engine/nodes/Channel.h"
+#include "engine/nodes/Container.h"
 #include "internal/Devices.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -48,6 +50,42 @@ namespace
                                          const devices::ParameterInfo* info = nullptr)
     {
         return FoundParameter { ref, kind, state, info };
+    }
+
+    // A chain's place among its container's, and how many chains it has; and whether it has a crossover: a band's, but the
+    // first's (which starts at the bottom), in a container split into bands.
+    std::pair<int, int> getChainPlace (const juce::ValueTree& chain)
+    {
+        const auto chains = getChainStates (chain.getParent());
+        return { (int) (std::find (chains.begin(), chains.end(), chain) - chains.begin()), (int) chains.size() };
+    }
+
+    bool hasCrossover (const juce::ValueTree& chain)
+    {
+        return chain.getParent()[schema::containerSplit].toString() == schema::splitBands && getChainPlace (chain).first > 0;
+    }
+
+    // A chain's crossover, its own or its place's default; and the ones it stays between: the chain's before it (the bottom,
+    // for the second chain) and the one's after it (the top, for the last).
+    float getCrossover (const juce::ValueTree& chain)
+    {
+        const auto [index, count] = getChainPlace (chain);
+        return (float) chain.getProperty (schema::chainCrossover, getDefaultCrossover (index, count));
+    }
+
+    juce::Range<float> getCrossoverRoom (const juce::ValueTree& chain)
+    {
+        const auto chains = getChainStates (chain.getParent());
+        const auto index = getChainPlace (chain).first;
+        const auto below = index > 1 ? getCrossover (chains[(size_t) index - 1]) : lowestCrossover;
+        const auto above = index + 1 < (int) chains.size() ? getCrossover (chains[(size_t) index + 1]) : highestCrossover;
+        return { below, std::max (below, above) };
+    }
+
+    juce::String describeFrequency (float hertz)
+    {
+        return hertz < 1000.0f ? juce::String (juce::roundToInt (hertz)) + " Hz"
+                               : juce::String (hertz / 1000.0f, hertz < 10000.0f ? 2 : 1) + " kHz";
     }
 
     // A parameter whose curve has one point plays that point's value everywhere: the point moves to a value set by hand,
@@ -109,6 +147,21 @@ std::optional<FoundParameter> locateParameter (const Song& song, const Parameter
     if (const auto send = findSendState (song, ref.device); send.isValid())
         return ref.parameter == schema::sendLevelParameter ? found (ref, ParameterSource::send, send) : std::nullopt;
 
+    // A container's chain's volume and pan, and a band's crossover.
+    if (const auto chain = findContainerChain (song, ref.device); chain.isValid())
+    {
+        if (ref.parameter == schema::chainVolumeParameter)
+            return found (ref, ParameterSource::chainVolume, chain);
+
+        if (ref.parameter == schema::chainPanParameter)
+            return found (ref, ParameterSource::chainPan, chain);
+
+        if (ref.parameter == schema::crossoverParameter && hasCrossover (chain))
+            return found (ref, ParameterSource::crossover, chain, &engine::crossoverInfo);
+
+        return {};
+    }
+
     if (const auto modulator = findModulatorState (song, ModulatorID::fromRaw (ref.device.getRaw())); modulator.isValid())
     {
         // A macro's one parameter has the macro's ID.
@@ -146,6 +199,11 @@ bool isStillThere (const Song& song, const FoundParameter& parameter)
         case ParameterSource::modulator:
         case ParameterSource::macro:
             return readID (parameter.state, schema::modulatorID) == id;
+        case ParameterSource::chainVolume:
+        case ParameterSource::chainPan:
+            return readID (parameter.state, schema::chainID) == id;
+        case ParameterSource::crossover:
+            return readID (parameter.state, schema::chainID) == id && hasCrossover (parameter.state);
     }
 
     return false;
@@ -181,6 +239,19 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
         case ParameterSource::macro:
             return { parameter.source, state[schema::macroName].toString(), { 0.0f, 1.0f }, 0.0f, {} };
 
+        case ParameterSource::chainVolume:
+            return { parameter.source, "Volume", { 0.0f, 1.0f }, atZeroDecibels, {} };
+
+        case ParameterSource::chainPan:
+            return { parameter.source, "Pan", { -1.0f, 1.0f }, 0.0f, {} };
+
+        case ParameterSource::crossover:
+        {
+            const auto [index, count] = getChainPlace (state);
+            return { parameter.source, "Crossover", devices::getRange (engine::crossoverInfo), getDefaultCrossover (index, count),
+                     engine::crossoverInfo };
+        }
+
         case ParameterSource::plugin:
         {
             // From 0 to 1, in its steps if it says it has some, as the plug-in told it as it opened.
@@ -203,12 +274,17 @@ juce::String getParameterText (const Song& song, const FoundParameter& parameter
     switch (parameter.source)
     {
         case ParameterSource::volume:
+        case ParameterSource::chainVolume:
             return juce::Decibels::toString (engine::faderPositionToDecibels (value) + 0.001f);
 
         case ParameterSource::send:
             return juce::Decibels::toString (engine::faderPositionToDecibels (value));
 
+        case ParameterSource::crossover:
+            return describeFrequency (value);
+
         case ParameterSource::pan:
+        case ParameterSource::chainPan:
             if (std::abs (value) < 0.001f)
                 return "Centre";
 
@@ -262,6 +338,15 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
 
         case ParameterSource::macro:
             return (float) state.getProperty (schema::macroValue, 0.0f);
+
+        case ParameterSource::chainVolume:
+            return engine::decibelsToFaderPosition ((float) state.getProperty (schema::channelVolume, 0.0f));
+
+        case ParameterSource::chainPan:
+            return (float) state.getProperty (schema::channelPan, 0.0f);
+
+        case ParameterSource::crossover:
+            return getCrossover (state);
 
         case ParameterSource::plugin:
             // The song's, where it sets one; else its instance's.
@@ -350,6 +435,31 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
             else
                 state.setProperty (schema::macroValue, told, undo);
 
+            break;
+        }
+
+        case ParameterSource::chainVolume:
+        {
+            told = juce::jlimit (0.0f, 1.0f, value);
+            moveOnePoint (song, ref, told);
+            setChainVolume (song, ref.device, engine::faderPositionToDecibels (told));
+            break;
+        }
+
+        case ParameterSource::chainPan:
+        {
+            told = juce::jlimit (-1.0f, 1.0f, value);
+            moveOnePoint (song, ref, told);
+            setChainPan (song, ref.device, told);
+            break;
+        }
+
+        case ParameterSource::crossover:
+        {
+            // Between its neighbours' crossovers: a band can't pass the one beside it.
+            told = getCrossoverRoom (state).clipValue (juce::jlimit (lowestCrossover, highestCrossover, value));
+            moveOnePoint (song, ref, told);
+            setChainCrossover (song, ref.device, told);
             break;
         }
     }

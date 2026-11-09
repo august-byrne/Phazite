@@ -2,7 +2,7 @@
 // A track, a bus, a return or the master as Phazite's engine plays it, kept by its ID from one plan to the next: its
 // channel (Channel.h), the buffer it plays into, what it sends before its fader and what a sidechain hears of it, and
 // where its notes are as it plays them. And what joins paths: the delay that lines a path up with a later one (delay
-// compensation), a send's level, and a container's mix of its devices' sound with what came in.
+// compensation), and a send's level. (A container's chains, and its mix of their sound with what came in: Container.h.)
 #pragma once
 
 #include "Channel.h"
@@ -94,27 +94,4 @@ private:
     float applied = -1.0f; // none yet
 };
 
-// A container of effects (model/mixer/ContainerModel.h): what comes into its devices, kept and delayed as much as they
-// delay their sound, to mix with what they put out by its mix, which the message thread sets and the audio thread glides
-// to over a block. Kept by the container's ID.
-class ContainerState
-{
-public:
-    ContainerState (int maximumBlockSize, int latency);
-
-    int getLatency() const noexcept { return latency; }
-    void setMix (float) noexcept;
-
-    // Audio thread: what comes in, before its first device; and after its last, its devices' sound mixed with it.
-    void keepDry (const float* const* channels, int numSamples) noexcept;
-    void mix (float* const* channels, int numSamples) noexcept;
-    void reset() noexcept; // nothing kept that came in before
-
-private:
-    int latency = 0;
-    std::atomic<float> mixValue { 1.0f };
-    float applied = -1.0f;
-    juce::AudioBuffer<float> dry;
-    std::unique_ptr<Delay> delay;
-};
 } // namespace phazite::engine

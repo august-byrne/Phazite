@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Sidechain.h"
 #include "devices/dynamics/Compressor.h"
+#include "internal/Containers.h"
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -144,7 +145,7 @@ bool hasSidechain (const Song& song, DeviceID id)
     const auto state = findDeviceState (song, id);
 
     // A container wires only the sound passing through its devices (Containers.h).
-    if (! state.hasType (schema::DEVICE) || isContainerState (state.getParent()))
+    if (! state.hasType (schema::DEVICE) || getOwningContainer (state).isValid())
         return false;
 
     if (const auto* own = findOwnDevice (state[schema::deviceType].toString().toStdString()))

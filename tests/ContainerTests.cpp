@@ -135,9 +135,9 @@ TEST_CASE ("Effects of one channel group into a container in the first one's pla
     const auto instrument = phazite::getInstrument (context, tracks.a)->id;
     const auto eq = effects[0], compressor = effects[1], reverb = effects[2];
 
-    // Not an instrument, nor effects of two channels.
+    // Effects of one channel (or its instrument with them, into an instrument container), not of two.
     CHECK (phazite::canGroupIntoContainer (context, { eq, reverb }));
-    CHECK_FALSE (phazite::canGroupIntoContainer (context, { instrument, eq }));
+    CHECK (phazite::canGroupIntoContainer (context, { instrument, eq }));
     CHECK_FALSE (phazite::canGroupIntoContainer (context, { eq, tracks.effectsOf (tracks.b)[0] }));
     CHECK_FALSE (phazite::canGroupIntoContainer (context, {}));
 
@@ -295,8 +295,11 @@ TEST_CASE ("A container is the song's, with its name, mix, devices and macros")
     const auto container = groupEqAndReverb (tracks);
     const auto element = phazite::findDeviceState (song, container);
 
-    // The song's container, in the EQ's place, with its name and its devices' elements in their order.
+    // The song's container, in the EQ's place, with its name and its one chain, which holds its devices' elements in their
+    // order.
     REQUIRE (element.hasType (schema::CONTAINER));
+    REQUIRE (phazite::getChainStates (element).size() == 1);
+    CHECK (phazite::getChainStates (element)[0][schema::chainName].toString() == juce::String ("Chain 1"));
     CHECK (element[schema::containerName].toString() == juce::String ("Container"));
     CHECK (phazite::getDeviceStates (phazite::findTrackState (song, tracks.a)).size() == 3); // the synth, the container, the compressor
     const auto devicesIn = [&element]
@@ -331,14 +334,16 @@ TEST_CASE ("A container is the song's, with its name, mix, devices and macros")
     CHECK (devicesIn() == std::vector<DeviceID> { eq, reverb });
     CHECK (tracks.namesOf (phazite::getContainerDevices (context, container)) == std::vector<juce::String> { "EQ", "Reverb" });
 
-    // A container the song gains shows on its channel, with its devices and its macros.
-    juce::ValueTree made (schema::CONTAINER), delay (schema::DEVICE), macro (schema::MACRO);
+    // A container the song gains shows on its channel, with its chain's devices and its macros.
+    juce::ValueTree made (schema::CONTAINER), chain (schema::CHAIN), delay (schema::DEVICE), macro (schema::MACRO);
     const auto madeID = DeviceID::fromRaw (song.makeID());
     made.setProperty (schema::deviceID, (juce::int64) madeID.getRaw(), nullptr);
     made.setProperty (schema::containerName, "Echoes", nullptr);
+    chain.setProperty (schema::chainID, (juce::int64) song.makeID(), nullptr);
     delay.setProperty (schema::deviceID, (juce::int64) song.makeID(), nullptr);
     delay.setProperty (schema::deviceType, "phaziteDelay", nullptr);
-    made.appendChild (delay, nullptr);
+    chain.appendChild (delay, nullptr);
+    made.appendChild (chain, nullptr);
     macro.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
     macro.setProperty (schema::macroName, "Space", nullptr);
     made.appendChild (macro, nullptr);

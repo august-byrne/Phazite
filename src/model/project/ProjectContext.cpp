@@ -153,7 +153,8 @@ namespace
         {
             const auto moved = parent.getChild (newIndex);
             const auto isTrack = isTrackElement (moved);
-            const auto isDevice = moved.hasType (schema::DEVICE) || moved.hasType (schema::CONTAINER) || moved.hasType (schema::SEND);
+            const auto isDevice = moved.hasType (schema::DEVICE) || moved.hasType (schema::CONTAINER) || moved.hasType (schema::SEND)
+                                  || moved.hasType (schema::CHAIN);
 
             // The elements it passed: now between its new place and its old one.
             const auto first = newIndex < oldIndex ? newIndex + 1 : oldIndex;
@@ -166,7 +167,9 @@ namespace
                 if (isTrack && isTrackElement (passed))
                     return add (pending.tracks);
 
-                if (isDevice && (passed.hasType (schema::DEVICE) || passed.hasType (schema::CONTAINER) || passed.hasType (schema::SEND)))
+                if (isDevice
+                    && (passed.hasType (schema::DEVICE) || passed.hasType (schema::CONTAINER) || passed.hasType (schema::SEND)
+                        || passed.hasType (schema::CHAIN)))
                     return add (pending.devices);
             }
         }
@@ -174,12 +177,14 @@ namespace
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
-            // makes one at each move (docs/performance-audit.md, U1); a channel's volume and pan, a send's level and a
-            // macro's value neither. Nor is where a device's window was, which no view shows.
+            // makes one at each move (docs/performance-audit.md, U1); a channel's or a container's chain's volume and pan, a
+            // chain's crossover, a send's level and a macro's value neither. Nor is where a device's window was, which no
+            // view shows.
             if (isParameterValue (tree, property) || tree.hasType (schema::VALUES) || tree.hasType (schema::VALUE)
                 || (tree.hasType (schema::DEVICE) && schema::isDeviceViewProperty (property))
-                || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER))
+                || ((tree.hasType (schema::TRACK) || tree.hasType (schema::MASTER) || tree.hasType (schema::CHAIN))
                     && (property == schema::channelVolume || property == schema::channelPan))
+                || (tree.hasType (schema::CHAIN) && property == schema::chainCrossover)
                 || (tree.hasType (schema::SEND) && property == schema::sendLevel)
                 || (tree.hasType (schema::MACRO) && property == schema::macroValue))
                 return;
