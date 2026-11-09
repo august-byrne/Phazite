@@ -172,8 +172,8 @@ namespace
     {
         double partStart = 0.0, partLength = 0.0, fileLength = 0.0;
         double startBeat = 0.0;
-        double tempo = 0.0;                           // the file's, while the clip follows the song's; 0 while it doesn't
-        std::vector<std::pair<double, double>> warps; // each a time of the sound with where it plays straight
+        double tempo = 0.0;                              // the file's, while the clip follows the song's; 0 while it doesn't
+        std::vector<std::pair<double, double>> warps {}; // each a time of the sound with where it plays straight
 
         double unwarp (double time) const { return alongPoints (warps, time, false); } // where it plays straight
         double warp (double straight) const { return alongPoints (warps, straight, true); }

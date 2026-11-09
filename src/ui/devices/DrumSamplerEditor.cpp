@@ -478,19 +478,20 @@ public:
     {
         const auto area = getArea();
 
-        switch (field)
-        {
-            case Field::start:
-                return xFor (getStartSeconds(), area);
-            case Field::attack:
-                return xFor (getAttackEnd(), area);
-            case Field::hold:
-                return xFor (getHoldEnd(), area);
-            case Field::decay:
-                return xFor (getHoldEnd() + getValue (Field::decay) * 0.001, area);
-            default:
-                return area.getX();
-        }
+        // Not a switch: a pad has many fields besides these, which GCC's -Wswitch-enum would want named.
+        if (field == Field::start)
+            return xFor (getStartSeconds(), area);
+
+        if (field == Field::attack)
+            return xFor (getAttackEnd(), area);
+
+        if (field == Field::hold)
+            return xFor (getHoldEnd(), area);
+
+        if (field == Field::decay)
+            return xFor (getHoldEnd() + getValue (Field::decay) * 0.001, area);
+
+        return area.getX();
     }
 
     void paint (juce::Graphics& g) override
@@ -606,25 +607,26 @@ public:
         const auto range = handle.getRange();
         auto value = 0.0f;
 
-        switch (handleFields[(size_t) dragged])
+        const auto field = handleFields[(size_t) dragged];
+
+        if (field == Field::start)
         {
-            case Field::start:
-                value = (float) (at / std::max (0.001, getLength()));
-                break;
-            case Field::attack:
-                value = (float) ((at - getStartSeconds()) * 1000.0);
-                break;
-            case Field::hold:
-                // Dragged to the end, it plays the whole sound.
-                value = e.position.x >= area.getRight() - 0.02f * area.getWidth() ? DrumSampler::wholeSound
-                                                                                  : (float) ((at - getAttackEnd()) * 1000.0);
-                value = std::min (value, DrumSampler::wholeSound);
-                break;
-            case Field::decay:
-                value = (float) ((at - getHoldEnd()) * 1000.0);
-                break;
-            default:
-                break;
+            value = (float) (at / std::max (0.001, getLength()));
+        }
+        else if (field == Field::attack)
+        {
+            value = (float) ((at - getStartSeconds()) * 1000.0);
+        }
+        else if (field == Field::hold)
+        {
+            // Dragged to the end, it plays the whole sound.
+            value = e.position.x >= area.getRight() - 0.02f * area.getWidth() ? DrumSampler::wholeSound
+                                                                              : (float) ((at - getAttackEnd()) * 1000.0);
+            value = std::min (value, DrumSampler::wholeSound);
+        }
+        else if (field == Field::decay)
+        {
+            value = (float) ((at - getHoldEnd()) * 1000.0);
         }
 
         handle.setValue (juce::jlimit (range.start, range.end, value));

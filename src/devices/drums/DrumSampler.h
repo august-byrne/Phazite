@@ -127,7 +127,7 @@ public:
     // Plays a pad at the next block, as if its note came in: for the editor's pads. Message thread, lock-free. Played while
     // the sampler plays no blocks (switched off, or on a muted or frozen track), it never plays: one that waited longer
     // than longestAuditionWait is dropped, rather than heard late with every pad played since.
-    void audition (int pad, float velocity);
+    void audition (int pad, float hitVelocity);
     bool isWaitingToPlay() const noexcept override; // a pad played, for the next block
 
     // How hard each pad was hit since the editor last looked, from 0 to 1 (devices/core/MeterValue.h).
@@ -210,8 +210,8 @@ private:
     std::array<MeterValue, numPads> padMeters;
     std::array<LiveValue, numPads> playheads;
 
-    void hit (int pad, float velocity, std::span<const float> parameters);
-    void startVoice (int pad, int layer, const Sound&, float velocity, std::span<const float> parameters); // a layer's
+    void hit (int pad, float hitVelocity, std::span<const float> parameters);
+    void startVoice (int pad, int layer, const Sound&, float hitVelocity, std::span<const float> parameters); // a layer's
     void release (int pad);
     void applyValues (Voice&, std::span<const float> parameters); // its level, pan and filter, as its pad's values are now
     void follow (std::span<const float> parameters);              // every voice's, and fades those of pads that mute or solo leave out

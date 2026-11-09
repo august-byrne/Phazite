@@ -25,7 +25,7 @@ struct Settings
     double semitones = 0.0;
     bool reversed = false;
     double rateRatio = 1.0;
-    std::vector<std::pair<double, double>> timeMap;
+    std::vector<std::pair<double, double>> timeMap {};
 
     bool operator== (const Settings&) const = default;
 };

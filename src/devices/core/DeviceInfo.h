@@ -33,8 +33,8 @@ enum class Unit
 
 struct ParameterInfo
 {
-    std::string_view id;   // saved in projects
-    std::string_view name; // what editors call it, such as "Cutoff"
+    std::string_view id {};   // saved in projects
+    std::string_view name {}; // what editors call it, such as "Cutoff"
     float minimum = 0.0f;
     float maximum = 1.0f;
     float defaultValue = 0.0f;

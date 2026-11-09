@@ -280,12 +280,12 @@ void DrumSampler::freeRetired()
                    retired.end());
 }
 
-void DrumSampler::audition (int pad, float velocity)
+void DrumSampler::audition (int pad, float hitVelocity)
 {
     const auto scope = auditionFifo.write (1);
 
     if (scope.blockSize1 > 0)
-        auditions[(size_t) scope.startIndex1] = { pad, velocity, juce::Time::getMillisecondCounter() };
+        auditions[(size_t) scope.startIndex1] = { pad, hitVelocity, juce::Time::getMillisecondCounter() };
 }
 
 bool DrumSampler::isWaitingToPlay() const noexcept
@@ -318,7 +318,7 @@ double DrumSampler::getTailSeconds() const
     return longest;
 }
 
-void DrumSampler::hit (int pad, float velocity, std::span<const float> values)
+void DrumSampler::hit (int pad, float hitVelocity, std::span<const float> values)
 {
     const auto at = [&values, pad] (Field field) { return values[(size_t) getParameterIndex (pad, field)]; };
 
@@ -348,20 +348,20 @@ void DrumSampler::hit (int pad, float velocity, std::span<const float> values)
                 voice.fadeStep = std::max (voice.fadeStep, (float) (1.0 / (fadeSeconds * sampleRate)));
 
     // Its layers share the hit as its mode says: all at once, or one of them.
-    velocity = std::clamp (velocity, 0.0f, 1.0f);
+    hitVelocity = std::clamp (hitVelocity, 0.0f, 1.0f);
     auto chosen = 0;
 
     switch ((LayerMode) std::clamp ((int) std::lround (at (Field::layerMode)), 0, (int) LayerMode::random))
     {
         case LayerMode::stack:
             for (int each = 0; each < found; ++each)
-                startVoice (pad, layers[(size_t) each], *layerSounds[(size_t) each], velocity, values);
+                startVoice (pad, layers[(size_t) each], *layerSounds[(size_t) each], hitVelocity, values);
 
-            padMeters[(size_t) pad].raise (velocity);
+            padMeters[(size_t) pad].raise (hitVelocity);
             return;
 
         case LayerMode::velocity:
-            chosen = std::min (found - 1, (int) (velocity * (float) found));
+            chosen = std::min (found - 1, (int) (hitVelocity * (float) found));
             break;
 
         case LayerMode::roundRobin:
@@ -379,11 +379,11 @@ void DrumSampler::hit (int pad, float velocity, std::span<const float> values)
             break;
     }
 
-    startVoice (pad, layers[(size_t) chosen], *layerSounds[(size_t) chosen], velocity, values);
-    padMeters[(size_t) pad].raise (velocity);
+    startVoice (pad, layers[(size_t) chosen], *layerSounds[(size_t) chosen], hitVelocity, values);
+    padMeters[(size_t) pad].raise (hitVelocity);
 }
 
-void DrumSampler::startVoice (int pad, int layer, const Sound& sound, float velocity, std::span<const float> values)
+void DrumSampler::startVoice (int pad, int layer, const Sound& sound, float hitVelocity, std::span<const float> values)
 {
     const auto at = [&values, pad] (Field field) { return values[(size_t) getParameterIndex (pad, field)]; };
 
@@ -400,7 +400,7 @@ void DrumSampler::startVoice (int pad, int layer, const Sound& sound, float velo
     voice.pad = pad;
     voice.layer = layer;
     voice.sound = &sound;
-    voice.velocity = velocity;
+    voice.velocity = hitVelocity;
     voice.reversed = at (Field::reverse) > 0.5f;
     voice.position = std::floor ((double) at (Field::start) * sound.audio.getNumSamples());
     voice.step = sound.sampleRate / sampleRate * std::exp2 (((double) at (Field::tune) + at (Field::fine) / 100.0) / 12.0);
@@ -569,7 +569,7 @@ void DrumSampler::render (float* left, float* right, int numSamples, std::span<c
             // Its filter (a state-variable filter, as Cytomic's), each side through its own state.
             if (voice.filterType != FilterType::off)
             {
-                const auto filter = [&voice] (float in, size_t side)
+                const auto throughFilter = [&voice] (float in, size_t side)
                 {
                     const auto v3 = in - voice.ic2[side];
                     const auto v1 = voice.a1 * voice.ic1[side] + voice.a2 * v3;
@@ -586,8 +586,8 @@ void DrumSampler::render (float* left, float* right, int numSamples, std::span<c
                     return in - voice.k * v1 - v2;
                 };
 
-                sampleLeft = filter (sampleLeft, 0);
-                sampleRight = filter (sampleRight, 1);
+                sampleLeft = throughFilter (sampleLeft, 0);
+                sampleRight = throughFilter (sampleRight, 1);
             }
 
             intoLeft[i] += sampleLeft * voice.gainLeft * envelope;
