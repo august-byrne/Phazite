@@ -83,6 +83,12 @@ public:
     // change. Message thread only.
     bool hasUnsavedChanges();
 
+    // As hasUnsavedChanges(), with its plug-ins' settings taken from them as a save takes them and the whole song compared
+    // with what was saved, rather than trusting what the plug-ins said: many say their settings changed when nothing did
+    // (a VST3's setDirty() as its window opens). What closing the project asks before it asks to save; none found, there
+    // are none from then on. Message thread only.
+    bool checkUnsavedChanges();
+
     // Saves to the project file. A copy of the previous version goes into Backups/ first, and the
     // new file only replaces the old one once it has been written completely. What is being tried in place (Swap) is kept
     // first, as its own undo step (model/commands/internal/Undo.h: Trial).

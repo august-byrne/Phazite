@@ -200,7 +200,10 @@ namespace
         }
 
         // Its state, in every version: its Gain (1 in one without it), then its Tone. A third value of 1 after them makes it
-        // take them as its own window would set them, telling the host (TestPlugin::setGain()).
+        // take them as its own window would set them, telling the host (TestPlugin::setGain()); and a fourth of 1 makes it
+        // tell what JUCE's VST3 host tells of every restartComponent() a VST3 makes (another program and new parameter
+        // info), as many do while they sit there, and of 2 that its settings changed, as a VST3's setDirty() comes, whether
+        // they did or not.
         void getStateInformation (juce::MemoryBlock& data) override
         {
             juce::MemoryOutputStream out (data, false);
@@ -217,6 +220,7 @@ namespace
             const auto gainValue = in.readFloat();
             const auto toneValue = in.readFloat();
             const auto asItsOwn = in.getNumBytesRemaining() >= 4 && in.readFloat() > 0.5f;
+            const auto tells = in.getNumBytesRemaining() >= 4 ? in.readFloat() : 0.0f;
             const auto set = [asItsOwn] (StandInParameter& parameter, float value)
             {
                 if (asItsOwn)
@@ -229,6 +233,11 @@ namespace
                 set (*gain, gainValue);
 
             set (*tone, toneValue);
+
+            if (tells > 1.5f)
+                updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
+            else if (tells > 0.5f)
+                updateHostDisplay (ChangeDetails().withProgramChanged (true).withParameterInfoChanged (true));
         }
 
     private:

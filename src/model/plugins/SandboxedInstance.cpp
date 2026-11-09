@@ -588,9 +588,11 @@ void SandboxedInstance::handleAsyncUpdate()
         }
     }
 
+    // A value it tells again as it was (many plug-ins do, as their windows open) changes nothing, nor is an unsaved change.
     for (const auto& [index, value] : changes)
     {
-        if (juce::isPositiveAndBelow (index, (int) parameters.size()))
+        if (juce::isPositiveAndBelow (index, (int) parameters.size())
+            && ! juce::exactlyEqual (parameters[(size_t) index]->getValue(), value))
         {
             parameters[(size_t) index]->setFromPlugin (value);
 

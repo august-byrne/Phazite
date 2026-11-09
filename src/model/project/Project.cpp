@@ -310,6 +310,29 @@ bool Project::hasUnsavedChanges()
     return changedSinceSave;
 }
 
+bool Project::checkUnsavedChanges()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! hasUnsavedChanges())
+        return false;
+
+    {
+        const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
+        storeForSaving (*song);
+    }
+
+    if (! holdTheSameProject (song->getState(), savedState))
+        return true;
+
+    // The song is as saved after all.
+    changedSinceSave = changedSinceAutosave = false;
+    changesOutsideHistory = song->getChangesOutsideHistory();
+    mayHaveChanged = compareAll = false;
+    elementsToCompare.clearQuick();
+    return false;
+}
+
 juce::Result Project::save()
 {
     JUCE_ASSERT_MESSAGE_THREAD

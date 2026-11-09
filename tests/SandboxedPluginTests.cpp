@@ -350,6 +350,56 @@ TEST_CASE ("What a plug-in in a helper changes itself is an unsaved change of it
         [&] { return song.getProject().hasUnsavedChanges() && juce::exactlyEqual (gain.getValue(), 0.5f); }, 20000));
 }
 
+TEST_CASE ("What a plug-in in a helper tells of itself that changes nothing is no unsaved change: a VST3's restart, values again")
+{
+    // The owner, 2026-11-08: an idle project asked to save its changes as Phazite closed, with none in Source Control.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    REQUIRE (song.getProject().save().wasOk());
+    CHECK_FALSE (song.getProject().hasUnsavedChanges());
+
+    // Its gain and tone told again as they are, as many plug-ins' windows do as they open; then what JUCE's VST3 host tells
+    // of a VST3's restartComponent(), for its latency say: another program, with new parameter info.
+    auto& instance = getSandboxed (song, effect);
+    const auto state = instance.getRemote().getState (10000);
+    REQUIRE (state.has_value());
+    juce::MemoryInputStream before (*state, false);
+    const auto gainNow = before.readFloat(), toneNow = before.readFloat();
+    enum Tells
+    {
+        nothingMore,
+        restart, // what JUCE's VST3 host tells of a restartComponent()
+        dirty    // that its settings changed, as a VST3's setDirty()
+    };
+
+    const auto tell = [&instance] (float gain, float tone, Tells tells)
+    {
+        juce::MemoryOutputStream told;
+        told.writeFloat (gain);
+        told.writeFloat (tone);
+        told.writeFloat (1.0f); // as its own window would set them
+        told.writeFloat ((float) tells);
+        REQUIRE (instance.getRemote().setState (told.getMemoryBlock(), 10000));
+    };
+
+    tell (gainNow, toneNow, restart);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 1000); // what it told has come and gone
+    CHECK_FALSE (song.getProject().hasUnsavedChanges());
+    CHECK (getSong (song).getChangesOutsideHistory() == 0);
+
+    // Its settings said to have changed, though they didn't: closing asks it for them, and finds none to save.
+    tell (gainNow, toneNow, dirty);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return song.getProject().hasUnsavedChanges(); }, 20000));
+    CHECK_FALSE (song.getProject().checkUnsavedChanges());
+    CHECK_FALSE (song.getProject().hasUnsavedChanges());
+
+    // Its gain told as another value is one, which closing finds too.
+    tell (gainNow * 0.5f, toneNow, nothingMore);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return song.getProject().hasUnsavedChanges(); }, 20000));
+    CHECK (song.getProject().checkUnsavedChanges());
+}
+
 #if JUCE_WINDOWS
 TEST_CASE ("A plug-in in a helper shows its editor in Phazite's window, as large as it makes it, and hands back play over it")
 {

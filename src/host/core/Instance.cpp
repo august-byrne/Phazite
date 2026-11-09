@@ -396,7 +396,11 @@ void Instance::audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails
     if (details.parameterInfoChanged)
         parametersChanged = true;
 
-    if (details.nonParameterStateChanged || details.programChanged)
+    // Its settings changed: as it says itself (a VST3's setDirty()), or another program. JUCE's VST3 host says the program
+    // changed, with new parameter info, at every restartComponent() a VST3 makes, for its latency or its parameters' names
+    // too, which many make as they sit there: that alone changes nothing (the values it changes come as theirs), and counting
+    // it made an idle project's plug-ins an unsaved change.
+    if (details.nonParameterStateChanged || (details.programChanged && ! details.parameterInfoChanged))
         stateChanged = true;
 }
 

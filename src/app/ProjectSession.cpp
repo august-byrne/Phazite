@@ -527,7 +527,8 @@ void ProjectSession::updateAutoSave()
 
 void ProjectSession::closeThen (std::function<void (bool)> callback)
 {
-    if (project == nullptr || ! project->hasUnsavedChanges())
+    // Its plug-ins asked for their settings, rather than trusted to say they changed (Project::checkUnsavedChanges()).
+    if (project == nullptr || ! project->checkUnsavedChanges())
     {
         callback (true);
         return;
