@@ -323,8 +323,8 @@ float getValueSetByHand (const Song& song, const FoundParameter& parameter)
     {
         case ParameterSource::device:
         case ParameterSource::modulator:
-            return (float) state.getChildWithName (schema::VALUES)
-                .getProperty (juce::Identifier (parameter.ref.parameter), parameter.info->defaultValue);
+            return readSavedValue (*parameter.info,
+                                   state.getChildWithName (schema::VALUES).getProperty (juce::Identifier (parameter.ref.parameter)));
 
         case ParameterSource::volume:
             return engine::decibelsToFaderPosition (
@@ -530,7 +530,7 @@ void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& 
 
     if (! isDefaultValue (info, value))
     {
-        element.getOrCreateChildWithName (schema::VALUES, undo).setProperty (parameter, value, undo);
+        element.getOrCreateChildWithName (schema::VALUES, undo).setProperty (parameter, toSavedValue (info, value), undo);
         return;
     }
 
@@ -541,5 +541,31 @@ void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo& 
         if (values.getNumProperties() == 0 && values.getNumChildren() == 0)
             element.removeChild (values, undo);
     }
+}
+
+juce::var toSavedValue (const devices::ParameterInfo& info, float value)
+{
+    if (info.unit == devices::Unit::choice)
+        if (const auto name = devices::getChoiceName (info, juce::roundToInt (value - info.minimum)); ! name.empty())
+            return juce::String::fromUTF8 (name.data(), (int) name.size());
+
+    return value;
+}
+
+float readSavedValue (const devices::ParameterInfo& info, const juce::var& saved)
+{
+    if (saved.isVoid())
+        return info.defaultValue;
+
+    if (info.unit == devices::Unit::choice && saved.isString())
+        if (const auto choice = devices::findChoice (info, saved.toString().toStdString()))
+            return info.minimum + (float) *choice;
+
+    return (float) saved;
+}
+
+float readValueSetByHand (const juce::ValueTree& element, const devices::ParameterInfo& info)
+{
+    return readSavedValue (info, element.getChildWithName (schema::VALUES).getProperty (juce::Identifier (toString (info.id))));
 }
 } // namespace phazite

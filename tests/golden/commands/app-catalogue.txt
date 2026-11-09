@@ -114,6 +114,8 @@ version.hear
 version.bounce
 version.deleteBounce
 version.exportDawProject
+version.verify
+version.recover
 project.export | ctrl + shift + R
 project.cleanUpAudio
 project.importDawProject

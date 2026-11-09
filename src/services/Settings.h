@@ -104,6 +104,10 @@ public:
     static constexpr BoolSetting versionBounce { "phaziteVersionBounce", false, SaveTiming::now };
     static constexpr BoolSetting autoSave { "phaziteAutoSave", true, SaveTiming::now };
 
+    // This computer, as projects' histories know it (model/versions/VersionsModel.h: setThisComputer()): an ID made the first
+    // time Phazite runs, never a name.
+    static constexpr TextSetting computer { "phaziteComputer", "", SaveTiming::now };
+
     // Whether Phazite asks its releases for a newer version each time it opens (services/Updates.h): off until the user turns
     // it on (docs/design.md, section 22).
     static constexpr BoolSetting updateCheck { "phaziteUpdateCheck", false, SaveTiming::now };

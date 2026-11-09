@@ -11,6 +11,7 @@
 #include "model/project/internal/NewProject.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/VersionHistory.h"
 #include "services/Library.h"
 #include "ui/shell/NewProjectPanel.h"
 #include "ui/theme/LookAndFeel.h"
@@ -608,11 +609,82 @@ void ProjectSession::open (const juce::File& file, bool restoreAutosave)
         return;
     }
 
+    // A file there that doesn't read: its newest backup that does, or its branch's last commit, offered in its place.
+    if (file.existsAsFile())
+    {
+        auto [backupFile, backup] = Project::readNewestBackup (file);
+        auto [commit, commitName] = readLastCommitSong (file);
+
+        if (backup.isValid() || commit.isValid())
+        {
+            const auto backupText =
+                backup.isValid() ? "the backup of " + backupFile.getLastModificationTime().formatted ("%d %b %Y %H:%M") : juce::String();
+            const auto commitText = commit.isValid() ? "the last commit, \"" + commitName + "\"" : juce::String();
+
+            const auto choose = [this, file, backup = backup, commit = commit] (int choice)
+            {
+                juce::String copyError;
+
+                if (const auto& song = choice == 1 ? backup : commit; choice != 0 && song.isValid())
+                {
+                    if (auto opened = Project::openWithSong (file, song, copyError))
+                    {
+                        setProject (std::move (opened));
+                        return;
+                    }
+                }
+
+                recent.remove (file);
+
+                if (copyError.isNotEmpty())
+                    showError ("Phazite couldn't open the project", copyError);
+
+                if (project == nullptr)
+                    createFirstProject();
+            };
+
+            askWhichCopyToOpen (error, backupText, commitText, choose);
+            return;
+        }
+    }
+
     recent.remove (file);
     showError ("Phazite couldn't open the project", error);
 
     if (project == nullptr)
         createFirstProject();
+}
+
+void ProjectSession::askWhichCopyToOpen (const juce::String& error, const juce::String& backup, const juce::String& commit,
+                                         std::function<void (int)> callback)
+{
+    if (askWhichCopy != nullptr)
+    {
+        askWhichCopy (error, backup, commit, std::move (callback));
+        return;
+    }
+
+    juce::StringArray copies;
+
+    for (const auto& copy : { backup, commit })
+        if (copy.isNotEmpty())
+            copies.add (copy);
+
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::WarningIcon)
+                       .withTitle ("Phazite couldn't read the project")
+                       .withMessage (error + "\n\n" + copies.joinIntoString (" and ") + (copies.size() > 1 ? " still read" : " still reads")
+                                     + ". Open it in the project's place? Saving then writes it into the project's file.")
+                       .withAssociatedComponent (dialogParent);
+
+    if (backup.isNotEmpty())
+        options = options.withButton ("Open the Backup", 1);
+
+    if (commit.isNotEmpty())
+        options = options.withButton ("Open the Last Commit", 2);
+
+    // Escape, or closing the window, answers 0, as Cancel does.
+    juce::AlertWindow::showAsync (options.withButton ("Cancel", 0), [callback] (int result) { callback (result); });
 }
 
 void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::unique_ptr<UnsavedFolder> newUnsavedFolder)

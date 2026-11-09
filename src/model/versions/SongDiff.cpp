@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongDiff.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
 
+#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <map>
 
 namespace phazite
 {
 namespace
 {
-    // The same value as a file holds it: the model may hold a number where a version holds its text, with more digits than
-    // the text keeps (a clip at 12.000000000000002 beats is at "12.0").
-    bool isSameValue (const juce::var& a, const juce::var& b)
+    // While findTrackChange() works out a line of the Changes list with PluginValues::reported: the properties left out, a
+    // plug-in's state where the plug-in didn't say it changed and no knob of it moved. Each thread's own, set for the call.
+    using PropertyRule = std::function<bool (const juce::ValueTree&, const juce::Identifier&)>;
+    thread_local const PropertyRule* leftOut = nullptr;
+
+    bool isLeftOut (const juce::ValueTree& element, const juce::Identifier& property)
     {
-        return (a == b && b == a) || a.toString() == b.toString();
+        return schema::isUncountedProperty (element, property) || (leftOut != nullptr && (*leftOut) (element, property));
     }
 
     // The counted properties that two elements don't hold the same of.
@@ -26,7 +32,7 @@ namespace
         {
             const auto name = a.getPropertyName (i);
 
-            if (schema::isUncountedProperty (a, name))
+            if (isLeftOut (a, name))
                 continue;
 
             if (const auto* other = b.getPropertyPointer (name); other == nullptr || ! isSameValue (a[name], *other))
@@ -34,10 +40,34 @@ namespace
         }
 
         for (int i = 0; i < b.getNumProperties(); ++i)
-            if (const auto name = b.getPropertyName (i); ! schema::isUncountedProperty (b, name) && ! a.hasProperty (name))
+            if (const auto name = b.getPropertyName (i); ! isLeftOut (b, name) && ! a.hasProperty (name))
                 changed.add (name);
 
         return changed;
+    }
+
+    // Whether any knob of a plug-in moved between its values then and now (both known).
+    bool haveKnobsMoved (std::uint64_t device, const PluginValues& values)
+    {
+        if (values.before == nullptr || values.after == nullptr)
+            return false;
+
+        const auto before = values.before->find (device), after = values.after->find (device);
+
+        if (before == values.before->end() || after == values.after->end())
+            return false;
+
+        std::map<juce::String, float> then;
+
+        for (const auto& parameter : before->second)
+            then.emplace (parameter.id, parameter.value);
+
+        return std::any_of (after->second.begin(), after->second.end(),
+                            [&then] (const PluginParameterValue& parameter)
+                            {
+                                const auto found = then.find (parameter.id);
+                                return found != then.end() && std::abs (found->second - parameter.value) > 0.0005f;
+                            });
     }
 
     // An element's counted children: those with keys by their types and keys, the keys of those in an order in that order,
@@ -276,7 +306,18 @@ namespace
                 else if (const auto moved = describeMovedParameters (readID (device[schema::deviceID]), values);
                          moved.isNotEmpty() || ! holdTheSame (found->second, device))
                 {
-                    what.add (getDeviceName (device) + (moved.isNotEmpty() ? ": " + moved : juce::String()));
+                    // An update of the plug-in that made its state, then the knobs that moved.
+                    juce::StringArray details;
+                    const auto versionThen = found->second[schema::pluginVersion].toString();
+                    const auto versionNow = device[schema::pluginVersion].toString();
+
+                    if (versionThen.isNotEmpty() && versionNow.isNotEmpty() && versionThen != versionNow)
+                        details.add ("updated " + versionThen + juce::String::fromUTF8 (" \xe2\x86\x92 ") + versionNow);
+
+                    if (moved.isNotEmpty())
+                        details.add (moved);
+
+                    what.add (getDeviceName (device) + (details.isEmpty() ? juce::String() : ": " + details.joinIntoString ("; ")));
                 }
             }
         }
@@ -436,6 +477,19 @@ std::set<std::uint64_t> getAutomatableIDs (const juce::ValueTree& track)
 SongChange findTrackChange (const juce::ValueTree& before, const juce::ValueTree& after, const juce::ValueTree& songBefore,
                             const juce::ValueTree& songAfter, const PluginValues& values)
 {
+    // With the plug-ins that said they changed given: a plug-in's state that differs only counts for those, or for one whose
+    // knobs moved (PluginValues).
+    const PropertyRule rule = [&values] (const juce::ValueTree& element, const juce::Identifier& property)
+    {
+        if (property != schema::pluginState || ! element.hasType (schema::DEVICE))
+            return false;
+
+        const auto device = readID (element[schema::deviceID]);
+        return values.reported->count (device) == 0 && ! haveKnobsMoved (device, values);
+    };
+
+    const juce::ScopedValueSetter<const PropertyRule*> leaving (leftOut, values.reported != nullptr ? &rule : leftOut);
+
     SongChange change;
     const auto& element = after.isValid() ? after : before;
     change.where = element.hasType (schema::MASTER) ? SongChange::Where::master : SongChange::Where::track;

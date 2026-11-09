@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Instance.h"
 #include "devices/core/AudioThreads.h"
+#include "sandbox/core/Vst3State.h"
 
 #include <array>
 
@@ -89,6 +90,10 @@ Instance::Instance (std::int64_t instanceID, std::unique_ptr<juce::AudioPluginIn
     for (auto* parameter : parameters)
         parameter->addListener (this);
 
+    // A VST3's class ID, from the preset file JUCE's VST3 client writes with it.
+    if (const auto* vst3 = plugin->getVST3Client())
+        vst3ClassID = sandbox::readVst3ClassID (vst3->getPreset());
+
     plugin->addListener (this);
     plugin->setPlayHead (playHead.get());
     start (std::move (blockChannel), sampleRate);
@@ -167,8 +172,15 @@ void Instance::prepare (std::unique_ptr<sandbox::BlockChannel> blockChannel, dou
 
 juce::MemoryBlock Instance::getState()
 {
+    // As JUCE takes it (which first sends the plug-in the parameter changes on their way), then, for a VST3, the same two
+    // streams as its format's own preset file.
     juce::MemoryBlock state;
     plugin->getStateInformation (state);
+
+    if (vst3ClassID.isNotEmpty())
+        if (const auto streams = sandbox::readJuceVst3State (state, vst3ClassID))
+            return sandbox::writeVst3Preset (*streams);
+
     return state;
 }
 
@@ -176,25 +188,22 @@ void Instance::setState (const juce::MemoryBlock& state)
 {
     // Not while a block plays: the plug-in's lock, which the audio thread holds as it plays.
     const juce::ScopedLock held (plugin->getCallbackLock());
-    plugin->setStateInformation (state.getData(), (int) state.getSize());
+    setPluginState (*plugin, state);
 }
 
-juce::MemoryBlock Instance::getPreset()
+void setPluginState (juce::AudioPluginInstance& plugin, const juce::MemoryBlock& state)
 {
-    // What a VST3's format offers of its own (JUCE's VST3 client): its preset, as JUCE writes it.
-    const auto* vst3 = plugin->getVST3Client();
-    return vst3 != nullptr ? vst3->getPreset() : juce::MemoryBlock();
-}
+    if (plugin.getVST3Client() != nullptr)
+    {
+        if (const auto streams = sandbox::readVst3Preset (state))
+        {
+            const auto wrapped = sandbox::writeJuceVst3State (*streams);
+            plugin.setStateInformation (wrapped.getData(), (int) wrapped.getSize());
+            return;
+        }
+    }
 
-bool Instance::setPreset (const juce::MemoryBlock& preset)
-{
-    auto* vst3 = plugin->getVST3Client();
-
-    if (vst3 == nullptr)
-        return false;
-
-    const juce::ScopedLock held (plugin->getCallbackLock()); // as setState()
-    return vst3->setPreset (preset);
+    plugin.setStateInformation (state.getData(), (int) state.getSize());
 }
 
 void Instance::setProgram (int index)

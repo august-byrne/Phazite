@@ -7,6 +7,7 @@
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/engine/AppInfo.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
@@ -23,6 +24,7 @@
 #include "model/transport/internal/Tempo.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
+#include "sandbox/core/Vst3State.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -122,7 +124,6 @@ namespace
     struct Writer
     {
         const Song& song;
-        PluginInstances* plugins;
         DawProjectContent& content;
         engine::TempoMap tempo { getTempoMap (song) };      // in seconds
         juce::StringArray leftOut {};                       // what couldn't go in
@@ -444,7 +445,7 @@ namespace
             const auto id = readID (device[schema::deviceID]);
             const auto elementID = "d" + juce::String ((juce::int64) id);
             auto* plugin = devices.createNewChildElement ("Vst3Plugin");
-            const auto preset = takePreset (DeviceID::fromRaw (id));
+            const auto preset = takePreset (device);
 
             // The plug-in's class ID, as its preset holds it (after "VST3" and the preset's version).
             if (preset.getSize() >= 40)
@@ -490,13 +491,15 @@ namespace
             content.blobs.emplace_back (path, preset);
         }
 
-        juce::MemoryBlock takePreset (DeviceID device) const
+        // Its state as the song keeps it, a VST3's preset file (sandbox/core/Vst3State.h): what DAWproject holds of a VST3
+        // too. None for a state that isn't one (it never loaded here).
+        static juce::MemoryBlock takePreset (const juce::ValueTree& device)
         {
-            if (plugins == nullptr)
-                return {};
+            if (auto bytes = readBytes (device[schema::pluginState].toString());
+                bytes.has_value() && sandbox::readVst3Preset (*bytes).has_value())
+                return std::move (*bytes);
 
-            const auto instance = plugins->find (device);
-            return instance != nullptr ? instance->getPreset() : juce::MemoryBlock();
+            return {};
         }
 
         void writeMaster (juce::XmlElement& structure)
@@ -710,11 +713,11 @@ namespace
     };
 } // namespace
 
-DawProjectContent describeDawProject (const Song& song, PluginInstances* plugins, const juce::String& title, const juce::String& comment)
+DawProjectContent describeDawProject (const Song& song, const juce::String& title, const juce::String& comment)
 {
     JUCE_ASSERT_MESSAGE_THREAD
     DawProjectContent content;
-    Writer writer { song, plugins, content };
+    Writer writer { song, content };
     writer.write (title, comment);
     return content;
 }
@@ -807,6 +810,11 @@ namespace
             auto* session = findSession (song);
             PluginInstances* instances = session != nullptr ? &session->getPlugins() : nullptr;
 
+            // The plug-ins' states as they are now, which the song's VST3s go in with as their preset files. An old
+            // version's song holds them as they were then.
+            if (session != nullptr)
+                song.storeDeviceStates();
+
             // A song no session plays (an old version's): its plug-ins in instances of its own, in the background.
             if (session == nullptr && pluginHost != nullptr)
             {
@@ -814,7 +822,7 @@ namespace
                 instances = ownPlugins.get();
             }
 
-            content = describeDawProject (song, instances, title, comment);
+            content = describeDawProject (song, title, comment);
             std::vector<OfflineRender::Job> jobs;
             const auto end = toSeconds (song, getSongEnd (song));
 
@@ -1015,7 +1023,7 @@ namespace
 
         void take()
         {
-            const auto written = describeDawProject (song, nullptr, {}, {});
+            const auto written = describeDawProject (song, {}, {});
             const ReadTracks theirs (*in.project), ours (*written.project);
             const auto isNew = getTrackIDs (song).size() <= 1 && getClipCount() == 0;
             std::set<const juce::XmlElement*> matched;

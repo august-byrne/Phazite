@@ -745,7 +745,7 @@ juce::PopupMenu VersionsView::makeMoreMenu()
     menu.addSeparator();
     addCommandItems (menu, commands, { "version.exportDawProject", "project.importDawProject" });
     menu.addSeparator();
-    addCommandItems (menu, commands, { "project.cleanUpAudio" });
+    addCommandItems (menu, commands, { "project.cleanUpAudio", "version.verify", "version.recover" });
     return menu;
 }
 
@@ -947,12 +947,20 @@ void VersionsView::refresh()
     if (const auto bounces = settings.get (Settings::versionBounce); getBounceWithVersion (context) != bounces)
         setBounceWithVersion (context, bounces);
 
+    // What needs saying first: a bounce or a restore that failed in part, what Verify History found, a line that went its
+    // own way on another computer; else the room the history takes.
     const auto room = getVersionsRoom (context);
-    const auto problem = getBounceProblem (context);
-    roomText.setText (problem.isNotEmpty() ? problem
-                      : versions.empty()   ? juce::String()
-                                           : "Commits take " + juce::File::descriptionOfSizeInBytes (room.songs) + ", bounces "
-                                                 + juce::File::descriptionOfSizeInBytes (room.bounces),
+    juce::String notice;
+
+    for (const auto& text :
+         { getBounceProblem (context), getRestoreProblem (context), describeHistoryCheck (context), describeDivergence (context) })
+        if (notice.isEmpty())
+            notice = text;
+
+    roomText.setText (notice.isNotEmpty() ? notice
+                      : versions.empty()  ? juce::String()
+                                          : "Commits take " + juce::File::descriptionOfSizeInBytes (room.songs) + ", bounces "
+                                                + juce::File::descriptionOfSizeInBytes (room.bounces),
                       juce::dontSendNotification);
     roomText.setVisible (roomText.getText().isNotEmpty());
 

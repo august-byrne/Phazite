@@ -59,6 +59,14 @@ public:
     // then still writes to the project file.
     static std::unique_ptr<Project> open (const juce::File& projectFile, bool restoreAutosave, juce::String& error);
 
+    // Opens a project whose file can't be read with a song from elsewhere (its newest backup that reads, or its branch's last
+    // commit: model/versions/internal/VersionHistory.h, readLastCommitSong()), as the project's, which a save then writes
+    // into its file: unsaved until then. Nothing, with error set, for a state that isn't a song.
+    static std::unique_ptr<Project> openWithSong (const juce::File& projectFile, const juce::ValueTree& song, juce::String& error);
+
+    // The newest file of the project's in Backups/ (its autosave too) that reads as a song, and the song; none for none.
+    static std::pair<juce::File, juce::ValueTree> readNewestBackup (const juce::File& projectFile);
+
     // True if the project has an autosave from a session that ended without saving or closing the
     // project, such as a crash: saving and closing both delete the autosave.
     static bool hasNewerAutosave (const juce::File& projectFile);

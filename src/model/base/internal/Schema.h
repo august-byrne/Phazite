@@ -11,7 +11,9 @@
 
 #include "model/base/Song.h"
 
+#include <algorithm>
 #include <map>
+#include <vector>
 
 namespace phazite::schema
 {
@@ -269,8 +271,10 @@ inline const juce::Identifier VALUES { "VALUES" };
 inline const juce::Identifier SOUNDS { "SOUNDS" };
 
 // On a plug-in's DEVICE: which plug-in it is, as scanning found it and a preset names it (preset::plugin):
-// its format ("VST3"), name, maker (manufacturer), identifier (its file, or what its format finds it by) and unique ID
-// (int).
+// its format ("VST3"), name, maker (manufacturer), identifier (its file on the computer it was added on, or what its
+// format finds it by) and unique ID (int: JUCE's number for it, which for a VST3 is made from its class ID). A song finds
+// its plug-in by its format, unique ID and maker first, wherever this computer keeps its file
+// (model/mixer/internal/Mixer.h: findKnownPlugin()), then by its file and name, then by its name.
 inline const juce::Identifier pluginFormat { "format" };
 inline const juce::Identifier pluginName { "name" };
 inline const juce::Identifier pluginMaker { "manufacturer" };
@@ -284,10 +288,17 @@ inline const juce::Identifier deviceMix { "mix" };
 
 // On a plug-in's DEVICE: what the plug-in keeps of its own, which the project stores outside the undo history as it saves,
 // before it copies the plug-in or takes it away, and as a preset loads into it (model/plugins/internal/PluginInstances.h):
-// its state, the block it keeps its settings in (base 64), none for an empty one; and its program (int), for a plug-in with
-// programs. state
+// its state, the bytes it keeps its settings in (in base 64, as RFC 4648 has it: model/base/internal/SongText.h), none for
+// none, which for a VST3 are its format's own preset file, a .vstpreset (sandbox/core/Vst3State.h), as DAWproject holds a
+// VST3's state too; and its program (int), for a plug-in with programs. state
 inline const juce::Identifier pluginState { "state" };
 inline const juce::Identifier pluginProgram { "program" };
+
+// On a plug-in's DEVICE, stored with its state: its ID in its format, which other hosts know it by (a VST3's class ID, 32
+// hexadecimal digits, as its preset file holds it), none for another format; and the version of the plug-in that made the
+// state, as the plug-in tells it ("1.3.7"), none if it tells none. state
+inline const juce::Identifier pluginFormatID { "formatID" };
+inline const juce::Identifier pluginVersion { "version" };
 
 // Children of a plug-in's DEVICE: the values set by hand of its parameters, those set by Phazite's controls, and those of
 // the parameters that automation or a modulator moves away from them, stored with its state (its state holds the others),
@@ -410,20 +421,43 @@ inline const juce::Identifier pointCurve { "curve" };
 // pinned, drum mode and rows, and their automation lanes; on PHAZITE, the playlist's grid; on devices (DEVICE), where their
 // windows were. PIANOROLL and LANE hold view settings only. Keep these lists exact: anything else a project holds is song
 // or state.
-inline bool isTrackViewProperty (const juce::Identifier& p)
+using IdentifierList = std::vector<const juce::Identifier*>;
+
+inline bool isAmong (const juce::Identifier& p, const IdentifierList& list)
 {
-    return p == trackHeight || p == trackCollapsed || p == trackPinned || p == drumMode || p == drumOrder || p == drumHidden;
+    return std::any_of (list.begin(), list.end(), [&p] (const juce::Identifier* name) { return *name == p; });
 }
 
-inline bool isGridProperty (const juce::Identifier& p)
+inline const IdentifierList& getTrackViewProperties()
 {
-    return p == gridSnap || p == gridAdaptive || p == gridOffset || p == gridStep || p == gridTriplets;
+    static const IdentifierList list { &trackHeight, &trackCollapsed, &trackPinned, &drumMode, &drumOrder, &drumHidden };
+    return list;
+}
+
+inline const IdentifierList& getGridProperties()
+{
+    static const IdentifierList list { &gridSnap, &gridAdaptive, &gridOffset, &gridStep, &gridTriplets };
+    return list;
 }
 
 // Written without the undo manager (model/mixer/internal/Mixer.h: rememberWindowPosition()).
+inline const IdentifierList& getDeviceViewProperties()
+{
+    static const IdentifierList list { &deviceWindowX, &deviceWindowY };
+    return list;
+}
+
+inline bool isTrackViewProperty (const juce::Identifier& p)
+{
+    return isAmong (p, getTrackViewProperties());
+}
+inline bool isGridProperty (const juce::Identifier& p)
+{
+    return isAmong (p, getGridProperties());
+}
 inline bool isDeviceViewProperty (const juce::Identifier& p)
 {
-    return p == deviceWindowX || p == deviceWindowY;
+    return isAmong (p, getDeviceViewProperties());
 }
 
 inline bool isTrackViewElement (const juce::ValueTree& element)
@@ -467,60 +501,108 @@ juce::String getOrderGroup (const juce::ValueTree&);
 bool holdsID (const juce::ValueTree&, const juce::Identifier& property);
 bool namesID (const juce::ValueTree&, const juce::Identifier& property);
 
+// How a version's pieces split a song (model/versions/internal/SongPieces.h), which a reader needn't know: the elements its
+// piece holds as pieces of their own (a track, the master, a clip, a device, a container, an automation curve), and those
+// that go in runs once their parent has many (a clip's notes, a curve's points).
+bool isPieceOfItsOwn (const juce::ValueTree&);
+bool goesInRuns (const juce::ValueTree&);
+
+// The properties whose values are bytes, written in base 64 (model/base/internal/SongText.h: writeBytes()): a plug-in's
+// state (pluginState). A version's pieces keep each out of line, as a piece of its own.
+bool isBytesProperty (const juce::ValueTree&, const juce::Identifier& property);
+
+// The properties an element's key is made of (getElementKey()), in the order the key joins them; none for an element
+// whose key is its type, or that has none (a curve's points).
+juce::StringArray getKeyProperties (const juce::Identifier& type);
+
+// The rules above (getElementKey(), getOrderGroup(), holdsID(), namesID(), isUncountedProperty(), isUncountedElement(),
+// isPieceOfItsOwn(), goesInRuns(), isBytesProperty()) as data, for another tool to compare and merge songs as Phazite does:
+// what tests/golden/format/song-rules.json holds (written by the golden tests; docs/versions-format.md, section 5).
+juce::var describeSongRules();
+
 //==============================================================================
-// The project's versions (model/versions/; docs/versions.md): the song as it was at each version the user saved, and its
-// branches, in the project's Versions folder. Nothing written there changes again, but a branch's file and the name of the
-// current branch, which are replaced whole.
+// The project's versions (model/versions/; docs/versions.md, and docs/versions-format.md for another tool): the song as it
+// was at each version the user saved, and its branches, in the project's Versions folder
+// (model/versions/internal/VersionStore.h). Nothing written there changes again, but each computer's record of a branch,
+// its own files and the name of the current branch, which are replaced whole, and a branch's log, which is appended to.
 //
 //   Versions/
-//     pieces/<name>.pack   pieces, written together as a version is saved (model/versions/internal/PieceStore.h)
-//     branches/<id>.xml    a branch (BRANCH)
-//     current              the current branch's id
-//     files.xml            what each audio file the song plays hashes to (FILES), so that each is read once
-//     bounces/<id>.flac    a version's bounce, by the version's id: its song rendered as Export Song renders it, in FLAC
-//                          (16 bits, dithered), which a deleted bounce takes with it
+//     pieces/<name>.pack                pieces, written together as a version is saved (model/versions/internal/PieceStore.h)
+//     branches/<branch>/<computer>.xml  a branch as that computer last had it (BRANCH): only that computer writes it
+//     current                           the current branch's id, which goes with the project file
+//     local/<computer>/files.xml        what each audio file this computer read hashes to (FILES), so that each is read once
+//     local/<computer>/working.xml      the song left on each branch this computer switched from (WORKING)
+//     local/<computer>/logs/<branch>    each move of the branch's last version on this computer, a line each
+//     bounces/<id>.flac                 a version's bounce, by the version's id: its song rendered as Export Song renders
+//                                       it, in FLAC (16 bits, dithered), which a deleted bounce takes with it
 //
-// A piece is named by the SHA-256 of what it holds, in hexadecimal. It holds an element of the song as XML (UTF-8): its
-// properties in the order of their names, its children in their order, and nothing between them. Its tracks, clips,
-// devices, containers and curves are pieces of their own, each a PIECE in its place; a clip's many notes and a curve's
-// many points are in runs (RUN), each a piece of its own; and a plug-in's state is a piece of its own, in its bytes
-// (model/versions/internal/SongPieces.h). So a version stores only the pieces no version before it has.
+// A piece is named by the SHA-256 of what it holds, in hexadecimal. It holds an element of the song as XML (UTF-8), as
+// model/base/internal/SongText.h writes it: its properties in the order of their names, its children in their order, and
+// nothing between them. Its tracks, clips, devices, containers and curves are pieces of their own, each a _piece in its
+// place; a clip's many notes and a curve's many points are in runs (_run), each a piece of its own; and a property whose
+// value is bytes (a plug-in's state) is a piece of its own, in its bytes (model/versions/internal/SongPieces.h). So a
+// version stores only the pieces no version before it has.
 namespace versions
 {
-    // An element that is a piece of its own, in its place, by its name (piece); a run of notes or points, likewise.
-    inline const juce::Identifier PIECE { "PIECE" };
-    inline const juce::Identifier RUN { "RUN" };
-    inline const juce::Identifier piece { "piece" };
+    // The store's own names in a piece start with "_", which no song's name does (docs/versions-format.md), and a reader
+    // leaves out an element of the store's it doesn't know.
+    //
+    // In its place in its parent's piece, an element that is a piece of its own (_piece): the piece's name (_hash), the
+    // element's type (_type), and the properties its key is made of, as the element has them (schema::getKeyProperties()),
+    // so that what a piece holds is known without reading it. A run of notes or points is a piece too, of the type "_run",
+    // which holds them one after another (_run).
+    inline const juce::Identifier PIECE { "_piece" };
+    inline const juce::Identifier pieceHash { "_hash" }, pieceType { "_type" };
+    inline const juce::Identifier RUN { "_run" };
 
-    // On a plug-in's DEVICE in a piece, in place of its state (pluginState): the piece of the state's bytes. And the piece
-    // of its parameters' values as the plug-in told them when the version was saved (PARAMETERS: a PARAMETER for each, with
-    // its ID, the plug-in's own, its name and its value from 0 to 1), which the changes name the knobs by, as the state's
-    // bytes say nothing to anyone but the plug-in. Not part of the song.
-    inline const juce::Identifier statePiece { "statePiece" };
-    inline const juce::Identifier parametersPiece { "parametersPiece" };
-    inline const juce::Identifier PARAMETERS { "PARAMETERS" };
-    inline const juce::Identifier PARAMETER { "PARAMETER" };
+    // A property whose value is bytes (schema::isBytesProperty(): a plug-in's state), in place of the property: a _bytes
+    // element, first among its element's, naming the property (name) and the piece that holds its bytes (hash).
+    inline const juce::Identifier BYTES { "_bytes" };
+    inline const juce::Identifier bytesName { "name" }, bytesHash { "hash" };
+
+    // On a plug-in's DEVICE in a piece: the piece (hash) of its parameters' values as the plug-in told them when the version
+    // was saved (_parameters: a _parameter for each, with its ID, the plug-in's own, its name and its value from 0 to 1),
+    // which the changes name the knobs by, as the state's bytes say nothing to anyone but the plug-in. Not part of the song.
+    inline const juce::Identifier PARAMETERS { "_parameters" };
+    inline const juce::Identifier parametersHash { "hash" };
+    inline const juce::Identifier PARAMETER { "_parameter" };
     inline const juce::Identifier parameterID { "id" }, parameterName { "name" }, parameterValue { "value" };
+
+    // On an element joined from a version whose piece, or part of it, couldn't be read: a stand-in that names what is
+    // missing by its type and key, which making the song like the version leaves as it is now (model/versions/ApplySong.h).
+    // Never part of a song.
+    inline const juce::Identifier missing { "_missing" };
 
     // A version, a piece of its own, named by its piece's name: its song's piece (song); the versions it follows (parents:
     // one, or two for a merge, separated by spaces; none for the first); its name and note, as the user gave them, or none;
     // the summary of its changes, which names it while it has no name of its own; when it was saved (saved, milliseconds
     // since 1970); the branch it was saved on (branch: the branch's id); and the Phazite that saved it (phazite: its
     // version, model/engine/AppInfo.h). With a FILE for each audio file its song plays: its path (as clipFile holds it),
-    // its size in bytes, and the SHA-256 of what it holds (sha256).
+    // its size in bytes, and the SHA-256 of what it holds (sha256). And, for a merge that gave new IDs to what the other line
+    // added (model/versions/internal/SongMerge.h), a RENUMBERED for each: the ID as the other line has it (from) and as the
+    // merge gave it (to), and for a note the key of its clip ("CLIP:66"), so that a later merge of that line knows them.
     inline const juce::Identifier VERSION { "VERSION" };
     inline const juce::Identifier versionSong { "song" }, versionParents { "parents" }, versionName { "name" }, versionNote { "note" },
         versionSummary { "summary" }, versionSaved { "saved" }, versionBranch { "branch" }, versionPhazite { "phazite" };
     inline const juce::Identifier FILE { "FILE" };
     inline const juce::Identifier filePath { "path" }, fileSize { "size" }, fileHash { "sha256" };
+    inline const juce::Identifier RENUMBERED { "RENUMBERED" };
+    inline const juce::Identifier renumberedClip { "clip" }, renumberedFrom { "from" }, renumberedTo { "to" };
 
-    // A branch, in a file of its own: its id (a juce::Uuid's 32 hexadecimal digits), its name and its color (as
-    // juce::Colour::toString() writes it), its last version (head; none before its first), and the song as it was left there
-    // when another branch was switched to (working: the song's piece, view state included; none while it is the current
-    // branch).
+    // A branch as one computer last had it, in a file of its own that only that computer writes: its id (a juce::Uuid's 32
+    // hexadecimal digits), its name and its color (as juce::Colour::toString() writes it), when they were last set
+    // (changed, milliseconds since 1970: the newest computer's win), and its last version there (head; none before its
+    // first). The computers' records together make the branch: where one's last version follows every other's, that is the
+    // branch's; where not, the lines went their own ways, to be merged (model/versions/internal/VersionHistory.h).
     inline const juce::Identifier BRANCH { "BRANCH" };
     inline const juce::Identifier branchID { "id" }, branchName { "name" }, branchColour { "colour" }, branchHead { "head" },
-        branchWorking { "working" };
+        branchChanged { "changed" };
+
+    // working.xml: WORKING, with a LEFT for each branch this computer left with a song of its own on it: the branch's id
+    // (branch) and the song as it was left there (song: its piece, view state included).
+    inline const juce::Identifier WORKING { "WORKING" };
+    inline const juce::Identifier LEFT { "LEFT" };
+    inline const juce::Identifier leftBranch { "branch" }, leftSong { "song" };
 
     // files.xml: FILES, with a FILE for each audio file read, its path, size and sha256 as a version's, and when it was last
     // written (modified: milliseconds since 1970), by which a file read before is known again.

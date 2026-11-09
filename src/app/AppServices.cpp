@@ -4,6 +4,7 @@
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/Preview.h"
 #include "model/plugins/internal/PluginHost.h"
+#include "model/versions/VersionsModel.h"
 
 namespace phazite
 {
@@ -98,6 +99,17 @@ AppServices::AppServices (EngineContext& context, AppServicesOptions options)
 {
     // Plug-ins in helper processes: the scan's list, and those that crashed as they loaded kept off.
     pluginLists = std::make_unique<PluginLists> (getPluginHost (engineContext), settings);
+
+    // This computer, as projects' histories know it: an ID made once and kept, before any project opens.
+    auto computer = settings.get (Settings::computer);
+
+    if (computer.isEmpty())
+    {
+        computer = juce::Uuid().toString();
+        settings.set (Settings::computer, computer);
+    }
+
+    setThisComputer (computer);
 }
 
 void AppServices::openAudioDevices()

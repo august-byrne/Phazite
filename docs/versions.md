@@ -339,15 +339,17 @@ The view is laid out as VS Code's Source Control view, and says what it does in 
 
 ### The store
 
+As built ([versions-format.md](versions-format.md#2-the-folder) has the format in full):
+
 ```
 Versions/
-  objects/ab/cdef...    pieces of songs and versions' records, each named by the SHA-256 of what it
-                        holds and compressed with zlib: written once and never changed
-  branches/<n>.xml      a branch: its name, its color, its last version, and the song as it was left
-                        there when that differs from its last version
-  current               the branch the project file is
+  pieces/<sha>.pack                  pieces of songs and versions' records, each named by the SHA-256 of what it
+                                     holds and compressed with zlib, in packs: written once and never changed
+  branches/<branch>/<computer>.xml   a branch as one computer last had it: its name, its color, its last version
+  current                            the branch the project file is
   bounces/<version>.flac
-  files.xml             what each audio file hashes to, by its path, size and date, so each is read once
+  local/<computer>/                  this computer's own: what each audio file hashes to (files.xml), the songs it
+                                     left on branches (working.xml) and each branch's moves (logs/)
 ```
 
 **Pieces.** The song is split at its tracks, clips, devices, containers, automation curves and sections:
@@ -360,9 +362,9 @@ Versions/
 - Each piece holds its element with its parts named by their hashes, down from the song's own piece, as git's trees are.
 - A version that changed one note stores its run, its clip's piece, its track's and the song's: a few kilobytes. Plug-in states that didn't change are stored once for all versions.
 
-**The same song always makes the same pieces.** Properties are written in the order of their names. Children whose order means nothing are written in the order of their IDs: Schema.h says which those are, such as clips and notes.
+**The same song always makes the same pieces.** Properties are written in the order of their names, and each value in one way, whatever type holds it in memory ([SongText.h](../src/model/base/internal/SongText.h)). Children are written in their order, so a song comes back exactly; the differences and the merge match children whose order means nothing by their keys, which Schema.h gives.
 
-**Safe to write.** A piece is written whole to a temporary name, then renamed. A branch's file is replaced whole. A cut-off write leaves at most a piece that nothing names. Reading checks each piece's hash, so a damaged one marks its versions and no others.
+**Safe to write.** A pack is written whole to a temporary name, then renamed. A branch's file is replaced whole. A cut-off write leaves at most a piece that nothing names. Reading checks each piece's hash, so a damaged one marks its versions and no others.
 
 **The project file stays the song alone:**
 - It is the current branch's working copy, and everything that opens a project reads it.
@@ -375,16 +377,16 @@ Versions/
 
 **Off the message thread.** Saving a version takes no more of the message thread than a save does: the song is copied there, as an autosave copies it. Splitting, hashing, compressing and writing happen on a background thread, as the autosave's writer does. The changes list is also worked out in the background, once changes pause.
 
-**The format is documented,** like the project file's (Schema.h, with the store's own names), so that other tools, and later the cloud, can read it.
+**The format is documented,** like the project file's (Schema.h, with the store's own names), so that other tools, and later the cloud, can read it: [versions-format.md](versions-format.md) and [project-format.md](project-format.md), with test vectors that an outside reader checks.
 
 ### Differences
 
 **How two songs are compared:**
-- Pieces are compared by hash, from the top down, so only what changed is read.
-- Then the changed elements are compared by their IDs. Elements without an ID go by a key Schema.h gives them: a curve by its device and parameter, a tempo or a chord by its beat.
+- The two songs are compared in memory, track by track; as the song changes, only the tracks that changed are compared again. (Comparing pieces by their hashes from the top down, so that only what changed is read, waits for the benchmark of a big song.)
+- The elements are compared by their IDs. Elements without an ID go by a key Schema.h gives them: a curve by its device and parameter, a tempo or a chord by its beat.
 - Each difference is described in the same words the inspector and the undo steps use.
 
-**A plug-in's own settings count as changed only when the plug-in reported a change** since the last version. Some plug-ins save different bytes each time with nothing changed. Their bytes are still stored, and kept once where they are equal.
+**A plug-in's own settings count as changed only when the plug-in reported a change** since the last version, or one of its knobs moved. Some plug-ins save different bytes each time with nothing changed. Their bytes are still stored, and kept once where they are equal.
 
 **A plug-in's change is named by its parameters:** the knobs whose values differ ([pieces](#the-store)). A change that moves no parameter, such as a sample loaded or a pattern drawn, shows as "settings changed".
 
@@ -423,7 +425,7 @@ Bring Back, Take, Put Back and Merge all work out the song they want and make th
 
 **Plug-in states, automation curves and the chord lane** merge whole:
 - A curve both sides changed is a clash.
-- So is a plug-in state both sides changed. Its clash names the parameters each side moved.
+- So is a plug-in state both sides changed. Its clash names the knobs whose values differ between the two sides, and the plug-in's versions where they differ.
 
 **View state and how the song plays** are always this branch's.
 
@@ -473,7 +475,7 @@ The new code follows the layers in `CLAUDE.md`.
 - Git merges lines of text, which a song isn't, so Phazite would do its own merges anyway.
 - Big audio needs Git LFS, which libgit2 doesn't speak.
 - GitHub refuses files over 100 MB, so pushing a project there, the one thing a real repository gains, is the part that suits audio worst.
-- Git rewrites its own files as it works, so a repository in a folder that Dropbox or OneDrive syncs between two computers can be damaged. The store only adds files, and each computer writes only its own branches' files.
+- Git rewrites its own files as it works, so a repository in a folder that Dropbox or OneDrive syncs between two computers can be damaged. The store's pieces are written once and never changed, and each computer writes only its own files: its record of each branch and what is under its own folder ([versions-format.md](versions-format.md#2-the-folder)).
 - Git's words would leak in.
 - libgit2's licence (GPL-2.0 with a linking exception) would allow it in Phazite. The reasons above are why it isn't used.
 
@@ -636,8 +638,8 @@ If the owner wants versions to be v1's headline instead, V1 to V3 are the part t
 | Bring Back or a merge changes the song wrongly | Each is one undo step; the project file and the versions stay; every example song goes through them in the tests |
 | The history grows large | Pieces are shared and long lists split into runs, so a version costs what changed: bytes to kilobytes. Bounces, nearly all of the room, show in the room taken and are deleted one by one |
 | An update makes older versions unreadable | Versions wait until compatibility starts; bounces still play |
-| Big songs make versions slow | Pieces compared by hash, work off the message thread, and benchmarks with targets |
-| Plug-ins that save different bytes with nothing changed | Their settings count as changed only when they reported a change; equal bytes are kept once |
+| Big songs make versions slow | Only the tracks that changed compared again, work off the message thread, and benchmarks with targets |
+| Plug-ins that save different bytes with nothing changed | Their settings count as changed only when they reported a change or a knob moved; equal bytes are kept once |
 | Git's words leak into the window | The list of words above; the texts kept in one place (phase A4's strings table) |
 | A merge that is clean but sounds wrong | It is one undo step, heard at once; the window warns where both sides changed the same bars of a track |
 | Audio files deleted by hand | The version names what is missing and plays the rest |
@@ -675,6 +677,12 @@ property per line, V1, V2, V4, V3, V5, Clean Up Unused Audio, then D1 and D2. Wh
     kept.
   - Imported back into a branch, a file takes notes, faders, mutes and tracks added or taken away. Values are compared
     within what the file's numbers keep. Its devices, automation and audio clips stay the version's.
+
+- **The format audit** (2026-11-09, [format-audit.md](format-audit.md#7-what-was-built)) made the store sturdier and
+  documented it: each computer writes its own record of each branch, with a log of its moves; Verify History and Recover
+  Lost Commits; a version with a damaged piece brought back in part; packs joined once there are more than 50; IDs a
+  merge gave anew kept with its version; a plug-in's bytes counted as changed only after a change it reported or a knob
+  moved, with its version kept beside its state; and the format written down ([versions-format.md](versions-format.md)).
 
 Not built yet:
 

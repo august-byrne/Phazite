@@ -96,4 +96,13 @@ float getCurrentValue (const Song&, const FoundParameter&, bool withModulation);
 // leaves the song as it was, no change in source control nor unsaved. Every writer of VALUES goes through it.
 bool isDefaultValue (const devices::ParameterInfo&, float value);
 void keepValueSetByHand (juce::ValueTree element, const devices::ParameterInfo&, float value, juce::UndoManager*);
+
+// A value set by hand as the song and presets keep it: a choice by its name (devices::getChoiceName(): "Low Pass"), so that
+// what it means doesn't hang on the choices' order and another tool can read it, any other as its number. And back: a
+// choice by its name, a value by its number, and the parameter's default for none. Every reader of VALUES goes through it.
+juce::var toSavedValue (const devices::ParameterInfo&, float value);
+float readSavedValue (const devices::ParameterInfo&, const juce::var& saved);
+
+// The value set by hand of a parameter of an element (a device's, a modulator's), as its VALUES keep it, or its default.
+float readValueSetByHand (const juce::ValueTree& element, const devices::ParameterInfo&);
 } // namespace phazite

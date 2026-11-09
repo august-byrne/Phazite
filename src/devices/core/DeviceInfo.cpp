@@ -49,9 +49,37 @@ bool isValid (const ParameterInfo& parameter)
         return isNear (parameter.minimum, 0.0f) && isNear (parameter.maximum, 1.0f) && parameter.choices.empty();
 
     if (parameter.unit == Unit::choice)
-        return parameter.choices.size() == (size_t) std::lround (parameter.maximum - parameter.minimum) + 1;
+    {
+        if (parameter.choices.size() != (size_t) std::lround (parameter.maximum - parameter.minimum) + 1
+            || (! parameter.choiceIDs.empty() && parameter.choiceIDs.size() != parameter.choices.size()))
+            return false;
 
-    return parameter.choices.empty();
+        // Each saved by a name of its own.
+        for (size_t i = 0; i < parameter.choices.size(); ++i)
+            if (const auto name = getChoiceName (parameter, (int) i); name.empty() || findChoice (parameter, name) != (int) i)
+                return false;
+
+        return true;
+    }
+
+    return parameter.choices.empty() && parameter.choiceIDs.empty();
+}
+
+std::string_view getChoiceName (const ParameterInfo& parameter, int index)
+{
+    if (! juce::isPositiveAndBelow (index, (int) parameter.choices.size()))
+        return {};
+
+    return parameter.choiceIDs.empty() ? parameter.choices[(size_t) index] : parameter.choiceIDs[(size_t) index];
+}
+
+std::optional<int> findChoice (const ParameterInfo& parameter, std::string_view name)
+{
+    for (int i = 0; i < (int) parameter.choices.size(); ++i)
+        if (getChoiceName (parameter, i) == name)
+            return i;
+
+    return std::nullopt;
 }
 
 juce::NormalisableRange<float> getRange (const ParameterInfo& parameter)

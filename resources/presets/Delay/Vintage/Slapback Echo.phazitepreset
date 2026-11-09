@@ -6,7 +6,7 @@
     "type": "phaziteDelay",
     "parameters": {
       "sync": 0,
-      "time": 6,
+      "time": "1/8D",
       "milliseconds": 110.0,
       "feedback": 0.1,
       "pingPong": 0,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongMerge.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
 
 #include <cmath>
@@ -10,13 +11,13 @@ namespace phazite
 {
 namespace
 {
-    // The same value as a file holds it (SongDiff.cpp), none the same as none only.
-    bool isSameValue (const juce::var& a, const juce::var& b)
+    // The same value as a file holds it (model/base/internal/SongText.h), none the same as none only.
+    bool isSameValueOrNone (const juce::var& a, const juce::var& b)
     {
         if (a.isVoid() || b.isVoid())
             return a.isVoid() && b.isVoid();
 
-        return (a == b && b == a) || a.toString() == b.toString();
+        return isSameValue (a, b);
     }
 
     juce::String keyOf (const juce::ValueTree& element)
@@ -84,8 +85,16 @@ namespace
     struct Renumbered
     {
         juce::ValueTree song;
-        CopiedIDs ids; // old to new
+        CopiedIDs ids;                                                           // old to new
+        std::map<std::pair<juce::String, std::uint64_t>, std::uint64_t> noteIDs; // by clip (its group) and old, the new
     };
+
+    // A clip's notes' group, by which their IDs given anew are kept: its alias group's, or its own.
+    juce::String getNoteGroup (const juce::ValueTree& clip)
+    {
+        return clip.hasProperty (schema::clipLink) ? "link " + clip[schema::clipLink].toString()
+                                                   : "clip " + clip[schema::clipID].toString();
+    }
 
     void collectIDs (const juce::ValueTree& tree, std::set<std::uint64_t>& ids)
     {
@@ -187,7 +196,7 @@ namespace
         collectClips (base, baseClips);
         collectClips (ours, ourClips);
         collectClips (result.song, theirClips);
-        std::map<std::pair<juce::String, std::uint64_t>, std::uint64_t> noteIDs;
+        auto& noteIDs = result.noteIDs;
 
         for (auto& [id, clip] : theirClips)
         {
@@ -202,8 +211,7 @@ namespace
                 if (note.hasType (schema::NOTE))
                     baseNotes.insert (readID (note[schema::noteID]));
 
-            const auto group = clip.hasProperty (schema::clipLink) ? "link " + clip[schema::clipLink].toString()
-                                                                   : "clip " + juce::String ((juce::int64) id);
+            const auto group = getNoteGroup (clip);
 
             std::map<std::uint64_t, juce::ValueTree> ourNotes;
 
@@ -389,10 +397,10 @@ namespace
                 const auto vo = r[name];
                 const auto vt = t[name];
 
-                if (isSameValue (vt, vb) || isSameValue (vo, vt))
+                if (isSameValueOrNone (vt, vb) || isSameValueOrNone (vo, vt))
                     continue;
 
-                if (isSameValue (vo, vb))
+                if (isSameValueOrNone (vo, vb))
                 {
                     if (vt.isVoid())
                         r.removeProperty (name, nullptr);
@@ -855,6 +863,13 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
     const auto renumbered = renumberAdditions (base, ours, theirs, makeNewID);
     const auto& other = renumbered.song;
 
+    // What it gave anew, which its commit keeps.
+    for (const auto& [from, to] : renumbered.ids)
+        result.renumbered.push_back ({ {}, from, to });
+
+    for (const auto& [note, to] : renumbered.noteIDs)
+        result.renumbered.push_back ({ note.first, note.second, to });
+
     for (const auto requested : lines.tracks)
     {
         const auto found = renumbered.ids.find (requested);
@@ -949,6 +964,64 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
     }
 
     return result;
+}
+
+void translateIDs (juce::ValueTree song, const std::vector<RenumberedID>& renumbered)
+{
+    CopiedIDs items;
+    std::map<std::pair<juce::String, std::uint64_t>, std::uint64_t> notes;
+
+    for (const auto& id : renumbered)
+    {
+        if (id.clip.isEmpty())
+            items[id.from] = id.to;
+        else
+            notes[{ id.clip, id.from }] = id.to;
+    }
+
+    if (items.empty() && notes.empty())
+        return;
+
+    // Items first, what holds an ID and what names one, so that a clip's alias group is numbered as this side's; then each
+    // clip's notes, by that group.
+    const std::function<void (juce::ValueTree)> translateItems = [&] (juce::ValueTree tree)
+    {
+        for (auto child : tree)
+        {
+            for (int i = 0; i < child.getNumProperties(); ++i)
+            {
+                const auto property = child.getPropertyName (i);
+
+                if ((schema::holdsID (child, property) && ! child.hasType (schema::NOTE)) || schema::namesID (child, property))
+                    if (const auto found = items.find (readID (child[property])); found != items.end())
+                        child.setProperty (property, writeIDLike (child[property], found->second), nullptr);
+            }
+
+            translateItems (child);
+        }
+    };
+
+    const std::function<void (juce::ValueTree)> translateNotes = [&] (juce::ValueTree tree)
+    {
+        for (auto child : tree)
+        {
+            if (! child.hasType (schema::CLIP))
+            {
+                translateNotes (child);
+                continue;
+            }
+
+            const auto group = getNoteGroup (child);
+
+            for (auto note : child)
+                if (note.hasType (schema::NOTE))
+                    if (const auto found = notes.find ({ group, readID (note[schema::noteID]) }); found != notes.end())
+                        note.setProperty (schema::noteID, (juce::int64) found->second, nullptr);
+        }
+    };
+
+    translateItems (song);
+    translateNotes (song);
 }
 
 juce::ValueTree findByPath (const juce::ValueTree& song, const juce::StringArray& path)

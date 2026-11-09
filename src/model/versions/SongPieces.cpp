@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SongPieces.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 
 #include <juce_cryptography/juce_cryptography.h>
 
@@ -13,9 +14,10 @@ namespace
 {
     namespace versions = schema::versions;
 
-    // A list of a clip's notes or a curve's points this long or longer is in runs, each ending after about one in
-    // averageRun of them: after one whose text's FNV-1a hash is a multiple of averageRun. Where a run ends depends on what
-    // it holds alone, so that a note added, changed or taken away changes its own run, and the runs after it stay.
+    // A list of an element's notes or points this long or longer is in runs, each ending after about one in averageRun of
+    // them: after one whose text's FNV-1a hash is a multiple of averageRun. Where a run ends depends on what it holds alone,
+    // so that a note added, changed or taken away changes its own run, and the runs after it stay. How the writer chooses,
+    // which a reader needn't know.
     constexpr int fewestInRuns = 128;
     constexpr std::uint64_t averageRun = 64;
 
@@ -32,76 +34,16 @@ namespace
         return hash;
     }
 
-    bool isPieceOfItsOwn (const juce::ValueTree& element)
+    juce::MemoryBlock toBlock (juce::MemoryOutputStream& out)
     {
-        for (const auto* type : { &schema::TRACK, &schema::MASTER, &schema::CLIP, &schema::DEVICE, &schema::CONTAINER, &schema::CURVE })
-            if (element.hasType (*type))
-                return true;
-
-        return false;
+        return { out.getData(), out.getDataSize() };
     }
 
-    bool goesInRuns (const juce::ValueTree& child)
+    void writePlainElement (juce::OutputStream& out, const juce::ValueTree& element)
     {
-        return child.hasType (schema::NOTE) || child.hasType (schema::POINT);
-    }
-
-    void writeEscaped (juce::MemoryOutputStream& out, const juce::String& text)
-    {
-        // As XML, every character that isn't one of these, with characters below 32 written as numbers too, so that a value's
-        // new lines and tabs come back.
-        for (auto* p = text.toRawUTF8(); *p != 0; ++p)
-        {
-            const auto c = (unsigned char) *p;
-
-            if (c == '&')
-                out << "&amp;";
-            else if (c == '<')
-                out << "&lt;";
-            else if (c == '>')
-                out << "&gt;";
-            else if (c == '"')
-                out << "&quot;";
-            else if (c < 32)
-                out << "&#" << (int) c << ';';
-            else
-                out.writeByte ((char) c);
-        }
-    }
-
-    // Its properties, in the order of their names, with what replaces some of them.
-    using Properties = std::vector<std::pair<juce::String, juce::String>>;
-
-    Properties getProperties (const juce::ValueTree& element)
-    {
-        Properties properties;
-        properties.reserve ((size_t) element.getNumProperties());
-
-        for (int i = 0; i < element.getNumProperties(); ++i)
-        {
-            const auto name = element.getPropertyName (i);
-            properties.emplace_back (name.toString(), element[name].toString());
-        }
-
-        return properties;
-    }
-
-    void writeStart (juce::MemoryOutputStream& out, const juce::Identifier& type, Properties properties)
-    {
-        std::sort (properties.begin(), properties.end(), [] (const auto& a, const auto& b) { return a.first.compare (b.first) < 0; });
-        out << '<' << type.toString();
-
-        for (const auto& [name, value] : properties)
-        {
-            out << ' ' << name << "=\"";
-            writeEscaped (out, value);
-            out << '"';
-        }
-    }
-
-    void writePlainElement (juce::MemoryOutputStream& out, const juce::ValueTree& element)
-    {
-        writeStart (out, element.getType(), getProperties (element));
+        auto properties = getPropertyTexts (element);
+        sortByName (properties);
+        writeStartTag (out, element.getType().toString(), properties);
 
         if (element.getNumChildren() == 0)
         {
@@ -117,9 +59,17 @@ namespace
         out << "</" << element.getType().toString() << '>';
     }
 
-    juce::MemoryBlock toBlock (juce::MemoryOutputStream& out)
+    void writeEmptyElement (juce::OutputStream& out, const juce::Identifier& type, PropertyTexts properties)
     {
-        return { out.getData(), out.getDataSize() };
+        sortByName (properties);
+        writeStartTag (out, type.toString(), properties);
+        out << "/>";
+    }
+
+    // What tells an element from others of its type in its parent ("TRACK:12"), as a merge's clash names it.
+    juce::String describe (const juce::ValueTree& element)
+    {
+        return element.getType().toString() + ":" + schema::getElementKey (element);
     }
 
     //==============================================================================
@@ -135,44 +85,41 @@ namespace
             return name;
         }
 
-        void writeReference (juce::MemoryOutputStream& out, const juce::String& name)
+        // A piece in its place: its name, the type of what it holds, and the properties of that element's key.
+        void writeReference (juce::OutputStream& out, const juce::String& name, const juce::String& type,
+                             const juce::ValueTree& element = {})
         {
-            out << '<' << versions::PIECE.toString() << ' ' << versions::piece.toString() << "=\"" << name << "\"/>";
+            PropertyTexts properties { { versions::pieceHash.toString(), name }, { versions::pieceType.toString(), type } };
+
+            if (element.isValid())
+                for (const auto& key : schema::getKeyProperties (element.getType()))
+                    if (element.hasProperty (key))
+                        properties.emplace_back (key, writeValue (element[key]));
+
+            writeEmptyElement (out, versions::PIECE, std::move (properties));
         }
 
-        // A plug-in's state, in its bytes (as long as they give the same text again), and its parameters' values.
-        Properties getPieceProperties (const juce::ValueTree& element)
+        // A plug-in's parameters' values, if given, as a piece of their own: its name, or none.
+        juce::String keepParameters (const juce::ValueTree& element)
         {
-            auto properties = getProperties (element);
-
             if (! element.hasType (schema::DEVICE))
-                return properties;
-
-            for (auto& property : properties)
-            {
-                if (property.first != schema::pluginState.toString())
-                    continue;
-
-                if (juce::MemoryBlock state; state.fromBase64Encoding (property.second) && state.toBase64Encoding() == property.second)
-                    property = { versions::statePiece.toString(), keep (std::move (state)) };
-            }
+                return {};
 
             const auto id = (std::uint64_t) element[schema::deviceID].toString().getLargeIntValue();
+            const auto found = parameters.find (id);
 
-            if (const auto found = parameters.find (id); found != parameters.end() && ! found->second.empty())
-            {
-                juce::ValueTree values (versions::PARAMETERS);
+            if (found == parameters.end() || found->second.empty())
+                return {};
 
-                for (const auto& parameter : found->second)
-                    values.appendChild (juce::ValueTree (versions::PARAMETER, { { versions::parameterID, parameter.id },
-                                                                                { versions::parameterName, parameter.name },
-                                                                                { versions::parameterValue, parameter.value } }),
-                                        nullptr);
+            juce::ValueTree values (versions::PARAMETERS);
 
-                properties.emplace_back (versions::parametersPiece.toString(), keep (writeElement (values)));
-            }
+            for (const auto& parameter : found->second)
+                values.appendChild (juce::ValueTree (versions::PARAMETER, { { versions::parameterID, parameter.id },
+                                                                            { versions::parameterName, parameter.name },
+                                                                            { versions::parameterValue, parameter.value } }),
+                                    nullptr);
 
-            return properties;
+            return keep (writeElement (values));
         }
 
         // An element, which a piece of its own holds, as its piece: its name.
@@ -183,13 +130,40 @@ namespace
             return keep (toBlock (out));
         }
 
-        // An element into the piece being written: its children that are pieces of their own each a PIECE in their place,
-        // and many notes or points in runs, each a piece.
-        void write (juce::MemoryOutputStream& out, const juce::ValueTree& element)
+        // An element into the piece being written: its properties, but those whose values are bytes, each a piece of its
+        // own named by a _bytes element first among its children; its plug-in's parameters' values, likewise; then its
+        // children, those that are pieces of their own each a reference in its place, and many notes or points in runs.
+        void write (juce::OutputStream& out, const juce::ValueTree& element)
         {
-            writeStart (out, element.getType(), getPieceProperties (element));
+            PropertyTexts properties, bytes;
 
-            if (element.getNumChildren() == 0)
+            for (int i = 0; i < element.getNumProperties(); ++i)
+            {
+                const auto name = element.getPropertyName (i);
+                auto text = writeValue (element[name]);
+
+                // Bytes that come back as the same text, out of line; others (none, or not base 64) as they are.
+                if (schema::isBytesProperty (element, name))
+                {
+                    if (const auto decoded = readBytes (text);
+                        decoded.has_value() && decoded->getSize() > 0 && writeBytes (*decoded) == text)
+                    {
+                        bytes.emplace_back (name.toString(), keep (*decoded));
+                        continue;
+                    }
+                }
+
+                properties.emplace_back (name.toString(), std::move (text));
+            }
+
+            sortByName (properties);
+            sortByName (bytes);
+            const auto type = element.getType().toString();
+            writeStartTag (out, type, properties);
+
+            const auto parametersPiece = keepParameters (element);
+
+            if (bytes.empty() && parametersPiece.isEmpty() && element.getNumChildren() == 0)
             {
                 out << "/>";
                 return;
@@ -197,10 +171,17 @@ namespace
 
             out << '>';
 
+            for (const auto& [name, piece] : bytes)
+                writeEmptyElement (out, versions::BYTES,
+                                   { { versions::bytesHash.toString(), piece }, { versions::bytesName.toString(), name } });
+
+            if (parametersPiece.isNotEmpty())
+                writeEmptyElement (out, versions::PARAMETERS, { { versions::parametersHash.toString(), parametersPiece } });
+
             int numInRuns = 0;
 
             for (const auto& child : element)
-                numInRuns += goesInRuns (child) ? 1 : 0;
+                numInRuns += schema::goesInRuns (child) ? 1 : 0;
 
             const auto inRuns = numInRuns >= fewestInRuns;
             juce::MemoryOutputStream run;
@@ -212,14 +193,14 @@ namespace
                     return;
 
                 run << "</" << versions::RUN.toString() << '>';
-                writeReference (out, keep (toBlock (run)));
+                writeReference (out, keep (toBlock (run)), versions::RUN.toString());
                 run.reset();
                 runOpen = false;
             };
 
             for (const auto& child : element)
             {
-                if (inRuns && goesInRuns (child))
+                if (inRuns && schema::goesInRuns (child))
                 {
                     if (! runOpen)
                     {
@@ -239,14 +220,14 @@ namespace
 
                 endRun();
 
-                if (isPieceOfItsOwn (child))
-                    writeReference (out, split (child));
+                if (schema::isPieceOfItsOwn (child))
+                    writeReference (out, split (child), child.getType().toString(), child);
                 else
                     write (out, child);
             }
 
             endRun();
-            out << "</" << element.getType().toString() << '>';
+            out << "</" << type << '>';
         }
     };
 
@@ -255,31 +236,49 @@ namespace
     {
         const ReadPiece& read;
         PluginParameterValues* parameters;
+        std::vector<MissingPiece>* missing; // given: as much as can be read, with stand-ins for the rest
         bool failed = false;
 
-        std::unique_ptr<juce::XmlElement> parse (const juce::String& name)
+        std::unique_ptr<juce::XmlElement> parse (const juce::String& name) const
         {
             const auto bytes = read (name);
-
-            if (! bytes.has_value())
-            {
-                failed = true;
-                return {};
-            }
-
-            auto xml = juce::parseXML (bytes->toString());
-            failed = failed || xml == nullptr;
-            return xml;
+            return bytes.has_value() ? juce::parseXML (bytes->toString()) : nullptr;
         }
 
-        void readParameters (const juce::XmlElement& device, const juce::String& name)
+        // A piece that couldn't be read: listed, or the whole join fails.
+        void lose (juce::StringArray path, const juce::String& what, const juce::String& piece)
+        {
+            if (missing == nullptr)
+            {
+                failed = true;
+                return;
+            }
+
+            path.add (what);
+            missing->push_back ({ path, piece });
+        }
+
+        // What a reference names, made of what the reference says of it: a stand-in, its type and key alone.
+        static juce::ValueTree makeStandIn (const juce::XmlElement& reference)
+        {
+            juce::ValueTree standIn (reference.getStringAttribute (versions::pieceType));
+
+            for (const auto& attribute : reference.getAttributeIterator())
+                if (! attribute.name.toString().startsWithChar ('_'))
+                    standIn.setProperty (attribute.name, attribute.value, nullptr);
+
+            standIn.setProperty (versions::missing, true, nullptr);
+            return standIn;
+        }
+
+        void readParameters (const juce::ValueTree& device, const juce::String& name)
         {
             const auto xml = parse (name);
 
             if (xml == nullptr || parameters == nullptr)
                 return;
 
-            auto& values = (*parameters)[(std::uint64_t) device.getStringAttribute (schema::deviceID).getLargeIntValue()];
+            auto& values = (*parameters)[(std::uint64_t) device[schema::deviceID].toString().getLargeIntValue()];
 
             for (const auto* parameter : xml->getChildWithTagNameIterator (versions::PARAMETER.toString()))
                 values.push_back ({ parameter->getStringAttribute (versions::parameterID),
@@ -287,49 +286,71 @@ namespace
                                     (float) parameter->getDoubleAttribute (versions::parameterValue) });
         }
 
-        juce::ValueTree convert (const juce::XmlElement& xml)
+        juce::ValueTree convert (const juce::XmlElement& xml, juce::StringArray path)
         {
             juce::ValueTree tree (xml.getTagName());
 
             for (const auto& attribute : xml.getAttributeIterator())
-            {
-                if (attribute.name == versions::statePiece)
-                {
-                    if (const auto state = read (attribute.value))
-                        tree.setProperty (schema::pluginState, state->toBase64Encoding(), nullptr);
-                    else
-                        failed = true;
-                }
-                else if (attribute.name == versions::parametersPiece)
-                {
-                    if (parameters != nullptr)
-                        readParameters (xml, attribute.value);
-                }
-                else
-                {
-                    tree.setProperty (attribute.name, attribute.value, nullptr);
-                }
-            }
+                tree.setProperty (attribute.name, attribute.value, nullptr);
+
+            path.add (describe (tree));
 
             for (const auto* child : xml.getChildIterator())
             {
-                if (! child->hasTagName (versions::PIECE.toString()))
+                if (child->hasTagName (versions::BYTES.toString()))
                 {
-                    tree.appendChild (convert (*child), nullptr);
-                    continue;
+                    const auto piece = child->getStringAttribute (versions::bytesHash);
+
+                    if (const auto bytes = read (piece))
+                    {
+                        tree.setProperty (child->getStringAttribute (versions::bytesName), writeBytes (*bytes), nullptr);
+                    }
+                    else
+                    {
+                        lose (path, versions::BYTES.toString() + ":" + child->getStringAttribute (versions::bytesName), piece);
+                        tree.setProperty (versions::missing, true, nullptr);
+                    }
                 }
+                else if (child->hasTagName (versions::PARAMETERS.toString()))
+                {
+                    readParameters (tree, child->getStringAttribute (versions::parametersHash));
+                }
+                else if (child->hasTagName (versions::PIECE.toString()))
+                {
+                    const auto piece = child->getStringAttribute (versions::pieceHash);
+                    const auto type = child->getStringAttribute (versions::pieceType);
+                    const auto held = parse (piece);
 
-                const auto piece = parse (child->getStringAttribute (versions::piece));
+                    if (held == nullptr || ! held->hasTagName (type))
+                    {
+                        // A run lost: the element it is in stands in for itself. Another piece: a stand-in in its place.
+                        if (type == versions::RUN.toString())
+                        {
+                            lose (path, type, piece);
+                            tree.setProperty (versions::missing, true, nullptr);
+                        }
+                        else
+                        {
+                            const auto standIn = makeStandIn (*child);
+                            lose (path, describe (standIn), piece);
 
-                if (piece == nullptr)
-                    continue;
+                            if (missing != nullptr)
+                                tree.appendChild (standIn, nullptr);
+                        }
 
-                // A run's notes or points go in its place, one after another.
-                if (piece->hasTagName (versions::RUN.toString()))
-                    for (const auto* inRun : piece->getChildIterator())
-                        tree.appendChild (convert (*inRun), nullptr);
-                else
-                    tree.appendChild (convert (*piece), nullptr);
+                        continue;
+                    }
+
+                    if (type == versions::RUN.toString())
+                        for (const auto* inRun : held->getChildIterator())
+                            tree.appendChild (convert (*inRun, path), nullptr);
+                    else
+                        tree.appendChild (convert (*held, path), nullptr);
+                }
+                else if (! child->getTagName().startsWithChar ('_')) // the store's own, which this build doesn't know: left out
+                {
+                    tree.appendChild (convert (*child, path), nullptr);
+                }
             }
 
             return tree;
@@ -350,16 +371,60 @@ SongPieces splitSong (const juce::ValueTree& song, const PluginParameterValues& 
     return result;
 }
 
-juce::ValueTree joinSong (const juce::String& name, const ReadPiece& read, PluginParameterValues* parameters)
+juce::ValueTree joinSong (const juce::String& name, const ReadPiece& read, PluginParameterValues* parameters,
+                          std::vector<MissingPiece>* missing)
 {
-    Joiner joiner { read, parameters };
+    Joiner joiner { read, parameters, missing };
     const auto xml = joiner.parse (name);
 
     if (xml == nullptr)
-        return {};
+    {
+        if (missing != nullptr)
+            missing->push_back ({ {}, name });
 
-    auto tree = joiner.convert (*xml);
+        return {};
+    }
+
+    auto tree = joiner.convert (*xml, {});
     return joiner.failed ? juce::ValueTree() : tree;
+}
+
+std::vector<PieceReference> findReferences (const juce::MemoryBlock& piece)
+{
+    std::vector<PieceReference> found;
+    const auto xml = juce::parseXML (piece.toString());
+
+    if (xml == nullptr)
+        return found;
+
+    const std::function<void (const juce::XmlElement&)> visit = [&] (const juce::XmlElement& element)
+    {
+        for (const auto* child : element.getChildIterator())
+        {
+            if (child->hasTagName (versions::PIECE.toString()))
+            {
+                const auto type = child->getStringAttribute (versions::pieceType);
+                found.push_back ({ child->getStringAttribute (versions::pieceHash),
+                                   type == versions::RUN.toString() ? type : describe (Joiner::makeStandIn (*child)) });
+            }
+            else if (child->hasTagName (versions::BYTES.toString()))
+            {
+                found.push_back ({ child->getStringAttribute (versions::bytesHash),
+                                   versions::BYTES.toString() + ":" + child->getStringAttribute (versions::bytesName) });
+            }
+            else if (child->hasTagName (versions::PARAMETERS.toString()))
+            {
+                found.push_back ({ child->getStringAttribute (versions::parametersHash), versions::PARAMETERS.toString() });
+            }
+            else
+            {
+                visit (*child);
+            }
+        }
+    };
+
+    visit (*xml);
+    return found;
 }
 
 juce::MemoryBlock writeElement (const juce::ValueTree& element)

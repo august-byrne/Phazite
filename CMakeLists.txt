@@ -277,9 +277,11 @@ target_sources(phazite_core PRIVATE
     src/model/base/Schema.cpp
     src/model/base/Song.cpp
     src/model/base/Song.h
+    src/model/base/SongText.cpp
     src/model/base/Toggles.h
     src/model/base/internal/Schema.h
     src/model/base/internal/Selection.h
+    src/model/base/internal/SongText.h
     src/model/chords/ChordModel.cpp
     src/model/chords/ChordModel.h
     src/model/chords/ChordValues.cpp
@@ -470,6 +472,8 @@ target_sources(phazite_core PRIVATE
     src/sandbox/core/PluginInfo.h
     src/sandbox/core/SharedMemory.cpp
     src/sandbox/core/SharedMemory.h
+    src/sandbox/core/Vst3State.cpp
+    src/sandbox/core/Vst3State.h
     # services: what the whole app shares (they use the model; the model never uses them)
     src/services/BrowserModel.cpp
     src/services/BrowserModel.h
@@ -1137,6 +1141,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/FreezeTests.cpp
         tests/GoldenFiles.cpp
         tests/GoldenFiles.h
+        tests/GoldenFormatTests.cpp
         tests/GoldenMetronomeTests.cpp
         tests/GoldenMixerTests.cpp
         tests/GoldenModulationTests.cpp
@@ -1207,6 +1212,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SettingsTests.cpp
         tests/ShortcutTests.cpp
         tests/SidechainTests.cpp
+        tests/SongTextTests.cpp
         tests/SoundKeyTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
@@ -1250,6 +1256,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsMergeTests.cpp
         tests/VersionsTests.cpp
         tests/VocoderTests.cpp
+        tests/Vst3StateTests.cpp
         tests/WarpTests.cpp
         tests/WavetableEditorTests.cpp
         tests/WavetableModelTests.cpp

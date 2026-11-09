@@ -179,6 +179,13 @@ bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::St
 // characters, ~ ^ : ? * [ \, "..", "@{", a leading dash or dot, a trailing dot, slash or ".lock"). Empty if nothing is left.
 juce::String toBranchName (const juce::String& typed);
 
+// This computer, as projects' histories know it (docs/versions-format.md: each computer writes only files of its own): an
+// ID the app makes once and keeps in its settings (services/Settings.h), and sets as it starts, before any project opens.
+// Until then (tests, and songs outside the app), one made for the process. Never a name: nothing of the user or the
+// computer goes into a project. Message thread.
+void setThisComputer (const juce::String& id);
+juce::String getThisComputer();
+
 // The branch the branch picker picked (ui/versions/BranchPicker.h), which version.switchBranch switches to.
 void selectBranch (ProjectContext&, const juce::String& branchID);
 
@@ -248,6 +255,33 @@ std::unique_ptr<TrackRender> startBounce (ProjectContext&, const juce::String& v
 bool startBackgroundBounce (ProjectContext&, const juce::String& versionID);
 std::optional<float> getBounceProgress (const ProjectContext&, const juce::String& versionID); // from 0 to 1
 juce::String getBounceProblem (const ProjectContext&);
+
+//==============================================================================
+// Keeping the history whole (docs/format-audit.md, R3 and R4).
+
+// Verify History (version.verify, git's fsck): every piece read and checked, every commit's song walked, and the commits no
+// branch holds found, in the background; whether it is under way; and what it found, as the Versions view says it ("12
+// commits and 340 pieces, all whole"), until the next check; none before the first.
+bool verifyHistory (ProjectContext&);
+bool canVerifyHistory (const ProjectContext&);
+bool isVerifyingHistory (const ProjectContext&);
+juce::String describeHistoryCheck (const ProjectContext&);
+
+// Recover Lost Commits (version.recover): each line of the commits the last check found that no branch holds made a branch
+// of its own, named after the branch it was made on ("main-recovered"); how many the check found, and how many branches it
+// made.
+int countLostVersions (const ProjectContext&);
+int recoverLostVersions (ProjectContext&);
+
+// What the last Restore from This Commit couldn't take from a damaged commit, which stayed as it is, as the Versions view
+// says it ("Bass: a clip"): none while it took everything, and why when it could take nothing.
+juce::String getRestoreProblem (const ProjectContext&);
+
+// The current branch's lines that went their own way on another computer (docs/format-audit.md, R8): their last
+// versions, which Merge into the current branch joins again; and as the Versions view says it. None while the computers
+// agree.
+juce::StringArray getDivergentVersions (const ProjectContext&);
+juce::String describeDivergence (const ProjectContext&);
 
 // The one or the other: in a host, which runs the song's and is told how it ended, or why a bounce couldn't start.
 void bounceVersion (ProjectContext&, const juce::String& versionID, TrackRenderHost&);

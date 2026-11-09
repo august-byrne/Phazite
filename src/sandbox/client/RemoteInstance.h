@@ -52,14 +52,10 @@ public:
     BlockChannel& getChannel() noexcept { return *channel; }
     bool prepare (double sampleRate, const BlockChannel::Limits&, int timeoutMilliseconds);
 
-    // Its state, as the plug-in keeps its settings, within the time; none if it didn't come.
+    // Its state, as the plug-in keeps its settings (a VST3's as its format's preset file, which other hosts read:
+    // sandbox/core/Vst3State.h), within the time; none if it didn't come.
     std::optional<juce::MemoryBlock> getState (int timeoutMilliseconds);
     bool setState (const juce::MemoryBlock&, int timeoutMilliseconds);
-
-    // Its state as its format's own preset file, which other hosts read (a VST3's .vstpreset; empty for another format), within
-    // the time; none if it didn't come. And one taken in: whether the plug-in took it.
-    std::optional<juce::MemoryBlock> getPreset (int timeoutMilliseconds);
-    bool setPreset (const juce::MemoryBlock&, int timeoutMilliseconds);
 
     // Its program (one of getInfo().programs): as it opened, then as it was set or the helper last told (any thread).
     int getProgram() const noexcept { return program.load (std::memory_order_relaxed); }

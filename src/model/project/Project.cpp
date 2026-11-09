@@ -3,6 +3,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AppInfo.h"
 #include "model/mixer/internal/Freeze.h"
@@ -29,14 +30,6 @@ namespace
         return {};
     }
 
-    // The same value as the file holds it. Values read from a file are text, and the model may write one back as a number
-    // or a bool, which notifies a change though nothing changed. JUCE compares values of different types one way round
-    // only (4.0 == "4" holds, "4" == 4.0 doesn't: saving would write "4.0"), so both ways must hold.
-    bool isSameValue (const juce::var& a, const juce::var& b)
-    {
-        return a == b && b == a;
-    }
-
     // What a save writes that the song doesn't hold yet: its devices' states as they are now, outside the undo history
     // (Song::storeDeviceStates()), and its next ID past every ID it holds.
     void storeForSaving (Song& song)
@@ -45,44 +38,19 @@ namespace
         countIDs (song);
     }
 
-    // Each element's properties in the order of their names, whatever order they were set in.
-    void sortProperties (juce::XmlElement& element)
-    {
-        std::vector<std::pair<juce::String, juce::String>> properties;
-
-        for (const auto& property : element.getAttributeIterator())
-            properties.emplace_back (property.name.toString(), property.value);
-
-        const auto byName = [] (const auto& a, const auto& b) { return a.first.compare (b.first) < 0; };
-
-        if (! std::is_sorted (properties.begin(), properties.end(), byName))
-        {
-            std::sort (properties.begin(), properties.end(), byName);
-            element.removeAllAttributes();
-
-            for (const auto& [name, value] : properties)
-                element.setAttribute (name, value);
-        }
-
-        for (auto* child : element.getChildIterator())
-            sortProperties (*child);
-    }
-
-    // Writes a song into a project file, through a temporary file that takes its place once it is whole: each property on a
-    // line of its own, in the order of their names, as the golden tests write songs, so that a tool that compares text (git,
-    // say) shows a change as the lines it changed.
+    // Writes a song into a project file (model/base/internal/SongText.h: writeProjectText()), through a temporary file that
+    // takes its place once it is whole: each property on a line of its own, in the order of their names, each value in the
+    // one text the song's versions write it in too, so that a tool that compares text (git, say) shows a change as the lines
+    // it changed.
     bool writeProjectFile (const juce::ValueTree& song, const juce::File& file)
     {
-        const auto xml = song.createXml();
-
-        if (xml == nullptr)
+        if (! song.isValid())
             return false;
 
-        sortProperties (*xml);
-        juce::XmlElement::TextFormat format;
-        format.lineWrapLength = 0; // a property on each line
+        juce::MemoryOutputStream text;
+        writeProjectText (text, song);
         juce::TemporaryFile temporary (file);
-        return xml->writeTo (temporary.getFile(), format) && temporary.overwriteTargetFileWithTemporary();
+        return temporary.getFile().replaceWithData (text.getData(), text.getDataSize()) && temporary.overwriteTargetFileWithTemporary();
     }
 
     // Makes the folder <parentFolder>/<name>, named as files can be, for a project of that name, or sets error and
@@ -220,6 +188,41 @@ std::unique_ptr<Project> Project::open (const juce::File& projectFile, bool rest
         project->changedSinceSave = project->changedSinceAutosave = true; // the restored changes aren't in the project file yet
 
     return project;
+}
+
+std::unique_ptr<Project> Project::openWithSong (const juce::File& projectFile, const juce::ValueTree& state, juce::String& error)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    auto song = makeSong (state.createCopy(), projectFile, getCacheFolder (projectFile));
+
+    if (song == nullptr)
+    {
+        error = "Phazite couldn't read that copy of the project " + projectFile.getFileNameWithoutExtension() + ".";
+        return {};
+    }
+
+    std::unique_ptr<Project> project (new Project (std::move (song), projectFile));
+    project->changedSinceSave = project->changedSinceAutosave = true; // not in the project file until it is saved
+    return project;
+}
+
+std::pair<juce::File, juce::ValueTree> Project::readNewestBackup (const juce::File& projectFile)
+{
+    auto backups = projectFile.getSiblingFile ("Backups").findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExtension);
+
+    std::sort (backups.begin(), backups.end(),
+               [] (const juce::File& a, const juce::File& b)
+               {
+                   const auto ta = a.getLastModificationTime(), tb = b.getLastModificationTime();
+                   return ta != tb ? ta > tb : a.getFileName() > b.getFileName();
+               });
+
+    for (const auto& backup : backups)
+        if (auto song = readSong (backup); song.isValid())
+            return { backup, song };
+
+    return {};
 }
 
 bool Project::hasNewerAutosave (const juce::File& projectFile)

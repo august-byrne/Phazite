@@ -20,6 +20,7 @@
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/engine/internal/EngineContext.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -502,7 +503,7 @@ TEST_CASE ("A preset loaded into one of Phazite's devices sets every parameter: 
     CHECK (song.valueOf ({ eq, "band4Gain" }) == doctest::Approx (-9.0f));
     CHECK (song.valueOf ({ eq, "output" }) == doctest::Approx (-3.0f));
 
-    // Saved again, a preset names every parameter, choices and switches as whole numbers and the rest as written.
+    // Saved again, a preset names every parameter: choices by their names, switches as 0 or 1, and the rest as written.
     const auto saved = temp.folder.getChildFile ("Saved" + juce::String (phazite::presetExtension));
     REQUIRE (phazite::saveDevicePreset (song.context, eq, saved));
     const auto values = phazite::readPreset (saved)[phazite::schema::preset::device][phazite::schema::preset::parameters];
@@ -510,4 +511,36 @@ TEST_CASE ("A preset loaded into one of Phazite's devices sets every parameter: 
     CHECK (values.getDynamicObject()->getProperties().size() == (int) info->parameters.size());
     CHECK (saved.loadFileAsString().contains ("\"output\": -3.0"));
     CHECK_FALSE (saved.loadFileAsString().contains ("00000"));
+}
+
+TEST_CASE ("A preset's choices are read by their names, in a device added from it and in one it loads into")
+{
+    phazite::test::TemporaryFolder temp;
+    Song song (temp.folder, "Choices");
+    const auto file = temp.folder.getChildFile ("Slow" + juce::String (phazite::presetExtension));
+    REQUIRE (file.replaceWithText (R"({ "kind": "device", "device": { "type": "phaziteChorus", "name": "Chorus", "instrument": false,
+                                        "parameters": { "division": "1 bar", "shape": "Sine" } } })"));
+
+    // "1 bar" is a choice far from the one its text's number would pick, and "Sine" isn't the shape's default.
+    const auto* info = phazite::findOwnDevice ("phaziteChorus");
+    REQUIRE (info != nullptr);
+    const auto& division = info->parameters[(size_t) phazite::devices::findParameter (*info, "division")];
+    const auto& shape = info->parameters[(size_t) phazite::devices::findParameter (*info, "shape")];
+    const auto bar = phazite::devices::findChoice (division, "1 bar");
+    const auto sine = phazite::devices::findChoice (shape, "Sine");
+    REQUIRE (bar.has_value());
+    REQUIRE (sine.has_value());
+    REQUIRE (*bar > 1);
+    REQUIRE (shape.minimum + (float) *sine != shape.defaultValue);
+
+    const auto added = phazite::addDeviceFromPreset (song.getSong(), phazite::getPluginHost (phazite::test::getEngineContext()),
+                                                     song.track (0), phazite::readPreset (file), nullptr);
+    REQUIRE (added.isValid());
+    CHECK (song.valueOf ({ added, "division" }) == doctest::Approx (division.minimum + (float) *bar));
+    CHECK (song.valueOf ({ added, "shape" }) == doctest::Approx (shape.minimum + (float) *sine));
+
+    const auto chorus = song.addEffect (song.track (1), "phaziteChorus");
+    REQUIRE (phazite::loadPresetInto (song.context, chorus, file));
+    CHECK (song.valueOf ({ chorus, "division" }) == doctest::Approx (division.minimum + (float) *bar));
+    CHECK (song.valueOf ({ chorus, "shape" }) == doctest::Approx (shape.minimum + (float) *sine));
 }

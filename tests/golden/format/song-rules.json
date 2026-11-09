@@ -1,0 +1,217 @@
+{
+  "items": {
+    "types": [
+      "TRACK",
+      "DEVICE",
+      "CONTAINER",
+      "CHAIN",
+      "SEND",
+      "MODULATOR",
+      "MACRO",
+      "CLIP",
+      "NOTE",
+      "SECTION"
+    ],
+    "idProperty": "id",
+    "alsoHoldingAnID": "MASTER"
+  },
+  "keys": [
+    {
+      "type": "CURVE",
+      "properties": [
+        "device",
+        "parameter"
+      ],
+      "join": "/"
+    },
+    {
+      "type": "LANE",
+      "properties": [
+        "device",
+        "parameter"
+      ],
+      "join": "/"
+    },
+    {
+      "type": "MODULATES",
+      "properties": [
+        "device",
+        "parameter"
+      ],
+      "join": "/"
+    },
+    {
+      "type": "VALUE",
+      "properties": [
+        "parameter"
+      ],
+      "join": "/"
+    },
+    {
+      "type": "TEMPO",
+      "properties": [
+        "beat"
+      ],
+      "join": "/",
+      "beat": "the number with 6 decimals"
+    },
+    {
+      "type": "TIMESIGNATURE",
+      "properties": [
+        "beat"
+      ],
+      "join": "/",
+      "beat": "the number with 6 decimals"
+    },
+    {
+      "type": "CHORD",
+      "properties": [
+        "start"
+      ],
+      "join": "/",
+      "beat": "the number with 6 decimals"
+    },
+    {
+      "type": "CHORDKEY",
+      "properties": [
+        "start"
+      ],
+      "join": "/",
+      "beat": "the number with 6 decimals"
+    }
+  ],
+  "unkeyed": [
+    "POINT",
+    "CONTROL",
+    "WARP"
+  ],
+  "otherElementsKeyedBy": "their type",
+  "orders": {
+    "TRACK": "tracks",
+    "DEVICE": "chain",
+    "CONTAINER": "chain",
+    "CHAIN": "chains",
+    "SEND": "SEND",
+    "MODULATOR": "MODULATOR",
+    "MACRO": "MACRO",
+    "MODULATES": "MODULATES",
+    "POINT": "POINT",
+    "CONTROL": "CONTROL",
+    "WARP": "WARP",
+    "LANE": "LANE"
+  },
+  "otherIDHolders": [
+    {
+      "type": "TRACK",
+      "property": "fader"
+    },
+    {
+      "type": "MASTER",
+      "property": "fader"
+    },
+    {
+      "type": "TRACK",
+      "property": "vca"
+    },
+    {
+      "type": "MASTER",
+      "property": "vca"
+    },
+    {
+      "type": "CLIP",
+      "property": "link"
+    }
+  ],
+  "idNamers": [
+    {
+      "type": "SEND",
+      "property": "to"
+    },
+    {
+      "type": "DEVICE",
+      "property": "sidechain"
+    },
+    {
+      "type": "LANE",
+      "property": "device"
+    },
+    {
+      "type": "CURVE",
+      "property": "device"
+    },
+    {
+      "type": "MODULATES",
+      "property": "device"
+    }
+  ],
+  "uncountedProperties": {
+    "TRACK": [
+      "height",
+      "collapsed",
+      "pinned",
+      "drumMode",
+      "drumOrder",
+      "drumHidden"
+    ],
+    "MASTER": [
+      "height",
+      "collapsed",
+      "pinned",
+      "drumMode",
+      "drumOrder",
+      "drumHidden"
+    ],
+    "DEVICE": [
+      "windowX",
+      "windowY"
+    ],
+    "PHAZITE": [
+      "gridSnap",
+      "gridAdaptive",
+      "gridOffset",
+      "gridStep",
+      "gridTriplets",
+      "nextID",
+      "loopFollowsSong",
+      "punch",
+      "lastInput",
+      "loop",
+      "loopStart",
+      "loopEnd",
+      "playStart",
+      "metronome"
+    ]
+  },
+  "uncountedElements": [
+    {
+      "parent": "PHAZITE",
+      "type": "PIANOROLL"
+    },
+    {
+      "parent": "TRACK",
+      "type": "LANE"
+    },
+    {
+      "parent": "MASTER",
+      "type": "LANE"
+    }
+  ],
+  "piecesOfTheirOwn": [
+    "TRACK",
+    "MASTER",
+    "CLIP",
+    "DEVICE",
+    "CONTAINER",
+    "CURVE"
+  ],
+  "inRuns": [
+    "NOTE",
+    "POINT"
+  ],
+  "bytes": [
+    {
+      "type": "DEVICE",
+      "property": "state"
+    }
+  ]
+}

@@ -32,8 +32,7 @@ namespace
         if (index < 0)
             return 0.0f;
 
-        const auto& info = devices::getModulatorParameters (kind)[(size_t) index];
-        return (float) modulator.getChildWithName (schema::VALUES).getProperty (juce::Identifier (toString (info.id)), info.defaultValue);
+        return readValueSetByHand (modulator, devices::getModulatorParameters (kind)[(size_t) index]);
     }
 
     // How many steps a step sequencer plays.

@@ -447,7 +447,7 @@ float getMix (const Song& song, DeviceID id)
     if (const auto* own = findOwnInfo (state))
     {
         const auto& mix = own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)];
-        return (float) state.getChildWithName (schema::VALUES).getProperty (juce::Identifier (getMixID()), mix.defaultValue);
+        return readValueSetByHand (state, mix);
     }
 
     return (float) state.getProperty (schema::deviceMix, 1.0f);
@@ -846,6 +846,14 @@ std::vector<DeviceType> getDeviceTypes (const PluginHost& host)
 std::optional<juce::PluginDescription> findKnownPlugin (const PluginHost& host, const juce::PluginDescription& wanted)
 {
     const auto types = host.getKnownPlugins().getTypes();
+
+    // By its format's own ID first (JUCE's number for it, which for a VST3 is made from its class ID), with its maker,
+    // wherever this computer keeps its file and whatever it is called now; then by its file and name; then by name.
+    if (wanted.uniqueId != 0)
+        for (const auto& type : types)
+            if (type.pluginFormatName == wanted.pluginFormatName && type.uniqueId == wanted.uniqueId
+                && type.manufacturerName == wanted.manufacturerName)
+                return type;
 
     for (const auto& type : types)
         if (wanted.fileOrIdentifier.isNotEmpty() && type.fileOrIdentifier == wanted.fileOrIdentifier && type.name == wanted.name)

@@ -323,8 +323,7 @@ TEST_CASE ("A DAWproject double-clicked imports as a new project, and the open o
     {
         phazite::test::TestSong elsewhere;
         elsewhere.addTrack ("Bass");
-        auto content = phazite::describeDawProject (*phazite::findSong (elsewhere.context),
-                                                    &phazite::getSession (elsewhere.context)->getPlugins(), "Elsewhere", {});
+        auto content = phazite::describeDawProject (*phazite::findSong (elsewhere.context), "Elsewhere", {});
         content.bounces.clear();
         REQUIRE (phazite::writeDawProject (content, {}, dawProject).wasOk());
     }
@@ -789,4 +788,46 @@ TEST_CASE ("After a crash, Phazite asks how to open the last project, and can op
         REQUIRE (session->getProject() != nullptr);
         CHECK (session->getProject()->getFile() != file);
     }
+}
+
+TEST_CASE ("A project file that won't open offers its newest backup that reads in its place, which a save writes back")
+{
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+
+    // Saved twice, so that the first save is a backup; then the project file damaged.
+    const auto file = createClosedProject (temp.folder, "Song");
+
+    {
+        juce::String error;
+        auto project = phazite::Project::open (file, false, error);
+        REQUIRE (project != nullptr);
+        auto& song = project->getSong();
+        song.getState().setProperty (phazite::schema::notes, "Saved twice", &song.getUndoManager());
+        REQUIRE (project->save().wasOk());
+    }
+
+    REQUIRE (file.replaceWithText ("<PHAZITE damaged"));
+
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    juce::String offered;
+    session.askWhichCopy =
+        [&offered] (const juce::String&, const juce::String& backup, const juce::String&, std::function<void (int)> answer)
+    {
+        offered = backup;
+        answer (1);
+    };
+
+    session.openProject (file);
+    CHECK (offered.startsWith ("the backup of"));
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.getProject()->getFile() == file);
+    CHECK (session.getProject()->hasUnsavedChanges());
+
+    // Saved, the project file reads again.
+    REQUIRE (session.getProject()->save().wasOk());
+    juce::String error;
+    CHECK (phazite::Project::open (file, false, error) != nullptr);
 }

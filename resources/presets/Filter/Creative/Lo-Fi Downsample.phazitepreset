@@ -5,10 +5,10 @@
     "instrument": false,
     "type": "phaziteFilter",
     "parameters": {
-      "filterType": 8,
+      "filterType": "Sample & Hold",
       "cutoff": 3500.0,
       "resonance": 0.1,
-      "filterSlope": 1,
+      "filterSlope": "24 dB",
       "drive": 4.0,
       "mix": 1.0
     }

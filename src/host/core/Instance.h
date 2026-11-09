@@ -33,15 +33,12 @@ public:
     juce::AudioPluginInstance& getPlugin() noexcept { return *plugin; }
     sandbox::PluginInfo describe() const;
 
-    // On the message thread.
+    // On the message thread. Its state: a VST3's as its format's own preset file (.vstpreset: sandbox/core/Vst3State.h),
+    // which projects keep and other hosts and DAWproject read, rather than JUCE's wrapper of the same streams; another
+    // format's as JUCE gives it.
     void prepare (std::unique_ptr<sandbox::BlockChannel>, double sampleRate); // a new channel, for another rate or size
     juce::MemoryBlock getState();
     void setState (const juce::MemoryBlock&);
-
-    // Its state as its format's own preset file, which other hosts read (a VST3's .vstpreset, which JUCE writes with the
-    // plug-in's class ID), or empty for another format; and one taken in, true if the plug-in took it.
-    juce::MemoryBlock getPreset();
-    bool setPreset (const juce::MemoryBlock&);
     void setProgram (int index);
     void setParameter (int index, float value);
     juce::String getParameterText (int index, float value) const;
@@ -70,6 +67,10 @@ private:
     std::vector<std::pair<int, bool>> gestures;
     std::atomic<bool> latencyChanged { false }, stateChanged { false }, parametersChanged { false };
 
+    // A VST3's class ID, as its own preset file writes it, which its state's preset file is written with; none for
+    // another format.
+    juce::String vst3ClassID;
+
     void start (std::unique_ptr<sandbox::BlockChannel>, double sampleRate);
     void stop();
     void run() override;
@@ -81,4 +82,9 @@ private:
     void parameterValueChanged (int index, float value) override;
     void parameterGestureChanged (int index, bool starting) override;
 };
+
+// Gives a plug-in a state as Phazite keeps it: a VST3's preset file as the same streams in JUCE's wrapper (which sets its
+// parameters' values again too, as a preset file set through JUCE's VST3 client doesn't), anything else as it is. On the
+// message thread, not while a block plays.
+void setPluginState (juce::AudioPluginInstance&, const juce::MemoryBlock&);
 } // namespace phazite::host

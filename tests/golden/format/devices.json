@@ -1,0 +1,7546 @@
+[
+  {
+    "type": "phaziteSynth",
+    "name": "Synth",
+    "kind": "instrument",
+    "parameters": [
+      {
+        "id": "osc1Wave",
+        "name": "Osc 1 Wave",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Saw",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw",
+          "Square"
+        ]
+      },
+      {
+        "id": "osc2Wave",
+        "name": "Osc 2 Wave",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Saw",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw",
+          "Square"
+        ]
+      },
+      {
+        "id": "osc2Pitch",
+        "name": "Osc 2 Pitch",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "osc2Detune",
+        "name": "Osc 2 Detune",
+        "unit": "cents",
+        "minimum": -100.0,
+        "maximum": 100.0,
+        "default": 8.0
+      },
+      {
+        "id": "osc2Sync",
+        "name": "Osc 2 Sync",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "osc2Envelope",
+        "name": "Osc 2 Envelope",
+        "unit": "semitones",
+        "minimum": -48.0,
+        "maximum": 48.0,
+        "default": 0.0
+      },
+      {
+        "id": "oscMix",
+        "name": "Osc Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "pulseWidth",
+        "name": "Pulse Width",
+        "unit": "percent",
+        "minimum": 0.05,
+        "maximum": 0.95,
+        "default": 0.5
+      },
+      {
+        "id": "subLevel",
+        "name": "Sub",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "subOctave",
+        "name": "Sub Octave",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "-1 Octave",
+        "choices": [
+          "-1 Octave",
+          "-2 Octaves"
+        ]
+      },
+      {
+        "id": "subShape",
+        "name": "Sub Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw",
+          "Square"
+        ]
+      },
+      {
+        "id": "noiseLevel",
+        "name": "Noise",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "drift",
+        "name": "Drift",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "unisonVoices",
+        "name": "Unison",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 6.0,
+        "default": "3",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7"
+        ]
+      },
+      {
+        "id": "unisonDetune",
+        "name": "Unison Detune",
+        "unit": "cents",
+        "minimum": 0.0,
+        "maximum": 100.0,
+        "default": 25.0
+      },
+      {
+        "id": "unisonSpread",
+        "name": "Unison Spread",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.800000011920929
+      },
+      {
+        "id": "filterType",
+        "name": "Filter Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "Low Pass",
+        "choices": [
+          "Low Pass",
+          "High Pass",
+          "Band Pass",
+          "Notch",
+          "Comb +",
+          "Comb -",
+          "Vowel",
+          "Phaser",
+          "Sample & Hold"
+        ]
+      },
+      {
+        "id": "cutoff",
+        "name": "Cutoff",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 3000.0
+      },
+      {
+        "id": "resonance",
+        "name": "Resonance",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.150000005960464
+      },
+      {
+        "id": "filterSlope",
+        "name": "Filter Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "12 dB",
+        "choices": [
+          "12 dB",
+          "24 dB"
+        ]
+      },
+      {
+        "id": "drive",
+        "name": "Filter Drive",
+        "unit": "decibels",
+        "minimum": 0.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "filterEnvelope",
+        "name": "Filter Envelope",
+        "unit": "semitones",
+        "minimum": -48.0,
+        "maximum": 48.0,
+        "default": 24.0
+      },
+      {
+        "id": "keyTracking",
+        "name": "Key Tracking",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "filterVelocity",
+        "name": "Filter Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "filterAttack",
+        "name": "Filter Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "filterDecay",
+        "name": "Filter Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 400.0
+      },
+      {
+        "id": "filterSustain",
+        "name": "Filter Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.200000002980232
+      },
+      {
+        "id": "filterRelease",
+        "name": "Filter Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "filterAttackCurve",
+        "name": "Filter Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "filterDecayCurve",
+        "name": "Filter Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "filterReleaseCurve",
+        "name": "Filter Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "attack",
+        "name": "Attack",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 2.0
+      },
+      {
+        "id": "decay",
+        "name": "Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "sustain",
+        "name": "Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.800000011920929
+      },
+      {
+        "id": "release",
+        "name": "Release",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 200.0
+      },
+      {
+        "id": "attackCurve",
+        "name": "Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "decayCurve",
+        "name": "Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "releaseCurve",
+        "name": "Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "lfoShape",
+        "name": "LFO Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw Up",
+          "Saw Down",
+          "Square",
+          "Random"
+        ]
+      },
+      {
+        "id": "lfoTarget",
+        "name": "LFO Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Pitch",
+        "choices": [
+          "Pitch",
+          "Cutoff",
+          "Level",
+          "Pulse Width"
+        ]
+      },
+      {
+        "id": "lfoRate",
+        "name": "LFO Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 20.0,
+        "default": 5.0
+      },
+      {
+        "id": "lfoDepth",
+        "name": "LFO Depth",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.25
+      },
+      {
+        "id": "lfoFade",
+        "name": "LFO Fade In",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 0.0
+      },
+      {
+        "id": "pitchAmount",
+        "name": "Pitch Amount",
+        "unit": "semitones",
+        "minimum": -48.0,
+        "maximum": 48.0,
+        "default": 0.0
+      },
+      {
+        "id": "pitchDecay",
+        "name": "Pitch Decay",
+        "unit": "milliseconds",
+        "minimum": 1.0,
+        "maximum": 2000.0,
+        "default": 60.0
+      },
+      {
+        "id": "voiceMode",
+        "name": "Voices",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Poly",
+        "choices": [
+          "Poly",
+          "Mono"
+        ]
+      },
+      {
+        "id": "glide",
+        "name": "Glide",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 0.0
+      },
+      {
+        "id": "glideMode",
+        "name": "Glide Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Always",
+        "choices": [
+          "Always",
+          "Legato"
+        ]
+      },
+      {
+        "id": "bendRange",
+        "name": "Bend Range",
+        "unit": "semitones",
+        "minimum": 0.0,
+        "maximum": 24.0,
+        "default": 2.0
+      },
+      {
+        "id": "velocity",
+        "name": "Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.600000023841858
+      },
+      {
+        "id": "level",
+        "name": "Level",
+        "unit": "decibels",
+        "minimum": -36.0,
+        "maximum": 6.0,
+        "default": -6.0
+      },
+      {
+        "id": "filterOn",
+        "name": "Filter On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "filterEnvelopeOn",
+        "name": "Filter Envelope On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lfoOn",
+        "name": "LFO On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "unisonOn",
+        "name": "Unison On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteWavetable",
+    "name": "Wavetable",
+    "kind": "instrument",
+    "parameters": [
+      {
+        "id": "osc1On",
+        "name": "Osc 1 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "osc1Position",
+        "name": "Osc 1 Position",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.666666686534882
+      },
+      {
+        "id": "osc1Pitch",
+        "name": "Osc 1 Pitch",
+        "unit": "semitones",
+        "minimum": -36.0,
+        "maximum": 36.0,
+        "default": 0.0
+      },
+      {
+        "id": "osc1Fine",
+        "name": "Osc 1 Fine",
+        "unit": "cents",
+        "minimum": -100.0,
+        "maximum": 100.0,
+        "default": 0.0
+      },
+      {
+        "id": "osc1Level",
+        "name": "Osc 1 Level",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.75
+      },
+      {
+        "id": "osc1Warp",
+        "name": "Osc 1 Warp",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Sync",
+          "Bend +",
+          "Bend -",
+          "Pulse Width",
+          "Mirror",
+          "FM",
+          "Ring Mod"
+        ]
+      },
+      {
+        "id": "osc1WarpAmount",
+        "name": "Osc 1 Warp Amount",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "osc2On",
+        "name": "Osc 2 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "osc2Position",
+        "name": "Osc 2 Position",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.666666686534882
+      },
+      {
+        "id": "osc2Pitch",
+        "name": "Osc 2 Pitch",
+        "unit": "semitones",
+        "minimum": -36.0,
+        "maximum": 36.0,
+        "default": 0.0
+      },
+      {
+        "id": "osc2Fine",
+        "name": "Osc 2 Fine",
+        "unit": "cents",
+        "minimum": -100.0,
+        "maximum": 100.0,
+        "default": 0.0
+      },
+      {
+        "id": "osc2Level",
+        "name": "Osc 2 Level",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.75
+      },
+      {
+        "id": "osc2Warp",
+        "name": "Osc 2 Warp",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Sync",
+          "Bend +",
+          "Bend -",
+          "Pulse Width",
+          "Mirror",
+          "FM",
+          "Ring Mod"
+        ]
+      },
+      {
+        "id": "osc2WarpAmount",
+        "name": "Osc 2 Warp Amount",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "subLevel",
+        "name": "Sub Level",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "subOctave",
+        "name": "Sub Octave",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "-1 Octave",
+        "choices": [
+          "-1 Octave",
+          "-2 Octaves"
+        ]
+      },
+      {
+        "id": "subShape",
+        "name": "Sub Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw",
+          "Square"
+        ]
+      },
+      {
+        "id": "noiseLevel",
+        "name": "Noise Level",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "unisonVoices",
+        "name": "Unison Voices",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "1",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "unisonDetune",
+        "name": "Unison Detune",
+        "unit": "cents",
+        "minimum": 0.0,
+        "maximum": 100.0,
+        "default": 20.0
+      },
+      {
+        "id": "unisonSpread",
+        "name": "Unison Spread",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.800000011920929
+      },
+      {
+        "id": "unisonPosition",
+        "name": "Unison Position Spread",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "filterOn",
+        "name": "Filter On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "filterType",
+        "name": "Filter Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "Low Pass",
+        "choices": [
+          "Low Pass",
+          "High Pass",
+          "Band Pass",
+          "Notch",
+          "Comb +",
+          "Comb -",
+          "Vowel",
+          "Phaser",
+          "Sample & Hold"
+        ]
+      },
+      {
+        "id": "cutoff",
+        "name": "Filter Cutoff",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 2500.0
+      },
+      {
+        "id": "resonance",
+        "name": "Filter Resonance",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.100000001490116
+      },
+      {
+        "id": "filterSlope",
+        "name": "Filter Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "24 dB",
+        "choices": [
+          "12 dB",
+          "24 dB"
+        ]
+      },
+      {
+        "id": "drive",
+        "name": "Filter Drive",
+        "unit": "decibels",
+        "minimum": 0.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "keyTracking",
+        "name": "Filter Key Tracking",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "env1Attack",
+        "name": "Envelope 1 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 2.0
+      },
+      {
+        "id": "env1Decay",
+        "name": "Envelope 1 Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "env1Sustain",
+        "name": "Envelope 1 Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.800000011920929
+      },
+      {
+        "id": "env1Release",
+        "name": "Envelope 1 Release",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 200.0
+      },
+      {
+        "id": "env1AttackCurve",
+        "name": "Envelope 1 Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "env1DecayCurve",
+        "name": "Envelope 1 Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "env1ReleaseCurve",
+        "name": "Envelope 1 Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "env2Attack",
+        "name": "Envelope 2 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "env2Decay",
+        "name": "Envelope 2 Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 400.0
+      },
+      {
+        "id": "env2Sustain",
+        "name": "Envelope 2 Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.200000002980232
+      },
+      {
+        "id": "env2Release",
+        "name": "Envelope 2 Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "env2AttackCurve",
+        "name": "Envelope 2 Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "env2DecayCurve",
+        "name": "Envelope 2 Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "env2ReleaseCurve",
+        "name": "Envelope 2 Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "env3Attack",
+        "name": "Envelope 3 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "env3Decay",
+        "name": "Envelope 3 Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 800.0
+      },
+      {
+        "id": "env3Sustain",
+        "name": "Envelope 3 Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "env3Release",
+        "name": "Envelope 3 Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "env3AttackCurve",
+        "name": "Envelope 3 Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "env3DecayCurve",
+        "name": "Envelope 3 Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "env3ReleaseCurve",
+        "name": "Envelope 3 Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "lfo1Shape",
+        "name": "LFO 1 Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw Up",
+          "Saw Down",
+          "Square",
+          "Random"
+        ]
+      },
+      {
+        "id": "lfo1Rate",
+        "name": "LFO 1 Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 20.0,
+        "default": 2.0
+      },
+      {
+        "id": "lfo1Sync",
+        "name": "LFO 1 Sync",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lfo1Division",
+        "name": "LFO 1 Division",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "1/4",
+        "choices": [
+          "1/32",
+          "1/16T",
+          "1/16",
+          "1/16D",
+          "1/8T",
+          "1/8",
+          "1/8D",
+          "1/4T",
+          "1/4",
+          "1/4D",
+          "1/2T",
+          "1/2",
+          "1/2D",
+          "1 bar",
+          "2 bars",
+          "4 bars",
+          "8 bars"
+        ]
+      },
+      {
+        "id": "lfo1Retrigger",
+        "name": "LFO 1 Retrigger",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lfo2Shape",
+        "name": "LFO 2 Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Triangle",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw Up",
+          "Saw Down",
+          "Square",
+          "Random"
+        ]
+      },
+      {
+        "id": "lfo2Rate",
+        "name": "LFO 2 Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 20.0,
+        "default": 0.5
+      },
+      {
+        "id": "lfo2Sync",
+        "name": "LFO 2 Sync",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lfo2Division",
+        "name": "LFO 2 Division",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "1/4",
+        "choices": [
+          "1/32",
+          "1/16T",
+          "1/16",
+          "1/16D",
+          "1/8T",
+          "1/8",
+          "1/8D",
+          "1/4T",
+          "1/4",
+          "1/4D",
+          "1/2T",
+          "1/2",
+          "1/2D",
+          "1 bar",
+          "2 bars",
+          "4 bars",
+          "8 bars"
+        ]
+      },
+      {
+        "id": "lfo2Retrigger",
+        "name": "LFO 2 Retrigger",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "mod1Source",
+        "name": "Mod 1 Source",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "Envelope 2",
+        "choices": [
+          "None",
+          "Envelope 2",
+          "Envelope 3",
+          "LFO 1",
+          "LFO 2",
+          "Velocity",
+          "Note",
+          "Mod Wheel",
+          "Random"
+        ]
+      },
+      {
+        "id": "mod1Target",
+        "name": "Mod 1 Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "Cutoff",
+        "choices": [
+          "None",
+          "Osc 1 Position",
+          "Osc 1 Warp",
+          "Osc 1 Pitch",
+          "Osc 1 Level",
+          "Osc 2 Position",
+          "Osc 2 Warp",
+          "Osc 2 Pitch",
+          "Osc 2 Level",
+          "Pitch",
+          "Sub Level",
+          "Noise Level",
+          "Cutoff",
+          "Resonance",
+          "Volume",
+          "Pan",
+          "Unison Detune"
+        ]
+      },
+      {
+        "id": "mod1Amount",
+        "name": "Mod 1 Amount",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.25
+      },
+      {
+        "id": "mod2Source",
+        "name": "Mod 2 Source",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Envelope 2",
+          "Envelope 3",
+          "LFO 1",
+          "LFO 2",
+          "Velocity",
+          "Note",
+          "Mod Wheel",
+          "Random"
+        ]
+      },
+      {
+        "id": "mod2Target",
+        "name": "Mod 2 Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Osc 1 Position",
+          "Osc 1 Warp",
+          "Osc 1 Pitch",
+          "Osc 1 Level",
+          "Osc 2 Position",
+          "Osc 2 Warp",
+          "Osc 2 Pitch",
+          "Osc 2 Level",
+          "Pitch",
+          "Sub Level",
+          "Noise Level",
+          "Cutoff",
+          "Resonance",
+          "Volume",
+          "Pan",
+          "Unison Detune"
+        ]
+      },
+      {
+        "id": "mod2Amount",
+        "name": "Mod 2 Amount",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "mod3Source",
+        "name": "Mod 3 Source",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Envelope 2",
+          "Envelope 3",
+          "LFO 1",
+          "LFO 2",
+          "Velocity",
+          "Note",
+          "Mod Wheel",
+          "Random"
+        ]
+      },
+      {
+        "id": "mod3Target",
+        "name": "Mod 3 Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Osc 1 Position",
+          "Osc 1 Warp",
+          "Osc 1 Pitch",
+          "Osc 1 Level",
+          "Osc 2 Position",
+          "Osc 2 Warp",
+          "Osc 2 Pitch",
+          "Osc 2 Level",
+          "Pitch",
+          "Sub Level",
+          "Noise Level",
+          "Cutoff",
+          "Resonance",
+          "Volume",
+          "Pan",
+          "Unison Detune"
+        ]
+      },
+      {
+        "id": "mod3Amount",
+        "name": "Mod 3 Amount",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "mod4Source",
+        "name": "Mod 4 Source",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Envelope 2",
+          "Envelope 3",
+          "LFO 1",
+          "LFO 2",
+          "Velocity",
+          "Note",
+          "Mod Wheel",
+          "Random"
+        ]
+      },
+      {
+        "id": "mod4Target",
+        "name": "Mod 4 Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Osc 1 Position",
+          "Osc 1 Warp",
+          "Osc 1 Pitch",
+          "Osc 1 Level",
+          "Osc 2 Position",
+          "Osc 2 Warp",
+          "Osc 2 Pitch",
+          "Osc 2 Level",
+          "Pitch",
+          "Sub Level",
+          "Noise Level",
+          "Cutoff",
+          "Resonance",
+          "Volume",
+          "Pan",
+          "Unison Detune"
+        ]
+      },
+      {
+        "id": "mod4Amount",
+        "name": "Mod 4 Amount",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "mod5Source",
+        "name": "Mod 5 Source",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Envelope 2",
+          "Envelope 3",
+          "LFO 1",
+          "LFO 2",
+          "Velocity",
+          "Note",
+          "Mod Wheel",
+          "Random"
+        ]
+      },
+      {
+        "id": "mod5Target",
+        "name": "Mod 5 Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Osc 1 Position",
+          "Osc 1 Warp",
+          "Osc 1 Pitch",
+          "Osc 1 Level",
+          "Osc 2 Position",
+          "Osc 2 Warp",
+          "Osc 2 Pitch",
+          "Osc 2 Level",
+          "Pitch",
+          "Sub Level",
+          "Noise Level",
+          "Cutoff",
+          "Resonance",
+          "Volume",
+          "Pan",
+          "Unison Detune"
+        ]
+      },
+      {
+        "id": "mod5Amount",
+        "name": "Mod 5 Amount",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "mod6Source",
+        "name": "Mod 6 Source",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Envelope 2",
+          "Envelope 3",
+          "LFO 1",
+          "LFO 2",
+          "Velocity",
+          "Note",
+          "Mod Wheel",
+          "Random"
+        ]
+      },
+      {
+        "id": "mod6Target",
+        "name": "Mod 6 Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Osc 1 Position",
+          "Osc 1 Warp",
+          "Osc 1 Pitch",
+          "Osc 1 Level",
+          "Osc 2 Position",
+          "Osc 2 Warp",
+          "Osc 2 Pitch",
+          "Osc 2 Level",
+          "Pitch",
+          "Sub Level",
+          "Noise Level",
+          "Cutoff",
+          "Resonance",
+          "Volume",
+          "Pan",
+          "Unison Detune"
+        ]
+      },
+      {
+        "id": "mod6Amount",
+        "name": "Mod 6 Amount",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "mod7Source",
+        "name": "Mod 7 Source",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Envelope 2",
+          "Envelope 3",
+          "LFO 1",
+          "LFO 2",
+          "Velocity",
+          "Note",
+          "Mod Wheel",
+          "Random"
+        ]
+      },
+      {
+        "id": "mod7Target",
+        "name": "Mod 7 Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Osc 1 Position",
+          "Osc 1 Warp",
+          "Osc 1 Pitch",
+          "Osc 1 Level",
+          "Osc 2 Position",
+          "Osc 2 Warp",
+          "Osc 2 Pitch",
+          "Osc 2 Level",
+          "Pitch",
+          "Sub Level",
+          "Noise Level",
+          "Cutoff",
+          "Resonance",
+          "Volume",
+          "Pan",
+          "Unison Detune"
+        ]
+      },
+      {
+        "id": "mod7Amount",
+        "name": "Mod 7 Amount",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "mod8Source",
+        "name": "Mod 8 Source",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Envelope 2",
+          "Envelope 3",
+          "LFO 1",
+          "LFO 2",
+          "Velocity",
+          "Note",
+          "Mod Wheel",
+          "Random"
+        ]
+      },
+      {
+        "id": "mod8Target",
+        "name": "Mod 8 Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "None",
+        "choices": [
+          "None",
+          "Osc 1 Position",
+          "Osc 1 Warp",
+          "Osc 1 Pitch",
+          "Osc 1 Level",
+          "Osc 2 Position",
+          "Osc 2 Warp",
+          "Osc 2 Pitch",
+          "Osc 2 Level",
+          "Pitch",
+          "Sub Level",
+          "Noise Level",
+          "Cutoff",
+          "Resonance",
+          "Volume",
+          "Pan",
+          "Unison Detune"
+        ]
+      },
+      {
+        "id": "mod8Amount",
+        "name": "Mod 8 Amount",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "voiceMode",
+        "name": "Voices",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Poly",
+        "choices": [
+          "Poly",
+          "Mono"
+        ]
+      },
+      {
+        "id": "glide",
+        "name": "Glide",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 0.0
+      },
+      {
+        "id": "bendRange",
+        "name": "Bend Range",
+        "unit": "semitones",
+        "minimum": 0.0,
+        "maximum": 24.0,
+        "default": 2.0
+      },
+      {
+        "id": "velocity",
+        "name": "Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.600000023841858
+      },
+      {
+        "id": "level",
+        "name": "Level",
+        "unit": "decibels",
+        "minimum": -36.0,
+        "maximum": 6.0,
+        "default": -6.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteFM",
+    "name": "FM",
+    "kind": "instrument",
+    "parameters": [
+      {
+        "id": "algorithm",
+        "name": "Algorithm",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "Two Pairs",
+        "choices": [
+          "Stack",
+          "Two Into Stack",
+          "Chain And One",
+          "Three Into One",
+          "Two Pairs",
+          "Stack And One",
+          "One Into Three",
+          "Four Carriers"
+        ]
+      },
+      {
+        "id": "timbre",
+        "name": "Timbre",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "default": 1.0
+      },
+      {
+        "id": "op1On",
+        "name": "Op 1 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "op1Wave",
+        "name": "Op 1 Wave",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw",
+          "Square"
+        ]
+      },
+      {
+        "id": "op1Feedback",
+        "name": "Op 1 Feedback",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op1Ratio",
+        "name": "Op 1 Ratio",
+        "unit": "none",
+        "minimum": 0.5,
+        "maximum": 32.0,
+        "default": 1.0
+      },
+      {
+        "id": "op1Fine",
+        "name": "Op 1 Fine",
+        "unit": "none",
+        "minimum": 0.0,
+        "maximum": 0.49,
+        "default": 0.0
+      },
+      {
+        "id": "op1Detune",
+        "name": "Op 1 Detune",
+        "unit": "cents",
+        "minimum": -50.0,
+        "maximum": 50.0,
+        "default": 4.0
+      },
+      {
+        "id": "op1Fixed",
+        "name": "Op 1 Fixed",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op1Frequency",
+        "name": "Op 1 Frequency",
+        "unit": "hertz",
+        "minimum": 1.0,
+        "maximum": 10000.0,
+        "default": 440.0
+      },
+      {
+        "id": "op1Level",
+        "name": "Op 1 Level",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "op1Velocity",
+        "name": "Op 1 Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.25
+      },
+      {
+        "id": "op1KeyScale",
+        "name": "Op 1 Key Scale",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op1Attack",
+        "name": "Op 1 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "op1Decay",
+        "name": "Op 1 Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 3000.0
+      },
+      {
+        "id": "op1Sustain",
+        "name": "Op 1 Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op1Release",
+        "name": "Op 1 Release",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 400.0
+      },
+      {
+        "id": "op1AttackCurve",
+        "name": "Op 1 Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "op1DecayCurve",
+        "name": "Op 1 Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "op1ReleaseCurve",
+        "name": "Op 1 Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "op2On",
+        "name": "Op 2 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "op2Wave",
+        "name": "Op 2 Wave",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw",
+          "Square"
+        ]
+      },
+      {
+        "id": "op2Feedback",
+        "name": "Op 2 Feedback",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op2Ratio",
+        "name": "Op 2 Ratio",
+        "unit": "none",
+        "minimum": 0.5,
+        "maximum": 32.0,
+        "default": 14.0
+      },
+      {
+        "id": "op2Fine",
+        "name": "Op 2 Fine",
+        "unit": "none",
+        "minimum": 0.0,
+        "maximum": 0.49,
+        "default": 0.0
+      },
+      {
+        "id": "op2Detune",
+        "name": "Op 2 Detune",
+        "unit": "cents",
+        "minimum": -50.0,
+        "maximum": 50.0,
+        "default": 0.0
+      },
+      {
+        "id": "op2Fixed",
+        "name": "Op 2 Fixed",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op2Frequency",
+        "name": "Op 2 Frequency",
+        "unit": "hertz",
+        "minimum": 1.0,
+        "maximum": 10000.0,
+        "default": 440.0
+      },
+      {
+        "id": "op2Level",
+        "name": "Op 2 Level",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.300000011920929
+      },
+      {
+        "id": "op2Velocity",
+        "name": "Op 2 Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.899999976158142
+      },
+      {
+        "id": "op2KeyScale",
+        "name": "Op 2 Key Scale",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.25
+      },
+      {
+        "id": "op2Attack",
+        "name": "Op 2 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 0.5
+      },
+      {
+        "id": "op2Decay",
+        "name": "Op 2 Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 350.0
+      },
+      {
+        "id": "op2Sustain",
+        "name": "Op 2 Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op2Release",
+        "name": "Op 2 Release",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "op2AttackCurve",
+        "name": "Op 2 Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "op2DecayCurve",
+        "name": "Op 2 Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "op2ReleaseCurve",
+        "name": "Op 2 Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "op3On",
+        "name": "Op 3 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "op3Wave",
+        "name": "Op 3 Wave",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw",
+          "Square"
+        ]
+      },
+      {
+        "id": "op3Feedback",
+        "name": "Op 3 Feedback",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op3Ratio",
+        "name": "Op 3 Ratio",
+        "unit": "none",
+        "minimum": 0.5,
+        "maximum": 32.0,
+        "default": 1.0
+      },
+      {
+        "id": "op3Fine",
+        "name": "Op 3 Fine",
+        "unit": "none",
+        "minimum": 0.0,
+        "maximum": 0.49,
+        "default": 0.0
+      },
+      {
+        "id": "op3Detune",
+        "name": "Op 3 Detune",
+        "unit": "cents",
+        "minimum": -50.0,
+        "maximum": 50.0,
+        "default": -4.0
+      },
+      {
+        "id": "op3Fixed",
+        "name": "Op 3 Fixed",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op3Frequency",
+        "name": "Op 3 Frequency",
+        "unit": "hertz",
+        "minimum": 1.0,
+        "maximum": 10000.0,
+        "default": 440.0
+      },
+      {
+        "id": "op3Level",
+        "name": "Op 3 Level",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "op3Velocity",
+        "name": "Op 3 Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.25
+      },
+      {
+        "id": "op3KeyScale",
+        "name": "Op 3 Key Scale",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op3Attack",
+        "name": "Op 3 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "op3Decay",
+        "name": "Op 3 Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 2500.0
+      },
+      {
+        "id": "op3Sustain",
+        "name": "Op 3 Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op3Release",
+        "name": "Op 3 Release",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 400.0
+      },
+      {
+        "id": "op3AttackCurve",
+        "name": "Op 3 Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "op3DecayCurve",
+        "name": "Op 3 Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "op3ReleaseCurve",
+        "name": "Op 3 Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "op4On",
+        "name": "Op 4 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "op4Wave",
+        "name": "Op 4 Wave",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw",
+          "Square"
+        ]
+      },
+      {
+        "id": "op4Feedback",
+        "name": "Op 4 Feedback",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.100000001490116
+      },
+      {
+        "id": "op4Ratio",
+        "name": "Op 4 Ratio",
+        "unit": "none",
+        "minimum": 0.5,
+        "maximum": 32.0,
+        "default": 1.0
+      },
+      {
+        "id": "op4Fine",
+        "name": "Op 4 Fine",
+        "unit": "none",
+        "minimum": 0.0,
+        "maximum": 0.49,
+        "default": 0.0
+      },
+      {
+        "id": "op4Detune",
+        "name": "Op 4 Detune",
+        "unit": "cents",
+        "minimum": -50.0,
+        "maximum": 50.0,
+        "default": 0.0
+      },
+      {
+        "id": "op4Fixed",
+        "name": "Op 4 Fixed",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op4Frequency",
+        "name": "Op 4 Frequency",
+        "unit": "hertz",
+        "minimum": 1.0,
+        "maximum": 10000.0,
+        "default": 440.0
+      },
+      {
+        "id": "op4Level",
+        "name": "Op 4 Level",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.449999988079071
+      },
+      {
+        "id": "op4Velocity",
+        "name": "Op 4 Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.699999988079071
+      },
+      {
+        "id": "op4KeyScale",
+        "name": "Op 4 Key Scale",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op4Attack",
+        "name": "Op 4 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "op4Decay",
+        "name": "Op 4 Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 1200.0
+      },
+      {
+        "id": "op4Sustain",
+        "name": "Op 4 Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op4Release",
+        "name": "Op 4 Release",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "op4AttackCurve",
+        "name": "Op 4 Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "op4DecayCurve",
+        "name": "Op 4 Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "op4ReleaseCurve",
+        "name": "Op 4 Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "pitchAmount",
+        "name": "Pitch Amount",
+        "unit": "semitones",
+        "minimum": -48.0,
+        "maximum": 48.0,
+        "default": 0.0
+      },
+      {
+        "id": "pitchDecay",
+        "name": "Pitch Decay",
+        "unit": "milliseconds",
+        "minimum": 1.0,
+        "maximum": 2000.0,
+        "default": 60.0
+      },
+      {
+        "id": "keyTime",
+        "name": "Key Time",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.25
+      },
+      {
+        "id": "phase",
+        "name": "Phase",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Reset",
+        "choices": [
+          "Reset",
+          "Free"
+        ]
+      },
+      {
+        "id": "filterOn",
+        "name": "Filter On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "filterType",
+        "name": "Filter Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "Low Pass",
+        "choices": [
+          "Low Pass",
+          "High Pass",
+          "Band Pass",
+          "Notch",
+          "Comb +",
+          "Comb -",
+          "Vowel",
+          "Phaser",
+          "Sample & Hold"
+        ]
+      },
+      {
+        "id": "cutoff",
+        "name": "Cutoff",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 5000.0
+      },
+      {
+        "id": "resonance",
+        "name": "Resonance",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.100000001490116
+      },
+      {
+        "id": "filterSlope",
+        "name": "Filter Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "24 dB",
+        "choices": [
+          "12 dB",
+          "24 dB"
+        ]
+      },
+      {
+        "id": "keyTracking",
+        "name": "Key Tracking",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lfoOn",
+        "name": "LFO On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lfoShape",
+        "name": "LFO Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw Up",
+          "Saw Down",
+          "Square",
+          "Random"
+        ]
+      },
+      {
+        "id": "lfoTarget",
+        "name": "LFO Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Pitch",
+        "choices": [
+          "Pitch",
+          "Timbre",
+          "Level",
+          "Cutoff"
+        ]
+      },
+      {
+        "id": "lfoRate",
+        "name": "LFO Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 20.0,
+        "default": 5.0
+      },
+      {
+        "id": "lfoDepth",
+        "name": "LFO Depth",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.25
+      },
+      {
+        "id": "voiceMode",
+        "name": "Voices",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Poly",
+        "choices": [
+          "Poly",
+          "Mono"
+        ]
+      },
+      {
+        "id": "glide",
+        "name": "Glide",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 0.0
+      },
+      {
+        "id": "bendRange",
+        "name": "Bend Range",
+        "unit": "semitones",
+        "minimum": 0.0,
+        "maximum": 24.0,
+        "default": 2.0
+      },
+      {
+        "id": "spread",
+        "name": "Spread",
+        "unit": "cents",
+        "minimum": 0.0,
+        "maximum": 50.0,
+        "default": 0.0
+      },
+      {
+        "id": "level",
+        "name": "Level",
+        "unit": "decibels",
+        "minimum": -36.0,
+        "maximum": 6.0,
+        "default": -6.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteSampler",
+    "name": "Sampler",
+    "kind": "instrument",
+    "parameters": [
+      {
+        "id": "mode",
+        "name": "Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "default": "Classic",
+        "choices": [
+          "Classic",
+          "One-Shot",
+          "Slice"
+        ]
+      },
+      {
+        "id": "root",
+        "name": "Root",
+        "unit": "note",
+        "minimum": 0.0,
+        "maximum": 127.0,
+        "default": 36.0
+      },
+      {
+        "id": "transpose",
+        "name": "Transpose",
+        "unit": "semitones",
+        "minimum": -48.0,
+        "maximum": 48.0,
+        "default": 0.0
+      },
+      {
+        "id": "fine",
+        "name": "Fine",
+        "unit": "cents",
+        "minimum": -50.0,
+        "maximum": 50.0,
+        "default": 0.0
+      },
+      {
+        "id": "start",
+        "name": "Start",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "end",
+        "name": "End",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "reverse",
+        "name": "Reverse",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "loopOn",
+        "name": "Loop On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "loopStart",
+        "name": "Loop Start",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.666666686534882
+      },
+      {
+        "id": "loopEnd",
+        "name": "Loop End",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "loopCrossfade",
+        "name": "Crossfade",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 0.5,
+        "default": 0.100000001490116
+      },
+      {
+        "id": "playback",
+        "name": "Playback",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Trigger",
+        "choices": [
+          "Trigger",
+          "Gate"
+        ]
+      },
+      {
+        "id": "fadeIn",
+        "name": "Fade In",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 1000.0,
+        "default": 0.0
+      },
+      {
+        "id": "fadeOut",
+        "name": "Fade Out",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 1000.0,
+        "default": 10.0
+      },
+      {
+        "id": "sliceBy",
+        "name": "Slice By",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Transients",
+        "choices": [
+          "Transients",
+          "Beats",
+          "Equal",
+          "Manual"
+        ]
+      },
+      {
+        "id": "sensitivity",
+        "name": "Sensitivity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "sliceDivision",
+        "name": "Division",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "1/16",
+        "choices": [
+          "1/32",
+          "1/16T",
+          "1/16",
+          "1/16D",
+          "1/8T",
+          "1/8",
+          "1/8D",
+          "1/4T",
+          "1/4",
+          "1/4D",
+          "1/2T",
+          "1/2",
+          "1/2D",
+          "1 bar",
+          "2 bars",
+          "4 bars",
+          "8 bars"
+        ]
+      },
+      {
+        "id": "sliceCount",
+        "name": "Slices",
+        "unit": "none",
+        "minimum": 2.0,
+        "maximum": 64.0,
+        "default": 8.0
+      },
+      {
+        "id": "playThrough",
+        "name": "Play Through",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "choke",
+        "name": "Choke",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "attack",
+        "name": "Attack",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "decay",
+        "name": "Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "sustain",
+        "name": "Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "release",
+        "name": "Release",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 10000.0,
+        "default": 50.0
+      },
+      {
+        "id": "attackCurve",
+        "name": "Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "decayCurve",
+        "name": "Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "releaseCurve",
+        "name": "Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "filterOn",
+        "name": "Filter On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "filterType",
+        "name": "Filter Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "Low Pass",
+        "choices": [
+          "Low Pass",
+          "High Pass",
+          "Band Pass",
+          "Notch",
+          "Comb +",
+          "Comb -",
+          "Vowel",
+          "Phaser",
+          "Sample & Hold"
+        ]
+      },
+      {
+        "id": "cutoff",
+        "name": "Cutoff",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 3000.0
+      },
+      {
+        "id": "resonance",
+        "name": "Resonance",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.150000005960464
+      },
+      {
+        "id": "filterSlope",
+        "name": "Filter Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "12 dB",
+        "choices": [
+          "12 dB",
+          "24 dB"
+        ]
+      },
+      {
+        "id": "keyTracking",
+        "name": "Key Tracking",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "filterEnvelope",
+        "name": "Filter Envelope",
+        "unit": "semitones",
+        "minimum": -48.0,
+        "maximum": 48.0,
+        "default": 24.0
+      },
+      {
+        "id": "filterEnvelopeOn",
+        "name": "Filter Envelope On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "filterAttack",
+        "name": "Filter Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "filterDecay",
+        "name": "Filter Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 400.0
+      },
+      {
+        "id": "filterSustain",
+        "name": "Filter Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.200000002980232
+      },
+      {
+        "id": "filterRelease",
+        "name": "Filter Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "filterAttackCurve",
+        "name": "Filter Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "filterDecayCurve",
+        "name": "Filter Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "filterReleaseCurve",
+        "name": "Filter Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "lfoOn",
+        "name": "LFO On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lfoShape",
+        "name": "LFO Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle",
+          "Saw Up",
+          "Saw Down",
+          "Square",
+          "Random"
+        ]
+      },
+      {
+        "id": "lfoTarget",
+        "name": "LFO Target",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "default": "Pitch",
+        "choices": [
+          "Pitch",
+          "Cutoff",
+          "Level"
+        ]
+      },
+      {
+        "id": "lfoRate",
+        "name": "LFO Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 20.0,
+        "default": 5.0
+      },
+      {
+        "id": "lfoDepth",
+        "name": "LFO Depth",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.25
+      },
+      {
+        "id": "voiceMode",
+        "name": "Voices",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Poly",
+        "choices": [
+          "Poly",
+          "Mono"
+        ]
+      },
+      {
+        "id": "glide",
+        "name": "Glide",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 0.0
+      },
+      {
+        "id": "bendRange",
+        "name": "Bend Range",
+        "unit": "semitones",
+        "minimum": 0.0,
+        "maximum": 24.0,
+        "default": 2.0
+      },
+      {
+        "id": "velocity",
+        "name": "Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.600000023841858
+      },
+      {
+        "id": "level",
+        "name": "Level",
+        "unit": "decibels",
+        "minimum": -36.0,
+        "maximum": 6.0,
+        "default": -6.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteDrums",
+    "name": "Drum Sampler",
+    "kind": "instrument",
+    "parameters": [
+      {
+        "id": "pad1Level",
+        "name": "Pad 1 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad1Pan",
+        "name": "Pad 1 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad1Tune",
+        "name": "Pad 1 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad1Attack",
+        "name": "Pad 1 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad1Length",
+        "name": "Pad 1 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad1Choke",
+        "name": "Pad 1 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad2Level",
+        "name": "Pad 2 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad2Pan",
+        "name": "Pad 2 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad2Tune",
+        "name": "Pad 2 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad2Attack",
+        "name": "Pad 2 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad2Length",
+        "name": "Pad 2 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad2Choke",
+        "name": "Pad 2 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad3Level",
+        "name": "Pad 3 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad3Pan",
+        "name": "Pad 3 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad3Tune",
+        "name": "Pad 3 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad3Attack",
+        "name": "Pad 3 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad3Length",
+        "name": "Pad 3 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad3Choke",
+        "name": "Pad 3 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad4Level",
+        "name": "Pad 4 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad4Pan",
+        "name": "Pad 4 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad4Tune",
+        "name": "Pad 4 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad4Attack",
+        "name": "Pad 4 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad4Length",
+        "name": "Pad 4 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad4Choke",
+        "name": "Pad 4 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad5Level",
+        "name": "Pad 5 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad5Pan",
+        "name": "Pad 5 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad5Tune",
+        "name": "Pad 5 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad5Attack",
+        "name": "Pad 5 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad5Length",
+        "name": "Pad 5 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad5Choke",
+        "name": "Pad 5 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad6Level",
+        "name": "Pad 6 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad6Pan",
+        "name": "Pad 6 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad6Tune",
+        "name": "Pad 6 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad6Attack",
+        "name": "Pad 6 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad6Length",
+        "name": "Pad 6 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad6Choke",
+        "name": "Pad 6 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad7Level",
+        "name": "Pad 7 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad7Pan",
+        "name": "Pad 7 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad7Tune",
+        "name": "Pad 7 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad7Attack",
+        "name": "Pad 7 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad7Length",
+        "name": "Pad 7 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad7Choke",
+        "name": "Pad 7 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "1",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad8Level",
+        "name": "Pad 8 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad8Pan",
+        "name": "Pad 8 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad8Tune",
+        "name": "Pad 8 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad8Attack",
+        "name": "Pad 8 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad8Length",
+        "name": "Pad 8 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad8Choke",
+        "name": "Pad 8 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad9Level",
+        "name": "Pad 9 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad9Pan",
+        "name": "Pad 9 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad9Tune",
+        "name": "Pad 9 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad9Attack",
+        "name": "Pad 9 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad9Length",
+        "name": "Pad 9 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad9Choke",
+        "name": "Pad 9 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "1",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad10Level",
+        "name": "Pad 10 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad10Pan",
+        "name": "Pad 10 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad10Tune",
+        "name": "Pad 10 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad10Attack",
+        "name": "Pad 10 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad10Length",
+        "name": "Pad 10 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad10Choke",
+        "name": "Pad 10 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad11Level",
+        "name": "Pad 11 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad11Pan",
+        "name": "Pad 11 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad11Tune",
+        "name": "Pad 11 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad11Attack",
+        "name": "Pad 11 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad11Length",
+        "name": "Pad 11 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad11Choke",
+        "name": "Pad 11 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "1",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad12Level",
+        "name": "Pad 12 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad12Pan",
+        "name": "Pad 12 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad12Tune",
+        "name": "Pad 12 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad12Attack",
+        "name": "Pad 12 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad12Length",
+        "name": "Pad 12 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad12Choke",
+        "name": "Pad 12 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad13Level",
+        "name": "Pad 13 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad13Pan",
+        "name": "Pad 13 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad13Tune",
+        "name": "Pad 13 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad13Attack",
+        "name": "Pad 13 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad13Length",
+        "name": "Pad 13 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad13Choke",
+        "name": "Pad 13 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad14Level",
+        "name": "Pad 14 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad14Pan",
+        "name": "Pad 14 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad14Tune",
+        "name": "Pad 14 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad14Attack",
+        "name": "Pad 14 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad14Length",
+        "name": "Pad 14 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad14Choke",
+        "name": "Pad 14 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad15Level",
+        "name": "Pad 15 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad15Pan",
+        "name": "Pad 15 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad15Tune",
+        "name": "Pad 15 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad15Attack",
+        "name": "Pad 15 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad15Length",
+        "name": "Pad 15 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad15Choke",
+        "name": "Pad 15 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "pad16Level",
+        "name": "Pad 16 Level",
+        "unit": "decibels",
+        "minimum": -48.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad16Pan",
+        "name": "Pad 16 Pan",
+        "unit": "pan",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad16Tune",
+        "name": "Pad 16 Tune",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad16Attack",
+        "name": "Pad 16 Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": "pad16Length",
+        "name": "Pad 16 Length",
+        "unit": "milliseconds",
+        "minimum": 10.0,
+        "maximum": 10000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "pad16Choke",
+        "name": "Pad 16 Choke",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      {
+        "id": "output",
+        "name": "Output",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 6.0,
+        "default": 0.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteEq",
+    "name": "EQ",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "band1On",
+        "name": "Band 1 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "band1Type",
+        "name": "Band 1 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Low Cut",
+        "choices": [
+          "Low Cut",
+          "Low Shelf",
+          "Bell",
+          "Notch",
+          "High Shelf",
+          "High Cut"
+        ]
+      },
+      {
+        "id": "band1Frequency",
+        "name": "Band 1 Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 30.0
+      },
+      {
+        "id": "band1Gain",
+        "name": "Band 1 Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band1Q",
+        "name": "Band 1 Q",
+        "unit": "none",
+        "minimum": 0.1,
+        "maximum": 18.0,
+        "default": 0.709999978542328
+      },
+      {
+        "id": "band1Slope",
+        "name": "Band 1 Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "24 dB/oct",
+        "choices": [
+          "12 dB/oct",
+          "24 dB/oct",
+          "36 dB/oct",
+          "48 dB/oct"
+        ]
+      },
+      {
+        "id": "band2On",
+        "name": "Band 2 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "band2Type",
+        "name": "Band 2 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Low Shelf",
+        "choices": [
+          "Low Cut",
+          "Low Shelf",
+          "Bell",
+          "Notch",
+          "High Shelf",
+          "High Cut"
+        ]
+      },
+      {
+        "id": "band2Frequency",
+        "name": "Band 2 Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 100.0
+      },
+      {
+        "id": "band2Gain",
+        "name": "Band 2 Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band2Q",
+        "name": "Band 2 Q",
+        "unit": "none",
+        "minimum": 0.1,
+        "maximum": 18.0,
+        "default": 0.709999978542328
+      },
+      {
+        "id": "band2Slope",
+        "name": "Band 2 Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "24 dB/oct",
+        "choices": [
+          "12 dB/oct",
+          "24 dB/oct",
+          "36 dB/oct",
+          "48 dB/oct"
+        ]
+      },
+      {
+        "id": "band3On",
+        "name": "Band 3 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "band3Type",
+        "name": "Band 3 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Bell",
+        "choices": [
+          "Low Cut",
+          "Low Shelf",
+          "Bell",
+          "Notch",
+          "High Shelf",
+          "High Cut"
+        ]
+      },
+      {
+        "id": "band3Frequency",
+        "name": "Band 3 Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 250.0
+      },
+      {
+        "id": "band3Gain",
+        "name": "Band 3 Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band3Q",
+        "name": "Band 3 Q",
+        "unit": "none",
+        "minimum": 0.1,
+        "maximum": 18.0,
+        "default": 1.0
+      },
+      {
+        "id": "band3Slope",
+        "name": "Band 3 Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "24 dB/oct",
+        "choices": [
+          "12 dB/oct",
+          "24 dB/oct",
+          "36 dB/oct",
+          "48 dB/oct"
+        ]
+      },
+      {
+        "id": "band4On",
+        "name": "Band 4 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "band4Type",
+        "name": "Band 4 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Bell",
+        "choices": [
+          "Low Cut",
+          "Low Shelf",
+          "Bell",
+          "Notch",
+          "High Shelf",
+          "High Cut"
+        ]
+      },
+      {
+        "id": "band4Frequency",
+        "name": "Band 4 Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 800.0
+      },
+      {
+        "id": "band4Gain",
+        "name": "Band 4 Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band4Q",
+        "name": "Band 4 Q",
+        "unit": "none",
+        "minimum": 0.1,
+        "maximum": 18.0,
+        "default": 1.0
+      },
+      {
+        "id": "band4Slope",
+        "name": "Band 4 Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "24 dB/oct",
+        "choices": [
+          "12 dB/oct",
+          "24 dB/oct",
+          "36 dB/oct",
+          "48 dB/oct"
+        ]
+      },
+      {
+        "id": "band5On",
+        "name": "Band 5 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "band5Type",
+        "name": "Band 5 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Bell",
+        "choices": [
+          "Low Cut",
+          "Low Shelf",
+          "Bell",
+          "Notch",
+          "High Shelf",
+          "High Cut"
+        ]
+      },
+      {
+        "id": "band5Frequency",
+        "name": "Band 5 Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 2500.0
+      },
+      {
+        "id": "band5Gain",
+        "name": "Band 5 Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band5Q",
+        "name": "Band 5 Q",
+        "unit": "none",
+        "minimum": 0.1,
+        "maximum": 18.0,
+        "default": 1.0
+      },
+      {
+        "id": "band5Slope",
+        "name": "Band 5 Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "24 dB/oct",
+        "choices": [
+          "12 dB/oct",
+          "24 dB/oct",
+          "36 dB/oct",
+          "48 dB/oct"
+        ]
+      },
+      {
+        "id": "band6On",
+        "name": "Band 6 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "band6Type",
+        "name": "Band 6 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "Bell",
+        "choices": [
+          "Low Cut",
+          "Low Shelf",
+          "Bell",
+          "Notch",
+          "High Shelf",
+          "High Cut"
+        ]
+      },
+      {
+        "id": "band6Frequency",
+        "name": "Band 6 Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 6000.0
+      },
+      {
+        "id": "band6Gain",
+        "name": "Band 6 Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band6Q",
+        "name": "Band 6 Q",
+        "unit": "none",
+        "minimum": 0.1,
+        "maximum": 18.0,
+        "default": 1.0
+      },
+      {
+        "id": "band6Slope",
+        "name": "Band 6 Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "24 dB/oct",
+        "choices": [
+          "12 dB/oct",
+          "24 dB/oct",
+          "36 dB/oct",
+          "48 dB/oct"
+        ]
+      },
+      {
+        "id": "band7On",
+        "name": "Band 7 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "band7Type",
+        "name": "Band 7 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "High Shelf",
+        "choices": [
+          "Low Cut",
+          "Low Shelf",
+          "Bell",
+          "Notch",
+          "High Shelf",
+          "High Cut"
+        ]
+      },
+      {
+        "id": "band7Frequency",
+        "name": "Band 7 Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "band7Gain",
+        "name": "Band 7 Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band7Q",
+        "name": "Band 7 Q",
+        "unit": "none",
+        "minimum": 0.1,
+        "maximum": 18.0,
+        "default": 0.709999978542328
+      },
+      {
+        "id": "band7Slope",
+        "name": "Band 7 Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "24 dB/oct",
+        "choices": [
+          "12 dB/oct",
+          "24 dB/oct",
+          "36 dB/oct",
+          "48 dB/oct"
+        ]
+      },
+      {
+        "id": "band8On",
+        "name": "Band 8 On",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "band8Type",
+        "name": "Band 8 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "High Cut",
+        "choices": [
+          "Low Cut",
+          "Low Shelf",
+          "Bell",
+          "Notch",
+          "High Shelf",
+          "High Cut"
+        ]
+      },
+      {
+        "id": "band8Frequency",
+        "name": "Band 8 Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 18000.0
+      },
+      {
+        "id": "band8Gain",
+        "name": "Band 8 Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "band8Q",
+        "name": "Band 8 Q",
+        "unit": "none",
+        "minimum": 0.1,
+        "maximum": 18.0,
+        "default": 0.709999978542328
+      },
+      {
+        "id": "band8Slope",
+        "name": "Band 8 Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "24 dB/oct",
+        "choices": [
+          "12 dB/oct",
+          "24 dB/oct",
+          "36 dB/oct",
+          "48 dB/oct"
+        ]
+      },
+      {
+        "id": "output",
+        "name": "Output",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteFilter",
+    "name": "Filter",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "filterType",
+        "name": "Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 8.0,
+        "default": "Low Pass",
+        "choices": [
+          "Low Pass",
+          "High Pass",
+          "Band Pass",
+          "Notch",
+          "Comb +",
+          "Comb -",
+          "Vowel",
+          "Phaser",
+          "Sample & Hold"
+        ]
+      },
+      {
+        "id": "cutoff",
+        "name": "Cutoff",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 20000.0,
+        "default": 20000.0
+      },
+      {
+        "id": "resonance",
+        "name": "Resonance",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.100000001490116
+      },
+      {
+        "id": "filterSlope",
+        "name": "Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "24 dB",
+        "choices": [
+          "12 dB",
+          "24 dB"
+        ]
+      },
+      {
+        "id": "drive",
+        "name": "Drive",
+        "unit": "decibels",
+        "minimum": 0.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteCompressor",
+    "name": "Compressor",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "character",
+        "name": "Character",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Clean",
+        "choices": [
+          "Clean",
+          "VCA",
+          "FET",
+          "Opto",
+          "Tube"
+        ]
+      },
+      {
+        "id": "inputGain",
+        "name": "Input Gain",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "attack",
+        "name": "Attack",
+        "unit": "milliseconds",
+        "minimum": 0.1,
+        "maximum": 200.0,
+        "default": 10.0
+      },
+      {
+        "id": "release",
+        "name": "Release",
+        "unit": "milliseconds",
+        "minimum": 5.0,
+        "maximum": 2000.0,
+        "default": 120.0
+      },
+      {
+        "id": "makeup",
+        "name": "Makeup",
+        "unit": "decibels",
+        "minimum": -12.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "drive",
+        "name": "Drive",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "keyLowCut",
+        "name": "Key Low Cut",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 500.0,
+        "default": 20.0
+      },
+      {
+        "id": "keyHighCut",
+        "name": "Key High Cut",
+        "unit": "hertz",
+        "minimum": 100.0,
+        "maximum": 20000.0,
+        "default": 20000.0
+      },
+      {
+        "id": "points",
+        "name": "Points",
+        "unit": "none",
+        "minimum": 2.0,
+        "maximum": 8.0,
+        "default": 4.0
+      },
+      {
+        "id": "point1X",
+        "name": "Point 1 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "point1Y",
+        "name": "Point 1 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "point1Tension",
+        "name": "Point 1 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "point1Type",
+        "name": "Point 1 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "point2X",
+        "name": "Point 2 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.102205999195576
+      },
+      {
+        "id": "point2Y",
+        "name": "Point 2 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.102205999195576
+      },
+      {
+        "id": "point2Tension",
+        "name": "Point 2 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "point2Type",
+        "name": "Point 2 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "point3X",
+        "name": "Point 3 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "point3Y",
+        "name": "Point 3 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.160455003380775
+      },
+      {
+        "id": "point3Tension",
+        "name": "Point 3 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.100808002054691
+      },
+      {
+        "id": "point3Type",
+        "name": "Point 3 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "point4X",
+        "name": "Point 4 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "point4Y",
+        "name": "Point 4 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.213276997208595
+      },
+      {
+        "id": "point4Tension",
+        "name": "Point 4 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.006570000201464
+      },
+      {
+        "id": "point4Type",
+        "name": "Point 4 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "point5X",
+        "name": "Point 5 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "point5Y",
+        "name": "Point 5 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.213276997208595
+      },
+      {
+        "id": "point5Tension",
+        "name": "Point 5 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.006570000201464
+      },
+      {
+        "id": "point5Type",
+        "name": "Point 5 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "point6X",
+        "name": "Point 6 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "point6Y",
+        "name": "Point 6 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.213276997208595
+      },
+      {
+        "id": "point6Tension",
+        "name": "Point 6 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.006570000201464
+      },
+      {
+        "id": "point6Type",
+        "name": "Point 6 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "point7X",
+        "name": "Point 7 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "point7Y",
+        "name": "Point 7 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.213276997208595
+      },
+      {
+        "id": "point7Tension",
+        "name": "Point 7 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.006570000201464
+      },
+      {
+        "id": "point7Type",
+        "name": "Point 7 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "point8X",
+        "name": "Point 8 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "point8Y",
+        "name": "Point 8 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.213276997208595
+      },
+      {
+        "id": "point8Tension",
+        "name": "Point 8 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.006570000201464
+      },
+      {
+        "id": "point8Type",
+        "name": "Point 8 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteMultiband",
+    "name": "Multiband",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "lowCut",
+        "name": "Low Cut",
+        "unit": "hertz",
+        "minimum": 10.0,
+        "maximum": 500.0,
+        "default": 20.0
+      },
+      {
+        "id": "lowFrequency",
+        "name": "Low Frequency",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 2000.0,
+        "default": 120.0
+      },
+      {
+        "id": "highFrequency",
+        "name": "High Frequency",
+        "unit": "hertz",
+        "minimum": 500.0,
+        "maximum": 20000.0,
+        "default": 5000.0
+      },
+      {
+        "id": "lowSlope",
+        "name": "Low Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "24 dB",
+        "choices": [
+          "12 dB",
+          "24 dB"
+        ]
+      },
+      {
+        "id": "highSlope",
+        "name": "High Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "24 dB",
+        "choices": [
+          "12 dB",
+          "24 dB"
+        ]
+      },
+      {
+        "id": "lmhDelay",
+        "name": "LMH Delay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": 2.0
+      },
+      {
+        "id": "lmhMix",
+        "name": "LMH Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "midDrivesMaster",
+        "name": "Mid Drives Master",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowMode",
+        "name": "Low Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "On",
+        "choices": [
+          "On",
+          "Comp Off",
+          "Muted",
+          "Off"
+        ]
+      },
+      {
+        "id": "lowSolo",
+        "name": "Low Solo",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowStereo",
+        "name": "Low Stereo",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPre",
+        "name": "Low Pre",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPost",
+        "name": "Low Post",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowAttack",
+        "name": "Low Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 500.0,
+        "default": 10.0
+      },
+      {
+        "id": "lowRelease",
+        "name": "Low Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowRelease2",
+        "name": "Low Release 2",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 100.0
+      },
+      {
+        "id": "lowSustain",
+        "name": "Low Sustain",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 1000.0,
+        "default": 20.0
+      },
+      {
+        "id": "lowCurve",
+        "name": "Low Curve",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "2",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "lowReleaseCurve",
+        "name": "Low Release Curve",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "3",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "lowDetection",
+        "name": "Low Detection",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Peak",
+        "choices": [
+          "Peak",
+          "RMS"
+        ]
+      },
+      {
+        "id": "lowSaturation",
+        "name": "Low Saturation",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowCeiling",
+        "name": "Low Ceiling",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoints",
+        "name": "Low Points",
+        "unit": "none",
+        "minimum": 2.0,
+        "maximum": 8.0,
+        "default": 3.0
+      },
+      {
+        "id": "lowPoint1X",
+        "name": "Low Point 1 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint1Y",
+        "name": "Low Point 1 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint1Tension",
+        "name": "Low Point 1 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint1Type",
+        "name": "Low Point 1 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "lowPoint2X",
+        "name": "Low Point 2 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lowPoint2Y",
+        "name": "Low Point 2 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lowPoint2Tension",
+        "name": "Low Point 2 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint2Type",
+        "name": "Low Point 2 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "lowPoint3X",
+        "name": "Low Point 3 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lowPoint3Y",
+        "name": "Low Point 3 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lowPoint3Tension",
+        "name": "Low Point 3 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint3Type",
+        "name": "Low Point 3 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "lowPoint4X",
+        "name": "Low Point 4 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lowPoint4Y",
+        "name": "Low Point 4 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lowPoint4Tension",
+        "name": "Low Point 4 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint4Type",
+        "name": "Low Point 4 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "lowPoint5X",
+        "name": "Low Point 5 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lowPoint5Y",
+        "name": "Low Point 5 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lowPoint5Tension",
+        "name": "Low Point 5 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint5Type",
+        "name": "Low Point 5 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "lowPoint6X",
+        "name": "Low Point 6 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lowPoint6Y",
+        "name": "Low Point 6 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lowPoint6Tension",
+        "name": "Low Point 6 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint6Type",
+        "name": "Low Point 6 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "lowPoint7X",
+        "name": "Low Point 7 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lowPoint7Y",
+        "name": "Low Point 7 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lowPoint7Tension",
+        "name": "Low Point 7 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint7Type",
+        "name": "Low Point 7 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "lowPoint8X",
+        "name": "Low Point 8 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "lowPoint8Y",
+        "name": "Low Point 8 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "lowPoint8Tension",
+        "name": "Low Point 8 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowPoint8Type",
+        "name": "Low Point 8 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "midMode",
+        "name": "Mid Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "On",
+        "choices": [
+          "On",
+          "Comp Off",
+          "Muted",
+          "Off"
+        ]
+      },
+      {
+        "id": "midSolo",
+        "name": "Mid Solo",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midStereo",
+        "name": "Mid Stereo",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPre",
+        "name": "Mid Pre",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPost",
+        "name": "Mid Post",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "midAttack",
+        "name": "Mid Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 500.0,
+        "default": 10.0
+      },
+      {
+        "id": "midRelease",
+        "name": "Mid Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 0.0
+      },
+      {
+        "id": "midRelease2",
+        "name": "Mid Release 2",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 100.0
+      },
+      {
+        "id": "midSustain",
+        "name": "Mid Sustain",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 1000.0,
+        "default": 20.0
+      },
+      {
+        "id": "midCurve",
+        "name": "Mid Curve",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "2",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "midReleaseCurve",
+        "name": "Mid Release Curve",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "3",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "midDetection",
+        "name": "Mid Detection",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Peak",
+        "choices": [
+          "Peak",
+          "RMS"
+        ]
+      },
+      {
+        "id": "midSaturation",
+        "name": "Mid Saturation",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midCeiling",
+        "name": "Mid Ceiling",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoints",
+        "name": "Mid Points",
+        "unit": "none",
+        "minimum": 2.0,
+        "maximum": 8.0,
+        "default": 3.0
+      },
+      {
+        "id": "midPoint1X",
+        "name": "Mid Point 1 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint1Y",
+        "name": "Mid Point 1 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint1Tension",
+        "name": "Mid Point 1 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint1Type",
+        "name": "Mid Point 1 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "midPoint2X",
+        "name": "Mid Point 2 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "midPoint2Y",
+        "name": "Mid Point 2 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "midPoint2Tension",
+        "name": "Mid Point 2 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint2Type",
+        "name": "Mid Point 2 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "midPoint3X",
+        "name": "Mid Point 3 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "midPoint3Y",
+        "name": "Mid Point 3 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "midPoint3Tension",
+        "name": "Mid Point 3 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint3Type",
+        "name": "Mid Point 3 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "midPoint4X",
+        "name": "Mid Point 4 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "midPoint4Y",
+        "name": "Mid Point 4 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "midPoint4Tension",
+        "name": "Mid Point 4 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint4Type",
+        "name": "Mid Point 4 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "midPoint5X",
+        "name": "Mid Point 5 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "midPoint5Y",
+        "name": "Mid Point 5 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "midPoint5Tension",
+        "name": "Mid Point 5 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint5Type",
+        "name": "Mid Point 5 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "midPoint6X",
+        "name": "Mid Point 6 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "midPoint6Y",
+        "name": "Mid Point 6 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "midPoint6Tension",
+        "name": "Mid Point 6 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint6Type",
+        "name": "Mid Point 6 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "midPoint7X",
+        "name": "Mid Point 7 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "midPoint7Y",
+        "name": "Mid Point 7 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "midPoint7Tension",
+        "name": "Mid Point 7 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint7Type",
+        "name": "Mid Point 7 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "midPoint8X",
+        "name": "Mid Point 8 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "midPoint8Y",
+        "name": "Mid Point 8 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "midPoint8Tension",
+        "name": "Mid Point 8 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midPoint8Type",
+        "name": "Mid Point 8 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "highMode",
+        "name": "High Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "On",
+        "choices": [
+          "On",
+          "Comp Off",
+          "Muted",
+          "Off"
+        ]
+      },
+      {
+        "id": "highSolo",
+        "name": "High Solo",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highStereo",
+        "name": "High Stereo",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPre",
+        "name": "High Pre",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPost",
+        "name": "High Post",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "highAttack",
+        "name": "High Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 500.0,
+        "default": 10.0
+      },
+      {
+        "id": "highRelease",
+        "name": "High Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 0.0
+      },
+      {
+        "id": "highRelease2",
+        "name": "High Release 2",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 100.0
+      },
+      {
+        "id": "highSustain",
+        "name": "High Sustain",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 1000.0,
+        "default": 20.0
+      },
+      {
+        "id": "highCurve",
+        "name": "High Curve",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "2",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "highReleaseCurve",
+        "name": "High Release Curve",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "3",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "highDetection",
+        "name": "High Detection",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Peak",
+        "choices": [
+          "Peak",
+          "RMS"
+        ]
+      },
+      {
+        "id": "highSaturation",
+        "name": "High Saturation",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highCeiling",
+        "name": "High Ceiling",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoints",
+        "name": "High Points",
+        "unit": "none",
+        "minimum": 2.0,
+        "maximum": 8.0,
+        "default": 3.0
+      },
+      {
+        "id": "highPoint1X",
+        "name": "High Point 1 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint1Y",
+        "name": "High Point 1 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint1Tension",
+        "name": "High Point 1 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint1Type",
+        "name": "High Point 1 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "highPoint2X",
+        "name": "High Point 2 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "highPoint2Y",
+        "name": "High Point 2 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "highPoint2Tension",
+        "name": "High Point 2 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint2Type",
+        "name": "High Point 2 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "highPoint3X",
+        "name": "High Point 3 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "highPoint3Y",
+        "name": "High Point 3 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "highPoint3Tension",
+        "name": "High Point 3 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint3Type",
+        "name": "High Point 3 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "highPoint4X",
+        "name": "High Point 4 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "highPoint4Y",
+        "name": "High Point 4 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "highPoint4Tension",
+        "name": "High Point 4 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint4Type",
+        "name": "High Point 4 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "highPoint5X",
+        "name": "High Point 5 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "highPoint5Y",
+        "name": "High Point 5 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "highPoint5Tension",
+        "name": "High Point 5 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint5Type",
+        "name": "High Point 5 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "highPoint6X",
+        "name": "High Point 6 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "highPoint6Y",
+        "name": "High Point 6 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "highPoint6Tension",
+        "name": "High Point 6 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint6Type",
+        "name": "High Point 6 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "highPoint7X",
+        "name": "High Point 7 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "highPoint7Y",
+        "name": "High Point 7 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "highPoint7Tension",
+        "name": "High Point 7 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint7Type",
+        "name": "High Point 7 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "highPoint8X",
+        "name": "High Point 8 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "highPoint8Y",
+        "name": "High Point 8 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "highPoint8Tension",
+        "name": "High Point 8 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highPoint8Type",
+        "name": "High Point 8 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "masterMode",
+        "name": "Master Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "On",
+        "choices": [
+          "On",
+          "Comp Off",
+          "Muted",
+          "Off"
+        ]
+      },
+      {
+        "id": "masterSolo",
+        "name": "Master Solo",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterStereo",
+        "name": "Master Stereo",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPre",
+        "name": "Master Pre",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPost",
+        "name": "Master Post",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterAttack",
+        "name": "Master Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 500.0,
+        "default": 2.0
+      },
+      {
+        "id": "masterRelease",
+        "name": "Master Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterRelease2",
+        "name": "Master Release 2",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 2000.0,
+        "default": 100.0
+      },
+      {
+        "id": "masterSustain",
+        "name": "Master Sustain",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 1000.0,
+        "default": 20.0
+      },
+      {
+        "id": "masterCurve",
+        "name": "Master Curve",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "2",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "masterReleaseCurve",
+        "name": "Master Release Curve",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 7.0,
+        "default": "3",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
+        ]
+      },
+      {
+        "id": "masterDetection",
+        "name": "Master Detection",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Peak",
+        "choices": [
+          "Peak",
+          "RMS"
+        ]
+      },
+      {
+        "id": "masterSaturation",
+        "name": "Master Saturation",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterCeiling",
+        "name": "Master Ceiling",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoints",
+        "name": "Master Points",
+        "unit": "none",
+        "minimum": 2.0,
+        "maximum": 8.0,
+        "default": 3.0
+      },
+      {
+        "id": "masterPoint1X",
+        "name": "Master Point 1 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint1Y",
+        "name": "Master Point 1 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint1Tension",
+        "name": "Master Point 1 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint1Type",
+        "name": "Master Point 1 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "masterPoint2X",
+        "name": "Master Point 2 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "masterPoint2Y",
+        "name": "Master Point 2 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "masterPoint2Tension",
+        "name": "Master Point 2 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint2Type",
+        "name": "Master Point 2 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "masterPoint3X",
+        "name": "Master Point 3 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "masterPoint3Y",
+        "name": "Master Point 3 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "masterPoint3Tension",
+        "name": "Master Point 3 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint3Type",
+        "name": "Master Point 3 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "masterPoint4X",
+        "name": "Master Point 4 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "masterPoint4Y",
+        "name": "Master Point 4 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "masterPoint4Tension",
+        "name": "Master Point 4 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint4Type",
+        "name": "Master Point 4 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "masterPoint5X",
+        "name": "Master Point 5 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "masterPoint5Y",
+        "name": "Master Point 5 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "masterPoint5Tension",
+        "name": "Master Point 5 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint5Type",
+        "name": "Master Point 5 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "masterPoint6X",
+        "name": "Master Point 6 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "masterPoint6Y",
+        "name": "Master Point 6 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "masterPoint6Tension",
+        "name": "Master Point 6 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint6Type",
+        "name": "Master Point 6 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "masterPoint7X",
+        "name": "Master Point 7 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "masterPoint7Y",
+        "name": "Master Point 7 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "masterPoint7Tension",
+        "name": "Master Point 7 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint7Type",
+        "name": "Master Point 7 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      },
+      {
+        "id": "masterPoint8X",
+        "name": "Master Point 8 X",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "masterPoint8Y",
+        "name": "Master Point 8 Y",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "masterPoint8Tension",
+        "name": "Master Point 8 Tension",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterPoint8Type",
+        "name": "Master Point 8 Type",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Single Curve",
+        "choices": [
+          "Single Curve",
+          "Double Curve",
+          "Hold",
+          "Stairs",
+          "Smooth Stairs"
+        ]
+      }
+    ]
+  },
+  {
+    "type": "phaziteLimiter",
+    "name": "Limiter",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "gain",
+        "name": "Gain",
+        "unit": "decibels",
+        "minimum": 0.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "ceiling",
+        "name": "Ceiling",
+        "unit": "decibels",
+        "minimum": -12.0,
+        "maximum": 0.0,
+        "default": -1.0
+      },
+      {
+        "id": "release",
+        "name": "Release",
+        "unit": "milliseconds",
+        "minimum": 1.0,
+        "maximum": 1000.0,
+        "default": 100.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteSaturator",
+    "name": "Saturator",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "drive",
+        "name": "Drive",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 36.0,
+        "default": 6.0
+      },
+      {
+        "id": "shape",
+        "name": "Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Soft",
+        "choices": [
+          "Soft",
+          "Tape",
+          "Tube",
+          "Hard",
+          "Fold"
+        ]
+      },
+      {
+        "id": "tone",
+        "name": "Tone",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "output",
+        "name": "Output",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "autoGain",
+        "name": "Auto Gain",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteDelay",
+    "name": "Delay",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "sync",
+        "name": "Sync",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "time",
+        "name": "Note",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 13.0,
+        "default": "1/8D",
+        "choices": [
+          "1/32",
+          "1/16T",
+          "1/16",
+          "1/16D",
+          "1/8T",
+          "1/8",
+          "1/8D",
+          "1/4T",
+          "1/4",
+          "1/4D",
+          "1/2T",
+          "1/2",
+          "1/2D",
+          "1 bar"
+        ]
+      },
+      {
+        "id": "milliseconds",
+        "name": "Time",
+        "unit": "milliseconds",
+        "minimum": 1.0,
+        "maximum": 2000.0,
+        "default": 375.0
+      },
+      {
+        "id": "feedback",
+        "name": "Feedback",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 0.95,
+        "default": 0.349999994039536
+      },
+      {
+        "id": "pingPong",
+        "name": "Ping-Pong",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowCut",
+        "name": "Low Cut",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 2000.0,
+        "default": 100.0
+      },
+      {
+        "id": "highCut",
+        "name": "High Cut",
+        "unit": "hertz",
+        "minimum": 1000.0,
+        "maximum": 20000.0,
+        "default": 8000.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.25
+      }
+    ]
+  },
+  {
+    "type": "phaziteReverb",
+    "name": "Reverb",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "size",
+        "name": "Size",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "decay",
+        "name": "Decay",
+        "unit": "seconds",
+        "minimum": 0.2,
+        "maximum": 20.0,
+        "default": 2.0
+      },
+      {
+        "id": "predelay",
+        "name": "Pre-Delay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 250.0,
+        "default": 10.0
+      },
+      {
+        "id": "damping",
+        "name": "Damping",
+        "unit": "hertz",
+        "minimum": 1000.0,
+        "maximum": 20000.0,
+        "default": 6000.0
+      },
+      {
+        "id": "lowCut",
+        "name": "Low Cut",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 1000.0,
+        "default": 100.0
+      },
+      {
+        "id": "highCut",
+        "name": "High Cut",
+        "unit": "hertz",
+        "minimum": 1000.0,
+        "maximum": 20000.0,
+        "default": 20000.0
+      },
+      {
+        "id": "width",
+        "name": "Width",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.25
+      }
+    ]
+  },
+  {
+    "type": "phazitePhaser",
+    "name": "Phaser",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "notches",
+        "name": "Notches",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "2",
+        "choices": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ]
+      },
+      {
+        "id": "frequency",
+        "name": "Frequency",
+        "unit": "hertz",
+        "minimum": 50.0,
+        "maximum": 10000.0,
+        "default": 800.0
+      },
+      {
+        "id": "depth",
+        "name": "Depth",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.600000023841858
+      },
+      {
+        "id": "sync",
+        "name": "Sync",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "division",
+        "name": "Division",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "1 bar",
+        "choices": [
+          "1/32",
+          "1/16T",
+          "1/16",
+          "1/16D",
+          "1/8T",
+          "1/8",
+          "1/8D",
+          "1/4T",
+          "1/4",
+          "1/4D",
+          "1/2T",
+          "1/2",
+          "1/2D",
+          "1 bar",
+          "2 bars",
+          "4 bars",
+          "8 bars"
+        ]
+      },
+      {
+        "id": "rate",
+        "name": "Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 20.0,
+        "default": 0.5
+      },
+      {
+        "id": "shape",
+        "name": "Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Sine",
+        "choices": [
+          "Sine",
+          "Triangle"
+        ]
+      },
+      {
+        "id": "feedback",
+        "name": "Feedback",
+        "unit": "percent",
+        "minimum": -0.85,
+        "maximum": 0.85,
+        "default": 0.300000011920929
+      },
+      {
+        "id": "spacing",
+        "name": "Spacing",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "stereo",
+        "name": "Stereo",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "safeBass",
+        "name": "Safe Bass",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 1000.0,
+        "default": 20.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteFlanger",
+    "name": "Flanger",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "delay",
+        "name": "Delay",
+        "unit": "milliseconds",
+        "minimum": 0.2,
+        "maximum": 15.0,
+        "default": 3.0
+      },
+      {
+        "id": "depth",
+        "name": "Depth",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.699999988079071
+      },
+      {
+        "id": "sync",
+        "name": "Sync",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "division",
+        "name": "Division",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "2 bars",
+        "choices": [
+          "1/32",
+          "1/16T",
+          "1/16",
+          "1/16D",
+          "1/8T",
+          "1/8",
+          "1/8D",
+          "1/4T",
+          "1/4",
+          "1/4D",
+          "1/2T",
+          "1/2",
+          "1/2D",
+          "1 bar",
+          "2 bars",
+          "4 bars",
+          "8 bars"
+        ]
+      },
+      {
+        "id": "rate",
+        "name": "Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 20.0,
+        "default": 0.25
+      },
+      {
+        "id": "shape",
+        "name": "Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Triangle",
+        "choices": [
+          "Sine",
+          "Triangle"
+        ]
+      },
+      {
+        "id": "feedback",
+        "name": "Feedback",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.300000011920929
+      },
+      {
+        "id": "stereo",
+        "name": "Stereo",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "safeBass",
+        "name": "Safe Bass",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 1000.0,
+        "default": 20.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteChorus",
+    "name": "Chorus",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "mode",
+        "name": "Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Classic",
+        "choices": [
+          "Classic",
+          "Ensemble"
+        ]
+      },
+      {
+        "id": "delay",
+        "name": "Delay",
+        "unit": "milliseconds",
+        "minimum": 1.0,
+        "maximum": 25.0,
+        "default": 3.5
+      },
+      {
+        "id": "depth",
+        "name": "Depth",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "sync",
+        "name": "Sync",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "division",
+        "name": "Division",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 16.0,
+        "default": "1 bar",
+        "choices": [
+          "1/32",
+          "1/16T",
+          "1/16",
+          "1/16D",
+          "1/8T",
+          "1/8",
+          "1/8D",
+          "1/4T",
+          "1/4",
+          "1/4D",
+          "1/2T",
+          "1/2",
+          "1/2D",
+          "1 bar",
+          "2 bars",
+          "4 bars",
+          "8 bars"
+        ]
+      },
+      {
+        "id": "rate",
+        "name": "Rate",
+        "unit": "hertz",
+        "minimum": 0.05,
+        "maximum": 20.0,
+        "default": 0.5
+      },
+      {
+        "id": "shape",
+        "name": "Shape",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Triangle",
+        "choices": [
+          "Sine",
+          "Triangle"
+        ]
+      },
+      {
+        "id": "feedback",
+        "name": "Feedback",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 0.9,
+        "default": 0.0
+      },
+      {
+        "id": "stereo",
+        "name": "Stereo",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "highCut",
+        "name": "High Cut",
+        "unit": "hertz",
+        "minimum": 1000.0,
+        "maximum": 20000.0,
+        "default": 20000.0
+      },
+      {
+        "id": "safeBass",
+        "name": "Safe Bass",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 1000.0,
+        "default": 20.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      }
+    ]
+  },
+  {
+    "type": "phaziteVocoder",
+    "name": "Vocoder",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "carrier",
+        "name": "Carrier",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 3.0,
+        "default": "Buzz",
+        "choices": [
+          "Buzz",
+          "Noise",
+          "Voice",
+          "Track"
+        ]
+      },
+      {
+        "id": "pitch",
+        "name": "Pitch",
+        "unit": "semitones",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "bands",
+        "name": "Bands",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 5.0,
+        "default": "16",
+        "choices": [
+          "8",
+          "12",
+          "16",
+          "24",
+          "32",
+          "40"
+        ]
+      },
+      {
+        "id": "lowFrequency",
+        "name": "Low Frequency",
+        "unit": "hertz",
+        "minimum": 40.0,
+        "maximum": 1000.0,
+        "default": 100.0
+      },
+      {
+        "id": "highFrequency",
+        "name": "High Frequency",
+        "unit": "hertz",
+        "minimum": 2000.0,
+        "maximum": 18000.0,
+        "default": 10000.0
+      },
+      {
+        "id": "bandWidth",
+        "name": "Band Width",
+        "unit": "percent",
+        "minimum": 0.25,
+        "maximum": 2.0,
+        "default": 1.0
+      },
+      {
+        "id": "formant",
+        "name": "Formant",
+        "unit": "semitones",
+        "minimum": -12.0,
+        "maximum": 12.0,
+        "default": 0.0
+      },
+      {
+        "id": "attack",
+        "name": "Attack",
+        "unit": "milliseconds",
+        "minimum": 0.5,
+        "maximum": 50.0,
+        "default": 2.0
+      },
+      {
+        "id": "release",
+        "name": "Release",
+        "unit": "milliseconds",
+        "minimum": 5.0,
+        "maximum": 500.0,
+        "default": 20.0
+      },
+      {
+        "id": "unvoiced",
+        "name": "Unvoiced",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "brightness",
+        "name": "Brightness",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "stereo",
+        "name": "Stereo",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "output",
+        "name": "Output",
+        "unit": "decibels",
+        "minimum": -24.0,
+        "maximum": 24.0,
+        "default": 0.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteStereoExpander",
+    "name": "Stereo Expander",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "width",
+        "name": "Width",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 2.0,
+        "default": 1.0
+      },
+      {
+        "id": "spread",
+        "name": "Spread",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "bassMono",
+        "name": "Bass Mono",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "bassMonoFrequency",
+        "name": "Bass Mono Frequency",
+        "unit": "hertz",
+        "minimum": 40.0,
+        "maximum": 500.0,
+        "default": 120.0
+      },
+      {
+        "id": "invertLeft",
+        "name": "Invert Left",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "invertRight",
+        "name": "Invert Right",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "gain",
+        "name": "Gain",
+        "unit": "decibels",
+        "minimum": -36.0,
+        "maximum": 36.0,
+        "default": 0.0
+      }
+    ]
+  }
+]

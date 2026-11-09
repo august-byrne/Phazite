@@ -102,8 +102,9 @@ struct Song
 
     phazite::DawProjectContent describe()
     {
-        return phazite::describeDawProject (*phazite::findSong (s.context), &phazite::getSession (s.context)->getPlugins(), "Test",
-                                            "A comment");
+        auto& song = *phazite::findSong (s.context);
+        song.storeDeviceStates();
+        return phazite::describeDawProject (song, "Test", "A comment");
     }
 };
 } // namespace
@@ -522,7 +523,7 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     const auto low = keptNote (36);
 
     // Exported, then saved again by another DAW, which moved a note of Bass up and turned Drums down.
-    auto content = phazite::describeDawProject (*phazite::findSong (s.context), nullptr, "Test",
+    auto content = phazite::describeDawProject (*phazite::findSong (s.context), "Test",
                                                 "Exported by Phazite from the version \"First\" (" + first + ").");
     auto* moved = const_cast<juce::XmlElement*> (find (*find (*content.project, "Lanes", "track", id ("t", bass)), "Note", "key", "40"));
     REQUIRE (moved != nullptr);

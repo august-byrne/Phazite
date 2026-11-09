@@ -49,6 +49,12 @@ struct ParameterInfo
     // For a parameter that moves in steps of its own (a count, say), from its minimum: the step. Choices and toggles move
     // in whole numbers without one.
     std::optional<float> step {};
+
+    // For Unit::choice: the name each choice is saved by in projects and presets (model/base/internal/Schema.h: VALUES), as
+    // many as there are choices, if not its text in choices: so that what editors show can change (or be translated)
+    // without changing what songs hold. Empty: the choices' own texts are their names. Last, after what descriptions give
+    // in order.
+    std::span<const std::string_view> choiceIDs {};
 };
 
 // Whether a description holds together: a range with the default in it, a midpoint strictly inside it, whole numbers
@@ -62,6 +68,11 @@ juce::NormalisableRange<float> getRange (const ParameterInfo&);
 // A value as the parameter allows it: within its range, whole for choices and toggles, and on a step for one that has
 // them.
 float constrain (const ParameterInfo&, float value);
+
+// For Unit::choice: the name a choice is saved by (choiceIDs, else its text), by its index from the minimum; empty for an
+// index that isn't one. And the index of the choice a name names, or nothing.
+std::string_view getChoiceName (const ParameterInfo&, int index);
+std::optional<int> findChoice (const ParameterInfo&, std::string_view name);
 
 //==============================================================================
 enum class DeviceKind

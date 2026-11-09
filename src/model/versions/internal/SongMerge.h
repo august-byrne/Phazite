@@ -33,12 +33,29 @@ struct MergeClash
     juce::String what;                                       // in Phazite's own words: "volume", "Synth: cutoff", "automation"
 };
 
+// An ID a merge gave anew to what the other side added, as the other side has it and as this one does now: an item's, or a
+// note's in a clip, by the clip's alias group or itself ("link 12", "clip 66"), as the merge's commit keeps it
+// (VersionStore.h: VersionRecord::renumbered), so that a later merge of that line knows them again (docs/format-audit.md, R9).
+struct RenumberedID
+{
+    juce::String clip;
+    std::uint64_t from = 0, to = 0;
+
+    bool operator== (const RenumberedID&) const = default;
+};
+
 struct MergeResult
 {
     juce::ValueTree song; // this side's, with the other's lines taken in
     std::vector<MergeClash> clashes;
     juce::StringArray notes; // what a merge can't decide for the user, such as "Bass: changed here, taken away there: kept"
+    std::vector<RenumberedID> renumbered;
 };
+
+// A song's IDs as earlier merges gave them anew (each from, its item's and what names it, or its note's in that clip, made
+// to): the other side's song, and where the lines parted, numbered as this side's before they are merged again. All at
+// once, so that one ID given anew never meets another.
+void translateIDs (juce::ValueTree song, const std::vector<RenumberedID>&);
 
 // What a merge takes, of the lines the other side changed since the two parted (findChanges (base, theirs)): tracks by their
 // IDs (the other side's), the master by its ID, and the song's own.

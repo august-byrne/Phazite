@@ -6,7 +6,7 @@
     "type": "phaziteSaturator",
     "parameters": {
       "drive": 3.0,
-      "shape": 2,
+      "shape": "Tube",
       "tone": 0.1,
       "output": 0.0,
       "autoGain": 1,

@@ -18,6 +18,7 @@
 #include "model/transport/internal/Playback.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/SongMerge.h"
+#include "model/versions/internal/VersionHistory.h"
 
 #include <set>
 
@@ -372,4 +373,83 @@ TEST_CASE ("Random edits on two sides always merge into a song whose IDs are eac
         checkIDs (phazite::findSong (s.context)->getState());
         CHECK (phazite::getTrackIDs (*phazite::findSong (s.context)).size() == phazite::getTrackElements (merged.song).size());
     }
+}
+
+TEST_CASE ("A line merged again after a merge gave its additions new IDs merges onto the same items, through what the merge recorded")
+{
+    Sides sides;
+
+    // Each side adds a track, both counting on from the same place: one ID for two tracks.
+    phazite::ensureTracks (*sides.ours, 3);
+    phazite::ensureTracks (*sides.theirs, 3);
+    auto ourTrack = phazite::getTrackElements (sides.ours->getState()).back();
+    auto theirTrack = phazite::getTrackElements (sides.theirs->getState()).back();
+    REQUIRE (ourTrack[schema::trackID] == theirTrack[schema::trackID]);
+    ourTrack.setProperty (schema::trackName, "Lead", nullptr);
+    theirTrack.setProperty (schema::trackName, "Pad", nullptr);
+
+    const auto first = sides.merge();
+    REQUIRE_FALSE (first.renumbered.empty());
+    const auto padID = findTrack (first.song, "Pad")[schema::trackID];
+    CHECK (padID != ourTrack[schema::trackID]);
+
+    // The other line goes on from what was merged in: its Pad renamed.
+    const auto parted = sides.theirs->getState().createCopy();
+    findTrack (sides.theirs->getState(), "Pad").setProperty (schema::trackName, "Pad 2", nullptr);
+
+    // Merged again, the parting's and the other side's songs numbered as this side's through what the first merge recorded.
+    auto base = parted.createCopy(), theirs = sides.theirs->getState().createCopy();
+    phazite::translateIDs (base, first.renumbered);
+    phazite::translateIDs (theirs, first.renumbered);
+    CHECK (findTrack (theirs, "Pad 2")[schema::trackID] == padID);
+
+    phazite::MergeLines lines;
+
+    for (const auto& change : phazite::findChanges (base, theirs))
+        if (change.where != phazite::SongChange::Where::song)
+            lines.tracks.insert (change.trackID);
+
+    auto ours = phazite::makeSong (first.song.createCopy());
+    const auto second = phazite::mergeSongs (base, ours->getState(), theirs, lines, [&ours] { return ours->makeID(); });
+
+    CHECK (second.clashes.empty());
+    CHECK (findTrack (second.song, "Lead")[schema::trackID] == ourTrack[schema::trackID]);
+    CHECK (findTrack (second.song, "Pad 2")[schema::trackID] == padID);
+    CHECK_FALSE (findTrack (second.song, "Pad").isValid());
+    CHECK (phazite::getTrackElements (second.song).size() == phazite::getTrackElements (first.song).size());
+    checkIDs (second.song);
+}
+
+TEST_CASE ("The renumberings that apply are those of this line's merges since the parting that merged in the other line")
+{
+    std::map<juce::String, phazite::VersionRecord> versions;
+
+    const auto add =
+        [&versions] (const char* id, juce::int64 saved, juce::StringArray parents, std::vector<phazite::RenumberedID> renumbered = {})
+    {
+        phazite::VersionRecord record;
+        record.id = id;
+        record.saved = saved;
+        record.parents = std::move (parents);
+        record.renumbered = std::move (renumbered);
+        versions.emplace (record.id, record);
+    };
+
+    // base, then ours o1 and theirs t1; m1 merges t1 into ours, renumbering 20 to 21; theirs goes on to t2; ours to o2. A
+    // merge of another line (x1, into m2) renumbered too, which doesn't apply.
+    add ("base", 1, {});
+    add ("o1", 2, { "base" });
+    add ("t1", 3, { "base" });
+    add ("m1", 4, { "o1", "t1" }, { { {}, 20, 21 } });
+    add ("x1", 5, { "base" });
+    add ("m2", 6, { "m1", "x1" }, { { {}, 30, 31 } });
+    add ("t2", 7, { "t1" });
+
+    const auto parted = phazite::findMergeBase (versions, "m2", "t2");
+    CHECK (parted == "t1");
+
+    const auto renumbering = phazite::findRenumbering (versions, "m2", "t2", parted);
+    REQUIRE (renumbering.size() == 1);
+    CHECK (renumbering[0].from == 20);
+    CHECK (renumbering[0].to == 21);
 }

@@ -5,9 +5,9 @@
     "instrument": false,
     "type": "phaziteVocoder",
     "parameters": {
-      "carrier": 0,
+      "carrier": "Buzz",
       "pitch": -5.0,
-      "bands": 3,
+      "bands": "24",
       "lowFrequency": 100.0,
       "highFrequency": 10000.0,
       "bandWidth": 1.0,

@@ -57,6 +57,12 @@ public:
     // calls back with the answer; untitled if the project was never saved. Unset, a dialog asks; tests answer themselves.
     std::function<void (const juce::File& projectFile, bool untitled, std::function<void (bool restore)>)> askToRestore;
 
+    // For a project file that won't open: asks whether to open its newest backup that reads, or its branch's last commit,
+    // each described ("the backup of 9 Nov 2026 14:02", empty where there is none), and calls back with the answer: 1 for the
+    // backup, 2 for the commit, 0 for neither. Unset, a dialog asks; tests answer themselves.
+    std::function<void (const juce::String& error, const juce::String& backup, const juce::String& commit, std::function<void (int)>)>
+        askWhichCopy;
+
     // After Phazite didn't close properly (a crash, perhaps in a plug-in of the project that was open), asks how to open that
     // project (docs/performance-audit.md, R2): as usual, with its plug-ins off, or not, starting a new one. Unset, a dialog
     // asks; tests answer themselves.
@@ -150,6 +156,7 @@ private:
     void open (const juce::File&, bool restoreAutosave);
     void restoreUntitled (const juce::File&, bool restore);
     void askWhetherToRestore (const juce::File&, bool untitled, std::function<void (bool restore)>);
+    void askWhichCopyToOpen (const juce::String& error, const juce::String& backup, const juce::String& commit, std::function<void (int)>);
     void askHowToOpenAfterCrash (const juce::File&, std::function<void (AfterCrash)>);
     bool pluginsOffUntilOpen = false; // the project opening opens with its plug-ins off
     void createFirstProject();        // an empty one, as every new project starts
