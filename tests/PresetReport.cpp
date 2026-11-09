@@ -23,6 +23,7 @@
 #include "engine/nodes/LoudnessMeter.h"
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/presets/PresetModel.h"
 #include "model/presets/internal/Presets.h"
 
@@ -93,7 +94,8 @@ std::optional<Preset> readPreset (const juce::File& file, devices::DeviceKind ki
         if (const auto* set = device[keys::parameters].getDynamicObject())
             for (const auto& [id, value] : set->getProperties())
                 if (const auto index = devices::findParameter (*info, id.toString().toStdString()); index >= 0)
-                    preset.values[(size_t) index] = devices::constrain (info->parameters[(size_t) index], (float) value);
+                    preset.values[(size_t) index] = devices::constrain (info->parameters[(size_t) index],
+                                                                        phazite::readSavedValue (info->parameters[(size_t) index], value));
 
         return preset;
     }

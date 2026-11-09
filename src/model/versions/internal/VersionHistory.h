@@ -77,9 +77,34 @@ public:
     bool saveVersion (const juce::String& name, const juce::String& note, std::function<void (juce::Result)> done = {});
     bool isSaving() const noexcept { return saving; }
 
-    // A version's song, read from its pieces, with its plug-ins' parameters' values if asked: invalid if one can't be read.
-    // And the current branch's last version's song, which the changes are from (invalid before the first version).
-    juce::ValueTree readSong (const juce::String& versionID, PluginParameterValues* parameters = nullptr) const;
+    // A version's song, read from its pieces, with its plug-ins' parameters' values if asked: invalid if one can't be read,
+    // or, given somewhere to list what is missing, as much as can be read (SongPieces.h: joinSong()). And the current
+    // branch's last version's song, which the changes are from (invalid before the first version).
+    juce::ValueTree readSong (const juce::String& versionID, PluginParameterValues* parameters = nullptr,
+                              std::vector<MissingPiece>* missing = nullptr) const;
+
+    // What the last Restore from This Commit couldn't take, as the commit's pieces that couldn't be read left it: none
+    // while it took everything. Told until the next one.
+    std::vector<MissingPiece> restoreMissing;
+
+    // Verify History (git's fsck): every piece of every pack read and checked against its name, every commit's song walked
+    // piece by piece, and the commits found in the packs that no branch's line holds. On the history's thread; done is told
+    // on the message thread, and the report kept for the Versions view until the next check.
+    struct Check
+    {
+        int numPieces = 0, numVersions = 0;
+        juce::StringArray damagedPieces;                           // in a pack, but not what their names say
+        std::map<juce::String, std::vector<MissingPiece>> damaged; // by version: what of its song can't be read
+        std::vector<VersionRecord> lost;                           // commits no branch's line holds, newest first
+    };
+
+    bool checkHistory (std::function<void()> done = {});
+    bool isChecking() const noexcept { return checking; }
+    const std::optional<Check>& getLastCheck() const noexcept { return lastCheck; }
+
+    // The lost commits the last check found, each line of them made a branch of its own at its newest commit (named after
+    // the branch they were made on, "main-recovered", or "recovered" for one this history doesn't know): how many branches.
+    int recoverLostVersions();
     const juce::ValueTree& getLastVersionSong() const noexcept { return baseline; }
 
     // The Versions view's choices, which the commands act on: the version selected in its history, and the line of the
@@ -146,8 +171,11 @@ public:
     bool renameBranch (const juce::String& branchID, const juce::String& name);
     juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to
 
-    // The newest version that two versions both are or follow; none for two of no common line.
+    // Where two versions' lines parted (findMergeBase()); none for two of no common line.
     juce::String findCommonVersion (const juce::String& a, const juce::String& b) const;
+
+    // The IDs earlier merges into this line gave anew to what the other line added (findRenumbering(), below).
+    std::vector<RenumberedID> findRenumbering (const juce::String& ours, const juce::String& theirs, const juce::String& parted) const;
 
     // A commit as git names one in a merge's message: "branch 'idea-2'" for another branch's last commit, else
     // "commit '1a2b3c4'" (its id's first seven characters).
@@ -160,6 +188,8 @@ public:
     {
         juce::String version, otherBranch;
         juce::ValueTree base, theirs;
+        PluginParameterValues theirParameters; // the other's plug-ins' knobs, which name a plug-in's clash
+        std::vector<RenumberedID> renumbered;  // what it gave anew, which its commit keeps
         std::vector<SongChange> lines;
         std::vector<MergeClash> clashes;
         std::vector<int> chosen;
@@ -184,7 +214,8 @@ private:
     std::shared_ptr<VersionStore> store;
     juce::ThreadPool thread;
     int pendingJobs = 0, generation = 0; // generation: which store what comes back from the thread was read from
-    bool hasRead = false, saving = false;
+    bool hasRead = false, saving = false, checking = false;
+    std::optional<Check> lastCheck;
 
     std::vector<BranchRecord> branches;
     juce::String currentBranch; // its id
@@ -201,7 +232,16 @@ private:
     PluginParameterValues stagedParameters;
     std::vector<SongChange> stagedChanges;
     bool stagedReady = false;
-    void takeLine (const SongChange&, const juce::ValueTree& from, const PluginParameterValues& fromParameters);
+
+    // The song's counts of the changes its plug-ins said they made (Song::getChangesOutsideHistory()), by device, as they
+    // were at the last commit and as each line was staged: a plug-in whose stored state differs counts as changed since one
+    // of them only if its count moved, or a knob of it did (SongDiff.h: PluginValues::reported).
+    using ReportCounts = std::map<std::uint64_t, int>;
+    ReportCounts reportedAtBaseline, reportedAtStaged;
+    static std::set<std::uint64_t> findReported (const ReportCounts& then, const ReportCounts& now);
+
+    void takeLine (const SongChange&, const juce::ValueTree& from, const PluginParameterValues& fromParameters,
+                   const ReportCounts& fromReported);
     void stagedChanged();
 
     // The changes, worked out a thing at a time: each track's (and the master's) by its ID, those with changes; the song's
@@ -224,14 +264,16 @@ private:
     void open(); // the store beside the song's file, read on the history's thread
     void opened (int generation, std::vector<BranchRecord>, const juce::String& current, std::map<juce::String, VersionRecord>,
                  const juce::ValueTree& head, PluginParameterValues);
-    void saved (int generation, bool ok, const VersionRecord&, const BranchRecord&, const juce::ValueTree& song, PluginParameterValues);
+    void saved (int generation, bool ok, const VersionRecord&, const BranchRecord&, const juce::ValueTree& song, PluginParameterValues,
+                ReportCounts committed);
     void followFolder(); // the song's project moved (its first save asked where): its versions are beside it there
     void run (std::function<void()> job);
+    void checked (int generation, Check);
 
     // Leaving the current branch for another: the song as it is now kept on it, and the other's as it was left there (or as
     // its last version had it), to make the song's: invalid if it can't be.
     juce::ValueTree leaveFor (const juce::String& branchID);
-    void setBaseline (juce::ValueTree song, PluginParameterValues);
+    void setBaseline (juce::ValueTree song, PluginParameterValues, ReportCounts);
 
     void markChanged (const juce::ValueTree&, const juce::Identifier& property);
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);
@@ -239,8 +281,13 @@ private:
     void changed(); // tells onChange at the next tick
     void edited();  // the song changed as the changes count it
     void takeChangesOutsideHistory();
+
+public:
+    // The song's plug-ins' parameters' values as they are now, as their instances tell them, by their devices' IDs: what a
+    // commit keeps beside their states, and what names a plug-in's knobs in a merge's clash.
     PluginParameterValues readPluginParameters() const;
 
+private:
     void timerCallback() override;
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { markChildChanged (parent, child); }
@@ -253,6 +300,33 @@ private:
 
 // The versions folder of a song's project, beside its file; none for a song without one.
 juce::File getVersionsFolder (const Song&);
+
+// Where the lines of two versions parted, as git merge-base finds it: of the versions both are or follow, one that no other
+// of them follows. Chosen by the graph, not by when versions were saved, so that computers whose clocks differ agree. Where
+// merges crossed and there are several, the one saved last (then the greater id). None for versions of no common line, or
+// whose records aren't among those given.
+juce::String findMergeBase (const std::map<juce::String, VersionRecord>& versions, const juce::String& a, const juce::String& b);
+
+// Whether a version is another or follows it, among the versions given.
+bool follows (const std::map<juce::String, VersionRecord>& versions, const juce::String& later, const juce::String& earlier);
+
+// The IDs earlier merges into one line (ours) gave anew to what another line (theirs) added (RenumberedID), oldest first:
+// those of the merge commits ours follows and where the lines parted doesn't, whose version merged in theirs follows. The
+// other side's song and the parting's, translated through them (SongMerge.h: translateIDs()), are numbered as this side's.
+std::vector<RenumberedID> findRenumbering (const std::map<juce::String, VersionRecord>& versions, const juce::String& ours,
+                                           const juce::String& theirs, const juce::String& parted);
+
+// The song of the current branch's last commit in a project's history, read from its Versions folder without opening the
+// project (when its file can't be read, ProjectSession offers it), and the commit's name; invalid for none, or one that
+// can't be read whole.
+std::pair<juce::ValueTree, juce::String> readLastCommitSong (const juce::File& projectFile);
+
+// Every computer's record of every branch (VersionStore.h) taken together, a record a branch, as this computer has them:
+// its name and color the newest record's; its last version the one that follows every other computer's, or, where the
+// lines went their own ways, this computer's (else the newest record's), with the others' last versions it doesn't follow
+// as divergent; and the song this computer left on it. Versions whose records aren't among those given count as none.
+std::vector<BranchRecord> joinBranchRecords (const std::vector<BranchRecord>& records,
+                                             const std::map<juce::String, VersionRecord>& versions, const juce::String& computer);
 
 // What a version is called: the name it was given, or the summary of its changes.
 juce::String getDisplayName (const VersionRecord&);

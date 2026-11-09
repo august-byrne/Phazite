@@ -102,9 +102,7 @@ namespace
     {
         constexpr auto kind = devices::ModulatorKind::steps;
         const auto index = devices::findModulatorParameter (kind, "numSteps");
-        const auto& info = devices::getModulatorParameters (kind)[(size_t) index];
-        const auto value =
-            (float) sequencer.getChildWithName (schema::VALUES).getProperty (juce::Identifier (toString (info.id)), info.defaultValue);
+        const auto value = readValueSetByHand (sequencer, devices::getModulatorParameters (kind)[(size_t) index]);
         return juce::jlimit (1, devices::Modulator::maxSteps, juce::roundToInt (value));
     }
 

@@ -16,11 +16,15 @@
 namespace phazite
 {
 // The values of the plug-ins' parameters then and now, if known (SongPieces.h): a plug-in whose knobs moved is changed,
-// named by them ("Serum: Cutoff 40% → 55%"), as its state says nothing to anyone but the plug-in.
+// named by them ("Serum: Cutoff 40% → 55%"), as its state says nothing to anyone but the plug-in. And, if given, the
+// plug-ins (by their devices' IDs) that said they changed since then (Song::markChangedOutsideHistory()): a plug-in's state
+// that differs counts as a change only for those, or for one whose knobs moved, as some plug-ins write other bytes each
+// time with nothing changed. Without it, every state that differs counts.
 struct PluginValues
 {
     const PluginParameterValues* before = nullptr;
     const PluginParameterValues* after = nullptr;
+    const std::set<std::uint64_t>* reported = nullptr;
 };
 
 // Whether two elements hold the same, counted as a project's changes are: the same properties, and the same children by

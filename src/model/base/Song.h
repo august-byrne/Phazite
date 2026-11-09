@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 
 namespace phazite
 {
@@ -43,9 +44,26 @@ public:
     std::uint64_t makeID(); // in Schema.cpp, with the name of the count
 
     // A change to the project made outside the song's history: a plug-in's own settings, changed in its window, which the
-    // song holds only once they are stored (setDeviceStateStore()). Each counts as an unsaved change.
-    void markChangedOutsideHistory() noexcept { ++changesOutsideHistory; }
+    // song holds only once they are stored (setDeviceStateStore()). Each counts as an unsaved change. Counted for the song,
+    // and for the device it was made in, by the device's ID: a plug-in whose stored settings differ counts as changed in the
+    // versions only after it said it changed (model/versions/internal/VersionHistory.h), as some write other bytes each time.
+    void markChangedOutsideHistory (std::uint64_t deviceID = 0)
+    {
+        ++changesOutsideHistory;
+
+        if (deviceID != 0)
+            ++deviceChangesOutsideHistory[deviceID];
+    }
+
     int getChangesOutsideHistory() const noexcept { return changesOutsideHistory; }
+
+    int getChangesOutsideHistory (std::uint64_t deviceID) const
+    {
+        const auto found = deviceChangesOutsideHistory.find (deviceID);
+        return found != deviceChangesOutsideHistory.end() ? found->second : 0;
+    }
+
+    const std::map<std::uint64_t, int>& getDeviceChangesOutsideHistory() const noexcept { return deviceChangesOutsideHistory; }
 
     // Values set by hand as they are set: by a control, a command or a preset (setValueSetByHand(),
     // model/devices/internal/Parameters.h), or by a plug-in itself, in its window. For what plays the song, what writes its
@@ -73,6 +91,7 @@ private:
     juce::File file, cacheFolder;
     mutable juce::File ownCacheFolder; // in the temporary folder, while no other is given
     int changesOutsideHistory = 0;
+    std::map<std::uint64_t, int> deviceChangesOutsideHistory;
     juce::ListenerList<ParameterListener> parameterListeners;
     std::function<void (std::uint64_t)> deviceStateStore;
 

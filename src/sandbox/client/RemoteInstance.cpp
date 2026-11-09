@@ -123,32 +123,6 @@ bool RemoteInstance::setState (const juce::MemoryBlock& state, int timeoutMillis
     return helper.request (message, timeoutMilliseconds).has_value();
 }
 
-std::optional<juce::MemoryBlock> RemoteInstance::getPreset (int timeoutMilliseconds)
-{
-    auto message = helper.makeRequest (MessageType::getPreset);
-    message.add (id);
-    const auto answer = helper.request (message, timeoutMilliseconds);
-
-    if (! answer.has_value())
-        return {};
-
-    MessageReader reader (*answer);
-    return reader.readBlock();
-}
-
-bool RemoteInstance::setPreset (const juce::MemoryBlock& preset, int timeoutMilliseconds)
-{
-    auto message = helper.makeRequest (MessageType::setPreset);
-    message.add (id).add (preset);
-    const auto answer = helper.request (message, timeoutMilliseconds);
-
-    if (! answer.has_value())
-        return false;
-
-    MessageReader reader (*answer);
-    return reader.readBool();
-}
-
 bool RemoteInstance::setProgram (int index, int timeoutMilliseconds)
 {
     auto message = helper.makeRequest (MessageType::setProgram);
@@ -302,8 +276,6 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         case MessageType::openEditor:
         case MessageType::closeEditor:
         case MessageType::scan:
-        case MessageType::getPreset:
-        case MessageType::setPreset:
         case MessageType::quit:
         case MessageType::setParameter:
         case MessageType::placeEditor:

@@ -35,6 +35,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/Devices.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
@@ -238,10 +239,12 @@ std::vector<float> readValues (const devices::DeviceInfo& info, const juce::var&
     for (const auto& parameter : info.parameters)
         values.push_back (parameter.defaultValue);
 
+    // A choice by its name, any other value by its number, as Phazite reads a preset.
     if (const auto* set = device[keys::parameters].getDynamicObject())
         for (const auto& [id, value] : set->getProperties())
             if (const auto index = devices::findParameter (info, id.toString().toStdString()); index >= 0)
-                values[(size_t) index] = devices::constrain (info.parameters[(size_t) index], (float) value);
+                values[(size_t) index] =
+                    devices::constrain (info.parameters[(size_t) index], phazite::readSavedValue (info.parameters[(size_t) index], value));
 
     return values;
 }
@@ -334,6 +337,15 @@ TEST_CASE ("Phazite's presets: each a device's, in its folder, with parameters a
             const auto index = devices::findParameter (*info, id.toString().toStdString());
             REQUIRE (index >= 0);
             const auto& parameter = info->parameters[(size_t) index];
+
+            // A choice by its name, one of the device's choices; any other value a number.
+            if (parameter.unit == devices::Unit::choice)
+            {
+                CHECK (value.isString());
+                CHECK (devices::findChoice (parameter, value.toString().toStdString()).has_value());
+                continue;
+            }
+
             CHECK ((value.isDouble() || value.isInt() || value.isInt64()));
             CHECK ((float) value >= parameter.minimum);
             CHECK ((float) value <= parameter.maximum);
@@ -395,16 +407,7 @@ TEST_CASE ("Phazite's presets play: sound comes out, only numbers, and never far
         const auto* info = findDevice (device[keys::type].toString());
         REQUIRE (info != nullptr);
 
-        std::vector<float> values;
-
-        for (const auto& parameter : info->parameters)
-            values.push_back (parameter.defaultValue);
-
-        if (const auto* set = device[keys::parameters].getDynamicObject())
-            for (const auto& [id, value] : set->getProperties())
-                if (const auto index = devices::findParameter (*info, id.toString().toStdString()); index >= 0)
-                    values[(size_t) index] = devices::constrain (info->parameters[(size_t) index], (float) value);
-
+        const auto values = readValues (*info, device);
         const auto played = play (*info, values, device[keys::sounds]);
         CHECK (played.finite);
         CHECK (played.peak < 2.0f); // 6 dB over full scale at most, for a chord at velocity 100 or a loud beat

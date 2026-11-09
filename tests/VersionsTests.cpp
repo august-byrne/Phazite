@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A project's versions (docs/versions.md): saving them, reading them back as the project opens, and the changes since the
 // last one, by track, in Phazite's own words.
+#include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/dynamics/Compressor.h"
@@ -11,6 +12,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
@@ -490,4 +492,171 @@ TEST_CASE ("A branch's name is what git takes: spaces as dashes, without what a 
     CHECK (phazite::toBranchName ("../.hidden.lock") == "hidden");
     CHECK (phazite::toBranchName ("feature//new idea/") == "feature/new-idea");
     CHECK (phazite::toBranchName ("---") == "");
+}
+
+TEST_CASE ("A plug-in's stored settings that differ count as a change only after it said it changed, or a knob of it moved")
+{
+    phazite::test::TestPlugin testPlugin; // known while the song is
+    TestSong s;
+    const auto track = s.addTrack ("Effects");
+    auto& song = *phazite::findSong (s.context);
+    phazite::DeviceID device;
+
+    {
+        const phazite::UndoStep step (song, "Add the stand-in");
+        device = phazite::test::TestPlugin::add (song, track);
+    }
+
+    keepVersion (s.context, "First");
+    CHECK (describeChanges (s.context).isEmpty());
+
+    // Other bytes stored with nothing said, as a plug-in that writes a time into its state leaves them at each save.
+    phazite::findDeviceState (song, device)
+        .setProperty (schema::pluginState, phazite::writeBytes (juce::MemoryBlock ("other", 5)), nullptr);
+    dispatchPendingMessages();
+    CHECK (describeChanges (s.context).isEmpty());
+
+    // Once it said its settings changed, they count.
+    song.markChangedOutsideHistory (device.getRaw());
+    CHECK (describeChanges (s.context).contains ("Effects"));
+}
+
+TEST_CASE ("A plug-in's update shows in the changes, by the version that made its settings then and now")
+{
+    phazite::test::TestPlugin testPlugin;
+    TestSong s;
+    const auto track = s.addTrack ("Effects");
+    auto& song = *phazite::findSong (s.context);
+    phazite::DeviceID device;
+
+    {
+        const phazite::UndoStep step (song, "Add the stand-in");
+        device = phazite::test::TestPlugin::add (song, track);
+    }
+
+    // A commit stores the version of the plug-in that made the state, as it stores the state.
+    phazite::findDeviceState (song, device).setProperty (schema::pluginVersion, "1.0.0", nullptr);
+    keepVersion (s.context, "First");
+    const auto then = phazite::findDeviceState (song, device)[schema::pluginVersion].toString();
+    const auto installed = phazite::test::TestPlugin::getDescription().version;
+    CHECK (then == (installed.isNotEmpty() ? installed : juce::String ("1.0.0")));
+
+    phazite::findDeviceState (song, device).setProperty (schema::pluginVersion, "9.9.9", nullptr);
+    CHECK (describeChanges (s.context).contains ("updated " + then + juce::String::fromUTF8 (" \xe2\x86\x92 9.9.9")));
+}
+
+TEST_CASE ("Verify History finds the commits no branch holds and what is damaged, and Recover Lost Commits makes a branch of each line")
+{
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    keepVersion (s.context, "First");
+    auto& song = *phazite::findSong (s.context);
+    const auto* history = phazite::getVersionHistory (s.context);
+    const auto first = history->findLastVersion()->id;
+
+    // A commit that no branch holds, as a lost branch file would leave one: written into the store beside the others.
+    juce::String lostID;
+
+    {
+        phazite::VersionStore store (phazite::getVersionsFolder (song), "elsewhere");
+        phazite::VersionRecord lost;
+        lost.name = "Lost";
+        lost.parents.add (first);
+        lost.branch = history->findCurrentBranch()->id;
+        lost.saved = juce::Time::currentTimeMillis();
+        lostID = store.writeVersion (lost, phazite::splitSong (song.getState()));
+        REQUIRE (lostID.isNotEmpty());
+    }
+
+    const auto verify = [&s]
+    {
+        REQUIRE (phazite::verifyHistory (s.context));
+        REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isVerifyingHistory (s.context); }, 20000));
+    };
+
+    verify();
+    CHECK (phazite::describeHistoryCheck (s.context).contains ("all whole"));
+    CHECK (phazite::countLostVersions (s.context) == 1);
+    CHECK (phazite::describeHistoryCheck (s.context).contains ("Recover Lost Commits"));
+
+    // Recovered: a branch at it, named after the branch it was made on.
+    CHECK (phazite::recoverLostVersions (s.context) == 1);
+    CHECK (phazite::countLostVersions (s.context) == 0);
+    const auto branches = phazite::getBranches (s.context);
+    CHECK (std::any_of (branches.begin(), branches.end(), [&lostID] (const phazite::BranchInfo& branch)
+                        { return branch.name == "main-recovered" && branch.head == lostID; }));
+
+    // A byte of a pack damaged: the piece is found, and the commits that need it named.
+    phazite::setChannelVolume (song, bass, -6.0f);
+    keepVersion (s.context, "Second");
+    juce::File newest;
+
+    for (const auto& pack :
+         phazite::getVersionsFolder (song).getChildFile ("pieces").findChildFiles (juce::File::findFiles, false, "*.pack"))
+        if (newest == juce::File() || pack.getLastModificationTime() > newest.getLastModificationTime())
+            newest = pack;
+
+    juce::MemoryBlock bytes;
+    REQUIRE (newest.loadFileAsData (bytes));
+    static_cast<char*> (bytes.getData())[10] ^= 0x5a;
+    REQUIRE (newest.replaceWithData (bytes.getData(), bytes.getSize()));
+
+    verify();
+    CHECK (phazite::describeHistoryCheck (s.context).contains ("damaged"));
+}
+
+TEST_CASE ("A branch another computer took its own way keeps this computer's line, with the other's as divergent")
+{
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    keepVersion (s.context, "First");
+    auto& song = *phazite::findSong (s.context);
+    const auto* history = phazite::getVersionHistory (s.context);
+    const auto first = history->findLastVersion()->id;
+    const auto main = *history->findCurrentBranch();
+
+    // Another computer, from the same commit, committed on main too: its own record of main says so.
+    juce::String theirs;
+
+    {
+        phazite::VersionStore elsewhere (phazite::getVersionsFolder (song), "elsewhere");
+        phazite::VersionRecord record;
+        record.name = "Theirs";
+        record.parents.add (first);
+        record.branch = main.id;
+        record.saved = juce::Time::currentTimeMillis();
+        theirs = elsewhere.writeVersion (record, phazite::splitSong (song.getState()));
+        REQUIRE (theirs.isNotEmpty());
+
+        auto branch = main;
+        branch.head = theirs;
+        branch.computer = "elsewhere";
+        branch.working = {};
+        REQUIRE (elsewhere.writeBranch (branch));
+    }
+
+    // This computer commits its own; then the history read again, as when the project next opens.
+    phazite::setChannelVolume (song, bass, -6.0f);
+    keepVersion (s.context, "Mine");
+    const auto mine = history->findLastVersion()->id;
+
+    phazite::VersionHistory reread (song, {});
+    REQUIRE (dispatchMessagesUntil ([&reread] { return ! reread.isReading() && ! reread.isBusy(); }));
+    REQUIRE (reread.findCurrentBranch() != nullptr);
+    CHECK (reread.findCurrentBranch()->head == mine);
+    CHECK (reread.findCurrentBranch()->divergent == juce::StringArray (theirs));
+}
+
+TEST_CASE ("A project's last commit is read from its Versions folder without the project, to open in its place")
+{
+    TestSong s;
+    s.addTrack ("Bass");
+    keepVersion (s.context, "Kept");
+    auto& song = *phazite::findSong (s.context);
+
+    const auto [commit, name] = phazite::readLastCommitSong (song.getFile());
+    REQUIRE (commit.isValid());
+    CHECK (name == "Kept");
+    CHECK (commit.hasType (schema::PHAZITE));
+    CHECK (phazite::getTrackElements (commit).size() == phazite::getTrackElements (song.getState()).size());
 }

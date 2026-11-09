@@ -8,6 +8,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
@@ -25,9 +26,9 @@ using phazite::test::TestPlugin;
 // The stand-in's gain, as its settings stored in base 64 hold it.
 float getStoredGain (const juce::String& base64)
 {
-    juce::MemoryBlock settings;
-    REQUIRE (settings.fromBase64Encoding (base64));
-    juce::MemoryInputStream stream (settings, false);
+    const auto settings = phazite::readBytes (base64);
+    REQUIRE (settings.has_value());
+    juce::MemoryInputStream stream (*settings, false);
     return stream.readFloat();
 }
 

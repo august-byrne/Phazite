@@ -42,9 +42,9 @@ struct DawProjectContent
     engine::TempoMap tempo;
 };
 
-// The song as a DAWproject, titled and with a comment, its plug-ins' presets taken from their instances (none: no states).
-// Message thread.
-DawProjectContent describeDawProject (const Song&, PluginInstances*, const juce::String& title, const juce::String& comment);
+// The song as a DAWproject, titled and with a comment, its VST3s' presets the states the song holds of them, which are
+// their preset files (sandbox/core/Vst3State.h; store the plug-ins' states first: Song::storeDeviceStates()). Message thread.
+DawProjectContent describeDawProject (const Song&, const juce::String& title, const juce::String& comment);
 
 // Writes it into a file, its bounces taken from a folder (<the track's ID>.wav): into a temporary file next to it, which
 // takes its place once complete. Any thread.

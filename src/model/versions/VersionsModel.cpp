@@ -2,6 +2,7 @@
 #include "VersionsModel.h"
 #include "internal/ApplySong.h"
 #include "internal/VersionHistory.h"
+#include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
@@ -17,6 +18,8 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 
+#include <cmath>
+#include <map>
 #include <set>
 
 namespace phazite
@@ -33,6 +36,51 @@ namespace
                  version.branch,
                  version.parents,
                  history.hasBounce (version.id) };
+    }
+
+    // A plug-in's clash, named by the knobs whose values differ between this side and the other ("Serum settings: Cutoff,
+    // Mix"), and by the versions of the plug-in that made each side's state, where they differ.
+    void nameKnobs (std::vector<MergeClash>& clashes, const juce::ValueTree& ours, const juce::ValueTree& theirs,
+                    const PluginParameterValues& ourValues, const PluginParameterValues& theirValues)
+    {
+        for (auto& clash : clashes)
+        {
+            if (clash.property != schema::pluginState)
+                continue;
+
+            const auto ourDevice = findByPath (ours, clash.path), theirDevice = findByPath (theirs, clash.path);
+            const auto id = readID ((ourDevice.isValid() ? ourDevice : theirDevice)[schema::deviceID]);
+            juce::StringArray details;
+
+            if (const auto mine = ourValues.find (id), other = theirValues.find (id); mine != ourValues.end() && other != theirValues.end())
+            {
+                std::map<juce::String, float> there;
+
+                for (const auto& parameter : other->second)
+                    there.emplace (parameter.id, parameter.value);
+
+                juce::StringArray knobs;
+
+                for (const auto& parameter : mine->second)
+                    if (const auto found = there.find (parameter.id);
+                        found != there.end() && std::abs (found->second - parameter.value) > 0.0005f)
+                        knobs.add (parameter.name);
+
+                if (knobs.size() > 3)
+                    details.add (knobs[0] + ", " + knobs[1] + " and " + juce::String (knobs.size() - 2) + " more");
+                else if (! knobs.isEmpty())
+                    details.add (knobs.joinIntoString (", "));
+            }
+
+            const auto ourVersion = ourDevice[schema::pluginVersion].toString();
+            const auto theirVersion = theirDevice[schema::pluginVersion].toString();
+
+            if (ourVersion.isNotEmpty() && theirVersion.isNotEmpty() && ourVersion != theirVersion)
+                details.add ("version " + ourVersion + " here, " + theirVersion + " there");
+
+            if (! details.isEmpty())
+                clash.what += ": " + details.joinIntoString ("; ");
+        }
     }
 
     BranchInfo toInfo (const BranchRecord& branch)
@@ -222,6 +270,26 @@ bool discardAllChanges (ProjectContext& context)
     return true;
 }
 
+namespace
+{
+    juce::String& getComputerHolder()
+    {
+        static juce::String computer = juce::Uuid().toString();
+        return computer;
+    }
+} // namespace
+
+void setThisComputer (const juce::String& id)
+{
+    if (id.isNotEmpty())
+        getComputerHolder() = id;
+}
+
+juce::String getThisComputer()
+{
+    return getComputerHolder();
+}
+
 juce::String toBranchName (const juce::String& typed)
 {
     // Spaces as dashes, and only what a ref can hold (git check-ref-format).
@@ -343,7 +411,11 @@ bool bringBackVersion (ProjectContext& context, const juce::String& versionID)
     if (song == nullptr || version == nullptr)
         return false;
 
-    const auto then = history->readSong (versionID);
+    // As much of it as can be read: what a damaged piece held stays as it is now, and is told (getRestoreProblem()).
+    std::vector<MissingPiece> missing;
+    const auto then = history->readSong (versionID, nullptr, &missing);
+    history->restoreMissing = missing;
+    history->tellNow();
 
     if (! then.isValid())
         return false;
@@ -650,7 +722,22 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
     preview.version = versionID;
     const auto parted = history->findCommonVersion (last->id, versionID);
     preview.base = parted.isNotEmpty() ? history->readSong (parted) : juce::ValueTree (schema::PHAZITE);
-    preview.theirs = history->readSong (versionID);
+    preview.theirs = history->readSong (versionID, &preview.theirParameters);
+
+    // Numbered as this line, where earlier merges of that line gave what it added IDs anew, its plug-ins' knobs too.
+    const auto renumbering = history->findRenumbering (last->id, versionID, parted);
+    translateIDs (preview.base, renumbering);
+    translateIDs (preview.theirs, renumbering);
+
+    for (const auto& id : renumbering)
+    {
+        if (const auto knobs = preview.theirParameters.find (id.from); id.clip.isEmpty() && knobs != preview.theirParameters.end())
+        {
+            auto values = std::move (knobs->second);
+            preview.theirParameters.erase (knobs);
+            preview.theirParameters[id.to] = std::move (values);
+        }
+    }
 
     for (const auto& branch : history->getBranches())
         if (branch.id == version->branch)
@@ -673,6 +760,7 @@ bool startMerge (ProjectContext& context, const juce::String& versionID)
     }
 
     preview.clashes = mergeSongs (preview.base, song->getState(), preview.theirs, everything, [&next] { return next++; }).clashes;
+    nameKnobs (preview.clashes, song->getState(), preview.theirs, history->readPluginParameters(), preview.theirParameters);
     history->ticked.assign (preview.lines.size(), true);
     history->preview = std::move (preview);
     history->tellNow();
@@ -743,6 +831,8 @@ bool finishMerge (ProjectContext& context, const std::vector<VersionChange>& lin
     countIDs (*song);
 
     merge.clashes = std::move (result.clashes);
+    merge.renumbered = std::move (result.renumbered);
+    nameKnobs (merge.clashes, song->getState(), merge.theirs, history->readPluginParameters(), merge.theirParameters);
     merge.chosen.assign (merge.clashes.size(), 1);
     merge.notes = result.notes;
     history->merging = std::move (merge);
@@ -1125,6 +1215,175 @@ juce::String getBounceProblem (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
     return history != nullptr ? history->bounceProblem : juce::String();
+}
+
+//==============================================================================
+namespace
+{
+    juce::String count (size_t number, const char* one, const char* many)
+    {
+        return juce::String ((juce::int64) number) + " " + (number == 1 ? one : many);
+    }
+
+    // A piece of a commit that couldn't be read, in words, by the track it was in as the song names it now: "Bass: a clip".
+    juce::String describeMissing (const Song& song, const MissingPiece& missing)
+    {
+        if (missing.path.isEmpty())
+            return "the whole song";
+
+        juce::String track;
+
+        for (const auto& step : missing.path)
+        {
+            const auto type = step.upToFirstOccurrenceOf (":", false, false);
+            const auto key = step.fromFirstOccurrenceOf (":", false, false);
+
+            if (type == schema::MASTER.toString())
+                track = "Master";
+            else if (type == schema::TRACK.toString())
+                track = findTrackState (song, TrackID::fromRaw ((std::uint64_t) key.getLargeIntValue())).isValid()
+                            ? getTrackName (song, TrackID::fromRaw ((std::uint64_t) key.getLargeIntValue()))
+                            : juce::String ("a track gone since");
+        }
+
+        const auto last = missing.path[missing.path.size() - 1].upToFirstOccurrenceOf (":", false, false);
+        const auto what = last == schema::CLIP.toString()              ? "a clip"
+                          : last == schema::DEVICE.toString()          ? "a device"
+                          : last == schema::CONTAINER.toString()       ? "a container"
+                          : last == schema::CURVE.toString()           ? "automation"
+                          : last == schema::TRACK.toString()           ? "the whole track"
+                          : last == schema::MASTER.toString()          ? "the whole master"
+                          : last == schema::versions::RUN.toString()   ? "notes"
+                          : last == schema::versions::BYTES.toString() ? "a plug-in's settings"
+                          : last == schema::PHAZITE.toString()         ? "the song's own"
+                                                                       : "a part";
+
+        return (track.isNotEmpty() ? track : juce::String ("Song")) + ": " + what;
+    }
+
+    juce::String describeVersion (const VersionHistory& history, const juce::String& id)
+    {
+        const auto* version = history.findVersion (id);
+        return "\"" + (version != nullptr ? getDisplayName (*version) : id.substring (0, 7)) + "\"";
+    }
+} // namespace
+
+bool verifyHistory (ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    return history != nullptr && history->checkHistory();
+}
+
+bool canVerifyHistory (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->keepsVersions() && ! history->isReading() && ! history->isSaving() && ! history->isChecking();
+}
+
+bool isVerifyingHistory (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->isChecking();
+}
+
+juce::String describeHistoryCheck (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    const auto* song = findSong (context);
+
+    if (history == nullptr || song == nullptr)
+        return {};
+
+    if (history->isChecking())
+        return "Verifying the history...";
+
+    const auto& check = history->getLastCheck();
+
+    if (! check.has_value())
+        return {};
+
+    juce::StringArray parts;
+
+    if (check->damagedPieces.isEmpty() && check->damaged.empty())
+        parts.add ("Verified " + count ((size_t) check->numVersions, "commit", "commits") + " and "
+                   + count ((size_t) check->numPieces, "piece", "pieces") + ": all whole.");
+
+    if (! check->damagedPieces.isEmpty())
+        parts.add (count ((size_t) check->damagedPieces.size(), "piece is", "pieces are") + " damaged.");
+
+    if (! check->damaged.empty())
+    {
+        juce::StringArray names;
+
+        for (const auto& [id, missing] : check->damaged)
+            names.add (describeVersion (*history, id) + " (" + describeMissing (*song, missing.front())
+                       + (missing.size() > 1 ? " and " + juce::String ((juce::int64) missing.size() - 1) + " more" : juce::String()) + ")");
+
+        parts.add (count (check->damaged.size(), "commit can't", "commits can't") + " be read whole: " + names.joinIntoString (", ")
+                   + ". Restore from This Commit takes what can be.");
+    }
+
+    if (! check->lost.empty())
+        parts.add (count (check->lost.size(), "commit", "commits") + " no branch holds: Recover Lost Commits makes a branch of each line.");
+
+    return parts.joinIntoString (" ");
+}
+
+int countLostVersions (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->getLastCheck().has_value() ? (int) history->getLastCheck()->lost.size() : 0;
+}
+
+int recoverLostVersions (ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    return history != nullptr ? history->recoverLostVersions() : 0;
+}
+
+juce::String getRestoreProblem (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    const auto* song = findSong (context);
+
+    if (history == nullptr || song == nullptr || history->restoreMissing.empty())
+        return {};
+
+    const auto& missing = history->restoreMissing;
+
+    if (missing.size() == 1 && missing.front().path.isEmpty())
+        return "That commit can't be read: Verify History says what is damaged.";
+
+    juce::StringArray what;
+
+    for (const auto& piece : missing)
+        what.addIfNotAlreadyThere (describeMissing (*song, piece));
+
+    return "Restored but for what the commit's damaged pieces held, which stayed as it was: " + what.joinIntoString (", ") + ".";
+}
+
+juce::StringArray getDivergentVersions (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    const auto* branch = history != nullptr ? history->findCurrentBranch() : nullptr;
+    return branch != nullptr ? branch->divergent : juce::StringArray();
+}
+
+juce::String describeDivergence (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    const auto* branch = history != nullptr ? history->findCurrentBranch() : nullptr;
+
+    if (branch == nullptr || branch->divergent.isEmpty())
+        return {};
+
+    juce::StringArray names;
+
+    for (const auto& id : branch->divergent)
+        names.add (describeVersion (*history, id));
+
+    return branch->name + " went another way on another computer too, to " + names.joinIntoString (" and ") + ": Merge into '"
+           + branch->name + "' in its menu joins the lines.";
 }
 
 void bounceVersion (ProjectContext& context, const juce::String& versionID, TrackRenderHost& host)
@@ -1547,5 +1806,22 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .perform = [&context, &renders] { exportDawProject (context, renders); },
            .isEnabled = [&context] { return canExportDawProject (context); },
            .currentName = [&context] { return describeDawProjectExport (context); } });
+
+    // Keeping the history whole.
+    add ({ .id = "version.verify",
+           .name = "Verify History",
+           .description = "Reads every piece of the project's history and checks it against its name, walks every commit's song, "
+                          "and finds the commits no branch holds, as git fsck does. The Versions view says what it found.",
+           .synonyms = { "fsck", "check", "integrity", "damaged", "corrupt", "repair" },
+           .perform = [&context] { verifyHistory (context); },
+           .isEnabled = [&context] { return canVerifyHistory (context); } });
+
+    add ({ .id = "version.recover",
+           .name = "Recover Lost Commits",
+           .description = "Makes a branch of each line of the commits Verify History found that no branch holds, named after "
+                          "the branch they were made on.",
+           .synonyms = { "lost", "dangling", "orphaned", "reflog", "find commits" },
+           .perform = [&context] { recoverLostVersions (context); },
+           .isEnabled = [&context] { return countLostVersions (context) > 0; } });
 }
 } // namespace phazite

@@ -11,6 +11,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/Devices.h"
 #include "model/devices/internal/DrumKit.h"
+#include "model/devices/internal/Parameters.h"
 #include "model/devices/internal/SamplerSound.h"
 #include "model/devices/internal/Wavetables.h"
 #include "model/engine/AudioFiles.h"
@@ -875,12 +876,9 @@ void SongPlayer::setModulatorValues (engine::ModulatorNode& node, const juce::Va
 
     // Those set by hand, the others at their defaults (devices/modulation/Modulators.h); its steps; and its switch.
     const auto parameters = devices::getModulatorParameters (*node.getKind());
-    const auto values = state.getChildWithName (schema::VALUES);
 
     for (size_t i = 0; i < parameters.size(); ++i)
-        node.setParameter ((int) i,
-                           (float) values.getProperty (juce::Identifier (juce::String (parameters[i].id.data(), parameters[i].id.size())),
-                                                       parameters[i].defaultValue));
+        node.setParameter ((int) i, readValueSetByHand (state, parameters[i]));
 
     const auto steps = getModulatorSteps (state);
 
@@ -1082,13 +1080,9 @@ void SongPlayer::setValues (engine::DeviceNode& node, const juce::ValueTree& dev
 {
     // Those set by hand, the others at their defaults.
     const auto& parameters = node.getDeviceInfo().parameters;
-    const auto values = deviceState.getChildWithName (schema::VALUES);
 
     for (size_t i = 0; i < parameters.size(); ++i)
-    {
-        const auto id = juce::Identifier (juce::String (parameters[i].id.data(), parameters[i].id.size()));
-        node.setValue ((int) i, (float) values.getProperty (id, parameters[i].defaultValue));
-    }
+        node.setValue ((int) i, readValueSetByHand (deviceState, parameters[i]));
 
     node.setOn (! (bool) deviceState[schema::deviceOff]);
 }
@@ -1308,7 +1302,7 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
             const auto& info = node->getDeviceInfo();
 
             if (const auto index = devices::findParameter (info, property.toString().toStdString()); index >= 0)
-                node->setValue (index, (float) tree.getProperty (property, info.parameters[(size_t) index].defaultValue));
+                node->setValue (index, readSavedValue (info.parameters[(size_t) index], tree.getProperty (property)));
         }
 
         return true;

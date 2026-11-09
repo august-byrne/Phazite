@@ -3,8 +3,10 @@
 #include "internal/PluginHost.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "sandbox/core/Vst3State.h"
 
 #include <set>
 
@@ -23,14 +25,15 @@ namespace
             state.setProperty (property, value, nullptr);
     }
 
+    // Its state's bytes, as the song keeps them in standard base 64 (model/base/internal/SongText.h); none for none, or for
+    // text that isn't base 64.
     juce::MemoryBlock readPluginState (const juce::ValueTree& device)
     {
-        juce::MemoryBlock block;
-
         if (const auto text = device[schema::pluginState].toString(); text.isNotEmpty())
-            block.fromBase64Encoding (text);
+            if (auto bytes = readBytes (text))
+                return std::move (*bytes);
 
-        return block;
+        return {};
     }
 
     // The plug-ins' elements in a part of the song (a track's element, with its containers' chains'), in their order.
@@ -206,7 +209,7 @@ void PluginInstances::listen (DeviceID id, SandboxedInstance& instance)
         }
 
         // A change of its own (the helper tells none it was given), which the next save stores: an unsaved change.
-        song.markChangedOutsideHistory();
+        song.markChangedOutsideHistory (id.getRaw());
         song.tellValueSetByHand (ref, value, true);
     };
 
@@ -217,7 +220,7 @@ void PluginInstances::listen (DeviceID id, SandboxedInstance& instance)
     };
 
     // Its own settings changed: an unsaved change, which the next save stores.
-    instance.onStateChanged = [this] { song.markChangedOutsideHistory(); };
+    instance.onStateChanged = [this, id] { song.markChangedOutsideHistory (id.getRaw()); };
 
     instance.onLatencyChanged = [this]
     {
@@ -311,9 +314,17 @@ void PluginInstances::store (DeviceID id)
     instance.getStateInformation (block);
 
     if (block.getSize() > 0)
-        storeProperty (device, schema::pluginState, block.toBase64Encoding());
+        storeProperty (device, schema::pluginState, writeBytes (block));
     else
         device.removeProperty (schema::pluginState, nullptr);
+
+    // With it, the plug-in's ID in its format (a VST3's class ID, from its preset file), and the version of the plug-in that
+    // made it, which the versions name when it changes.
+    if (const auto classID = sandbox::readVst3ClassID (block); classID.isNotEmpty())
+        storeProperty (device, schema::pluginFormatID, classID);
+
+    if (const auto known = findKnownPlugin (host, getPluginIdentity (device)); known.has_value() && known->version.isNotEmpty())
+        storeProperty (device, schema::pluginVersion, known->version);
 
     if (instance.getNumPrograms() > 1)
         storeProperty (device, schema::pluginProgram, instance.getCurrentProgram());

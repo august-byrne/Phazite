@@ -83,12 +83,8 @@ namespace
         if (state[schema::deviceType].toString() != juce::String (Compressor::typeID))
             return;
 
-        const auto nameOf = [] (std::string_view parameter)
-        { return juce::Identifier (juce::String (parameter.data(), parameter.size())); };
-        const auto set = state.getChildWithName (schema::VALUES);
-
         for (const auto& parameter : Compressor::info.parameters)
-            if (std::abs ((float) set.getProperty (nameOf (parameter.id), parameter.defaultValue) - parameter.defaultValue) > 1.0e-4f)
+            if (std::abs (readValueSetByHand (state, parameter) - parameter.defaultValue) > 1.0e-4f)
                 return;
 
         auto* undo = &song.getUndoManager();

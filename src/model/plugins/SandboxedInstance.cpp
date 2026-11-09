@@ -465,19 +465,6 @@ void SandboxedInstance::setStateInformation (const void* data, int size)
         remote->setState (lastState, stateMilliseconds);
 }
 
-juce::MemoryBlock SandboxedInstance::getPreset()
-{
-    if (hasCrashed())
-        return {};
-
-    return remote->getPreset (stateMilliseconds).value_or (juce::MemoryBlock());
-}
-
-bool SandboxedInstance::setPreset (const juce::MemoryBlock& preset)
-{
-    return ! hasCrashed() && remote->setPreset (preset, stateMilliseconds);
-}
-
 //==============================================================================
 void SandboxedInstance::parameterChanged (int index, float value)
 {

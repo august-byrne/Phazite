@@ -69,11 +69,14 @@ namespace
                    : nullptr;
     }
 
-    // A parameter's value as a preset writes it: a choice's or a switch's as a whole number, any other as the shortest
-    // number that reads back as the same float ("0.6", rather than "0.6000000238418579", every digit of it as a double).
+    // A value as a preset holds it: a choice by its name, as the song keeps it (model/devices/internal/Parameters.h:
+    // toSavedValue()), a toggle as 0 or 1, and any other number in the fewest digits that read back as its float.
     juce::var toPresetValue (const devices::ParameterInfo& parameter, float value)
     {
-        if (parameter.unit == devices::Unit::choice || parameter.unit == devices::Unit::toggle)
+        if (parameter.unit == devices::Unit::choice)
+            return toSavedValue (parameter, value);
+
+        if (parameter.unit == devices::Unit::toggle)
             return juce::roundToInt (value);
 
         std::array<char, 32> text {};
@@ -106,9 +109,7 @@ namespace
     {
         constexpr auto kind = devices::ModulatorKind::steps;
         const auto& info = devices::getModulatorParameters (kind)[(size_t) devices::findModulatorParameter (kind, "numSteps")];
-        const auto value =
-            (float) sequencer.getChildWithName (schema::VALUES).getProperty (juce::Identifier (toString (info.id)), info.defaultValue);
-        return juce::jlimit (1, devices::Modulator::maxSteps, juce::roundToInt (value));
+        return juce::jlimit (1, devices::Modulator::maxSteps, juce::roundToInt (readValueSetByHand (sequencer, info)));
     }
 
     //==============================================================================
@@ -132,14 +133,11 @@ namespace
             set (preset, keys::type, toString (own->typeID));
 
             // Every parameter, so that the preset sets the whole device wherever it loads.
-            const auto values = device.getChildWithName (schema::VALUES);
             const auto parameters = makeObject();
 
             for (const auto& parameter : own->parameters)
-            {
-                const juce::Identifier parameterID (toString (parameter.id));
-                set (parameters, parameterID, toPresetValue (parameter, (float) values.getProperty (parameterID, parameter.defaultValue)));
-            }
+                set (parameters, juce::Identifier (toString (parameter.id)),
+                     toPresetValue (parameter, readValueSetByHand (device, parameter)));
 
             set (preset, keys::parameters, parameters);
 
@@ -311,7 +309,8 @@ namespace
 
         for (const auto& parameter : info.parameters)
             if (const juce::Identifier parameterID (toString (parameter.id)); named.hasProperty (parameterID))
-                values.push_back ({ parameterID.toString(), devices::constrain (parameter, (float) named[parameterID]) });
+                values.push_back (
+                    { parameterID.toString(), devices::constrain (parameter, readSavedValue (parameter, named[parameterID])) });
 
         auto state = makeOwnDeviceState (song, info.typeID, values);
         juce::ValueTree sounds (schema::SOUNDS);
@@ -568,7 +567,7 @@ namespace
         for (const auto& parameter : info.parameters)
         {
             const juce::Identifier parameterID (toString (parameter.id));
-            const auto value = values.hasProperty (parameterID) ? (float) values[parameterID] : parameter.defaultValue;
+            const auto value = readSavedValue (parameter, values[parameterID]);
             setValueSetByHand (song, ParameterRef { id, parameterID.toString() }, devices::constrain (parameter, value));
         }
 
@@ -751,14 +750,10 @@ juce::var makeTrackPreset (Song& song, TrackID track)
         set (preset, keys::type, keys::modulatorTypeNames[(size_t) *type]);
 
         // Its parameters' values set by hand (a preset loads it switched on).
-        const auto values = modulator.getChildWithName (schema::VALUES);
         const auto parameters = makeObject();
 
         for (const auto& info : devices::getModulatorParameters (*kind))
-        {
-            const juce::Identifier parameterID (toString (info.id));
-            set (parameters, parameterID, (float) values.getProperty (parameterID, info.defaultValue));
-        }
+            set (parameters, juce::Identifier (toString (info.id)), toPresetValue (info, readValueSetByHand (modulator, info)));
 
         set (preset, keys::parameters, parameters);
 
@@ -943,8 +938,9 @@ TrackID addTrackFromPreset (Song& song, const PluginHost& host, TrackID after, c
 
             if (auto* values = modulator[keys::parameters].getDynamicObject())
                 for (const auto& [id, value] : values->getProperties())
-                    if (devices::findModulatorParameter (*kind, id.toString().toStdString()) >= 0)
-                        setValueSetByHand (song, ParameterRef { DeviceID::fromRaw (added.getRaw()), id.toString() }, (float) value);
+                    if (const auto index = devices::findModulatorParameter (*kind, id.toString().toStdString()); index >= 0)
+                        setValueSetByHand (song, ParameterRef { DeviceID::fromRaw (added.getRaw()), id.toString() },
+                                           readSavedValue (devices::getModulatorParameters (*kind)[(size_t) index], value));
 
             if (const auto* steps = modulator[keys::steps].getArray())
                 for (int i = 0; i < steps->size(); ++i)

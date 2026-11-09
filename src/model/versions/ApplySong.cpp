@@ -2,6 +2,7 @@
 #include "internal/ApplySong.h"
 #include "internal/SongDiff.h"
 #include "model/base/internal/Schema.h"
+#include "model/base/internal/SongText.h"
 
 #include <map>
 #include <set>
@@ -10,12 +11,6 @@ namespace phazite
 {
 namespace
 {
-    // The same value as a file holds it (SongDiff.cpp): a number with more digits than its text keeps is the same.
-    bool isSameValue (const juce::var& a, const juce::var& b)
-    {
-        return (a == b && b == a) || a.toString() == b.toString();
-    }
-
     // An element's counted children, each named by its type and key, or, without a key, by its type and its place among
     // those of its type (a curve's points).
     struct Child
@@ -39,6 +34,45 @@ namespace
     bool isTaken (Taken taken, const juce::ValueTree& element, const juce::ValueTree& child)
     {
         return taken == Taken::everything || ! schema::isUncountedElement (element, child);
+    }
+
+    // An element of a version's song whose piece, or part of it, couldn't be read (SongPieces.h: joinSong()): the song keeps
+    // its own as it is now, wherever it is.
+    bool isStandIn (const juce::ValueTree& element)
+    {
+        return element.hasProperty (schema::versions::missing);
+    }
+
+    juce::String nameOf (const juce::ValueTree& element)
+    {
+        return element.getType().toString() + ":" + schema::getElementKey (element);
+    }
+
+    // The stand-ins in the other song, by their names, as getCountedChildren() names them.
+    using StandIns = std::set<juce::String>;
+
+    StandIns findStandIns (const juce::ValueTree& other)
+    {
+        StandIns names;
+        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (isStandIn (child))
+                    names.insert (nameOf (child));
+                else
+                    visit (child);
+            }
+        };
+
+        visit (other);
+        return names;
+    }
+
+    const StandIns& noStandIns()
+    {
+        static const StandIns none;
+        return none;
     }
 
     std::vector<Child> getCountedChildren (const juce::ValueTree& element, bool withTracks = true, Taken taken = Taken::counted)
@@ -69,7 +103,7 @@ namespace
     // The element made like the other, its children too, but for the tracks in it while withTracks is off (a folder's,
     // which are things of their own).
     void makeLike (juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo, bool withTracks = true,
-                   Taken taken = Taken::counted)
+                   Taken taken = Taken::counted, const StandIns& standIns = noStandIns())
     {
         for (int i = live.getNumProperties(); --i >= 0;)
             if (const auto name = live.getPropertyName (i); isTaken (taken, live, name) && ! other.hasProperty (name))
@@ -98,9 +132,9 @@ namespace
 
         for (const auto& child : getCountedChildren (live, withTracks, taken))
         {
-            if (wantedNames.count (child.name) == 0)
+            if (wantedNames.count (child.name) == 0 && standIns.count (child.name) == 0)
                 live.removeChild (child.tree, undo);
-            else
+            else if (wantedNames.count (child.name) > 0)
                 kept.emplace (child.name, child.tree);
         }
 
@@ -114,15 +148,22 @@ namespace
 
             if (const auto found = kept.find (child.name); found != kept.end())
             {
+                // What the other's version couldn't read stays as it is, in its place.
                 auto tree = found->second;
-                makeLike (tree, child.tree, undo, true, taken);
+
+                if (! isStandIn (child.tree))
+                    makeLike (tree, child.tree, undo, true, taken, standIns);
 
                 if (const auto index = live.indexOf (tree); index != place)
                     live.moveChild (index, place, undo);
             }
-            else
+            else if (! isStandIn (child.tree))
             {
                 live.addChild (child.tree.createCopy(), place, undo);
+            }
+            else
+            {
+                continue; // a stand-in for what the song hasn't: nothing to put there
             }
 
             ++place;
@@ -152,7 +193,8 @@ namespace
 
     // The items that are somewhere else in the other song (a track moved into a folder, a clip onto another track, a
     // device into a container), taken away first, to be put where the other has them: no ID is in the song twice meanwhile.
-    void removeMovedItems (juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo)
+    void removeMovedItems (juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo,
+                           const StandIns& standIns = noStandIns())
     {
         const auto otherPlaces = findPlaces (other);
         std::vector<juce::ValueTree> moved;
@@ -160,7 +202,7 @@ namespace
         {
             for (const auto& child : element)
             {
-                if (! child.hasType (schema::NOTE) && schema::holdsID (child, schema::trackID))
+                if (! child.hasType (schema::NOTE) && schema::holdsID (child, schema::trackID) && standIns.count (nameOf (child)) == 0)
                 {
                     const auto found = otherPlaces.find (child.getType().toString() + ":" + child[schema::trackID].toString());
 
@@ -235,7 +277,9 @@ namespace
 
             if (const auto found = wanted.find (schema::getElementKey (curve)); found != wanted.end())
             {
-                makeLike (curve, found->second, undo);
+                if (! isStandIn (found->second)) // a curve the version couldn't read stays as it is
+                    makeLike (curve, found->second, undo);
+
                 wanted.erase (found);
             }
             else
@@ -245,7 +289,8 @@ namespace
         }
 
         for (const auto& [key, curve] : wanted)
-            automation.appendChild (curve.createCopy(), undo);
+            if (! isStandIn (curve))
+                automation.appendChild (curve.createCopy(), undo);
     }
 
     // The tracks a song holds by their IDs, each with its parent's ID (0 for the track list) and its place there.
@@ -272,8 +317,9 @@ namespace
 void makeSongLike (Song& song, const juce::ValueTree& other)
 {
     auto* undo = &song.getUndoManager();
-    removeMovedItems (song.getState(), other, undo);
-    makeLike (song.getState(), other, undo);
+    const auto standIns = findStandIns (other);
+    removeMovedItems (song.getState(), other, undo, standIns);
+    makeLike (song.getState(), other, undo, true, Taken::counted, standIns);
 }
 
 void makeSongTheSame (Song& song, const juce::ValueTree& other)
@@ -296,13 +342,17 @@ namespace
         if (! live.isValid() && ! then.isValid())
             return false;
 
+        // A track the other's version couldn't read stays as it is.
+        if (then.isValid() && isStandIn (then))
+            return true;
+
         // Its devices' automation, of what either of them holds.
         auto devices = getAutomatableIDs (live);
         devices.merge (getAutomatableIDs (then));
 
         if (live.isValid() && then.isValid())
         {
-            makeLike (live, then, undo, false);
+            makeLike (live, then, undo, false, Taken::counted, findStandIns (then));
         }
         else if (live.isValid())
         {

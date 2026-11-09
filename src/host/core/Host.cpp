@@ -167,16 +167,6 @@ void Host::handle (const juce::MemoryBlock& message)
             scan (reader, answer);
             break;
 
-        case MessageType::getPreset:
-            if (auto* instance = findInstance (reader.readInt64()))
-                answer.add (instance->getPreset());
-            break;
-
-        case MessageType::setPreset:
-            if (auto* instance = findInstance (reader.readInt64()))
-                answer.add (instance->setPreset (reader.readBlock()));
-            break;
-
         // Notices: nothing to answer.
         case MessageType::setParameter:
             if (auto* instance = findInstance (reader.readInt64()))
@@ -252,7 +242,7 @@ void Host::openInstance (MessageReader& reader, MessageWriter& answer)
 
     // Its settings as the song keeps them, before it plays.
     if (! state.isEmpty())
-        plugin->setStateInformation (state.getData(), (int) state.getSize());
+        setPluginState (*plugin, state);
 
     auto instance = std::make_unique<Instance> (id, std::move (plugin), std::move (channel), sampleRate);
     answer.add (true).add (juce::String());

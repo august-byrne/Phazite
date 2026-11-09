@@ -6,7 +6,7 @@
     "type": "phaziteSaturator",
     "parameters": {
       "drive": 12.0,
-      "shape": 4,
+      "shape": "Fold",
       "tone": -0.25,
       "output": 0.0,
       "autoGain": 1,

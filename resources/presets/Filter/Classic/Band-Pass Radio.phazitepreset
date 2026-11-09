@@ -5,10 +5,10 @@
     "instrument": false,
     "type": "phaziteFilter",
     "parameters": {
-      "filterType": 2,
+      "filterType": "Band Pass",
       "cutoff": 1400.0,
       "resonance": 0.1,
-      "filterSlope": 0,
+      "filterSlope": "12 dB",
       "drive": 6.0,
       "mix": 1.0
     }

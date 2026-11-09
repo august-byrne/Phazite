@@ -14,7 +14,7 @@ namespace phazite::sandbox
 // The program's argument that names the pipe it connects to ("--PhaziteSandbox:<pipe>"), and the messages' version,
 // which both sides must have.
 inline constexpr const char* helperProcessID = "PhaziteSandbox";
-inline constexpr std::int32_t protocolVersion = 3;
+inline constexpr std::int32_t protocolVersion = 4;
 
 enum class MessageType : std::int32_t
 {
@@ -25,8 +25,8 @@ enum class MessageType : std::int32_t
                      // -> ok, why not, and what it is (PluginInfo.h)
     closeInstance,   // instance -> nothing
     prepareInstance, // instance, channel name, limits, sample rate -> ok: it plays the new channel from now on
-    getState,        // instance -> its state
-    setState,        // instance, state -> nothing (once it took it)
+    getState,        // instance -> its state: a VST3's as its format's preset file (Vst3State.h), another's as JUCE gives it
+    setState,        // instance, state (the same) -> nothing (once it took it)
     parameterText,   // instance, parameter, value -> how the plug-in writes that value
     stats,           // nothing -> the helper's CPU seconds and its memory in bytes
     setProgram,      // instance, program -> nothing (once it has it)
@@ -34,9 +34,6 @@ enum class MessageType : std::int32_t
     closeEditor,     // instance -> nothing (once it has gone)
     scan,            // a plug-in format's name, a file (or identifier) -> how many plug-ins it holds, and each one's
                      // description (JUCE's XML for it): a plug-in scan, which loads the plug-in's code in the helper
-    getPreset,       // instance -> its state as its format's own preset file, which other hosts read: a VST3's .vstpreset,
-                     // its class ID in it; empty for a plug-in of another format
-    setPreset,       // instance, such a preset file -> whether the plug-in took it
 
     // Phazite's notices.
     quit = 50,     // the helper ends

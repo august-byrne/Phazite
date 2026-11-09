@@ -52,6 +52,13 @@ jobs:
           dash -n tools/check-architecture.sh
           AWK=mawk dash tools/check-architecture.sh --ci
 
+      # A reader written from docs/versions-format.md alone, with nothing of Phazite's, lists the test vectors' pack as
+      # Phazite's own reader does (tests/GoldenFormatTests.cpp): the specification stays true to what Phazite writes.
+      - name: Versions format (an outside reader)
+        run: |
+          perl tools/read-versions.pl tests/golden/format/song.pack > "$RUNNER_TEMP/song.txt"
+          diff -u tests/golden/format/song.txt "$RUNNER_TEMP/song.txt"
+
   windows:
     name: Windows (${{ matrix.preset }})
     runs-on: windows-2025-vs2026 # Visual Studio 2026, which cmake/toolchains/windows-msvc.cmake requires
