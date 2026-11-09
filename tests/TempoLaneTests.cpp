@@ -92,7 +92,8 @@ TEST_CASE ("The tempo lane shows only while the song's tempo changes: the time b
     // Its header's menu offers Remove Tempo Changes, which takes the lane away (its commands run as the menu would).
     const auto offers = [&screen] (const juce::String& name)
     {
-        const auto* item = findMenuItem (screen.header->getMoreMenu(), { name });
+        const auto menu = screen.header->getMoreMenu(); // kept while its item is read: the menu is made anew each time
+        const auto* item = findMenuItem (menu, { name });
         return item != nullptr && item->isEnabled;
     };
 
