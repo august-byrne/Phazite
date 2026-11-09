@@ -531,7 +531,7 @@ TEST_CASE ("A preset's choices are read by their names, in a device added from i
     REQUIRE (bar.has_value());
     REQUIRE (sine.has_value());
     REQUIRE (*bar > 1);
-    REQUIRE (shape.minimum + (float) *sine != shape.defaultValue);
+    REQUIRE_FALSE (juce::exactlyEqual (shape.minimum + (float) *sine, shape.defaultValue));
 
     const auto added = phazite::addDeviceFromPreset (song.getSong(), phazite::getPluginHost (phazite::test::getEngineContext()),
                                                      song.track (0), phazite::readPreset (file), nullptr);

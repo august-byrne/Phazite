@@ -41,13 +41,14 @@ namespace
             return std::isnan (number) ? "nan" : (number > 0 ? "inf" : "-inf");
 
         // A whole number in its digits (as far as a double holds whole numbers exactly).
-        if (number == std::trunc (number) && std::abs (number) < 1.0e15)
+        if (juce::exactlyEqual (number, std::trunc (number)) && std::abs (number) < 1.0e15)
             return juce::String ((juce::int64) number);
 
         // A float's value in the fewest digits that read back as that float; any other in 15 significant digits, as C's
         // "%.15g" writes it, so that what arithmetic leaves past them ("8.000000000000004") is no change.
         char text[48];
-        const auto isFloats = std::abs (number) <= (double) std::numeric_limits<float>::max() && (double) (float) number == number;
+        const auto isFloats =
+            std::abs (number) <= (double) std::numeric_limits<float>::max() && juce::exactlyEqual ((double) (float) number, number);
         const auto written = isFloats ? std::to_chars (text, text + sizeof (text), (float) number)
                                       : std::to_chars (text, text + sizeof (text), number, std::chars_format::general, 15);
         return juce::String (text, (size_t) (written.ptr - text));

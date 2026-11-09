@@ -14,11 +14,6 @@ namespace phazite
 {
 namespace
 {
-    juce::String toString (std::string_view text)
-    {
-        return juce::String (text.data(), text.size());
-    }
-
     juce::UndoManager* getUndo (Song& song)
     {
         return &song.getUndoManager();

@@ -134,7 +134,7 @@ namespace
     Renumbered renumberAdditions (const juce::ValueTree& base, const juce::ValueTree& ours, const juce::ValueTree& theirs,
                                   const std::function<std::uint64_t()>& makeID)
     {
-        Renumbered result { theirs.createCopy(), {} };
+        Renumbered result { theirs.createCopy(), {}, {} };
         std::set<std::uint64_t> inBase, inOurs;
         collectIDs (base, inBase);
         collectIDs (ours, inOurs);
