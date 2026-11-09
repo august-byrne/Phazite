@@ -82,19 +82,12 @@ namespace
         clipState.getParent().removeChild (clipState, &song.getUndoManager());
     }
 
-    // How far a move of an audio clip's start or end, from where it plays now (in the song's seconds) to a beat, takes it
-    // into its file, in the file's seconds as it plays them.
-    double getFileSecondsTo (const Song& song, const juce::ValueTree& clipState, double from, BeatPosition to)
-    {
-        return (toSeconds (song, to) - from) / getClipStretch (song, clipState).timeRatio;
-    }
-
     // Moves a clip's start to a beat, its end staying where it is, and what it plays too.
     void trimStartTo (Song& song, juce::ValueTree clipState, BeatPosition start)
     {
         if (isAudioState (clipState))
         {
-            const auto moved = getFileSecondsTo (song, clipState, getPlayedPosition (song, clipState).start, start);
+            const auto moved = getFileSecondsBetween (song, clipState, getPlayedPosition (song, clipState).start, start);
             auto part = getFilePart (clipState);
 
             if (getClipStretch (song, clipState).reversed)
@@ -117,7 +110,7 @@ namespace
 
         if (isAudioState (clipState))
         {
-            const auto moved = getFileSecondsTo (song, clipState, getPlayedPosition (song, clipState).end, end);
+            const auto moved = getFileSecondsBetween (song, clipState, getPlayedPosition (song, clipState).end, end);
             auto part = getFilePart (clipState);
 
             if (getClipStretch (song, clipState).reversed)
@@ -148,7 +141,7 @@ namespace
 
         if (isAudioState (clipState))
         {
-            const auto into = getFileSecondsTo (song, clipState, getPlayedPosition (song, clipState).start, beat);
+            const auto into = getFileSecondsBetween (song, clipState, getPlayedPosition (song, clipState).start, beat);
             auto left = getFilePart (clipState), rest = left;
 
             if (getClipStretch (song, clipState).reversed) // the left half plays the end of the part, backwards
@@ -698,12 +691,11 @@ void slipClip (Song& song, ClipID clip, double startOffset, double distance)
     if (isAudioState (clipState))
     {
         // The same length of its file, from as far into what it plays.
-        const auto settings = getClipStretch (song, clipState);
-        const auto from = offset / settings.timeRatio;
+        const auto from = getPartStartFor (song, clipState, offset);
         auto part = getFilePart (clipState);
         const auto length = part.end - part.start;
 
-        if (settings.reversed)
+        if ((bool) clipState.getProperty (schema::clipReversed, false))
             part.end = getClipFileLength (song, clipState) - from;
         else
             part.end = from + length;

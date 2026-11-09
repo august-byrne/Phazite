@@ -93,6 +93,74 @@ namespace
         const auto tempo = seconds > 0.0 && info.loopBeats > 0.0 ? info.loopBeats / seconds * 60.0 : getTempoAt (song, start);
         return juce::jlimit (minClipTempo, maxClipTempo, tempo);
     }
+
+    // How a clip's played sound (its file, backwards while the clip plays backwards) lines up with the song: where its part
+    // starts in it and how long that is, in seconds, the file's whole length, the beat the clip starts at, and the file's
+    // tempo while the clip follows the song's. Following it, a time in the sound is a beat of the song, at the file's tempo
+    // from where the clip starts, whatever the song's tempo does there.
+    struct ClipTime
+    {
+        double partStart = 0.0, partLength = 0.0, fileLength = 0.0;
+        double startBeat = 0.0;
+        double tempo = 0.0; // the file's, while the clip follows the song's; 0 while it doesn't
+
+        double beatAt (double time) const { return startBeat + (time - partStart) * tempo / 60.0; }
+        double timeAt (double beat) const { return partStart + (beat - startBeat) * 60.0 / tempo; }
+    };
+
+    ClipTime getClipTime (const Song& song, const juce::ValueTree& clipState)
+    {
+        const auto part = getFilePart (clipState);
+        const auto length = getClipFileLength (song, clipState);
+        const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
+        return { reversed ? length - part.end : part.start, part.end - part.start, length, getClipRange (clipState).getStart().inBeats(),
+                 (double) clipState.getProperty (schema::clipTempo, 0.0) };
+    }
+
+    // How the clip lines up with the song while it follows the song's tempo where it changes under the clip's file, from the
+    // file's start to its end as the clip places them: then it plays along the changes, rather than at one ratio as it does
+    // under one tempo. Nothing otherwise, found without reading the file for a clip that keeps its speed or a song of one
+    // tempo.
+    std::optional<ClipTime> findChangingTempo (const Song& song, const juce::ValueTree& clipState)
+    {
+        if ((double) clipState.getProperty (schema::clipTempo, 0.0) <= 0.0 || ! hasTempoChanges (song))
+            return std::nullopt;
+
+        const auto time = getClipTime (song, clipState);
+
+        if (time.fileLength <= 0.0 || getTempoMap (song).isSteadyBetween (time.beatAt (0.0), time.beatAt (time.fileLength)))
+            return std::nullopt;
+
+        return time;
+    }
+
+    // Its stretch along the tempo's changes: at every half beat of the sound, and where the song's tempo changes, the time in
+    // the sound with where it plays in the render, which starts where the sound's start plays.
+    std::vector<std::pair<double, double>> makeTimeMap (const Song& song, const ClipTime& time)
+    {
+        const auto map = getTempoMap (song); // in seconds
+        const auto origin = map.toSamples (time.beatAt (0.0));
+        const auto step = 30.0 / time.tempo;
+        std::vector<double> times;
+
+        for (int each = 1; each * step < time.fileLength; ++each)
+            times.push_back (each * step);
+
+        for (const auto& change : getTempoChanges (song))
+            if (const auto at = time.timeAt (change.beat.inBeats()); at > 0.0 && at < time.fileLength)
+                times.push_back (at);
+
+        times.push_back (time.fileLength);
+        std::sort (times.begin(), times.end());
+        times.erase (std::unique (times.begin(), times.end(), [] (double a, double b) { return b - a < 1.0e-6; }), times.end());
+
+        std::vector<std::pair<double, double>> timeMap;
+
+        for (const auto at : times)
+            timeMap.emplace_back (at, map.toSamples (time.beatAt (at)) - origin);
+
+        return timeMap;
+    }
 } // namespace
 
 //==============================================================================
@@ -132,7 +200,41 @@ double getClipFileLength (const Song& song, const juce::ValueTree& clipState)
 
 stretch::Settings getClipStretch (const Song& song, const juce::ValueTree& clipState)
 {
-    return getSettings (getSound (song, clipState), getTempoAt (song, getClipRange (clipState).getStart()));
+    auto settings = getSettings (getSound (song, clipState), getTempoAt (song, getClipRange (clipState).getStart()));
+
+    // Under the song's tempo changes, the stretch follows each of them, its ratio being the whole file's.
+    if (const auto time = findChangingTempo (song, clipState))
+    {
+        settings.timeMap = makeTimeMap (song, *time);
+        settings.timeRatio = settings.timeMap.back().second / time->fileLength;
+    }
+
+    return settings;
+}
+
+bool followsTempoChanges (const Song& song, const juce::ValueTree& clipState)
+{
+    return isAudioState (clipState) && findChangingTempo (song, clipState).has_value();
+}
+
+double getFileSecondsBetween (const Song& song, const juce::ValueTree& clipState, double from, BeatPosition to)
+{
+    // Along tempo changes, the clip's beats are its sound's, at its file's tempo.
+    if (const auto time = findChangingTempo (song, clipState))
+        return (to.inBeats() - toBeats (song, from).inBeats()) * 60.0 / time->tempo;
+
+    return (toSeconds (song, to) - from) / getClipStretch (song, clipState).timeRatio;
+}
+
+double getPartStartFor (const Song& song, const juce::ValueTree& clipState, double offset)
+{
+    if (const auto time = findChangingTempo (song, clipState))
+    {
+        const auto start = toSeconds (song, BeatPosition::fromBeats (time->startBeat));
+        return (time->startBeat - toBeats (song, start - offset).inBeats()) * 60.0 / time->tempo;
+    }
+
+    return offset / getClipStretch (song, clipState).timeRatio;
 }
 
 juce::File getPlayedFile (const Song& song, const juce::ValueTree& clipState)
@@ -148,6 +250,14 @@ juce::File getPlayedFile (const Song& song, const juce::ValueTree& clipState)
 PlayedPosition getPlayedPosition (const Song& song, const juce::ValueTree& clipState)
 {
     const auto start = toSeconds (song, getClipRange (clipState).getStart());
+
+    // Along the song's tempo changes: where its part's end plays, and how far into the render its part's start is.
+    if (const auto time = findChangingTempo (song, clipState))
+    {
+        const auto map = getTempoMap (song);
+        return { start, map.toSamples (time->beatAt (time->partStart + time->partLength)), start - map.toSamples (time->beatAt (0.0)) };
+    }
+
     const auto settings = getClipStretch (song, clipState);
     const auto part = getFilePart (clipState);
     const auto from = settings.reversed ? getFileSeconds (getClipFile (song, clipState)) - part.end : part.start;
@@ -247,13 +357,24 @@ bool isRendered (const Song& song, ClipID clip)
 
 juce::File getRenderFile (const Song& song, const juce::File& source, const stretch::Settings& settings)
 {
-    const auto key = source.getFullPathName() + "|" + juce::String (settings.timeRatio, 9) + "|" + juce::String (settings.semitones, 4)
-                     + "|" + (settings.reversed ? "backwards" : "forwards") + "|" + renderVersion;
+    auto key = source.getFullPathName() + "|" + juce::String (settings.timeRatio, 9) + "|" + juce::String (settings.semitones, 4) + "|"
+               + (settings.reversed ? "backwards" : "forwards") + "|" + renderVersion;
+
+    // Along tempo changes, the whole stretch: two clips under the same changes share it.
+    for (const auto& [in, out] : settings.timeMap)
+        key << "|" << juce::String (in, 6) << ":" << juce::String (out, 6);
+
     return song.getCacheFolder().getChildFile (renderFilePrefix + juce::String::toHexString (key.hashCode64()) + ".wav");
 }
 
 SecondsRange getAudioFileRange (const Song& song, const juce::ValueTree& clipState)
 {
+    if (const auto time = findChangingTempo (song, clipState))
+    {
+        const auto map = getTempoMap (song);
+        return { map.toSamples (time->beatAt (0.0)), map.toSamples (time->beatAt (time->fileLength)) };
+    }
+
     const auto position = getPlayedPosition (song, clipState);
     const auto start = position.start - position.offset;
     return { start, start + getClipFileLength (song, clipState) * getClipStretch (song, clipState).timeRatio };
@@ -262,6 +383,14 @@ SecondsRange getAudioFileRange (const Song& song, const juce::ValueTree& clipSta
 double getFileTimeAt (const Song& song, ClipID clip, BeatPosition beat)
 {
     const auto clipState = findAudioState (song, clip);
+
+    // Along tempo changes, the sound's time is the song's beat, at the file's tempo.
+    if (const auto time = findChangingTempo (song, clipState))
+    {
+        const auto into = time->timeAt (beat.inBeats());
+        return (bool) clipState.getProperty (schema::clipReversed, false) ? time->fileLength - into : into;
+    }
+
     const auto position = getPlayedPosition (song, clipState);
     const auto settings = getClipStretch (song, clipState);
     const auto intoFile = (toSeconds (song, beat) - (position.start - position.offset)) / settings.timeRatio;

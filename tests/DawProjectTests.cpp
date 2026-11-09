@@ -25,6 +25,7 @@
 
 #include <functional>
 #include <map>
+#include <tuple>
 
 namespace
 {
@@ -395,6 +396,80 @@ TEST_CASE ("A DAWproject opens as a new song: its tracks with their notes, audio
     REQUIRE (phazite::getSections (imported).size() == 1);
     CHECK (phazite::getSections (imported).front().name == "Intro");
     CHECK (said.contains ("sends"));
+}
+
+TEST_CASE ("A DAWproject carries the tempo's changes both ways: steps held, ramps straight, and bent ones in straight pieces")
+{
+    // From 128 BPM, a ramp down to 96 at beat 8, bent up to 140 at beat 16, held, and a step to 110 at beat 24.
+    Song song;
+    TemporaryFolder folder;
+    auto& written = *phazite::findSong (song.s.context);
+    phazite::takeTempoChanges (written,
+                               { { phazite::BeatPosition(), 128.0, phazite::tempoRamp },
+                                 { phazite::BeatPosition::fromBeats (8.0), 96.0, 0.3f },
+                                 { phazite::BeatPosition::fromBeats (16.0), 140.0, phazite::tempoJump },
+                                 { phazite::BeatPosition::fromBeats (24.0), 110.0, phazite::tempoJump } },
+                               phazite::BeatPosition());
+    REQUIRE (phazite::getTempoChanges (written).size() == 4);
+
+    auto content = song.describe();
+    const auto* automation = find (*content.project, "TempoAutomation", "id", "tempoAutomation");
+    REQUIRE (automation != nullptr);
+    CHECK (automation->getChildByName ("Target")->getStringAttribute ("parameter") == "tempo");
+    CHECK (automation->getStringAttribute ("timeUnit") == "beats");
+
+    std::map<double, std::pair<double, juce::String>> points; // by time: the tempo and how it goes on
+
+    for (const auto* point : automation->getChildWithTagNameIterator ("RealPoint"))
+        points[point->getDoubleAttribute ("time")] = { point->getDoubleAttribute ("value"), point->getStringAttribute ("interpolation") };
+
+    CHECK (points[0.0] == std::pair (128.0, juce::String ("linear")));
+    CHECK (points[8.0] == std::pair (96.0, juce::String ("linear")));
+    CHECK (points[16.0] == std::pair (140.0, juce::String ("hold")));
+    CHECK (points[24.0] == std::pair (110.0, juce::String ("hold")));
+    CHECK (points.size() >= 4 + 15); // the bent ramp in at least 16 pieces
+
+    // Read back into a new song: the same tempo all along it, give or take what the straight pieces leave of the bend.
+    const auto file = folder.folder.getChildFile ("Tempo.dawproject");
+    content.bounces.clear();
+    REQUIRE (phazite::writeDawProject (content, {}, file).wasOk());
+    TestSong into;
+    phazite::takeDawProject (*phazite::findSong (into.context), phazite::readDawProject (file));
+    const auto& imported = *phazite::findSong (into.context);
+
+    for (auto beat = 0.0; beat < 30.0; beat += 0.25)
+    {
+        CAPTURE (beat);
+        CHECK (phazite::getTempoAt (imported, phazite::BeatPosition::fromBeats (beat))
+               == doctest::Approx (phazite::getTempoAt (written, phazite::BeatPosition::fromBeats (beat))).epsilon (0.01));
+    }
+
+    CHECK (phazite::toSeconds (imported, phazite::BeatPosition::fromBeats (30.0))
+           == doctest::Approx (phazite::toSeconds (written, phazite::BeatPosition::fromBeats (30.0))).epsilon (0.001));
+
+    // In seconds, as another DAW may write them: each point's beat from the tempos before it.
+    auto inSeconds = std::make_unique<juce::XmlElement> (*content.project);
+    auto* secondsAutomation = inSeconds->getChildByName ("Arrangement")->getChildByName ("TempoAutomation");
+    secondsAutomation->deleteAllChildElementsWithTagName ("RealPoint");
+    secondsAutomation->setAttribute ("timeUnit", "seconds");
+
+    for (const auto& [time, bpm, ramps] : { std::tuple (0.0, 120.0, false), std::tuple (2.0, 60.0, true), std::tuple (4.0, 120.0, false) })
+    {
+        auto* point = secondsAutomation->createNewChildElement ("RealPoint");
+        point->setAttribute ("time", time);
+        point->setAttribute ("value", bpm);
+        point->setAttribute ("interpolation", ramps ? "linear" : "hold");
+    }
+
+    phazite::DawProjectFile other;
+    other.project = std::move (inSeconds);
+    TestSong fromSeconds;
+    phazite::takeDawProject (*phazite::findSong (fromSeconds.context), other);
+    const auto changes = phazite::getTempoChanges (*phazite::findSong (fromSeconds.context));
+    REQUIRE (changes.size() == 3);
+    CHECK (changes[1].beat.inBeats() == doctest::Approx (4.0)); // two seconds at 120
+    CHECK (changes[2].beat.inBeats() == doctest::Approx (7.0)); // two seconds ramping from 60 to 120, at 90 on average
+    CHECK (changes[1].curve == doctest::Approx (phazite::tempoRamp));
 }
 
 TEST_CASE ("Import DAWproject opens one from elsewhere as a new untitled project")

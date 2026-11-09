@@ -76,6 +76,8 @@ after start:
   transport.countIn: on "Count-In"
   transport.samplesFollowTempo: on "Samples Follow Tempo"
   transport.patternsFollowTempo: on, ticked "Patterns Follow Tempo"
+  transport.addTempoChange: on "Add Tempo Change"
+  transport.removeTempoChanges: off "Remove Tempo Changes"
   transport.record: off "Record"
   transport.overdub: on, ticked "Overdub"
   transport.quantizeRecordings: on "Quantize Recordings"

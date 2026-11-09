@@ -8,6 +8,7 @@
 #include "ChordLane.h"
 #include "ClipComponent.h"
 #include "SectionsStrip.h"
+#include "TempoLane.h"
 #include "TrackHeader.h"
 #include "model/automation/AutomationModel.h"
 #include "model/project/ProjectContext.h"
@@ -106,7 +107,12 @@ private:
     int scrollY = 0;
 
     SectionsStrip sectionsStrip; // in the time bar, above the ruler
-    ChordLane chordLane;         // under the time bar, above the tracks, while the song has chords
+    TempoLane tempoLane;         // under the time bar, above the chord lane and the tracks, while the song's tempo changes
+    TempoLaneHeader tempoLaneHeader;
+    bool tempoLaneShown = false;
+    void showTempoLaneWithChanges(); // shows the tempo lane, or takes it away, as the song has more than one tempo or not
+
+    ChordLane chordLane; // under the time bar, above the tracks, while the song has chords
     ChordLaneHeader chordLaneHeader;
     bool chordLaneShown = false;
     void showChordLaneWithChords(); // shows the chord lane, or takes it away, as the song has chords or not
@@ -269,7 +275,7 @@ private:
 
     // TimelineEditor
     juce::Rectangle<int> getTimelineArea() const override;
-    std::vector<juce::Component*> getScrollingParts() override;  // the lanes, the sections and the chord lane
+    std::vector<juce::Component*> getScrollingParts() override;  // the lanes, the sections, the tempo lane and the chord lane
     std::vector<OverviewMark> getOverviewMarks() const override; // each track's clips, a row each
     BeatRange getContentRange() const override;
     void timelineChanged() override;

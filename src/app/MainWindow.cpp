@@ -1103,9 +1103,10 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
 
             menu.addSubMenu ("Song Outline", outlines);
 
-            // The chord lane's progressions, which put chords on it: the playlist shows it once the song has some.
+            // The chord lane's progressions, which put chords on it: the playlist shows it once the song has some. And a tempo
+            // change where the playhead is, which shows the tempo lane.
             menu.addSeparator();
-            add (menu, { "chords.progressions" });
+            add (menu, { "chords.progressions", "transport.addTempoChange" });
             break;
         }
 

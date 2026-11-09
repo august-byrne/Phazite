@@ -36,6 +36,7 @@ namespace
 {
     constexpr double bounceRate = 48000.0;
     constexpr int bounceBlockSize = 512;
+    constexpr int minimumTempoPieces = 16; // straight pieces a bent tempo line is written as, at least
 
     // A number as DAWproject's files write them: as many decimals as it needs, up to nine.
     juce::String number (double value)
@@ -193,14 +194,48 @@ namespace
                 auto* points = arrangement.createNewChildElement ("TempoAutomation");
                 points->setAttribute ("unit", "bpm");
                 points->setAttribute ("id", "tempoAutomation");
+                points->setAttribute ("timeUnit", "beats");
                 points->createNewChildElement ("Target")->setAttribute ("parameter", "tempo");
 
-                for (const auto& change : tempos)
+                const auto addPoint = [points] (double beat, double bpm, bool linear)
                 {
                     auto* point = points->createNewChildElement ("RealPoint");
-                    point->setAttribute ("time", number (change.beat.inBeats()));
-                    point->setAttribute ("value", number (change.bpm));
-                    point->setAttribute ("interpolation", "hold");
+                    point->setAttribute ("time", number (beat));
+                    point->setAttribute ("value", number (bpm));
+                    point->setAttribute ("interpolation", linear ? "linear" : "hold");
+                };
+
+                // A DAWproject's tempo holds or ramps straight from point to point: a bent line goes as straight pieces along
+                // it, a beat long at most, and one that jumps at once holds the next tempo from its start.
+                for (size_t i = 0; i < tempos.size(); ++i)
+                {
+                    const auto& change = tempos[i];
+                    const auto from = change.beat.inBeats();
+                    const auto curve = juce::jlimit (-1.0f, 1.0f, change.curve);
+
+                    if (i + 1 >= tempos.size() || juce::exactlyEqual (curve, tempoJump))
+                    {
+                        addPoint (from, change.bpm, false);
+                    }
+                    else if (juce::exactlyEqual (curve, -1.0f))
+                    {
+                        addPoint (from, tempos[i + 1].bpm, false);
+                    }
+                    else if (juce::exactlyEqual (curve, tempoRamp))
+                    {
+                        addPoint (from, change.bpm, true);
+                    }
+                    else
+                    {
+                        const auto to = tempos[i + 1].beat.inBeats();
+                        const auto pieces = std::max (minimumTempoPieces, (int) std::ceil (to - from));
+
+                        for (int piece = 0; piece < pieces; ++piece)
+                        {
+                            const auto beat = from + (to - from) * piece / pieces;
+                            addPoint (beat, piece == 0 ? change.bpm : tempo.getTempoAt (beat), true);
+                        }
+                    }
                 }
             }
 
@@ -1252,6 +1287,15 @@ namespace
             }
 
             const auto* arrangement = in.project->getChildByName ("Arrangement");
+
+            if (const auto* automation = arrangement != nullptr ? arrangement->getChildByName ("TempoAutomation") : nullptr)
+            {
+                const auto* lanes = arrangement->getChildByName ("Lanes");
+                const auto unit =
+                    automation->getStringAttribute ("timeUnit", lanes != nullptr ? lanes->getStringAttribute ("timeUnit") : "");
+                takeTempoAutomation (*automation, unit == "seconds");
+            }
+
             const auto* markers = arrangement != nullptr ? arrangement->getChildByName ("Markers") : nullptr;
             std::vector<const juce::XmlElement*> all;
 
@@ -1269,6 +1313,48 @@ namespace
                 section.length = BeatDuration::fromBeats (std::max (1.0, end - start));
                 insertSection (song, BeatPosition::fromBeats (start), section);
             }
+        }
+
+        // The tempo's changes: each point's tempo from its time, held until the next or ramping straight to it. Times in
+        // seconds become beats along the tempos before them, a ramp's as straight in time, which its ends keep.
+        void takeTempoAutomation (const juce::XmlElement& automation, bool inSeconds)
+        {
+            struct Point
+            {
+                double time = 0.0, bpm = 120.0;
+                bool ramps = false;
+            };
+
+            std::vector<Point> points;
+
+            for (const auto* point : automation.getChildWithTagNameIterator ("RealPoint"))
+                points.push_back ({ point->getDoubleAttribute ("time"), point->getDoubleAttribute ("value", 120.0),
+                                    point->getStringAttribute ("interpolation") == "linear" });
+
+            std::stable_sort (points.begin(), points.end(), [] (const Point& a, const Point& b) { return a.time < b.time; });
+
+            if (points.empty())
+                return;
+
+            std::vector<TempoChange> changes;
+            auto beat = 0.0;
+
+            for (size_t i = 0; i < points.size(); ++i)
+            {
+                if (! inSeconds)
+                    beat = points[i].time;
+                else if (i == 0)
+                    beat = points[0].time * getTempo (song) / 60.0; // before it, the transport's tempo
+                else
+                    beat += (points[i].time - points[i - 1].time)
+                            * (points[i - 1].ramps ? (points[i - 1].bpm + points[i].bpm) / 2.0 : points[i - 1].bpm) / 60.0;
+
+                changes.push_back (
+                    { BeatPosition::fromBeats (std::max (0.0, beat)), points[i].bpm, points[i].ramps ? tempoRamp : tempoJump });
+            }
+
+            // Before the first, if it starts later, the transport's tempo holds.
+            takeTempoChanges (song, changes, BeatPosition());
         }
     };
 } // namespace

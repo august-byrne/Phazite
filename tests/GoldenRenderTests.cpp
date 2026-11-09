@@ -112,21 +112,22 @@ bool soundsLikeTheMix (const Fingerprint& fingerprint, const juce::AudioBuffer<f
 }
 
 //==============================================================================
-constexpr int trapBeatSeconds = 10; // its intro, 4 bars at 140 BPM (6.86 s), and the first hook's start
+constexpr double exodusSeconds = 24.0; // its intro, 8 bars speeding up from 50 BPM to 111 (22.66 s), and the theme's first beats
 
-// Something in every block of its 10 seconds (the pad holds through the intro), and louder once the hook comes in with the
-// drums and the 808, whose first kick peaks high.
-bool soundsLikeTrapBeat (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
+// Something in every block of its 24 seconds (the arpeggio, the sub and a kick play through the intro, darkened by the
+// master's filters), and the intro swelling into the theme, quieter at first, as its recording's does; and the theme's
+// first kick, with the bass and the filters open, peaking high.
+bool soundsLikeExodus (const Fingerprint& fingerprint, const juce::AudioBuffer<float>&)
 {
-    REQUIRE (fingerprint.size() == (size_t) trapBeatSeconds * 10);
+    REQUIRE (fingerprint.size() == (size_t) std::lround (exodusSeconds * 10.0));
     auto everywhere = true;
 
     for (const auto& block : fingerprint)
         everywhere = everywhere && std::min (block.rms[0], block.rms[1]) > -50.0f;
 
-    CHECK_MESSAGE (everywhere, "every 100 ms of the Trap Beat example should be above -50 dBFS on each side");
+    CHECK_MESSAGE (everywhere, "every 100 ms of the Exodus example should be above -50 dBFS on each side");
 
-    // The intro's middle and the hook's first three seconds, by their blocks' average level.
+    // The intro's first four seconds and the theme's first second, by their blocks' average level.
     const auto average = [&fingerprint] (int from, int to)
     {
         auto sum = 0.0f;
@@ -137,17 +138,17 @@ bool soundsLikeTrapBeat (const Fingerprint& fingerprint, const juce::AudioBuffer
         return sum / (float) (to - from);
     };
 
-    const auto intro = average (10, 60), hook = average (70, 100);
-    const auto louder = hook > intro + 3.0f;
-    CHECK_MESSAGE (louder, ("the hook should be 3 dB louder than the intro; the intro is " + formatLevel (intro) + " dBFS and the hook "
-                            + formatLevel (hook) + " dBFS")
+    const auto intro = average (0, 40), theme = average (228, 240);
+    const auto louder = theme > intro + 2.0f;
+    CHECK_MESSAGE (louder, ("the theme should be 2 dB louder than the intro's start; the intro is " + formatLevel (intro)
+                            + " dBFS and the theme " + formatLevel (theme) + " dBFS")
                                .toStdString());
 
-    const auto firstKick = std::max (fingerprint[68].peak[0], fingerprint[69].peak[0]);
+    const auto firstKick = std::max ({ fingerprint[225].peak[0], fingerprint[226].peak[0], fingerprint[227].peak[0] });
     const auto kick = firstKick > -12.0f;
-    CHECK_MESSAGE (
-        kick,
-        ("6.80-7.00 s: the hook's first kick should peak above -12 dBFS; it peaks at " + formatLevel (firstKick) + " dBFS").toStdString());
+    CHECK_MESSAGE (kick,
+                   ("22.50-22.80 s: the theme's first kick should peak above -12 dBFS; it peaks at " + formatLevel (firstKick) + " dBFS")
+                       .toStdString());
 
     return everywhere && louder && kick;
 }
@@ -716,16 +717,19 @@ TEST_SUITE ("golden")
             golden ("mix", "two tones through a bus, a send to a reverb return, volume automation and pan.", 4.0, soundsLikeTheMix));
     }
 
-    TEST_CASE ("Golden render: the Trap Beat example song's intro and the start of its hook")
+    TEST_CASE ("Golden render: the Exodus example song's intro and the start of its theme")
     {
-        TestSong song (TestSong::Start::trapBeat);
+        TestSong song (TestSong::Start::exodus);
         phazite::test::settle();
-        phazite::test::checkGoldenRender (song.context, golden ("trap-beat",
-                                                                "the Trap Beat example song's intro (FM bells and a pad on the "
-                                                                "wavetable and the synth, a riser) and the start of its hook (the "
-                                                                "808 kit, the 808's slide notes, a crash sample, two returns and "
-                                                                "the master's limiter).",
-                                                                trapBeatSeconds, soundsLikeTrapBeat));
+        phazite::test::checkGoldenRender (song.context, golden ("exodus",
+                                                                "the Exodus example song's intro (its notes from a MIDI file, its tempo "
+                                                                "ramping from 50 BPM to 111: an arpeggio on the synth, the wavetable "
+                                                                "and FM, a sub, a plate on a return, the master's EQ, and its "
+                                                                "high-pass and low-pass in automation lanes before its limiter) "
+                                                                "and the start of its theme at 114 BPM (the Synthwave Kit, the FM "
+                                                                "bass, and five tracks and the plate pumping under the drums "
+                                                                "through sidechains).",
+                                                                exodusSeconds, soundsLikeExodus));
     }
 
     TEST_CASE ("Golden render: two chords on Phazite's wavetable synth, in unison, an envelope sweeping each note's table")

@@ -103,6 +103,41 @@ namespace
         return drums::makeStereo (makeHat (rate, shape), makeHat (rate, right));
     }
 
+    // The synthwave kit's snare and clap in stereo, as its samples are: each side its own noise, and the snare's tone a
+    // little apart, so that their tails spread wide.
+    Audio synthwaveStereo (const Audio& left, const Audio& right)
+    {
+        return drums::makeStereo (left, right);
+    }
+
+    // The synthwave kit's hats: a bright layer that dies quickly over a darker one that rings on, so that the hat darkens as
+    // it rings, as a sampled one does.
+    Audio layeredHat (const HatShape& bright, const HatShape& dark, float darkLevel)
+    {
+        auto sound = makeHat (rate, bright);
+        const auto under = makeHat (rate, dark);
+        sound.addFrom (0, 0, under, 0, 0, std::min (sound.getNumSamples(), under.getNumSamples()), darkLevel);
+        return sound;
+    }
+
+    // The synthwave kit's toms, as the 80s' electronic kits' sound: a sine swept down an octave over a tenth of a second,
+    // a breath of noise and a stick's click.
+    Audio synthwaveTom (double hz)
+    {
+        return makeKick (rate, { .startHz = hz * 2.0,
+                                 .endHz = hz,
+                                 .pitchSeconds = 0.06,
+                                 .decaySeconds = 0.2,
+                                 .click = 0.3,
+                                 .clickHz = 3000.0,
+                                 .noise = 0.25,
+                                 .noiseHz = 5000.0,
+                                 .noiseSeconds = 0.08,
+                                 .length = 0.9,
+                                 .drive = 1.3,
+                                 .seed = (int) hz });
+    }
+
     //==============================================================================
     struct Entry
     {
@@ -603,6 +638,153 @@ namespace
         { "Percussion Low Woodblock", [] { return drums::makeWoodblock (rate, 700.0); } },
         { "Percussion Triangle", [] { return drums::makeTriangle (rate, false); } },
         { "Percussion High Woodblock", [] { return drums::makeWoodblock (rate, 1050.0); } },
+
+        // Synthwave: the 80s' electronic drums as synthwave plays them, after the samples of the Exodus example's original
+        // (docs/presets.md), measured: a kick whose pitch falls from about 250 Hz to 65 Hz, held 45 ms and then cut short; a
+        // snare whose 160 Hz tone carries three quarters of it under bright noise, with a long tail; a clap of hands around
+        // 1.1 kHz over a long, quieter tail; a woody knock for the rim; bright, noisy hats; and swept synth toms.
+        { "Synthwave Kick",
+          []
+          {
+              return makeKick (rate, { .chirpHz = 1200.0,
+                                       .chirpSeconds = 0.002,
+                                       .startHz = 280.0,
+                                       .endHz = 64.0,
+                                       .pitchSeconds = 0.011,
+                                       .holdSeconds = 0.04,
+                                       .decaySeconds = 0.014,
+                                       .click = 1.2,
+                                       .clickHz = 2000.0,
+                                       .clickSeconds = 0.005,
+                                       .length = 0.35,
+                                       .drive = 1.6 });
+          } },
+        { "Synthwave Rim",
+          []
+          {
+              return makeKick (rate, { .startHz = 1750.0,
+                                       .endHz = 1100.0,
+                                       .pitchSeconds = 0.008,
+                                       .decaySeconds = 0.021,
+                                       .click = 0.5,
+                                       .clickHz = 4000.0,
+                                       .clickSeconds = 0.002,
+                                       .noise = 1.0,
+                                       .noiseHz = 2500.0,
+                                       .noiseSeconds = 0.025,
+                                       .length = 0.25,
+                                       .drive = 1.4,
+                                       .seed = 91 });
+          } },
+        { "Synthwave Snare",
+          []
+          {
+              return synthwaveStereo (makeSnare (rate, { .lowHz = 162.0,
+                                                         .highHz = 175.0,
+                                                         .lowSeconds = 0.115,
+                                                         .highSeconds = 0.012,
+                                                         .snaresSeconds = 0.1,
+                                                         .snaresLevel = 0.55,
+                                                         .snaresLowCut = 3000.0,
+                                                         .snaresHighCut = 7500.0,
+                                                         .length = 0.9,
+                                                         .drive = 1.2,
+                                                         .seed = 92,
+                                                         .lowLevel = 0.5,
+                                                         .highLevel = 0.6 }),
+                                      makeSnare (rate, { .lowHz = 164.5,
+                                                         .highHz = 177.5,
+                                                         .lowSeconds = 0.115,
+                                                         .highSeconds = 0.012,
+                                                         .snaresSeconds = 0.1,
+                                                         .snaresLevel = 0.55,
+                                                         .snaresLowCut = 3000.0,
+                                                         .snaresHighCut = 7500.0,
+                                                         .length = 0.9,
+                                                         .drive = 1.2,
+                                                         .seed = 192,
+                                                         .lowLevel = 0.5,
+                                                         .highLevel = 0.6 }));
+          } },
+        { "Synthwave Clap",
+          []
+          {
+              return synthwaveStereo (makeClap (rate, { .centreHz = 1150.0,
+                                                        .q = 1.0,
+                                                        .lowCut = 400.0,
+                                                        .spread = 1.0,
+                                                        .tailSeconds = 0.12,
+                                                        .length = 0.85,
+                                                        .seed = 93,
+                                                        .tailLevel = 0.4 }),
+                                      makeClap (rate, { .centreHz = 1150.0,
+                                                        .q = 1.0,
+                                                        .lowCut = 400.0,
+                                                        .spread = 1.15,
+                                                        .tailSeconds = 0.12,
+                                                        .length = 0.85,
+                                                        .seed = 193,
+                                                        .tailLevel = 0.4 }));
+          } },
+        { "Synthwave Snare 2",
+          []
+          {
+              return makeSnare (rate, { .lowHz = 190.0,
+                                        .highHz = 380.0,
+                                        .lowSeconds = 0.06,
+                                        .highSeconds = 0.025,
+                                        .snaresSeconds = 0.14,
+                                        .snaresLevel = 0.6,
+                                        .snaresLowCut = 2000.0,
+                                        .snaresHighCut = 11000.0,
+                                        .length = 0.6,
+                                        .drive = 1.6,
+                                        .seed = 94 });
+          } },
+        { "Synthwave Low Tom", [] { return synthwaveTom (82.0); } },
+        { "Synthwave Closed Hat",
+          []
+          {
+              return layeredHat (
+                  { .decaySeconds = 0.045, .length = 0.28, .noise = 0.8, .centreHz = 12500.0, .lowCut = 7500.0, .pitch = 1.3, .seed = 95 },
+                  { .decaySeconds = 0.05, .length = 0.28, .noise = 0.8, .centreHz = 6500.0, .lowCut = 5000.0, .pitch = 1.3, .seed = 195 },
+                  0.8f);
+          } },
+        { "Synthwave Floor Tom", [] { return synthwaveTom (98.0); } },
+        { "Synthwave Pedal Hat",
+          []
+          {
+              return layeredHat (
+                  { .decaySeconds = 0.05, .length = 0.32, .noise = 0.8, .centreHz = 12000.0, .lowCut = 7000.0, .pitch = 1.3, .seed = 96 },
+                  { .decaySeconds = 0.1, .length = 0.32, .noise = 0.8, .centreHz = 6800.0, .lowCut = 4800.0, .pitch = 1.3, .seed = 196 },
+                  0.55f);
+          } },
+        { "Synthwave Mid Tom", [] { return synthwaveTom (116.0); } },
+        { "Synthwave Open Hat",
+          []
+          {
+              return layeredHat (
+                  { .decaySeconds = 0.08, .length = 0.33, .noise = 0.8, .centreHz = 12000.0, .lowCut = 8000.0, .pitch = 1.3, .seed = 97 },
+                  { .decaySeconds = 0.3, .length = 0.33, .noise = 0.8, .centreHz = 6000.0, .lowCut = 4000.0, .pitch = 1.3, .seed = 197 },
+                  0.6f);
+          } },
+        { "Synthwave Mid Tom 2", [] { return synthwaveTom (138.0); } },
+        { "Synthwave High Tom", [] { return synthwaveTom (165.0); } },
+        { "Synthwave Crash",
+          []
+          {
+              return makeHat (
+                  rate,
+                  { .decaySeconds = 0.6, .length = 2.0, .noise = 0.6, .centreHz = 7500.0, .lowCut = 3500.0, .pitch = 1.1, .seed = 98 });
+          } },
+        { "Synthwave High Tom 2", [] { return synthwaveTom (196.0); } },
+        { "Synthwave Ride",
+          []
+          {
+              return makeHat (
+                  rate,
+                  { .decaySeconds = 0.55, .length = 1.6, .noise = 0.25, .centreHz = 9000.0, .lowCut = 6000.0, .pitch = 1.35, .seed = 99 });
+          } },
     };
 
     constexpr auto numDrums = std::size (entries);

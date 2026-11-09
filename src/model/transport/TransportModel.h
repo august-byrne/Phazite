@@ -30,9 +30,11 @@ void setTimeSignature (ProjectContext&, TimeSignature);
 TrackID getLiveMidiTrack (const ProjectContext&);
 
 //==============================================================================
-// The tempo as a field changes it: a drag is one undo step, "Change Tempo", from its first move to its last (a Gesture,
-// model/commands/internal/Undo.h), and a change outside a drag, such as a typed tempo, is one of its own. It forgets a project
-// that closes.
+// The tempo as a field changes it: the tempo where the playhead is, and a change changes the tempo in effect there (with
+// tempo changes along the song, the last one at or before the playhead; inside a ramp, the tempo it ramps from), as
+// TempoModel.h's lane shows. A drag is one undo step, "Change Tempo", from its first move to its last (a Gesture,
+// model/commands/internal/Undo.h), the tempo where the playhead was as it began changing all through it, and a change
+// outside a drag, such as a typed tempo, is one of its own. It forgets a project that closes.
 class TempoHandle
 {
 public:

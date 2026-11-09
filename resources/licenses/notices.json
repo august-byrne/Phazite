@@ -251,6 +251,16 @@
             "url": "https://github.com/microsoft/vscode",
             "file": "VSCode.txt",
             "sources": [ "resources/licenses/VSCode.txt" ]
+        },
+        {
+            "name": "Exodus",
+            "version": "",
+            "licence": "CC-BY-4.0",
+            "copyright": "Copyright (c) 2018 XCALIBUR",
+            "use": "The notes of the Exodus example song, which Phazite's instruments play",
+            "url": "https://lmms.io/lsp/?action=show&file=12900",
+            "file": "Exodus.txt",
+            "sources": [ "resources/songs/Exodus.txt", "resources/licenses/CC-BY-4.0.txt" ]
         }
     ],
     "trademarks": [

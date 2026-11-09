@@ -546,7 +546,7 @@ TEST_CASE ("A view its key shows gets the keyboard, and a screen reader its name
 {
     Screen screen;
     screen.session.openAtStartup();
-    REQUIRE (screen.registry.invoke ("help.example.trapBeat"));
+    REQUIRE (screen.registry.invoke ("help.example.exodus"));
     phazite::test::dispatchPendingMessages();
     phazite::test::settle();
 
@@ -595,7 +595,7 @@ TEST_CASE ("Every control in the window has a name and a role for screen readers
 {
     Screen screen;
     screen.session.openAtStartup();
-    REQUIRE (screen.registry.invoke ("help.example.trapBeat")); // tracks, clips and devices to show
+    REQUIRE (screen.registry.invoke ("help.example.exodus")); // tracks, clips and devices to show
     phazite::test::dispatchPendingMessages();
     phazite::test::settle();
     juce::StringArray nameless;

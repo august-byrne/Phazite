@@ -5,6 +5,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/transport/internal/Playback.h"
 
 #include <algorithm>
 #include <cmath>
@@ -99,7 +100,8 @@ namespace
         std::vector<TempoChange> changes;
 
         for (const auto& entry : getEntries (songState.getChildWithName (schema::TEMPOMAP), schema::TEMPO))
-            changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]), (double) entry.getProperty (schema::bpm, 120.0) });
+            changes.push_back ({ BeatPosition::fromBeats (entry[schema::mapBeat]), (double) entry.getProperty (schema::bpm, 120.0),
+                                 juce::jlimit (-1.0f, 1.0f, (float) entry.getProperty (schema::tempoCurve, tempoJump)) });
 
         if (changes.empty())
             changes.push_back ({});
@@ -149,7 +151,7 @@ engine::TempoMap getTempoMap (const juce::ValueTree& songState, double sampleRat
     std::vector<engine::TempoMap::TimeSignature> signatures;
 
     for (const auto& change : readTempoChanges (songState))
-        tempos.push_back ({ change.beat.inBeats(), change.bpm });
+        tempos.push_back ({ change.beat.inBeats(), change.bpm, change.curve });
 
     for (const auto& change : readTimeSignatureChanges (songState))
         signatures.push_back ({ change.beat.inBeats(), change.signature.numerator, change.signature.denominator });
@@ -234,6 +236,208 @@ void setTempo (Song& song, double bpm)
     const UndoStep step (song, "Change Tempo");
     const PatternsKeepTheirSpeed keepPatterns (song); // unless they follow it
     getFirstOfMap (song, schema::TEMPO).setProperty (schema::bpm, rounded, &song.getUndoManager());
+}
+
+//==============================================================================
+namespace
+{
+    double roundTempo (double bpm)
+    {
+        return std::round (juce::jlimit (minTempo, maxTempo, bpm) * 100.0) / 100.0;
+    }
+
+    // The song's tempos' elements, in getTempoChanges()'s order, the tempo map made first if it has none.
+    std::vector<juce::ValueTree> getTempoEntries (Song& song)
+    {
+        ensureTempoMap (song);
+        return getEntries (findTempoMap (song), schema::TEMPO);
+    }
+
+    // What isn't written is a step, as tempos start.
+    void writeCurve (Song& song, juce::ValueTree entry, float curve)
+    {
+        if (const auto bounded = juce::jlimit (-1.0f, 1.0f, curve); juce::exactlyEqual (bounded, tempoJump))
+            entry.removeProperty (schema::tempoCurve, &song.getUndoManager());
+        else
+            entry.setProperty (schema::tempoCurve, bounded, &song.getUndoManager());
+    }
+
+    // The place of the tempo in effect at a beat: the last at or before it.
+    int findTempoAt (const std::vector<TempoChange>& changes, BeatPosition beat)
+    {
+        int found = 0;
+
+        for (int i = 0; i < (int) changes.size(); ++i)
+            if (changes[(size_t) i].beat <= beat)
+                found = i;
+
+        return found;
+    }
+
+    bool isSameBeat (BeatPosition a, BeatPosition b)
+    {
+        return std::abs ((a - b).inBeats()) < 1.0e-6;
+    }
+} // namespace
+
+void setTempoAt (Song& song, BeatPosition beat, double bpm)
+{
+    const auto changes = getTempoChanges (song);
+
+    if (changes.size() <= 1)
+    {
+        setTempo (song, bpm); // the song's one tempo, the patterns kept at their speed if the song says so
+        return;
+    }
+
+    const auto index = findTempoAt (changes, beat);
+    const auto rounded = roundTempo (bpm);
+
+    if (juce::approximatelyEqual (changes[(size_t) index].bpm, rounded))
+        return;
+
+    const UndoStep step (song, "Change Tempo");
+    getTempoEntries (song)[(size_t) index].setProperty (schema::bpm, rounded, &song.getUndoManager());
+}
+
+bool hasTempoChanges (const Song& song)
+{
+    return getTempoChanges (song).size() > 1;
+}
+
+std::vector<double> getTempoValues (const Song& song, BeatRange range, int count)
+{
+    const auto map = getTempoMap (song);
+    count = std::max (2, count);
+    std::vector<double> values;
+    values.reserve ((size_t) count);
+
+    for (int i = 0; i < count; ++i)
+        values.push_back (map.getTempoAt (range.getStart().inBeats() + range.getLength().inBeats() * i / (count - 1)));
+
+    return values;
+}
+
+int addTempoChange (Song& song, BeatPosition beat, std::optional<double> bpm)
+{
+    const auto at = std::max (BeatPosition(), beat);
+    const auto changes = getTempoChanges (song);
+    const auto index = findTempoAt (changes, at);
+    const auto value = roundTempo (bpm.value_or (getTempoAt (song, at)));
+    const UndoStep step (song, "Add Tempo Change");
+    auto entries = getTempoEntries (song);
+
+    // A tempo already there takes the value.
+    if (isSameBeat (changes[(size_t) index].beat, at))
+    {
+        entries[(size_t) index].setProperty (schema::bpm, value, &song.getUndoManager());
+        return index;
+    }
+
+    // The line it is on goes on through it: a step stays a step, and a ramp ramps on from it.
+    juce::ValueTree entry (schema::TEMPO, { { schema::mapBeat, at.inBeats() }, { schema::bpm, value } });
+    findTempoMap (song).appendChild (entry, &song.getUndoManager());
+    writeCurve (song, entry, changes[(size_t) index].curve);
+    return findTempoAt (getTempoChanges (song), at);
+}
+
+void addTempoChangeAtPlayhead (Song& song)
+{
+    addTempoChange (song, getPlayheadBeat (song));
+}
+
+int moveTempoChange (Song& song, int index, BeatPosition beat, double bpm)
+{
+    auto entries = getTempoEntries (song);
+
+    if (! juce::isPositiveAndBelow (index, (int) entries.size()))
+        return -1;
+
+    auto entry = entries[(size_t) index];
+    const auto at = index == 0 ? BeatPosition() : std::max (BeatPosition(), beat);
+    const auto rounded = roundTempo (bpm);
+
+    if (isSameBeat (BeatPosition::fromBeats (entry[schema::mapBeat]), at)
+        && juce::approximatelyEqual ((double) entry[schema::bpm], rounded))
+        return index;
+
+    const UndoStep step (song, "Move Tempo Change");
+    entry.setProperty (schema::mapBeat, at.inBeats(), &song.getUndoManager());
+    entry.setProperty (schema::bpm, rounded, &song.getUndoManager());
+
+    const auto moved = getTempoEntries (song);
+    const auto found = std::find (moved.begin(), moved.end(), entry);
+    return found != moved.end() ? (int) std::distance (moved.begin(), found) : -1;
+}
+
+void setTempoCurve (Song& song, int index, float curve)
+{
+    auto entries = getTempoEntries (song);
+
+    if (! juce::isPositiveAndBelow (index, (int) entries.size()))
+        return;
+
+    const auto bounded = juce::jlimit (-1.0f, 1.0f, curve);
+
+    if (juce::exactlyEqual ((float) entries[(size_t) index].getProperty (schema::tempoCurve, tempoJump), bounded))
+        return;
+
+    const UndoStep step (song, "Change Tempo Ramp");
+    writeCurve (song, entries[(size_t) index], bounded);
+}
+
+void deleteTempoChange (Song& song, int index)
+{
+    auto entries = getTempoEntries (song);
+
+    if (index <= 0 || index >= (int) entries.size())
+        return;
+
+    const UndoStep step (song, "Delete Tempo Change");
+    findTempoMap (song).removeChild (entries[(size_t) index], &song.getUndoManager());
+}
+
+void removeTempoChanges (Song& song)
+{
+    auto entries = getTempoEntries (song);
+
+    if (entries.size() <= 1 && ! entries.front().hasProperty (schema::tempoCurve))
+        return;
+
+    const UndoStep step (song, "Remove Tempo Changes");
+    auto map = findTempoMap (song);
+
+    for (size_t i = 1; i < entries.size(); ++i)
+        map.removeChild (entries[i], &song.getUndoManager());
+
+    writeCurve (song, entries.front(), tempoJump);
+}
+
+void takeTempoChanges (Song& song, const std::vector<TempoChange>& tempos, BeatPosition from)
+{
+    for (const auto& tempo : tempos)
+    {
+        const auto beat = std::max (BeatPosition(), from + (tempo.beat - BeatPosition()));
+        auto index = 0;
+
+        if (isSameBeat (beat, BeatPosition()))
+        {
+            setTempo (song, tempo.bpm);
+        }
+        else
+        {
+            // A step to the tempo the song holds there already changes nothing, and goes in as nothing.
+            const auto changes = getTempoChanges (song);
+            const auto& held = changes[(size_t) findTempoAt (changes, beat)];
+
+            if (tempo.curve >= tempoJump && held.curve >= tempoJump && juce::approximatelyEqual (held.bpm, roundTempo (tempo.bpm)))
+                continue;
+
+            index = addTempoChange (song, beat, tempo.bpm);
+        }
+
+        setTempoCurve (song, index, tempo.curve);
+    }
 }
 
 TempoStretch getTempoStretch (const Song& song)
@@ -327,5 +531,25 @@ void addTempoCommands (CommandRegistry& registry, Selection& selection)
                     .isEnabled = hasSong,
                     .undoTarget = undoTarget,
                     .isTicked = ifSong (selection, doPatternsFollowTempo) });
+
+    registry.add ({ .id = "transport.addTempoChange",
+                    .name = "Add Tempo Change",
+                    .category = "Transport",
+                    .description = "Adds a tempo change where the playhead is, at the tempo there, and shows the tempo lane over the "
+                                   "tracks, where it can be dragged to another tempo and ramped.",
+                    .synonyms = { "tempo map", "tempo automation", "tempo track", "insert tempo", "bpm change", "accelerando", "ritardando",
+                                  "speed up", "slow down" },
+                    .perform = withSong (selection, addTempoChangeAtPlayhead),
+                    .isEnabled = hasSong,
+                    .undoTarget = undoTarget });
+
+    registry.add ({ .id = "transport.removeTempoChanges",
+                    .name = "Remove Tempo Changes",
+                    .category = "Transport",
+                    .description = "Takes away the song's tempo changes, leaving its first tempo all the way through.",
+                    .synonyms = { "clear tempo map", "one tempo", "steady tempo", "delete tempo changes", "flatten tempo" },
+                    .perform = withSong (selection, removeTempoChanges),
+                    .isEnabled = ifSong (selection, hasTempoChanges),
+                    .undoTarget = undoTarget });
 }
 } // namespace phazite

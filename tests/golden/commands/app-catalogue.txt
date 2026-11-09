@@ -75,6 +75,8 @@ transport.metronome | O
 transport.countIn
 transport.samplesFollowTempo
 transport.patternsFollowTempo
+transport.addTempoChange
+transport.removeTempoChanges
 transport.record | R
 transport.overdub
 transport.quantizeRecordings
@@ -83,7 +85,7 @@ track.arm
 clip.previousTake
 clip.nextTake
 transport.capture | ctrl + shift + C
-help.example.trapBeat
+help.example.exodus
 help.example.loFiBeat
 help.example.houseGroove
 project.new | ctrl + N

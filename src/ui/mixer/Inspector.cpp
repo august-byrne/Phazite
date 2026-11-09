@@ -10,6 +10,7 @@
 #include "model/commands/SongGesture.h"
 #include "model/mixer/MixerModel.h"
 #include "model/notes/NotesModel.h"
+#include "model/transport/TempoModel.h"
 #include "model/transport/TransportModel.h"
 #include "ui/components/Controls.h"
 #include "ui/components/TrackSwitch.h"
@@ -1395,9 +1396,7 @@ namespace
 
         void refresh() override
         {
-            tempoLabel.setText (juce::String (getTempoHandle (context).getValue(), 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".")
-                                    + " BPM",
-                                juce::dontSendNotification);
+            tempoLabel.setText (describeSongTempo(), juce::dontSendNotification);
             const auto signature = getTimeSignature (context).value_or (TimeSignature {});
             signatureLabel.setText (juce::String (signature.numerator) + "/" + juce::String (signature.denominator),
                                     juce::dontSendNotification);
@@ -1405,6 +1404,19 @@ namespace
             lengthLabel.setText (describeLength (context, { BeatPosition(), getTimelineEnd (context) }), juce::dontSendNotification);
             tracksLabel.setText (juce::String ((int) getAllPlaylistTracks (context).size()), juce::dontSendNotification);
             sectionsLabel.setText (juce::String ((int) getSongSections (context).size()), juce::dontSendNotification);
+        }
+
+        // The song's tempo, "120 BPM"; or, while it changes along the song (the tempo lane), how far: "50 to 260 BPM".
+        juce::String describeSongTempo() const
+        {
+            const auto tempos = getTempoChanges (context);
+
+            if (tempos.size() <= 1)
+                return formatTempo (getTempoHandle (context).getValue());
+
+            const auto [lowest, highest] = std::minmax_element (tempos.begin(), tempos.end(),
+                                                                [] (const TempoChange& a, const TempoChange& b) { return a.bpm < b.bpm; });
+            return formatTempo (lowest->bpm).upToFirstOccurrenceOf (" ", false, false) + " to " + formatTempo (highest->bpm);
         }
 
         ProjectContext& context;

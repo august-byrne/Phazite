@@ -36,10 +36,24 @@ FilePart getFilePart (const juce::ValueTree& clipState);
 juce::ValueTree makeAudioClipState (Song&, const juce::String& name, const juce::File&, BeatPosition start, FilePart);
 
 // The file it plays (Song::getFile() is where a kept path starts), how long that file is in seconds, and how it plays it:
-// at the song's tempo where it starts.
+// at the song's tempo where it starts, or along the song's tempo changes (followsTempoChanges()).
 juce::File getClipFile (const Song&, const juce::ValueTree& clipState);
 double getClipFileLength (const Song&, const juce::ValueTree& clipState);
 stretch::Settings getClipStretch (const Song&, const juce::ValueTree& clipState);
+
+// Whether it follows the song's tempo where the tempo changes under its file, from the file's start to its end as the clip
+// places them. Then each beat of its sound plays on a beat of the song, at the file's tempo from where the clip starts, so
+// that it speeds up and slows down with the song, and its render follows a time map (stretch::Settings); under one tempo it
+// plays at one ratio, as Phazite always played it.
+bool followsTempoChanges (const Song&, const juce::ValueTree& clipState);
+
+// How far into its file, in the file's seconds as it plays them, a move of its start or end takes it: from where that plays
+// now, in the song's seconds, to a beat.
+double getFileSecondsBetween (const Song&, const juce::ValueTree& clipState, double from, BeatPosition to);
+
+// Where its part would start in its sound as it plays (backwards while it plays backwards), in seconds, if its start were
+// so far into what plays it, in the song's seconds (PlayedPosition::offset): what a slip of it sets.
+double getPartStartFor (const Song&, const juce::ValueTree& clipState, double offset);
 
 // What plays for it: the file, or Phazite's render of it (getRenderFile()); and where, in the song's seconds, with how far
 // into what plays it starts.

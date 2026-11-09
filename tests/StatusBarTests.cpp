@@ -90,7 +90,7 @@ TEST_CASE ("The status bar says what is selected, and where what is played on a 
 {
     Screen screen;
     screen.session.openAtStartup();
-    REQUIRE (screen.registry.invoke ("help.example.trapBeat")); // tracks with clips, as Help > Example Songs opens it
+    REQUIRE (screen.registry.invoke ("help.example.exodus")); // tracks with clips, as Help > Example Songs opens it
     phazite::test::dispatchPendingMessages();
     phazite::test::settle();
     auto& status = screen.shell.getStatusBar();

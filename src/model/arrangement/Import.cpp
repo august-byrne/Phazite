@@ -9,6 +9,8 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <algorithm>
+#include <cmath>
 #include <optional>
 #include <vector>
 
@@ -34,12 +36,14 @@ namespace
 
     // What a MIDI file holds for a clip: the notes and controller events of its first track with notes, as the song keeps
     // them (Schema.h: NOTE, CONTROL), in beats (quarter notes) from the file's start, and its name: the track's own, or
-    // else the file's. Nothing for a file that can't be read or that holds no notes.
+    // else the file's; and the file's tempos, each from its beat, from any of its tracks. Nothing for a file that can't be
+    // read or that holds no notes.
     struct MidiFileClip
     {
         juce::String name;
         std::vector<juce::ValueTree> notes, controls;
         double lastBeat = 0.0;
+        std::vector<TempoChange> tempos;
     };
 
     std::optional<MidiFileClip> readMidiFile (const juce::File& file)
@@ -57,6 +61,20 @@ namespace
             midi.convertTimestampTicksToSeconds();
 
         const auto toBeats = [ticks] (double time) { return ticks > 0.0 ? time / ticks : time * 2.0; };
+
+        // Its tempos, in a file timed in ticks: each held until the next, as MIDI's tempo changes are.
+        std::vector<TempoChange> tempos;
+
+        if (ticks > 0.0)
+        {
+            juce::MidiMessageSequence tempoEvents;
+            midi.findAllTempoEvents (tempoEvents);
+
+            for (const auto* event : tempoEvents)
+                if (const auto seconds = event->message.getTempoSecondsPerQuarterNote(); seconds > 0.0)
+                    tempos.push_back (
+                        { BeatPosition::fromBeats (std::max (0.0, toBeats (event->message.getTimeStamp()))), 60.0 / seconds });
+        }
 
         for (int index = 0; index < midi.getNumTracks(); ++index)
         {
@@ -126,6 +144,7 @@ namespace
                 if (clip.name.isEmpty())
                     clip.name = file.getFileNameWithoutExtension();
 
+                clip.tempos = tempos;
                 return clip;
             }
         }
@@ -230,6 +249,16 @@ ClipID importFile (Song& song, TrackID track, const juce::File& file, BeatPositi
 
             if (! content.has_value())
                 return {};
+
+            // A file whose tempo changes brings them into a song that has neither clips nor tempo changes yet, from where it
+            // is dropped, so that its notes play at their times; otherwise the song keeps its tempo, as a dropped file's
+            // single tempo leaves it.
+            const auto& tempos = content->tempos;
+            const auto changes = std::any_of (tempos.begin(), tempos.end(), [&tempos] (const TempoChange& tempo)
+                                              { return std::abs (tempo.bpm - tempos.front().bpm) >= 0.005; });
+
+            if (changes && getClipStates (song).empty() && ! hasTempoChanges (song))
+                takeTempoChanges (song, tempos, start);
 
             const auto bars = getBars (song);
             const auto end = bars.getBarStart (bars.getBarAt (BeatPosition::fromBeats (std::max (0.0, content->lastBeat - 1.0e-6))) + 1);

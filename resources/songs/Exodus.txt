@@ -1,0 +1,19 @@
+Exodus
+Copyright (c) 2018 XCALIBUR (XcaliburLord on the LMMS Sharing Platform)
+
+Phazite's Exodus example song plays the notes of "Exodus" by XCALIBUR
+(https://soundcloud.com/xc4libur/exodus), taken from the LMMS project that
+XCALIBUR shared on the LMMS Sharing Platform
+(https://lmms.io/lsp/?action=show&file=12900) under the Creative Commons
+Attribution license, version 4.0 (CC BY 4.0), whose text follows. The
+platform names no version; 4.0 was the current one when the project was
+shared, on 18 March 2018.
+
+What Phazite changed: it took the notes alone (resources/songs/Exodus.mid,
+written from the project by tools/lmms-to-midi.ps1) and plays them as the
+recording does: without the project's bars 24 to 32, a fourth higher and with
+the recording's tempo. It plays them on its own instruments and effects, with
+its own mix. None of the original's sounds or samples are in Phazite.
+
+The work is offered as-is, without warranties of any kind (sections 5 and 6
+of the license below).

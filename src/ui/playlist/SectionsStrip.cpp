@@ -2,6 +2,7 @@
 #include "SectionsStrip.h"
 #include "ChordLane.h"
 #include "model/arrangement/Outlines.h"
+#include "model/transport/TempoModel.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -411,8 +412,12 @@ juce::PopupMenu SectionsStrip::getMenu (const std::optional<SongSection>& sectio
                           safeThis->addSectionAt (where);
                   });
 
-    // A chord there: a song's first shows the chord lane.
+    // A chord there: a song's first shows the chord lane. And a tempo change there, on the grid, at the tempo there, which
+    // shows the tempo lane.
     menu.addSubMenu ("Add Chord Here", getAddChordMenu (context, where));
+    auto& ctx = context;
+    const auto tempoBeat = std::max (BeatPosition(), editor.snap (where, {}));
+    menu.addItem ("Add Tempo Change Here", context.hasProject(), false, [&ctx, tempoBeat] { addTempoChange (ctx, tempoBeat); });
 
     // Each outline lays out the whole song; it replaces the sections there are.
     juce::PopupMenu outlines;

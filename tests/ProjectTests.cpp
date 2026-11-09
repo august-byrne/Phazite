@@ -6,6 +6,7 @@
 #include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/fm/FmSynth.h"
 #include "devices/synth/Synth.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/Outlines.h"
@@ -475,11 +476,11 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
     juce::String error;
     std::unique_ptr<phazite::Project> project;
 
-    SUBCASE ("The Trap Beat example song, as Help > Example Songs makes it")
+    SUBCASE ("The Exodus example song, as Help > Example Songs makes it")
     {
         project = phazite::Project::create (
-            temp.folder, "Trap", error,
-            phazite::getExampleSongContent (phazite::test::getEngineContext(), "trapBeat", phazite::test::getFactoryPresetsFolder()));
+            temp.folder, "Exodus", error,
+            phazite::getExampleSongContent (phazite::test::getEngineContext(), "exodus", phazite::test::getFactoryPresetsFolder()));
         INFO (error.toStdString());
         REQUIRE (project != nullptr);
         const auto& song = project->getSong();
@@ -488,10 +489,11 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
         for (const auto id : phazite::getTrackIDs (song))
             tracks[phazite::getTrackName (song, id)] = id;
 
-        // Its tracks with clips, each played by one of Phazite's own instruments: the drum sampler, the synth, the wavetable.
+        // Its tracks with clips, each played by one of Phazite's own instruments: the drum sampler, the synth, the FM synth,
+        // the wavetable.
         for (const auto& [name, instrumentType] :
-             { std::pair ("Drums", phazite::devices::DrumSampler::typeID), std::pair ("808", phazite::devices::Synth::typeID),
-               std::pair ("Bells", phazite::devices::WavetableSynth::typeID) })
+             { std::pair ("Drums", phazite::devices::DrumSampler::typeID), std::pair ("Sub", phazite::devices::Synth::typeID),
+               std::pair ("Bass", phazite::devices::FmSynth::typeID), std::pair ("Arp Pad", phazite::devices::WavetableSynth::typeID) })
         {
             CAPTURE (name);
             REQUIRE (tracks.contains (name));

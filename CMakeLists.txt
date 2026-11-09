@@ -420,6 +420,8 @@ target_sources(phazite_core PRIVATE
     src/model/transport/RecordingModel.h
     src/model/transport/Take.cpp
     src/model/transport/Tempo.cpp
+    src/model/transport/TempoModel.cpp
+    src/model/transport/TempoModel.h
     src/model/transport/TempoValues.cpp
     src/model/transport/TempoValues.h
     src/model/transport/TransportModel.cpp
@@ -494,6 +496,9 @@ juce_add_binary_data(phazite_data
         resources/outlines/techno.outline.json
         # Chord progressions (src/model/chords/Progressions.h)
         resources/progressions/progressions.json
+        # The notes of example songs that others made and shared under free licenses (src/model/project/ExampleSongs.h),
+        # credited in resources/licenses/notices.json
+        resources/songs/Exodus.mid
         # The notices of the code and fonts from others that Phazite is built with, for the About box (src/model/engine/AppInfo.h)
         resources/licenses/notices.json
         # Phazite's logo, its own drawing (ui::createLogo()), from which the app's icon is made too (juce_add_gui_app below)
@@ -809,6 +814,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/playlist/PlaylistTracks.cpp
     src/ui/playlist/SectionsStrip.cpp
     src/ui/playlist/SectionsStrip.h
+    src/ui/playlist/TempoLane.cpp
+    src/ui/playlist/TempoLane.h
     src/ui/playlist/TrackHeader.cpp
     src/ui/playlist/TrackHeader.h
     src/ui/playlist/TrackHeights.cpp
@@ -1203,6 +1210,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TestDevices.h
         tests/TestPlugin.cpp
         tests/TestPlugin.h
+        tests/TempoLaneTests.cpp
         tests/TempoTests.cpp
         tests/TestSong.cpp
         tests/TestSong.h

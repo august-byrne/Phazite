@@ -15,6 +15,7 @@
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/TempoModel.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/Inspector.h"
@@ -71,6 +72,14 @@ TEST_CASE ("With nothing selected the inspector shows the song; a selected track
     CHECK (screen.shows ("120 BPM"));
     CHECK (screen.shows ("4/4"));
     CHECK (screen.shows ("C major")); // the key the chord lane's chords are in
+
+    // While the tempo changes along the song, how far it goes.
+    phazite::addTempoChange (screen.context, phazite::BeatPosition::fromBeats (16.0), 90.0);
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.shows ("90 to 120 BPM"));
+    phazite::removeTempoChanges (screen.context);
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.shows ("120 BPM"));
 
     selection.selectOnly (screen.track (1));
     phazite::test::dispatchPendingMessages();

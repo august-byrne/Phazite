@@ -128,12 +128,12 @@ TEST_CASE ("An example song opens as a new untitled project, with the computer k
     phazite::CommandRegistry registry;
     phazite::test::RenderHost renders;
     session.addCommands (registry, renders);
-    REQUIRE (registry.invoke ("help.example.trapBeat"));
+    REQUIRE (registry.invoke ("help.example.exodus"));
     phazite::test::dispatchPendingMessages();
 
     REQUIRE (session.getProject() != nullptr);
     CHECK (session.isUntitled());
-    CHECK (session.getProject()->getFile().getFileNameWithoutExtension() == "Trap Beat");
+    CHECK (session.getProject()->getFile().getFileNameWithoutExtension() == "Exodus");
 
     auto& context = session.getContext();
     juce::StringArray names;
@@ -141,12 +141,12 @@ TEST_CASE ("An example song opens as a new untitled project, with the computer k
     for (const auto& row : phazite::getPlaylistRows (context))
         names.add (row.name);
 
-    CHECK (names.joinIntoString (", ") == "Drums, Crash, Riser, 808, Bells, Pad, Pluck");
+    CHECK (names.joinIntoString (", ") == "Drums, Sub, Bass, Arp, Arp Pad, Sparkle");
 
-    // The computer keyboard plays the bells: their track is selected, and live MIDI follows the selection.
+    // The computer keyboard plays the arpeggio's sound: its track is selected, and live MIDI follows the selection.
     const auto selected = context.getSongSelection().getTracks();
     REQUIRE (selected.size() == 1);
-    CHECK (phazite::getTrackRow (context, selected.front())->name == "Bells");
+    CHECK (phazite::getTrackRow (context, selected.front())->name == "Arp");
 
     // The song is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();

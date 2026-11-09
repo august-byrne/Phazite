@@ -593,10 +593,11 @@ TEST_CASE ("Phazite's engine plays a plug-in from its instance in its helper, as
     CHECK (levelOf (audio, 0, 0.1, 0.5) == doctest::Approx (toneLevel).epsilon (0.002));
 }
 
-TEST_CASE ("Phazite's engine renders the Trap Beat example the same to the last bit on one thread or four")
+TEST_CASE ("Phazite's engine renders the Exodus example the same to the last bit on one thread or four")
 {
-    // Its intro and the first hook's start: the drums, the 808's glides, the bells, the pad and the returns.
-    TestSong song (TestSong::Start::trapBeat);
+    // Its intro: the arpeggio's three layers, the sub, the returns and the master's filters in automation lanes, with the
+    // compressors that duck five tracks under the drums, which have yet to come in.
+    TestSong song (TestSong::Start::exodus);
     phazite::test::dispatchPendingMessages();
     auto& state = *phazite::findSong (song.context);
     const auto one = phazite::renderWithOwnEngine (state, 48000 * 9, 48000.0, 256, 1);

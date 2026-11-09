@@ -35,7 +35,16 @@ struct TempoChange
 {
     BeatPosition beat {};
     double bpm = 120.0;
+
+    // The line to the next tempo, as an automation point's (AutomationValues.h): 1 holds this tempo and then jumps to the
+    // next (a step, as tempo changes start), 0 ramps straight to it, and between the ramp bends; -1 jumps to it at once.
+    float curve = 1.0f;
+
+    bool operator== (const TempoChange&) const = default;
 };
+
+// A ramp's curve: straight; and the step that new tempo changes start as.
+inline constexpr float tempoRamp = 0.0f, tempoJump = 1.0f;
 
 struct TimeSignatureChange
 {

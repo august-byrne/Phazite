@@ -21,10 +21,12 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -65,6 +67,32 @@ double playedSecondsOf (const phazite::Song& song, phazite::ClipID clip)
 bool isAudioClip (const phazite::Song& song, phazite::ClipID clip)
 {
     return phazite::isAudioState (phazite::findClipState (song, clip));
+}
+
+// A loop of drum hits, one a beat, each noise falling away over 30 ms, its tempo in its name: what Rubber Band keeps on its
+// beat when it stretches it to twice as long, where it puts writeClicks()'s 2 ms clicks up to 8 ms early, at one tempo as
+// along tempo changes.
+juce::File writeHits (const juce::File& folder, int beats, double bpm)
+{
+    constexpr double sampleRate = 44100.0;
+    const auto beatSamples = (int) std::lround (60.0 / bpm * sampleRate);
+    juce::AudioBuffer<float> audio (1, beats * beatSamples);
+    audio.clear();
+    juce::Random random (5);
+
+    for (int beat = 0; beat < beats; ++beat)
+        for (int i = 0; i < std::min (beatSamples, (int) (0.24 * sampleRate)); ++i)
+            audio.setSample (0, beat * beatSamples + i,
+                             0.5f * std::exp ((float) -i / (float) (0.03 * sampleRate)) * (random.nextFloat() * 2.0f - 1.0f));
+
+    const auto file = folder.getChildFile ("Hits " + juce::String (bpm, 0) + " BPM.wav");
+    folder.createDirectory();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+    auto writer = juce::WavAudioFormat().createWriterFor (
+        stream, juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels (1).withBitsPerSample (24));
+    REQUIRE (writer != nullptr);
+    writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
+    return file;
 }
 } // namespace
 
@@ -426,4 +454,249 @@ TEST_CASE ("What a tempo change stretches: every sample follows it or none does,
 
     phazite::togglePatternsFollowTempo (song);
     CHECK_FALSE (phazite::getTempoStretch (song).patternsFollow);
+}
+
+TEST_CASE ("Tempo changes along the song: added, moved, ramped, bent and deleted, each a named undo step, the first at the start")
+{
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    phazite::setTempo (song, 100.0);
+    song.getUndoManager().clearUndoHistory();
+    CHECK_FALSE (phazite::hasTempoChanges (song));
+
+    // Added on the line where it goes, nothing changes until it moves: a step, as tempo changes start.
+    CHECK (phazite::addTempoChange (song, phazite::test::at (8.0)) == 1);
+    CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Add Tempo Change"));
+    CHECK (phazite::hasTempoChanges (song));
+    CHECK (phazite::getTempoChanges (song)[1].bpm == doctest::Approx (100.0));
+    CHECK (phazite::getTempoChanges (song)[1].curve == doctest::Approx (phazite::tempoJump));
+
+    // Moved, it changes the tempo from there; the first stays at the song's start, its tempo changed.
+    CHECK (phazite::moveTempoChange (song, 1, phazite::test::at (4.0), 140.0) == 1);
+    CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Move Tempo Change"));
+    CHECK (phazite::getTempoAt (song, phazite::test::at (3.9)) == doctest::Approx (100.0));
+    CHECK (phazite::getTempoAt (song, phazite::test::at (4.0)) == doctest::Approx (140.0));
+    CHECK (phazite::moveTempoChange (song, 0, phazite::test::at (2.0), 90.0) == 0);
+    CHECK (phazite::getTempoChanges (song)[0].beat.inBeats() == doctest::Approx (0.0));
+    CHECK (phazite::getTempo (song) == doctest::Approx (90.0));
+    CHECK (phazite::toSeconds (song, phazite::test::at (4.0)) == doctest::Approx (4.0 * 60.0 / 90.0));
+
+    // Ramped, the tempo goes straight from one to the next, and the beats take the time it gives them.
+    phazite::setTempoCurve (song, 0, phazite::tempoRamp);
+    CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Change Tempo Ramp"));
+    CHECK (phazite::getTempoAt (song, phazite::test::at (2.0)) == doctest::Approx (115.0));
+    CHECK (phazite::toSeconds (song, phazite::test::at (4.0)) == doctest::Approx (4.0 * 60.0 / 50.0 * std::log (140.0 / 90.0)));
+    const auto values = phazite::getTempoValues (song, { phazite::BeatPosition(), phazite::test::at (8.0) }, 5);
+    REQUIRE (values.size() == 5);
+    CHECK (values[0] == doctest::Approx (90.0));
+    CHECK (values[1] == doctest::Approx (115.0));
+    CHECK (values[4] == doctest::Approx (140.0));
+
+    // One added on a ramp ramps on from it, at the ramp's tempo there.
+    CHECK (phazite::addTempoChange (song, phazite::test::at (1.0)) == 1);
+    CHECK (phazite::getTempoChanges (song)[1].bpm == doctest::Approx (102.5));
+    CHECK (phazite::getTempoChanges (song)[1].curve == doctest::Approx (phazite::tempoRamp));
+    CHECK (phazite::getTempoAt (song, phazite::test::at (2.0)) == doctest::Approx (115.0));
+
+    // A tempo already at a beat takes the one given; the top bar's change sets the tempo in effect where it is.
+    CHECK (phazite::addTempoChange (song, phazite::test::at (1.0), 110.0) == 1);
+    CHECK (phazite::getTempoChanges (song).size() == 3);
+    CHECK (phazite::getTempoChanges (song)[1].bpm == doctest::Approx (110.0));
+    phazite::setTempoAt (song, phazite::test::at (6.0), 150.0);
+    CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Change Tempo"));
+    CHECK (phazite::getTempoChanges (song)[2].bpm == doctest::Approx (150.0));
+    CHECK (phazite::getTempo (song) == doctest::Approx (90.0));
+
+    // Within the limits, to a hundredth, and curves within -1 and 1.
+    phazite::moveTempoChange (song, 2, phazite::test::at (4.0), 1000.0);
+    CHECK (phazite::getTempoChanges (song)[2].bpm == doctest::Approx (phazite::maxTempo));
+    phazite::setTempoCurve (song, 1, 0.3f);
+    CHECK (phazite::getTempoChanges (song)[1].curve == doctest::Approx (0.3f));
+    phazite::setTempoCurve (song, 1, 5.0f);
+    CHECK (phazite::getTempoChanges (song)[1].curve == doctest::Approx (1.0f));
+
+    // Deleted: never the first; and all of them removed, the first tempo goes on all the way, a step again.
+    phazite::deleteTempoChange (song, 0);
+    CHECK (phazite::getTempoChanges (song).size() == 3);
+    phazite::deleteTempoChange (song, 1);
+    CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Delete Tempo Change"));
+    CHECK (phazite::getTempoChanges (song).size() == 2);
+    phazite::removeTempoChanges (song);
+    CHECK (song.getUndoManager().getUndoDescription() == juce::String ("Remove Tempo Changes"));
+    CHECK_FALSE (phazite::hasTempoChanges (song));
+    CHECK (phazite::getTempoChanges (song)[0].curve == doctest::Approx (phazite::tempoJump));
+    CHECK (phazite::getTempoAt (song, phazite::test::at (100.0)) == doctest::Approx (90.0));
+
+    // Undone, they come back.
+    phazite::undo (song);
+    CHECK (phazite::getTempoChanges (song).size() == 2);
+    CHECK (phazite::getTempoChanges (song)[0].curve == doctest::Approx (phazite::tempoRamp));
+}
+
+TEST_CASE ("The tempo commands add a tempo change where the playhead is, and take them all away")
+{
+    phazite::test::TestSong song;
+    auto& state = *phazite::findSong (song.context);
+    song.setTempo (100.0);
+    CHECK (phazite::CommandRegistry::isEnabled (*song.commands.find ("transport.addTempoChange")));
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*song.commands.find ("transport.removeTempoChanges")));
+
+    phazite::movePlayhead (state, phazite::test::at (16.0));
+    song.run ("transport.addTempoChange");
+    REQUIRE (phazite::getTempoChanges (state).size() == 2);
+    CHECK (phazite::getTempoChanges (state)[1].beat.inBeats() == doctest::Approx (16.0));
+    CHECK (phazite::getTempoChanges (state)[1].bpm == doctest::Approx (100.0));
+    CHECK (phazite::CommandRegistry::isEnabled (*song.commands.find ("transport.removeTempoChanges")));
+
+    // The top bar's tempo is the one where the playhead is, and changing it changes that one.
+    auto tempo = phazite::getTempoHandle (song.context);
+    tempo.setValue (128.0);
+    CHECK (phazite::getTempoChanges (state)[1].bpm == doctest::Approx (128.0));
+    CHECK (phazite::getTempo (state) == doctest::Approx (100.0));
+    CHECK (tempo.getValue() == doctest::Approx (128.0));
+    phazite::movePlayhead (state, phazite::test::at (4.0));
+    CHECK (tempo.getValue() == doctest::Approx (100.0));
+
+    song.run ("transport.removeTempoChanges");
+    CHECK_FALSE (phazite::hasTempoChanges (state));
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (*song.commands.find ("transport.removeTempoChanges")));
+}
+
+TEST_CASE ("A loop that follows the tempo plays along the song's tempo changes, every hit on its beat, through a ramp and a step")
+{
+    phazite::test::TemporaryFolder temp;
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    const auto loop =
+        phazite::importFile (song, phazite::getTrackIDs (song)[0], writeHits (temp.folder, 8, 120.0), phazite::BeatPosition());
+    REQUIRE (isAudioClip (song, loop));
+    CHECK (phazite::getClipTempo (song, loop) == doctest::Approx (120.0));
+    CHECK_FALSE (phazite::followsTempoChanges (song, phazite::findClipState (song, loop)));
+
+    // A ramp from 120 down to 100 BPM over its first four beats (a ritardando), 100 held, and a step down to 90 at beat 6.
+    // (StretchTests.cpp holds a ramp that doubles a stretch, with hits close together; on its own after silence, a hit
+    // stretched to twice as long comes out 5 to 8 ms early from Rubber Band, at one tempo as along changes.)
+    phazite::takeTempoChanges (
+        song,
+        { { phazite::BeatPosition(), 120.0, phazite::tempoRamp }, { phazite::test::at (4.0), 100.0 }, { phazite::test::at (6.0), 90.0 } },
+        phazite::BeatPosition());
+    const auto clipState = phazite::findClipState (song, loop);
+    REQUIRE (phazite::followsTempoChanges (song, clipState));
+
+    // It keeps its eight beats, which last as long as the tempo says (the ramp's four 12 ln 1.2 seconds), and each of its
+    // file's seconds is two of its beats.
+    CHECK (phazite::getClipRange (song, loop).getLength().inBeats() == doctest::Approx (8.0));
+    const auto position = phazite::getPlayedPosition (song, clipState);
+    const auto end = phazite::toSeconds (song, phazite::test::at (8.0));
+    CHECK (end == doctest::Approx (12.0 * std::log (1.2) + 2.0 * 0.6 + 2.0 * 60.0 / 90.0));
+    CHECK (position.start == doctest::Approx (0.0));
+    CHECK (position.end == doctest::Approx (end));
+    CHECK (position.offset == doctest::Approx (0.0));
+    CHECK (phazite::getFileTimeAt (song, loop, phazite::test::at (4.0)) == doctest::Approx (2.0));
+    CHECK (phazite::getFileTimeAt (song, loop, phazite::test::at (7.0)) == doctest::Approx (3.5));
+
+    const auto settings = phazite::getClipStretch (song, clipState);
+    REQUIRE (settings.timeMap.size() >= 8);
+    CHECK (settings.timeMap.back().first == doctest::Approx (4.0));
+    CHECK (settings.timeMap.back().second == doctest::Approx (end));
+    CHECK (settings.timeRatio == doctest::Approx (end / 4.0));
+    REQUIRE (phazite::isRendered (song, loop));
+
+    // Trimmed, it plays the file from its beat, and back.
+    phazite::trimClipStart (song, loop, phazite::test::at (2.0));
+    CHECK (phazite::getFilePart (phazite::findClipState (song, loop)).start == doctest::Approx (1.0));
+    CHECK (phazite::getClipRange (song, loop).getEnd().inBeats() == doctest::Approx (8.0));
+    phazite::trimClipStart (song, loop, phazite::BeatPosition());
+    CHECK (phazite::getFilePart (phazite::findClipState (song, loop)).start == doctest::Approx (0.0));
+
+    // Rendered through Phazite's engine, as an export plays it: each hit where its beat is, give or take what Rubber Band
+    // moves an attack by, as at one tempo. Each is found by its first 10 ms, the lag that matches them best within 10 ms of
+    // its beat: stretched, a hit's loudest millisecond could be any of them.
+    REQUIRE (phazite::renderMissingClipAudio (song));
+    constexpr double rate = 44100.0;
+    const auto audio = phazite::renderWithOwnEngine (song, (int) std::lround ((end + 0.2) * rate), rate, 512);
+    const auto* out = audio.getReadPointer (0);
+    const std::unique_ptr<juce::AudioFormatReader> reader (
+        phazite::getAudioFormats().createReaderFor (phazite::getClipFile (song, phazite::findClipState (song, loop))));
+    REQUIRE (reader != nullptr);
+    juce::AudioBuffer<float> hits (1, (int) reader->lengthInSamples);
+    reader->read (&hits, 0, hits.getNumSamples(), 0, true, false);
+    constexpr int length = 441, near = 441;
+
+    for (int k = 1; k < 8; ++k)
+    {
+        CAPTURE (k);
+        const auto expected = (int) std::lround (phazite::toSeconds (song, phazite::test::at (k)) * rate);
+        const auto* hit = hits.getReadPointer (0, k * 22050);
+        auto best = 0.0;
+        auto at = expected;
+
+        for (auto lag = expected - near; lag <= expected + near && lag + length <= audio.getNumSamples(); ++lag)
+        {
+            auto dot = 0.0;
+
+            for (int i = 0; i < length; ++i)
+                dot += (double) out[lag + i] * hit[i];
+
+            if (dot > best)
+            {
+                best = dot;
+                at = lag;
+            }
+        }
+
+        CHECK (best > 0.0);
+        CHECK (std::abs ((at - expected) / rate * 1000.0) < 1.5);
+    }
+
+    // Back to one tempo, it plays at one ratio again.
+    phazite::removeTempoChanges (song);
+    CHECK_FALSE (phazite::followsTempoChanges (song, phazite::findClipState (song, loop)));
+    CHECK (phazite::getClipStretch (song, loop).timeMap.empty());
+    CHECK_FALSE (phazite::isRendered (song, loop));
+}
+
+TEST_CASE ("A MIDI file's tempo changes come into a song without clips; a song with clips keeps its tempo")
+{
+    phazite::test::TemporaryFolder temp;
+
+    // 120 BPM, then 60 from beat 4, then 90 from beat 6; a note over eight beats.
+    juce::MidiMessageSequence events;
+    events.addEvent (juce::MidiMessage::tempoMetaEvent (500000), 0.0);
+    events.addEvent (juce::MidiMessage::tempoMetaEvent (1000000), 4.0 * 960.0);
+    events.addEvent (juce::MidiMessage::tempoMetaEvent (666667), 6.0 * 960.0);
+    events.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0.0);
+    events.addEvent (juce::MidiMessage::noteOff (1, 60), 8.0 * 960.0);
+    events.updateMatchedPairs();
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote (960);
+    midi.addTrack (events);
+    const auto file = temp.folder.getChildFile ("Tempo changes.mid");
+
+    {
+        juce::FileOutputStream out (file);
+        REQUIRE (out.openedOk());
+        REQUIRE (midi.writeTo (out));
+    }
+
+    // Into a song without clips, from where it is dropped.
+    const auto emptyPtr = phazite::createSong();
+    auto& empty = *emptyPtr;
+    REQUIRE (phazite::importFile (empty, phazite::getTrackIDs (empty)[0], file, phazite::test::at (4.0)).isValid());
+    const auto changes = phazite::getTempoChanges (empty);
+    REQUIRE (changes.size() == 3);
+    CHECK (changes[0].bpm == doctest::Approx (120.0));
+    CHECK (changes[1].beat.inBeats() == doctest::Approx (8.0));
+    CHECK (changes[1].bpm == doctest::Approx (60.0));
+    CHECK (changes[2].beat.inBeats() == doctest::Approx (10.0));
+    CHECK (changes[2].bpm == doctest::Approx (90.0).epsilon (0.001));
+    CHECK (changes[1].curve == doctest::Approx (phazite::tempoJump));
+
+    // A song that has clips already keeps its tempo.
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    const auto track = phazite::getTrackIDs (song)[0];
+    REQUIRE (phazite::insertMidiClip (song, track, { phazite::BeatPosition(), phazite::test::at (4.0) }, nullptr).isValid());
+    REQUIRE (phazite::importFile (song, track, file, phazite::test::at (8.0)).isValid());
+    CHECK_FALSE (phazite::hasTempoChanges (song));
 }

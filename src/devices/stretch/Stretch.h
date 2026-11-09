@@ -8,18 +8,24 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <functional>
+#include <utility>
+#include <vector>
 
 namespace phazite::stretch
 {
 // How a sound plays: so many times as long (above 1 is slower), shifted in pitch by semitones, and backwards or not; and,
 // for a sound played at another sample rate than its own, the rate it is played at over its own (so many more frames, at
-// the same speed and pitch).
+// the same speed and pitch). A sound whose stretch changes along it (an audio clip under a song's tempo changes) has a time
+// map too: times in the sound as it plays (backwards, for a sound played backwards), in seconds after its start and in
+// order, each with where it plays in what is rendered, its timeRatio then being the whole sound's. Each frame between two of
+// them plays where a straight line between them puts it, give or take what Rubber Band moves an attack by.
 struct Settings
 {
     double timeRatio = 1.0;
     double semitones = 0.0;
     bool reversed = false;
     double rateRatio = 1.0;
+    std::vector<std::pair<double, double>> timeMap;
 
     bool operator== (const Settings&) const = default;
 };

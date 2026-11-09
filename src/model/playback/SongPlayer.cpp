@@ -221,17 +221,8 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
 
     auto plan = std::make_unique<engine::Plan>();
 
-    // The tempo map, the loop and the metronome.
-    std::vector<engine::TempoMap::Tempo> tempos;
-    std::vector<engine::TempoMap::TimeSignature> signatures;
-
-    for (const auto& change : getTempoChanges (song))
-        tempos.push_back ({ change.beat.inBeats(), change.bpm });
-
-    for (const auto& change : getTimeSignatureChanges (song))
-        signatures.push_back ({ change.beat.inBeats(), change.signature.numerator, change.signature.denominator });
-
-    plan->tempo = engine::TempoMap (std::move (tempos), std::move (signatures), sampleRate);
+    // The tempo map, with its ramps, the loop and the metronome.
+    plan->tempo = getTempoMap (song, sampleRate);
 
     if (const auto loop = live.has_value() ? getLoop (song) : std::nullopt)
         plan->loop = engine::Plan::BeatRange { loop->getStart().inBeats(), loop->getEnd().inBeats() };

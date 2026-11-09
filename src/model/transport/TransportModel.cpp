@@ -64,6 +64,9 @@ struct TempoHandle::Impl
 {
     juce::WeakReference<Song> song;
     std::unique_ptr<Gesture> gesture;
+    BeatPosition gestureBeat; // where the playhead was as the drag began: the tempo there changes all through it
+
+    BeatPosition getBeat() const { return gesture != nullptr ? gestureBeat : getPlayheadBeat (*song); }
 };
 
 TempoHandle getTempoHandle (ProjectContext& context)
@@ -117,7 +120,7 @@ bool TempoHandle::isValid() const
 double TempoHandle::getValue() const
 {
     auto* song = impl != nullptr ? impl->song.get() : nullptr;
-    return song != nullptr ? getTempo (*song) : 120.0;
+    return song != nullptr ? getTempoAt (*song, impl->getBeat()) : 120.0;
 }
 
 void TempoHandle::beginGesture()
@@ -125,13 +128,16 @@ void TempoHandle::beginGesture()
     auto* song = impl != nullptr ? impl->song.get() : nullptr;
 
     if (song != nullptr && impl->gesture == nullptr)
+    {
+        impl->gestureBeat = getPlayheadBeat (*song);
         impl->gesture = std::make_unique<Gesture> (*song, "Change Tempo");
+    }
 }
 
 void TempoHandle::setValue (double bpm)
 {
     if (auto* song = impl != nullptr ? impl->song.get() : nullptr)
-        setTempo (*song, bpm); // joins the drag's step, if one is in progress
+        setTempoAt (*song, impl->getBeat(), bpm); // joins the drag's step, if one is in progress
 }
 
 void TempoHandle::endGesture()

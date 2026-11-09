@@ -275,6 +275,8 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
       selection (projectContext.getSongSelection()),
       range (projectContext.getSongRange()),
       sectionsStrip (*this),
+      tempoLane (*this),
+      tempoLaneHeader (*this),
       chordLane (*this),
       chordLaneHeader (*this),
       addTrackRow (std::make_unique<AddTrackRow> (*this)),
@@ -288,6 +290,7 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     setComponentID ("playlist");
     addTrackButton.setComponentID ("track.add");
     sectionsStrip.setComponentID ("sections");
+    tempoLane.setComponentID ("tempoLane");
     chordLane.setComponentID ("chordLane");
 
     addTrackButton.setButtonText ("Track");
@@ -317,8 +320,9 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
         lanes->addAndMakeVisible (layer);
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &collapseAllButton, &sectionsStrip, &chordLaneHeader,
-                                                             &chordLane, &headerColumn, lanes.get(), headerEdge.get(), &getOverview() })
+    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &collapseAllButton, &sectionsStrip, &tempoLaneHeader,
+                                                             &tempoLane, &chordLaneHeader, &chordLane, &headerColumn, lanes.get(),
+                                                             headerEdge.get(), &getOverview() })
         addAndMakeVisible (c);
 
     // The overview along the time bar's top scrolls and zooms the time line, as FL Studio's scroll bar there does: no scroll bar
@@ -379,6 +383,9 @@ void Playlist::showProject()
 
     TimelineEditor::showProject();
     sectionsStrip.showProject();
+    tempoLane.showProject();
+    tempoLaneHeader.update();
+    showTempoLaneWithChanges();
     chordLane.showProject();
     chordLaneHeader.update();
     showChordLaneWithChords();
@@ -414,6 +421,13 @@ void Playlist::songChanged (const SongChanges& changes)
     // The time bar's sections and the chord lane's chords, which the tempo places in time too.
     if (changes.sections || changes.tempo)
         sectionsStrip.repaint();
+
+    // The tempo lane, while the song's tempo changes.
+    if (changes.tempo)
+    {
+        showTempoLaneWithChanges();
+        tempoLane.tempoChanged();
+    }
 
     // The chord lane, while the song has chords. A track's key sets the new project's, which the lane is in until a key is
     // chosen for it.
@@ -464,7 +478,7 @@ juce::Rectangle<int> Playlist::getTimelineArea() const
 
 std::vector<juce::Component*> Playlist::getScrollingParts()
 {
-    return { lanes.get(), &sectionsStrip, &chordLane };
+    return { lanes.get(), &sectionsStrip, &tempoLane, &chordLane };
 }
 
 std::vector<TimelineEditor::OverviewMark> Playlist::getOverviewMarks() const
@@ -506,6 +520,7 @@ void Playlist::timelineChanged()
     layOutClips();
     lanes->repaint();
     sectionsStrip.repaint();
+    tempoLane.repaint();
     chordLane.repaint();
 }
 
@@ -552,7 +567,12 @@ void Playlist::resized()
     sectionsStrip.setBounds (timeBar.removeFromTop (SectionsStrip::preferredHeight));
     ruler.setBounds (timeBar);
 
-    // Under it, while the song has chords, the chord lane, with its header over the track headers.
+    // Under it, while the song's tempo changes, the tempo lane, and while it has chords, the chord lane, each with its header
+    // over the track headers.
+    auto tempoRow = area.removeFromTop (tempoLaneShown ? TempoLane::preferredHeight : 0);
+    tempoLaneHeader.setBounds (tempoRow.removeFromLeft (headerWidth));
+    tempoLane.setBounds (tempoRow);
+
     auto chordRow = area.removeFromTop (chordLaneShown ? ChordLane::preferredHeight : 0);
     chordLaneHeader.setBounds (chordRow.removeFromLeft (headerWidth));
     chordLane.setBounds (chordRow);
@@ -567,6 +587,17 @@ void Playlist::resized()
 
     layOutRows();
     setViewStart (getView().start);
+}
+
+void Playlist::showTempoLaneWithChanges()
+{
+    // A song of one tempo has it in the top bar alone, as other DAWs show their tempo tracks only once the tempo changes.
+    const auto shown = hasTempoChanges (context);
+    tempoLane.setVisible (shown);
+    tempoLaneHeader.setVisible (shown);
+
+    if (std::exchange (tempoLaneShown, shown) != shown)
+        resized();
 }
 
 void Playlist::showChordLaneWithChords()

@@ -23,6 +23,11 @@ struct CurvePoint
     float curve = 0.0f; // -1 to 1, 0 for a straight line to the next point
 };
 
+// How far a line from one point to the next has gone from the first's value to the second's (0 to 1), a part of the way
+// along it (0 to 1), for the first point's curve (-1 to 1): what Curve plays, and the song's tempo map's lines too
+// (core/TempoMap.h).
+double getCurveProgress (double along, double curve) noexcept;
+
 class Curve
 {
 public:

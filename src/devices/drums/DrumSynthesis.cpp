@@ -43,6 +43,34 @@ Sound makeKick (double rate, double startHz, double endHz, double pitchSeconds, 
     return sound;
 }
 
+Sound makeKick (double rate, const KickShape& shape)
+{
+    Sound sound (1, (int) (shape.length * rate));
+    juce::Random random (shape.seed);
+    juce::IIRFilter clickFilter, noiseFilter;
+    clickFilter.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, shape.clickHz, 0.8));
+    noiseFilter.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, shape.noiseHz, 0.7));
+    auto phase = 0.0;
+
+    for (int i = 0; i < sound.getNumSamples(); ++i)
+    {
+        const auto t = i / rate;
+        auto hz = shape.endHz + (shape.startHz - shape.endHz) * std::exp (-t / shape.pitchSeconds);
+
+        if (shape.chirpHz > 0.0)
+            hz += (shape.chirpHz - shape.startHz) * std::exp (-t / shape.chirpSeconds);
+
+        phase += twoPi * hz / rate;
+        const auto level = t < shape.holdSeconds ? 1.0 : std::exp (-(t - shape.holdSeconds) / shape.decaySeconds);
+        const auto body = std::sin (phase) * level * juce::jmin (1.0, t / 0.0005);
+        const auto snap = shape.click * clickFilter.processSingleSampleRaw (noise (random)) * std::exp (-t / shape.clickSeconds);
+        const auto breath = shape.noise * noiseFilter.processSingleSampleRaw (noise (random)) * std::exp (-t / shape.noiseSeconds);
+        sound.setSample (0, i, softClip (body + snap + breath, shape.drive));
+    }
+
+    return sound;
+}
+
 Sound makeSnare (double rate, const SnareShape& shape)
 {
     Sound sound (1, (int) (shape.length * rate));
@@ -54,8 +82,8 @@ Sound makeSnare (double rate, const SnareShape& shape)
     for (int i = 0; i < sound.getNumSamples(); ++i)
     {
         const auto t = i / rate;
-        const auto shell = 0.6 * std::sin (twoPi * shape.lowHz * t) * std::exp (-t / shape.lowSeconds)
-                           + 0.4 * std::sin (twoPi * shape.highHz * t) * std::exp (-t / shape.highSeconds);
+        const auto shell = shape.lowLevel * std::sin (twoPi * shape.lowHz * t) * std::exp (-t / shape.lowSeconds)
+                           + shape.highLevel * std::sin (twoPi * shape.highHz * t) * std::exp (-t / shape.highSeconds);
         const auto snares = shape.snaresLevel * smooth.processSingleSampleRaw (highPass.processSingleSampleRaw (noise (random)))
                             * std::exp (-t / shape.snaresSeconds);
         sound.setSample (0, i, softClip ((shell + snares) * juce::jmin (1.0, t / 0.0005), shape.drive));
@@ -76,7 +104,7 @@ Sound makeClap (double rate, const ClapShape& shape)
     for (int i = 0; i < sound.getNumSamples(); ++i)
     {
         const auto t = i / rate;
-        auto envelope = t >= strikes.back() ? std::exp (-(t - strikes.back()) / shape.tailSeconds) : 0.0;
+        auto envelope = t >= strikes.back() ? shape.tailLevel * std::exp (-(t - strikes.back()) / shape.tailSeconds) : 0.0;
 
         for (const auto strike : strikes)
             if (t >= strike)

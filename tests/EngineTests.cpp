@@ -563,6 +563,46 @@ TEST_CASE ("The tempo map places each beat in samples, beats of the time signatu
     CHECK (waltz.toSamples (1.0) == doctest::Approx (32000.0));
 }
 
+TEST_CASE ("The tempo map ramps from tempo to tempo, straight or bent, holds and jumps, as an automation lane's line goes")
+{
+    // A straight ramp from 60 to 120 BPM over four beats: 90 half way, its beats as long as the ramp makes them (a beat
+    // lasts 60 / tempo seconds, so the four last 4 ln 2 seconds), then 120 held.
+    const engine::TempoMap ramp ({ { 0.0, 60.0, 0.0f }, { 4.0, 120.0 } }, {}, rate);
+    CHECK (ramp.getTempoAt (2.0) == doctest::Approx (90.0));
+    CHECK (ramp.getTempoAt (6.0) == doctest::Approx (120.0));
+    CHECK (ramp.toSamples (4.0) == doctest::Approx (rate * 4.0 * std::log (2.0)));
+    CHECK (ramp.toSamples (5.0) == doctest::Approx (rate * (4.0 * std::log (2.0) + 0.5)));
+    CHECK (ramp.getSamplesPerBeat (2.0) == doctest::Approx (rate * 60.0 / 90.0));
+    CHECK_FALSE (ramp.isSteadyBetween (1.0, 3.0));
+    CHECK (ramp.isSteadyBetween (4.0, 10.0));
+    CHECK (ramp.isSteadyBetween (-2.0, 0.0)); // before the song's start, its first tempo goes on as it is
+    CHECK (ramp.toSamples (-1.0) == doctest::Approx (-rate));
+
+    // A step holds its tempo, then jumps to the next; -1 jumps to it at once.
+    const engine::TempoMap step ({ { 0.0, 60.0, 1.0f }, { 4.0, 120.0 } }, {}, rate);
+    CHECK (step.getTempoAt (3.99) == doctest::Approx (60.0));
+    CHECK (step.toSamples (4.0) == doctest::Approx (rate * 4.0));
+    CHECK (step.isSteadyBetween (0.0, 3.99));
+    const engine::TempoMap jump ({ { 0.0, 60.0, -1.0f }, { 4.0, 120.0 } }, {}, rate);
+    CHECK (jump.getTempoAt (0.5) == doctest::Approx (120.0));
+    CHECK (jump.toSamples (4.0) == doctest::Approx (rate * 2.0));
+
+    // A bent ramp, slow at first, is under the straight one half way and takes longer; every beat comes back from its
+    // sample, through the ramps, before them and after them.
+    const engine::TempoMap bent ({ { 0.0, 60.0, 0.5f }, { 4.0, 120.0 } }, {}, rate);
+    CHECK (bent.getTempoAt (2.0) == doctest::Approx (66.0).epsilon (0.01));
+    CHECK (bent.toSamples (4.0) > ramp.toSamples (4.0));
+
+    for (const auto* map : { &ramp, &step, &bent })
+        for (auto beat = -1.0; beat < 8.0; beat += 0.37)
+            CHECK (map->toBeats (map->toSamples (beat)) == doctest::Approx (beat));
+
+    // Down again: a ramp from 120 to 60 is as long as the one up.
+    const engine::TempoMap down ({ { 0.0, 120.0, 0.0f }, { 4.0, 60.0 } }, {}, rate);
+    CHECK (down.toSamples (4.0) == doctest::Approx (ramp.toSamples (4.0)));
+    CHECK (down.getTempoAt (1.0) == doctest::Approx (105.0));
+}
+
 namespace
 {
 // A plan at 120 BPM in 4/4 at the test's rate, with the metronome on.

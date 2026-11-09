@@ -7,10 +7,10 @@ The presets that come with Phazite (`resources/presets/<device>/<kind>/<name>.ph
 | Instrument | Presets | Kinds |
 |---|---|---|
 | Synth | 49 | Bass, Brass, FX, Keys, Lead, Pad, Percussion, Pluck, Strings |
-| Wavetable | 29 | Bass, Chords, FX, Keys, Lead, Pad, Percussion, Pluck |
+| Wavetable | 30 | Bass, Chords, FX, Keys, Lead, Pad, Percussion, Pluck |
 | FM | 36 | Bass, Brass, FX, Keys, Lead, Mallets, Pad, Percussion, Pluck, Strings, Winds |
 | Sampler | 8 | Bass, FX, Lead |
-| Drum Sampler | 10 kits | 808, 909, Trap, House, Lo-Fi, Rhythm Box, Percussion, Punchy, Tight, Wide |
+| Drum Sampler | 11 kits | 808, 909, Trap, House, Lo-Fi, Rhythm Box, Percussion, Punchy, Tight, Wide, Synthwave |
 
 The kinds follow what Ableton Live, Logic, Bitwig and Arturia sort their factory sounds into: brass, strings, mallets, winds and percussion have kinds of their own rather than sitting under Lead, Pad or Pluck. Each preset's name is its own across the instruments (the FM synth's Brass and the synth's Poly Brass, not two "Brass"), so that a search finds one thing by a name.
 
@@ -36,6 +36,9 @@ The presets recreate classic instruments' sounds, but are named by their sound, 
 - **Rhythm Box Kit:** the CR-78's fourteen voices and its open hat: its small kick, its hats and cymbal of ringing band-passed noise with its metallic beat (three squares through a band-pass at 5.6 kHz), its guiro's scrape, maracas, tambourine, cowbell, claves, bongos and conga. Little is published about its circuits; these follow what is.
 - **Trap Kit:** what producers expect of a trap kit: a short kick over a long 808 (a sine falling an octave onto G1 over 22 ms, saturated), a crisp snare, a layered clap, tight hats for rolls, a snap, toms, a saturated 808 cowbell as phonk plays it, a shaker, a tambourine and a crash.
 - **Percussion Kit:** hand percussion, as Bitwig and FL Studio ship it: congas (open and slapped), bongos, timbales, agogo bells, woodblocks, claves, a shaker, a cabasa, a tambourine and a triangle.
+- **Synthwave Kit** (`src/devices/drums/FactoryDrums.cpp`, from `DrumSynthesis.h`): 80s synthwave drums, made for the example song Exodus after the samples its original plays (from the free 80s Retro Futuristic Drum Pack), each measured from the original's stems, none of them copied: a kick that chirps down from 1.2 kHz and falls from 280 Hz to 64 Hz in about 11 ms, held 40 ms and then cut short, as the sample's falls 20 dB between 60 and 80 ms; a snare whose tone near 165 Hz carries most of it under noise from 3 to 7.5 kHz; a clap near 1.1 kHz over a long tail, both wide as the samples are; a woody rim knock, toms from 82 to 196 Hz, and hats and cymbals, each hat a bright layer over a dark one.
+
+**Exodus's sounds**, measured against the original's stems the same way: the wavetable's Harmonic Pluck, the Harmonic Pad's sound with the envelope of the original's PADsynth layer (up in 25 ms, down 40 dB over 270 ms, released in 41 ms), so that an arpeggio's sixteenths fade before the next, as the original's do; and the compressor's Sidechain Pump, the pumping the original's peak controller makes: 30 : 1 from -46 dB, keyed below 150 Hz, in 3 ms and back over 50 ms, which takes a kick's beat down about 30 dB and brings it back in about 200 ms.
 
 **Synths** (Phazite's synth, after the 56 Juno-60 factory patches as the Hera emulator reads them, Sequential's own Prophet-5 recipes, the Alpha Juno's factory patch sheet, Open303's model of the TB-303, Adam Szabo's analysis of the JP-8000's supersaw, and Gordon Reid's Synth Secrets): Acid Bass glides (60 ms) only into a note played over a held one, as the 303 slides; DCO Strings and PWM Pad sweep a pulse's width with the LFO, PWM Pad's coming in over 1.5 s as the Juno's LFO delay brings it; Sync Lead sweeps a hard-synced oscillator with the filter envelope, as the Prophet-5's poly-mod does; Ladder Bass, Pedal Bass, Fat Lead and Scream Lead drive the filter, as a Minimoog's and an MS-20's do; Poly Pad, Poly Brass and the pads drift a little, as analog voices do. The chorus several of these want is an effect in Phazite, put after the synth.
 

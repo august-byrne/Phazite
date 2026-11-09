@@ -690,6 +690,17 @@ namespace ChordTint
     inline constexpr int grabDistance = 6;
 } // namespace ChordTint
 
+// How the tempo lane shows the song's tempo (ui/playlist/TempoLane.h), in the accent color, with points, a bend handle and
+// reach as an automation lane's (LaneTint): the wash under its line (an alpha); the lane's height (pixels); and the room it
+// keeps above and below the tempos it shows, in beats per minute at least, and as a part of how far apart they are.
+namespace TempoTint
+{
+    inline constexpr float wash = 0.12f;
+    inline constexpr int laneHeight = 48;
+    inline constexpr double minimumRoom = 5.0;
+    inline constexpr double room = 0.15;
+} // namespace TempoTint
+
 // How an audio clip's fades show, in the playlist and the audio clip editor: what a fade takes away is shaded black above
 // its curve from silence to full volume (alphas), and the curve's thickness.
 namespace FadeTint

@@ -21,6 +21,22 @@ float softClip (double x, double drive);
 Sound makeKick (double sampleRate, double startHz, double endHz, double pitchSeconds, double decaySeconds, double length, double click,
                 double drive);
 
+// A kick or a drum shaped more closely, as a sampled one measures: its pitch falling in two stages, a chirp from chirpHz
+// in its first milliseconds and then from startHz to endHz; held at full level for holdSeconds before it decays, as a
+// gated drum is; and a click of noise band-passed around clickHz.
+struct KickShape
+{
+    double chirpHz = 0.0, chirpSeconds = 0.0015; // no chirp at 0
+    double startHz = 160.0, endHz = 50.0, pitchSeconds = 0.03;
+    double holdSeconds = 0.0, decaySeconds = 0.3;
+    double click = 0.5, clickHz = 1000.0, clickSeconds = 0.003;
+    double noise = 0.0, noiseHz = 4000.0, noiseSeconds = 0.05; // a breath of band-passed noise under the body
+    double length = 0.6, drive = 1.6;
+    int seed = 1;
+};
+
+Sound makeKick (double sampleRate, const KickShape&);
+
 // A snare: its shell, two tuned sines that fade each at its own pace, and its snares, band-passed noise that rings for
 // snaresSeconds. The defaults are the default kit's snare.
 struct SnareShape
@@ -32,6 +48,7 @@ struct SnareShape
     double snaresLowCut = 800.0, snaresHighCut = 9000.0; // Hz
     double length = 0.45, drive = 1.6;
     int seed = 2;
+    double lowLevel = 0.6, highLevel = 0.4; // the shell's tones' levels
 };
 
 Sound makeSnare (double sampleRate, const SnareShape& = {});
@@ -45,6 +62,7 @@ struct ClapShape
     double tailSeconds = 0.13;
     double length = 0.55;
     int seed = 3;
+    double tailLevel = 1.0; // the tail's level against the strikes', as a room or a plate leaves it
 };
 
 Sound makeClap (double sampleRate, const ClapShape& = {});

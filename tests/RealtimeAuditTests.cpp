@@ -471,6 +471,33 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
+    TEST_CASE ("Real-time audit: Phazite's own engine, chords and the metronome through tempo changes that ramp, bend, hold and jump")
+    {
+        // As the tempo lane makes them (roadmap step 4.8): the engine works each block's beats out of the song's tempo map, a
+        // ramp's exactly and a bent one's in straight pieces. A change every half beat, so that steady playback goes through
+        // each kind of line.
+        TestSong song;
+        song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+        const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (clip, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        song.setSwitch ("transport.metronome", true);
+        constexpr float curves[] { phazite::tempoRamp, 0.5f, -0.5f, phazite::tempoJump, -1.0f };
+        std::vector<phazite::TempoChange> changes;
+
+        for (int i = 0; i < 32; ++i)
+            changes.push_back ({ phazite::BeatPosition::fromBeats (0.5 * i), i % 2 == 0 ? 100.0 : 150.0, curves[i % 5] });
+
+        phazite::takeTempoChanges (getSong (song), changes, phazite::BeatPosition());
+        REQUIRE (phazite::getTempoChanges (getSong (song)).size() == changes.size());
+        const auto m = playProjectAndMeasure (song.context);
+        report ("Phazite's engine: tempo changes", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
     TEST_CASE ("Real-time audit: Phazite's own engine, chords through a filter that an LFO and a note follower move, the pan and volume "
                "by an envelope follower, steps and a macro")
     {

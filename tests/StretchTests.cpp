@@ -10,6 +10,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include <algorithm>
+#include <functional>
 
 namespace
 {
@@ -74,14 +75,15 @@ std::vector<float> render (const juce::AudioBuffer<float>& audio, const phazite:
     return out;
 }
 
-// Each hit's copies in what came out: where (in milliseconds from where it should be) and how strong (1 for the hit as it
-// was), from correlating with its first 10 ms within 60 ms of where it should be.
+// Each hit's copies in what came out: where (in milliseconds from where it should be, the frame of what came out for the
+// frame of the sound it starts at) and how strong (1 for the hit as it was), from correlating with its first 10 ms within
+// 60 ms of where it should be.
 struct Copy
 {
     double ms, strength;
 };
 
-std::vector<std::vector<Copy>> findCopies (const Hits& hits, const std::vector<float>& out, double timeRatio)
+std::vector<std::vector<Copy>> findCopies (const Hits& hits, const std::vector<float>& out, const std::function<double (int)>& whereItPlays)
 {
     constexpr int length = 441;
     const int window = (int) (0.06 * rate);
@@ -90,7 +92,7 @@ std::vector<std::vector<Copy>> findCopies (const Hits& hits, const std::vector<f
 
     for (auto start : hits.starts)
     {
-        const auto expected = (int) std::lround (start * timeRatio);
+        const auto expected = (int) std::lround (whereItPlays (start));
 
         if (start + length > hits.audio.getNumSamples() || expected + window + length > (int) out.size())
             break;
@@ -221,7 +223,7 @@ TEST_CASE ("A drum loop stretched to another tempo plays every hit once, on its 
         CAPTURE (songTempo);
         const auto timeRatio = 120.0 / songTempo;
         const auto out = render (hits.audio, { timeRatio, 0.0, false });
-        const auto copies = findCopies (hits, out, timeRatio);
+        const auto copies = findCopies (hits, out, [timeRatio] (int start) { return start * timeRatio; });
         REQUIRE (copies.size() >= 16);
         std::vector<double> offsets;
 
@@ -252,6 +254,68 @@ TEST_CASE ("A drum loop stretched to another tempo plays every hit once, on its 
         std::sort (offsets.begin(), offsets.end());
         CHECK (std::abs (offsets[offsets.size() / 2]) < 1.0);
     }
+}
+
+TEST_CASE ("A drum loop stretched along a time map plays every hit once and on its beat, through a ramp that doubles its stretch")
+{
+    // Hits a sixteenth apart at 120 BPM, as the song whose tempo they follow ramps from 120 down to 60 BPM over their first
+    // two seconds (their stretch from 1 to 2), holds 60 and steps up to 90: each half second of the sound is a beat of the
+    // song. R3's offline key frames, each taken up a hop late, put them up to 9 ms early by the ramp's end.
+    const auto hits = makeHits (4.0, 0.125, 0.03);
+    const auto songSeconds = [] (double beat)
+    {
+        if (beat <= 4.0)
+            return -4.0 * std::log (1.0 - beat / 8.0); // a beat lasts 60 / (120 - 15 b) seconds
+        if (beat <= 6.0)
+            return 4.0 * std::log (2.0) + (beat - 4.0);
+        return 4.0 * std::log (2.0) + 2.0 + (beat - 6.0) * 2.0 / 3.0;
+    };
+
+    phazite::stretch::Settings settings;
+
+    for (int step = 1; step <= 64; ++step)
+        settings.timeMap.emplace_back (step / 16.0, songSeconds (step / 8.0));
+
+    settings.timeRatio = settings.timeMap.back().second / 4.0;
+    const auto out = render (hits.audio, settings);
+
+    // Where each frame of the sound plays: straight between the map's times, as it promises.
+    const auto whereItPlays = [&settings] (int frame)
+    {
+        const auto seconds = frame / rate;
+        std::pair<double, double> before { 0.0, 0.0 };
+
+        for (const auto& point : settings.timeMap)
+        {
+            if (point.first >= seconds)
+                return rate * (before.second + (seconds - before.first) * (point.second - before.second) / (point.first - before.first));
+
+            before = point;
+        }
+
+        return rate * before.second;
+    };
+
+    const auto copies = findCopies (hits, out, whereItPlays);
+    REQUIRE (copies.size() >= 28);
+    std::vector<double> offsets;
+
+    // Every hit but the first, whose copy at the very start the search can't see.
+    for (size_t hit = 1; hit < copies.size(); ++hit)
+    {
+        CAPTURE (hit);
+        REQUIRE_FALSE (copies[hit].empty());
+
+        // Once, and within 2.5 ms of its beat, as at one tempo.
+        for (size_t c = 1; c < copies[hit].size(); ++c)
+            CHECK (std::abs (copies[hit][c].ms - copies[hit][0].ms) < 1.0);
+
+        CHECK (std::abs (copies[hit][0].ms) < 2.5);
+        offsets.push_back (copies[hit][0].ms);
+    }
+
+    std::sort (offsets.begin(), offsets.end());
+    CHECK (std::abs (offsets[offsets.size() / 2]) < 1.0);
 }
 
 TEST_CASE ("A held chord stretched to another tempo stays clean between its notes")

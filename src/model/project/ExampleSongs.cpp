@@ -7,7 +7,10 @@
 #include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/dynamics/Multiband.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/fm/FmSynth.h"
+#include "devices/motion/Chorus.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
@@ -26,18 +29,21 @@
 #include "model/mixer/MixerModel.h"
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
-#include "model/notes/internal/Notes.h"
 #include "model/presets/PresetModel.h"
+#include "model/project/ProjectContents.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
+#include "model/transport/internal/Tempo.h"
 
+#include <PhaziteData.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <span>
+#include <map>
+#include <tuple>
 
 namespace phazite
 {
@@ -184,6 +190,77 @@ namespace
     }
 
     //==============================================================================
+    // A song by someone else that ships as its notes (resources/songs/*.mid, among Phazite's data), each of its parts by its
+    // track's name: its notes in the file's ticks, so that two clips' notes compare exactly.
+    struct SongNotes
+    {
+        struct Note
+        {
+            int start = 0, length = 0; // in ticks
+            int pitch = 0, velocity = 0;
+
+            bool operator== (const Note&) const = default;
+        };
+
+        int ticksPerBeat = 1;
+        std::map<juce::String, std::vector<Note>> parts; // each in time order
+
+        double toBeats (int ticks) const { return ticks / (double) ticksPerBeat; }
+
+        const std::vector<Note>& getPart (const juce::String& name) const
+        {
+            static const std::vector<Note> none;
+            const auto found = parts.find (name);
+            return found != parts.end() ? found->second : none;
+        }
+    };
+
+    // A song's notes from its MIDI file among Phazite's data by the data's name ("Exodus_mid" for resources/songs/Exodus.mid);
+    // none if it isn't there.
+    SongNotes readSongNotes (const char* resourceName)
+    {
+        SongNotes song;
+        int size = 0;
+        const auto* data = PhaziteData::getNamedResource (resourceName, size);
+        juce::MidiFile file;
+
+        if (data == nullptr)
+            return song;
+
+        if (juce::MemoryInputStream stream (data, (size_t) size, false); ! file.readFrom (stream) || file.getTimeFormat() <= 0)
+            return song;
+
+        song.ticksPerBeat = file.getTimeFormat();
+
+        for (int index = 0; index < file.getNumTracks(); ++index)
+        {
+            juce::MidiMessageSequence sequence (*file.getTrack (index));
+            sequence.updateMatchedPairs();
+            juce::String name;
+            std::vector<SongNotes::Note> notes;
+
+            for (const auto* event : sequence)
+            {
+                const auto& message = event->message;
+
+                if (message.isTrackNameEvent() && name.isEmpty())
+                    name = message.getTextFromTextMetaEvent();
+                else if (message.isNoteOn() && event->noteOffObject != nullptr)
+                {
+                    const auto start = juce::roundToInt (message.getTimeStamp());
+                    notes.push_back ({ start, juce::roundToInt (event->noteOffObject->message.getTimeStamp()) - start,
+                                       message.getNoteNumber(), message.getVelocity() });
+                }
+            }
+
+            if (name.isNotEmpty())
+                song.parts[name] = std::move (notes);
+        }
+
+        return song;
+    }
+
+    //==============================================================================
     // Makes a song through the model's functions by ID, as the UI makes one, and keeps going past what isn't there (a preset
     // missing from an install), so that a song always opens.
     class Builder
@@ -204,6 +281,13 @@ namespace
         {
             if (auto tempo = getTempoHandle (context); tempo.isValid())
                 tempo.setValue (bpm);
+        }
+
+        // Tempos along the song, each from its beat, the first at its start.
+        void setTempoChanges (const std::vector<TempoChange>& tempos)
+        {
+            if (auto* song = findSong (context))
+                takeTempoChanges (*song, tempos, BeatPosition());
         }
 
         TrackID addTrack (const juce::String& name, const char* colour)
@@ -323,14 +407,75 @@ namespace
             addNote (context, clip, pitch, at (start), BeatDuration::fromBeats (length), velocity);
         }
 
-        // A slide note (NoteValues.h): it plays nothing itself, but glides what sounds as it starts to its pitch over its
-        // length, as an 808 glides.
-        void slide (ClipID clip, int pitch, double start, double length)
+        // A part of a song that ships as its notes (SongNotes) on a track, in clips of so many bars: a clip ends where a bar
+        // ends with no note held over it and holds only the bars with notes, and one that plays what an earlier one plays is
+        // an alias of it (repeat()), as a pattern is played again.
+        void addNotes (TrackID track, const SongNotes& song, const std::vector<SongNotes::Note>& notes, int barsPerClip)
         {
-            const auto added = addNote (context, clip, pitch, at (start), BeatDuration::fromBeats (length), 100);
+            const auto ticksPerBar = song.ticksPerBeat * 4;
+            auto end = 0;
 
-            if (auto* played = findSong (context); played != nullptr && added.isValid())
-                toggleNotesSlide (*played, { added });
+            for (const auto& each : notes)
+                end = std::max (end, each.start + each.length);
+
+            std::vector<int> ends;
+
+            for (auto at = ticksPerBar * barsPerClip; at < end; at += ticksPerBar * barsPerClip)
+                if (std::none_of (notes.begin(), notes.end(),
+                                  [at] (const SongNotes::Note& held) { return held.start < at && held.start + held.length > at; }))
+                    ends.push_back (at);
+
+            ends.push_back (end);
+
+            struct Made
+            {
+                int length;
+                std::vector<SongNotes::Note> notes; // from the clip's start
+                ClipID clip;
+            };
+
+            std::vector<Made> made;
+            auto from = 0;
+
+            for (const auto to : ends)
+            {
+                std::vector<SongNotes::Note> inside;
+
+                for (const auto& each : notes)
+                    if (each.start >= from && each.start < to)
+                        inside.push_back (each);
+
+                from = to;
+
+                if (inside.empty())
+                    continue;
+
+                const auto first = inside.front().start / ticksPerBar * ticksPerBar;
+                auto last = 0;
+
+                for (auto& each : inside)
+                {
+                    last = std::max (last, each.start + each.length);
+                    each.start -= first;
+                }
+
+                const auto length = (last + ticksPerBar - 1) / ticksPerBar * ticksPerBar - first;
+                const auto same = std::find_if (made.begin(), made.end(), [length, &inside] (const Made& earlier)
+                                                { return earlier.length == length && earlier.notes == inside; });
+
+                if (same != made.end())
+                {
+                    repeat (same->clip, { song.toBeats (first) });
+                    continue;
+                }
+
+                const auto clip = addClip (track, song.toBeats (first), song.toBeats (length));
+
+                for (const auto& each : inside)
+                    note (clip, each.pitch, song.toBeats (first + each.start), song.toBeats (each.length), each.velocity);
+
+                made.push_back ({ length, std::move (inside), clip });
+            }
         }
 
         // Aliases of a clip, which play what it plays, starting at these song beats on its track.
@@ -443,210 +588,313 @@ namespace
     };
 
     //==============================================================================
-    // Trap at 140 BPM in C minor, 56 bars: an intro on iv and V that the hook's i resolves; drums in half time on the trap
-    // kit, the snare and the clap on each bar's third beat, and hi-hat rolls in 32nds and triplets; an 808 whose slide notes
-    // glide it up an octave and on to the next chord's root; FM bells, a dark pad and, in the verse, a pluck that answers
-    // them; a noise riser into each hook and a crash on its first beat; and a plate and a ping-pong delay on returns.
-    void makeTrapBeat (Builder& song)
+    // Exodus, a synthwave song by XCALIBUR (https://soundcloud.com/xc4libur/exodus), which its author shared with its LMMS
+    // project under CC BY 4.0 (resources/licenses/notices.json): its notes (resources/songs/Exodus.mid, written from the
+    // project by tools/lmms-to-midi.ps1), played on Phazite's instruments in F major, 112 bars, as its recording plays them,
+    // with its tempo (the tempo lane): a tape speeding up from 50 BPM to 114 over the intro, held through the themes (111 in
+    // the last), and spinning up to 260 BPM over each breakdown before it drops to 50 and ramps back up over the build-up.
+    // An arpeggio of seventh chords in sixteenths on three layers, an octave and two up; a bass pulsing in sixteenths and a
+    // sub under them, B flat, G and A, which the chord lane follows; 80s drums on the Synthwave Kit, a fill closing every
+    // eighth bar; everything else pumping under the drums through sidechains; and the master's high-pass and low-pass in
+    // automation lanes, as the recording's: the low-pass darkens the intro and opens into the theme, the high-pass sweeps
+    // into each theme, and both thin the breakdowns and the build-ups and close over the outro. Its credit is in the
+    // project's notes, so that it stays with what is made from it.
+    void makeExodus (Builder& song)
     {
-        constexpr double bpm = 140.0;
-        song.setTempo (bpm);
-        const Key key { 0, Scale::minor };
+        const Key key { 5, Scale::major };
+        const auto notes = readSongNotes ("Exodus_mid");
+
+        // Its recording differs from the project XCALIBUR shared, and is what the song follows (its stems, measured): its
+        // first theme is 24 bars, without the project's bars 24 to 32; it plays a fourth higher, in F major (the project's
+        // pitch is 0 and nothing moves it, so the recording was transposed whole); and its first two themes are at 114 BPM.
+        // Bars from 32 on in the project's count come 8 bars earlier here.
+        constexpr double cutFrom = 24.0, cutTo = 32.0;
+        const auto recorded = [] (double projectBar)
+        { return at (bar (projectBar >= cutTo ? projectBar - (cutTo - cutFrom) : projectBar)); };
+        const auto ticksPerBar = 4 * notes.ticksPerBeat;
+
+        const auto part = [&notes, ticksPerBar] (const juce::String& name, int transpose)
+        {
+            std::vector<SongNotes::Note> kept;
+
+            for (auto note : notes.getPart (name))
+            {
+                if (note.start >= cutFrom * ticksPerBar && note.start < cutTo * ticksPerBar)
+                    continue;
+
+                if (note.start >= cutTo * ticksPerBar)
+                    note.start -= (int) ((cutTo - cutFrom) * ticksPerBar);
+
+                note.pitch += transpose;
+                kept.push_back (note);
+            }
+
+            return kept;
+        };
+
+        constexpr int up = 5; // the recording's fourth
+
+        // The recording's tempo, ramping straight from point to point as LMMS's automation does: up from 50 BPM to 98 by bar
+        // 4 and 111 by bar 8, where the first two themes jump to 114 and hold it; over each breakdown, from 114 up to 260
+        // BPM three sixty-fourths of a bar before its end, where it drops to 51 and 50, and over the build-up back up to 98
+        // and 111, the last theme's tempo. Each jump comes a 192nd of a bar, LMMS's tick, after the ramp's end.
+        constexpr double tick = 1.0 / 192.0;
+        std::vector<TempoChange> tempos { { recorded (0), 50.0, tempoRamp },
+                                          { recorded (4), 98.0, tempoRamp },
+                                          { recorded (8 - tick), 111.0 },
+                                          { recorded (8), 114.0 } };
+
+        for (const auto& [breakdown, theme] : { std::pair (40.0, 114.0), std::pair (80.0, 111.0) })
+            for (const auto& [bars, bpm, curve] :
+                 { std::tuple (0.0, 114.0, tempoRamp), std::tuple (7.0 + 141.0 / 192.0, 260.0, tempoRamp),
+                   std::tuple (7.75, 51.0, tempoRamp), std::tuple (8.0, 50.0, tempoRamp), std::tuple (12.0, 98.0, tempoRamp),
+                   std::tuple (16.0 - tick, 111.0, tempoJump), std::tuple (16.0, theme, tempoJump) })
+                tempos.push_back ({ recorded (breakdown + bars), bpm, curve });
+
+        song.setTempoChanges (tempos);
 
         song.layOutSections (
             { { .name = "Intro",
                 .role = "intro",
-                .tip = "The bells and the pad on iv and V, which the hook resolves",
-                .bars = 4,
+                .tip = "The arpeggio and the sub, thinned by the master's high-pass and low-pass until the drums come in",
+                .bars = 8,
                 .energy = 0.3f },
-              { .name = "Hook",
-                .role = "hook",
-                .tip = "Everything plays: the 808 glides between its notes (slide notes) and the hats roll",
-                .bars = 16,
-                .energy = 1.0f },
-              { .name = "Verse",
-                .role = "verse",
-                .tip = "Room for a voice: the bells rest, a pluck answers and the 808 plays less",
-                .bars = 16,
-                .energy = 0.65f },
-              { .name = "Hook 2", .role = "hook", .tip = "The hook again", .bars = 16, .energy = 1.0f },
-              { .name = "Outro", .role = "outro", .tip = "The bells and the pad on i, and a last 808", .bars = 4, .energy = 0.25f } });
-        song.layChords (key, { "iv", "iv", "V", "V" }, 0, 4);
-        song.layChords (key, { "i", "i", "VI", "VI", "iv", "iv", "V", "V" }, 4, 52);
-        song.layChords (key, { "i" }, 52, 56);
+              { .name = "Theme",
+                .role = "drop",
+                .tip = "Everything plays, pumping under the drums, the bass under the arpeggio's chords, and a fill every eighth bar",
+                .bars = 24,
+                .energy = 0.85f },
+              { .name = "Breakdown",
+                .role = "breakdown",
+                .tip = "No drums: the arpeggio and the bass through the master's high-pass",
+                .bars = 8,
+                .energy = 0.4f },
+              { .name = "Build-up",
+                .role = "buildUp",
+                .tip = "The drums come back under the high-pass, which opens into the theme",
+                .bars = 8,
+                .energy = 0.6f },
+              { .name = "Theme 2", .role = "drop", .tip = "The theme again", .bars = 24, .energy = 0.9f },
+              { .name = "Breakdown 2", .role = "breakdown", .tip = "The breakdown again", .bars = 8, .energy = 0.4f },
+              { .name = "Build-up 2", .role = "buildUp", .tip = "The build-up again", .bars = 8, .energy = 0.6f },
+              { .name = "Theme 3", .role = "drop", .tip = "The chords change every two bars now", .bars = 16, .energy = 1.0f },
+              { .name = "Outro", .role = "outro", .tip = "The master's low-pass closes over the last bars", .bars = 8, .energy = 0.5f } });
 
-        // Each of the hook's and the verse's chords, two bars each: the 808's note under it (C, Ab, F and G, low), and its
-        // three notes for the bells.
-        struct Chord
-        {
-            int bass;
-            int tones[3];
-        };
+        setProjectNotes (song.context,
+                         "Exodus, by XCALIBUR: https://soundcloud.com/xc4libur/exodus\n"
+                         "From its LMMS project, which XCALIBUR shared on the LMMS Sharing Platform "
+                         "(https://lmms.io/lsp/?action=show&file=12900) under the Creative Commons Attribution 4.0 license "
+                         "(CC BY 4.0: https://creativecommons.org/licenses/by/4.0/).\n"
+                         "Phazite plays its notes on its own instruments as its recording plays them, with its tempo, its first "
+                         "theme 24 bars long and everything a fourth higher than the project's; the sounds, the effects and "
+                         "the mix are Phazite's, not the original's. If you share something made from it, credit XCALIBUR.");
 
-        constexpr Chord cycle[4] = { { 36, { 72, 75, 79 } }, { 32, { 68, 72, 75 } }, { 29, { 65, 68, 72 } }, { 31, { 67, 71, 74 } } };
-
-        // The kick's hits in two bars, in sixteenths from their start, which the 808 plays with.
-        constexpr int hookKicks[] = { 0, 3, 10, 16, 22, 27, 30 };
-        constexpr int verseKicks[] = { 0, 7, 10, 16, 25 };
-        const auto kicksOf = [&] (bool hook) { return hook ? std::span<const int> (hookKicks) : std::span<const int> (verseKicks); };
-
-        // The drums: the kick; the snare on each bar's third beat (half time), with a clap in the hook; hats in eighths, an
-        // open one in the hook; a roll of 32nds before the first bar's snare is done, and one at the end of the second bar,
-        // in triplets, or for the last two bars of a part in 32nds without the kick, into the next.
+        // The drums: a kick on every beat and a snare on two and four, a fill closing every eighth bar, and a pickup into the
+        // first theme and each build-up, on the Synthwave Kit, whose sounds were made after the original's five samples
+        // (from the free 80s Retro Futuristic Drum Pack), measured: a kick whose pitch falls from about 250 Hz to 65 Hz,
+        // held 45 ms and then cut short; a snare whose 160 Hz tone carries most of it under bright noise; a clap around
+        // 1.1 kHz over a long tail; a woody knock for the percussion; and a bright open hat that darkens as it rings. The
+        // snare's and the clap's long tails spread wide, as the samples' do, and the drums stay dry, as the original's do.
         const auto drums = song.addTrack ("Drums", "Vermilion");
-        song.setInstrument (drums, devices::DrumSampler::typeID, "Drum Sampler/Kits/Trap Kit");
+        song.setInstrument (drums, devices::DrumSampler::typeID, "Drum Sampler/Kits/Synthwave Kit");
+        auto drumNotes = part ("Drums", 0);
 
-        const auto roll = [&song] (ClipID clip, double start, double length, int count, int from, int to)
+        // The recording's kick on every beat of the intro, under the master's high-pass as it opens, up to the pickup.
+        for (int beat = 0; beat < 7 * 4; ++beat)
+            drumNotes.push_back ({ .start = beat * notes.ticksPerBeat, .length = notes.ticksPerBeat / 4, .pitch = 36, .velocity = 100 });
+
+        song.addNotes (drums, notes, drumNotes, 8);
+        song.setVolume (drums, -3.0f);
+
+        // Its low mids a little down, where the kit rings more than the original's drums do in its mix.
+        const auto drumsEq = song.addEffect (drums, devices::Equalizer::typeID);
+
+        // An EQ's band: on, its type (0 a low cut, 1 a low shelf, 2 a bell), its frequency, gain and Q.
+        const auto setBand = [&song] (DeviceID eq, int band, float type, float hertz, float decibels, float q)
         {
-            for (int each = 0; each < count; ++each)
-                song.note (clip, closedHat, start + length * each / count, length / count, from + (to - from) * each / (count - 1));
+            const auto prefix = "band" + juce::String (band);
+            song.set (eq, (prefix + "On").toRawUTF8(), 1.0f);
+            song.set (eq, (prefix + "Type").toRawUTF8(), type);
+            song.set (eq, (prefix + "Frequency").toRawUTF8(), hertz);
+            song.set (eq, (prefix + "Gain").toRawUTF8(), decibels);
+            song.set (eq, (prefix + "Q").toRawUTF8(), q);
         };
 
-        const auto addDrums = [&] (double start, bool hook, bool ending)
+        setBand (drumsEq, 3, 2.0f, 500.0f, -3.0f, 0.8f);
+
+        // The sub, on the chords' roots, as the original's: three saws a few cents apart through a 12 dB low-pass, which each
+        // note opens to about 2.7 kHz and which closes over a second and a half to 170 Hz (the original's falls from 6 kHz to
+        // about 155 Hz, further than the synth's envelope reaches), with no envelope on its level; then an ensemble chorus,
+        // a little drive (the original clips at -3 dB) and the original's EQ, which lifts 31, 125 and 250 Hz.
+        const auto sub = song.addTrack ("Sub", "Blue");
+        const auto subSynth = song.setInstrument (sub, devices::Synth::typeID, "Synth/Bass/Reese Bass");
+
+        for (const auto& [parameter, value] : { std::pair ("oscMix", 0.0f),
+                                                std::pair ("subLevel", 0.0f),
+                                                std::pair ("unisonOn", 1.0f),
+                                                std::pair ("unisonVoices", 2.0f),
+                                                std::pair ("unisonDetune", 17.0f),
+                                                std::pair ("unisonSpread", 0.8f),
+                                                std::pair ("lfoOn", 0.0f),
+                                                std::pair ("filterOn", 1.0f),
+                                                std::pair ("filterType", 0.0f),
+                                                std::pair ("filterSlope", 0.0f),
+                                                std::pair ("cutoff", 170.0f),
+                                                std::pair ("resonance", 0.35f),
+                                                std::pair ("keyTracking", 0.0f),
+                                                std::pair ("filterEnvelopeOn", 1.0f),
+                                                std::pair ("filterEnvelope", 48.0f),
+                                                std::pair ("filterAttack", 1.0f),
+                                                std::pair ("filterDecay", 1528.0f),
+                                                std::pair ("filterSustain", 0.0f),
+                                                std::pair ("filterRelease", 100.0f),
+                                                std::pair ("filterDecayCurve", 0.5f),
+                                                std::pair ("attack", 2.0f),
+                                                std::pair ("sustain", 1.0f),
+                                                std::pair ("release", 60.0f),
+                                                std::pair ("voiceMode", 0.0f),
+                                                std::pair ("glide", 0.0f) })
+            song.set (subSynth, parameter, value);
+
+        song.addEffect (sub, devices::Chorus::typeID, "Chorus/Ensemble/Lush Ensemble");
+        song.addEffect (sub, devices::Saturator::typeID, "Saturator/Warmth/Subtle Drive");
+        const auto subEq = song.addEffect (sub, devices::Equalizer::typeID);
+        setBand (subEq, 2, 2.0f, 31.0f, 11.9f, 1.4f);
+        setBand (subEq, 3, 2.0f, 125.0f, 6.7f, 1.4f);
+        setBand (subEq, 4, 2.0f, 250.0f, 8.6f, 1.4f);
+        song.addNotes (sub, notes, part ("Sub", up), 4);
+
+        // Brighter through the intro, as the recording's, whose strongest notes there are the sub's harmonics.
+        song.automate ({ subSynth, "cutoff" }, { { recorded (0), 900.0f }, { recorded (7.7), 900.0f }, { recorded (8), 170.0f } });
+        song.setVolume (sub, -9.0f);
+
+        // The bass's sixteenths over it, as the original's: a saw whose phase two waves move (LMMS's phase modulation, by a
+        // sine a fourth above and a wave at the saw's own pitch, each at a third of full: an index of about 2), which the FM
+        // synth plays as a saw carrier with two sines under it; its level falls to nothing in 192 ms while its tone holds;
+        // then the original's EQ, which lifts everything under 150 Hz by 7 dB.
+        const auto bass = song.addTrack ("Bass", "Sky blue");
+        const auto bassSynth = song.setInstrument (bass, devices::FmSynth::typeID, "FM/Bass/FM Bass");
+
+        for (const auto& [parameter, value] :
+             { std::pair ("algorithm", 3.0f),    std::pair ("voiceMode", 0.0f),     std::pair ("glide", 0.0f),
+               std::pair ("op1Wave", 2.0f),      std::pair ("op1Ratio", 1.0f),      std::pair ("op1Level", 1.0f),
+               std::pair ("op1Attack", 0.5f),    std::pair ("op1Decay", 192.0f),    std::pair ("op1Sustain", 0.0f),
+               std::pair ("op1Release", 100.0f), std::pair ("op1DecayCurve", 0.0f), std::pair ("op1ReleaseCurve", 0.0f),
+               std::pair ("op2Wave", 0.0f),      std::pair ("op2Ratio", 1.0f),      std::pair ("op2Fine", 0.33f),
+               std::pair ("op2Detune", 6.0f),    std::pair ("op2Level", 0.41f),     std::pair ("op2Velocity", 0.0f),
+               std::pair ("op2KeyScale", 0.0f),  std::pair ("op2Attack", 0.5f),     std::pair ("op2Decay", 0.0f),
+               std::pair ("op2Sustain", 1.0f),   std::pair ("op2Release", 300.0f),  std::pair ("op3On", 1.0f),
+               std::pair ("op3Wave", 0.0f),      std::pair ("op3Ratio", 1.0f),      std::pair ("op3Level", 0.41f),
+               std::pair ("op3Velocity", 0.0f),  std::pair ("op3KeyScale", 0.0f),   std::pair ("op3Attack", 0.5f),
+               std::pair ("op3Decay", 0.0f),     std::pair ("op3Sustain", 1.0f),    std::pair ("op3Release", 300.0f),
+               std::pair ("op4On", 0.0f) })
+            song.set (bassSynth, parameter, value);
+
+        const auto bassEq = song.addEffect (bass, devices::Equalizer::typeID);
+        setBand (bassEq, 2, 1.0f, 150.0f, 7.0f, 0.71f);
+        setBand (bassEq, 3, 2.0f, 400.0f, 2.5f, 0.7f);
+        song.addNotes (bass, notes, part ("Bass", up), 4);
+        song.setVolume (bass, -7.0f);
+
+        // The arpeggio, and its second layer an octave up, the loudest of the three, each dry through a tape's wobble, as the
+        // original's channel plays them through a vinyl record's warp. The second is the original's pad sound plucked, as
+        // its envelope plays it: in 25 ms, and down 40 dB over 270 ms, so that each sixteenth fades before the next.
+        const auto arp = song.addTrack ("Arp", "Bluish green");
+        song.setInstrument (arp, devices::Synth::typeID, "Synth/Pluck/Bright Pluck");
+        song.addEffect (arp, devices::Chorus::typeID, "Chorus/Creative/Tape Wobble");
+        song.addNotes (arp, notes, part ("Arp", up), 4);
+        song.setVolume (arp, -8.0f);
+
+        const auto arpPad = song.addTrack ("Arp Pad", "Reddish purple");
+        song.setInstrument (arpPad, devices::WavetableSynth::typeID, "Wavetable/Pluck/Harmonic Pluck");
+        const auto padWobble = song.addEffect (arpPad, devices::Chorus::typeID, "Chorus/Creative/Tape Wobble");
+        song.set (padWobble, "stereo", 0.6f); // the original's pad is stereo
+
+        // Both warmer, as the original's are: their notes' own octave up a little and the upper mids well down.
+        for (const auto layer : { arp, arpPad })
         {
-            const auto clip = song.addClip (drums, start, bar (2));
-
-            for (const auto step : kicksOf (hook))
-                if (! ending || step < 28)
-                    song.note (clip, kick, start + step * 0.25, 0.25, step % 16 == 0 ? 118 : 104);
-
-            for (int each = 0; each < 2; ++each)
-            {
-                song.note (clip, snare, start + bar (each) + 2.0, 0.25, 112);
-
-                if (hook)
-                    song.note (clip, clap, start + bar (each) + 2.0, 0.25, 100);
-            }
-
-            // Eighths but where the rolls are: the first bar's last half beat and the second bar's last beat.
-            for (int step = 0; step < 16; ++step)
-                if (step != 7 && step < 14)
-                    song.note (clip, hook && step == 3 ? openHat : closedHat, start + step * 0.5, hook && step == 3 ? 0.5 : 0.25,
-                               step % 2 == 0 ? 92 : 70);
-
-            roll (clip, start + 3.5, 0.5, 4, 60, 92);
-
-            if (ending)
-                roll (clip, start + 7.0, 1.0, 8, 50, 110);
-            else
-                roll (clip, start + 7.0, 1.0, 6, 55, 100);
-
-            return clip;
-        };
-
-        const auto hookDrums = addDrums (bar (4), true, false);
-        song.repeat (hookDrums, { bar (6), bar (8), bar (10), bar (12), bar (14), bar (16), bar (36), bar (38), bar (40), bar (42),
-                                  bar (44), bar (46), bar (48) });
-        song.repeat (addDrums (bar (18), true, true), { bar (50) });
-        song.repeat (addDrums (bar (20), false, false), { bar (22), bar (24), bar (26), bar (28), bar (30), bar (32) });
-        addDrums (bar (34), false, true);
-
-        // A crash on the first beat of each part after the intro, and a riser into each hook.
-        const auto crash = song.addTrack ("Crash", "Yellow");
-        song.repeat (song.addSample (crash, "Crash", getStereoFactoryDrum ("Trap Crash"), bar (4)), { bar (20), bar (36) });
-        song.setVolume (crash, -8.0f);
-
-        const auto riser = song.addTrack ("Riser", "Gray");
-        song.setInstrument (riser, devices::Synth::typeID, "Synth/FX/Noise Riser");
-        song.note (song.addClip (riser, bar (2), bar (2)), 57, bar (2), bar (2), 90);
-        song.note (song.addClip (riser, bar (34), bar (2)), 57, bar (34), bar (2), 90);
-        song.setVolume (riser, -13.0f);
-
-        // The 808: a note with each kick, held until the next, at the root of the chord it is under. In the hook a slide note
-        // glides it up an octave and back in each chord's first bar, and another on to the next chord's root at its end.
-        const auto bass = song.addTrack ("808", "Blue");
-        song.setInstrument (bass, devices::Synth::typeID, "Synth/Bass/Sine 808");
-        song.addEffect (bass, devices::Saturator::typeID, "Saturator/Warmth/Subtle Drive");
-
-        const auto add808 = [&] (double start, bool hook)
-        {
-            const auto clip = song.addClip (bass, start, bar (8));
-            const auto kicks = kicksOf (hook);
-
-            for (int each = 0; each < 4; ++each)
-            {
-                const auto chordStart = start + bar (2 * each);
-                const auto root = cycle[each].bass;
-
-                for (size_t hit = 0; hit < kicks.size(); ++hit)
-                {
-                    const auto from = kicks[hit] * 0.25, to = hit + 1 < kicks.size() ? kicks[hit + 1] * 0.25 : 8.0;
-                    song.note (clip, root, chordStart + from, to - from - 0.05, kicks[hit] % 16 == 0 ? 112 : 100);
-                }
-
-                if (hook)
-                {
-                    song.slide (clip, root + 12, chordStart + 3.0, 0.25);
-                    song.slide (clip, root, chordStart + 3.5, 0.25);
-                }
-
-                if (hook || each == 3)
-                    song.slide (clip, cycle[(each + 1) % 4].bass, chordStart + 7.75, 0.25);
-            }
-
-            return clip;
-        };
-
-        song.repeat (add808 (bar (4), true), { bar (12), bar (36), bar (44) });
-        song.repeat (add808 (bar (20), false), { bar (28) });
-        song.note (song.addClip (bass, bar (52), bar (2)), 36, bar (52), bar (2), 110);
-
-        // The bells: each chord's notes in a figure over its two bars, an eighth note at a time with rests: in the hooks, in
-        // the intro (on iv and V) and in the outro (on i).
-        const auto bells = song.addTrack ("Bells", "Sky blue");
-        song.setInstrument (bells, devices::WavetableSynth::typeID, "Wavetable/Keys/Glass Bells");
-        constexpr int figure[16] = { 0, 1, 2, 1, 3, 2, 1, 2, 0, 1, 2, -1, 3, 2, 1, -1 }; // 3 is the lowest an octave up, -1 a rest
-
-        const auto addFigure = [&song, &figure] (ClipID clip, double start, const Chord& chord)
-        {
-            for (int step = 0; step < 16; ++step)
-                if (const auto place = figure[step]; place >= 0)
-                    song.note (clip, place == 3 ? chord.tones[0] + 12 : chord.tones[place], start + step * 0.5, 0.45,
-                               step % 4 == 0 ? 100 : 82);
-        };
-
-        const auto hookBells = song.addClip (bells, bar (4), bar (8));
-
-        for (int each = 0; each < 4; ++each)
-            addFigure (hookBells, bar (4 + 2 * each), cycle[each]);
-
-        song.repeat (hookBells, { bar (12), bar (36), bar (44) });
-        const auto intro = song.addClip (bells, bar (0), bar (4));
-        addFigure (intro, bar (0), cycle[2]);
-        addFigure (intro, bar (2), cycle[3]);
-        const auto outro = song.addClip (bells, bar (52), bar (4));
-        addFigure (outro, bar (52), cycle[0]);
-        addFigure (outro, bar (54), cycle[0]);
-        song.setVolume (bells, -6.0f);
-
-        // A dark pad from the chord lane, under it all; and in the verse a pluck that answers, down the chord from its top.
-        const auto pad = song.addPart (PartStyle::sustainedTriads, 0, 56, "Pad", "Reddish purple", "Synth/Pad/Dark Pad");
-        song.setVolume (pad, -10.0f);
-
-        const auto pluck = song.addTrack ("Pluck", "Bluish green");
-        song.setInstrument (pluck, devices::WavetableSynth::typeID, "Wavetable/Pluck/Future Pluck");
-        const auto answer = song.addClip (pluck, bar (20), bar (8));
-
-        for (int each = 0; each < 4; ++each)
-        {
-            const auto start = bar (20 + 2 * each);
-            const auto& tones = cycle[each].tones;
-            song.note (answer, tones[2] + 12, start + 2.5, 0.25, 92);
-            song.note (answer, tones[1] + 12, start + 2.75, 0.25, 84);
-            song.note (answer, tones[0] + 12, start + 3.0, 0.5, 88);
-            song.note (answer, tones[2], start + 6.5, 0.5, 80);
+            const auto warmth = song.addEffect (layer, devices::Equalizer::typeID);
+            setBand (warmth, 3, 2.0f, 870.0f, 2.0f, 1.0f);
+            setBand (warmth, 5, 2.0f, 2670.0f, -8.0f, 0.8f);
         }
+        song.addNotes (arpPad, notes, part ("Arp Pad", up), 4);
+        song.setVolume (arpPad, 3.5f);
 
-        song.repeat (answer, { bar (28) });
-        song.setVolume (pluck, -8.0f);
+        // Its third layer two octaves up, a glassy pluck, which carries the intro and the breakdowns through the high-pass.
+        const auto sparkle = song.addTrack ("Sparkle", "Yellow");
+        song.setInstrument (sparkle, devices::FmSynth::typeID, "FM/Pluck/Glass Pluck");
+        song.addNotes (sparkle, notes, part ("Sparkle", up), 4);
+        song.setVolume (sparkle, -7.0f);
 
-        // A plate and a ping-pong delay that the bells send to, the pad and the pluck to the plate; and the master's
-        // limiter, which makes the mix loud.
-        const auto plate = song.addReturn (bells, devices::Reverb::typeID, "Reverb/Plates/Bright Plate", -10.0f);
-        song.send (pad, plate, -12.0f);
-        song.send (pluck, plate, -8.0f);
-        song.addReturn (bells, devices::Delay::typeID, "Delay/Rhythmic/Ping-Pong Eighths", -14.0f);
-        song.addEffect ({}, devices::Limiter::typeID, "Limiter/Mastering/Loud Master");
+        // A plate under the bass, the sub and the third layer, a quarter of them wet, as the original's channel of them plays
+        // them; the drums and the arpeggio's first two layers stay dry, as the original's do.
+        const auto plate = song.addReturn (bass, devices::Reverb::typeID, "Reverb/Plates/Vocal Plate", -10.0f);
+
+        if (const auto reverbs = getEffects (song.context, plate); ! reverbs.empty())
+            song.set (reverbs.front().id, "lowCut", 40.0f); // as the original's plate, which keeps the bass's lows
+        song.send (sub, plate, -10.0f);
+        song.send (sparkle, plate, -10.0f);
+
+        // Everything but the drums pumps hard under the kick, the plate too, as the original's channels do, keyed by its
+        // peak controller: down about 30 dB at the beat, back in about 200 ms.
+        for (const auto ducked : { sub, bass, arp, arpPad, sparkle, plate })
+            if (const auto pump = duckUnder (song.context, ducked, drums); pump.isValid())
+                song.loadPreset (pump, "Compressor/Sidechain/Sidechain Pump");
+
+        // The chord lane: each of the sub's notes is its chord's root, in F major.
+        setLaneKey (song.context, BeatPosition(), key);
+        constexpr std::array<const char*, 12> numerals { "I", "", "ii", "", "iii", "IV", "", "V", "", "vi", "bVII", "" };
+
+        for (const auto& root : part ("Sub", up))
+            if (const auto* name = numerals[(size_t) ((root.pitch - key.root + 12) % 12)]; *name != 0)
+                if (const auto numeral = parseNumeral (name))
+                    addLaneChord (song.context, { at (notes.toBeats (root.start)), at (notes.toBeats (root.start + root.length)) },
+                                  *numeral);
+
+        // The original's master EQ, warm and dark: its ten bands lift the lows and take the rest down a little, and its DJ EQ
+        // takes the lows and the highs down, which leaves the lows a little up and the highs well down.
+        const auto masterEq = song.addEffect ({}, devices::Equalizer::typeID);
+        setBand (masterEq, 2, 1.0f, 150.0f, 2.5f, 0.71f);
+        setBand (masterEq, 3, 2.0f, 400.0f, -3.0f, 1.4f);
+        setBand (masterEq, 4, 2.0f, 1600.0f, -4.0f, 0.7f);
+        setBand (masterEq, 7, 4.0f, 4000.0f, -5.0f, 0.71f);
+
+        // The master's high-pass and low-pass at 12 dB an octave, as the original's. Over the intro they follow its
+        // recording, fitted to its spectrum every two seconds (its stems, measured): the high-pass takes the sub's
+        // fundamental and the kick's low end away at first, opening from 250 Hz until the lows are whole by bar 6, then
+        // sweeps up to 1.5 kHz into the theme and away; the low-pass opens from about 400 Hz to 1.8 kHz by bar 6 and
+        // fully into the theme. Elsewhere they follow the project: the high-pass thins the breakdowns and the build-ups
+        // and opens fully into the themes; the low-pass opens over the breakdowns, sweeps open again before the second
+        // breakdown, and closes over the outro. Each holds between them.
+        const auto highPass = song.addEffect ({}, devices::FilterEffect::typeID);
+        song.set (highPass, "filterType", (float) devices::dsp::FilterMode::highPass);
+        song.set (highPass, "filterSlope", 0.0f);
+        song.automate ({ highPass, "cutoff" },
+                       { { recorded (0), 250.0f },        { recorded (1.2), 160.0f },      { recorded (2.4), 125.0f },
+                         { recorded (3.1), 80.0f },       { recorded (3.8), 63.0f },       { recorded (4.6), 40.0f },
+                         { recorded (6.45), 20.0f },      { recorded (6.63), 250.0f },     { recorded (6.8), 400.0f },
+                         { recorded (7.0), 500.0f },      { recorded (7.24), 1000.0f },    { recorded (7.46), 1500.0f },
+                         { recorded (7.7), 150.0f },      { recorded (7.85), 80.0f },      { recorded (8), 20.0f, 1.0f },
+                         { recorded (40), 4438.8f },      { recorded (46.0625), 2646.2f }, { recorded (47.5625), 6738.4f, 1.0f },
+                         { recorded (48), 4438.8f },      { recorded (54.0625), 2646.2f }, { recorded (55.25), 4097.1f },
+                         { recorded (55.5625), 6738.4f }, { recorded (55.875), 3682.9f },  { recorded (56), 20.0f, 1.0f },
+                         { recorded (80), 4438.8f },      { recorded (86.0625), 2646.2f }, { recorded (87.5625), 6738.4f, 1.0f },
+                         { recorded (88), 4438.8f },      { recorded (94.0625), 2646.2f }, { recorded (95.25), 4097.1f },
+                         { recorded (95.5625), 6738.4f }, { recorded (95.875), 3682.9f },  { recorded (96), 20.0f } });
+
+        const auto lowPass = song.addEffect ({}, devices::FilterEffect::typeID);
+        song.set (lowPass, "filterSlope", 0.0f);
+        song.automate ({ lowPass, "cutoff" },
+                       { { recorded (0), 375.0f },        { recorded (0.67), 470.0f },       { recorded (1.75), 600.0f },
+                         { recorded (3.06), 750.0f },     { recorded (4.64), 1100.0f },      { recorded (5.48), 1400.0f },
+                         { recorded (6.35), 1800.0f },    { recorded (6.95), 2000.0f },      { recorded (7.24), 2000.0f },
+                         { recorded (7.46), 2500.0f },    { recorded (7.6), 20000.0f },      { recorded (8), 20000.0f, 1.0f },
+                         { recorded (40), 12371.3f },     { recorded (47.375), 14212.9f },   { recorded (48), 20000.0f, 1.0f },
+                         { recorded (72), 5504.3f },      { recorded (80), 20000.0f, 1.0f }, { recorded (80), 12371.3f },
+                         { recorded (87.375), 14212.9f }, { recorded (88), 20000.0f, 1.0f }, { recorded (112), 20000.0f },
+                         { recorded (118), 5164.9f },     { recorded (120), 5112.4f } });
+        const auto limiter = song.addEffect ({}, devices::Limiter::typeID, "Limiter/Mastering/Loud Master");
+        song.set (limiter, "gain", 16.0f); // as loud as the original's master
 
         useKeyOnEveryTrack (song.context, key);
     }
@@ -1198,10 +1446,11 @@ namespace
 const std::vector<ExampleSong>& getExampleSongs()
 {
     static const std::vector<ExampleSong> songs {
-        { "trapBeat", "Trap Beat",
-          "Trap at 140 BPM: half-time drums with hi-hat rolls in triplets and 32nds, an 808 that glides on slide notes, FM bells, "
-          "a dark pad from the chord lane, a pluck in the verse, a riser and a crash, and sends to a plate and a delay.",
-          "Bells" },
+        { "exodus", "Exodus",
+          "Synthwave at 111 BPM: Exodus by XCALIBUR (CC BY 4.0), its notes on Phazite's instruments, its tempo speeding up and "
+          "slowing down in the tempo lane: an arpeggio of seventh chords on three layers, a bass in sixteenths and a sub, 80s "
+          "drums, everything pumping under them through sidechains, and the master's filters sweeping in automation lanes.",
+          "Arp" },
         { "loFiBeat", "Lo-fi Beat",
           "A lo-fi beat at 82 BPM: a lazy, swung kit with fills, shaker, vinyl and rain samples, ninth chords on a wobbling "
           "e-piano through a container with macros, an LFO that pans them, a walking bass, automation and a dub delay.",
@@ -1230,8 +1479,8 @@ bool addExampleSong (ProjectContext& context, const juce::String& id, const juce
 
     if (id == "loFiBeat")
         makeLoFiBeat (song);
-    else if (id == "trapBeat")
-        makeTrapBeat (song);
+    else if (id == "exodus")
+        makeExodus (song);
     else if (id == "houseGroove")
         makeHouseGroove (song);
     else

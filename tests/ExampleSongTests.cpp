@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The example songs (src/model/project/ExampleSongs.h; the owner, 2026-11-01 and 2026-11-04): each opens as a new project
 // without undo steps or unsaved changes, plays without clipping and saves the same once it is opened again, and each shows
-// what its description says. Trap Beat has a golden render (GoldenRenderTests.cpp).
+// what its description says. Exodus has a golden render (GoldenRenderTests.cpp).
 #include "GoldenFiles.h"
 #include "RenderHarness.h"
 #include "TestHelpers.h"
@@ -15,10 +15,12 @@
 #include "model/modulation/ModulationModel.h"
 #include "model/notes/NotesModel.h"
 #include "model/project/ExampleSongs.h"
+#include "model/project/ProjectContents.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ExampleSongs.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/TempoModel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -135,12 +137,33 @@ TEST_CASE ("Every example song opens as a new project without undo steps or unsa
     CHECK_FALSE (phazite::addExampleSong (noProject, "noSuchSong", {}));
 }
 
-TEST_CASE ("Trap Beat shows half-time drums with hi-hat rolls, an 808 that glides on slide notes, bells and returns")
+TEST_CASE ("Exodus shows a song by someone else, its notes from a file in clips and aliases, sidechains, returns and filters")
 {
-    Example example ("trapBeat");
+    Example example ("exodus");
     auto& context = example.context;
-    CHECK (example.getSectionNames().joinIntoString (", ") == "Intro, Hook, Verse, Hook 2, Outro");
-    CHECK (phazite::getLaneChords (context).size() == 56);
+    CHECK (example.getSectionNames().joinIntoString (", ")
+           == "Intro, Theme, Breakdown, Build-up, Theme 2, Breakdown 2, Build-up 2, Theme 3, Outro");
+
+    // Its credit, which goes with what is made from it: in its description and in its project's notes.
+    CHECK (juce::String (phazite::findExampleSong ("exodus")->description).contains ("XCALIBUR (CC BY 4.0)"));
+    CHECK (phazite::getProjectNotes (context).contains ("by XCALIBUR"));
+    CHECK (phazite::getProjectNotes (context).contains ("CC BY 4.0"));
+
+    // Its recording's tempo in the tempo lane: up from 50 BPM to 111 over the intro, 114 through the first two themes, and up
+    // to 260 over each breakdown before it drops to 50 and ramps back up to 111 over the build-up; the last theme at 111.
+    const auto tempos = phazite::getTempoChanges (context);
+    CHECK (tempos.size() == 17);
+    REQUIRE_FALSE (tempos.empty());
+    CHECK (tempos.front().bpm == doctest::Approx (50.0));
+    CHECK (tempos.front().curve == doctest::Approx (phazite::tempoRamp));
+
+    for (const auto& [beat, bpm] : { std::pair (16.0, 98.0), std::pair (32.0, 114.0), std::pair (100.0, 114.0), std::pair (158.9375, 260.0),
+                                     std::pair (160.0, 50.0), std::pair (192.0, 114.0), std::pair (318.9375, 260.0),
+                                     std::pair (320.0, 50.0), std::pair (352.0, 111.0), std::pair (440.0, 111.0) })
+    {
+        CAPTURE (beat);
+        CHECK (phazite::getTempoAt (context, phazite::BeatPosition::fromBeats (beat)) == doctest::Approx (bpm).epsilon (0.01));
+    }
 
     const auto notesOf = [&example, &context] (const juce::String& trackName)
     {
@@ -152,39 +175,83 @@ TEST_CASE ("Trap Beat shows half-time drums with hi-hat rolls, an 808 that glide
         return phazite::getNotes (context, clips);
     };
 
-    // The snare on each bar's third beat (half time), and hats in rolls: some a sixth of a beat apart (triplet sixteenths),
-    // some an eighth (32nds).
-    constexpr int snare = 38, closedHat = 42;
-    const auto drums = notesOf ("Drums");
-    CHECK (std::all_of (drums.begin(), drums.end(), [] (const phazite::NoteData& note)
-                        { return note.pitch != snare || std::abs (std::fmod (note.start.inBeats(), 4.0) - 2.0) < 1.0e-6; }));
-
-    const auto hasHatsApart = [&drums] (double apart)
+    // The notes of its file (resources/songs/Exodus.mid) that its recording plays, without the project's bars 24 to 32,
+    // each part on its own track.
+    for (const auto& [name, count] : { std::pair ("Drums", 579 + 28), std::pair ("Sub", 37), std::pair ("Bass", 1612),
+                                       std::pair ("Arp", 1744), std::pair ("Arp Pad", 1744), std::pair ("Sparkle", 1744) })
     {
-        for (const auto& a : drums)
-            for (const auto& b : drums)
-                if (a.pitch == closedHat && b.pitch == closedHat && std::abs ((b.start - a.start).inBeats() - apart) < 1.0e-6)
-                    return true;
+        CAPTURE (name);
+        CHECK (notesOf (name).size() == (size_t) count);
+    }
 
-        return false;
+    // The theme's first bar: the kick on every beat, the snare on two and four.
+    constexpr int kick = 36, snare = 38;
+    const auto drums = notesOf ("Drums");
+    const auto plays = [&drums] (int pitch, double beat)
+    {
+        return std::any_of (drums.begin(), drums.end(), [pitch, beat] (const phazite::NoteData& note)
+                            { return note.pitch == pitch && std::abs (note.start.inBeats() - beat) < 1.0e-6; });
     };
 
-    CHECK (hasHatsApart (1.0 / 6.0));
-    CHECK (hasHatsApart (1.0 / 8.0));
+    for (const auto beat : { 32.0, 33.0, 34.0, 35.0 })
+        CHECK (plays (kick, beat));
 
-    // The 808 glides on slide notes, which play nothing themselves, between the notes it plays.
-    const auto bass = notesOf ("808");
-    CHECK (std::any_of (bass.begin(), bass.end(), [] (const phazite::NoteData& note) { return note.slide; }));
-    CHECK (std::any_of (bass.begin(), bass.end(), [] (const phazite::NoteData& note) { return ! note.slide; }));
+    CHECK (plays (snare, 33.0));
+    CHECK (plays (snare, 35.0));
 
-    // The bells through a plate and a delay, the pad through the plate; a crash sample at each part after the intro, a
-    // pluck in the verse, and the master's limiter.
-    CHECK (example.sends ("Bells", "Reverb"));
-    CHECK (example.sends ("Bells", "Delay"));
-    CHECK (example.sends ("Pad", "Reverb"));
-    CHECK (example.clips ("Crash").size() == 3);
-    CHECK_FALSE (example.clips ("Pluck").empty());
-    CHECK (findDevice (phazite::getEffects (context, {}), "Limiter").isValid());
+    // Its parts in clips that play again as aliases, as patterns do: the drums' eight bars with a fill nine times, the beat
+    // without one twice, a bar's pickup twice, and once the intro's kick on every beat into its pickup, which no clip repeats.
+    const auto drumClips = example.clips ("Drums");
+    CHECK (drumClips.size() == 14);
+    CHECK (std::count_if (drumClips.begin(), drumClips.end(), [] (const phazite::ClipInfo& clip) { return clip.linked; })
+           == (std::ptrdiff_t) drumClips.size() - 1);
+
+    // The chord lane follows the sub, in F major, the key of its recording, which plays everything a fourth higher than its
+    // project: its roots, from B flat, IV, every one in the key.
+    const auto chords = phazite::getLaneChords (context);
+    CHECK (chords.size() == 37);
+    REQUIRE_FALSE (chords.empty());
+    CHECK (chords.front().name == "Bb");
+    CHECK (phazite::getLaneKeyAt (context, {}) == phazite::Key { 5, phazite::Scale::major });
+    CHECK (chords.front().numeral.degree == 4);
+
+    for (const auto& chord : chords)
+    {
+        CAPTURE (chord.name.toStdString());
+        CHECK (chord.numeral.accidental == 0);
+    }
+
+    // Every other track and the plate duck under the drums; the bass, the sub and the arpeggio's third layer send to the
+    // plate, and the drums and the arpeggio's first two layers stay dry; and the master's high-pass and low-pass sweep in
+    // automation lanes before its limiter.
+    for (const auto* ducked : { "Sub", "Bass", "Arp", "Arp Pad", "Sparkle", "Reverb" })
+    {
+        CAPTURE (ducked);
+        CHECK (example.listens (ducked, "Drums"));
+    }
+
+    for (const auto* wet : { "Bass", "Sub", "Sparkle" })
+    {
+        CAPTURE (wet);
+        CHECK (example.sends (wet, "Reverb"));
+    }
+
+    for (const auto* dry : { "Drums", "Arp", "Arp Pad" })
+    {
+        CAPTURE (dry);
+        CHECK_FALSE (example.sends (dry, "Reverb"));
+    }
+    const auto master = phazite::getEffects (context, {});
+    std::vector<phazite::DeviceID> filters;
+
+    for (const auto& device : master)
+        if (device.name == "Filter")
+            filters.push_back (device.id);
+
+    REQUIRE (filters.size() == 2);
+    CHECK (phazite::getAutomationPoints (context, { filters[0], "cutoff" }).size() == 33);
+    CHECK (phazite::getAutomationPoints (context, { filters[1], "cutoff" }).size() == 23);
+    CHECK (findDevice (master, "Limiter").isValid());
 }
 
 TEST_CASE ("House Groove shows a bus, samples, a bass and chords that pump under the kick, a breakdown, automation and returns")

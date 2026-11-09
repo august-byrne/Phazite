@@ -4,7 +4,9 @@
 // project starts empty. Each is made in code through the model's functions by ID, as the UI makes a song, so that it keeps
 // working however the model holds the song (Bitwig's, Studio One's and Reason's demo songs are files of their own, which
 // Phazite would have to keep up with every change of its format while it is pre-alpha). Their sounds are Phazite's devices
-// with Phazite's own presets, and samples each synthesizes as it is made (Phazite ships no sound files).
+// with Phazite's own presets, and samples each synthesizes as it is made (Phazite ships no sound files). A song someone
+// else made and shared under a free license ships as its notes alone, a MIDI file (resources/songs/), credited in its
+// description, its project's notes and the About box (resources/licenses/notices.json).
 #pragma once
 
 #include "model/base/IDs.h"

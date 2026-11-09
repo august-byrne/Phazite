@@ -57,17 +57,20 @@ inline const juce::Identifier LASTKEY { "LASTKEY" };
 
 //==============================================================================
 // The song's tempo map (model/transport/internal/Tempo.h): its tempos and time signatures, each from a beat on, which
-// everything in the song is placed on. For now a song has one tempo and one time signature, from its start; a tempo lane
-// will add changes along it. song
+// everything in the song is placed on. The playlist's tempo lane adds tempos along the song, each held until the next or
+// ramping to it; for now a song has one time signature, from its start. song
 
 // Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tempos (TEMPO) and time
 // signatures (TIMESIGNATURE), in no particular order. Without one, the song is at 120 BPM in 4/4.
 inline const juce::Identifier TEMPOMAP { "TEMPOMAP" };
 
 // Child of TEMPOMAP: a tempo, from where it starts (mapBeat) to the next one's start, in beats per minute (bpm, 20..300,
-// to a hundredth). The first starts at 0.
+// to a hundredth), and how it goes on to the next (tempoCurve, float -1..1, as an automation point's pointCurve; without
+// it, 1: held until the next tempo, which it jumps to; 0 ramps straight to the next, and between, the ramp bends). The
+// first starts at 0.
 inline const juce::Identifier TEMPO { "TEMPO" };
 inline const juce::Identifier bpm { "bpm" };
+inline const juce::Identifier tempoCurve { "curve" };
 
 // Child of TEMPOMAP: a time signature, from where it starts (mapBeat), as many beats in a bar (numerator, int 1..32) of a
 // note value (denominator: 2, 4, 8 or 16). The first starts at 0.
