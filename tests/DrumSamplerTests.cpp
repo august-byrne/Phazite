@@ -313,7 +313,7 @@ TEST_CASE ("A drum pad's level, pan, velocity, tuning, hold and decay shape what
     CHECK (peakOf (played.right, 0, 48000) < 1.0e-6f);
 
     // Without velocity, a soft hit is as loud as a hard one; with half of it, it is turned down half as much.
-    for (const auto [amount, expected] : { std::pair (0.0f, 1.0f), std::pair (0.5f, 0.625f) })
+    for (const auto& [amount, expected] : { std::pair (0.0f, 1.0f), std::pair (0.5f, 0.625f) })
     {
         CAPTURE (amount);
         values = getDefaults();
