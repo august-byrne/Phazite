@@ -27,6 +27,7 @@
     "edit.nudgeLeft": [ "cursor left" ],
     "edit.nudgeRight": [ "cursor right" ],
     "edit.quantize": [ "command + U" ],
+    "clip.consolidate": [ "command + J" ],
     "note.transposeUp": [ "cursor up" ],
     "note.transposeDown": [ "cursor down" ],
     "note.octaveUp": [ "shift + cursor up" ],

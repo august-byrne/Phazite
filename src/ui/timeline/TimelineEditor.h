@@ -105,7 +105,8 @@ public:
     virtual bool isViewFixed() const { return false; }
     void movePlayheadTo (BeatPosition); // playback starts there from now on (phazite::movePlayhead())
     BeatPosition getPlayheadBeat() const;
-    bool isPlayheadShowingLinkedClip() const; // where a linked clip plays elsewhere (getLinkedPlayheadBeat()), for tests
+    BeatPosition getShownPlayheadBeat() const; // where its line shows: while playing, the beat heard at the frame shown
+    bool isPlayheadShowingLinkedClip() const;  // where a linked clip plays elsewhere (getLinkedPlayheadBeat()), for tests
 
     // A frame of the display, at its vertical blank's time (seconds by juce::Time::getMillisecondCounterHiRes()): while the
     // song plays where the editor shows, the playhead moves to the beat heard then (getHeardPlayheadBeat()) and the frame is
@@ -231,6 +232,9 @@ protected:
     // Where the playhead shows instead of the song's position, in song beats: the piano roll shows there where the
     // notes it edits are playing while a clip linked to its own plays elsewhere in the song. Nothing as a rule.
     virtual std::optional<double> getLinkedPlayheadBeat (double /*songBeat*/) const { return {}; }
+    // The playhead's line was placed again (at each frame of the display while the song plays): for what follows it, as the
+    // playlist's recordings grow with it.
+    virtual void playheadShown() {}
     // What a tool does here, for its button's tooltip.
     virtual juce::String describeToolHere (Tool toolToDescribe) const { return describeTool (toolToDescribe); }
 
@@ -322,7 +326,6 @@ private:
     void componentVisibilityChanged (juce::Component&) override; // the vertical scroll bar showed or hid itself
     void timerCallback() override;                               // notices what changed elsewhere, a few times a second
     void followPlayhead();                                       // moves the playhead, and turns the page while playing
-    BeatPosition getShownPlayheadBeat() const;                   // the beat heard at the frame shown, while playing
     void writeFrameLog();                                        // the frames since playback started, into Phazite's log
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TimelineEditor)

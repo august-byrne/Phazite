@@ -673,6 +673,15 @@ inline const juce::Identifier clipFadeOutBend { "fadeOutBend" };
 inline constexpr const char* fadeIsCurve = "curve";
 inline constexpr const char* fadeIsSCurve = "sCurve";
 
+// Child of an audio CLIP that follows the song's tempo, in no particular order: a warp marker (AudioClipModel.h), which pins a
+// time of the file to where it plays, the audio between two of them stretched to fit, as Ableton Live's warp markers do. On
+// WARP. double, 0 or more: its time in the file, in seconds as it was recorded; and double: where that time plays, as a time
+// of the file played straight at the clip's tempo (clipTempo), in seconds, so that the markers keep their beats as the clip's
+// tempo changes. song
+inline const juce::Identifier WARP { "WARP" };
+inline const juce::Identifier warpTime { "time" };
+inline const juce::Identifier warpPlaysAt { "playsAt" };
+
 //==============================================================================
 // Recording audio (model/transport/RecordingModel.h; roadmap step 3.4).
 

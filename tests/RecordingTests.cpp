@@ -275,6 +275,72 @@ TEST_CASE ("Punched in, a take keeps only the notes played in the looped range")
     phazite::setPunchOn (take.song.context, false);
 }
 
+TEST_CASE ("While recording, the notes played show on live MIDI's track as they come in, over where their clip will go")
+{
+    // As Ableton Live draws a MIDI clip growing as it records (RecordingModel.h: getRecordingsInProgress()).
+    EngineTake take;
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    take.song.run ("transport.record");
+    take.playback.play (0.25);
+    CHECK (phazite::getRecordingsInProgress (take.song.context).empty()); // nothing played yet
+
+    // A note held: from where recording started, the note reaching where it has got to.
+    audio.playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    take.playback.play (0.25);
+    auto recordings = phazite::getRecordingsInProgress (take.song.context);
+    REQUIRE (recordings.size() == 1);
+    CHECK (recordings[0].track == take.song.firstTrack);
+    CHECK (recordings[0].source == phazite::RecordSource::midi);
+    CHECK (recordings[0].take == 1);
+    CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (1.0).epsilon (withinABlock));
+    REQUIRE (recordings[0].notes.size() == 1);
+    CHECK (recordings[0].notes[0].pitch == 60);
+    CHECK (recordings[0].notes[0].start == doctest::Approx (0.5).epsilon (withinABlock));
+    CHECK (recordings[0].notes[0].end == doctest::Approx (recordings[0].range.getLength().inBeats()));
+
+    // Let go of: it ends there, and the recording grows on.
+    audio.playLive (juce::MidiMessage::noteOff (1, 60));
+    take.playback.play (0.25);
+    recordings = phazite::getRecordingsInProgress (take.song.context);
+    REQUIRE (recordings.size() == 1);
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (1.5).epsilon (withinABlock));
+    REQUIRE (recordings[0].notes.size() == 1);
+    CHECK (recordings[0].notes[0].end == doctest::Approx (1.0).epsilon (withinABlock));
+
+    // Stopped, the clip it made is there instead, as it was shown.
+    take.song.run ("transport.record");
+    CHECK (phazite::getRecordingsInProgress (take.song.context).empty());
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (1.5).epsilon (withinABlock));
+}
+
+TEST_CASE ("Round a looped range, the notes shown fold into it, and fill it once recording has gone round")
+{
+    EngineTake take;
+    phazite::loopBeatRange (*phazite::findSong (take.song.context), 0.0, 2.0); // a second
+    take.song.run ("transport.record");
+    take.playNote (60, 0.25, 0.25); // at half a beat, the first time round
+
+    auto recordings = phazite::getRecordingsInProgress (take.song.context);
+    REQUIRE (recordings.size() == 1);
+    CHECK (recordings[0].take == 1);
+    CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (1.0).epsilon (withinABlock));
+
+    take.playNote (62, 1.0, 0.1); // at 1.5 s: a beat into the second time round
+    recordings = phazite::getRecordingsInProgress (take.song.context);
+    REQUIRE (recordings.size() == 1);
+    CHECK (recordings[0].take == 2);
+    CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (2.0));
+    REQUIRE (recordings[0].notes.size() == 2);
+    CHECK (recordings[0].notes[0].start == doctest::Approx (0.5).epsilon (withinABlock));
+    CHECK (recordings[0].notes[1].start == doctest::Approx (1.0).epsilon (withinABlock));
+    take.song.run ("transport.record");
+}
+
 TEST_CASE ("Overdub adds a take's notes to the clip there, and without it they take its place")
 {
     const auto record = [] (bool overdub)

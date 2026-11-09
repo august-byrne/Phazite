@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist, driven with the mouse and the keys as the user would.
+#include "EnginePlayback.h"
 #include "TestClips.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/Outlines.h"
@@ -19,7 +20,9 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/RecordingModel.h"
+#include "model/transport/TransportModel.h"
 #include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/components/DisplayTicker.h"
 #include "ui/components/TrackSwitch.h"
@@ -1845,14 +1848,39 @@ TEST_CASE ("A track without an instrument has an arm switch: with an input, a cl
         return nullptr;
     };
 
-    // A track with an instrument plays what is played on MIDI: no arm switch.
+    const auto isLabelShown = [&screen] (const juce::String& text)
+    {
+        const auto labels = phazite::test::findAll<juce::Label> (screen.playlist);
+        return std::any_of (labels.begin(), labels.end(),
+                            [&text] (juce::Label* label) { return label->isVisible() && label->getText() == text; });
+    };
+
     auto* arm = findArm (0);
     REQUIRE (arm != nullptr);
     CHECK (arm->isVisible());
+
+    // A track with an instrument records what is played on MIDI: its switch is lit on the track live MIDI plays, as Ableton
+    // Live arms the selected MIDI track by itself, and a click sends live MIDI there, or stops it recording there.
     phazite::setInstrument (screen.getSong(), screen.tracks[1], phazite::makeOwnDeviceState (screen.getSong(), "phaziteSynth"));
     phazite::test::dispatchPendingMessages();
-    REQUIRE (findArm (1) != nullptr);
-    CHECK_FALSE (findArm (1)->isVisible());
+    auto* midiArm = findArm (1);
+    REQUIRE (midiArm != nullptr);
+    CHECK (midiArm->isVisible());
+    CHECK (midiArm->getComponentID() == juce::String ("track.armMidi")); // the recording lesson rings the audio one
+    CHECK_FALSE (midiArm->getToggleState());
+
+    phazite::test::Mouse (*midiArm).click (midiArm->getLocalBounds().getCentre());
+    CHECK (phazite::getLiveMidiTrack (screen.context) == screen.tracks[1]);
+    CHECK (phazite::isMidiArmed (screen.context, screen.tracks[1]));
+    CHECK (midiArm->getToggleState());
+    CHECK (isLabelShown ("MIDI"));
+    CHECK (phazite::describeRecordTargets (screen.context) == phazite::getTrackName (screen.getSong(), screen.tracks[1]) + " (MIDI)");
+
+    phazite::test::Mouse (*midiArm).click (midiArm->getLocalBounds().getCentre());
+    CHECK (phazite::getLiveMidiTrack (screen.context) == screen.tracks[1]); // it still plays
+    CHECK_FALSE (phazite::isMidiArmed (screen.context, screen.tracks[1]));
+    CHECK_FALSE (midiArm->getToggleState());
+    CHECK_FALSE (isLabelShown ("MIDI"));
 
     // With an input, a click arms the track; its header says what it records, and the click is no undo step.
     phazite::setTrackInput (screen.context, screen.tracks[0], "1");
@@ -1863,14 +1891,64 @@ TEST_CASE ("A track without an instrument has an arm switch: with an input, a cl
     CHECK (phazite::isArmed (screen.context, screen.tracks[0]));
     CHECK (arm->getToggleState());
     CHECK_FALSE (screen.getSong().getUndoManager().canUndo());
-    const auto labels = phazite::test::findAll<juce::Label> (screen.playlist);
-    CHECK (
-        std::any_of (labels.begin(), labels.end(), [] (juce::Label* label) { return label->isVisible() && label->getText() == "In 1"; }));
+    CHECK (isLabelShown ("In 1"));
 
     // Armed elsewhere (the Arm Track command, the mixer), it shows at the displays' next tick.
     phazite::setArmed (screen.context, screen.tracks[0], false);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK_FALSE (arm->getToggleState());
+}
+
+TEST_CASE ("While recording, what comes in shows on its track as a clip growing with the playhead, until the take's clip is there")
+{
+    // As Ableton Live draws a clip as it records (model/transport/RecordingModel.h: getRecordingsInProgress()).
+    PlaylistScreen screen;
+    phazite::test::EnginePlayback playback (phazite::test::EnginePlayback::Input::loopback);
+    auto& song = screen.getSong();
+    phazite::setTrackInput (screen.context, screen.tracks[1], "1");
+    phazite::setInputMonitoring (screen.context, screen.tracks[1], phazite::InputMonitoring::never);
+    phazite::setArmed (screen.context, screen.tracks[1], true);
+    REQUIRE (phazite::isArmed (screen.context, screen.tracks[1]));
+
+    const auto findRecording = [&screen]() -> phazite::ui::ClipComponent*
+    {
+        for (auto* clip : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (clip->isRecording())
+                return clip;
+
+        return nullptr;
+    };
+
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    playback.play (1.0); // two beats at 120 BPM
+    ticker.tickNow();
+
+    // On the armed track's row, from where recording started to the playhead, saying that it records.
+    auto* recording = findRecording();
+    REQUIRE (recording != nullptr);
+    CHECK (recording->isVisible());
+    CHECK (recording->getLabel() == "Recording");
+    const auto shown = screen.lanes->getLocalArea (recording, recording->getLocalBounds());
+    CHECK (shown.getX() == screen.at (0.0, 1).x);
+    CHECK (std::abs (shown.getRight() - screen.at (2.0, 1).x) <= 1);
+    CHECK (shown.contains (screen.at (1.0, 1)));
+
+    // It grows as the song plays on.
+    playback.play (1.0);
+    ticker.tickNow();
+    REQUIRE (findRecording() == recording);
+    CHECK (std::abs (screen.lanes->getLocalArea (recording, recording->getLocalBounds()).getRight() - screen.at (4.0, 1).x) <= 1);
+
+    // Stopped: it goes, and the clip the take made is where it was.
+    phazite::stopRecording (song);
+    phazite::test::dispatchPendingMessages();
+    ticker.tickNow();
+    CHECK (findRecording() == nullptr);
+    const auto clips = phazite::getClips (song, screen.tracks[1]);
+    REQUIRE (clips.size() == 1);
+    CHECK (screen.boundsOf (clips[0]).getX() == shown.getX());
 }
 
 TEST_CASE ("A clip shows a tag with its name only where that isn't its track's or like it, and a link while it is an alias")

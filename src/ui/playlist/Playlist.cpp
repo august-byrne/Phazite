@@ -372,6 +372,7 @@ void Playlist::showProject()
     laneViews.clear();
     knownLanes.reset(); // the new project's lanes show where they are
     clipComponents.clear();
+    shownRecordings.clear();
     shownParts.clear();
     waveforms.clear();
     shownClips.clear();
@@ -398,6 +399,8 @@ void Playlist::showProject()
 
 void Playlist::tick()
 {
+    showRecordings(); // what is being recorded, as it comes in
+
     if (ticksToSkip-- > 0)
         return;
 

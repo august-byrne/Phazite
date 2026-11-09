@@ -110,8 +110,37 @@ SecondsRange getAudioFileRange (const Song&, const juce::ValueTree& clipState);
 
 // The time, in seconds, in the clip's file (getClipFile()) that plays at a song beat as the clip plays it, or would play
 // there if the clip reached it: a time outside the file before and after it. It goes down as the beats go up while the
-// clip plays backwards.
+// clip plays backwards. And the beat a time of the file plays at.
 double getFileTimeAt (const Song&, ClipID, BeatPosition);
+BeatPosition getBeatOfFileTime (const Song&, ClipID, double fileTime);
+std::vector<BeatPosition> getBeatsOfFileTimes (const Song&, ClipID, const std::vector<double>& fileTimes); // at once
+
+//==============================================================================
+// Warp markers (Schema.h: WARP; AudioClipModel.h says what they do), changed in each clip of a clip's alias group, which
+// plays the same audio, in the caller's undo step. A clip that doesn't follow the song's tempo follows it first; one that
+// stops following it loses them.
+
+// A clip's markers, each a time of its file as recorded with the beat it plays at, in the file's time order; none while it
+// doesn't follow the song's tempo.
+std::vector<WarpMarker> getWarpMarkers (const Song&, ClipID);
+
+// A marker at a time of the file, where that plays now, so that nothing moves: false for a time outside the file, or within
+// minWarpGap of a marker.
+bool addWarpMarker (Song&, ClipID, double time);
+inline constexpr double minWarpGap = 0.01; // seconds
+
+// The marker at a time of the file to play at a beat, the audio between it and its neighbours stretched to fit, no faster
+// or slower than 8 times; the audio where the clip starts stays there, held by a marker of its own while the moved one would
+// move it (one at the clip's start doesn't move).
+void moveWarpMarker (Song&, ClipID, double time, BeatPosition);
+
+void removeWarpMarker (Song&, ClipID, double time);
+void removeWarpMarkers (Song&, ClipID); // it plays straight at its tempo again
+
+// Quantize Audio for one clip (AudioClipModel.h): each of the hits it plays (times of its file) towards the grid line nearest
+// where it plays, by a share of the way (1 for all of it), with a marker of its own; the markers already there that no hit
+// replaces stay where they play, and the audio where the clip starts stays there.
+void quantizeClipAudio (Song&, ClipID, const std::vector<double>& hits, BeatDuration grid, double strength);
 
 // The tempo the clip's audio was played at, in beats per minute, while it follows the song's tempo; 0 while it doesn't.
 double getClipTempo (const Song&, ClipID);

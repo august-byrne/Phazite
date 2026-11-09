@@ -18,6 +18,7 @@
 #include "ui/mixer/DevicesView.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/shell/Panels.h"
+#include "ui/theme/DesignTokens.h"
 
 namespace
 {
@@ -131,6 +132,47 @@ TEST_CASE ("The audio clip editor shows the selected audio clip, in the song's b
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (screen.editor.getClip().isValid());
     CHECK_FALSE (screen.find ("Gain").isEnabled());
+}
+
+TEST_CASE ("In the audio clip editor, a double-click along the top pins the audio with a warp marker, which drags, each change one "
+           "undo step")
+{
+    // As Ableton Live's warp markers (docs/recording-audit.md): the vocal from beat 4 to 12, half of it at beat 8.
+    EditorScreen screen;
+    screen.editor.showClip (screen.vocal);
+    phazite::test::dispatchPendingMessages();
+    phazite::test::Mouse mouse (screen.waveform());
+    const auto stripY = phazite::ui::AudioClipTint::warpStrip / 2;
+    const auto markers = [&screen] { return phazite::getWarpMarkers (screen.context, screen.vocal); };
+
+    // A double-click at beat 8: a marker on the audio there, the clip following the tempo, nothing moved.
+    mouse.doubleClick ({ screen.xOf (8.0), stripY });
+    CHECK (screen.describeUndo() == "Undo Add Warp Marker");
+    REQUIRE (markers().size() == 1);
+    CHECK (markers()[0].beat.inBeats() == doctest::Approx (8.0).epsilon (0.01));
+    CHECK (screen.get().followsTempo);
+    CHECK (screen.get().clip.range.getEnd().inBeats() == doctest::Approx (12.0));
+
+    // Dragged to beat 9: the audio from the clip's start stretches to fit, held there by a marker of its own, and the clip
+    // ends a beat later, the audio after the marker as it was.
+    const auto from = juce::Point<int> (screen.xOf (markers()[0].beat.inBeats()), stripY);
+    mouse.press (from);
+    mouse.dragTo ({ screen.xOf (8.5), stripY });
+    mouse.dragTo ({ screen.xOf (9.0), stripY });
+    mouse.release();
+    CHECK (screen.describeUndo() == "Undo Move Warp Marker");
+    REQUIRE (markers().size() == 2);
+    CHECK (markers()[0].beat.inBeats() == doctest::Approx (4.0));
+    CHECK (markers()[1].beat.inBeats() == doctest::Approx (9.0));
+    CHECK (screen.get().clip.range.getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (screen.get().clip.range.getEnd().inBeats() == doctest::Approx (13.0).epsilon (0.01));
+
+    // A double-click on it takes it away; one undo brings it back.
+    mouse.doubleClick ({ screen.xOf (9.0), stripY });
+    CHECK (screen.describeUndo() == "Undo Remove Warp Marker");
+    CHECK (markers().size() == 1);
+    phazite::undo (*screen.song);
+    CHECK (markers().size() == 2);
 }
 
 TEST_CASE ("In the audio clip editor, the clip's edges trim it and its handles fade it, each drag one undo step")

@@ -18,6 +18,7 @@ class ClipRenders;
 class EngineContext;
 class PlaybackSession;
 class ProjectContext;
+class Transients;
 class VersionHistory;
 struct Clipboard;
 
@@ -25,6 +26,7 @@ Song* findSong (const ProjectContext&); // the open project's song, or nullptr w
 Selection& getSelection (ProjectContext&);
 const Selection& getSelection (const ProjectContext&);
 RangeSelection& getRangeSelection (ProjectContext&);
+const RangeSelection& getRangeSelection (const ProjectContext&);
 
 // The engine it plays on (the app's, model/engine/internal/EngineContext.h), and the open song's session there
 // (model/playback/internal/PlaybackSession.h): nullptr while no project is open.
@@ -38,6 +40,10 @@ AutomationWatcher* getAutomationWatcher (const ProjectContext&);
 // What renders the open song's audio clips stretched, pitched or reversed (model/arrangement/internal/ClipRenders.h):
 // nullptr while no project is open.
 ClipRenders* getClipRenders (const ProjectContext&);
+
+// What finds the hits in the audio files of the projects it holds (model/arrangement/internal/Transients.h), kept while it
+// lives, as a file's are the same whichever project plays it.
+Transients& getTransientFinder (const ProjectContext&);
 
 // What Cut and Copy keep for Paste (model/arrangement/internal/Clipboard.h), of the open song: empty after another opens.
 Clipboard& getClipboard (ProjectContext&);

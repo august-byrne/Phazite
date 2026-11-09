@@ -55,6 +55,7 @@ section.outline.techno
 track.addReturn
 track.freeze
 track.bounceInPlace
+clip.consolidate | ctrl + J
 device.group | ctrl + G
 device.ungroup | ctrl + shift + G
 automation.automateLastTouched | ctrl + shift + A
@@ -173,6 +174,7 @@ tool.zoom | Z, 9
 edit.nudgeLeft | cursor left
 edit.nudgeRight | cursor right
 edit.quantize | ctrl + U
+clip.quantizeAudio
 edit.rename | ctrl + R, F2
 track.color
 view.focusMode

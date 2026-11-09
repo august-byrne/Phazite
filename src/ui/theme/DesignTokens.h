@@ -731,6 +731,14 @@ namespace AudioClipTint
     inline constexpr float minimumBendWidth = 24.0f;
     inline constexpr float bendPerHalfHeight = 1.0f;
     inline constexpr int grabDistance = 8;
+
+    // Warping (docs/design.md, section 7): the strip along the audio's top that holds its warp markers, so tall (pixels); each
+    // marker a flag this wide at the strip's foot, in the palette's warning colour (Ableton Live's markers are yellow), with
+    // a line down the audio this opaque; the hits found in the audio as ticks so tall at the strip's foot, this opaque.
+    inline constexpr int warpStrip = 16;
+    inline constexpr float warpFlag = 8.0f;
+    inline constexpr float warpLine = 0.7f;
+    inline constexpr float hitTick = 5.0f, hitAlpha = 0.6f;
 } // namespace AudioClipTint
 
 // A track's arm switch (ui/components/ArmButton.h): its dot, as a part of the button's height, and the dot's outline while
@@ -740,6 +748,15 @@ namespace ArmTint
     inline constexpr float dot = 0.55f;
     inline constexpr float outline = 1.5f;
 } // namespace ArmTint
+
+// What is being recorded, as the playlist draws it growing on each track that records (ui/playlist/PlaylistRecording.cpp),
+// as Ableton Live draws a clip as it records: its edge this wide in the danger colour (pixels); its end at the playhead's
+// line while that is no further than this past what has come in (pixels: an input comes in a few milliseconds late).
+namespace RecordingTint
+{
+    inline constexpr float edge = 2.0f;
+    inline constexpr int reach = 32;
+} // namespace RecordingTint
 
 // The lesson card (ui/shell/LessonCard.h): as wide as this, with a shadow this deep around it (pixels) and so dark (an
 // alpha), its corners, its outline in the accent colour and the dots of how far the lesson has come; and the ring around

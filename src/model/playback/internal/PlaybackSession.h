@@ -78,6 +78,7 @@ public:
     bool isRecording() const noexcept { return take != nullptr; }
     bool startTake();
     std::unique_ptr<Take> releaseTake();
+    Take* getTake() noexcept { return take.get(); } // while it records, or nullptr
 
     // The audio device's inputs and their delays, as the host has them (PlaybackHost.h); and the notes played live in the
     // last 30 seconds, and from a clock on while a take records.
@@ -93,6 +94,12 @@ public:
     TrackID getLiveTrack() const noexcept { return liveTrack; }
     void setLiveTrack (TrackID);
     void followLiveMidi();
+
+    // Whether Record records what is played on MIDI onto that track (model/transport/RecordingModel.h: its arm switch): as
+    // live MIDI starts playing a track, until its arm switch turns it off, as Ableton Live arms the selected MIDI track by
+    // itself. Not saved.
+    bool recordsLiveTrack() const noexcept { return liveTrackRecords; }
+    void setRecordsLiveTrack (bool records) noexcept { liveTrackRecords = records; }
 
     // The piano roll's guide notes into a track; and their ends.
     void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity);
@@ -118,6 +125,7 @@ private:
     AutomationWriter writer;
 
     TrackID liveTrack;
+    bool liveTrackRecords = true;
     std::vector<std::pair<std::int64_t, int>> guideNotes; // each track's sounding
 
     std::unique_ptr<Take> take;

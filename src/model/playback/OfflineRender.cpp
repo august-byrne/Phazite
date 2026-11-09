@@ -89,16 +89,20 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
     if (writer == nullptr)
         return failed;
 
+    // From the song's time it starts at: its samples from there are what it counts.
+    const auto firstSample = (std::int64_t) std::llround (std::max (0.0, job.startSeconds) * setup.sampleRate);
+    const auto firstBeat = compiled.plan->tempo.toBeats ((double) firstSample);
+
     engine::Engine engine;
     engine.setNumThreads (setup.numThreads);
     engine.prepare (setup.sampleRate, setup.blockSize);
     engine.setPlan (std::move (compiled.plan));
-    engine.locate (0.0);
+    engine.locate (firstBeat);
 
     engine::LoudnessMeter meter;
     meter.prepare (setup.sampleRate, partSamples);
     juce::AudioBuffer<float> part (2, partSamples);
-    const auto endSample = (std::int64_t) std::llround (job.endSeconds * setup.sampleRate);
+    const auto endSample = std::max<std::int64_t> (0, (std::int64_t) std::llround (job.endSeconds * setup.sampleRate) - firstSample);
     const auto lastSample = endSample + (std::int64_t) std::llround (job.tailSeconds * setup.sampleRate);
     std::int64_t done = 0;
     engine.beginRender();

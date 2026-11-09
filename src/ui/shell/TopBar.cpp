@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TopBar.h"
+#include "model/transport/RecordingModel.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -49,7 +50,8 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     playButton.onClick = [this] { commands.invoke ("transport.playStop"); };
     recordButton.onClicked = [this] (bool isMenuClick)
     {
-        if (isMenuClick)
+        // With nothing to record onto, a click offers what could record: a new track for an input.
+        if (isMenuClick || ! isCommandEnabled ("transport.record"))
         {
             showRecordMenu();
             return;
@@ -150,11 +152,7 @@ void TopBar::projectChanged()
 void TopBar::refreshTooltips()
 {
     playButton.setTooltip (withShortcut (commands, "Play or stop", "transport.playStop"));
-    recordButton.setTooltip (
-        withShortcut (commands,
-                      "Record what you play onto the selected track, and the armed tracks' audio inputs, from where playback "
-                      "starts. Right-click for the count-in, punch-in, overdub and quantizing",
-                      "transport.record"));
+    refreshRecordTooltip();
     captureButton.setTooltip (withShortcut (commands,
                                             "Capture: turns what you played in the last 30 seconds into a clip on the selected "
                                             "track, recording or not",
@@ -264,9 +262,49 @@ void TopBar::hideTempoStretch()
 void TopBar::showRecordMenu()
 {
     juce::PopupMenu menu;
+
+    if (! isCommandEnabled ("transport.record"))
+        menu.addSectionHeader ("Nothing records yet: arm a track, or record an input on a new track");
+
     addCommandItems (menu, commands,
                      { "transport.record", "transport.countIn", "transport.punch", "transport.overdub", "transport.quantizeRecordings" });
+
+    // A microphone or an instrument plugged in: a new track that records it, armed, the input chosen last first.
+    auto& context = projectContext;
+    auto inputs = getAudioInputs (context);
+    const auto last = getLastInput (context);
+    std::stable_partition (inputs.begin(), inputs.end(), [&last] (const AudioInput& input) { return input.id == last; });
+    menu.addSeparator();
+
+    if (inputs.empty())
+    {
+        menu.addItem ("Record an Input on a New Track (no audio inputs: choose an input device in the audio settings)", false, false,
+                      nullptr);
+    }
+    else
+    {
+        juce::PopupMenu choices;
+
+        for (const auto& input : inputs)
+            choices.addItem (input.name, [&context, id = input.id] { addTrackForInput (context, id); });
+
+        menu.addSubMenu ("Record an Input on a New Track", choices, context.hasProject());
+    }
+
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (recordButton));
+}
+
+void TopBar::refreshRecordTooltip()
+{
+    // What it records onto, as the tracks' arm switches show it, or what to do while it would record nothing.
+    const auto text = recordTargets.isNotEmpty()
+                          ? "Record onto " + recordTargets
+                                + ", from where playback starts. Right-click to record an input on a new track, and for the "
+                                  "count-in, punch-in, overdub and quantizing"
+                          : juce::String ("Record: nothing records yet. Arm a track with the circle in its header: one with an instrument "
+                                          "records what you play on MIDI, one without records an input. Click to record an input on "
+                                          "a new track, and right-click for the count-in, punch-in, overdub and quantizing");
+    recordButton.setTooltip (withShortcut (commands, text, "transport.record"));
 }
 
 void TopBar::showMetronomeMenu()
@@ -373,8 +411,14 @@ void TopBar::timerCallback()
     }
 
     playButton.setEnabled (open);
-    recordButton.setEnabled (isCommandEnabled ("transport.record"));
+    recordButton.setEnabled (open); // with nothing to record onto, a click offers what could record (showRecordMenu())
     recordButton.setToggleState (isCommandTicked ("transport.record"), juce::dontSendNotification);
+
+    if (const auto targets = open ? describeRecordTargets (projectContext) : juce::String(); targets != recordTargets)
+    {
+        recordTargets = targets;
+        refreshRecordTooltip();
+    }
     captureButton.setEnabled (isCommandEnabled ("transport.capture"));
     loopButton.setEnabled (open);
     loopButton.setToggleState (isLoopOn (projectContext), juce::dontSendNotification);

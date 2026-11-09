@@ -3,6 +3,7 @@
 #include "TrackHeights.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/MixerModel.h"
+#include "model/transport/RecordingModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -15,7 +16,8 @@ namespace
     constexpr int dragThreshold = 4;      // pixels the mouse moves before a press becomes a drag that moves the tracks
     constexpr float kindIconAlpha = 0.6f; // a folder's or a return's icon is drawn in the header's ink, a little muted
     constexpr float kindIconSize = 14.0f;
-    constexpr int kindIconRoom = 180; // a header narrower than this gives its folder's or return's icon's room to its name
+    constexpr int kindIconRoom = 180;   // a header narrower than this gives its folder's or return's icon's room to its name
+    constexpr float inputAlpha = 0.75f; // what an armed track records is in the header's ink, a little muted
 
     juce::Colour getHeaderTint (const juce::Component& component, juce::Colour colour, bool selected)
     {
@@ -69,7 +71,8 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
 
     muteSolo.setTrack (row.id);
 
-    // A track without an instrument records audio: its arm switch, and while it is armed, what it records under its name.
+    // A track records an input, or with an instrument MIDI: its arm switch, and while it is armed, what it records under its
+    // name.
     arm.setTrack (row.id);
     arm.onChange = [this] { showArmedInput(); };
     inputLabel.setFont (juce::FontOptions (TextSize::small));
@@ -166,8 +169,12 @@ juce::Colour TrackHeader::getBackground() const
 
 void TrackHeader::updateColours()
 {
-    // Black or white, whichever reads better on the track's color.
-    nameLabel.setColour (juce::Label::textColourId, getInkFor (getBackground()));
+    // Black or white, whichever reads better on the track's color; what it records a little muted, or in the danger colour
+    // while Record records onto it.
+    const auto ink = getInkFor (getBackground());
+    nameLabel.setColour (juce::Label::textColourId, ink);
+    inputLabel.setColour (juce::Label::textColourId,
+                          isRecordingOnto (context, row.id) ? getPalette (*this).danger : ink.withAlpha (inputAlpha));
     peak.setFillColour (row.colour);
     repaint();
 }
@@ -275,6 +282,7 @@ void TrackHeader::resized()
 void TrackHeader::showArmedInput()
 {
     inputLabel.setText (describeArmedInput (context, row.id), juce::dontSendNotification);
+    updateColours(); // in the danger colour while Record records onto it
     resized();
 }
 

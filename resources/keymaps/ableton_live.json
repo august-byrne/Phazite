@@ -25,6 +25,7 @@
     "edit.nudgeLeft": [ "cursor left" ],
     "edit.nudgeRight": [ "cursor right" ],
     "edit.quantize": [ "command + U" ],
+    "clip.consolidate": [ "command + J" ],
     "clip.reverse": [ "R" ],
     "clip.previousTake": [ "command + cursor up" ],
     "clip.nextTake": [ "command + cursor down" ],

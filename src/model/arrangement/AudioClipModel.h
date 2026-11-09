@@ -109,6 +109,40 @@ void setClipFollowsTempo (ProjectContext&, ClipID, bool);
 void setClipTempo (ProjectContext&, ClipID, double bpm);
 
 //==============================================================================
+// Warping (docs/design.md, section 7; docs/recording-audit.md), as Ableton Live's: warp markers (PlaylistValues.h:
+// WarpMarker) pin times of a clip's audio to beats of the song, the audio between two of them stretched to fit, and a clip
+// with any follows the song's tempo; stopping following it takes them away. They are a clip's alias group's, which plays
+// the same audio. Each change is an undo step of its own, named as its comment says, or joins an open gesture's (a drag's).
+
+// Its markers, in its file's time order; none while it doesn't follow the song's tempo.
+std::vector<WarpMarker> getWarpMarkers (const ProjectContext&, ClipID);
+
+// The time in its audio file that plays at a beat as the clip plays it now (outside the file before and after it).
+double getAudioTimeAt (const ProjectContext&, ClipID, BeatPosition);
+
+// "Add Warp Marker": one at a time of the file, where that plays now, so that nothing moves, the clip following the tempo from
+// then on. False, and no step, for a time outside the file or within 10 ms of a marker.
+bool addWarpMarker (ProjectContext&, ClipID, double time);
+
+// "Move Warp Marker": the marker at a time of the file to another beat, the audio between it and the markers either side
+// stretched to fit (with none before it there, a marker is added where the clip starts, which holds the audio there).
+void moveWarpMarker (ProjectContext&, ClipID, double time, BeatPosition);
+
+// "Remove Warp Marker"; "Remove Warp Markers": the clip plays straight at its tempo again.
+void removeWarpMarker (ProjectContext&, ClipID, double time);
+void removeWarpMarkers (ProjectContext&, ClipID);
+
+// The hits in its audio (transients), each a time of the file with the beat it plays at now, as the editor shows them; found
+// in the background the first time a file is asked for (nothing until then, an empty list for a clip that is gone).
+std::optional<std::vector<WarpMarker>> getTransients (const ProjectContext&, ClipID);
+
+// "Quantize Audio": in each audio clip among these (MIDI clips are left as they are), each hit it plays moves towards the line
+// of a grid nearest it (lines a step apart from the song's start) by a share of the way (1 for all of it), through warp
+// markers, the clip following the tempo, as Ableton Live quantizes audio. One undo step. Whether any is an audio clip.
+void quantizeAudio (ProjectContext&, const std::vector<ClipID>&, BeatDuration grid, double strength = 1.0);
+bool canQuantizeAudio (const ProjectContext&, const std::vector<ClipID>&);
+
+//==============================================================================
 // The renders Phazite makes in the background for the clips that follow the tempo, or are pitched or reversed (each clip
 // silent until its own is ready; roadmap step 2.18), as the status bar shows them: how many are being made or wait their
 // turn (clips that play the same render count once), and how much of all of them is done, from 0 to 1, since none was.

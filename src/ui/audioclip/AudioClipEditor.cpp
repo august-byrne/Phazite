@@ -8,6 +8,7 @@
 #include "ui/timeline/TimelineGesture.h"
 
 #include <cmath>
+#include <utility>
 
 namespace phazite::ui
 {
@@ -55,7 +56,10 @@ struct AudioClipEditor::Waveform : public juce::Component
         fadeOut,
         bendIn, // the handle in the middle of the fade's curve
         bendOut,
-        audio // inside the clip: moves its audio
+        warpMarker, // in the warp strip along the top: a marker, which drags
+        hit,        // there, a hit in the audio, which a drag makes a marker of and moves
+        warpStrip,  // the rest of it, over the audio: a double-click adds a marker
+        audio       // inside the clip: moves its audio
     };
 
     AudioClipEditor& editor;
@@ -67,7 +71,14 @@ struct AudioClipEditor::Waveform : public juce::Component
     double slipStartOffset = 0.0;             // the clip's offset when the drag began, for moving its part along the audio
     FadeCurve curveAtStart;                   // the bent fade's, when the drag began
 
+    // Warping (AudioClipModel.h): the clip's markers and the hits in its audio as shown last (the hits once they are found),
+    // and the time in the file of the marker or hit under the pointer, and of the one dragged.
+    std::vector<WarpMarker> markers;
+    std::optional<std::vector<WarpMarker>> hits;
+    double hoveredTime = 0.0, draggedTime = 0.0;
+
     static bool isBend (Zone zone) { return zone == Zone::bendIn || zone == Zone::bendOut; }
+    static bool isWarp (Zone zone) { return zone == Zone::warpMarker || zone == Zone::hit || zone == Zone::warpStrip; }
 
     float beatToX (BeatPosition beat) const { return (float) editor.getView().beatToX (beat); }
     BeatPosition xToBeat (float x) const { return editor.getView().xToBeat (x); }
@@ -135,6 +146,38 @@ struct AudioClipEditor::Waveform : public juce::Component
             .withCentre ({ x, area.getCentreY() });
     }
 
+    // In the warp strip along the top, over the audio: the marker or else the hit nearest the pointer within reach, with its
+    // time in the file; or the strip itself.
+    std::optional<std::pair<Zone, double>> getWarpAt (juce::Point<float> point) const
+    {
+        if (! editor.info.has_value() || point.y >= (float) AudioClipTint::warpStrip || editor.info->state == AudioState::missing
+            || point.x < beatToX (editor.info->content.getStart()) || point.x > beatToX (editor.info->content.getEnd()))
+            return std::nullopt;
+
+        const auto nearest = [this, point] (const std::vector<WarpMarker>& among) -> std::optional<double>
+        {
+            std::optional<double> found;
+            auto distance = (float) AudioClipTint::grabDistance;
+
+            for (const auto& marker : among)
+                if (const auto away = std::abs (beatToX (marker.beat) - point.x); away <= distance)
+                {
+                    distance = away;
+                    found = marker.time;
+                }
+
+            return found;
+        };
+
+        if (const auto marker = nearest (markers))
+            return std::pair { Zone::warpMarker, *marker };
+
+        if (const auto hit = hits.has_value() ? nearest (*hits) : std::nullopt)
+            return std::pair { Zone::hit, *hit };
+
+        return std::pair { Zone::warpStrip, 0.0 };
+    }
+
     Zone getZoneAt (juce::Point<float> point) const
     {
         if (! editor.info.has_value())
@@ -152,6 +195,10 @@ struct AudioClipEditor::Waveform : public juce::Component
         for (const auto fadeIn : { true, false })
             if (isNear (getFadeHandle (fadeIn), AudioClipTint::handleRadius))
                 return fadeIn ? Zone::fadeIn : Zone::fadeOut;
+
+        // Then the warp strip along the top, over the edges too.
+        if (const auto warp = getWarpAt (point))
+            return warp->first;
 
         const auto area = getClipArea();
 
@@ -185,25 +232,43 @@ struct AudioClipEditor::Waveform : public juce::Component
             case Zone::audio:
                 return "Drag the clip along its audio to play another part of it: the clip stays where it is in the song. Hold Alt "
                        "to move it freely. Right-click for the fades' shape.";
+            case Zone::warpMarker:
+                return "A warp marker: drag it to move this point of the audio to another beat, the audio either side stretching to "
+                       "fit; double-click it to take it away. Hold Alt to place it off the grid.";
+            case Zone::hit:
+                return "A hit in the audio: drag it to another beat, which makes a warp marker of it, or double-click to pin it where "
+                       "it is with one. Hold Alt to place it off the grid.";
+            case Zone::warpStrip:
+                return "Warp markers: double-click to pin the audio here to its beat with a marker, then drag the marker to stretch "
+                       "the audio to fit. Right-click to quantize the hits to the grid.";
             case Zone::none:
             default:
                 return {};
         }
     }
 
-    void setHovered (Zone zone)
+    void setHovered (Zone zone, double time = 0.0)
     {
-        if (hovered != zone)
+        if (hovered != zone || ! juce::exactlyEqual (hoveredTime, time))
         {
             hovered = zone;
+            hoveredTime = time;
             repaint();
         }
 
         setDescription (describe (zone));
-        setMouseCursor (zone == Zone::audio  ? juce::MouseCursor::DraggingHandCursor
-                        : zone == Zone::none ? juce::MouseCursor::NormalCursor
-                        : isBend (zone)      ? juce::MouseCursor::UpDownResizeCursor
-                                             : juce::MouseCursor::LeftRightResizeCursor);
+        setMouseCursor (zone == Zone::audio                             ? juce::MouseCursor::DraggingHandCursor
+                        : zone == Zone::none || zone == Zone::warpStrip ? juce::MouseCursor::NormalCursor
+                        : isBend (zone)                                 ? juce::MouseCursor::UpDownResizeCursor
+                                                                        : juce::MouseCursor::LeftRightResizeCursor);
+    }
+
+    // What is under the pointer: its zone, and a marker's or a hit's time in the file.
+    void hover (juce::Point<float> point)
+    {
+        const auto zone = getZoneAt (point);
+        const auto warp = isWarp (zone) ? getWarpAt (point) : std::nullopt;
+        setHovered (zone, warp.has_value() ? warp->second : 0.0);
     }
 
     //==============================================================================
@@ -272,6 +337,9 @@ struct AudioClipEditor::Waveform : public juce::Component
             paintFade (g, clipArea.getRight(), clipArea.getRight() - (float) shown.clip.fadeOut * width, 0.0f, (float) getHeight(),
                        shown.clip.fadeOutCurve);
 
+        // The warp strip along the top: the hits found in the audio, and its markers, each with a line down the audio.
+        paintWarp (g);
+
         // Its edges as brackets, with their grips, and the fades' handles; the one under the pointer in the text color, which
         // stands out on a track of any color.
         const auto isLit = [this] (Zone zone) { return hovered == zone || dragging == zone; };
@@ -328,13 +396,56 @@ struct AudioClipEditor::Waveform : public juce::Component
         }
     }
 
+    void paintWarp (juce::Graphics& g)
+    {
+        const auto& p = getPalette (*this);
+        const auto strip = (float) AudioClipTint::warpStrip;
+        const auto flag = AudioClipTint::warpFlag;
+        const auto flagAt = [strip, flag] (float x)
+        {
+            juce::Path triangle;
+            triangle.addTriangle (x - flag / 2.0f, strip - flag, x + flag / 2.0f, strip - flag, x, strip);
+            return triangle;
+        };
+
+        // The hits, as ticks along the strip's foot; one under the pointer shows the marker a drag would make of it, hollow.
+        if (hits.has_value())
+        {
+            g.setColour (p.textMuted.withAlpha (AudioClipTint::hitAlpha));
+
+            for (const auto& hit : *hits)
+                g.fillRect (beatToX (hit.beat) - 0.5f, strip - AudioClipTint::hitTick, 1.0f, AudioClipTint::hitTick);
+
+            if (hovered == Zone::hit && dragging == Zone::none)
+                for (const auto& hit : *hits)
+                    if (juce::exactlyEqual (hit.time, hoveredTime))
+                    {
+                        g.setColour (p.text);
+                        g.strokePath (flagAt (beatToX (hit.beat)), juce::PathStrokeType (1.0f));
+                    }
+        }
+
+        // The markers, each a flag at the strip's foot with a line down the audio; the one under the pointer, or dragged, lit.
+        for (const auto& marker : markers)
+        {
+            const auto drags = (dragging == Zone::warpMarker || dragging == Zone::hit) && std::abs (marker.time - draggedTime) < 1.0e-7;
+            const auto lit = drags || (hovered == Zone::warpMarker && juce::exactlyEqual (marker.time, hoveredTime));
+            const auto colour = lit ? p.text : p.warning;
+            const auto x = beatToX (marker.beat);
+            g.setColour (colour.withAlpha (AudioClipTint::warpLine));
+            g.fillRect (x - 0.5f, strip, 1.0f, (float) getHeight() - strip);
+            g.setColour (colour);
+            g.fillPath (flagAt (x));
+        }
+    }
+
     //==============================================================================
-    void mouseMove (const juce::MouseEvent& e) override { setHovered (getZoneAt (e.position)); }
+    void mouseMove (const juce::MouseEvent& e) override { hover (e.position); }
     void mouseExit (const juce::MouseEvent&) override { setHovered (Zone::none); }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        setHovered (getZoneAt (e.position));
+        hover (e.position);
         dragged = false;
         dragging = Zone::none;
 
@@ -343,7 +454,9 @@ struct AudioClipEditor::Waveform : public juce::Component
 
         if (e.mods.isPopupMenu())
         {
-            if (isBend (hovered))
+            if (isWarp (hovered))
+                showWarpMenu();
+            else if (isBend (hovered))
                 showShapeMenu (hovered == Zone::bendIn);
             else
                 showMenu();
@@ -352,6 +465,7 @@ struct AudioClipEditor::Waveform : public juce::Component
         }
 
         dragging = hovered;
+        draggedTime = hoveredTime;
         gesture = std::make_unique<TimelineGesture>();
         gesture->startPosition = e.getPosition();
         gesture->startBeat = xToBeat (e.position.x);
@@ -372,13 +486,25 @@ struct AudioClipEditor::Waveform : public juce::Component
                 return;
 
             dragged = true;
+            const auto warps = dragging == Zone::warpMarker || dragging == Zone::hit;
             gesture->beginStep (editor.context, dragging == Zone::trimStart ? "Trim Clip Start"
                                                 : dragging == Zone::trimEnd ? "Trim Clip End"
                                                 : dragging == Zone::fadeIn  ? "Fade In"
                                                 : dragging == Zone::fadeOut ? "Fade Out"
                                                 : dragging == Zone::bendIn  ? "Bend Fade In"
                                                 : dragging == Zone::bendOut ? "Bend Fade Out"
+                                                : warps                     ? "Move Warp Marker"
                                                                             : "Slip Clip");
+
+            // A hit dragged becomes a marker, which the drag moves, in its step; meanwhile the view stays as it is, the audio
+            // growing and shrinking in it.
+            if (warps)
+            {
+                editor.viewHeld = true;
+
+                if (dragging == Zone::hit && ! addWarpMarker (editor.context, editor.clip, draggedTime))
+                    dragging = Zone::none; // a marker is there already
+            }
         }
 
         const auto beat = xToBeat (e.position.x);
@@ -423,6 +549,12 @@ struct AudioClipEditor::Waveform : public juce::Component
                 break;
             }
 
+            case Zone::warpMarker:
+            case Zone::hit:
+                moveWarpMarker (song, edited, draggedTime, editor.snap (beat, e.mods));
+                break;
+
+            case Zone::warpStrip:
             case Zone::none:
             default:
                 break;
@@ -435,7 +567,12 @@ struct AudioClipEditor::Waveform : public juce::Component
     {
         gesture = nullptr; // keeps the drag's change as its undo step
         dragging = Zone::none;
-        setHovered (getZoneAt (e.position));
+
+        // The view fits the clip's audio again, as it is now.
+        if (std::exchange (editor.viewHeld, false))
+            editor.refresh();
+
+        hover (e.position);
     }
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
@@ -444,6 +581,23 @@ struct AudioClipEditor::Waveform : public juce::Component
 
         if (! editor.info.has_value())
             return;
+
+        // Warping: a marker goes; a hit, or the audio under the pointer, is pinned where it plays with one.
+        if (isWarp (zone))
+        {
+            auto& project = editor.context;
+            const auto time = getWarpAt (e.position).value_or (std::pair { zone, 0.0 }).second;
+
+            if (zone == Zone::warpMarker)
+                removeWarpMarker (project, editor.clip, time);
+            else if (zone == Zone::hit)
+                addWarpMarker (project, editor.clip, time);
+            else
+                addWarpMarker (project, editor.clip, getAudioTimeAt (project, editor.clip, xToBeat (e.position.x)));
+
+            editor.refresh();
+            return;
+        }
 
         // A bend's handle: straight again, its shape kept for the next bend.
         if (isBend (zone))
@@ -487,6 +641,25 @@ struct AudioClipEditor::Waveform : public juce::Component
         menu.showMenuAsync (juce::PopupMenu::Options());
     }
 
+    // A right-click in the warp strip: on a marker, to take it away; and the clip's hits to the editor's grid, or all its
+    // markers away.
+    void showWarpMenu()
+    {
+        auto& project = editor.context;
+        const auto edited = editor.clip;
+        const auto time = hoveredTime;
+        const auto step = BeatDuration::fromBeats (editor.getGridStepInBeats());
+        juce::PopupMenu menu;
+        menu.addSectionHeader ("Warp");
+
+        if (hovered == Zone::warpMarker)
+            menu.addItem ("Remove Warp Marker", [&project, edited, time] { removeWarpMarker (project, edited, time); });
+
+        menu.addItem ("Quantize Audio", true, false, [&project, edited, step] { quantizeAudio (project, { edited }, step); });
+        menu.addItem ("Remove Warp Markers", ! markers.empty(), false, [&project, edited] { removeWarpMarkers (project, edited); });
+        menu.showMenuAsync (juce::PopupMenu::Options());
+    }
+
     // A bend's handle's: one fade's shape, a curve or an S-curve, bent as far as it is (a straight one all the way, so that
     // the change shows).
     void showShapeMenu (bool fadeIn)
@@ -523,7 +696,8 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Audio clip editor");
     setDescription ("The selected audio clip's whole audio. Drag the clip's edges to trim it, the round handles at its top to fade "
-                    "it, the handle in a fade's middle to bend it, and the clip along its audio to play another part of it");
+                    "it, the handle in a fade's middle to bend it, and the clip along its audio to play another part of it. Along the "
+                    "top, warp markers pin the audio to beats: double-click to add one, and drag it or a hit to stretch the audio");
 
     // The view shows the clip's whole audio, always: no scroll bar, and no turning pages while the song plays.
     setFollowingPlayback (false);
@@ -648,10 +822,15 @@ void AudioClipEditor::refresh()
     info = clip.isValid() ? getAudioClip (context, clip) : std::nullopt;
     updateControls();
     fitView(); // wherever the clip and its audio are now in the song
+
+    // Its warp markers, and the hits in its audio, where they play now: the hits once they are found.
+    const auto hasAudio = info.has_value() && info->state != AudioState::missing;
+    waveform->markers = hasAudio ? getWarpMarkers (context, clip) : std::vector<WarpMarker>();
+    waveform->hits = hasAudio ? getTransients (context, clip) : std::optional<std::vector<WarpMarker>>();
     waveform->clipChanged();
 
-    // Nothing tells the editor when the audio's render is ready: look again until it is.
-    if (info.has_value() && info->state == AudioState::preparing)
+    // Nothing tells the editor when the audio's render is ready, or its hits are found: look again until they are.
+    if ((info.has_value() && info->state == AudioState::preparing) || (hasAudio && ! waveform->hits.has_value()))
     {
         if (! preparingCheck.isTimerRunning())
             preparingCheck.startTimerHz (4);
@@ -660,6 +839,17 @@ void AudioClipEditor::refresh()
     {
         preparingCheck.stopTimer();
     }
+}
+
+bool AudioClipEditor::canQuantizeSelection() const
+{
+    return info.has_value() && info->state != AudioState::missing && canQuantizeAudio (context, { clip });
+}
+
+void AudioClipEditor::quantizeSelection()
+{
+    if (canQuantizeSelection())
+        quantizeAudio (context, { clip }, BeatDuration::fromBeats (getGridStepInBeats()));
 }
 
 bool AudioClipEditor::isTypingInField() const
@@ -722,7 +912,7 @@ void AudioClipEditor::updateControls()
 
 void AudioClipEditor::fitView()
 {
-    if (! info.has_value() || waveform->getWidth() <= 0)
+    if (! info.has_value() || waveform->getWidth() <= 0 || viewHeld)
         return;
 
     const auto shown = getContentRange();

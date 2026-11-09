@@ -2,6 +2,7 @@
 // The playlist's track headers: clicking, dragging (into the browser too) and their menus; adding tracks at the end; and the
 // playlist's commands.
 #include "PlaylistParts.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "ui/devices/SidechainMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/input/LibraryDrag.h"
@@ -296,6 +297,16 @@ void Playlist::addCommands (CommandRegistry& registry)
     const auto hasProject = [this] { return context.hasProject(); };
     const auto hasSelectedTracks = [this] { return ! selection.getTracks().empty(); };
     const auto hasSelectedSections = [this] { return ! selection.getSections().empty(); };
+
+    // The selected audio clips' hits to the playlist's grid, as the audio clip editor's Quantize does to its clip's.
+    registry.add ({ .id = "clip.quantizeAudio",
+                    .name = "Quantize Audio",
+                    .category = "Clip",
+                    .description = "Moves each hit in the selected audio clips to the nearest line of the grid, through warp markers, "
+                                   "so that they play on the beat and follow the tempo.",
+                    .synonyms = { "audio quantize", "warp", "tighten", "timing", "transients", "align drums" },
+                    .perform = [this] { quantizeAudio (context, selection.getClips(), BeatDuration::fromBeats (getGridStepInBeats())); },
+                    .isEnabled = [this] { return canQuantizeAudio (context, selection.getClips()); } });
 
     registry.add ({ .id = "edit.rename",
                     .name = "Rename",

@@ -25,19 +25,33 @@ void ArmButton::setTrack (TrackID id)
 
 void ArmButton::update()
 {
-    const auto wasShown = shown;
-    shown = track.isValid() && canRecordAudio (context, track);
-    const auto armed = shown && isArmed (context, track);
-    const auto input = shown ? getTrackInput (context, track) : juce::String();
-    const auto changed = armed != getToggleState() || input != shownInput || shown != wasShown;
+    const auto wasShown = shown, wasMidi = midi, wasRecording = recording;
+    const auto audio = track.isValid() && canRecordAudio (context, track);
+    midi = ! audio && track.isValid() && canRecordMidi (context, track);
+    shown = audio || midi;
+    const auto armed = audio ? isArmed (context, track) : midi && isMidiArmed (context, track);
+    const auto input = audio ? getTrackInput (context, track) : juce::String();
+    recording = shown && isRecordingOnto (context, track);
+    const auto changed =
+        armed != getToggleState() || input != shownInput || shown != wasShown || midi != wasMidi || recording != wasRecording;
     shownInput = input;
     setToggleState (armed, juce::dontSendNotification);
-    setTooltip (input.isEmpty()
-                    ? juce::String ("Arm: choose the input this track records from (a microphone, a guitar...); it records it when "
-                                    "Record is pressed")
-                    : "Arm: records " + describeInput (input)
-                          + " onto this track when Record is pressed. Right-click for "
-                            "the input, and when you hear it");
+
+    // Lessons about recording audio point at the switches of tracks that record an input.
+    setComponentID (midi ? "track.armMidi" : "track.arm");
+
+    if (midi)
+        setTooltip (armed ? juce::String ("Arm: records what you play on a MIDI keyboard or the computer keyboard onto this track when "
+                                          "Record is pressed. Click to play it without recording")
+                          : juce::String ("Arm: click to play what you play on a MIDI keyboard or the computer keyboard on this track, "
+                                          "and record it when Record is pressed"));
+    else
+        setTooltip (input.isEmpty()
+                        ? juce::String ("Arm: choose the input this track records from (a microphone, a guitar...); it records it when "
+                                        "Record is pressed")
+                        : "Arm: records " + describeInput (input)
+                              + " onto this track when Record is pressed. Right-click for "
+                                "the input, and when you hear it");
 
     if (changed)
     {
@@ -50,10 +64,14 @@ void ArmButton::update()
 
 void ArmButton::tick()
 {
-    // Cheap, and only while it shows: arming elsewhere shows here.
-    const auto armed = shown && isArmed (context, track);
+    // Cheap, and only while it shows: arming elsewhere, or another track taking live MIDI, shows here.
+    if (! shown)
+        return;
 
-    if (armed != getToggleState() || (shown && getTrackInput (context, track) != shownInput))
+    const auto armed = midi ? isMidiArmed (context, track) : isArmed (context, track);
+
+    if (armed != getToggleState() || (! midi && getTrackInput (context, track) != shownInput)
+        || isRecordingOnto (context, track) != recording)
         update();
 }
 
@@ -61,6 +79,14 @@ void ArmButton::clicked (const juce::ModifierKeys& mods)
 {
     if (! shown)
         return;
+
+    // A track with an instrument: live MIDI plays it, armed; or, armed, it stops recording onto it.
+    if (midi)
+    {
+        setMidiArmed (context, track, ! isMidiArmed (context, track));
+        update();
+        return;
+    }
 
     if (mods.isPopupMenu() || getTrackInput (context, track).isEmpty())
     {
@@ -74,7 +100,7 @@ void ArmButton::clicked (const juce::ModifierKeys& mods)
 
 void ArmButton::showMenu()
 {
-    if (! shown)
+    if (! shown || midi)
         return;
 
     // Its items act on the track by ID (a menu that outlives the button still works), and show it after if it is still there.
@@ -166,6 +192,15 @@ void ArmButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown)
 
 juce::String describeArmedInput (const ProjectContext& context, TrackID id)
 {
-    return isArmed (context, id) ? describeInput (getTrackInput (context, id)) : juce::String();
+    juce::String source;
+
+    if (isArmed (context, id))
+        source = describeInput (getTrackInput (context, id));
+    else if (isMidiArmed (context, id))
+        source = "MIDI";
+    else
+        return {};
+
+    return isRecordingOnto (context, id) ? "Recording " + source : source;
 }
 } // namespace phazite::ui

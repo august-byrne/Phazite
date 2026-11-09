@@ -5,6 +5,7 @@
 #include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/SongRange.h"
 #include "model/arrangement/internal/SongSelection.h"
+#include "model/arrangement/internal/Transients.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineContext.h"
@@ -244,6 +245,7 @@ struct ProjectContext::Impl
     DeviceWindowHost* windows = nullptr;           // what shows the devices' windows, the app's
     Clipboard clipboard;                           // what Cut and Copy keep for Paste
     std::unique_ptr<SongWatcher> songWatcher;
+    Transients transients; // the hits found in audio files, whichever project plays them
     int projectNumber = 0;
 
     void dropSong()
@@ -339,6 +341,11 @@ RangeSelection& getRangeSelection (ProjectContext& context)
     return context.getImpl().rangeSelection;
 }
 
+const RangeSelection& getRangeSelection (const ProjectContext& context)
+{
+    return context.getImpl().rangeSelection;
+}
+
 EngineContext& getEngineContext (const ProjectContext& context)
 {
     return context.getImpl().engine;
@@ -357,6 +364,11 @@ AutomationWatcher* getAutomationWatcher (const ProjectContext& context)
 ClipRenders* getClipRenders (const ProjectContext& context)
 {
     return context.getImpl().clipRenders.get();
+}
+
+Transients& getTransientFinder (const ProjectContext& context)
+{
+    return context.getImpl().transients;
 }
 
 Clipboard& getClipboard (ProjectContext& context)

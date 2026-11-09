@@ -56,6 +56,7 @@ after start:
   track.addReturn: on "Add Return Track"
   track.freeze: off "Freeze Track"
   track.bounceInPlace: off "Bounce in Place"
+  clip.consolidate: off "Consolidate"
   device.group: off "Group into Container"
   device.ungroup: off "Ungroup Container"
   automation.automateLastTouched: off "Automate Last Touched Parameter"
@@ -415,13 +416,16 @@ after add a MIDI clip on One, with two notes:
   edit.deselectAll: on "Deselect All"
   edit.cut: on "Cut Clip"
   edit.copy: on "Copy Clip"
+  clip.consolidate: on "Consolidate"
   selected: clip on One at 0.000
 after edit.mute:
   edit.undo: on "Undo Mute"
   edit.undoOrRedo: on "Undo Mute"
   edit.mute: on, ticked "Mute"
+  clip.consolidate: off "Consolidate"
 after edit.mute:
   edit.mute: on "Mute"
+  clip.consolidate: on "Consolidate"
 after edit.duplicate:
   edit.undo: on "Undo Duplicate Clip"
   edit.undoOrRedo: on "Undo Duplicate Clip"
@@ -438,6 +442,7 @@ after edit.delete:
   edit.deselectAll: off "Deselect All"
   edit.cut: off "Cut"
   edit.copy: off "Copy"
+  clip.consolidate: off "Consolidate"
   selected: nothing
 after select the clip:
   edit.delete: on "Delete Clip"
@@ -449,6 +454,7 @@ after select the clip:
   edit.deselectAll: on "Deselect All"
   edit.cut: on "Cut Clip"
   edit.copy: on "Copy Clip"
+  clip.consolidate: on "Consolidate"
   selected: clip on One at 0.000
 after edit.duplicateAsAlias:
   edit.undo: on "Undo Duplicate as Alias"
@@ -478,6 +484,7 @@ after select the clip's notes:
   edit.split: off "Split"
   edit.cut: on "Cut 2 Notes"
   edit.copy: on "Copy 2 Notes"
+  clip.consolidate: off "Consolidate"
   note.transposeUp: on "Transpose Up"
   note.transposeDown: on "Transpose Down"
   note.octaveUp: on "Octave Up"
@@ -575,6 +582,7 @@ after import a tone onto Two at beat 8, and select it:
   edit.deselectAll: on "Deselect All"
   edit.cut: on "Cut Clip"
   edit.copy: on "Copy Clip"
+  clip.consolidate: on "Consolidate"
   selected: clip on Two at 8.000
 after clip.fadeConvex:
   edit.undo: on "Undo Convex Fades"
@@ -615,6 +623,7 @@ after edit.deleteAndCloseGap:
   edit.deselectAll: off "Deselect All"
   edit.cut: off "Cut"
   edit.copy: off "Copy"
+  clip.consolidate: off "Consolidate"
   selected: nothing
 after select beats 2 to 6 on One:
   edit.delete: on "Delete Range"
@@ -626,13 +635,16 @@ after select beats 2 to 6 on One:
   edit.deselectAll: on "Deselect All"
   edit.cut: on "Cut Range"
   edit.copy: on "Copy Range"
+  clip.consolidate: on "Consolidate"
   selected: range 2.000-6.000 beats on One
 after edit.insertTime:
   edit.undo: on "Undo Insert Time"
   edit.undoOrRedo: on "Undo Insert Time"
+  clip.consolidate: off "Consolidate"
 after edit.removeTime:
   edit.undo: on "Undo Remove Time"
   edit.undoOrRedo: on "Undo Remove Time"
+  clip.consolidate: on "Consolidate"
 after transport.loopSelection:
   loop 2.000-6.000 beats
 after edit.split:
@@ -645,6 +657,7 @@ after edit.duplicate:
 after edit.delete:
   edit.undo: on "Undo Delete Range"
   edit.undoOrRedo: on "Undo Delete Range"
+  clip.consolidate: off "Consolidate"
 after clear the range:
   edit.delete: off "Delete"
   edit.deleteAndCloseGap: off "Delete and Close Gap"
@@ -683,6 +696,7 @@ after edit.selectAll:
   edit.deselectAll: on "Deselect All"
   edit.cut: on "Cut 3 Clips"
   edit.copy: on "Copy 3 Clips"
+  clip.consolidate: on "Consolidate"
   selected: clip on One at 0.000, clip on One at 2.000, clip on One at 4.000
 after select One:
   edit.delete: on "Delete Track"
@@ -702,6 +716,7 @@ after select One:
   track.solo: on "Solo Track"
   track.freeze: on "Freeze Track"
   track.bounceInPlace: on "Bounce in Place"
+  clip.consolidate: off "Consolidate"
   automation.showLanes: on "Show Automation"
   automation.read: on, ticked "Read Automation"
   automation.touch: on "Touch Automation"

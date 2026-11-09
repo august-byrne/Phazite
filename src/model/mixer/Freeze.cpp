@@ -6,6 +6,8 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Consolidate.h"
+#include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
@@ -645,6 +647,181 @@ namespace
         }
     };
 
+    //==============================================================================
+    // Joins every part Consolidate has (model/arrangement/internal/Consolidate.h), each with the file rendered for its track's
+    // audio, if any, as one undo step, "Consolidate". What it made is selected, unless a time range was: that stays over it.
+    void joinParts (ProjectContext& context, Song& song, const std::vector<ConsolidatePart>& parts,
+                    const std::function<juce::File (TrackID)>& renderedFor)
+    {
+        const auto keepsRange = ! getRangeSelection (context).isEmpty();
+        std::vector<ClipID> made;
+
+        {
+            const UndoStep step (song, "Consolidate");
+
+            for (const auto& part : parts)
+                for (const auto clip : consolidatePart (song, part, renderedFor (part.track)))
+                    made.push_back (clip);
+        }
+
+        if (auto& selection = getSelection (context); ! made.empty() && ! keepsRange)
+        {
+            selection.selectOnly (made.front());
+
+            for (size_t i = 1; i < made.size(); ++i)
+                selection.addToSelection (made[i]);
+        }
+    }
+
+    // Consolidating with audio: each part's audio clips before its track's devices, from the part's start to its end, into a
+    // WAV file of floating-point samples in the song's recordings folder (its project's Audio folder), all on a thread of
+    // their own; then every part joined, MIDI ones too. Nothing of the song changes meanwhile.
+    class ConsolidateRender final : public TrackRender::Impl
+    {
+    public:
+        ConsolidateRender (ProjectContext& c, Song& s, std::vector<ConsolidatePart> toJoin,
+                           std::function<void (const juce::Result&)> callback)
+            : context (c),
+              song (&s),
+              parts (std::move (toJoin)),
+              onFinished (std::move (callback)),
+              alive (std::make_shared<ConsolidateRender*> (this))
+        {
+            if (isSongPlaying (*song))
+                stopAndReturn (*song);
+
+            // A frozen track plays its frozen file rather than its clips: live again first, as changing its clips would make it.
+            for (const auto& part : parts)
+                if (part.audio && (bool) findTrackState (*song, part.track)[schema::trackFrozen])
+                    unfreeze (*song, part.track);
+
+            renderMissingClipAudio (*song); // the engine plays a clip whose render isn't there silent
+
+            std::vector<OfflineRender::Job> jobs;
+            std::set<juce::String> taken;
+            const auto folder = getRecordingsFolder (*song);
+
+            for (const auto& part : parts)
+            {
+                if (! part.audio)
+                    continue;
+
+                // "Bass (Consolidated).wav", or the first "Bass (Consolidated) 2.wav"... that no file, nor another part, has.
+                const auto name = juce::File::createLegalFileName (getTrackName (*song, part.track) + " (Consolidated)");
+                auto target = folder.getChildFile (name + ".wav");
+
+                for (int number = 2; target.exists() || taken.contains (target.getFullPathName()); ++number)
+                    target = folder.getChildFile (name + " " + juce::String (number) + ".wav");
+
+                taken.insert (target.getFullPathName());
+                const auto rendered =
+                    target.getSiblingFile (target.getFileNameWithoutExtension() + " (rendering).wav").getNonexistentSibling (false);
+                files.push_back ({ part.track, target, rendered });
+
+                OfflineRender::Job job;
+                job.file = rendered;
+                job.startSeconds = toSeconds (*song, part.range.getStart());
+                job.endSeconds = toSeconds (*song, part.range.getEnd());
+                job.of = SongPlayer::RenderOf { (std::int64_t) part.track.getRaw(), true, std::set<std::int64_t>() }; // no devices
+                jobs.push_back (std::move (job));
+            }
+
+            auto* session = findSession (*song);
+            const auto format = getRenderFormat (session);
+            const OfflineRender::Setup setup {
+                .session = session,
+                .makePlayer = [played = song, session]
+                { return std::make_unique<SongPlayer> (*played, session != nullptr ? &session->getPlugins() : nullptr); },
+                .numThreads = session != nullptr ? session->getHost().getNumThreads() : 1,
+                .sampleRate = format.sampleRate,
+                .blockSize = format.blockSize
+            };
+
+            render = std::make_unique<OfflineRender> (setup, jobs, OfflineRender::Rendered(),
+                                                      [weakAlive = std::weak_ptr<ConsolidateRender*> (alive)] (const juce::Result& result)
+                                                      {
+                                                          juce::MessageManager::callAsync (
+                                                              [weakAlive, result]
+                                                              {
+                                                                  if (const auto locked = weakAlive.lock())
+                                                                      (*locked)->finish (result);
+                                                              });
+                                                      });
+        }
+
+        ~ConsolidateRender() override
+        {
+            alive = nullptr; // no callback from here on
+            render = nullptr;
+            deleteRenderedFiles();
+        }
+
+        float getProgress() const override { return render != nullptr ? render->getProgress() : 0.0f; }
+        juce::String getTitle() const override { return "Consolidating"; }
+        bool hasStarted() const noexcept { return render != nullptr; }
+
+    private:
+        struct RenderedFile
+        {
+            TrackID track;
+            juce::File target, rendered; // where it goes, and what the engine plays into
+        };
+
+        ProjectContext& context;
+        const Song::Ptr song;
+        const std::vector<ConsolidatePart> parts;
+        const std::function<void (const juce::Result&)> onFinished;
+        std::vector<RenderedFile> files;
+        std::shared_ptr<ConsolidateRender*> alive; // what a callback on its way holds on to
+        std::unique_ptr<OfflineRender> render;
+
+        void deleteRenderedFiles()
+        {
+            for (const auto& file : files)
+                if (file.rendered.existsAsFile())
+                    file.rendered.deleteFile();
+        }
+
+        void finish (juce::Result result)
+        {
+            render = nullptr; // the project plays its plug-ins again
+
+            if (result.wasOk())
+                result = use();
+
+            deleteRenderedFiles();
+
+            if (const auto callback = onFinished; callback != nullptr)
+                callback (result); // last: it may delete this
+        }
+
+        juce::Result use()
+        {
+            for (const auto& file : files)
+                if (! file.rendered.moveFileTo (file.target))
+                    return juce::Result::fail ("Phazite couldn't write " + file.target.getFullPathName() + ".");
+
+            joinParts (context, *song, parts,
+                       [this] (TrackID track)
+                       {
+                           const auto found = std::find_if (files.begin(), files.end(),
+                                                            [track] (const RenderedFile& file) { return file.track == track; });
+                           return found != files.end() ? found->target : juce::File();
+                       });
+
+            return juce::Result::ok();
+        }
+
+        JUCE_DECLARE_NON_COPYABLE (ConsolidateRender)
+    };
+
+    std::vector<ConsolidatePart> getPartsToConsolidate (const ProjectContext& context)
+    {
+        auto* song = findSong (context);
+        return song != nullptr ? getConsolidateParts (*song, getSelection (context), getRangeSelection (context))
+                               : std::vector<ConsolidatePart>();
+    }
+
     TrackID getSelectedTrackID (const ProjectContext& context)
     {
         const auto selected = getSelectedTracks (getSelection (context));
@@ -751,6 +928,39 @@ void unfreezeTrack (ProjectContext& context, TrackID id)
         unfreeze (*song, id);
 }
 
+juce::String getWhyNotConsolidate (const ProjectContext& context)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return "Open a project first.";
+
+    if (isRecording (*song))
+        return "Stop recording first.";
+
+    if (getPartsToConsolidate (context).empty())
+        return "Select the clips to join, or a time range across tracks.";
+
+    return {};
+}
+
+bool doesConsolidateRender (const ProjectContext& context)
+{
+    const auto parts = getPartsToConsolidate (context);
+    return std::any_of (parts.begin(), parts.end(), [] (const ConsolidatePart& part) { return part.audio; });
+}
+
+std::unique_ptr<TrackRender> startConsolidate (ProjectContext& context, std::function<void (const juce::Result&)> onFinished)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr || getWhyNotConsolidate (context).isNotEmpty() || ! doesConsolidateRender (context))
+        return {};
+
+    auto render = std::make_unique<ConsolidateRender> (context, *song, getPartsToConsolidate (context), std::move (onFinished));
+    return render->hasStarted() ? std::make_unique<TrackRender> (std::move (render)) : nullptr;
+}
+
 //==============================================================================
 void toggleFreeze (ProjectContext& context, TrackRenderHost& host)
 {
@@ -795,6 +1005,32 @@ bool canBounceSelectedTrack (const ProjectContext& context)
     return getWhyNotBounce (context, getSelectedTrackID (context)).isEmpty();
 }
 
+void consolidateSelection (ProjectContext& context, TrackRenderHost& host)
+{
+    const auto title = juce::String ("Consolidating");
+
+    if (const auto whyNot = getWhyNotConsolidate (context); whyNot.isNotEmpty())
+    {
+        host.renderFinished (title, juce::Result::fail (whyNot));
+        return;
+    }
+
+    // MIDI alone needs no render: joined at once.
+    if (! doesConsolidateRender (context))
+    {
+        joinParts (context, *findSong (context), getPartsToConsolidate (context), [] (TrackID) { return juce::File(); });
+        return;
+    }
+
+    runOrExplain (host, title, {},
+                  [&context] (std::function<void (const juce::Result&)> done) { return startConsolidate (context, std::move (done)); });
+}
+
+bool canConsolidateSelection (const ProjectContext& context)
+{
+    return getWhyNotConsolidate (context).isEmpty();
+}
+
 void addFreezeCommands (CommandRegistry& registry, ProjectContext& context, TrackRenderHost& host)
 {
     registry.add ({ .id = "track.freeze",
@@ -813,8 +1049,17 @@ void addFreezeCommands (CommandRegistry& registry, ProjectContext& context, Trac
                     .category = "Track",
                     .description = "Renders the selected track through its instrument and effects onto a new audio track under it, "
                                    "and mutes the original.",
-                    .synonyms = { "render", "consolidate", "resample", "print", "audio", "flatten", "commit" },
+                    .synonyms = { "render", "bounce to new track", "resample", "print", "audio", "flatten", "commit" },
                     .perform = [&context, &host] { bounceSelectedTrack (context, host); },
                     .isEnabled = [&context] { return canBounceSelectedTrack (context); } });
+
+    registry.add ({ .id = "clip.consolidate",
+                    .name = "Consolidate",
+                    .category = "Clip",
+                    .description = "Joins the selected clips on each track, or what lies in the selected time range, into one clip: a MIDI "
+                                   "clip of their notes, or one audio file of what the audio clips play, before the track's effects.",
+                    .synonyms = { "join", "glue", "merge clips", "combine", "render clips", "flatten clips" },
+                    .perform = [&context, &host] { consolidateSelection (context, host); },
+                    .isEnabled = [&context] { return canConsolidateSelection (context); } });
 }
 } // namespace phazite

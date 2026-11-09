@@ -227,6 +227,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/ClipRenders.cpp
     src/model/arrangement/Clipboard.cpp
     src/model/arrangement/Clips.cpp
+    src/model/arrangement/Consolidate.cpp
     src/model/arrangement/Grid.cpp
     src/model/arrangement/GridSettings.h
     src/model/arrangement/Import.cpp
@@ -246,11 +247,13 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/TrackColours.cpp
     src/model/arrangement/TrackColours.h
     src/model/arrangement/Tracks.cpp
+    src/model/arrangement/Transients.cpp
     src/model/arrangement/internal/Arrangement.h
     src/model/arrangement/internal/AudioClips.h
     src/model/arrangement/internal/ClipRenders.h
     src/model/arrangement/internal/Clipboard.h
     src/model/arrangement/internal/Clips.h
+    src/model/arrangement/internal/Consolidate.h
     src/model/arrangement/internal/Grid.h
     src/model/arrangement/internal/Import.h
     src/model/arrangement/internal/Outlines.h
@@ -259,6 +262,7 @@ target_sources(phazite_core PRIVATE
     src/model/arrangement/internal/SongRange.h
     src/model/arrangement/internal/SongSelection.h
     src/model/arrangement/internal/Tracks.h
+    src/model/arrangement/internal/Transients.h
     src/model/automation/Automation.cpp
     src/model/automation/AutomationModel.cpp
     src/model/automation/AutomationModel.h
@@ -418,6 +422,7 @@ target_sources(phazite_core PRIVATE
     src/model/transport/Recording.cpp
     src/model/transport/RecordingModel.cpp
     src/model/transport/RecordingModel.h
+    src/model/transport/RecordingValues.h
     src/model/transport/Take.cpp
     src/model/transport/Tempo.cpp
     src/model/transport/TempoModel.cpp
@@ -809,6 +814,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/playlist/PlaylistAutomation.cpp
     src/ui/playlist/PlaylistDrops.cpp
     src/ui/playlist/PlaylistParts.h
+    src/ui/playlist/PlaylistRecording.cpp
     src/ui/playlist/PlaylistRows.cpp
     src/ui/playlist/PlaylistTools.cpp
     src/ui/playlist/PlaylistTracks.cpp
@@ -1095,6 +1101,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/CompressorEditorTests.cpp
         tests/CompressorTests.cpp
         tests/ComputerKeyboardTests.cpp
+        tests/ConsolidateTests.cpp
         tests/ContainerTests.cpp
         tests/ContainerUiTests.cpp
         tests/ControlsTests.cpp
@@ -1237,6 +1244,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsMergeTests.cpp
         tests/VersionsTests.cpp
         tests/VocoderTests.cpp
+        tests/WarpTests.cpp
         tests/WavetableEditorTests.cpp
         tests/WavetableModelTests.cpp
         tests/WavetableTests.cpp

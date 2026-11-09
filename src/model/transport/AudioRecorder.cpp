@@ -238,12 +238,19 @@ void placeTake (Song& song, TrackID track, const juce::File& file, const TakePla
     const auto name = getTrackName (song, track);
     const auto beatsOf = [&song] (double seconds) { return toBeats (song, seconds); };
 
-    // A clip of the song's playing the file from a time in it, as it was recorded.
+    // A clip of the song's playing the file from a time in it, as it was recorded: following the song's tempo from the tempo it
+    // was played at, as Ableton Live warps a recording, while the tempo holds steady over it, so that it keeps to its beats
+    // when the tempo changes later (one played along tempo changes keeps its own speed).
     const auto place = [&] (double clipStart, double clipEnd, double fileStart)
     {
         const auto partStart = std::max (0.0, fileStart);
         const auto clipState = makeAudioClipState (song, name, file, beatsOf (clipStart), { partStart, partStart + (clipEnd - clipStart) });
-        return placeClipState (song, clipState, track);
+        const auto clip = placeClipState (song, clipState, track);
+
+        if (clip.isValid() && getTempoMap (song).isSteadyBetween (beatsOf (clipStart).inBeats(), beatsOf (clipEnd).inBeats()))
+            setClipFollowsTempo (song, clip, true);
+
+        return clip;
     };
 
     // Punched in: only what falls in the range, in place of what was there, cross-fading at the edges: the new clip

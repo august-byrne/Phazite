@@ -9,7 +9,12 @@
 //   aren't undo steps (a track keeps one frozen file, which a later freeze replaces), as mute and solo aren't.
 // - Bounce in Place renders a track through its instrument and devices, before its fader, onto a new audio track under it,
 //   in the project's Audio folder, and mutes and collapses the original: one undo step, "Bounce in Place".
-// Returns, buses and folders are neither frozen nor bounced.
+// - Consolidate, as Ableton Live's: the clips selected on each track, from the first one's start to the last one's end, or
+//   what lies in the time range selected across tracks, become one clip on each track: a MIDI clip of the notes they play,
+//   and an audio clip of a file rendered from what the audio clips play there, before the track's devices (with their gain,
+//   fades, pitch and stretch), in the project's Audio folder: one undo step, "Consolidate", the new clips selected. A frozen
+//   track plays live again first; MIDI alone needs no render.
+// Returns, buses and folders are neither frozen nor bounced, nor consolidated.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -62,6 +67,13 @@ private:
 std::unique_ptr<TrackRender> startFreeze (ProjectContext&, TrackID, std::function<void (const juce::Result&)> onFinished);
 std::unique_ptr<TrackRender> startBounceInPlace (ProjectContext&, TrackID, std::function<void (const juce::Result&)> onFinished);
 
+// Why the selection can't be consolidated now, as a sentence, empty if it can; and whether consolidating it renders audio.
+// Starts consolidating it, whose undo step comes once its audio is rendered; nothing, without calling back, if it can't
+// start or has no audio to render (consolidateSelection() joins MIDI clips at once).
+juce::String getWhyNotConsolidate (const ProjectContext&);
+bool doesConsolidateRender (const ProjectContext&);
+std::unique_ptr<TrackRender> startConsolidate (ProjectContext&, std::function<void (const juce::Result&)> onFinished);
+
 // Plays a frozen track live again, from its clips and devices. Not an undo step.
 void unfreezeTrack (ProjectContext&, TrackID);
 
@@ -92,6 +104,10 @@ juce::String getFreezeCommandName (const ProjectContext&);
 void bounceSelectedTrack (ProjectContext&, TrackRenderHost&);
 bool canBounceSelectedTrack (const ProjectContext&);
 
-// The commands: track.freeze and track.bounceInPlace.
+// Consolidate, for the selection: MIDI alone at once, audio in the host.
+void consolidateSelection (ProjectContext&, TrackRenderHost&);
+bool canConsolidateSelection (const ProjectContext&);
+
+// The commands: track.freeze, track.bounceInPlace and clip.consolidate.
 void addFreezeCommands (CommandRegistry&, ProjectContext&, TrackRenderHost&);
 } // namespace phazite

@@ -18,7 +18,7 @@ namespace phazite
 bool canRecord (const Song& song)
 {
     const auto* session = findPlayingSession (song);
-    return session != nullptr && (getLiveMidiTrack (song).isValid() || session->getRecorder().canRecord());
+    return session != nullptr && ((getLiveMidiTrack (song).isValid() && session->recordsLiveTrack()) || session->getRecorder().canRecord());
 }
 
 bool isRecording (const Song& song)
@@ -197,8 +197,8 @@ void addRecordingCommands (CommandRegistry& registry, Selection& selection, Audi
     registry.add ({ .id = "transport.record",
                     .name = "Record",
                     .category = "Transport",
-                    .description = "Records what you play onto the track live MIDI plays, and the armed tracks' audio inputs, from where "
-                                   "playback starts, or stops recording.",
+                    .description = "Records onto the armed tracks, from where playback starts: their audio inputs, and what you play on "
+                                   "MIDI onto the track it plays. Or stops recording.",
                     .synonyms = { "rec", "take", "record midi", "record audio" },
                     .perform = withSong (selection, toggleRecording),
                     .isEnabled = ifSong (selection, canToggleRecording),

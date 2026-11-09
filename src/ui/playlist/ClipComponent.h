@@ -2,7 +2,7 @@
 // A clip in the playlist: in its track's color, a preview of what it holds (an audio clip's waveform and fades, a MIDI
 // clip's notes), which fills it, and over that its name where it says more than its track's header does, and marks for an
 // alias and for a sample that follows the tempo. It only draws: the playlist handles the mouse, with the Smart Tool. The
-// playlist makes one only for a clip in view.
+// playlist makes one only for a clip in view, and one for what is being recorded on each track that records (showRecording()).
 #pragma once
 
 #include "ClipWaveform.h"
@@ -48,8 +48,16 @@ public:
 
     // What its tag at its top left says: its name where that isn't its track's, which the track's header shows (a sample's,
     // or one given it), and the take a clip recorded round a loop plays, of how many; nothing for a clip called after its
-    // track, which shows no tag.
+    // track, which shows no tag. A recording's says that it records, and round a looped range which take.
     juce::String getLabel() const;
+
+    // Shows what is being recorded rather than a clip of the song (model/transport/RecordingModel.h:
+    // getRecordingsInProgress()), growing as it records: its edge in the danger colour, as record buttons are, and a tag
+    // that says it records, round a looped range the take it is on (from 1); a MIDI recording's notes, as they are played,
+    // are given to it (showNotes()), and an input's waveform is one that draws what has come in.
+    void showRecording (int take);
+    void showNotes (std::vector<NoteShape>);
+    bool isRecording() const noexcept { return recordingTake > 0; }
 
     void paint (juce::Graphics&) override;
 
@@ -60,6 +68,7 @@ private:
     std::vector<NoteShape> notes; // a MIDI clip's
     juce::Colour colour;
     bool selected = false, frozen = false, trackSilent = false;
+    int recordingTake = 0;            // while it shows a recording: the take it is on, from 1
     std::optional<double> rendering;  // to a hundredth
     ClipWaveform* waveform = nullptr; // an audio clip's, the playlist's
 

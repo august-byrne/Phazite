@@ -78,7 +78,12 @@ private:
     void updateTempo();
     void showTempoStretch(); // what the tempo stretches, as it starts to change
     void hideTempoStretch();
+    // Record's menu: the recording commands, and a new track for one of the audio device's inputs, armed (as FL Studio's record
+    // button asks what to record): what a click on Record opens while nothing would record. Its tooltip says what it records
+    // onto (model/transport/RecordingModel.h: describeRecordTargets()), as the tracks' arm switches show it.
     void showRecordMenu();
+    juce::String recordTargets;
+    void refreshRecordTooltip();
     void showMetronomeMenu();
     void showTimeSignatureMenu();
     bool isCommandTicked (const juce::String& commandID) const;

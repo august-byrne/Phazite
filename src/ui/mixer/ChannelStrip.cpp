@@ -2,6 +2,7 @@
 #include "ChannelStrip.h"
 #include "model/presets/PresetModel.h"
 #include "model/transport/RecordingModel.h"
+#include "model/transport/TransportModel.h"
 #include "ui/devices/DeviceMenus.h"
 #include "ui/input/CommandUI.h"
 #include "ui/input/LibraryDrag.h"
@@ -328,9 +329,12 @@ juce::String ChannelStrip::describeInput() const
             break;
     }
 
-    // A track that records audio says from what, and whether it is armed.
+    // A track that records audio says from what, and whether it is armed; the track live MIDI plays, that it is fed MIDI.
     if (const auto input = getTrackInput (context, track); input.isNotEmpty() && canRecordAudio (context, track))
         return (isArmed (context, track) ? "Armed: " : "Input: ") + phazite::describeInput (input);
+
+    if (canRecordMidi (context, track) && getLiveMidiTrack (context) == track)
+        return isMidiArmed (context, track) ? "Armed: MIDI" : "Input: MIDI";
 
     return {};
 }

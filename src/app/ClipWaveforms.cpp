@@ -9,9 +9,11 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <utility>
+#include <vector>
 
 namespace phazite
 {
@@ -101,6 +103,29 @@ namespace
 
             const auto& song = *findSong (context);
             showFileOf (song, clipState);
+
+            // Between two of the clip's warp markers its file plays straight: each stretch between them is drawn on its own,
+            // from the file's time at each end (without markers, all of it at once).
+            const auto left = beatAt (area.getX()).inBeats(), right = beatAt (area.getRight()).inBeats();
+            std::vector<int> edges { area.getX() };
+
+            for (const auto& marker : getWarpMarkers (song, clipID))
+                if (const auto beat = marker.beat.inBeats(); right > left && beat > left && beat < right)
+                    edges.push_back (area.getX() + juce::roundToInt ((beat - left) / (right - left) * area.getWidth()));
+
+            edges.push_back (area.getRight());
+            std::sort (edges.begin(), edges.end());
+
+            for (size_t i = 0; i + 1 < edges.size(); ++i)
+                if (edges[i + 1] > edges[i])
+                    drawStraight (song, g, area.withX (edges[i]).withRight (edges[i + 1]), beatAt);
+        }
+
+        // Draws a stretch the file plays straight, over the part of an area that it has audio for.
+        void drawStraight (const Song& song, juce::Graphics& g, juce::Rectangle<int> area, const std::function<BeatPosition (int)>& beatAt)
+        {
+            if (! area.intersects (g.getClipBounds()))
+                return;
 
             // The time in the file at an x, as the clip plays it: stretched to the song's tempo, say, or going back from
             // its end while the clip plays backwards.

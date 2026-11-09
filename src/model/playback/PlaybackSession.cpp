@@ -217,6 +217,10 @@ void PlaybackSession::timerCallback()
 
 void PlaybackSession::setLiveTrack (TrackID track)
 {
+    // A track live MIDI starts playing records it, as Ableton Live arms the selected MIDI track by itself.
+    if (track != liveTrack)
+        liveTrackRecords = true;
+
     liveTrack = track;
     followLiveMidi();
 }

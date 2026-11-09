@@ -756,6 +756,8 @@ void TimelineEditor::updatePlayhead()
                              area.getBottom() - top);
         playhead->setOffset ((float) (playheadX - left));
     }
+
+    playheadShown();
 }
 
 void TimelineEditor::updateScrollBar()

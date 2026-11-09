@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song, or a part of it, played offline by Phazite's engine on a thread of its own: an export's
-// (model/project/Export.h), a freeze's or a bounce's (model/mixer/FreezeModel.h). Each job plays from the song's start
-// to an end, and on until its tails fall silent (a block of 512 under -70 dB, so many seconds at most), into a WAV file
-// of 32-bit floats, measured as it goes (EBU R128). What each plays is compiled on the message thread as this is made,
+// (model/project/Export.h), a freeze's, a bounce's or a consolidation's (model/mixer/FreezeModel.h). Each job plays from the
+// song's start (or a time in it) to an end, and on until its tails fall silent (a block of 512 under -70 dB, so many seconds
+// at most), into a WAV file of 32-bit floats, measured as it goes (EBU R128). What each plays is compiled on the message thread as this is made,
 // with the project's plug-ins, which it has alone while it lives (PlaybackSession::lendToRender()); deleting it, on the
 // message thread, cancels what is left, waits for its thread and gives them back.
 #pragma once
@@ -28,6 +28,7 @@ public:
         double endSeconds = 0.0;                   // the song's time it plays to, before its tails
         double tailSeconds = 0.0;                  // and on, for as long as its tails sound, at most
         std::optional<SongPlayer::RenderOf> of {}; // the song through the master, or a part of it
+        double startSeconds = 0.0;                 // the song's time it plays from
     };
 
     // On the render thread: what comes of a job's file once it is written, with what was measured of it (an export writes

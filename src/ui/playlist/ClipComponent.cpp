@@ -44,7 +44,8 @@ void ClipComponent::showClip (const ClipInfo& shown)
     setTitle (info.name); // what screen readers call it, and what its marks show
     describe();
 
-    if (info.kind == ClipType::midi)
+    // A recording's notes are given to it as they are played (showNotes()).
+    if (info.kind == ClipType::midi && ! isRecording())
         notes = getNoteShapes (context, id);
 
     repaint();
@@ -57,6 +58,21 @@ void ClipComponent::showWaveform (ClipWaveform* newWaveform)
         waveform = newWaveform;
         repaint();
     }
+}
+
+void ClipComponent::showRecording (int take)
+{
+    if (std::exchange (recordingTake, std::max (1, take)) != recordingTake)
+    {
+        describe();
+        repaint();
+    }
+}
+
+void ClipComponent::showNotes (std::vector<NoteShape> shown)
+{
+    notes = std::move (shown);
+    repaint();
 }
 
 void ClipComponent::showLook (juce::Colour newColour, bool isSelected, bool isFrozen, bool isTrackSilent)
@@ -76,6 +92,12 @@ void ClipComponent::showLook (juce::Colour newColour, bool isSelected, bool isFr
 
 void ClipComponent::describe()
 {
+    if (isRecording())
+    {
+        setDescription ("Being recorded: it is kept as you see it when recording stops");
+        return;
+    }
+
     juce::StringArray about;
 
     if (rendering.has_value())
@@ -199,13 +221,24 @@ void ClipComponent::paint (juce::Graphics& g)
     if (faint)
         g.endTransparencyLayer();
 
-    // Its edge in its colour, opaque (faint where it is); a selected clip's in the text color, which shows on any clip color.
+    // Its edge in its colour, opaque (faint where it is); a selected clip's in the text color, which shows on any clip color; a
+    // recording's in the danger colour, as record buttons are.
+    if (isRecording())
+    {
+        g.setColour (p.danger);
+        g.drawRoundedRectangle (body.reduced (0.5f), corner, RecordingTint::edge);
+        return;
+    }
+
     g.setColour (selected ? p.text : colour.withMultipliedAlpha (faint ? ClipTint::muted : 1.0f));
     g.drawRoundedRectangle (body, corner, selected ? 2.0f : 1.0f);
 }
 
 juce::String ClipComponent::getLabel() const
 {
+    if (isRecording())
+        return recordingTake > 1 ? "Recording take " + juce::String (recordingTake) : juce::String ("Recording");
+
     auto label = info.namedLikeTrack ? juce::String() : info.name;
 
     if (info.takes > 1)

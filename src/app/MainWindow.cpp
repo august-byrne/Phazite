@@ -1065,7 +1065,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSeparator();
             add (menu, { "edit.selectAll", "edit.deselectAll" });
             menu.addSeparator();
-            add (menu, { "edit.quantize" });
+            add (menu, { "edit.quantize", "clip.consolidate" });
 
             // The piano roll's edits, which act on the selected notes.
             juce::PopupMenu notes;

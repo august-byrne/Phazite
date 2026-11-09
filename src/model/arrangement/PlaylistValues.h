@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The playlist's edits as plain values, for PlaylistModel.h and the model's own arrangement code: where tracks dragged
-// in the playlist go, and the shapes of audio clips' fades.
+// in the playlist go, the shapes of audio clips' fades, and their warp markers.
 #pragma once
+
+#include "model/base/Beats.h"
 
 #include <juce_core/juce_core.h>
 
@@ -35,4 +37,13 @@ struct FadeCurve
 
 inline constexpr FadeCurve linearFade {}, convexFade { FadeShape::curve, 1.0f }, concaveFade { FadeShape::curve, -1.0f },
     sCurveFade { FadeShape::sCurve, 1.0f };
+
+// A warp marker of an audio clip that follows the song's tempo (AudioClipModel.h), as Ableton Live's: a time of its file, in
+// seconds as it was recorded, pinned to the beat of the song it plays at, the audio between two markers stretched to fit.
+// The same is a hit in a clip's audio (a transient), where it plays now.
+struct WarpMarker
+{
+    double time = 0.0;
+    BeatPosition beat {};
+};
 } // namespace phazite

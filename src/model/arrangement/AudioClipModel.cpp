@@ -4,6 +4,7 @@
 #include "internal/ClipRenders.h"
 #include "internal/Clips.h"
 #include "internal/Tracks.h"
+#include "internal/Transients.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
@@ -207,6 +208,94 @@ void setClipFollowsTempo (ProjectContext& context, ClipID id, bool follows)
 void setClipTempo (ProjectContext& context, ClipID id, double bpm)
 {
     changeClip (context, id, "Change Clip Tempo", [id, bpm] (Song& song) { setClipTempo (song, id, bpm); });
+}
+
+//==============================================================================
+std::vector<WarpMarker> getWarpMarkers (const ProjectContext& context, ClipID id)
+{
+    return findAudioClip (context, id).isValid() ? getWarpMarkers (*findSong (context), id) : std::vector<WarpMarker>();
+}
+
+double getAudioTimeAt (const ProjectContext& context, ClipID id, BeatPosition beat)
+{
+    return findAudioClip (context, id).isValid() ? getFileTimeAt (*findSong (context), id, beat) : 0.0;
+}
+
+bool addWarpMarker (ProjectContext& context, ClipID id, double time)
+{
+    const auto clipState = findAudioClip (context, id);
+    auto* song = findSong (context);
+
+    // None where it can't be, so that no empty step is left.
+    if (! clipState.isValid() || time < 0.0 || time > getClipFileLength (*song, clipState))
+        return false;
+
+    for (const auto& marker : getWarpMarkers (*song, id))
+        if (std::abs (marker.time - time) < minWarpGap)
+            return false;
+
+    auto added = false;
+    changeClip (context, id, "Add Warp Marker", [id, time, &added] (Song& changed) { added = addWarpMarker (changed, id, time); });
+    return added;
+}
+
+void moveWarpMarker (ProjectContext& context, ClipID id, double time, BeatPosition beat)
+{
+    changeClip (context, id, "Move Warp Marker", [id, time, beat] (Song& song) { moveWarpMarker (song, id, time, beat); });
+}
+
+void removeWarpMarker (ProjectContext& context, ClipID id, double time)
+{
+    changeClip (context, id, "Remove Warp Marker", [id, time] (Song& song) { removeWarpMarker (song, id, time); });
+}
+
+void removeWarpMarkers (ProjectContext& context, ClipID id)
+{
+    if (! getWarpMarkers (context, id).empty())
+        changeClip (context, id, "Remove Warp Markers", [id] (Song& song) { removeWarpMarkers (song, id); });
+}
+
+std::optional<std::vector<WarpMarker>> getTransients (const ProjectContext& context, ClipID id)
+{
+    const auto clipState = findAudioClip (context, id);
+
+    if (! clipState.isValid())
+        return std::vector<WarpMarker>();
+
+    const auto& song = *findSong (context);
+    const auto hits = getTransientFinder (context).find (getClipFile (song, clipState));
+
+    if (! hits.has_value())
+        return std::nullopt;
+
+    std::vector<WarpMarker> shown;
+    const auto beats = getBeatsOfFileTimes (song, id, *hits);
+
+    for (size_t i = 0; i < hits->size(); ++i)
+        shown.push_back ({ (*hits)[i], beats[i] });
+
+    return shown;
+}
+
+void quantizeAudio (ProjectContext& context, const std::vector<ClipID>& clips, BeatDuration grid, double strength)
+{
+    if (! canQuantizeAudio (context, clips) || grid.inBeats() <= 0.0)
+        return;
+
+    // Each clip's hits, found now if they haven't been: the command can't wait for them.
+    auto& song = *findSong (context);
+    auto& finder = getTransientFinder (context);
+    const UndoStep step (song, "Quantize Audio");
+
+    for (const auto clip : clips)
+        if (const auto clipState = findAudioClip (context, clip); clipState.isValid())
+            quantizeClipAudio (song, clip, finder.findNow (getClipFile (song, clipState)), grid, strength);
+}
+
+bool canQuantizeAudio (const ProjectContext& context, const std::vector<ClipID>& clips)
+{
+    auto* song = findSong (context);
+    return song != nullptr && hasAudioClips (*song, clips);
 }
 
 ClipRenderProgress getClipRenderProgress (const ProjectContext& context)

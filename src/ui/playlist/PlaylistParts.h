@@ -2,17 +2,28 @@
 // The playlist's parts, for its own .cpp files: Playlist.cpp is the view (the lanes, the panel's layout, and what it
 // listens to), PlaylistRows.cpp lays out the tracks' rows and their clips, PlaylistTools.cpp is the tools (the mouse in
 // the lanes), PlaylistDrops.cpp takes files and browser items dropped on it, PlaylistAutomation.cpp shows the automation
-// lanes under the tracks and edits them, and PlaylistTracks.cpp handles the track headers and their menus, and holds the
-// playlist's commands.
+// lanes under the tracks and edits them, PlaylistTracks.cpp handles the track headers and their menus, and holds the
+// playlist's commands, and PlaylistRecording.cpp shows what is being recorded as it comes in.
 #pragma once
 
 #include "Playlist.h"
+#include "model/transport/RecordingModel.h"
 #include "ui/timeline/TimelineGesture.h"
 
 #include <map>
 
 namespace phazite::ui
 {
+//==============================================================================
+// What is being recorded on a track, as the playlist shows it (PlaylistRecording.cpp): what the model says of it, an
+// input's waveform as it comes in, and the clip that shows it.
+struct Playlist::ShownRecording
+{
+    RecordingInProgress recording;
+    std::unique_ptr<ClipWaveform> waveform; // an input's; it goes after the clip that draws it
+    std::unique_ptr<ClipComponent> clip;
+};
+
 //==============================================================================
 // The tracks' rows, with the grid, and the clips on them. The hint bar shows what the mouse does where
 // it is (the description changes as it moves).

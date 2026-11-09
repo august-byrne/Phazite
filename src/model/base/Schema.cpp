@@ -181,7 +181,7 @@ namespace schema
         if (element.hasType (CHORD) || element.hasType (CHORDKEY))
             return beatKey (element[chordStart]);
 
-        if (element.hasType (POINT) || element.hasType (CONTROL))
+        if (element.hasType (POINT) || element.hasType (CONTROL) || element.hasType (WARP))
             return {};
 
         return element.getType().toString(); // one of its kind in its parent: MASTER, TEMPOMAP, TRACKS, VALUES...
@@ -195,7 +195,7 @@ namespace schema
         if (element.hasType (DEVICE) || element.hasType (CONTAINER))
             return "chain";
 
-        for (const auto* type : { &SEND, &MODULATOR, &MACRO, &MODULATES, &POINT, &CONTROL, &LANE })
+        for (const auto* type : { &SEND, &MODULATOR, &MACRO, &MODULATES, &POINT, &CONTROL, &WARP, &LANE })
             if (element.hasType (*type))
                 return type->toString();
 

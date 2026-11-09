@@ -198,6 +198,15 @@ private:
     int ticksToSkip = 0;
     void tick() override;
 
+    // What is being recorded, on each track it records onto, growing as it comes in, as Ableton Live draws it
+    // (PlaylistRecording.cpp): a clip that shows it (ClipComponent::showRecording()), from where it started to the
+    // playhead, brought up to date at each of the ticker's ticks, and its end at each frame of the display.
+    struct ShownRecording;
+    std::vector<ShownRecording> shownRecordings;
+    void showRecordings();
+    void layOutRecordings();
+    void playheadShown() override;
+
     // The rows of tracks.
     std::vector<TrackRow> getShownRows() const; // the playlist's tracks, and the master while it has lanes
     void rebuild();                             // after tracks were added, deleted, moved or changed

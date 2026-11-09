@@ -263,6 +263,124 @@ TEST_CASE ("Punched in, only what falls in the looped range is kept, in place of
     CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (12.0));
 }
 
+TEST_CASE ("While recording, an armed track's input shows where it will go, growing, with its waveform as it comes in")
+{
+    // As Ableton Live draws a clip growing as it records (RecordingModel.h: getRecordingsInProgress()).
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    const auto track = studio.song.firstTrack;
+    phazite::movePlayhead (context, phazite::BeatPosition::fromBeats (0.5));
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.0); // to 2.5 beats
+
+    // From where recording started to what has come in, which came in a block late.
+    auto recordings = phazite::getRecordingsInProgress (context);
+    REQUIRE (recordings.size() == 1);
+    CHECK (recordings[0].track == track);
+    CHECK (recordings[0].source == phazite::RecordSource::input);
+    CHECK (recordings[0].take == 1);
+    CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.5));
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (2.5 - 256.0 / 24000.0));
+
+    // Its waveform, in quarter beats, once the writing thread has written it: the clicks on beats 1 and 2, where they were
+    // played, and silence between them. (Its levels are kept for 256 frames at a time, so the column before a click, which
+    // ends where the click starts, has it too.)
+    const auto span = phazite::BeatRange (phazite::BeatPosition::fromBeats (0.5), phazite::BeatPosition::fromBeats (2.5));
+    const auto levels = [&context, track, span] { return phazite::getRecordingLevels (context, track, span, 8); };
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&levels] { return levels()[6] > 0.0f; }));
+    const auto shown = levels();
+    CHECK (shown[0] == 0.0f);
+    CHECK (shown[2] > 0.1f); // from beat 1
+    CHECK (shown[4] == 0.0f);
+    CHECK (shown[6] > 0.1f); // from beat 2
+
+    // Stopped, the clip it made is there instead, as it was shown.
+    studio.song.run ("transport.record");
+    CHECK (phazite::getRecordingsInProgress (context).empty());
+    const auto clips = phazite::getClips (context, track);
+    REQUIRE (clips.size() == 1);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.5));
+    CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (2.5 - 256.0 / 24000.0));
+}
+
+TEST_CASE ("While recording round a looped range, the input shows this time round as its take; punched in, what falls in the range")
+{
+    SUBCASE ("Round a range a second long")
+    {
+        EngineStudio studio;
+        phazite::loopBeatRange (*phazite::findSong (studio.song.context), 0.0, 2.0);
+        studio.song.run ("transport.record");
+        studio.playback.play (1.5); // half way round the second time
+
+        const auto recordings = phazite::getRecordingsInProgress (studio.song.context);
+        REQUIRE (recordings.size() == 1);
+        CHECK (recordings[0].take == 2);
+        CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.0));
+        CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (1.0 - 256.0 / 24000.0));
+
+        // This time round's click on its first beat, where it played.
+        const auto span = phazite::BeatRange (phazite::BeatPosition(), phazite::BeatPosition::fromBeats (1.0));
+        const auto levels = [&studio, span] { return phazite::getRecordingLevels (studio.song.context, studio.song.firstTrack, span, 4); };
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&levels] { return levels()[0] > 0.0f; }));
+        CHECK (levels()[2] == 0.0f);
+        studio.song.run ("transport.record");
+    }
+
+    SUBCASE ("Punched in over beats 4 to 8: nothing before it, then from its start")
+    {
+        EngineStudio studio;
+        phazite::loopBeatRange (*phazite::findSong (studio.song.context), 4.0, 8.0);
+        phazite::setPunchOn (studio.song.context, true);
+        studio.song.run ("transport.record");
+        studio.playback.play (1.0); // to beat 2
+        CHECK (phazite::getRecordingsInProgress (studio.song.context).empty());
+
+        studio.playback.play (2.0); // to beat 6
+        const auto recordings = phazite::getRecordingsInProgress (studio.song.context);
+        REQUIRE (recordings.size() == 1);
+        CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (4.0));
+        CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (6.0 - 256.0 / 24000.0));
+        studio.song.run ("transport.record");
+        phazite::setPunchOn (studio.song.context, false);
+    }
+}
+
+TEST_CASE ("An input recorded on a new track adds a track called Audio after the selected one, armed with it, as one undo step")
+{
+    TestSong song;
+    EnginePlayback playback; // a device with two inputs
+    auto& context = song.context;
+    auto& selection = getSelection (context);
+    selection.selectOnly (song.firstTrack);
+    song.context.getUndoManager()->clearUndoHistory();
+
+    const auto track = phazite::addTrackForInput (context, "1+2");
+    REQUIRE (track.isValid());
+    const auto tracks = phazite::getTrackIDs (*phazite::findSong (context));
+    REQUIRE (tracks.size() == 2);
+    CHECK (tracks[1] == track); // after the selected track
+    CHECK (phazite::getTrackName (*phazite::findSong (context), track) == juce::String ("Audio"));
+    CHECK (phazite::getTrackInput (context, track) == juce::String ("1+2"));
+    CHECK (phazite::getLastInput (context) == juce::String ("1+2"));
+    CHECK (phazite::isArmed (context, track));
+    CHECK (selection.getTracks() == std::vector { track });
+    CHECK (context.getUndoManager()->getUndoDescription() == juce::String ("Add Audio Track"));
+    CHECK (phazite::describeRecordTargets (context) == juce::String ("Audio (In 1+2)"));
+
+    // The next is called Audio 2; an input the device doesn't have adds none.
+    const auto second = phazite::addTrackForInput (context, "1");
+    CHECK (phazite::getTrackName (*phazite::findSong (context), second) == juce::String ("Audio 2"));
+    CHECK (phazite::describeRecordTargets (context) == juce::String ("Audio (In 1+2) and Audio 2 (In 1)"));
+    CHECK_FALSE (phazite::addTrackForInput (context, "3+4").isValid());
+
+    // Undone, each goes, and nothing stays armed.
+    phazite::undo (*phazite::findSong (context));
+    phazite::undo (*phazite::findSong (context));
+    CHECK (phazite::getTrackIDs (*phazite::findSong (context)).size() == 1);
+    CHECK (phazite::getArmedTracks (context).empty());
+}
+
 TEST_CASE ("A track hears its input while it is armed, or always, as its monitoring says, stopped or playing")
 {
     TestSong song;

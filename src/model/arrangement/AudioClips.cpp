@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 
 namespace phazite
@@ -94,18 +95,90 @@ namespace
         return juce::jlimit (minClipTempo, maxClipTempo, tempo);
     }
 
+    // A line through points in order, straight from each to the next, from each point's first to its second (or, inverse,
+    // the other way round), and straight on at a slope of 1 before the first and after the last: the same without points.
+    double alongPoints (const std::vector<std::pair<double, double>>& points, double x, bool inverse)
+    {
+        if (points.empty())
+            return x;
+
+        const auto from = [inverse] (const std::pair<double, double>& point) { return inverse ? point.second : point.first; };
+        const auto to = [inverse] (const std::pair<double, double>& point) { return inverse ? point.first : point.second; };
+
+        if (x <= from (points.front()))
+            return to (points.front()) + (x - from (points.front()));
+
+        if (x >= from (points.back()))
+            return to (points.back()) + (x - from (points.back()));
+
+        const auto next = std::upper_bound (points.begin(), points.end(), x, [&from] (double value, const std::pair<double, double>& point)
+                                            { return value < from (point); });
+        const auto& a = *std::prev (next);
+        const auto& b = *next;
+        return to (a) + (x - from (a)) / (from (b) - from (a)) * (to (b) - to (a));
+    }
+
+    // A clip's warp markers as the song holds them (Schema.h: WARP), each a time of its file as recorded with where that
+    // plays straight at the clip's tempo, in time order, both rising (any that doesn't is left out); none while the clip
+    // doesn't follow the song's tempo.
+    std::vector<std::pair<double, double>> getWarpPoints (const juce::ValueTree& clipState)
+    {
+        std::vector<std::pair<double, double>> points;
+
+        if ((double) clipState.getProperty (schema::clipTempo, 0.0) <= 0.0)
+            return points;
+
+        for (const auto& child : clipState)
+            if (child.hasType (schema::WARP))
+                points.emplace_back ((double) child[schema::warpTime], (double) child[schema::warpPlaysAt]);
+
+        std::sort (points.begin(), points.end());
+        std::vector<std::pair<double, double>> rising;
+
+        for (const auto& point : points)
+            if (rising.empty() || (point.first > rising.back().first && point.second > rising.back().second))
+                rising.push_back (point);
+
+        return rising;
+    }
+
+    // A clip's warp markers, in each clip of its alias group (which play the same audio), in place of those there.
+    void writeWarpPoints (Song& song, const juce::ValueTree& clipState, const std::vector<std::pair<double, double>>& points)
+    {
+        auto* um = &song.getUndoManager();
+
+        for (auto alias : getAliasStates (clipState))
+        {
+            for (auto i = alias.getNumChildren(); --i >= 0;)
+                if (alias.getChild (i).hasType (schema::WARP))
+                    alias.removeChild (i, um);
+
+            for (const auto& [at, playsAt] : points)
+            {
+                juce::ValueTree warp (schema::WARP);
+                warp.setProperty (schema::warpTime, at, nullptr);
+                warp.setProperty (schema::warpPlaysAt, playsAt, nullptr);
+                alias.appendChild (warp, um);
+            }
+        }
+    }
+
     // How a clip's played sound (its file, backwards while the clip plays backwards) lines up with the song: where its part
-    // starts in it and how long that is, in seconds, the file's whole length, the beat the clip starts at, and the file's
-    // tempo while the clip follows the song's. Following it, a time in the sound is a beat of the song, at the file's tempo
-    // from where the clip starts, whatever the song's tempo does there.
+    // starts in it and how long that is, in seconds, the file's whole length, the beat the clip starts at, the file's tempo
+    // while the clip follows the song's, and its warp markers in the sound as it plays. Following it, a time in the sound is a
+    // beat of the song, at the file's tempo from where the clip starts, whatever the song's tempo does there; between two
+    // markers, the sound stretches to fit, and before the first and after the last it plays straight.
     struct ClipTime
     {
         double partStart = 0.0, partLength = 0.0, fileLength = 0.0;
         double startBeat = 0.0;
-        double tempo = 0.0; // the file's, while the clip follows the song's; 0 while it doesn't
+        double tempo = 0.0;                           // the file's, while the clip follows the song's; 0 while it doesn't
+        std::vector<std::pair<double, double>> warps; // each a time of the sound with where it plays straight
 
-        double beatAt (double time) const { return startBeat + (time - partStart) * tempo / 60.0; }
-        double timeAt (double beat) const { return partStart + (beat - startBeat) * 60.0 / tempo; }
+        double unwarp (double time) const { return alongPoints (warps, time, false); } // where it plays straight
+        double warp (double straight) const { return alongPoints (warps, straight, true); }
+        double beatAt (double time) const { return startBeat + (unwarp (time) - unwarp (partStart)) * tempo / 60.0; }
+        double timeAt (double beat) const { return warp (unwarp (partStart) + (beat - startBeat) * 60.0 / tempo); }
     };
 
     ClipTime getClipTime (const Song& song, const juce::ValueTree& clipState)
@@ -113,42 +186,71 @@ namespace
         const auto part = getFilePart (clipState);
         const auto length = getClipFileLength (song, clipState);
         const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
-        return { reversed ? length - part.end : part.start, part.end - part.start, length, getClipRange (clipState).getStart().inBeats(),
-                 (double) clipState.getProperty (schema::clipTempo, 0.0) };
+        ClipTime time { reversed ? length - part.end : part.start, part.end - part.start, length,
+                        getClipRange (clipState).getStart().inBeats(), (double) clipState.getProperty (schema::clipTempo, 0.0) };
+        time.warps = getWarpPoints (clipState);
+
+        // Backwards, the sound's time runs from the file's end: each marker at the same audio, mirrored, each stretch as long.
+        if (reversed && ! time.warps.empty())
+        {
+            const auto end = alongPoints (time.warps, length, false);
+
+            for (auto& [at, playsAt] : time.warps)
+            {
+                at = length - at;
+                playsAt = end - playsAt;
+            }
+
+            std::reverse (time.warps.begin(), time.warps.end());
+        }
+
+        return time;
     }
 
-    // How the clip lines up with the song while it follows the song's tempo where it changes under the clip's file, from the
-    // file's start to its end as the clip places them: then it plays along the changes, rather than at one ratio as it does
-    // under one tempo. Nothing otherwise, found without reading the file for a clip that keeps its speed or a song of one
-    // tempo.
-    std::optional<ClipTime> findChangingTempo (const Song& song, const juce::ValueTree& clipState)
+    // How the clip lines up with the song while it follows the song's tempo along warp markers, or where the tempo changes
+    // under the clip's file, from the file's start to its end as the clip places them: then it plays along the markers and
+    // the changes, rather than at one ratio as it does under one tempo. Nothing otherwise, found without reading the file for a
+    // clip that keeps its speed, or one without markers in a song of one tempo.
+    std::optional<ClipTime> findMappedTime (const Song& song, const juce::ValueTree& clipState)
     {
-        if ((double) clipState.getProperty (schema::clipTempo, 0.0) <= 0.0 || ! hasTempoChanges (song))
+        if ((double) clipState.getProperty (schema::clipTempo, 0.0) <= 0.0)
+            return std::nullopt;
+
+        const auto warped = clipState.getChildWithName (schema::WARP).isValid();
+
+        if (! warped && ! hasTempoChanges (song))
             return std::nullopt;
 
         const auto time = getClipTime (song, clipState);
 
-        if (time.fileLength <= 0.0 || getTempoMap (song).isSteadyBetween (time.beatAt (0.0), time.beatAt (time.fileLength)))
+        if (time.fileLength <= 0.0
+            || (time.warps.empty() && getTempoMap (song).isSteadyBetween (time.beatAt (0.0), time.beatAt (time.fileLength))))
             return std::nullopt;
 
         return time;
     }
 
-    // Its stretch along the tempo's changes: at every half beat of the sound, and where the song's tempo changes, the time in
-    // the sound with where it plays in the render, which starts where the sound's start plays.
+    // Its stretch along its markers and the tempo's changes: at every half beat of the sound, at each marker and where the
+    // song's tempo changes, the time in the sound with where it plays in the render, which starts where the sound's start
+    // plays.
     std::vector<std::pair<double, double>> makeTimeMap (const Song& song, const ClipTime& time)
     {
         const auto map = getTempoMap (song); // in seconds
         const auto origin = map.toSamples (time.beatAt (0.0));
-        const auto step = 30.0 / time.tempo;
+        const auto step = 30.0 / time.tempo; // half a beat of the sound, played straight
+        const auto first = time.unwarp (0.0), last = time.unwarp (time.fileLength);
         std::vector<double> times;
 
-        for (int each = 1; each * step < time.fileLength; ++each)
-            times.push_back (each * step);
+        for (int each = 1; first + each * step < last; ++each)
+            times.push_back (time.warp (first + each * step));
 
         for (const auto& change : getTempoChanges (song))
             if (const auto at = time.timeAt (change.beat.inBeats()); at > 0.0 && at < time.fileLength)
                 times.push_back (at);
+
+        for (const auto& warp : time.warps)
+            if (warp.first > 0.0 && warp.first < time.fileLength)
+                times.push_back (warp.first);
 
         times.push_back (time.fileLength);
         std::sort (times.begin(), times.end());
@@ -202,8 +304,8 @@ stretch::Settings getClipStretch (const Song& song, const juce::ValueTree& clipS
 {
     auto settings = getSettings (getSound (song, clipState), getTempoAt (song, getClipRange (clipState).getStart()));
 
-    // Under the song's tempo changes, the stretch follows each of them, its ratio being the whole file's.
-    if (const auto time = findChangingTempo (song, clipState))
+    // Along its warp markers and the song's tempo changes, the stretch follows each of them, its ratio being the whole file's.
+    if (const auto time = findMappedTime (song, clipState))
     {
         settings.timeMap = makeTimeMap (song, *time);
         settings.timeRatio = settings.timeMap.back().second / time->fileLength;
@@ -214,24 +316,26 @@ stretch::Settings getClipStretch (const Song& song, const juce::ValueTree& clipS
 
 bool followsTempoChanges (const Song& song, const juce::ValueTree& clipState)
 {
-    return isAudioState (clipState) && findChangingTempo (song, clipState).has_value();
+    return isAudioState (clipState) && findMappedTime (song, clipState).has_value();
 }
 
 double getFileSecondsBetween (const Song& song, const juce::ValueTree& clipState, double from, BeatPosition to)
 {
-    // Along tempo changes, the clip's beats are its sound's, at its file's tempo.
-    if (const auto time = findChangingTempo (song, clipState))
-        return (to.inBeats() - toBeats (song, from).inBeats()) * 60.0 / time->tempo;
+    // Along markers and tempo changes, the clip's beats are its sound's, at its file's tempo between its markers.
+    if (const auto time = findMappedTime (song, clipState))
+        return time->timeAt (to.inBeats()) - time->timeAt (toBeats (song, from).inBeats());
 
     return (toSeconds (song, to) - from) / getClipStretch (song, clipState).timeRatio;
 }
 
 double getPartStartFor (const Song& song, const juce::ValueTree& clipState, double offset)
 {
-    if (const auto time = findChangingTempo (song, clipState))
+    // The sound's start would play at the song's time so far before the clip's start: its part starts where that puts it.
+    if (const auto time = findMappedTime (song, clipState))
     {
         const auto start = toSeconds (song, BeatPosition::fromBeats (time->startBeat));
-        return (time->startBeat - toBeats (song, start - offset).inBeats()) * 60.0 / time->tempo;
+        const auto soundStart = toBeats (song, start - offset).inBeats();
+        return time->warp (time->unwarp (0.0) + (time->startBeat - soundStart) * 60.0 / time->tempo);
     }
 
     return offset / getClipStretch (song, clipState).timeRatio;
@@ -251,8 +355,9 @@ PlayedPosition getPlayedPosition (const Song& song, const juce::ValueTree& clipS
 {
     const auto start = toSeconds (song, getClipRange (clipState).getStart());
 
-    // Along the song's tempo changes: where its part's end plays, and how far into the render its part's start is.
-    if (const auto time = findChangingTempo (song, clipState))
+    // Along its markers and the song's tempo changes: where its part's end plays, and how far into the render its part's
+    // start is.
+    if (const auto time = findMappedTime (song, clipState))
     {
         const auto map = getTempoMap (song);
         return { start, map.toSamples (time->beatAt (time->partStart + time->partLength)), start - map.toSamples (time->beatAt (0.0)) };
@@ -369,7 +474,7 @@ juce::File getRenderFile (const Song& song, const juce::File& source, const stre
 
 SecondsRange getAudioFileRange (const Song& song, const juce::ValueTree& clipState)
 {
-    if (const auto time = findChangingTempo (song, clipState))
+    if (const auto time = findMappedTime (song, clipState))
     {
         const auto map = getTempoMap (song);
         return { map.toSamples (time->beatAt (0.0)), map.toSamples (time->beatAt (time->fileLength)) };
@@ -384,8 +489,8 @@ double getFileTimeAt (const Song& song, ClipID clip, BeatPosition beat)
 {
     const auto clipState = findAudioState (song, clip);
 
-    // Along tempo changes, the sound's time is the song's beat, at the file's tempo.
-    if (const auto time = findChangingTempo (song, clipState))
+    // Along markers and tempo changes, the sound's time is the song's beat, at the file's tempo between its markers.
+    if (const auto time = findMappedTime (song, clipState))
     {
         const auto into = time->timeAt (beat.inBeats());
         return (bool) clipState.getProperty (schema::clipReversed, false) ? time->fileLength - into : into;
@@ -451,6 +556,10 @@ void setClipFollowsTempo (Song& song, ClipID clip, bool follows)
 
     const auto tempo = follows ? getFileTempo (song, getClipRange (clipState).getStart(), getClipFile (song, clipState)) : 0.0;
     changeSound (song, clip, [tempo] (Sound& sound) { sound.tempo = tempo; });
+
+    // At its own speed, its warp markers go with the tempo they were set at.
+    if (! follows)
+        writeWarpPoints (song, clipState, {});
 }
 
 void setClipTempo (Song& song, ClipID clip, double bpm)
@@ -460,6 +569,234 @@ void setClipTempo (Song& song, ClipID clip, double bpm)
 
     const auto tempo = juce::jlimit (minClipTempo, maxClipTempo, bpm);
     changeSound (song, clip, [tempo] (Sound& sound) { sound.tempo = tempo; });
+}
+
+//==============================================================================
+namespace
+{
+    // How far a stretch between two warp markers can go, as a share of its length played straight: as fast as eight times, as
+    // slow as an eighth.
+    constexpr double fastestWarp = 8.0;
+
+    // The time of a clip's file where the clip starts, as recorded: its part's start, or its end while it plays backwards.
+    double getStartTimeInFile (const juce::ValueTree& clipState)
+    {
+        const auto part = getFilePart (clipState);
+        return (bool) clipState.getProperty (schema::clipReversed, false) ? part.end : part.start;
+    }
+
+    std::vector<std::pair<double, double>>::iterator findPoint (std::vector<std::pair<double, double>>& points, double time)
+    {
+        return std::find_if (points.begin(), points.end(), [time] (const auto& point) { return std::abs (point.first - time) < 1.0e-7; });
+    }
+
+    // Where a time of the file plays straight, for a clip at its tempo whose start's audio plays straight at a time: the beat
+    // in the song, as the clip plays it, made a time played straight (backwards, a later beat is an earlier time).
+    double getStraightFor (const ClipTime& time, bool reversed, double startStraight, BeatPosition beat)
+    {
+        const auto along = (beat.inBeats() - time.startBeat) * 60.0 / time.tempo;
+        return reversed ? startStraight - along : startStraight + along;
+    }
+} // namespace
+
+std::vector<WarpMarker> getWarpMarkers (const Song& song, ClipID clip)
+{
+    std::vector<WarpMarker> markers;
+    const auto points = getWarpPoints (findAudioState (song, clip));
+    std::vector<double> times;
+
+    for (const auto& point : points)
+        times.push_back (point.first);
+
+    const auto beats = getBeatsOfFileTimes (song, clip, times);
+
+    for (size_t i = 0; i < times.size(); ++i)
+        markers.push_back ({ times[i], beats[i] });
+
+    return markers;
+}
+
+BeatPosition getBeatOfFileTime (const Song& song, ClipID clip, double fileTime)
+{
+    return getBeatsOfFileTimes (song, clip, { fileTime }).front();
+}
+
+std::vector<BeatPosition> getBeatsOfFileTimes (const Song& song, ClipID clip, const std::vector<double>& fileTimes)
+{
+    std::vector<BeatPosition> beats;
+    const auto clipState = findAudioState (song, clip);
+
+    if (! clipState.isValid())
+        return std::vector<BeatPosition> (fileTimes.size());
+
+    const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
+
+    // Along markers and tempo changes, by the clip's time; else at one ratio, from where the file's start plays.
+    if (const auto time = findMappedTime (song, clipState))
+    {
+        for (const auto fileTime : fileTimes)
+            beats.push_back (BeatPosition::fromBeats (time->beatAt (reversed ? time->fileLength - fileTime : fileTime)));
+
+        return beats;
+    }
+
+    const auto length = getClipFileLength (song, clipState);
+    const auto start = getAudioFileRange (song, clipState).start;
+    const auto ratio = getClipStretch (song, clipState).timeRatio;
+
+    for (const auto fileTime : fileTimes)
+        beats.push_back (toBeats (song, start + (reversed ? length - fileTime : fileTime) * ratio));
+
+    return beats;
+}
+
+bool addWarpMarker (Song& song, ClipID clip, double at)
+{
+    if (! findAudioState (song, clip).isValid() || at < 0.0 || at > getClipFileLength (song, findAudioState (song, clip)))
+        return false;
+
+    setClipFollowsTempo (song, clip, true);
+    const auto clipState = findAudioState (song, clip);
+    auto points = getWarpPoints (clipState);
+
+    if (getClipTempo (song, clip) <= 0.0
+        || std::any_of (points.begin(), points.end(), [at] (const auto& point) { return std::abs (point.first - at) < minWarpGap; }))
+        return false;
+
+    // Where it plays now, straight: nothing moves.
+    points.emplace_back (at, alongPoints (points, at, false));
+    std::sort (points.begin(), points.end());
+    writeWarpPoints (song, clipState, points);
+    return true;
+}
+
+void moveWarpMarker (Song& song, ClipID clip, double at, BeatPosition beat)
+{
+    const auto clipState = findAudioState (song, clip);
+    auto points = getWarpPoints (clipState);
+
+    if (findPoint (points, at) == points.end())
+        return;
+
+    // The audio where the clip starts stays there (a marker on it stays with it): held by a marker of its own while the moved
+    // one's stretches would reach it.
+    const auto startTime = getStartTimeInFile (clipState);
+    const auto startStraight = alongPoints (points, startTime, false);
+
+    if (std::abs (startTime - at) < minWarpGap)
+        return;
+    const auto moving = findPoint (points, at);
+    const auto before = moving == points.begin() ? -std::numeric_limits<double>::max() : std::prev (moving)->first;
+    const auto after = std::next (moving) == points.end() ? std::numeric_limits<double>::max() : std::next (moving)->first;
+
+    if (startTime > before && startTime < after && std::abs (startTime - at) >= minWarpGap && findPoint (points, startTime) == points.end())
+    {
+        points.emplace_back (startTime, startStraight);
+        std::sort (points.begin(), points.end());
+    }
+
+    // Where the beat is, played straight, kept between its neighbours, each stretch no faster or slower than fastestWarp.
+    const auto time = getClipTime (song, clipState);
+    const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
+    const auto index = (size_t) std::distance (points.begin(), findPoint (points, at));
+    auto low = -std::numeric_limits<double>::max(), high = std::numeric_limits<double>::max();
+
+    if (index > 0)
+    {
+        const auto& previous = points[index - 1];
+        low = previous.second + (at - previous.first) / fastestWarp;
+        high = previous.second + (at - previous.first) * fastestWarp;
+    }
+
+    if (index + 1 < points.size())
+    {
+        const auto& next = points[index + 1];
+        low = std::max (low, next.second - (next.first - at) * fastestWarp);
+        high = std::min (high, next.second - (next.first - at) / fastestWarp);
+    }
+
+    if (low > high)
+        return;
+
+    points[index].second = juce::jlimit (low, high, getStraightFor (time, reversed, startStraight, beat));
+    writeWarpPoints (song, clipState, points);
+}
+
+void removeWarpMarker (Song& song, ClipID clip, double at)
+{
+    const auto clipState = findAudioState (song, clip);
+    auto points = getWarpPoints (clipState);
+
+    if (const auto found = findPoint (points, at); found != points.end())
+    {
+        points.erase (found);
+        writeWarpPoints (song, clipState, points);
+    }
+}
+
+void removeWarpMarkers (Song& song, ClipID clip)
+{
+    if (const auto clipState = findAudioState (song, clip); clipState.isValid() && clipState.getChildWithName (schema::WARP).isValid())
+        writeWarpPoints (song, clipState, {});
+}
+
+void quantizeClipAudio (Song& song, ClipID clip, const std::vector<double>& hits, BeatDuration grid, double strength)
+{
+    if (! findAudioState (song, clip).isValid() || grid.inBeats() <= 0.0)
+        return;
+
+    setClipFollowsTempo (song, clip, true);
+    const auto clipState = findAudioState (song, clip);
+
+    if (getClipTempo (song, clip) <= 0.0)
+        return;
+
+    const auto time = getClipTime (song, clipState);
+    const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
+    const auto points = getWarpPoints (clipState);
+    const auto startTime = getStartTimeInFile (clipState);
+    const auto startStraight = alongPoints (points, startTime, false);
+    const auto played = getAudioClipRange (song, clipState);
+    const auto step = grid.inBeats();
+    const auto share = juce::jlimit (0.0, 1.0, strength);
+
+    // Each hit the clip plays, towards the grid line nearest where it plays now.
+    std::vector<std::pair<double, double>> quantized;
+
+    for (const auto hit : hits)
+    {
+        const auto beat = time.beatAt (reversed ? time.fileLength - hit : hit);
+
+        if (beat < played.getStart().inBeats() || beat >= played.getEnd().inBeats())
+            continue;
+
+        const auto target = beat + (std::round (beat / step) * step - beat) * share;
+        quantized.emplace_back (hit, getStraightFor (time, reversed, startStraight, BeatPosition::fromBeats (target)));
+    }
+
+    // The markers there that no hit replaces stay where they play, and one holds the audio where the clip starts.
+    const auto isNear = [&quantized] (double at)
+    {
+        return std::any_of (quantized.begin(), quantized.end(),
+                            [at] (const auto& point) { return std::abs (point.first - at) < minWarpGap; });
+    };
+
+    for (const auto& point : points)
+        if (! isNear (point.first))
+            quantized.push_back (point);
+
+    if (! isNear (startTime))
+        quantized.emplace_back (startTime, startStraight);
+
+    // In time order, each later than the one before where it plays: one that would play with or before it stays unquantized.
+    std::sort (quantized.begin(), quantized.end());
+    std::vector<std::pair<double, double>> rising;
+
+    for (const auto& point : quantized)
+        if (rising.empty() || point.second > rising.back().second + minWarpGap / fastestWarp)
+            rising.push_back (point);
+
+    writeWarpPoints (song, clipState, rising);
 }
 
 int getClipTakeCount (const Song& song, ClipID clip)
