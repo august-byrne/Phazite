@@ -5,6 +5,7 @@
 #pragma once
 
 #include "ActivityBar.h"
+#include "DeviceNotices.h"
 #include "Guide.h"
 #include "LessonCard.h"
 #include "Lessons.h"
@@ -101,6 +102,7 @@ public:
     Guide& getGuide() noexcept { return guide; }
     Lessons& getLessons() noexcept { return lessons; }
     LessonCard& getLessonCard() noexcept { return lessonCard; }
+    DeviceNotices& getDeviceNotices() noexcept { return deviceNotices; }
 
     // The control a lesson's step names (Lessons::Step::target), if it shows: a component with that ID, the first found depth
     // first, or one inside another ("pianoRoll/tool.draw").
@@ -160,6 +162,7 @@ private:
     Guide guide;             // the hint bar's next step for newcomers
     Lessons lessons;         // Help > Lessons, in the lesson card while one runs
     LessonCard lessonCard { lessons, [this] (const juce::String& target) { return findLessonTarget (target); } };
+    DeviceNotices deviceNotices { engineContext.getAudioDeviceManager() }; // audio devices plugged in, over the lesson card
     juce::Label openingLabel; // over the centre until a project is open: what the window shows as Phazite starts
 
     // The editor used last, which the time line's commands (zoom, grid, tools, nudge) act on.
@@ -241,7 +244,8 @@ private:
     void revealBrowser(); // the browser, in the left panel or its window, shown whatever showed there: never hidden
     void placePanelButtons();
     void updateCards();         // where the panels' cards are, after they moved
-    void keepOverlaysInFront(); // the cards over the panels, the lesson's ring and card over them
+    void keepOverlaysInFront(); // the cards over the panels, the lesson's ring and card over them, the notices over all
+    void placeNotices();        // the lesson card in the bottom right corner, the notices of devices plugged in over it
     void setActiveEditor (TimelineEditor*);
     bool placeItem (const LibraryItem&);                 // from the browser or the plug-in picker, onto the selected track
     juce::String getDefaultHint() const;                 // the guide's next step, or how to search for commands

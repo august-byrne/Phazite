@@ -206,6 +206,14 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     addChildComponent (lessonCard.getRing());
     addChildComponent (lessonCard);
 
+    // Over them all, the notices of audio devices plugged in, which offer to switch to them.
+    addChildComponent (deviceNotices);
+    deviceNotices.onChange = [this]
+    {
+        placeNotices();
+        keepOverlaysInFront();
+    };
+
     // How the editors follow playback, as it was left; the panels as they were left, or every panel, and the views where
     // they were left.
     playlist.setScrollingContinuously (settings.get (Settings::scrollContinuously));
@@ -937,6 +945,28 @@ void AppShell::keepOverlaysInFront()
     cards.toFront (false);
     lessonCard.getRing().toFront (false);
     lessonCard.toFront (false);
+    deviceNotices.toFront (false);
+}
+
+void AppShell::placeNotices()
+{
+    // In the bottom right corner, over the panels and above the status bar, each as tall as its text: the lesson card at the
+    // bottom, where it stays, and the notices over it, one over another (NoticeCard.h); the lesson's ring over the whole
+    // window.
+    lessonCard.getRing().setBounds (getLocalBounds());
+    const auto width = NoticeCard::getWidthIn (getWidth() - 2 * edgeInset);
+    const auto left = getWidth() - edgeInset - width;
+    auto bottom = statusBar.getY();
+
+    if (lessonCard.isVisible())
+    {
+        const auto height = lessonCard.getHeightFor (width);
+        lessonCard.setBounds (left, bottom - height, width, height);
+        bottom = lessonCard.getY() + 2 * NoticeCard::getMargin() - NoticeTint::gap;
+    }
+
+    const auto height = deviceNotices.getHeightFor (width);
+    deviceNotices.setBounds (left, bottom - height, width, height);
 }
 
 void AppShell::updateAudioAlert()
@@ -1030,13 +1060,7 @@ void AppShell::resized()
 
     placePanelButtons();
     updateCards();
-
-    // The lesson card in the bottom right corner, over the panels and above the status bar, as tall as its text; its ring
-    // over the whole window.
-    lessonCard.getRing().setBounds (getLocalBounds());
-    const auto cardWidth = juce::jmin (LessonTint::width + 2 * LessonTint::shadow, getWidth() - 2 * edgeInset);
-    const auto cardHeight = lessonCard.getHeightFor (cardWidth);
-    lessonCard.setBounds (getWidth() - edgeInset - cardWidth, statusBar.getY() - cardHeight, cardWidth, cardHeight);
+    placeNotices();
 }
 
 std::unique_ptr<juce::ComponentTraverser> AppShell::createKeyboardFocusTraverser()

@@ -325,6 +325,8 @@ target_sources(phazite_core PRIVATE
     src/model/engine/AppInfo.h
     src/model/engine/AudioDevices.cpp
     src/model/engine/AudioDevices.h
+    src/model/engine/AudioDeviceWatch.cpp
+    src/model/engine/AudioDeviceWatch.h
     src/model/engine/AudioFiles.cpp
     src/model/engine/AudioFiles.h
     src/model/engine/AudioIO.cpp
@@ -848,6 +850,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/CleanUpPanel.h
     src/ui/shell/CommandPalette.cpp
     src/ui/shell/CommandPalette.h
+    src/ui/shell/DeviceNotices.cpp
+    src/ui/shell/DeviceNotices.h
     src/ui/shell/ExportPanel.cpp
     src/ui/shell/ExportPanel.h
     src/ui/shell/Guide.cpp
@@ -860,6 +864,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/Lessons.h
     src/ui/shell/NewProjectPanel.cpp
     src/ui/shell/NewProjectPanel.h
+    src/ui/shell/NoticeCard.cpp
+    src/ui/shell/NoticeCard.h
     src/ui/shell/PanelLayout.cpp
     src/ui/shell/PanelLayout.h
     src/ui/shell/Panels.cpp
@@ -1085,6 +1091,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AppTests.cpp
         tests/AudioClipEditorTests.cpp
         tests/AudioDevicesTests.cpp
+        tests/DeviceNoticesTests.cpp
         tests/AudioSettingsTests.cpp
         tests/AudioClipModelTests.cpp
         tests/AudioGlitchTests.cpp

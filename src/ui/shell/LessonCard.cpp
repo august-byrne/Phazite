@@ -12,7 +12,6 @@ namespace
     const auto headerHeight = juce::roundToInt (TextSize::title) + Space::xs;
     const auto progressHeight = juce::roundToInt (TextSize::small) + Space::xs;
     constexpr int kindWidth = 56;
-    constexpr int buttonWidth = 80;
 
     juce::FontOptions getTextFont()
     {
@@ -179,7 +178,7 @@ void LessonCard::timerCallback()
 int LessonCard::getHeightFor (int width) const
 {
     // The text wrapped at the card's width, with half a line to spare, as a label breaks lines a little differently.
-    const auto textWidth = width - 2 * (LessonTint::shadow + Space::m);
+    const auto textWidth = width - 2 * (getMargin() + Space::m);
     juce::AttributedString attributed (lessons.getText());
     attributed.setFont (juce::Font (getTextFont()));
     attributed.setWordWrap (juce::AttributedString::byWord);
@@ -187,20 +186,14 @@ int LessonCard::getHeightFor (int width) const
     layout.createLayout (attributed, (float) juce::jmax (1, textWidth));
     const auto textHeight = (int) std::ceil (layout.getHeight() + TextSize::title / 2.0f);
 
-    return 2 * (LessonTint::shadow + Space::m) + headerHeight + progressHeight + Space::s + textHeight + Space::s + controlHeight;
+    return 2 * (getMargin() + Space::m) + headerHeight + progressHeight + Space::s + textHeight + Space::s + controlHeight;
 }
 
 void LessonCard::paint (juce::Graphics& g)
 {
+    // Raised over the window as every notice is: it isn't a part of what is under it, and the ring marks the control.
+    NoticeCard::paint (g);
     const auto& p = getPalette (*this);
-    const auto card = getLocalBounds().reduced (LessonTint::shadow);
-
-    // Raised over the window, in an accent outline: it isn't a part of what is under it.
-    juce::DropShadow (juce::Colours::black.withAlpha (LessonTint::shadowAlpha), LessonTint::shadow, {}).drawForRectangle (g, card);
-    g.setColour (p.surfaceRaised);
-    g.fillRoundedRectangle (card.toFloat(), LessonTint::corner);
-    g.setColour (p.accent);
-    g.drawRoundedRectangle (card.toFloat().reduced (LessonTint::outline / 2.0f), LessonTint::corner, LessonTint::outline);
 
     // How far the lesson has come: a dot for each step, filled up to this one.
     if (const auto* lesson = lessons.getLesson())
@@ -225,7 +218,7 @@ void LessonCard::paint (juce::Graphics& g)
 
 void LessonCard::resized()
 {
-    auto area = getLocalBounds().reduced (LessonTint::shadow).reduced (Space::m);
+    auto area = getCardArea().reduced (Space::m);
     auto header = area.removeFromTop (headerHeight);
     closeButton.setBounds (header.removeFromRight (headerHeight));
     kind.setBounds (header.removeFromLeft (kindWidth));
@@ -234,8 +227,8 @@ void LessonCard::resized()
     area.removeFromTop (Space::s);
 
     auto footer = area.removeFromBottom (controlHeight);
-    nextButton.setBounds (footer.removeFromRight (buttonWidth));
-    backButton.setBounds (footer.removeFromLeft (buttonWidth));
+    nextButton.setBounds (footer.removeFromRight (NoticeTint::buttonWidth));
+    backButton.setBounds (footer.removeFromLeft (NoticeTint::buttonWidth));
     area.removeFromBottom (Space::s);
     text.setBounds (area);
 }

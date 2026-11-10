@@ -758,18 +758,28 @@ namespace RecordingTint
     inline constexpr int reach = 32;
 } // namespace RecordingTint
 
-// The lesson card (ui/shell/LessonCard.h): as wide as this, with a shadow this deep around it (pixels) and so dark (an
-// alpha), its corners, its outline in the accent colour and the dots of how far the lesson has come; and the ring around
-// the control a step is about: its width and how far outside the control (pixels); as a step starts, so many rings that
-// spread out this far and fade, over so many seconds, drawn so many times a second; and after, how many times a second
+// What shows over the bottom right corner of the window's centre, where VS Code shows its notifications: the lesson card
+// (ui/shell/LessonCard.h) and the notices of audio devices plugged in (ui/shell/DeviceNotices.h), one column of cards
+// (ui/shell/NoticeCard.h) as wide as this, raised as the popups are (Popup::shadowRadius and shadowAlpha), rounded as the
+// panels' cards (cardCornerRadius) and edged in the border colour as both are, so far apart one over another; their buttons
+// so wide, a notice's icon so big; and a notice goes by itself once it has shown for so many seconds while Phazite is in
+// front and the pointer isn't over it (as long as VS Code shows an information), at most so many at once.
+namespace NoticeTint
+{
+    inline constexpr int width = 380;
+    inline constexpr int gap = 8;
+    inline constexpr int buttonWidth = 80;
+    inline constexpr float iconSize = 16.0f;
+    inline constexpr double shownSeconds = 15.0;
+    inline constexpr int mostShown = 3;
+} // namespace NoticeTint
+
+// The lesson card (ui/shell/LessonCard.h), a notice card as above: the dots of how far the lesson has come; and the ring
+// around the control a step is about: its width and how far outside the control (pixels); as a step starts, so many rings
+// that spread out this far and fade, over so many seconds, drawn so many times a second; and after, how many times a second
 // the card looks whether the control moved and whether the song shows the step done.
 namespace LessonTint
 {
-    inline constexpr int width = 380;
-    inline constexpr int shadow = 12;
-    inline constexpr float shadowAlpha = 0.4f;
-    inline constexpr float corner = 8.0f;
-    inline constexpr float outline = 1.5f;
     inline constexpr float dot = 6.0f;
     inline constexpr float ringWidth = 2.5f, ringGap = 3.0f;
     inline constexpr int pulses = 3;

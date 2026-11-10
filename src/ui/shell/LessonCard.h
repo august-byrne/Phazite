@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The lesson that runs (Lessons.h), in a card over the bottom right corner of the window's centre (the owner, 2026-11-01:
-// lessons in the hint bar were too easy to miss), with a ring around the control its step is about: the lesson's name, how
-// far it has come, the step in large text, Back, and Next (or Skip, past a step not done yet), and a button that stops it.
+// lessons in the hint bar were too easy to miss), a notice card as the others there (NoticeCard.h), at the bottom of their
+// column, with a ring around the control its step is about: the lesson's name, how far it has come, the step in large
+// text, Back, and Next (or Skip, past a step not done yet), and a button that stops it.
 // It covers nothing but its corner, and everything goes on working while it shows: help beside the task, which the user
 // does, works better than a tutorial that takes over (Nielsen Norman Group), and so does a mark on the real control. The
 // ring pulses a few times as a step starts, then stays still, so that nothing repaints while nothing changes; a few times a
@@ -9,6 +10,7 @@
 #pragma once
 
 #include "Lessons.h"
+#include "NoticeCard.h"
 #include "ui/theme/Icons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -18,7 +20,7 @@
 
 namespace phazite::ui
 {
-class LessonCard : public juce::Component,
+class LessonCard : public NoticeCard,
                    private juce::Timer
 {
 public:
