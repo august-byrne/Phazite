@@ -6,6 +6,8 @@
 
 Phazite is a free, open-source digital audio workstation (DAW) for making beats and finishing songs. It is written in C++20 on [JUCE](https://github.com/juce-framework/JUCE), with its own playback engine, Windows first.
 
+**[Website](https://august-byrne.github.io/phazite-site/)** · [User guide](https://august-byrne.github.io/phazite-site/guide/getting-started/) · [Download](https://august-byrne.github.io/phazite-site/download/)
+
 ![Phazite with the House Groove example song: the browser on the left with Phazite's instruments, the whole song in the playlist with its sections, chord lane, a filter's automation and the playhead in the second drop, and the synth of the Chords track under it](docs/images/phazite.png)
 
 - **Clean and quick:** an uncluttered window in a dark, light or high-contrast theme, one clear way to do each thing, and the shortcuts of Phazite, FL Studio or Ableton Live.
