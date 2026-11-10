@@ -68,8 +68,8 @@ void SectionsStrip::showProject()
 juce::Rectangle<int> SectionsStrip::getBlockArea (const SongSection& section) const
 {
     const auto& view = editor.getView();
-    const auto left = juce::roundToInt (view.beatToX (section.range.getStart()));
-    const auto right = juce::roundToInt (view.beatToX (section.range.getEnd()));
+    const auto left = view.beatToColumn (section.range.getStart());
+    const auto right = view.beatToColumn (section.range.getEnd());
     return { left, 0, std::max (2, right - left), getHeight() };
 }
 
@@ -148,7 +148,7 @@ void SectionsStrip::paint (juce::Graphics& g)
     // While dragging: where the section would go, or where its end would be.
     if (const auto target = getDragTarget())
     {
-        const auto x = juce::roundToInt (editor.getView().beatToX (*target));
+        const auto x = editor.getView().beatToColumn (*target);
 
         if (const auto section = getSongSection (context, drag->section); section.has_value() && drag->kind == Drag::Kind::resize)
         {

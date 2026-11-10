@@ -8,6 +8,7 @@ namespace
 {
     constexpr int drumRowHeight = 22;
     constexpr int numPitches = 128;
+    constexpr float shortestNote = 3.0f; // pixels: however short a note is, it shows
 } // namespace
 
 int PianoRoll::getRowHeight() const
@@ -109,6 +110,24 @@ juce::Rectangle<float> PianoRoll::getNoteBounds (const NoteData& note) const
         return { left - height / 2.0f, top, height, height };
 
     const auto right = (float) timeline.beatToX (note.getEnd());
-    return { left, top, std::max (3.0f, right - left), height };
+    return { left, top, std::max (shortestNote, right - left), height };
+}
+
+juce::Rectangle<float> PianoRoll::getNoteShape (const NoteData& note, float scale) const
+{
+    const auto bounds = getNoteBounds (note);
+
+    if (bounds.isEmpty())
+        return {};
+
+    // Rounded where the note is in the song, not where it is in view: a note's end half a pixel in, rounded in view, went one
+    // way in one frame and the other in the next while the song scrolled continuously.
+    const auto perPixel = std::max (1.0f, scale);
+    const auto snap = [perPixel] (float position) { return std::round (position * perPixel) / perPixel; };
+    const auto& timeline = getView();
+    const auto left = (float) timeline.beatToEdge (note.start, perPixel);
+    const auto right = std::max ((float) timeline.beatToEdge (note.getEnd(), perPixel), left + snap (shortestNote));
+    const auto top = snap (bounds.getY());
+    return { left, top, right - left, snap (bounds.getBottom()) - top };
 }
 } // namespace phazite::ui

@@ -24,6 +24,16 @@ struct TimelineView
     double beatToX (BeatPosition) const;
     BeatPosition xToBeat (double x) const;
 
+    // The column a line or an edge at a beat is drawn in, within half a pixel of beatToX(): its place rounded from the beat's
+    // own, then counted from the view's start, so that a view that moves by whole pixels (scrolling continuously) moves every
+    // column with it, each rounded the same way at every frame. Rounded from where it is in view, a line half a pixel in went
+    // one way in one frame and the other in the next: every other grid line wiggled at some zooms (the owner, 2026-11-09).
+    int beatToColumn (BeatPosition) const;
+
+    // The same on the screen's own pixels, so many to one of the view's (Graphics' physical pixel scale): where an edge at the
+    // beat is drawn sharp, moving with the song as the columns do. At a scale of 1, the column.
+    double beatToEdge (BeatPosition, float scale) const;
+
     // Zooms in (a factor above 1) or out, keeping the beat at x where it is. The zoom stays within its
     // limits, and the view doesn't start before the song does.
     void zoomAround (double x, double factor);

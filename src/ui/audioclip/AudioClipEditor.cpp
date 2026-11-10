@@ -81,6 +81,7 @@ struct AudioClipEditor::Waveform : public juce::Component
     static bool isWarp (Zone zone) { return zone == Zone::warpMarker || zone == Zone::hit || zone == Zone::warpStrip; }
 
     float beatToX (BeatPosition beat) const { return (float) editor.getView().beatToX (beat); }
+    int beatToColumn (BeatPosition beat) const { return editor.getView().beatToColumn (beat); }
     BeatPosition xToBeat (float x) const { return editor.getView().xToBeat (x); }
 
     void clipChanged()
@@ -300,8 +301,8 @@ struct AudioClipEditor::Waveform : public juce::Component
 
         // The file's audio in view, as one span that the waveform keeps between paints (ClipWaveform.h), and its parts in their
         // colours through clip regions.
-        const auto left = std::max (0, juce::roundToInt (beatToX (shown.content.getStart())));
-        const auto right = std::min (getWidth(), juce::roundToInt (beatToX (shown.content.getEnd())));
+        const auto left = std::max (0, beatToColumn (shown.content.getStart()));
+        const auto right = std::min (getWidth(), beatToColumn (shown.content.getEnd()));
 
         if (drawing != nullptr && shown.state != AudioState::missing && right > left)
         {
@@ -310,7 +311,7 @@ struct AudioClipEditor::Waveform : public juce::Component
 
             const auto paintPart = [&] (BeatRange part, juce::Colour partColour)
             {
-                const auto x0 = juce::roundToInt (beatToX (part.getStart())), x1 = juce::roundToInt (beatToX (part.getEnd()));
+                const auto x0 = beatToColumn (part.getStart()), x1 = beatToColumn (part.getEnd());
                 juce::Graphics::ScopedSaveState state (g);
 
                 if (g.reduceClipRegion (shownAudio.withX (x0).withWidth (std::max (0, x1 - x0))))

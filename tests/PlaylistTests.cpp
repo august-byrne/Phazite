@@ -34,6 +34,7 @@
 #include "ui/theme/LookAndFeel.h"
 
 #include <array>
+#include <optional>
 #include <set>
 
 namespace
@@ -1381,6 +1382,74 @@ TEST_CASE ("Scrolling continuously, the song glides under the playhead by parts 
     CHECK (screen.playlist.getSubPixel() == 0.0f);
     CHECK (screen.lanes->getTransform().isIdentity());
     CHECK (ruler->getTransform().isIdentity());
+}
+
+TEST_CASE ("A view that moves by whole pixels moves the grid's lines and the clips' edges with it, those half a pixel in too")
+{
+    // The owner, 2026-11-09: scrolling continuously, every other line of the grid wiggled and clips' edges flickered. Each was
+    // rounded where it was in view, and one half a pixel in went one way in one frame and the other in the next.
+    PlaylistScreen screen;
+    const auto clip = screen.addClip (0, 40.25, 8.0);
+    phazite::test::dispatchPendingMessages();
+
+    // At 54 pixels a beat, a quarter beat is 13.5 pixels: every other line, and both of the clip's edges, half a pixel in.
+    screen.playlist.zoom (1.5);
+    screen.playlist.zoom (1.5);
+    REQUIRE (screen.playlist.getView().pixelsPerBeat == 54.0);
+    auto grid = screen.playlist.getGrid();
+    grid.adaptive = false;
+    grid.fixedLevel = phazite::GridSettings::beatLevel - 2; // a quarter beat
+    screen.playlist.setGrid (grid);
+
+    // The columns in a row of the lanes, under the clips' track, that aren't the background: the grid's lines.
+    auto& lanes = *screen.lanes;
+    const auto background = phazite::ui::getPalette (lanes).background;
+    const auto row = screen.at (0.0, 2).y;
+    const auto lines = [&lanes, background, row]
+    {
+        juce::Image image (juce::Image::ARGB, lanes.getWidth(), lanes.getHeight(), true, juce::SoftwareImageType());
+        {
+            juce::Graphics g (image);
+            lanes.paintEntireComponent (g, false);
+        }
+
+        std::set<int> columns;
+
+        for (int x = 0; x < image.getWidth(); ++x)
+            if (image.getPixelAt (x, row) != background)
+                columns.insert (x);
+
+        return columns;
+    };
+
+    // The view starting a whole pixel later each time, as scrolling continuously starts it: everything moves a pixel left.
+    const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
+    const auto firstPixel = juce::roundToInt (38.0 * pixelsPerBeat);
+    std::optional<juce::Rectangle<int>> firstClip;
+    std::set<int> before;
+
+    for (int step = 0; step < 16; ++step)
+    {
+        CAPTURE (step);
+        screen.playlist.setViewStart (beats ((firstPixel + step) / pixelsPerBeat));
+        const auto bounds = screen.boundsOf (clip);
+        REQUIRE_FALSE (bounds.isEmpty());
+
+        if (! firstClip.has_value())
+            firstClip = bounds;
+
+        CHECK (bounds == firstClip->translated (-step, 0));
+
+        const auto now = lines();
+        CHECK (now.size() > 20);
+
+        if (step > 0)
+            for (const auto x : before)
+                if (x > 1 && x < lanes.getWidth() - 1)
+                    CHECK (now.contains (x - 1));
+
+        before = now;
+    }
 }
 
 TEST_CASE ("A clip is kept as a picture, which scrolling only moves; one that draws the part of it in view is painted afresh while "

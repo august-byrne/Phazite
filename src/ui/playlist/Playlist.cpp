@@ -30,7 +30,7 @@ void Playlist::Lanes::paint (juce::Graphics& g)
     // The song's sections, as ghosts behind the tracks: a faint wash of each one's color.
     const auto sections = getSongSections (playlist.context);
     const auto& timeline = playlist.getView();
-    const auto xOf = [&timeline] (BeatPosition beat) { return juce::roundToInt (timeline.beatToX (beat)); };
+    const auto xOf = [&timeline] (BeatPosition beat) { return timeline.beatToColumn (beat); };
 
     for (const auto& section : sections)
     {
@@ -77,19 +77,18 @@ void Playlist::Lanes::paint (juce::Graphics& g)
 
         for (const auto& folded : summary.clips)
         {
-            const auto left = (float) timeline.beatToX (folded.range.getStart());
-            const auto right = (float) timeline.beatToX (folded.range.getEnd());
+            // On whole pixels (columns, which move with the song), so that the bars' edges are crisp, with a pixel's gap after
+            // each clip and under each lane.
+            const auto left = (float) timeline.beatToColumn (folded.range.getStart());
+            const auto right = (float) timeline.beatToColumn (folded.range.getEnd());
 
             if (right < (float) clip.getX() || left > (float) clip.getRight())
                 continue;
 
-            // On whole pixels, so that the bars' edges are crisp, with a pixel's gap after each clip and under each lane.
             const auto laneTop = std::round (top + laneHeight * (float) folded.lane);
             const auto laneBottom = std::max (laneTop + 1.0f, std::round (top + laneHeight * (float) (folded.lane + 1)) - 1.0f);
-            const auto x = std::round (left);
             g.setColour (folded.colour.withAlpha (folded.muted ? FolderTint::mutedClip : FolderTint::clip));
-            g.fillRect (
-                juce::Rectangle<float>::leftTopRightBottom (x, laneTop, std::max (x + 1.0f, std::round (right) - 1.0f), laneBottom));
+            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (left, laneTop, std::max (left + 1.0f, right - 1.0f), laneBottom));
         }
     }
 
@@ -135,8 +134,8 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     if (! playlist.range.isEmpty())
     {
         const auto shown = playlist.range.getRange();
-        const auto left = juce::roundToInt (timeline.beatToX (shown.getStart()));
-        const auto right = juce::roundToInt (timeline.beatToX (shown.getEnd()));
+        const auto left = timeline.beatToColumn (shown.getStart());
+        const auto right = timeline.beatToColumn (shown.getEnd());
 
         for (const auto track : playlist.range.getTracks())
         {
@@ -155,7 +154,7 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     // Where dragged files would go: a line at that time, on that track or below the tracks.
     if (playlist.fileDropBeat.has_value())
     {
-        const auto x = juce::roundToInt (timeline.beatToX (*playlist.fileDropBeat));
+        const auto x = timeline.beatToColumn (*playlist.fileDropBeat);
         const auto area = juce::isPositiveAndBelow (playlist.fileDropRow, (int) playlist.rows.size())
                               ? getRowArea (playlist.rows[(size_t) playlist.fileDropRow])
                               : getLocalBounds();
@@ -190,7 +189,7 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
     if (const auto target = playlist.sectionsStrip.getDragTarget())
     {
         g.setColour (p.accent);
-        g.fillRect (juce::roundToInt (timeline.beatToX (*target)) - 1, 0, 3, getHeight());
+        g.fillRect (timeline.beatToColumn (*target) - 1, 0, 3, getHeight());
     }
 }
 

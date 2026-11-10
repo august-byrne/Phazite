@@ -251,8 +251,8 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
 
     for (const auto& clip : shown)
     {
-        const auto left = juce::roundToInt (timeline.beatToX (clip.range.getStart()));
-        const auto right = juce::roundToInt (timeline.beatToX (clip.range.getEnd()));
+        const auto left = timeline.beatToColumn (clip.range.getStart());
+        const auto right = timeline.beatToColumn (clip.range.getEnd());
         g.setColour (clip.colour.withAlpha (0.06f));
         g.fillRect (left, area.getY(), right - left, area.getHeight());
         g.setColour (clip.colour.withAlpha (0.6f));
@@ -291,7 +291,7 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
             if (roll.drumMode)
                 g.fillPath (makeDiamond (bounds));
             else
-                g.fillRoundedRectangle (snapToPixels (g, bounds), noteCorner);
+                g.fillRoundedRectangle (roll.getNoteShape (note, g.getInternalContext().getPhysicalPixelScaleFactor()), noteCorner);
         }
     }
 
@@ -345,8 +345,8 @@ void PianoRoll::NoteGrid::paintChordTones (juce::Graphics& g, juce::Rectangle<in
 
     for (const auto& chord : getLaneChords (roll.context))
     {
-        const auto left = std::max (area.getX(), juce::roundToInt (timeline.beatToX (chord.range.getStart())));
-        const auto right = std::min (area.getRight(), juce::roundToInt (timeline.beatToX (chord.range.getEnd())));
+        const auto left = std::max (area.getX(), timeline.beatToColumn (chord.range.getStart()));
+        const auto right = std::min (area.getRight(), timeline.beatToColumn (chord.range.getEnd()));
 
         if (right <= left)
             continue;
@@ -404,7 +404,7 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
         }
 
         // On the screen's pixels, its outline inside its edges, so that both are sharp.
-        const auto shape = snapToPixels (g, bounds);
+        const auto shape = roll.getNoteShape (note, g.getInternalContext().getPhysicalPixelScaleFactor());
         const auto stroke = isSelected ? 2.0f : 1.0f;
         g.setColour (fill);
         g.fillRoundedRectangle (shape, noteCorner);
@@ -460,7 +460,7 @@ void PianoRoll::NoteGrid::paintNotes (juce::Graphics& g)
             continue;
 
         g.setColour (p.accent.withAlpha (0.45f));
-        const auto shape = snapToPixels (g, bounds);
+        const auto shape = roll.getNoteShape (note, g.getInternalContext().getPhysicalPixelScaleFactor());
 
         if (roll.drumMode)
             g.fillPath (makeDiamond (bounds));

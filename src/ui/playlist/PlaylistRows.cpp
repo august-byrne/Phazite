@@ -401,8 +401,8 @@ juce::Rectangle<int> Playlist::getClipBounds (const ClipInfo& clip) const
 
     const auto& r = rows[(size_t) row];
     const auto& timeline = getView();
-    const auto left = juce::roundToInt (timeline.beatToX (clip.range.getStart()));
-    const auto right = juce::roundToInt (timeline.beatToX (clip.range.getEnd()));
+    const auto left = timeline.beatToColumn (clip.range.getStart());
+    const auto right = timeline.beatToColumn (clip.range.getEnd());
 
     // A clip fills its row down to the line under it (Lanes::paint()), which is all that keeps it apart from the next track's
     // clips, as in FL Studio and Ableton Live. Clips that overlap share the row out, one under another, a pixel apart.

@@ -203,6 +203,10 @@ private:
     void updateVerticalScrollBar();
     juce::Rectangle<float> getNoteBounds (const NoteData&) const;
 
+    // Its bounds on the screen's pixels, so many to one of the piano roll's, so that its edges are sharp: its ends where the
+    // time line's edges are (TimelineView::beatToEdge()), which move with the song as it scrolls, its top and foot rounded.
+    juce::Rectangle<float> getNoteShape (const NoteData&, float scale) const;
+
     // Playing notes as they are placed or clicked, on their track's instrument.
     void audition (ClipID, int pitch, int velocity);
     void audition (ClipID, const std::vector<int>& pitches, int velocity);

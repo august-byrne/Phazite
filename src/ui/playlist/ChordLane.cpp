@@ -102,8 +102,8 @@ void ChordLane::showProject()
 juce::Rectangle<int> ChordLane::getBlockArea (const LaneChord& chord) const
 {
     const auto& view = editor.getView();
-    const auto left = juce::roundToInt (view.beatToX (chord.range.getStart()));
-    const auto right = juce::roundToInt (view.beatToX (chord.range.getEnd()));
+    const auto left = view.beatToColumn (chord.range.getStart());
+    const auto right = view.beatToColumn (chord.range.getEnd());
     return { left, 0, std::max (2, right - left), getHeight() };
 }
 
@@ -184,7 +184,7 @@ void ChordLane::paint (juce::Graphics& g)
 
     for (size_t i = 1; i < keys.size(); ++i)
     {
-        const auto x = juce::roundToInt (editor.getView().beatToX (keys[i].start));
+        const auto x = editor.getView().beatToColumn (keys[i].start);
         g.setColour (p.warning.withAlpha (ChordTint::keyChange));
         g.fillRect (x - 1, 0, 2, getHeight());
     }
@@ -193,7 +193,7 @@ void ChordLane::paint (juce::Graphics& g)
     if (const auto target = getDragTarget())
     {
         g.setColour (p.accent);
-        g.fillRect (juce::roundToInt (editor.getView().beatToX (*target)) - 1, 0, 3, getHeight());
+        g.fillRect (editor.getView().beatToColumn (*target) - 1, 0, 3, getHeight());
     }
 }
 

@@ -148,8 +148,8 @@ void Playlist::layOutRecordings()
         // Over the clips already there, all of the row's height, as a clip that overlaps none has it.
         const auto& r = rows[(size_t) row];
         auto& layer = r.track.pinned ? pinnedClips : scrollingClips;
-        const auto left = juce::roundToInt (timeline.beatToX (recorded.getStart()));
-        const auto right = juce::roundToInt (timeline.beatToX (recorded.getEnd()));
+        const auto left = timeline.beatToColumn (recorded.getStart());
+        const auto right = timeline.beatToColumn (recorded.getEnd());
         const juce::Rectangle<int> bounds (left, getRowTop (r), std::max (2, right - left), std::max (1, r.height - 1));
 
         if (clip.getParentComponent() != &layer)

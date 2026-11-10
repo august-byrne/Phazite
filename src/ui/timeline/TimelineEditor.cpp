@@ -145,7 +145,7 @@ void TimelineRuler::paint (juce::Graphics& g)
     // Bars count from the time origin: the beats here are from there.
     const auto origin = fromSongStart (editor.getTimeOrigin());
     const BeatRange visible (view.xToBeat (clip.getX() - 1) - origin, view.xToBeat (clip.getRight() + 1) - origin);
-    const auto xOf = [&view, origin] (BeatPosition beat) { return view.beatToX (beat + origin); };
+    const auto columnOf = [&view, origin] (BeatPosition beat) { return view.beatToColumn (beat + origin); };
 
     // The loop's lane along the top, washed under the pointer, and the loop in it, over a wash of the part that loops, under
     // the ticks: song beats, not counted from the origin.
@@ -189,7 +189,7 @@ void TimelineRuler::paint (juce::Graphics& g)
 
                          const auto tick = isBar ? RulerTint::barTick : RulerTint::beatTick;
                          g.setColour (p.textMuted.withAlpha (isBar ? RulerTint::bar : RulerTint::beat));
-                         g.fillRect (juce::roundToInt (xOf (beat)), foot - tick, 1, tick);
+                         g.fillRect (columnOf (beat), foot - tick, 1, tick);
                      });
 
     // The numbered bars, each a tick from the loop's lane down to the foot with its number beside it: from a little before
@@ -204,7 +204,7 @@ void TimelineRuler::paint (juce::Graphics& g)
 
     for (; bar <= lastBar; bar += every)
     {
-        const auto x = juce::roundToInt (xOf (getBarStart (context, bar)));
+        const auto x = columnOf (getBarStart (context, bar));
         g.setColour (p.textMuted.withAlpha (RulerTint::numberTick));
         g.fillRect (x, top, 1, foot - top);
         g.setColour (p.textMuted);
@@ -1185,7 +1185,7 @@ void paintGridLines (juce::Graphics& g, const TimelineEditor& editor, juce::Rect
                      {
                          g.setColour (lineType == GridLineType::bar ? barColour
                                                                     : (lineType == GridLineType::beat ? p.border : subdivisionColour));
-                         g.fillRect (juce::roundToInt (view.beatToX (beat + origin)), area.getY(), 1, area.getHeight());
+                         g.fillRect (view.beatToColumn (beat + origin), area.getY(), 1, area.getHeight());
                      });
 }
 

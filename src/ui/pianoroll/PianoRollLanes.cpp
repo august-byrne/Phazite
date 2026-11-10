@@ -285,8 +285,10 @@ void PianoRoll::VelocityLane::paint (juce::Graphics& g)
         if (note.muted)
             colour = colour.withAlpha (0.4f);
 
-        // The stem on the screen's pixels, and the ball centred on it.
-        const auto left = snapToPixels (g, x - VelocityTint::stem / 2.0f);
+        // The stem on the screen's pixels, rounded where the note is in the song (TimelineView::beatToEdge()) so that it moves
+        // with the song as it scrolls, and the ball centred on it.
+        const auto left = (float) timeline.beatToEdge (note.start, g.getInternalContext().getPhysicalPixelScaleFactor())
+                          - snapToPixels (g, VelocityTint::stem / 2.0f);
         const auto centre = left + VelocityTint::stem / 2.0f;
         g.setColour (colour);
         g.fillRect (left, snapToPixels (g, top), VelocityTint::stem, height);
