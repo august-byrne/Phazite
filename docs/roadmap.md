@@ -629,6 +629,7 @@ On 2026-11-07 the owner added two instruments for right now, 4.6 (the sampler) a
 
 **4.4 Documentation (M)**
 - The basics of a user guide, a README update and a contributor guide.
+- *Status:* begun (2026-11-09): the guide's first pages in `docs/guide/` (Getting started, Troubleshooting, Questions and Privacy), which Phazite's website publishes. The website is a repository of its own, `phazite-site`: Astro with Starlight on GitHub Pages, in the app's colors, font and icons, its Download page filled from the latest release's `phazite-update.json`, as the update check reads it ([design section 26](design.md#26-decision-log)). The guide's pages for each area, and pictures of them painted by tests as the README's is, are to come.
 
 **4.5 Release process (S)**
 - Versioning, a changelog and release builds from CI.
