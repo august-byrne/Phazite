@@ -566,6 +566,11 @@ void FmSynth::beginNote (Voice& voice, int note, float velocityValue, std::span<
     voice.active = true;
     voice.age = 0;
     voice.started = ++notesPlayed;
+
+    // At its full level, whatever fade the voice was in when its last note ended (one cut as playback stopped can end its
+    // release first): left fading, the new note would fade out at once.
+    voice.fade = 1.0f;
+    voice.fadeStep = 0.0f;
 }
 
 void FmSynth::setEnvelopes (Voice& voice, std::span<const float> values) noexcept
@@ -905,10 +910,11 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
 
                 auto gain = outputGain * voice.fade;
 
-                // A voice taken for another note, or cut as playback stopped, fades out; faded, it is free.
+                // A voice taken for another note, or cut as playback stopped, fades out; faded, it is free, and silent for the
+                // rest of its step, where its filters still hold its sound (a note begun on it starts at its full level).
                 if (voice.fadeStep > 0.0f && (voice.fade -= voice.fadeStep) <= 0.0f)
                 {
-                    voice.fade = 1.0f;
+                    voice.fade = 0.0f;
                     voice.fadeStep = 0.0f;
                     voice.active = false;
 

@@ -655,12 +655,20 @@ void DrumSampler::process (const ProcessContext& block)
                 && (Mode) std::lround (values[(size_t) getParameterIndex (pad, Field::mode)]) == Mode::gate)
                 release (pad);
 
-            // Playback stopped: hits that had only just begun fade out, so that nothing the song began just before Stop
-            // sounds after it (the loop's first hits, when Stop came as it went round). Older hits ring on.
-            if (event.type == NoteEvent::Type::allNotesOff && ! block.isPlaying)
+            // Every note lets go (Processor.h): a gated pad decays as at its note's end, which Stop and a jump send no note-off
+            // for. Playback stopped, hits that had only just begun fade out too, so that nothing the song began just before
+            // Stop sounds after it (the loop's first hits, when Stop came as it went round). Older one-shots ring on.
+            if (event.type == NoteEvent::Type::allNotesOff)
+            {
                 for (auto& voice : voices)
-                    if (voice.pad >= 0 && voice.played < justBegunSeconds * sampleRate)
-                        voice.fadeStep = std::max (voice.fadeStep, (float) (1.0 / (fadeSeconds * sampleRate)));
+                    if (voice.pad >= 0 && (Mode) std::lround (values[(size_t) getParameterIndex (voice.pad, Field::mode)]) == Mode::gate)
+                        voice.released = voice.decaying = true;
+
+                if (! block.isPlaying)
+                    for (auto& voice : voices)
+                        if (voice.pad >= 0 && voice.played < justBegunSeconds * sampleRate)
+                            voice.fadeStep = std::max (voice.fadeStep, (float) (1.0 / (fadeSeconds * sampleRate)));
+            }
         }
 
         const auto until = next < block.events.size() ? std::min (block.numSamples, block.events[next].sample) : block.numSamples;

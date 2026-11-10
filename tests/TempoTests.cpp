@@ -287,6 +287,32 @@ TEST_CASE ("A project's renders are made in the background, and one that no clip
     phazite::purgeClipRenders (song); // the short one's, which no clip plays now
 }
 
+TEST_CASE ("Deleting a tempo change starts the renders it makes needed: a loop at the deleted tempo plays at the song's")
+{
+    // A loop at 140 BPM where the song changes to 140: the change deleted, the song is at 120 there, and the loop needs a
+    // render, which nothing started (renders heard changes and additions, not what was taken away), so it stayed silent.
+    phazite::test::TemporaryFolder temp;
+    const auto songPtr = phazite::createSong();
+    auto& song = *songPtr;
+    const auto track = phazite::getTrackIDs (song)[0];
+    phazite::ClipRenders renders (song);
+    {
+        const phazite::UndoStep step (song, "Add Tempo Change");
+        phazite::addTempoChange (song, phazite::test::at (8.0), 140.0);
+    }
+
+    const auto loop = phazite::importFile (song, track, writeClicks (temp.folder.getChildFile ("Loop"), 4, 140.0), phazite::test::at (8.0));
+    REQUIRE (isAudioClip (song, loop));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return ! renders.isRendering(); }, 20000));
+
+    phazite::deleteTempoChange (song, 1);
+    REQUIRE (phazite::getTempoChanges (song).size() == 1);
+    REQUIRE (phazite::isRendered (song, loop));
+    const auto render = playedFileOf (song, loop);
+    CHECK (phazite::test::dispatchMessagesUntil ([&render] { return phazite::getAudioFileInfo (render).isValid(); }, 20000));
+    phazite::purgeClipRenders (song);
+}
+
 TEST_CASE ("A loop stretched to the song's tempo plays every hit once and on its beat, as export renders it")
 {
     // Stretched clips must neither play early nor double their hits.

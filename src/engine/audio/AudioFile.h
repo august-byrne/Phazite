@@ -2,8 +2,8 @@
 // An audio file as Phazite's engine plays it: its samples read in chunks by a reading thread (FileReader.h), each
 // handed to the audio thread through an atomic pointer once read, so that the audio thread never waits for the disk; a
 // chunk not read yet plays as silence, and a render waits for it. A short file is read whole and kept; a longer one is
-// read ahead of where it plays, with the start of each clip that plays it kept, and what it played long ago let go of.
-// What reads the file (its format) is the model's, behind SampleReader.
+// read ahead of everywhere it plays (two clips can play it at once, in two places), with the start of each clip that plays
+// it kept, and what it played long ago let go of. What reads the file (its format) is the model's, behind SampleReader.
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -74,13 +74,17 @@ private:
 
     std::unique_ptr<std::atomic<const Chunk*>[]> chunks; // what the audio thread reads
     std::vector<std::unique_ptr<Chunk>> read;            // each chunk read, owned here
-    std::atomic<int> playing { 0 };                      // the chunk the audio thread read last
-    std::atomic<std::uint64_t> playedAt { 0 };           // the engine's block count then
+
+    // When the audio thread read each chunk last: the engine's block count then, plus one (0 for never). Those it read in
+    // its last few blocks are where the file plays now, one place for each clip that plays it.
+    std::unique_ptr<std::atomic<std::uint64_t>[]> playedIn;
 
     std::mutex mutex; // between the reading thread, a render's and the message thread; never the audio thread
     std::set<int> kept;
     std::vector<std::pair<std::unique_ptr<Chunk>, std::uint64_t>> letGo; // each with the block count it can go after
+    std::vector<int> playingAt;                                          // the reading thread's: where it plays now
 
     bool readChunk (int index); // under the mutex
+    void findWherePlaying();    // into playingAt, under the mutex
 };
 } // namespace phazite::engine

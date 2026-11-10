@@ -6,6 +6,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/modulation/internal/Modulation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -281,11 +282,13 @@ void removeChain (Song& song, DeviceID chain)
     storeStatesOf (song, container);
     container.removeChild (state, getUndo (song));
 
-    // One chain left is heard: its mute or its solo would be the container's own switch.
+    // One chain left is heard: its mute or its solo would be the container's own switch. Switched off in this step, though a
+    // switch alone is none, so that undoing it brings the switches back with the chain.
     if (const auto left = getChainStates (container); left.size() == 1)
     {
-        setChainSwitch (left.front(), schema::chainMute, false);
-        setChainSwitch (left.front(), schema::chainSolo, false);
+        auto chainLeft = left.front();
+        chainLeft.removeProperty (schema::chainMute, getUndo (song));
+        chainLeft.removeProperty (schema::chainSolo, getUndo (song));
     }
 }
 
@@ -298,7 +301,8 @@ DeviceID duplicateChain (Song& song, DeviceID chain)
         return {};
 
     // A copy of its element, with what its plug-ins keep of their own, every item in it given a new ID, and its parameters'
-    // automation copied; on a container split into bands, its band between its original's and the next.
+    // automation and modulation copied, as a copy of a track keeps both; on a container split into bands, its band between
+    // its original's and the next.
     storeStatesOf (song, container);
     auto copy = state.createCopy();
     const auto copied = giveNewIDs (song, copy);
@@ -306,6 +310,7 @@ DeviceID duplicateChain (Song& song, DeviceID chain)
     auto parent = container;
     parent.addChild (copy, parent.indexOf (state) + 1, getUndo (song));
     copyCurves (song, copied);
+    copyModulations (song, copied); // the container's macros and the track's modulators move the copy's devices too
     keepCrossoversInOrder (song, getDeviceID (container));
     return getChainID (copy);
 }
@@ -493,7 +498,8 @@ void keepCrossoversInOrder (juce::ValueTree state, juce::UndoManager* undo)
     if (readSplit (state) != ContainerSplit::bands)
         return;
 
-    // Each chain's band above the one before it: a chain without a crossover gets its place's default if that is between its
+    // Each chain's band above the one before it: a chain without a crossover, or with one no higher than the one before it
+    // (chains moved while the container was split otherwise keep theirs), gets its place's default if that is between its
     // neighbours', else the middle between them, in octaves.
     const auto chains = getChainStates (state);
     const auto count = (int) chains.size();
@@ -503,13 +509,13 @@ void keepCrossoversInOrder (juce::ValueTree state, juce::UndoManager* undo)
     {
         auto chain = chains[(size_t) i];
 
-        if (! chain.hasProperty (schema::chainCrossover))
+        if (! chain.hasProperty (schema::chainCrossover) || (float) chain[schema::chainCrossover] <= below)
         {
             auto above = highestCrossover;
 
             for (int j = i + 1; j < count; ++j)
             {
-                if (chains[(size_t) j].hasProperty (schema::chainCrossover))
+                if (chains[(size_t) j].hasProperty (schema::chainCrossover) && (float) chains[(size_t) j][schema::chainCrossover] > below)
                 {
                     above = (float) chains[(size_t) j][schema::chainCrossover];
                     break;
@@ -614,8 +620,13 @@ DeviceID addContainer (Song& song, TrackID channel)
 
 DeviceID addInstrumentContainer (Song& song, TrackID track)
 {
-    auto container = makeContainerState (song, true);
+    // A chain holds devices: an instrument container already the track's would go into the new one's and play nothing.
     const auto old = findDeviceState (song, getInstrument (song, track));
+
+    if (isContainerState (old))
+        return {};
+
+    auto container = makeContainerState (song, true);
 
     if (! insertDeviceState (song, track, container).isValid())
         return {};

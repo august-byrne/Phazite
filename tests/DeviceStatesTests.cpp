@@ -107,6 +107,31 @@ TEST_CASE ("A save stores the plug-ins' settings, programs and values moved by a
     CHECK_FALSE (element.getChildWithProperty (schema::valueParameter, juce::String (TestPlugin::toneID)).isValid());
 }
 
+TEST_CASE ("A plug-in on the master keeps its instance as the song changes, and a save stores what it keeps of its own")
+{
+    // The master isn't among the tracks: its plug-ins were made anew from their stored state at each change of the song, and
+    // a save never stored them.
+    TestPlugin testPlugin;
+    phazite::test::TestSong song;
+    auto& open = *phazite::findSong (song.context);
+    const auto plugin = TestPlugin::add (open, phazite::TrackID());
+    auto* session = phazite::getSession (song.context);
+    REQUIRE (session != nullptr);
+    session->update();
+    auto* instance = phazite::findPluginInstance (open, plugin);
+    REQUIRE (instance != nullptr);
+
+    // Its gain turned in its window, then a track added: the same instance plays on, its gain as it was.
+    TestPlugin::setGain (open, plugin, 0.25f);
+    song.addTrack ("Another");
+    session->update();
+    CHECK (phazite::findPluginInstance (open, plugin) == instance);
+    CHECK (TestPlugin::getGain (open, plugin) == doctest::Approx (0.25f));
+
+    REQUIRE (song.getProject().save().wasOk());
+    CHECK (getStoredGain (phazite::findDeviceState (open, plugin)[schema::pluginState].toString()) == doctest::Approx (0.25f));
+}
+
 TEST_CASE ("Storing a plug-in's, or a track's plug-ins' states, writes them into the song without an undo step")
 {
     Devices devices;

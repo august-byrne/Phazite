@@ -21,6 +21,7 @@
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace
@@ -271,6 +272,113 @@ TEST_CASE ("A container split into bands keeps its chains' crossovers in order, 
     CHECK_FALSE (phazite::getChainCrossover (context, chains[1].id).isValid());
 }
 
+TEST_CASE ("Chains moved while a container is split otherwise come back to bands in order, each above the one before it")
+{
+    ToneContainer tone (3);
+    auto& context = tone.song.context;
+    const auto container = tone.container;
+    phazite::setContainerSplit (context, container, ContainerSplit::bands); // 120 Hz and 2.5 kHz
+    phazite::setContainerSplit (context, container, ContainerSplit::layers);
+
+    // The third, its crossover 2.5 kHz, before the second, its 120 Hz: back in bands, each starts above the one before.
+    phazite::moveChain (context, tone.chain (2), -1);
+    phazite::setContainerSplit (context, container, ContainerSplit::bands);
+    auto below = 0.0f;
+
+    for (const auto& chain : phazite::getChains (context, container))
+    {
+        if (const auto crossover = phazite::getChainCrossover (context, chain.id); crossover.isValid())
+        {
+            CAPTURE (chain.name.toStdString());
+            CHECK (crossover.getValue() > below);
+            below = crossover.getValue();
+        }
+    }
+}
+
+TEST_CASE ("Removing a container's chain and undoing it brings back the other's solo, and its switches go only while it is alone")
+{
+    ToneContainer tone (2);
+    auto& context = tone.song.context;
+    phazite::toggleChainSoloAlone (context, tone.chain (0));
+    REQUIRE (phazite::getChain (context, tone.chain (0))->soloed);
+    const auto second = tone.chain (1);
+
+    // Alone, the first is heard, its solo gone with the second; Undo brings both back as they were, the second silent.
+    phazite::removeChain (context, second);
+    CHECK_FALSE (phazite::getChain (context, tone.chain (0))->soloed);
+    phazite::undo (tone.model());
+    REQUIRE (phazite::getChains (context, tone.container).size() == 2);
+    CHECK (phazite::getChain (context, tone.chain (0))->soloed);
+    CHECK_FALSE (phazite::getChain (context, second)->heard);
+}
+
+TEST_CASE ("A track's instrument container is never put into another: Container is offered while the instrument isn't one")
+{
+    TestSong song;
+    auto& context = song.context;
+    song.setInstrument (song.firstTrack, "phaziteSynth");
+    REQUIRE (phazite::canAddInstrumentContainer (context, song.firstTrack));
+    const auto container = phazite::addInstrumentContainer (context, song.firstTrack);
+    REQUIRE (container.isValid());
+
+    // Again: nothing, the container still the instrument, the synth in its chain (nested, it would have played nothing).
+    CHECK_FALSE (phazite::canAddInstrumentContainer (context, song.firstTrack));
+    CHECK_FALSE (phazite::addInstrumentContainer (context, song.firstTrack).isValid());
+    CHECK (phazite::getInstrument (context, song.firstTrack)->id == container);
+    const auto inside = phazite::getContainerDevices (context, container);
+    REQUIRE (inside.size() == 1);
+    CHECK (inside[0].name == juce::String ("Synth"));
+}
+
+TEST_CASE ("A copy of a chain is modulated as the chain is, by its container's macros and its track's modulators")
+{
+    ToneContainer tone (1);
+    auto& context = tone.song.context;
+    phazite::addEffectToChain (context, tone.chain (0), tone.song.findDeviceType ("phaziteEq"));
+    const auto eq = phazite::getChain (context, tone.chain (0))->devices[0].id;
+    const phazite::ParameterRef gain { eq, "band4Gain" };
+    const auto macro = phazite::getContainerMacros (context, tone.container)[0].id;
+    const auto lfo = phazite::addModulator (context, tone.song.firstTrack, phazite::ModulatorType::lfo);
+    phazite::modulate (context, macro, gain, 0.5f);
+    phazite::modulate (context, lfo, gain, -0.25f);
+
+    // The copy's EQ, moved by both as much, in the one step that copies the chain.
+    const auto copy = phazite::duplicateChain (context, tone.chain (0));
+    REQUIRE (copy.isValid());
+    const auto copiedEq = phazite::getChain (context, copy)->devices[0].id;
+    const auto modulations = phazite::getModulations (context, { copiedEq, "band4Gain" });
+    REQUIRE (modulations.size() == 2);
+
+    for (const auto& modulation : modulations)
+        CHECK (modulation.amount == doctest::Approx (modulation.modulator == macro ? 0.5f : -0.25f));
+
+    CHECK (tone.describeUndo() == juce::String ("Undo Duplicate Chain"));
+    CHECK (phazite::getModulations (context, gain).size() == 2); // the original's, as they were
+}
+
+TEST_CASE ("A chain's automation is saved, and still there once the project is opened again")
+{
+    // A project opened forgets the curves of what isn't there, and chains weren't among what it looked for: a chain's
+    // volume, pan and crossover lost their automation each time the project opened.
+    ToneContainer tone (2);
+    auto& context = tone.song.context;
+    const auto volume = phazite::getChainVolume (context, tone.chain (1)).getRef();
+    const auto pan = phazite::getChainPan (context, tone.chain (1)).getRef();
+
+    for (const auto& parameter : { volume, pan })
+    {
+        REQUIRE (parameter.isValid());
+        phazite::addPoint (tone.model(), parameter, { phazite::BeatPosition(), 0.5f, 0.0f });
+        phazite::addPoint (tone.model(), parameter, { phazite::BeatPosition::fromBeats (4.0), 0.75f, 0.0f });
+        REQUIRE (phazite::getAutomationPoints (context, parameter).size() == 2);
+    }
+
+    tone.song.reopen();
+    CHECK (phazite::getAutomationPoints (context, volume).size() == 2);
+    CHECK (phazite::getAutomationPoints (context, pan).size() == 2);
+}
+
 TEST_CASE ("A container's chains' volumes, pans and crossovers are automated and modulated as a device's parameters")
 {
     ToneContainer tone (2);
@@ -344,6 +452,51 @@ TEST_CASE ("Phazite's engine lines a container's chains up with the latest, so t
     // The second muted: the first's alone, at the tone's level.
     phazite::toggleChainMute (tone.song.context, tone.chain (1));
     CHECK (tone.level() == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("A container keeps what comes into it for the device's blocks once they grow, to mix with what its chains play")
+{
+    ToneContainer tone (1);
+    auto& context = tone.song.context;
+    addToChain (tone.song, tone.chain (0), phazite::test::TestDelay::typeID); // the tone 64 samples late, upside down
+    phazite::getMix (context, tone.container).setValue (0.5f);                // half of that, half the tone in step: nothing
+    EnginePlayback playback;
+    EnginePlayback::waitForFiles();
+    tone.song.run ("transport.playStop");
+    playback.play (0.25);
+
+    // The device starts again with blocks four times as long. The song's plan made for them keeps what comes into the
+    // container for them: one kept from the plan before would keep a quarter of each block, and write past its end.
+    constexpr int longer = 4 * EnginePlayback::blockSize;
+    auto& host = phazite::getPlaybackHost (phazite::test::getEngineContext());
+    host.prepare (EnginePlayback::sampleRate, longer);
+    phazite::test::dispatchPendingMessages();
+    const auto* plan = host.getEngine().getPlan();
+    REQUIRE (plan != nullptr);
+    CHECK (plan->maximumBlockSize == longer);
+    const auto strip = std::find_if (plan->strips.begin(), plan->strips.end(), [] (const auto& each) { return ! each.containers.empty(); });
+    REQUIRE (strip != plan->strips.end());
+    CHECK (strip->containers.front().state->getMaximumBlockSize() == longer);
+
+    juce::AudioBuffer<float> played (2, 12 * longer);
+    const auto play = [&] (int blocks)
+    {
+        for (int b = 0; b < blocks; ++b)
+        {
+            float* channels[] = { played.getWritePointer (0, b * longer), played.getWritePointer (1, b * longer) };
+            host.getEngine().process (channels, 2, longer);
+        }
+    };
+
+    play (12);
+    CHECK (played.getMagnitude (0, 12 * longer) < 1.0e-4f);
+
+    // Its chain muted, half the tone as it came in, from the container alone.
+    phazite::toggleChainMute (context, tone.chain (0));
+    phazite::test::dispatchPendingMessages();
+    play (2); // the chain fades out
+    play (12);
+    CHECK (juce::Decibels::gainToDecibels (played.getRMSLevel (0, 0, 12 * longer)) == doctest::Approx (toneLevel - 6.02f).epsilon (0.002));
 }
 
 TEST_CASE ("Phazite's engine splits a container's sound into bands that add up to it, each its chain's")

@@ -8,8 +8,9 @@ namespace phazite::engine
 {
 namespace
 {
-    constexpr double aheadSeconds = 10.0; // of a longer file, read ahead of where it plays
-    constexpr int behindChunks = 2;       // and kept behind it
+    constexpr double aheadSeconds = 10.0;     // of a longer file, read ahead of where it plays
+    constexpr int behindChunks = 2;           // and kept behind it
+    constexpr std::uint64_t recentBlocks = 8; // a chunk read in so many of the last blocks it was read in is where it plays
 } // namespace
 
 AudioFile::AudioFile (std::unique_ptr<SampleReader> r, const std::atomic<std::uint64_t>* engineBlocks)
@@ -22,11 +23,16 @@ AudioFile::AudioFile (std::unique_ptr<SampleReader> r, const std::atomic<std::ui
     numChunks = (int) ((length + chunkSamples - 1) / chunkSamples);
     whole = blocks == nullptr || (double) length <= shortSeconds * sampleRate;
     chunks = std::make_unique<std::atomic<const Chunk*>[]> ((size_t) std::max (1, numChunks));
+    playedIn = std::make_unique<std::atomic<std::uint64_t>[]> ((size_t) std::max (1, numChunks));
 
     for (int i = 0; i < numChunks; ++i)
+    {
         chunks[(size_t) i].store (nullptr, std::memory_order_relaxed);
+        playedIn[(size_t) i].store (0, std::memory_order_relaxed);
+    }
 
     read.resize ((size_t) numChunks);
+    playingAt.reserve (16);
 }
 
 AudioFile::~AudioFile() = default;
@@ -41,10 +47,7 @@ const float* AudioFile::getSamples (int channel, std::int64_t start, int& numSam
 
     const auto index = (int) (start / chunkSamples);
     const auto offset = (int) (start - (std::int64_t) index * chunkSamples);
-    playing.store (index, std::memory_order_relaxed);
-
-    if (blocks != nullptr)
-        playedAt.store (blocks->load (std::memory_order_relaxed), std::memory_order_relaxed);
+    playedIn[(size_t) index].store ((blocks != nullptr ? blocks->load (std::memory_order_relaxed) : 0) + 1, std::memory_order_relaxed);
 
     const auto* chunk = chunks[(size_t) index].load (std::memory_order_acquire);
     const auto inChunk = (int) std::min<std::int64_t> (chunkSamples - offset, length - start);
@@ -101,22 +104,30 @@ bool AudioFile::readNext()
         return false;
     }
 
-    // A longer one: where each clip that plays it starts, then ahead of where it plays.
+    // A longer one: where each clip that plays it starts, then ahead of everywhere it plays, the nearest first.
     for (const auto index : kept)
         if (index < numChunks && read[(size_t) index] == nullptr)
             return readChunk (index);
 
-    const auto at = playing.load (std::memory_order_relaxed);
+    findWherePlaying();
     const auto ahead = (int) std::ceil (aheadSeconds * sampleRate / chunkSamples);
 
-    for (int i = at; i < std::min (numChunks, at + ahead); ++i)
-        if (read[(size_t) i] == nullptr)
-            return readChunk (i);
+    for (int distance = 0; distance < ahead; ++distance)
+        for (const auto at : playingAt)
+            if (const auto i = at + distance; i < numChunks && read[(size_t) i] == nullptr)
+                return readChunk (i);
 
-    // What it played long ago, or is far ahead of, it lets go of; freed only once the audio thread can't be reading it.
+    // What it played long ago, or is far ahead of, everywhere it plays, it lets go of; freed only once the audio thread can't
+    // be reading it.
+    const auto isNear = [this, ahead] (int i)
+    {
+        return std::any_of (playingAt.begin(), playingAt.end(),
+                            [i, ahead] (int at) { return i >= at - behindChunks && i < at + ahead + 1; });
+    };
+
     for (int i = 0; i < numChunks; ++i)
     {
-        if (read[(size_t) i] != nullptr && kept.count (i) == 0 && (i < at - behindChunks || i >= at + ahead + 1))
+        if (read[(size_t) i] != nullptr && kept.count (i) == 0 && ! isNear (i))
         {
             chunks[(size_t) i].store (nullptr, std::memory_order_release);
             letGo.emplace_back (std::move (read[(size_t) i]), blocks->load (std::memory_order_acquire) + 2);
@@ -124,6 +135,25 @@ bool AudioFile::readNext()
     }
 
     return false;
+}
+
+void AudioFile::findWherePlaying()
+{
+    // The chunks the audio thread read in its last few blocks of the file (two clips playing it read in two places), each
+    // block counted from the latest it read any in: stopped, where it played last stays where it plays. Before it played
+    // anywhere, from the file's start.
+    playingAt.clear();
+    std::uint64_t latest = 0;
+
+    for (int i = 0; i < numChunks; ++i)
+        latest = std::max (latest, playedIn[(size_t) i].load (std::memory_order_relaxed));
+
+    for (int i = 0; i < numChunks; ++i)
+        if (const auto stamp = playedIn[(size_t) i].load (std::memory_order_relaxed); stamp != 0 && stamp + recentBlocks > latest)
+            playingAt.push_back (i);
+
+    if (playingAt.empty())
+        playingAt.push_back (0);
 }
 
 void AudioFile::readNow (std::int64_t start, std::int64_t numSamples)

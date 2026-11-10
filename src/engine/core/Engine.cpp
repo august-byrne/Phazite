@@ -299,12 +299,17 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
         if (outputs[channel] != nullptr)
             juce::FloatVectorOperations::clear (outputs[channel], numSamples);
 
-    // A block longer than prepared plays in parts.
+    // A block longer than prepared plays in parts, and so does one longer than its plan was made for: the device's blocks
+    // grew (it started again with a larger buffer), and the plan made for them is still being built.
     std::array<float*, maximumChannels> part {};
 
     for (int done = 0; done < numSamples;)
     {
-        const auto length = std::min (numSamples - done, maximumBlockSize);
+        const Handover<Plan>::Block held { plans };
+        const auto* plan = held.get();
+        const auto longest =
+            plan != nullptr && plan->maximumBlockSize > 0 ? std::min (maximumBlockSize, plan->maximumBlockSize) : maximumBlockSize;
+        const auto length = std::min (numSamples - done, longest);
 
         for (int channel = 0; channel < numOutputs; ++channel)
             part[(size_t) channel] = outputs[channel] != nullptr ? outputs[channel] + done : nullptr;
@@ -314,12 +319,12 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
         for (int channel = 0; channel < numInputs; ++channel)
             partInputs[(size_t) channel] = inputs[channel] != nullptr ? inputs[channel] + done : nullptr;
 
-        const Handover<Plan>::Block held { plans };
         const Handover<Recording>::Block heldRecording { recordings };
         auto* recording = heldRecording.get();
+        partStart = done;
 
         // A plan for another rate (the device's changed, and the new one is still being built) plays nothing.
-        if (const auto* plan = held.get(); plan != nullptr && juce::exactlyEqual (plan->tempo.getSampleRate(), sampleRate))
+        if (plan != nullptr && juce::exactlyEqual (plan->tempo.getSampleRate(), sampleRate))
         {
             // A new plan, perhaps of another tempo or rate: the playhead stays on its beat.
             if (transport.plan != plan)
@@ -369,11 +374,17 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                         loopStart = std::llround (plan->tempo.toSamples (plan->loop->start));
                         loopEnd = std::llround (plan->tempo.toSamples (plan->loop->end));
 
-                        // Past the loop's end, playback starts again at its start; it plays as far as its end at most.
+                        // Past the loop's end (it was moved before the playhead), playback starts again at its start, the
+                        // notes sounding ending and those there starting, as a loop round does; it plays as far as its end
+                        // at most.
                         if (loopEnd > loopStart)
                         {
                             if (transport.sample >= loopEnd)
+                            {
                                 transport.sample = loopStart;
+                                transport.notesOff = true;
+                                transport.chase = true;
+                            }
 
                             span = (int) std::min<std::int64_t> (span, loopEnd - transport.sample);
                         }
@@ -492,7 +503,7 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
     span.beatsPerSample = transport.playing && numSamples > 0
                               ? (plan.tempo.toBeats ((double) (transport.sample + numSamples)) - span.beat) / numSamples
                               : 0.0;
-    span.gridSample = transport.playing ? transport.sample : clock + offset;
+    span.gridSample = transport.playing ? transport.sample : clock + partStart + offset;
     span.pass = ++passes;
     span.flush = transport.flush;
     findControlPoints (plan, span.gridSample, numSamples);
@@ -1023,8 +1034,24 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
 
     const auto* notes = strip.notes.get();
 
-    if (! transport.playing || notes == nullptr)
+    if (! transport.playing)
         return;
+
+    // None now (the song changed as it played: the track's clips gone, or their notes): what the notes before sounded ends.
+    if (notes == nullptr)
+    {
+        if (state.sequence != nullptr)
+        {
+            for (size_t pitch = 0; pitch < 128; ++pitch)
+                if (state.sounding[pitch])
+                    state.addEvent ({ Type::noteOff, 0, (int) pitch, 0.0f });
+
+            state.sounding.reset();
+            state.sequence = nullptr;
+        }
+
+        return;
+    }
 
     const auto from = (double) transport.sample;
     const auto fromBeat = plan.tempo.toBeats (from), toBeat = plan.tempo.toBeats (from + numSamples);

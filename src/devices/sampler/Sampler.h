@@ -177,7 +177,9 @@ public:
     void setManualSlices (std::shared_ptr<const ManualSlices>);
 
     // Message thread: the sound and the slices changed by hand it plays now, for drawing them; the slices nullptr for none.
+    // And the sound held, for what draws it over several paints: the sampler lets go of a sound once it plays another.
     const Sound* getSound() const noexcept { return playingSound.get(); }
+    std::shared_ptr<const Sound> holdSound() const noexcept { return playingSound; }
     const ManualSlices* getManualSlices() const noexcept { return playingSlices.get(); }
 
     // Plays a note at the next block as if it came in, and lets it go: for the editor (a slice clicked, the sound played).

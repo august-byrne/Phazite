@@ -140,7 +140,9 @@ public:
             fallbackName = name;
         }
 
-        sound = sampler != nullptr ? sampler->getSound() : fallback.get();
+        // Held while it shows: hidden, the view isn't refreshed, and the sampler may let go of a sound swapped out meanwhile.
+        held = sampler != nullptr ? sampler->holdSound() : fallback;
+        sound = held.get();
         manual = sampler != nullptr ? (sampler->getManualSlices() != nullptr ? *sampler->getManualSlices() : Sampler::ManualSlices())
                                     : editor.getDevice().getManualSlices();
         tempo = sampler != nullptr ? (double) sampler->getShown().tempo.get() : 120.0;
@@ -485,6 +487,7 @@ private:
     SamplerEditor& editor;
     std::vector<ParameterHandle> handles; // every parameter, in the description's order
     std::vector<float> values;
+    std::shared_ptr<const Sampler::Sound> held; // what sound points at, kept while it shows
     const Sampler::Sound* sound = nullptr;
     const Sampler::Sound* shownSound = nullptr;
     std::shared_ptr<const Sampler::Sound> fallback; // the song's, while nothing plays it

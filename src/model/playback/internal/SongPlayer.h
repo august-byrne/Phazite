@@ -143,8 +143,9 @@ private:
     std::set<std::pair<std::int64_t, int>> usedPartOutputs;
     std::map<std::int64_t, std::set<int>> separatedPads; // each pad once, however many tracks name it
     std::map<const engine::PartOutput*, int> partLatencies;
-    std::set<std::int64_t> used; // the devices the plan being compiled plays
-    bool lowLatency = false;     // as the plan being compiled sees it
+    std::set<std::int64_t> used;      // the devices the plan being compiled plays
+    bool lowLatency = false;          // as the plan being compiled sees it
+    std::optional<RenderOf> rendered; // what a render plays, as the plan being compiled sees it: none live
 
     // The audio files the plans play, by their paths and versions (getAudioFile()), and each audio clip's place in its file,
     // by its ID.

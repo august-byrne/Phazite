@@ -1423,9 +1423,11 @@ void DevicesView::showBody()
     const auto device = findDeviceSlot (id);
     const auto inWindow = device.has_value() && device->windowOpen;
     const auto frozen = device.has_value() && device->frozen;
+    const auto container = device.has_value() ? (device->isContainer ? device->id : getContainerOf (context, device->id)) : DeviceID();
 
-    // The same device as it was: only its container's names and chains, which may have changed.
-    if (body != nullptr && id == bodyDevice && inWindow == bodyInWindow && frozen == bodyFrozen)
+    // The same device as it was, in the same container (ungrouped, it is in none): only its container's names and chains,
+    // which may have changed.
+    if (body != nullptr && id == bodyDevice && container == bodyContainer && inWindow == bodyInWindow && frozen == bodyFrozen)
     {
         if (auto* frame = dynamic_cast<ContainerFrame*> (body.get()))
             frame->refresh();
@@ -1437,6 +1439,7 @@ void DevicesView::showBody()
     bodyView.setViewedComponent (nullptr, false);
     body = nullptr;
     bodyDevice = id;
+    bodyContainer = container;
     bodyInWindow = inWindow;
     bodyFrozen = frozen;
 
@@ -1480,7 +1483,7 @@ void DevicesView::showBody()
             note->setColour (juce::Label::textColourId, p.textMuted);
 
         // A frozen device's controls are off until its track is unfrozen; in a container, the way back to its chains isn't.
-        if (const auto container = device->isContainer ? device->id : getContainerOf (context, device->id); container.isValid())
+        if (container.isValid())
         {
             auto frame =
                 std::make_unique<ContainerFrame> (*this, container, device->isContainer ? std::nullopt : device, std::move (shown));
@@ -1651,6 +1654,7 @@ void DevicesView::projectChanged()
     bodyView.setViewedComponent (nullptr, false);
     body = nullptr;
     bodyDevice = {};
+    bodyContainer = {};
     column->instrument = nullptr;
     column->effects = nullptr;
     followSelection();

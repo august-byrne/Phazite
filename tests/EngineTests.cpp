@@ -1058,6 +1058,70 @@ TEST_CASE ("Playback started or jumping starts from silence: a tail rings on aft
     CHECK (player.render (blockSize).getMagnitude (0, 0, blockSize) == 0.0f);
 }
 
+namespace
+{
+// An instrument that plays a level of 0.5 all the time, taking its blocks whole, and keeps the longest it was handed.
+class LongestBlock final : public dev::Processor
+{
+public:
+    static inline const dev::DeviceInfo info { .typeID = "testLongestBlock", .name = "Longest Block", .kind = dev::DeviceKind::instrument };
+
+    int longest = 0;
+
+    void prepare (double, int) override {}
+    void reset() override {}
+    bool sleepsOnSilence() const noexcept override { return false; }
+    bool takesWholeBlocks() const noexcept override { return true; }
+
+    void process (const dev::ProcessContext& context) override
+    {
+        longest = std::max (longest, context.numSamples);
+
+        for (int channel = 0; channel < context.numChannels; ++channel)
+            juce::FloatVectorOperations::fill (context.channels[channel], 0.5f, context.numSamples);
+    }
+};
+} // namespace
+
+TEST_CASE ("A plan made for shorter blocks than the device's plays in parts that long until the plan made for them comes")
+{
+    // A plan made for blocks of 256 samples, whose instrument would take four times as many (so that nothing overflows if the
+    // engine handed it more than its plan was made for).
+    constexpr int longer = 4 * blockSize;
+    const auto makePlan = [] (int madeFor, LongestBlock*& probe)
+    {
+        auto plan = makeClickPlan();
+        plan->metronome = false;
+        plan->maximumBlockSize = madeFor;
+        auto instrument = std::make_unique<LongestBlock>();
+        probe = instrument.get();
+        plan->strips.push_back (makeTrack (1, LongestBlock::info, std::move (instrument), {}, longer));
+        plan->strips.push_back (makeMaster (*plan, longer));
+        return plan;
+    };
+
+    LongestBlock* probe = nullptr;
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (makePlan (blockSize, probe));
+    juce::AudioBuffer<float> played (2, longer);
+    float* channels[] = { played.getWritePointer (0), played.getWritePointer (1) };
+    player.process (channels, 2, blockSize);
+    CHECK (probe->longest == blockSize);
+
+    // The device starts again with blocks four times as long, and the plan made for them is still being built: the one
+    // before plays them a quarter at a time, without a gap.
+    player.prepare (rate, longer);
+    player.process (channels, 2, longer);
+    CHECK (probe->longest == blockSize);
+    CHECK (juce::FloatVectorOperations::findMinAndMax (played.getReadPointer (0), longer) == juce::Range (0.5f, 0.5f));
+
+    // The plan made for them plays them whole.
+    player.setPlan (makePlan (longer, probe));
+    player.process (channels, 2, longer);
+    CHECK (probe->longest == longer);
+}
+
 TEST_CASE ("The engine's master lines its tracks up, each delayed as much as the latest is late")
 {
     auto plan = makeClickPlan();
@@ -1405,7 +1469,9 @@ TEST_CASE ("A long audio file is read ahead of where it plays, each clip's start
     count = 64;
     REQUIRE (file.getSamples (0, 0, count) != nullptr);
 
-    // Played on to chunk 5: it reads that, and lets go of the first, which goes once the engine has played on.
+    // Played on to chunk 5, some blocks later: it reads that, and lets go of the first, which goes once the engine has played
+    // on.
+    blocks += 10;
     count = 64;
     CHECK (file.getSamples (0, 5 * chunk, count) == nullptr);
     CHECK (file.readNext());
@@ -1422,6 +1488,44 @@ TEST_CASE ("A long audio file is read ahead of where it plays, each clip's start
     count = 64;
     file.getSamples (0, 6 * chunk - 10, count);
     CHECK (count == 10);
+}
+
+TEST_CASE ("A long audio file two clips play at once is read ahead of both, and neither's part of it is let go")
+{
+    // At 1 kHz, 300 s is 10 chunks, of which it reads one ahead of each place it plays: one clip from the start, another from
+    // chunk 6, both read in every block (a vocal doubled on a second track, a few seconds late).
+    std::atomic<std::uint64_t> blocks { 0 };
+    engine::AudioFile file (std::make_unique<MemoryReader> (1, 1000.0, 300000), &blocks);
+    const auto chunk = engine::AudioFile::chunkSamples;
+    const auto plays = [&file] (std::int64_t sample)
+    {
+        auto count = 64;
+        return file.getSamples (0, sample, count) != nullptr;
+    };
+
+    const auto readAll = [&file]
+    {
+        while (file.readNext())
+        {
+        }
+    };
+
+    // Each block, the first clip reads before the second, and each reads all it needs.
+    for (int step = 0; step < 3; ++step)
+    {
+        CAPTURE (step);
+        const auto first = (std::int64_t) step * chunk, second = (std::int64_t) (6 + step) * chunk;
+
+        for (int block = 0; block < 4; ++block, ++blocks)
+        {
+            plays (first);
+            plays (second);
+            readAll();
+        }
+
+        CHECK (plays (first));
+        CHECK (plays (second));
+    }
 }
 
 TEST_CASE ("A lane's line eases as far as it bends: quick or slow at first up to half way, then held at one end, and at the ends a jump")

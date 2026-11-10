@@ -461,4 +461,35 @@ void removeModulation (Song& song, ModulatorID id, const ParameterRef& parameter
     if (auto modulates = findModulatesState (findModulatorState (song, id), parameter); modulates.isValid())
         modulates.getParent().removeChild (modulates, getUndo (song));
 }
+
+void copyModulations (Song& song, const std::map<std::uint64_t, std::uint64_t>& copied)
+{
+    for (auto modulator : getModulatorStates (song))
+    {
+        std::vector<juce::ValueTree> copies;
+
+        for (const auto& child : modulator)
+        {
+            if (! child.hasType (schema::MODULATES))
+                continue;
+
+            const auto parameter = getModulatedParameter (child);
+            const auto found = copied.find (parameter.device.getRaw());
+
+            if (found == copied.end())
+                continue;
+
+            if (const ParameterRef copiedParameter { DeviceID::fromRaw (found->second), parameter.parameter };
+                ! findModulatesState (modulator, copiedParameter).isValid())
+            {
+                auto copy = child.createCopy();
+                copy.setProperty (schema::modulatesDevice, juce::String ((juce::int64) found->second), nullptr);
+                copies.push_back (copy);
+            }
+        }
+
+        for (const auto& copy : copies)
+            modulator.appendChild (copy, getUndo (song));
+    }
+}
 } // namespace phazite

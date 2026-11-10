@@ -29,6 +29,8 @@
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
 
+#include <algorithm>
+
 TEST_CASE ("Overdub and quantizing recordings are the app's settings, which their commands switch")
 {
     auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
@@ -367,6 +369,64 @@ TEST_CASE ("Overdub adds a take's notes to the clip there, and without it they t
     CHECK (record (true) == std::pair { size_t (1), std::vector { 60, 48 } }); // in the clip, beside its note
     CHECK (record (false)
            == std::pair { size_t (2), std::vector { 60, 48 } }); // the clip cut where the take was: its end, with its note, stays
+}
+
+TEST_CASE ("Overdub puts each note in the clip it starts in, and one between clips in a clip of its own there: every note plays")
+{
+    // Clips at beats 0 to 2 and 4 to 6, notes played at beats half, 2.5 and 4.5 (120 BPM): all went into the first clip,
+    // which can't grow past the second, so the later ones lay outside it and never played.
+    EngineTake take;
+    const auto first = take.song.addMidiClip (take.song.firstTrack, 0.0, 2.0);
+    const auto second = take.song.addMidiClip (take.song.firstTrack, 4.0, 2.0);
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    phazite::setOverdubOn (audio, true);
+    take.song.run ("transport.record");
+    take.playNote (60, 0.25, 0.1);
+    take.playNote (62, 0.9, 0.1);
+    take.playNote (64, 0.9, 0.1);
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 3);
+    const auto notes = take.getNotes();
+    REQUIRE (notes.size() == 3);
+
+    for (const auto& note : notes)
+    {
+        CAPTURE (note.pitch);
+        const auto clip = std::find_if (clips.begin(), clips.end(), [&note] (const auto& each) { return each.id == note.clip; });
+        REQUIRE (clip != clips.end());
+        CHECK (clip->range.getStart() <= note.start);
+        CHECK (note.start < clip->range.getEnd());
+    }
+
+    CHECK (notes[0].clip == first);
+    CHECK (notes[2].clip == second);
+    CHECK (notes[1].clip != first);
+    CHECK (notes[1].clip != second);
+}
+
+TEST_CASE ("Quantized round a looped range, a note played just before its end goes round to its start, in the range's clip")
+{
+    // Round beats 0 to 2 (a second), a note 15 ms before the end the second time round: quantized to its sixteenth, it was
+    // on the range's end, which grew the clip past it, where it never played.
+    EngineTake take;
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+    phazite::setRecordQuantizeOn (audio, true);
+    const juce::ScopeGuard quantizeOff { [&audio] { phazite::setRecordQuantizeOn (audio, false); } }; // the app's setting
+    phazite::loopBeatRange (*phazite::findSong (take.song.context), 0.0, 2.0);
+    take.song.run ("transport.record");
+    take.playNote (60, 1.985, 0.01);
+    take.playback.play (0.25);
+    take.song.run ("transport.record");
+
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 1);
+    CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (2.0));
+    const auto notes = take.getNotes();
+    REQUIRE (notes.size() == 1);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (0.0));
 }
 
 TEST_CASE ("A take starts after a bar of count-in")

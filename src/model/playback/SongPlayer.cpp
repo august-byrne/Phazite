@@ -217,12 +217,14 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
         strips.clear();
         delays.clear();
         modulators.clear();
+        containers.clear();
         chains.clear();
         preparedRate = sampleRate;
         preparedBlockSize = maximumBlockSize;
     }
 
     auto plan = std::make_unique<engine::Plan>();
+    plan->maximumBlockSize = preparedBlockSize;
 
     // The tempo map, with its ramps, the loop and the metronome.
     plan->tempo = getTempoMap (song, sampleRate);
@@ -235,11 +237,14 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
     // Each track that holds clips, through its devices.
     lowLatency = live.has_value() && live->lowLatency;
     armed = live.has_value() ? live->armed : std::set<TrackID>();
+    rendered = of;
     used.clear();
     usedFiles.clear();
     usedRegions.clear();
     usedNotes.clear();
     usedModulators.clear();
+    usedSends.clear();
+    usedContainers.clear();
     usedChains.clear();
     modulated.clear();
     readCurves();
@@ -454,7 +459,10 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getPluginDevice (const juce::Val
     auto& node = devices[id];
     const auto* playing = node != nullptr ? dynamic_cast<const SandboxedProcessor*> (&node->getRunner().getProcessor()) : nullptr;
 
-    if (playing == nullptr || &playing->getInstance() != sandboxed.get())
+    // Made anew for another instance, and for a latency the plug-in changed (its look-ahead set longer in its own window): its
+    // runner takes it as it is prepared, for its strip's and its mix's delays.
+    if (playing == nullptr || &playing->getInstance() != sandboxed.get()
+        || playing->getLatencySamples() != node->getRunner().getLatencySamples())
     {
         auto processor = std::make_unique<SandboxedProcessor> (sandboxed);
         const auto* made = processor.get();
@@ -1175,10 +1183,14 @@ void SongPlayer::setChannel (const juce::ValueTree& channelState, bool isMaster)
 void SongPlayer::updateAudibility()
 {
     // A track is heard unless it is muted, or in a muted folder, or other tracks are soloed and neither it nor a folder it is
-    // in is (a return is never silenced by a solo); a pad's track, as its sampler's track is too.
+    // in is (a return is never silenced by a solo); a pad's track, as its sampler's track is too. A render before a channel's
+    // fader (a freeze, a bounce: RenderOf) hears that channel whatever its mute switch says, and what feeds it whatever
+    // other tracks' solos say: it plays the channel alone already.
     const auto trackStates = getTrackStates (song);
+    const auto beforeFader = rendered.has_value() && rendered->beforeFader;
     const auto anySoloed =
-        std::any_of (trackStates.begin(), trackStates.end(), [] (const auto& state) { return (bool) state[schema::trackSolo]; });
+        ! beforeFader
+        && std::any_of (trackStates.begin(), trackStates.end(), [] (const auto& state) { return (bool) state[schema::trackSolo]; });
 
     // A bus carries a soloed track in it.
     const auto holdsSoloed = [] (const juce::ValueTree& folder, auto& holdsNext) -> bool
@@ -1215,7 +1227,8 @@ void SongPlayer::updateAudibility()
                 findTrackState (song, getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) getID (state, schema::trackPadDevice)))));
 
         soloed = soloed || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
-        strip->getChannel().setAudible (! muted && (! anySoloed || soloed || isReturnState (state)));
+        const auto isRendered = beforeFader && getID (state, schema::trackID) == rendered->channel;
+        strip->getChannel().setAudible (isRendered || (! muted && (! anySoloed || soloed || isReturnState (state))));
     }
 }
 

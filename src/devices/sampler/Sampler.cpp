@@ -515,6 +515,11 @@ void Sampler::startVoice (Voice& voice, float velocityValue, std::span<const flo
     voice.age = 0;
     voice.started = ++notesPlayed;
 
+    // At its full level, whatever fade the voice was in when its last note ended (one cut as playback stopped can end its
+    // release first): left fading, the new note would fade out at once.
+    voice.fade = 1.0f;
+    voice.fadeStep = 0.0f;
+
     // A voice its fades shape lets go as a gated note does, over the fade out; the amp envelope shapes the others.
     if (voice.fades)
         voice.amp.setParameters (0.0f, 0.0f, 1.0f, std::max (0.0005f, values[fadeOut] * 0.001f));
@@ -926,8 +931,13 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
             {
                 if (voice.loops)
                 {
+                    // Round the loop, it plays on: the few samples' fade in at its start was for its first time only, as
+                    // the start may be where the loop starts.
                     while (voice.position >= voice.loopEndAt)
+                    {
                         voice.position -= loopLength;
+                        voice.fadeIn = 0;
+                    }
                 }
                 else if (voice.position >= voice.regionEnd)
                 {
@@ -970,10 +980,11 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
                 if (! voice.loops && remaining < fadingOut)
                     gain *= (float) std::max (0.0, remaining / fadingOut);
 
-                // A voice taken for another note, its sound swapped, or cut as playback stopped, fades out; faded, it is free.
+                // A voice taken for another note, its sound swapped, or cut as playback stopped, fades out; faded, it is free,
+                // and silent for the rest of the block (a note begun on it starts at its full level).
                 if (voice.fadeStep > 0.0f && (voice.fade -= voice.fadeStep) <= 0.0f)
                 {
-                    voice.fade = 1.0f;
+                    voice.fade = 0.0f;
                     voice.fadeStep = 0.0f;
                     voice.amp.reset();
                     voice.filterEnvelope.reset();

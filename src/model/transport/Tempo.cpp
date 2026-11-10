@@ -203,20 +203,73 @@ void insertTempoMapTime (Song& song, BeatPosition at, BeatDuration length)
 
 void removeTempoMapTime (Song& song, BeatRange range)
 {
+    // Of each kind, tempos and time signatures, what played after the range plays from its start, as the chord lane's keys
+    // do: the last change in the range moves to its start (unless one starts where it ends, which moves there too); the
+    // others in it go, and those after it move back. One that lands on the song's start gives the first its values.
     auto map = findTempoMap (song);
+    auto* undo = &song.getUndoManager();
+    const auto start = range.getStart().inBeats(), end = range.getEnd().inBeats(), length = range.getLength().inBeats();
 
-    for (int i = map.getNumChildren(); --i >= 0;)
+    for (const auto& type : { schema::TEMPO, schema::TIMESIGNATURE })
     {
-        auto entry = map.getChild (i);
-        const auto beat = (double) entry[schema::mapBeat];
+        const auto entries = getEntries (map, type);
+        juce::ValueTree last, first;
+        auto oneAtEnd = false;
 
-        if (beat <= 0.0 || beat < range.getStart().inBeats())
-            continue;
+        for (const auto& entry : entries)
+        {
+            const auto beat = (double) entry[schema::mapBeat];
 
-        if (beat < range.getEnd().inBeats())
-            map.removeChild (i, &song.getUndoManager());
-        else
-            entry.setProperty (schema::mapBeat, beat - range.getLength().inBeats(), &song.getUndoManager());
+            if (beat <= 0.0)
+                first = entry;
+            else if (beat >= start && beat < end && (! last.isValid() || beat > (double) last[schema::mapBeat]))
+                last = entry;
+            else if (juce::approximatelyEqual (beat, end))
+                oneAtEnd = true;
+        }
+
+        const auto moveToStart = [&] (juce::ValueTree entry)
+        {
+            if (start > 0.0 || ! first.isValid())
+            {
+                entry.setProperty (schema::mapBeat, start, undo);
+                return;
+            }
+
+            for (int p = 0; p < entry.getNumProperties(); ++p)
+                if (const auto name = entry.getPropertyName (p); name != schema::mapBeat)
+                    first.setProperty (name, entry[name], undo);
+
+            for (int p = first.getNumProperties(); --p >= 0;)
+                if (const auto name = first.getPropertyName (p); name != schema::mapBeat && ! entry.hasProperty (name))
+                    first.removeProperty (name, undo);
+
+            map.removeChild (entry, undo);
+        };
+
+        for (auto entry : entries)
+        {
+            const auto beat = (double) entry[schema::mapBeat];
+
+            if (beat <= 0.0 || beat < start)
+                continue;
+
+            if (beat >= end)
+            {
+                if (juce::approximatelyEqual (beat, end))
+                    moveToStart (entry);
+                else
+                    entry.setProperty (schema::mapBeat, beat - length, undo);
+            }
+            else if (entry == last && ! oneAtEnd)
+            {
+                moveToStart (entry);
+            }
+            else
+            {
+                map.removeChild (entry, undo);
+            }
+        }
     }
 }
 

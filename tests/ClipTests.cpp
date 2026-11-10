@@ -2,6 +2,7 @@
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
@@ -398,6 +399,52 @@ TEST_CASE ("A time range is deleted, split, inserted and removed")
     // A range whose tracks are all gone is empty.
     phazite::deleteTracks (e.song, { e.tracks[0] }, nullptr);
     CHECK (e.range.isEmpty());
+}
+
+TEST_CASE ("Removing time keeps the tempo that played after it: a change inside moves to its start, or the song's start takes it")
+{
+    // An intro at 90 BPM, and a verse from beat 16 at 128 that the chorus after it, from beat 32, plays at too: the change
+    // in a range removed went, so what came after played at the tempo before it.
+    const auto makeSong = [] (ClipEdit& e)
+    {
+        phazite::setTempo (e.song, 90.0);
+        const phazite::UndoStep step (e.song, "Add Tempo Change");
+        phazite::addTempoChange (e.song, beats (16.0), 128.0);
+    };
+
+    const auto describeTempos = [] (const phazite::Song& song)
+    {
+        juce::StringArray tempos;
+
+        for (const auto& tempo : phazite::getTempoChanges (song))
+            tempos.add (juce::String (tempo.beat.inBeats()) + ": " + juce::String (tempo.bpm));
+
+        return tempos.joinIntoString (", ");
+    };
+
+    const auto removeTime = [] (phazite::Song& song, double from, double to)
+    {
+        const phazite::UndoStep step (song, "Remove Time");
+        phazite::removeTime (song, { beats (from), beats (to) });
+    };
+
+    // The verse removed: the chorus, now from beat 16, at 128 still.
+    {
+        ClipEdit e;
+        makeSong (e);
+        removeTime (e.song, 16.0, 32.0);
+        CHECK (describeTempos (e.song) == juce::String ("0: 90, 16: 128"));
+    }
+
+    // The intro removed: the song starts at the verse's 128, one tempo at its start; undone, as it was.
+    {
+        ClipEdit e;
+        makeSong (e);
+        removeTime (e.song, 0.0, 16.0);
+        CHECK (describeTempos (e.song) == juce::String ("0: 128"));
+        phazite::undo (e.song);
+        CHECK (describeTempos (e.song) == juce::String ("0: 90, 16: 128"));
+    }
 }
 
 TEST_CASE ("Duplicate copies a time range right after it, and the range moves to the copy")

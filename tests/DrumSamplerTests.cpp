@@ -11,6 +11,7 @@
 #include "TestSong.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
+#include "engine/nodes/DeviceRunner.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
@@ -26,6 +27,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -369,6 +371,23 @@ TEST_CASE ("A gated drum pad decays from its note's end; a one-shot plays on")
 
     CHECK (tailOf (DrumSampler::Mode::gate) <= (size_t) (4800 + 0.02 * testRate) + testBlockSize);
     CHECK (tailOf (DrumSampler::Mode::oneShot) == 24000);
+
+    // Every note let go at once, as Stop and a jump let them go, without a note-off of its own: the gated pad decays there
+    // too (it rang on to its sound's end); a one-shot plays on.
+    const auto afterAllOff = [] (DrumSampler::Mode mode)
+    {
+        auto values = getDefaults();
+        set (values, 49, DrumSampler::mode, (float) mode);
+        set (values, 49, DrumSampler::decay, 20.0f);
+        DrumSampler sampler;
+        sampler.prepare (testRate, testBlockSize);
+        const auto played =
+            play (sampler, values, 24000, { noteOn (0, 49), { NoteEvent::Type::allNotesOff, 4800, 0, 0.0f } }, [] (int) {}, 24000);
+        return soundingUntil (played.left);
+    };
+
+    CHECK (afterAllOff (DrumSampler::Mode::gate) <= (size_t) (4800 + 0.02 * testRate) + testBlockSize);
+    CHECK (afterAllOff (DrumSampler::Mode::oneShot) == 24000);
 }
 
 TEST_CASE ("A drum pad plays from its start, reversed from its end, through its attack, swept to its pitch and filtered")
@@ -929,6 +948,43 @@ TEST_CASE ("A drum pad on a track of its own plays there, leaving its sampler's 
     CHECK (phazite::findPadTrack (model, sampler, 36) == padTrack);
     phazite::setTrackMuted (model, padTrack, true);
     CHECK (peaks().first < 1.0e-4f);
+}
+
+TEST_CASE ("A pad on a track of its own rings on after its sampler's own sound has ended: the sampler doesn't sleep under it")
+{
+    // Played as an audio device plays it (a render never sleeps): the crash's part on an output of its own, hit once. The
+    // sampler's own channels are silent from the start, and a runner silent for a quarter of a second went to sleep, so
+    // the crash on its own track stopped dead there.
+    phazite::engine::DeviceRunner runner (DrumSampler::info, std::make_unique<DrumSampler>());
+    runner.prepare (testRate, testBlockSize);
+    juce::AudioBuffer<float> buffer (2, testBlockSize), part (2, testBlockSize);
+    const devices::PartOutput crash { 49, { part.getWritePointer (0), part.getWritePointer (1) } };
+    const auto values = getDefaults();
+    phazite::engine::DeviceRunner::Block block;
+    block.values = values;
+    block.partOutputs = std::span (&crash, 1);
+    block.isPlaying = true;
+    std::array<NoteEvent, 1> hit { noteOn (0, 49) };
+    auto loudestEarly = 0.0f, loudestLate = 0.0f;
+
+    for (int done = 0; done < (int) testRate; done += testBlockSize)
+    {
+        // Cleared by its pointers, which the sampler writes through (AudioBuffer::clear() marks it clear, and its level reads
+        // nothing then).
+        buffer.clear();
+
+        for (int channel = 0; channel < 2; ++channel)
+            juce::FloatVectorOperations::clear (part.getWritePointer (channel), testBlockSize);
+
+        block.events = done == 0 ? std::span<NoteEvent> (hit) : std::span<NoteEvent>();
+        runner.process (buffer, 0, testBlockSize, block);
+        CHECK (buffer.getMagnitude (0, testBlockSize) == 0.0f); // all of it on its own track
+        auto& loudest = done >= (int) (testRate / 2) ? loudestLate : loudestEarly;
+        loudest = std::max (loudest, part.getMagnitude (0, 0, testBlockSize));
+    }
+
+    REQUIRE (loudestEarly > 0.05f);
+    CHECK (loudestLate > 0.01f);
 }
 
 TEST_CASE ("Stopping playback cuts the hits that had only just begun, and lets the others ring")

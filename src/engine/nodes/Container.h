@@ -56,6 +56,7 @@ public:
     ContainerState (int maximumBlockSize, int latency);
 
     int getLatency() const noexcept { return latency; }
+    int getMaximumBlockSize() const noexcept { return dry.getNumSamples(); } // the longest block it keeps
     void setMix (float) noexcept;
 
     // Audio thread: what comes in, before its chains; and after them, what they put out mixed with it.

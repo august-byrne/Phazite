@@ -1030,14 +1030,15 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
 
 void forgetCurvesOfGoneDevices (Song& song)
 {
-    // A device that is there keeps its curves, those of parameters it has now and others (a plug-in that isn't installed
-    // has none until it is): a device's, a fader's or a send's.
+    // What is there keeps its curves, those of parameters it has now and others (a plug-in that isn't installed has none
+    // until it is): a device's, a fader's, a send's or a container's chain's (its volume, pan and crossover), each an
+    // automated parameter's owner as locateParameter() finds it. (A modulator's parameters aren't automated.)
     auto automation = song.getState().getChildWithName (schema::AUTOMATION);
 
     for (auto i = automation.getNumChildren(); --i >= 0;)
-        if (const auto device = getCurveParameter (automation.getChild (i)).device; ! findDeviceState (song, device).isValid()
-                                                                                    && ! findSendState (song, device).isValid()
-                                                                                    && ! findChannelOfFader (song, device).isValid())
+        if (const auto owner = getCurveParameter (automation.getChild (i)).device;
+            ! findDeviceState (song, owner).isValid() && ! findSendState (song, owner).isValid()
+            && ! findChannelOfFader (song, owner).isValid() && ! findContainerChain (song, owner).isValid())
             automation.removeChild (i, nullptr);
 }
 

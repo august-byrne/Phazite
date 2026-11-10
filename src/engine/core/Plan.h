@@ -26,6 +26,11 @@ struct Plan
 {
     TempoMap tempo;
 
+    // The longest block its buffers take, as it was made for (its strips', devices', chains' and containers'); 0 for a plan
+    // with no buffers of its own, which takes blocks of any length. While the device's blocks grow, the engine plays them in
+    // parts this long until it is handed the plan made for them.
+    int maximumBlockSize = 0;
+
     // What plays over and over while the loop is on, in beats; none while it is off.
     struct BeatRange
     {

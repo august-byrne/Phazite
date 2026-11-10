@@ -10,6 +10,7 @@
 #include "devices/sampler/SampleAnalysis.h"
 #include "devices/sampler/Sampler.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -342,6 +343,79 @@ TEST_CASE ("The sampler's loop holds a note on past its sound's end, its seam cr
     sampler->reset();
     const auto once = play (*sampler, values, (int) testRate, { noteOn (0, 60) });
     CHECK (peakOf (once, (size_t) (0.51 * testRate), once.size()) == 0.0f);
+}
+
+TEST_CASE ("A loop that starts where the sound starts plays round without a dip: the start's fade in is for its first time only")
+{
+    // A steady level, played from a quarter in, its loop from there (Loop Start before Start is Start) to three quarters,
+    // without a crossfade: each time round began at the start's few samples' fade in again, a dip to silence, a click.
+    auto steady = makeSound (24000, [] (int) { return 0.5f; });
+    auto sampler = makeSampler (steady);
+    auto values = getPlainValues();
+    values[Sampler::start] = 0.25f;
+    values[Sampler::loopOn] = 1.0f;
+    values[Sampler::loopStart] = 0.0f;
+    values[Sampler::loopEnd] = 0.75f;
+    values[Sampler::loopCrossfade] = 0.0f;
+
+    const auto held = play (*sampler, values, (int) testRate, { noteOn (0, 60) });
+    auto lowest = 1.0f;
+
+    for (auto i = (size_t) (0.1 * testRate); i < held.size(); ++i)
+        lowest = std::min (lowest, std::abs (held[i]));
+
+    CHECK (lowest > 0.4f);
+}
+
+TEST_CASE ("A note on a sampler voice that Stop was fading plays at its full level, though the voice's release ended first")
+{
+    // Mono, released in a millisecond: Stop just after its note began fades the voice over 10 ms, and its release ends first,
+    // which left the voice fading for the next note, which then died in a few milliseconds.
+    auto values = getPlainValues();
+    values[Sampler::voiceMode] = 1.0f; // mono: every note on the one voice
+    values[Sampler::release] = 1.0f;
+    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    std::vector<NoteEvent> events;
+    const auto playBlock = [&buffer, &events, &values] (Sampler& sampler, bool songPlays, std::vector<NoteEvent> inBlock)
+    {
+        buffer.clear();
+        events = std::move (inBlock);
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = testBlockSize;
+        block.parameters = values;
+        block.events = events;
+        block.tempo = 120.0;
+        block.isPlaying = songPlays;
+        sampler.process (block);
+        return buffer.getMagnitude (0, 0, testBlockSize);
+    };
+
+    const auto loudestOfNote = [&playBlock] (Sampler& sampler)
+    {
+        playBlock (sampler, true, { noteOn (0, 60) });
+        auto loudest = 0.0f;
+
+        for (int i = 0; i < 8; ++i)
+            loudest = std::max (loudest, playBlock (sampler, true, {}));
+
+        return loudest;
+    };
+
+    const auto sine = makeSine (440.0, 1.0);
+    const auto full = loudestOfNote (*makeSampler (sine));
+    REQUIRE (full > 0.1f);
+
+    auto sampler = makeSampler (sine);
+    playBlock (*sampler, true, { noteOn (0, 60) });
+    playBlock (*sampler, false, { { NoteEvent::Type::allNotesOff, 0, 0, 0.0f } });
+
+    for (int i = 0; i < 8; ++i)
+        playBlock (*sampler, false, {});
+
+    CHECK (loudestOfNote (*sampler) == doctest::Approx (full).epsilon (0.01));
 }
 
 TEST_CASE ("One-Shot plays to the end whatever the note, and with Gate lets go over its fade out")

@@ -34,7 +34,8 @@ DeviceID addContainer (ProjectContext&, TrackID channel);
 
 // An instrument container as a track's instrument ("Add Instrument Container"), as the instruments' menu offers one: the
 // instrument the track had goes into its one chain, for others to be layered with it. Returns it, or none for a track that
-// can't hold an instrument.
+// can't hold an instrument, or whose instrument is an instrument container already (which can't go into another's chain).
+bool canAddInstrumentContainer (const ProjectContext&, TrackID);
 DeviceID addInstrumentContainer (ProjectContext&, TrackID);
 
 // Whether a container can be ungrouped, one of one chain, and ungrouping it ("Ungroup Container"): its devices back on its

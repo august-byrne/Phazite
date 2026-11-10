@@ -12,6 +12,8 @@
 #include "model/devices/ParameterRef.h"
 #include "model/modulation/ModulationValues.h"
 
+#include <cstdint>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -86,4 +88,9 @@ bool canModulate (const Song&, ModulatorID, const ParameterRef&);
 // Makes a modulation or changes its amount (-1 to 1, to a ten-thousandth), and takes it away.
 void setModulation (Song&, ModulatorID, const ParameterRef&, float amount);
 void removeModulation (Song&, ModulatorID, const ParameterRef&);
+
+// What modulates the originals of copies modulates the copies too, as much, by the IDs a copy was given (giveNewIDs():
+// each original's to its copy's): for a copy that the modulators aren't in, a container's chain's, whose macros are the
+// container's and whose track's modulators are the track's. In the caller's undo step.
+void copyModulations (Song&, const std::map<std::uint64_t, std::uint64_t>& copied);
 } // namespace phazite

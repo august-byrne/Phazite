@@ -61,10 +61,11 @@ namespace
 juce::PopupMenu makeInstrumentMenu (ProjectContext& context, TrackID track, juce::Component& target, const std::vector<DeviceType>& types)
 {
     // An instrument container first, as the effects' menu starts with a container of effects: it layers instruments, or
-    // plays each on keys of its own; the instrument the track has goes into it, for others to be added beside it.
+    // plays each on keys of its own; the instrument the track has goes into it, for others to be added beside it. Not while
+    // the instrument is one: its chains take more instruments.
     const juce::Component::SafePointer<juce::Component> safeTarget (&target);
     juce::PopupMenu start;
-    start.addItem ("Container",
+    start.addItem ("Container", canAddInstrumentContainer (context, track), false,
                    [&context, track, safeTarget]
                    {
                        if (safeTarget != nullptr)

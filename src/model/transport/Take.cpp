@@ -429,30 +429,46 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
     if (notes.empty() || played.to <= played.from)
         return;
 
-    // The clip they go in: with Overdub, the MIDI clip the first starts in; otherwise a new one over what was recorded, in
-    // place of what was there.
+    // The clip each goes in: with Overdub, the MIDI clip it starts in, or one made for the gap it falls in, between the clips
+    // around it within what was recorded (all in the one that holds the first, the rest went outside it and never played);
+    // otherwise a new one over what was recorded, in place of what was there.
     const auto toBeat = [this] (std::int64_t sample) { return BeatPosition::fromBeats (tempo->toBeats ((double) sample)); };
     const auto range = BeatRange (toBeat (played.from), toBeat (played.to));
-    const auto firstStart = toBeat (notes.front().start);
-    ClipID clip;
+    const auto overdub = isOverdubOn (session.getAudioIO());
+    ClipID recorded;
 
-    if (isOverdubOn (session.getAudioIO()))
-    {
-        for (const auto& clipState : getClipStates (findTrackState (song, midiTrack)))
-            if (! clip.isValid() && isMidiState (clipState) && getClipRange (clipState).getStart() <= firstStart
-                && getClipRange (clipState).getEnd() > firstStart)
-                clip = getClipID (clipState);
-    }
-    else
+    if (! overdub)
     {
         clearClipsIn (song, midiTrack, range);
+        recorded = insertMidiClip (song, midiTrack, range, nullptr);
+
+        if (! recorded.isValid())
+            return;
     }
 
-    if (! clip.isValid())
-        clip = insertMidiClip (song, midiTrack, range, nullptr);
+    const auto clipFor = [&] (BeatPosition beat) -> ClipID
+    {
+        if (! overdub)
+            return recorded;
 
-    if (! clip.isValid())
-        return;
+        const auto clips = getClipStates (findTrackState (song, midiTrack));
+
+        for (const auto& clipState : clips)
+            if (isMidiState (clipState) && getClipRange (clipState).getStart() <= beat && getClipRange (clipState).getEnd() > beat)
+                return getClipID (clipState);
+
+        auto from = std::min (range.getStart(), beat), to = range.getEnd(); // quantized, a note can start before what was recorded
+
+        for (const auto& clipState : clips)
+        {
+            if (const auto around = getClipRange (clipState); around.getEnd() <= beat)
+                from = std::max (from, around.getEnd());
+            else if (around.getStart() > beat)
+                to = std::min (to, around.getStart());
+        }
+
+        return to > from ? insertMidiClip (song, midiTrack, { from, to }, nullptr) : ClipID();
+    };
 
     const auto quantize = isRecordQuantizeOn (session.getAudioIO());
 
@@ -461,11 +477,19 @@ void Take::placeNotes (std::int64_t startSample, std::int64_t startClock, std::i
         auto start = toBeat (note.start).inBeats();
         const auto noteLength = toBeat (note.end).inBeats() - start;
 
+        // Quantized round a looped range, a note played just before its end goes round to its start, where it would sound
+        // the next time round; at the end, it would make the clip longer than the range and never play.
         if (quantize)
+        {
             start = std::round (start / sixteenthInBeats) * sixteenthInBeats;
 
-        addNote (song, clip, note.pitch, BeatPosition::fromBeats (start),
-                 BeatDuration::fromBeats (std::max (noteLength, getMinimumNoteLength().inBeats())), note.velocity);
+            if (loop.has_value() && start >= loop->getEnd().inBeats() - 1.0e-9)
+                start -= loop->getLength().inBeats();
+        }
+
+        if (const auto clip = clipFor (BeatPosition::fromBeats (start)); clip.isValid())
+            addNote (song, clip, note.pitch, BeatPosition::fromBeats (start),
+                     BeatDuration::fromBeats (std::max (noteLength, getMinimumNoteLength().inBeats())), note.velocity);
     }
 }
 

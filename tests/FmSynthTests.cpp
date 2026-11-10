@@ -613,6 +613,56 @@ TEST_CASE ("The FM synth doesn't fold a high note's sidebands back down as alias
     CHECK (worst < fundamental * 0.03); // more than 30 dB down
 }
 
+TEST_CASE ("A note on an FM voice that Stop was fading plays at its full level, though the voice's release ended first")
+{
+    // Operator 1 alone, released in a millisecond: Stop just after its note began fades the voice over 10 ms, and its
+    // release ends first, which left the voice fading for the next note on it, which then died in a few milliseconds.
+    auto values = getPlainValues();
+    at (values, 0, Field::release) = 1.0f;
+    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    std::vector<NoteEvent> events;
+    const auto playBlock = [&buffer, &events, &values] (FmSynth& synth, bool songPlays, std::vector<NoteEvent> inBlock)
+    {
+        buffer.clear();
+        events = std::move (inBlock);
+        float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        devices::ProcessContext block;
+        block.channels = channels;
+        block.numChannels = 2;
+        block.numSamples = testBlockSize;
+        block.parameters = values;
+        block.events = events;
+        block.isPlaying = songPlays;
+        synth.process (block);
+        return buffer.getMagnitude (0, 0, testBlockSize);
+    };
+
+    const auto loudestOfNote = [&playBlock] (FmSynth& synth)
+    {
+        playBlock (synth, true, { noteOn (0, 60) });
+        auto loudest = 0.0f;
+
+        for (int i = 0; i < 8; ++i)
+            loudest = std::max (loudest, playBlock (synth, true, {}));
+
+        return loudest;
+    };
+
+    const auto fresh = makeSynth();
+    const auto full = loudestOfNote (*fresh);
+    REQUIRE (full > 0.1f);
+
+    const auto synth = makeSynth();
+    playBlock (*synth, true, { noteOn (0, 60) });
+    playBlock (*synth, false, { { NoteEvent::Type::allNotesOff, 0, 0, 0.0f } });
+
+    for (int i = 0; i < 8; ++i)
+        playBlock (*synth, false, {});
+
+    REQUIRE (synth->getActiveVoices() == 0);
+    CHECK (loudestOfNote (*synth) == doctest::Approx (full).epsilon (0.01));
+}
+
 TEST_CASE ("The FM synth plays the same every time, and lets every note go")
 {
     const auto values = getDefaults();

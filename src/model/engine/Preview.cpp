@@ -180,6 +180,7 @@ struct Previewer::Impl : private juce::Timer
     void setPlan (engine::Plan::Strip sound, double bpm)
     {
         auto plan = std::make_unique<engine::Plan>();
+        plan->maximumBlockSize = previews.getMaximumBlockSize(); // its sound's strip's and the master's
         plan->tempo = engine::TempoMap ({ { 0.0, bpm } }, { { 0.0, 4, 4 } }, previews.getSampleRate());
 
         if (repeating)

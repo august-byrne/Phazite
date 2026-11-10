@@ -305,4 +305,11 @@ void ClipRenders::valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&)
 {
     startTimer (quietMilliseconds); // a clip, or a track with clips, back from undo, say
 }
+
+void ClipRenders::valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int)
+{
+    // A tempo change taken away, or a clip's last warp marker: the clips under it play at another speed now, from a render
+    // of their own.
+    startTimer (quietMilliseconds);
+}
 } // namespace phazite

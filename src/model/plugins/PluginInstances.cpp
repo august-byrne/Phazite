@@ -53,6 +53,8 @@ namespace
         }
     }
 
+    // Every track's and the master's (which isn't among the tracks): one missed here would be made anew from what its device
+    // stored at each change of the song, and never store what it keeps of its own.
     std::vector<juce::ValueTree> findPlugins (const Song& song)
     {
         std::vector<juce::ValueTree> found;
@@ -60,6 +62,7 @@ namespace
         for (const auto& track : getTrackStates (song))
             findPlugins (track, found);
 
+        findPlugins (song.getState().getChildWithName (schema::MASTER), found);
         return found;
     }
 

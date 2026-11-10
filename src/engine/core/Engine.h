@@ -261,6 +261,7 @@ private:
     std::vector<ModulatorNode::Point> controlPoints;
     int numControlPoints = 0;
     std::int64_t clock = 0;
+    int partStart = 0;   // where the part of the block played starts in it (a block longer than a plan takes plays in parts)
     Delay noDelay { 0 }; // joins what needs no delay, at a gain
     LoudnessMeter loudness;
     void findControlPoints (const Plan&, std::int64_t gridSample, int numSamples) noexcept;

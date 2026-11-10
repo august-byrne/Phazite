@@ -96,6 +96,7 @@ private:
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override;
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override;
+    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override;
 
     JUCE_DECLARE_NON_COPYABLE (ClipRenders)
 };

@@ -110,6 +110,20 @@ namespace
         return true;
     }
 
+    // The same for the outputs its parts play into (a drum sampler's pads on tracks of their own), from where a block starts
+    // in them.
+    bool arePartsQuiet (std::span<const devices::PartOutput> parts, int start, int numSamples, float silence)
+    {
+        for (const auto& part : parts)
+            for (const auto* channel : part.channels)
+                if (channel != nullptr)
+                    if (const auto range = juce::FloatVectorOperations::findMinAndMax (channel + start, numSamples);
+                        range.getEnd() > silence || range.getStart() < -silence)
+                        return false;
+
+        return true;
+    }
+
     // The events before a sample.
     std::span<devices::NoteEvent> getEventsBefore (std::span<devices::NoteEvent> events, int sample) noexcept
     {
@@ -219,8 +233,10 @@ void DeviceRunner::end (juce::AudioBuffer<float>& buffer, int start, int numSamp
     if (! begun.settled)
         keepValues();
 
-    // Silent in and out long enough: asleep from the next block.
-    if (begun.quietIn && isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence))
+    // Silent in and out long enough, its parts' own outputs too (a pad on a track of its own rings on after the sampler's
+    // own sound has ended): asleep from the next block.
+    if (begun.quietIn && isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence)
+        && arePartsQuiet (in.partOutputs, in.outputOffset, numSamples, silence))
     {
         silentSamples = std::min (silentSamples + numSamples, sleepAfterSamples);
         asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence();

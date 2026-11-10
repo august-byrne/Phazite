@@ -111,6 +111,7 @@ private:
     juce::Viewport bodyView; // the device that shows, beside the column
     std::unique_ptr<juce::Component> body;
     DeviceID bodyDevice;       // whose it is
+    DeviceID bodyContainer;    // the container it showed it in (around it), or none
     bool bodyInWindow = false; // what it showed: that the device is in its window,
     bool bodyFrozen = false;   // that it is frozen
     juce::Label hint;          // with nothing to show: why, or what to do

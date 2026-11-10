@@ -1363,3 +1363,25 @@ TEST_CASE (
     CHECK (phazite::test::findComponentWithTitle (*editor->getParentComponent(), "Macro 1") != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*editor->getParentComponent(), "Back to Chain 1") != nullptr);
 }
+
+TEST_CASE ("A device shown in its container shows alone once the container is ungrouped, without the gone container's macros")
+{
+    // The same device shown again was kept as it was, in the frame of the container it had been in.
+    Screen screen;
+    auto& view = screen.view;
+    const auto eq = screen.effects (0)[0];
+    const auto container = phazite::groupIntoContainer (screen.context, { eq });
+    REQUIRE (container.isValid());
+    phazite::test::dispatchPendingMessages();
+    view.showDevice (eq);
+    phazite::test::dispatchPendingMessages();
+    auto* inside = dynamic_cast<phazite::ui::EqEditor*> (view.getShownBody());
+    REQUIRE (inside != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*inside->getParentComponent(), "Macro 1") != nullptr);
+
+    phazite::ungroupContainer (screen.context, container);
+    phazite::test::dispatchPendingMessages();
+    auto* alone = dynamic_cast<phazite::ui::EqEditor*> (view.getShownBody());
+    REQUIRE (alone != nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*alone->getParentComponent(), "Macro 1") == nullptr);
+}

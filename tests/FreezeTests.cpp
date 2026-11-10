@@ -359,6 +359,26 @@ TEST_CASE ("A freeze cancelled leaves the track as it was")
         CHECK_FALSE (file.getFileName().startsWith ("Frozen"));
 }
 
+TEST_CASE ("A track frozen while it is muted, or while another track is soloed, freezes its sound, not silence")
+{
+    // A render before the fader hears the track whatever its mute switch or a solo elsewhere says: muted, it rendered its
+    // first block alone; Bounce in Place mutes the original, so a second bounce of it was silent.
+    for (const auto soloElsewhere : { false, true })
+    {
+        CAPTURE (soloElsewhere);
+        Song song;
+        auto& model = song.getSong();
+
+        if (soloElsewhere)
+            phazite::setTrackSoloed (model, song.reverb, true);
+        else
+            phazite::setTrackMuted (model, song.bass, true);
+
+        song.freeze();
+        CHECK (getLevel (song.frozenFile(), 0.5, 1.0) > 0.05);
+    }
+}
+
 TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio track under it, and mutes the original")
 {
     Song song;

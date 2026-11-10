@@ -122,11 +122,17 @@ DeviceID addContainer (ProjectContext& context, TrackID channel)
     return addContainer (*song, channel);
 }
 
+bool canAddInstrumentContainer (const ProjectContext& context, TrackID track)
+{
+    const auto* song = findSong (context);
+    return song != nullptr && canHoldInstrument (context, track) && ! isContainer (*song, getInstrument (*song, track));
+}
+
 DeviceID addInstrumentContainer (ProjectContext& context, TrackID track)
 {
     auto* song = findSong (context);
 
-    if (song == nullptr || ! canHoldInstrument (context, track))
+    if (song == nullptr || ! canAddInstrumentContainer (context, track))
         return {};
 
     const UndoStep step (*song, "Add Instrument Container");

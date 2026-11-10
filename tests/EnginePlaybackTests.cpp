@@ -24,6 +24,7 @@
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TransportModel.h"
+#include "model/transport/internal/Playback.h"
 
 #include <cmath>
 #include <cstring>
@@ -239,6 +240,54 @@ TEST_CASE ("A new plan compiles again the notes of the tracks whose clips change
     compile();
     phazite::undo (state);
     CHECK (pitchesOf (*compile(), song.firstTrack) == std::vector { 60, 64 });
+}
+
+TEST_CASE ("A note sounding as its track's last clip goes ends at once, and one held as the loop moves before the playhead ends")
+{
+    // Test Tone plays the velocity of the note it holds; at 120 BPM a beat is half a second.
+    TestSong song;
+    song.setTempo (120.0);
+    auto& state = *phazite::findSong (song.context);
+    phazite::test::addTestDevice (state, song.firstTrack, phazite::test::TestTone::typeID);
+    const auto quietAt = [] (const juce::AudioBuffer<float>& audio, double from, double to)
+    {
+        const auto first = (int) (from * EnginePlayback::sampleRate);
+        return audio.getMagnitude (0, first, (int) (to * EnginePlayback::sampleRate) - first) == 0.0f;
+    };
+
+    {
+        // A note held from the song's start; its clip deleted as it sounds (the track's only one): it ends, and doesn't
+        // sound on until Stop.
+        const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+        song.addNote (clip, 60, 0.0, 16.0);
+        EnginePlayback playback;
+        song.run ("transport.playStop");
+        REQUIRE_FALSE (quietAt (playback.play (0.5), 0.4, 0.5));
+
+        {
+            const phazite::UndoStep step (state, "Delete Clip");
+            phazite::deleteClips (state, { clip }, false);
+        }
+
+        CHECK (quietAt (playback.play (0.5), 0.1, 0.5));
+        song.run ("transport.playStop");
+    }
+
+    {
+        // A note held from beat 8 and one at beat 1; the playhead at beat 10 when the loop becomes beats 0 to 4: playback
+        // goes round to its start, the held note ending, and the loop's note plays the first time round.
+        const auto clip = song.addMidiClip (song.firstTrack, 0.0, 16.0);
+        song.addNote (clip, 62, 8.0, 8.0);
+        song.addNote (clip, 64, 1.0, 1.0);
+        EnginePlayback playback;
+        song.run ("transport.playStop");
+        REQUIRE_FALSE (quietAt (playback.play (5.0), 4.5, 5.0));
+        phazite::loopBeatRange (state, 0.0, 4.0);
+        const auto looped = playback.play (1.25);
+        CHECK (quietAt (looped, 0.1, 0.45));
+        CHECK_FALSE (quietAt (looped, 0.6, 0.9));
+        song.run ("transport.playStop");
+    }
 }
 
 TEST_CASE ("The piano roll's guide notes play through Phazite's engine while the song is stopped")
