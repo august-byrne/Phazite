@@ -64,6 +64,12 @@ float MixHandle::getValue() const
     return song != nullptr ? getMix (*song, impl->device) : 1.0f;
 }
 
+float MixHandle::getDefaultValue() const
+{
+    auto* song = impl != nullptr ? impl->findSong() : nullptr;
+    return song != nullptr ? getDefaultMix (*song, impl->device) : 1.0f;
+}
+
 void MixHandle::beginGesture()
 {
     auto* song = impl != nullptr ? impl->findSong() : nullptr;

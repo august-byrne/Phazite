@@ -15,13 +15,18 @@
 #include "model/base/internal/SongText.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/VersionHistory.h"
+#include "ui/components/Controls.h"
+#include "ui/input/CommandBridge.h"
+#include "ui/mixer/DevicesView.h"
 
 namespace
 {
@@ -228,6 +233,197 @@ TEST_CASE ("A knob turned and set back to its default, or a modulator's, is no c
         defaultOf (phazite::devices::getModulatorParameters (phazite::devices::ModulatorKind::envelopeFollower), "depth"));
     CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
     CHECK_FALSE (s.getProject().hasUnsavedChanges());
+
+    // The faders too, the master's to where it starts, a little down, which its double-click sets (it set 0 dB: 2026-11-09).
+    const auto setBack = [&s] (phazite::ParameterHandle fader)
+    {
+        INFO (fader.getName().toStdString());
+        REQUIRE (fader.getDefaultValue().has_value());
+        fader.setValue (0.3f);
+        CHECK (phazite::hasChangesSinceLastVersion (s.context));
+        fader.setValue (*fader.getDefaultValue());
+        CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+        CHECK_FALSE (s.getProject().hasUnsavedChanges());
+    };
+
+    setBack (phazite::getVolume (s.context, track));
+    setBack (phazite::getMasterVolume (s.context));
+}
+
+TEST_CASE ("An effect's knob turned in the Devices view, then double-clicked back or undone, is no change since the last version")
+{
+    // As the user sets a knob back (the owner's report, 2026-11-09): dragged, then double-clicked, which sets it to its
+    // default; or dragged, then undone. Each of Phazite's own effects in its editor beside the column, their mixes at their
+    // lines' ends, and a plug-in's key knobs, which set its parameters through Phazite's controls.
+    TestPlugin testPlugin; // before the song that holds one, and gone after it
+    TestSong s;
+    const auto track = s.addTrack ("Effects");
+    std::vector<std::pair<phazite::DeviceID, juce::String>> effects;
+
+    for (const auto& type : phazite::getDeviceTypes (s.context))
+        if (! type.isInstrument && (type.isBuiltIn || type.description.fileOrIdentifier == TestPlugin::getDescription().fileOrIdentifier))
+            effects.emplace_back (s.addEffect (track, type.description.fileOrIdentifier.toRawUTF8()), type.name);
+
+    REQUIRE (effects.size() > 10);
+    keepVersion (s.context);
+    REQUIRE_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+    auto& song = *phazite::findSong (s.context);
+
+    phazite::ui::CommandBridge bridge { s.commands };
+    phazite::ui::DevicesView view { bridge, s.context };
+    TestWindow window { view, 1600, 380 };
+    s.context.getSongSelection().selectOnly (track);
+    dispatchPendingMessages();
+    Mouse mouse (view); // one for every knob, so that its clicks' times only go forward
+
+    // The knobs that show, enabled, where the mouse reaches them (not scrolled away under the column's top): in what shows
+    // the device beside the column, or in the column.
+    const auto findKnobs = [&view] (bool beside)
+    {
+        std::vector<phazite::ui::Knob*> knobs;
+        auto* body = view.getShownBody();
+
+        for (auto* knob : findAll<phazite::ui::Knob> (view))
+        {
+            auto* reached = view.getComponentAt (view.getLocalPoint (knob, knob->getLocalBounds().getCentre()));
+
+            if (knob->isShowing() && knob->isEnabled() && (reached == knob || knob->isParentOf (reached))
+                && (body != nullptr && body->isParentOf (knob)) == beside)
+                knobs.push_back (knob);
+        }
+
+        return knobs;
+    };
+
+    // A drag up, or down from the top of its range; where it was pressed.
+    const auto turn = [&view, &mouse] (phazite::ui::Knob& knob)
+    {
+        const auto centre = view.getLocalPoint (&knob, knob.getLocalBounds().getCentre());
+        const auto atTop = knob.getValue() >= knob.getMaximum() - 0.001 * (knob.getMaximum() - knob.getMinimum());
+        mouse.press (centre);
+
+        for (int step = 1; step <= 4; ++step)
+            mouse.dragTo (centre.translated (0, (atTop ? 40 : -40) * step / 4));
+
+        mouse.release();
+        mouse.pause();
+        return centre;
+    };
+
+    // Each knob found again after each change, which may make the view's parts anew.
+    const auto turnAndSetBack = [&] (const juce::String& device, bool beside)
+    {
+        const auto count = findKnobs (beside).size();
+
+        for (size_t i = 0; i < count; ++i)
+        {
+            const auto knob = [&findKnobs, beside, count, i]
+            {
+                const auto knobs = findKnobs (beside);
+                REQUIRE (knobs.size() == count);
+                return knobs[i];
+            };
+
+            const auto what = device + ": " + knob()->getTitle();
+            INFO (what.toStdString());
+            const auto centre = turn (*knob());
+            CHECK (phazite::hasChangesSinceLastVersion (s.context));
+            mouse.doubleClick (centre);
+            dispatchPendingMessages();
+            CHECK (knob()->getValue() == doctest::Approx (knob()->getDoubleClickReturnValue()));
+            CHECK (describeChanges (s.context) == "");
+
+            turn (*knob());
+            CHECK (phazite::hasChangesSinceLastVersion (s.context));
+            phazite::undo (song);
+            dispatchPendingMessages();
+            CHECK (describeChanges (s.context) == "");
+        }
+
+        return count;
+    };
+
+    for (const auto& [device, name] : effects)
+    {
+        view.showDevice (device);
+        dispatchPendingMessages();
+        REQUIRE (view.getShownBody() != nullptr);
+        CHECK (turnAndSetBack (name, true) > 0);
+    }
+
+    CHECK (turnAndSetBack ("Mix", false) > 0);
+
+    // A plug-in's knob turned in its own window and set back there, its settings stored after each, as Auto Save stores them.
+    const auto plugin = effects.back().first; // the stand-in: plug-ins come after Phazite's own
+    const auto gain = TestPlugin::getGain (song, plugin);
+    TestPlugin::setGain (song, plugin, 0.25f);
+    song.storeDeviceStates();
+    CHECK (describeChanges (s.context).contains ("Gain"));
+    TestPlugin::setGain (song, plugin, gain);
+    song.storeDeviceStates();
+    CHECK (describeChanges (s.context) == "");
+}
+
+TEST_CASE ("A plug-in's knob set to its default by Phazite's controls keeps no value in the song, and what it plays still saves")
+{
+    TestPlugin testPlugin; // before the song that holds one, and gone after it
+    TestSong s;
+    auto& song = *phazite::findSong (s.context);
+    phazite::DeviceID plugin;
+
+    {
+        const phazite::UndoStep step (song, "Add the stand-in");
+        plugin = TestPlugin::add (song, s.firstTrack);
+    }
+
+    // Its Gain at a quarter, set in its own window, which its settings hold: the song keeps no value of its own for it.
+    TestPlugin::setGain (song, plugin, 0.25f);
+    keepVersion (s.context);
+    REQUIRE (s.getProject().save().wasOk());
+    dispatchPendingMessages();
+    REQUIRE_FALSE (s.getProject().hasUnsavedChanges());
+    const auto hasValue = [&song, plugin]
+    { return phazite::findDeviceState (song, plugin).getChildWithProperty (schema::valueParameter, TestPlugin::gainID).isValid(); };
+    const auto played = [&song, plugin]
+    {
+        auto* instance = phazite::findPluginInstance (song, plugin);
+        REQUIRE (instance != nullptr);
+        return instance->getParameterValue (instance->findParameter (TestPlugin::gainID));
+    };
+    REQUIRE_FALSE (hasValue());
+
+    // Set to its default by a control, as a double-click sets it: a change from what the plug-in held, which the song keeps.
+    s.setParameter (plugin, TestPlugin::gainID, 1.0f);
+    CHECK (played() == doctest::Approx (1.0f));
+    CHECK (hasValue());
+    CHECK (describeChanges (s.context).contains ("Gain 25%"));
+
+    // Turned and set back to its default again: no value in the song, the plug-in holding it, and still a change that saves.
+    s.setParameter (plugin, TestPlugin::gainID, 0.5f);
+    s.setParameter (plugin, TestPlugin::gainID, 1.0f);
+    CHECK_FALSE (hasValue());
+    CHECK (played() == doctest::Approx (1.0f));
+    CHECK (describeChanges (s.context).contains ("Gain 25%"));
+    CHECK (s.getProject().hasUnsavedChanges());
+
+    // Undone, step by step, back to what the plug-in held, never through 0, and no change at all.
+    phazite::undo (song);
+    CHECK (played() == doctest::Approx (0.5f));
+    phazite::undo (song);
+    CHECK (played() == doctest::Approx (1.0f));
+    phazite::undo (song);
+    CHECK (played() == doctest::Approx (0.25f));
+    CHECK_FALSE (hasValue());
+    CHECK (describeChanges (s.context) == "");
+
+    // Redone and saved: opened again, the plug-in plays its default from its settings.
+    phazite::redo (song);
+    phazite::redo (song);
+    phazite::redo (song);
+    CHECK_FALSE (hasValue());
+    REQUIRE (s.getProject().save().wasOk());
+    s.reopen();
+    CHECK (TestPlugin::getGain (*phazite::findSong (s.context), plugin) == doctest::Approx (1.0f));
 }
 
 TEST_CASE ("A track muted and unmuted again, soloed and unsoloed, or a clip muted and unmuted, is no change since the last version")

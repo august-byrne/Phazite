@@ -5,8 +5,9 @@
 // plug-in's, by the plug-in's own ID for it), a channel's fader's volume or pan, a send's level (Schema.h: faderVolume to
 // sendLevelParameter), by a container's chain's ID its volume, pan or crossover (chainVolumeParameter to
 // crossoverParameter), or, by the modulator's or the macro's ID, a modulator's parameter or a macro's value (by the
-// macro's ID as its parameter's). The song holds every value set by hand, but a plug-in's that no control set, which its
-// instance holds (and the song stores as it saves). For the model, the app and tests. Message thread only.
+// macro's ID as its parameter's). The song holds every value set by hand, but a plug-in's that no control set, or that one
+// set back to its default, which its instance holds (and the song stores as it saves). For the model, the app and tests.
+// Message thread only.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"

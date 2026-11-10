@@ -109,7 +109,8 @@ std::optional<juce::Point<int>> getWindowPosition (const Song&, DeviceID);
 // own effects' mix parameter, or a plug-in's or a container of effects' mix (Schema.h: deviceMix). An instrument (an
 // instrument container too) has none. Set in the caller's step.
 bool hasMix (const Song&, DeviceID);
-float getMix (const Song&, DeviceID); // 1 for a device without a mix
+float getMix (const Song&, DeviceID);        // 1 for a device without a mix
+float getDefaultMix (const Song&, DeviceID); // its mix parameter's default (a reverb's 0.25), else 1
 void setMix (Song&, DeviceID, float mix);
 
 // Which plug-in a device is, on its element in the song (Schema.h: pluginFormat to pluginInstrument), as its description

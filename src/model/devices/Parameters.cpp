@@ -41,6 +41,19 @@ namespace
         return device.getChildWithProperty (schema::valueParameter, parameter);
     }
 
+    // Whether two of a plug-in's values, from 0 to 1, are the same, to a millionth (as isDefaultValue() takes them).
+    bool isSamePluginValue (float a, float b)
+    {
+        return std::abs (a - b) <= 1.0e-6f;
+    }
+
+    // Whether a value is a plug-in's parameter's default, as its instance tells it (none known without one).
+    bool isPluginDefault (const Song& song, const ParameterRef& ref, float value)
+    {
+        const auto [instance, index] = findPluginParameter (song, ref);
+        return instance != nullptr && isSamePluginValue (value, instance->getParameterInfos()[(size_t) index].defaultValue);
+    }
+
     bool isVCA (const juce::ValueTree& channel, DeviceID fader)
     {
         return readID (channel, schema::channelVCA) == fader.getRaw();
@@ -226,8 +239,14 @@ ParameterDescription describeParameter (const Song& song, const FoundParameter& 
 
         case ParameterSource::volume:
         {
-            const auto* name = state.hasType (schema::MASTER) ? "Master volume" : isVCA (state, parameter.ref.device) ? "VCA" : "Volume";
-            return { parameter.source, name, { 0.0f, 1.0f }, atZeroDecibels, {} };
+            // The master's starts a little down (defaultMasterVolume), where a double-click sets it back.
+            const auto isMaster = state.hasType (schema::MASTER);
+            const auto* name = isMaster ? "Master volume" : isVCA (state, parameter.ref.device) ? "VCA" : "Volume";
+            return { parameter.source,
+                     name,
+                     { 0.0f, 1.0f },
+                     isMaster ? engine::decibelsToFaderPosition (defaultMasterVolume) : atZeroDecibels,
+                     {} };
         }
 
         case ParameterSource::pan:
@@ -389,18 +408,39 @@ void setValueSetByHand (Song& song, const FoundParameter& parameter, float value
 
         case ParameterSource::plugin:
         {
-            // A VALUE of the plug-in's element, which its instance takes (model/plugins/internal/PluginInstances.h).
+            // A VALUE of the plug-in's element, which its instance takes (model/plugins/internal/PluginInstances.h), made
+            // holding the value the plug-in has, so that an undo takes it back there; none for the value it has already.
             told = juce::jlimit (0.0f, 1.0f, value);
             moveOnePoint (song, ref, told);
-            auto stored = state.getChildWithProperty (schema::valueParameter, ref.parameter);
+            auto stored = findPluginValue (state, ref.parameter);
 
             if (! stored.isValid())
             {
-                stored = juce::ValueTree (schema::VALUE, { { schema::valueParameter, ref.parameter } });
-                state.appendChild (stored, undo);
+                const auto held = getValueSetByHand (song, parameter);
+
+                if (! isSamePluginValue (held, told))
+                {
+                    stored =
+                        juce::ValueTree (schema::VALUE, { { schema::valueParameter, ref.parameter }, { schema::valueSetByHand, held } });
+                    state.appendChild (stored, undo);
+                    stored.setProperty (schema::valueSetByHand, told, undo);
+                }
+
+                break;
             }
 
             stored.setProperty (schema::valueSetByHand, told, undo);
+
+            // One set back to the parameter's default goes, as Phazite's own devices keep none at their defaults
+            // (keepValueSetByHand()): the plug-in holds the value then, which its settings hold once the next save stores
+            // them. A change outside the song's history, so that the project saves it; the song's, not the plug-in's own,
+            // which the versions would take its stored settings for a change of (model/base/Song.h).
+            if (isPluginDefault (song, ref, told))
+            {
+                state.removeChild (stored, undo);
+                song.markChangedOutsideHistory();
+            }
+
             break;
         }
 

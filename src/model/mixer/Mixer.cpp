@@ -453,6 +453,14 @@ float getMix (const Song& song, DeviceID id)
     return (float) state.getProperty (schema::deviceMix, 1.0f);
 }
 
+float getDefaultMix (const Song& song, DeviceID id)
+{
+    if (const auto* own = hasMix (song, id) ? findOwnInfo (findDeviceState (song, id)) : nullptr)
+        return own->parameters[(size_t) devices::findParameter (*own, devices::mixParameterID)].defaultValue;
+
+    return 1.0f;
+}
+
 void setMix (Song& song, DeviceID id, float mix)
 {
     if (! hasMix (song, id))

@@ -118,7 +118,7 @@ namespace strip
           handle (std::move (mix))
     {
         slider.setRange (0.0, 1.0);
-        slider.setDoubleClickReturnValue (true, 1.0);
+        slider.setDoubleClickReturnValue (true, handle.getDefaultValue()); // as the device's own Mix knob sets it back
         slider.onDragStart = [this]
         {
             dragging = true;
@@ -144,10 +144,13 @@ namespace strip
     Knob* addMixKnob (juce::Component& parent, juce::OwnedArray<Knob>& knobs, std::unique_ptr<MixAttachment>& attachment,
                       ProjectContext& context, const DeviceSlot& device)
     {
-        auto* knob = knobs.add (new Knob ("Mix", 1.0));
+        auto mix = getMix (context, device.id);
+        const auto defaultMix = mix.getDefaultValue();
+        auto* knob = knobs.add (new Knob ("Mix", defaultMix));
         knob->textFromValueFunction = [] (double value) { return juce::String (juce::roundToInt (value * 100.0)) + "% wet"; };
         juce::String tooltip ("Mix: how much of the sound is the effect. At 100% it is the effect alone; lower lets the sound "
-                              "that comes in through as well. Double-click for 100%");
+                              "that comes in through as well. Double-click for ");
+        tooltip << juce::roundToInt (defaultMix * 100.0f) << "%";
 
         // An effect that delays its sound says by how much: the sound that comes in is delayed as much, so the two stay
         // together below 100% too.
@@ -156,7 +159,7 @@ namespace strip
                     << " ms, and what comes in with it";
 
         knob->setTooltip (tooltip);
-        attachment = std::make_unique<MixAttachment> (*knob, getMix (context, device.id));
+        attachment = std::make_unique<MixAttachment> (*knob, std::move (mix));
         parent.addAndMakeVisible (knob);
         return knob;
     }

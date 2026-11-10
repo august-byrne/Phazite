@@ -18,7 +18,8 @@ public:
     ~MixHandle(); // ends a gesture in progress, keeping its change
 
     bool isValid() const;
-    float getValue() const; // 1 without a device
+    float getValue() const;        // 1 without a device
+    float getDefaultValue() const; // what a double-click sets it back to: the device's own default (a reverb's 0.25), else 1
 
     void beginGesture();
     void setValue (float mix);
