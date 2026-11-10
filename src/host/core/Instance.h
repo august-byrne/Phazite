@@ -42,6 +42,7 @@ public:
     void setProgram (int index);
     void setParameter (int index, float value);
     juce::String getParameterText (int index, float value) const;
+    float getParameterValue (int index, const juce::String& text) const; // as the plug-in reads text ("-6 dB"), from 0 to 1
 
     // What the plug-in changed itself since the last call, as messages to Phazite (on the message thread).
     void takeNotices (const std::function<void (sandbox::MessageWriter&)>& send);

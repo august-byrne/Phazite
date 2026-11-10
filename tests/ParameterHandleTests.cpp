@@ -11,6 +11,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/ParameterHandle.h"
 #include "model/devices/internal/ParameterHandle.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -56,6 +57,10 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     CHECK (handle.getText (0.25f) == juce::String ("25 %")); // as the plug-in writes it, in its helper
     CHECK_FALSE (handle.getInfo().has_value());              // not one of Phazite's own devices
 
+    // And text typed as the plug-in reads it, in its helper: a percentage, where a number alone would be the whole range's.
+    CHECK (handle.readText ("75 %").value_or (-1.0f) == doctest::Approx (0.75f));
+    CHECK (handle.readText ("40").value_or (-1.0f) == doctest::Approx (0.4f));
+
     // When the project closes, the handle finds nothing and changes nothing.
     phazite::setSong (context, nullptr);
     song = nullptr;
@@ -65,6 +70,47 @@ TEST_CASE ("A parameter handle shows its parameter, and nothing once the plug-in
     handle.setValue (0.5f);
     handle.endGesture();
     CHECK_FALSE (handle.isInGesture());
+    CHECK_FALSE (handle.readText ("75 %").has_value());
+}
+
+TEST_CASE ("A parameter handle reads a value typed as its text writes it, in its units")
+{
+    auto song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    phazite::setSong (context, song.get());
+    const auto track = phazite::getTrackIDs (*song)[0];
+    const auto read = [] (const phazite::ParameterHandle& h, const juce::String& text) { return h.readText (text).value_or (-99.0f); };
+
+    // A fader's decibels, as its position, kept to its range.
+    const auto volume = phazite::getVolume (context, track);
+    CHECK (read (volume, "-6 dB") == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
+    CHECK (read (volume, volume.getText (phazite::decibelsToFaderPosition (-12.0f)))
+           == doctest::Approx (phazite::decibelsToFaderPosition (-12.0f)).epsilon (0.001));
+    CHECK (read (volume, "-inf") == doctest::Approx (0.0f));
+    CHECK (read (volume, "+60") == doctest::Approx (volume.getRange().end));
+    CHECK_FALSE (volume.readText ("loud").has_value());
+
+    // A pan as it writes it, a fraction, or as a percentage.
+    const auto pan = phazite::getPan (context, track);
+    CHECK (read (pan, pan.getText (-0.3f)) == doctest::Approx (-0.3f));
+    CHECK (read (pan, "30% left") == doctest::Approx (-0.3f));
+    CHECK (read (pan, "25R") == doctest::Approx (0.25f));
+    CHECK (read (pan, "-50") == doctest::Approx (-0.5f));
+    CHECK (read (pan, "Centre") == doctest::Approx (0.0f));
+
+    // One of Phazite's devices': a choice by its name, any other as its text's number.
+    const auto reverb = addReverb (*song);
+
+    for (const auto& parameter : phazite::devices::Reverb::info.parameters)
+    {
+        const auto id = juce::String (parameter.id.data(), parameter.id.size());
+        CAPTURE (id.toStdString());
+        const auto handle = phazite::makeParameterHandle (*song, { reverb, id });
+        const auto value = parameter.unit == phazite::devices::Unit::choice ? parameter.maximum : parameter.defaultValue;
+        CHECK (read (handle, handle.getText (value)) == doctest::Approx (value).epsilon (0.001));
+    }
+
+    phazite::setSong (context, nullptr);
 }
 
 TEST_CASE ("Changes through a parameter handle are named undo steps: one per gesture, and one per single change")

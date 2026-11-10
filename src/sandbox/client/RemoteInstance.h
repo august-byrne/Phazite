@@ -76,9 +76,11 @@ public:
     void closeEditor (int timeoutMilliseconds);
     void setEditorKeys (bool getsEveryKey, const std::vector<std::pair<int, int>>& keys);
 
-    // A value set by hand, from 0 to 1 (Phazite doesn't wait for it), and how the plug-in writes a value of a parameter.
+    // A value set by hand, from 0 to 1 (Phazite doesn't wait for it), how the plug-in writes a value of a parameter, and the
+    // value it reads text as ("-6 dB"), from 0 to 1.
     void setParameter (int index, float value);
     std::optional<juce::String> getParameterText (int index, float value, int timeoutMilliseconds);
+    std::optional<float> getParameterValue (int index, const juce::String& text, int timeoutMilliseconds);
 
     // Its listener (nullptr for none), set before it can tell anything.
     void setListener (Listener* newListener) noexcept { listener = newListener; }

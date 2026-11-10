@@ -57,11 +57,13 @@ juce::String formatSampleRate (double hz);
 juce::String getShowInFolderText();
 
 // A value of one of Phazite's devices' parameters, as its unit says: "120 Hz", "1.20 kHz", "+3.0 dB", "35%", "12.5 ms",
-// "1.20 s", "+7 st", "-15 ct", "4.0:1", a choice's name, "On" or "Off", or a plain number ("0.71").
+// "1.20 s", "+7 st", "-15 ct", "4.0:1", a choice's name, "On" or "Off", or a plain number ("0.71"). A pitch reads to a
+// cent, so that one a little off never reads as a whole semitone: "+6.97 st", "+12.5 ct".
 juce::String formatParameterValue (const devices::ParameterInfo&, float value);
 
-// Reads a value as formatParameterValue() writes it, or as someone might type it: a plain number in the unit, "1.2k"
-// for 1.2 kHz, "250ms" for a quarter of a second, a choice's name or number, "on" or "off". Kept to the parameter's
-// range; nothing if it can't be read.
+// Reads a value as formatParameterValue() writes it, or as someone might type it, as FabFilter's fields read one: a plain
+// number in the unit, "1.2k" for 1.2 kHz, a note's name for its frequency ("A4" for 440 Hz, "C#3+13" with cents),
+// "250ms" for a quarter of a second, "1 oct" for 12 semitones, a choice's name or number, "on" or "off". Kept to the
+// parameter's range; nothing if it can't be read.
 std::optional<float> parseParameterValue (const devices::ParameterInfo&, const juce::String&);
 } // namespace phazite::ui

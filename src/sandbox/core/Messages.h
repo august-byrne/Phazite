@@ -14,7 +14,7 @@ namespace phazite::sandbox
 // The program's argument that names the pipe it connects to ("--PhaziteSandbox:<pipe>"), and the messages' version,
 // which both sides must have.
 inline constexpr const char* helperProcessID = "PhaziteSandbox";
-inline constexpr std::int32_t protocolVersion = 4;
+inline constexpr std::int32_t protocolVersion = 5;
 
 enum class MessageType : std::int32_t
 {
@@ -28,6 +28,7 @@ enum class MessageType : std::int32_t
     getState,        // instance -> its state: a VST3's as its format's preset file (Vst3State.h), another's as JUCE gives it
     setState,        // instance, state (the same) -> nothing (once it took it)
     parameterText,   // instance, parameter, value -> how the plug-in writes that value
+    parameterValue,  // instance, parameter, text -> the value, from 0 to 1, that the plug-in reads the text as ("-6 dB")
     stats,           // nothing -> the helper's CPU seconds and its memory in bytes
     setProgram,      // instance, program -> nothing (once it has it)
     openEditor,      // instance -> ok, its width and height, whether it can be resized: the plug-in's editor made, not shown

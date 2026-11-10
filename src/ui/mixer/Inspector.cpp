@@ -483,7 +483,8 @@ namespace
             : context (c)
         {
             showAsDecibels (level);
-            level.setTooltip ("How much of this track the send feeds the return: off until you turn it. Double-click for 0 dB");
+            level.setTooltip ("How much of this track the send feeds the return: off until you turn it. Click it and type a level, or "
+                              "double-click for 0 dB");
             attachment.setParameter (getSendLevelTo (context, from, target.returnTrack));
             prePost.setTooltip ("Pre: the send takes the sound before the fader, so the fader doesn't change it. Post: after the fader");
             prePost.onClick = [this]
@@ -561,10 +562,12 @@ namespace
             };
 
             showAsDecibels (volume);
-            volume.setTooltip ("The track's volume. Double-click for 0 dB; drag with Shift held for fine steps");
+            volume.setTooltip ("The track's volume. Click it and type a level, or double-click for 0 dB; drag with Shift held for fine "
+                               "steps");
             volumeAttachment.setParameter (getVolume (context, track));
             showAsPan (pan);
-            pan.setTooltip ("Where the track sits between the left and right speakers. Double-click to center it");
+            pan.setTooltip ("Where the track sits between the left and right speakers. Click it and type a position (30L), or "
+                            "double-click to center it");
             panAttachment.setParameter (getPan (context, track));
             muteSolo.setTrack (track);
 
@@ -1212,7 +1215,9 @@ namespace
                 return value.has_value() ? std::optional ((double) *value) : std::nullopt;
             }
 
-            return text.containsAnyOf ("0123456789") ? std::optional (text.getDoubleValue()) : std::nullopt;
+            // As the device writes it: a plug-in's as the plug-in reads it.
+            const auto value = handle.readText (text);
+            return value.has_value() ? std::optional ((double) *value) : std::nullopt;
         }
 
         void refresh() override

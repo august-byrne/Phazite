@@ -59,6 +59,12 @@ TEST_CASE ("A device parameter's value reads as its unit says, and back")
     CHECK (parse (hertz, "5") == doctest::Approx (20.0f)); // kept to the range
     CHECK_FALSE (parseParameterValue (hertz, "loud").has_value());
 
+    // A note's name reads as its frequency, as FabFilter's fields read one, with cents after it if any.
+    CHECK (parse (hertz, "A4") == doctest::Approx (440.0f));
+    CHECK (parse (hertz, "a3") == doctest::Approx (220.0f));
+    CHECK (parse (hertz, "C#3+13") == doctest::Approx (440.0 * std::pow (2.0, (49.13 - 69.0) / 12.0)).epsilon (0.0001));
+    CHECK_FALSE (parseParameterValue (hertz, "H4").has_value());
+
     const ParameterInfo gain { .id = "g", .name = "G", .minimum = -24.0f, .maximum = 24.0f, .unit = Unit::decibels };
     CHECK (formatParameterValue (gain, 3.0f) == "+3.0 dB");
     CHECK (parse (gain, "-6") == doctest::Approx (-6.0f));
@@ -89,9 +95,27 @@ TEST_CASE ("A device parameter's value reads as its unit says, and back")
     CHECK (formatParameterValue (tune, 0.5f) == "+0.5 st");
     CHECK (parse (tune, "+7 st") == doctest::Approx (7.0f));
 
+    // A pitch reads to a cent, so that one a little off never reads as a whole semitone (6.97 read "+7 st"); and it is typed
+    // in octaves too.
+    CHECK (formatParameterValue (tune, 6.97f) == "+6.97 st");
+    CHECK (formatParameterValue (tune, -0.25f) == "-0.25 st");
+    CHECK (formatParameterValue (tune, 6.999f) == "+7 st"); // within a tenth of a cent
+    CHECK (parse (tune, "6.97") == doctest::Approx (6.97f));
+    CHECK (parse (tune, "1 oct") == doctest::Approx (12.0f));
+    CHECK (parse (tune, "-7 semitones") == doctest::Approx (-7.0f));
+
     const ParameterInfo fine { .id = "c", .name = "C", .minimum = -100.0f, .maximum = 100.0f, .unit = Unit::cents };
     CHECK (formatParameterValue (fine, -15.0f) == "-15 ct");
+    CHECK (formatParameterValue (fine, 12.5f) == "+12.5 ct");
     CHECK (parse (fine, "-15 cents") == doctest::Approx (-15.0f));
+
+    const ParameterInfo root { .id = "k", .name = "K", .maximum = 127.0f, .defaultValue = 60.0f, .unit = Unit::note, .step = 1.0f };
+    CHECK (formatParameterValue (root, 61.0f) == "C#4");
+    CHECK (parse (root, "C4") == doctest::Approx (60.0f));
+    CHECK (parse (root, "Bb2") == doctest::Approx (46.0f));
+    CHECK (parse (root, "C-1") == doctest::Approx (0.0f));
+    CHECK (parse (root, "C#3+13") == doctest::Approx (49.0f)); // in its whole steps
+    CHECK_FALSE (parseParameterValue (root, "C#3+").has_value());
 
     const ParameterInfo ratio { .id = "r", .name = "R", .minimum = 1.0f, .maximum = 20.0f, .defaultValue = 4.0f, .unit = Unit::ratio };
     CHECK (formatParameterValue (ratio, 4.0f) == "4.0:1");

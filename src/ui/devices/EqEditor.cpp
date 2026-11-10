@@ -395,12 +395,18 @@ EqEditor::EqEditor (const DeviceHandle& handle)
          std::initializer_list<juce::Component*> { &onButton, &typeBox, &slopeBox, &frequencyKnob, &gainKnob, &qKnob, &outputKnob })
         addAndMakeVisible (control);
 
-    // Each knob's name, then what it is set to.
+    // Each knob's name, then what it is set to, where a click types a value.
     for (const auto* name : { "Frequency", "Gain", "Q", "Output" })
         addLabel (name);
 
-    for (int i = 0; i < numKnobs; ++i)
-        setThemeColour (addLabel ({}), juce::Label::textColourId, &Palette::textMuted);
+    Knob* const shown[] = { &frequencyKnob, &gainKnob, &qKnob, &outputKnob };
+
+    for (auto* knob : shown)
+    {
+        auto& value = addLabel ({});
+        setThemeColour (value, juce::Label::textColourId, &Palette::textMuted);
+        knob->setValueReadout (&value);
+    }
 
     showAsParameter (outputKnob, getInfo (Eq::outputParameter));
     outputAttachment.setParameter (device.getParameter (getInfo (Eq::outputParameter).id));

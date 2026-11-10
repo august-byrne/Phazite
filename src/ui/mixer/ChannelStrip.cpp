@@ -30,7 +30,7 @@ struct ChannelStrip::SendSlot : public juce::Component
         };
 
         level.setTooltip ("How much of a copy of this track goes to the return: off until you turn it. The track itself still plays "
-                          "through its Out. Double-click for 0 dB");
+                          "through its Out. Click it and type a level, or double-click for 0 dB");
         showAsDecibels (level);
         attachment.setParameter (getSendLevelTo (context, from, target.returnTrack));
 
@@ -127,8 +127,9 @@ ChannelStrip::ChannelStrip (CommandBridge& bridge, ProjectContext& projectContex
 
     showAsDecibels (volume);
     showAsPan (pan);
-    volume.setTooltip ("The track's volume. Double-click for 0 dB; drag with Shift held for fine steps");
-    pan.setTooltip ("Where the track sits between the left and right speakers. Double-click to center it");
+    volume.setTooltip ("The track's volume. Click it and type a level, or double-click for 0 dB; drag with Shift held for fine steps");
+    pan.setTooltip ("Where the track sits between the left and right speakers. Click it and type a position (30L), or double-click "
+                    "to center it");
 
     addSendButton.setTooltip ("Makes a return and sends it a copy of this track: the return's effect, such as a reverb, plays alongside "
                               "the track, which still goes to its Out. To run several tracks' whole sound through one effect, put "

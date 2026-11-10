@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ParameterHandle.h"
+#include "engine/nodes/Channel.h"
 #include "internal/ParameterHandle.h"
 #include "internal/Parameters.h"
 #include "model/automation/internal/Automation.h"
@@ -7,9 +8,120 @@
 #include "model/commands/internal/Undo.h"
 #include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/plugins/internal/PluginInstances.h"
+#include "model/plugins/internal/SandboxedInstance.h"
+
+#include <cstring>
+#include <initializer_list>
 
 namespace phazite
 {
+namespace
+{
+    // A number as it may be typed ("-6", "+3.5", "0.300"); nothing for text that isn't one.
+    std::optional<float> readNumber (const juce::String& text)
+    {
+        const auto t = text.trim();
+
+        if (! t.containsOnly ("+-.0123456789") || ! t.containsAnyOf ("0123456789"))
+            return {};
+
+        return t.getFloatValue();
+    }
+
+    // The text without the first of these endings that it has, trimmed, and whether it had one.
+    bool dropEnding (juce::String& text, std::initializer_list<const char*> endings)
+    {
+        for (const auto* ending : endings)
+        {
+            if (text.endsWith (ending))
+            {
+                text = text.dropLastCharacters ((int) std::strlen (ending)).trim();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A value as getParameterText() writes it, or as it may be typed in the same units: a fader's decibels ("-6.00 dB",
+    // "-inf") as the fader's position, a pan as a fraction, as written ("0.300 Left"), or as a percentage ("30% left", "30 L"),
+    // a crossover's hertz ("1.2k"), a choice by its name, any other as a number; a plug-in's as the plug-in reads it.
+    std::optional<float> readParameterText (const Song& song, const FoundParameter& parameter, const juce::String& typed)
+    {
+        auto t = typed.trim().toLowerCase();
+
+        switch (parameter.source)
+        {
+            case ParameterSource::volume:
+            case ParameterSource::send:
+            case ParameterSource::chainVolume:
+            {
+                dropEnding (t, { "db" });
+
+                if (t == "-inf" || t == "-infinity")
+                    return 0.0f; // silence, the fader's foot
+
+                const auto decibels = readNumber (t);
+                return decibels.has_value() ? std::optional (engine::decibelsToFaderPosition (*decibels)) : std::nullopt;
+            }
+
+            case ParameterSource::pan:
+            case ParameterSource::chainPan:
+            {
+                if (t == "centre" || t == "center" || t == "c")
+                    return 0.0f;
+
+                const auto left = dropEnding (t, { "left", "l" });
+                const auto right = ! left && dropEnding (t, { "right", "r" });
+                const auto percent = dropEnding (t, { "%" });
+                const auto amount = readNumber (t);
+
+                if (! amount.has_value())
+                    return {};
+
+                const auto size = juce::jmin (1.0f, std::abs (*amount) / (percent || std::abs (*amount) > 1.0f ? 100.0f : 1.0f));
+                return (left || (! right && *amount < 0.0f)) ? -size : size;
+            }
+
+            case ParameterSource::crossover:
+            {
+                const auto kilo = dropEnding (t, { "khz", "k" });
+
+                if (! kilo)
+                    dropEnding (t, { "hz" });
+
+                const auto hertz = readNumber (t);
+                return hertz.has_value() ? std::optional (*hertz * (kilo ? 1000.0f : 1.0f)) : std::nullopt;
+            }
+
+            case ParameterSource::device:
+            case ParameterSource::modulator:
+            {
+                const auto& info = *parameter.info;
+
+                for (size_t i = 0; i < info.choices.size(); ++i)
+                    if (t == juce::String (info.choices[i].data(), info.choices[i].size()).toLowerCase())
+                        return info.minimum + (float) i;
+
+                return readNumber (t);
+            }
+
+            case ParameterSource::macro:
+                return readNumber (t);
+
+            case ParameterSource::plugin:
+                if (auto* instance = findPluginInstance (song, parameter.ref.device))
+                    if (const auto index = instance->findParameter (parameter.ref.parameter); index >= 0)
+                        return instance->readValue (index, typed);
+
+                return readNumber (t);
+        }
+
+        return {};
+    }
+} // namespace
+
 struct ParameterHandle::Impl
 {
     juce::WeakReference<Song> song; // the context can outlive it
@@ -204,6 +316,18 @@ juce::String ParameterHandle::getText (float value) const
 {
     const auto* parameter = impl != nullptr ? impl->find() : nullptr;
     return parameter != nullptr ? getParameterText (*impl->song.get(), *parameter, value) : juce::String();
+}
+
+std::optional<float> ParameterHandle::readText (const juce::String& text) const
+{
+    const auto* parameter = impl != nullptr ? impl->find() : nullptr;
+    const auto value = parameter != nullptr ? readParameterText (*impl->song.get(), *parameter, text) : std::nullopt;
+
+    if (! value.has_value())
+        return {};
+
+    const auto range = getRange();
+    return juce::jlimit (range.start, range.end, *value);
 }
 
 std::optional<devices::ParameterInfo> ParameterHandle::getInfo() const

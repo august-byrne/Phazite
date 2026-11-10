@@ -50,8 +50,16 @@ namespace
         return (value > 0.0 ? "+" : "-") + size;
     }
 
+    // A pitch, whole semitones without decimals and any other to a hundredth, a cent, so that a pitch a little off never reads
+    // as a whole one: "+7", "+6.97", "+0.5", "0".
+    juce::String withCents (double semitones)
+    {
+        const auto hundredths = juce::roundToInt (semitones * 100.0);
+        return withSign (hundredths / 100.0, hundredths % 100 == 0 ? 0 : (hundredths % 10 == 0 ? 1 : 2));
+    }
+
     // A note's name as Phazite writes them, middle C (60) as "C4", in sharps; or the note a name or a number gives: "C4",
-    // "f#1", "Bb2", "60".
+    // "f#1", "Bb2", "60", and a name with cents above or below it, as FabFilter's fields take one: "C#3+13" (49.13).
     juce::String formatNote (float value)
     {
         return juce::MidiMessage::getMidiNoteName (juce::roundToInt (value), true, true, 4);
@@ -63,7 +71,7 @@ namespace
             return number;
 
         static constexpr int steps[] = { 9, 11, 0, 2, 4, 5, 7 }; // A to G, from C
-        const auto t = text.trim().toUpperCase();
+        const auto t = text.removeCharacters (" ").toUpperCase();
 
         if (t.isEmpty() || t[0] < 'A' || t[0] > 'G')
             return {};
@@ -79,12 +87,34 @@ namespace
         if (rest.startsWithChar ('#') || rest.startsWithChar ('B'))
             rest = rest.substring (1);
 
-        const auto octave = parseNumber (rest);
+        // The octave ("-1" for the lowest), then the cents, signed, if any.
+        const auto sign = rest.startsWithChar ('-') ? 1 : 0;
+        const auto octaveLength = sign + rest.substring (sign).initialSectionContainingOnly ("0123456789").length();
+        const auto octave = parseNumber (rest.substring (0, octaveLength));
+        const auto cents = rest.substring (octaveLength);
 
         if (! octave.has_value())
             return {};
 
-        return note + 12.0 * (*octave + 1.0);
+        auto offset = 0.0;
+
+        if (cents.isNotEmpty())
+        {
+            const auto amount = parseNumber (cents);
+
+            if (! amount.has_value() || ! (cents.startsWithChar ('+') || cents.startsWithChar ('-')))
+                return {};
+
+            offset = *amount / 100.0;
+        }
+
+        return note + 12.0 * (*octave + 1.0) + offset;
+    }
+
+    // The frequency a note plays at, A4 (69) at 440 Hz.
+    double getNoteFrequency (double note)
+    {
+        return 440.0 * std::pow (2.0, (note - 69.0) / 12.0);
     }
 
     // The text without the first of these endings that it has, and whether it had one.
@@ -258,10 +288,13 @@ juce::String formatParameterValue (const devices::ParameterInfo& parameter, floa
             return value < 1.0f ? withThreeDigits (value * 1000.0) + " ms" : withThreeDigits (value) + " s";
 
         case Unit::semitones:
-            return withSign (value, std::abs (value - std::round (value)) < 0.05f ? 0 : 1) + " st";
+            return withCents (value) + " st";
 
         case Unit::cents:
-            return withSign (std::round (value), 0) + " ct";
+        {
+            const auto tenths = juce::roundToInt (value * 10.0f);
+            return withSign (tenths / 10.0, tenths % 10 == 0 ? 0 : 1) + " ct";
+        }
 
         case Unit::note:
             return formatNote (value);
@@ -328,6 +361,15 @@ std::optional<float> parseParameterValue (const devices::ParameterInfo& paramete
 
         case Unit::hertz:
         {
+            // A note's name plays at its frequency: "A4" is 440 Hz.
+            if (t.isNotEmpty() && t[0] >= 'a' && t[0] <= 'g')
+            {
+                if (const auto note = parseNote (t))
+                    value = getNoteFrequency (*note);
+
+                break;
+            }
+
             const auto kilo = removeEnding (t, { "khz", "k" });
 
             if (! kilo)
@@ -369,12 +411,23 @@ std::optional<float> parseParameterValue (const devices::ParameterInfo& paramete
             break;
 
         case Unit::semitones:
-            removeEnding (t, { "semitones", "st" });
+        {
+            // Semitones, or octaves of twelve.
+            const auto octaves = removeEnding (t, { "octaves", "octave", "oct" });
+
+            if (! octaves)
+                removeEnding (t, { "semitones", "semitone", "semis", "semi", "st" });
+
             value = parseNumber (t);
+
+            if (value.has_value() && octaves)
+                *value *= 12.0;
+
             break;
+        }
 
         case Unit::cents:
-            removeEnding (t, { "cents", "ct" });
+            removeEnding (t, { "cents", "cent", "ct" });
             value = parseNumber (t);
             break;
 

@@ -118,3 +118,30 @@ TEST_CASE ("A press away from a text field lets the keys go, and a field the key
     phazite::test::dispatchPendingMessages();
     panel.removeChildComponent (&dialog);
 }
+
+TEST_CASE ("A press away from a knob that has the keys lets them go too, so that the number keys reach the shortcuts again")
+{
+    // The owner, 2026-11-09: a knob that has the keys takes a number typed as its value (ui::ValueSlider), and the tools'
+    // shortcuts are numbers.
+    Panel panel;
+    juce::Slider knob (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
+    knob.setWantsKeyboardFocus (true);
+    panel.addAndMakeVisible (knob);
+    knob.setBounds (120, 10, 40, 40);
+    phazite::test::TestWindow window (panel, 200, 200);
+    phazite::ui::TextFieldRelease release;
+    phazite::test::Mouse mouse (panel);
+
+    mouse.click (knob.getBounds().getCentre());
+    REQUIRE (knob.hasKeyboardFocus (false));
+    mouse.click (panel.background.getBounds().getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (juce::Component::getCurrentlyFocusedComponent() == nullptr);
+
+    // A press on it keeps them; one on what takes them gives them there.
+    mouse.click (knob.getBounds().getCentre());
+    mouse.click (knob.getBounds().getCentre());
+    CHECK (knob.hasKeyboardFocus (false));
+    mouse.click (panel.taker.getBounds().getCentre());
+    CHECK (panel.taker.hasKeyboardFocus (false));
+}

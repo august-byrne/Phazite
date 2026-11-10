@@ -285,6 +285,228 @@ TEST_CASE ("A number field moves in steps when dragged or stepped, takes any val
     CHECK (field.getValue() == doctest::Approx (140.0));
 }
 
+TEST_CASE ("A knob takes a value typed: a number typed while it has the keys opens a field with it, and Enter sets it as one undo step")
+{
+    // The owner, 2026-11-09: "i need a way to type in exact values ... rather than move my mouse to an exact infentesimal
+    // position".
+    auto song = phazite::createSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() }; // the open project, as the app has it
+    phazite::setSong (context, song.get());
+    const auto track = phazite::getTrackIDs (*song)[0];
+    const auto pan = [&song, track] { return phazite::getChannelPan (*song, track); };
+
+    // A knob, and another control that takes the keys, side by side in a window.
+    juce::Component holder;
+    phazite::ui::Knob knob ("Pan", 0.0);
+    phazite::ui::showAsPan (knob);
+    phazite::ui::ParameterAttachment attachment (knob);
+    attachment.setParameter (phazite::getPan (context, track));
+    juce::Component other;
+    other.setWantsKeyboardFocus (true);
+    holder.addAndMakeVisible (knob);
+    holder.addAndMakeVisible (other);
+    knob.setBounds (80, 40, 40, 40);
+    other.setBounds (150, 40, 40, 40);
+    phazite::test::TestWindow window (holder, 200, 120);
+    song->getUndoManager().clearUndoHistory();
+
+    // Clicked, it has the keys, and nothing changed. A number typed opens its field, over it, with what was typed and the keys.
+    phazite::test::Mouse mouse (holder);
+    mouse.click (knob.getBounds().getCentre());
+    REQUIRE (knob.hasKeyboardFocus (false));
+    CHECK_FALSE (song->getUndoManager().canUndo());
+    window.pressKey (juce::KeyPress ('3', {}, '3'));
+    auto* field = knob.getValueField();
+    REQUIRE (field != nullptr);
+    CHECK (field->isShowing());
+    CHECK (field->hasKeyboardFocus (false));
+    CHECK (field->getText() == juce::String ("3"));
+    CHECK (field->getBounds().getCentre() == knob.getBounds().getCentre());
+    CHECK (field->getWidth() > knob.getWidth()); // room for its text
+    CHECK (window.getLocalBounds().contains (field->getBounds()));
+
+    // What is typed next goes into it; Enter sets 30% left as one undo step, and the knob has the keys again.
+    window.pressKey (juce::KeyPress ('0', {}, '0'));
+    window.pressKey (juce::KeyPress ('L', {}, 'L'));
+    CHECK (field->getText() == juce::String ("30L"));
+    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (pan() == doctest::Approx (-0.3f));
+    CHECK (knob.getValue() == doctest::Approx (-0.3));
+    CHECK (song->getUndoManager().getUndoDescription() == juce::String ("Change Pan"));
+    CHECK (knob.getValueField() == nullptr);
+    CHECK (knob.hasKeyboardFocus (false));
+    phazite::test::dispatchPendingMessages(); // the field goes, a message after it closed
+    CHECK (phazite::test::findAll<juce::TextEditor> (window).isEmpty());
+
+    // One undo puts it back.
+    phazite::undo (*song);
+    CHECK (pan() == doctest::Approx (0.0f));
+    attachment.update();
+    song->getUndoManager().clearUndoHistory();
+
+    // Enter alone opens nothing: it keeps its meaning where the knob is (a window's default button, the piano roll's Apply).
+    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (knob.getValueField() == nullptr);
+
+    // Its menu's Type a Value... opens the field with the value, all of it selected, so that what is typed replaces it; Esc
+    // leaves the value as it was.
+    auto menu = attachment.getMenu();
+    REQUIRE (phazite::test::runMenuItem (menu, { "Type a Value..." }));
+    field = knob.getValueField();
+    REQUIRE (field != nullptr);
+    CHECK (field->getText() == juce::String ("Center"));
+    CHECK (field->getHighlightedRegion().getLength() == 6);
+    window.pressKey (juce::KeyPress ('5', {}, '5'));
+    CHECK (field->getText() == juce::String ("5"));
+    window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+    CHECK (pan() == doctest::Approx (0.0f));
+    CHECK (knob.getValueField() == nullptr);
+    CHECK (knob.hasKeyboardFocus (false));
+    phazite::test::dispatchPendingMessages();
+
+    // Its value set again unchanged, or text it can't read, changes nothing either.
+    for (const auto* text : { "", "loud" })
+    {
+        REQUIRE (phazite::test::runMenuItem (menu, { "Type a Value..." }));
+        REQUIRE (knob.getValueField() != nullptr);
+
+        if (juce::String (text).isNotEmpty())
+            knob.getValueField()->setText (text, false);
+
+        window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+        phazite::test::dispatchPendingMessages();
+        CHECK (pan() == doctest::Approx (0.0f));
+        CHECK_FALSE (song->getUndoManager().canUndo());
+    }
+
+    // The keys going elsewhere set what it says, as a click elsewhere does: "-50" is half left.
+    for (const auto typed : { '-', '5', '0' })
+        window.pressKey (juce::KeyPress (typed, {}, (juce::juce_wchar) typed));
+
+    other.grabKeyboardFocus();
+    CHECK (pan() == doctest::Approx (-0.5f));
+    CHECK (knob.getValueField() == nullptr);
+    phazite::test::dispatchPendingMessages();
+
+    // A number typed reaches only the control that has the keys, and not with Ctrl, which makes a key a shortcut's.
+    window.pressKey (juce::KeyPress ('7', {}, '7'));
+    CHECK (knob.getValueField() == nullptr);
+    knob.grabKeyboardFocus();
+    window.pressKey (juce::KeyPress ('1', juce::ModifierKeys::ctrlModifier, '1'));
+    CHECK (knob.getValueField() == nullptr);
+
+    // Off, as it is without a parameter, it types nothing.
+    phazite::setSong (context, nullptr);
+    song = nullptr;
+    attachment.update();
+    CHECK_FALSE (knob.isEnabled());
+    knob.showValueField ("4");
+    CHECK (knob.getValueField() == nullptr);
+}
+
+TEST_CASE ("A knob's readout opens the field over it, a pitch drags in whole semitones, and a number field types in its own box")
+{
+    // A knob with its value under it, as a device's editor shows one, for a pitch of up to two octaves either way.
+    using phazite::devices::Unit;
+    const phazite::devices::ParameterInfo pitch { .id = "p",
+                                                  .name = "Pitch",
+                                                  .minimum = -24.0f,
+                                                  .maximum = 24.0f,
+                                                  .unit = Unit::semitones };
+    juce::Component holder;
+    phazite::ui::Knob knob ("Pitch", 0.0);
+    knob.setRange (-24.0, 24.0);
+    phazite::ui::showAsParameter (knob, pitch);
+    juce::Label readout;
+    knob.setValueReadout (&readout);
+    CHECK (knob.getValueReadout() == &readout);
+    holder.addAndMakeVisible (knob);
+    holder.addAndMakeVisible (readout);
+    knob.setBounds (60, 10, 40, 40);
+    readout.setBounds (52, 52, 56, 16);
+    phazite::test::TestWindow window (holder, 240, 120);
+    int drags = 0;
+    knob.onDragStart = [&drags] { ++drags; };
+
+    // A click on the readout opens the field over it, the value selected; 7 and Enter set it exactly, as one drag's start and
+    // end, which an attachment makes one undo step. The pointer over the readout is a text cursor.
+    CHECK (readout.getMouseCursor() == juce::MouseCursor::IBeamCursor);
+    phazite::test::Mouse mouse (holder);
+    mouse.click (readout.getBounds().getCentre());
+    auto* field = knob.getValueField();
+    REQUIRE (field != nullptr);
+    CHECK (field->getBounds().getCentre() == readout.getBounds().getCentre());
+    CHECK (field->getText() == juce::String ("0 st"));
+    window.pressKey (juce::KeyPress ('7', {}, '7'));
+    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (juce::exactlyEqual (knob.getValue(), 7.0));
+    CHECK (drags == 1);
+    CHECK (knob.getTextFromValue (knob.getValue()) == juce::String ("+7 st"));
+    phazite::test::dispatchPendingMessages();
+
+    // Dragged, it moves in whole semitones: 13 pixels of 200 for 48 semitones are 3.
+    const auto isWhole = [&knob] { return std::abs (knob.getValue() - std::round (knob.getValue())) < 1.0e-9; };
+    const auto centre = knob.getBounds().getCentre();
+    mouse.pause();
+    mouse.press (centre);
+    mouse.dragTo (centre + juce::Point<int> (0, -13));
+    mouse.release();
+    CHECK (knob.getValue() == doctest::Approx (10.0));
+    CHECK (isWhole());
+
+    // With Shift, between them, a fifth as far: 0.62 of one.
+    mouse.pause();
+    mouse.press (centre, juce::ModifierKeys::shiftModifier);
+    mouse.dragTo (centre + juce::Point<int> (0, -13));
+    mouse.release();
+    CHECK (knob.getValue() == doctest::Approx (10.624).epsilon (0.001));
+    CHECK_FALSE (isWhole());
+    CHECK (knob.getTextFromValue (knob.getValue()) == juce::String ("+10.62 st")); // not "+11 st"
+    phazite::test::dispatchPendingMessages();
+
+    // A range of two values (a chain's keys) types nothing.
+    phazite::ui::ValueSlider keys (juce::Slider::TwoValueHorizontal, "Keys", 0.0);
+    holder.addAndMakeVisible (keys);
+    keys.setBounds (10, 80, 100, 20);
+    keys.grabKeyboardFocus();
+    window.pressKey (juce::KeyPress ('5', {}, '5'));
+    CHECK (keys.getValueField() == nullptr);
+
+    // A number field has a text box of its own, which a number typed opens with it, as a knob's field.
+    phazite::ui::NumberField tempo ("Tempo", 20.0, 300.0, 1.0, 120.0);
+    holder.addAndMakeVisible (tempo);
+    tempo.setBounds (130, 80, 96, 24);
+    tempo.grabKeyboardFocus();
+    window.pressKey (juce::KeyPress ('9', {}, '9'));
+    auto editors = phazite::test::findAll<juce::TextEditor> (tempo);
+    REQUIRE (editors.size() == 1);
+    CHECK (editors[0]->getText() == juce::String ("9"));
+    window.pressKey (juce::KeyPress ('5', {}, '5'));
+    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    phazite::test::dispatchPendingMessages();
+    CHECK (tempo.getValue() == doctest::Approx (95.0));
+
+    // In a call-out that holds the keys while it is up (a modulator's editor), the field is in the call-out, where the keys
+    // reach it: outside, they would go to the call-out instead.
+    juce::Component callOut;
+    phazite::ui::Knob rate ("Rate", 0.0);
+    rate.setRange (0.0, 100.0);
+    callOut.addAndMakeVisible (rate);
+    rate.setBounds (10, 10, 40, 40);
+    holder.addAndMakeVisible (callOut);
+    callOut.setBounds (120, 0, 110, 70);
+    callOut.enterModalState (false);
+    rate.grabKeyboardFocus();
+    window.pressKey (juce::KeyPress ('2', {}, '2'));
+    REQUIRE (rate.getValueField() != nullptr);
+    CHECK (rate.getValueField()->getParentComponent() == &callOut);
+    window.pressKey (juce::KeyPress ('5', {}, '5'));
+    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (rate.getValue() == doctest::Approx (25.0));
+    callOut.exitModalState (0);
+    phazite::test::dispatchPendingMessages();
+}
+
 TEST_CASE ("A volume fader's scale marks the decibels where the fader puts them, 0 dB in the text colour")
 {
     // The owner, 2026-11-07: the mixer's faders had no scale, which consoles print and Pro Tools draws beside its faders.

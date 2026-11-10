@@ -16,7 +16,8 @@ MasterStrip::MasterStrip (CommandBridge& bridge, ProjectContext& projectContext)
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Master");
     showAsDecibels (volume);
-    volume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
+    volume.setTooltip ("The volume of everything Phazite plays. Click it and type a level, or double-click to put it back where it "
+                       "starts");
 
     loudness.setFont (LookAndFeel::getNumberFont (TextSize::small));
     loudness.setJustificationType (juce::Justification::topLeft);

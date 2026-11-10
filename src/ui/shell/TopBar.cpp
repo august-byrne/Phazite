@@ -100,7 +100,8 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     refreshTooltips();
 
     showAsDecibels (masterVolume);
-    masterVolume.setTooltip ("The volume of everything Phazite plays. Double-click for 0 dB");
+    masterVolume.setTooltip ("The volume of everything Phazite plays. Click it and type a level, or double-click to put it back where "
+                             "it starts");
 
     // Clicking these buttons leaves the keyboard focus where it was; Tab still reaches them.
     for (auto* button : std::initializer_list<juce::Button*> { &playButton, &recordButton, &captureButton, &loopButton, &metronomeButton,

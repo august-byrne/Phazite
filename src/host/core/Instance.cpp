@@ -228,6 +228,13 @@ juce::String Instance::getParameterText (int index, float value) const
                                                                : juce::String();
 }
 
+float Instance::getParameterValue (int index, const juce::String& text) const
+{
+    // A VST3 reads it with getParamValueByString(), as JUCE asks it; one that can't, as a number.
+    return juce::isPositiveAndBelow (index, parameters.size()) ? juce::jlimit (0.0f, 1.0f, parameters[index]->getValueForText (text))
+                                                               : 0.0f;
+}
+
 void Instance::takeNotices (const std::function<void (sandbox::MessageWriter&)>& send)
 {
     using sandbox::MessageType;

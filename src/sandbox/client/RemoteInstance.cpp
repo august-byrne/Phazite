@@ -201,6 +201,19 @@ std::optional<juce::String> RemoteInstance::getParameterText (int index, float v
     return reader.readString();
 }
 
+std::optional<float> RemoteInstance::getParameterValue (int index, const juce::String& text, int timeoutMilliseconds)
+{
+    auto message = helper.makeRequest (MessageType::parameterValue);
+    message.add (id).add ((std::int32_t) index).add (text);
+    const auto answer = helper.request (message, timeoutMilliseconds);
+
+    if (! answer.has_value())
+        return {};
+
+    MessageReader reader (*answer);
+    return (float) reader.readDouble();
+}
+
 void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
 {
     auto* told = listener.load();
@@ -271,6 +284,7 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         case MessageType::getState:
         case MessageType::setState:
         case MessageType::parameterText:
+        case MessageType::parameterValue:
         case MessageType::stats:
         case MessageType::setProgram:
         case MessageType::openEditor:

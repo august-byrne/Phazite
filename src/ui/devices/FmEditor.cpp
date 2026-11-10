@@ -355,7 +355,8 @@ namespace
 
     //==========================================================================
     // A parameter as a strip of its own: dragged up and down or left and right as a knob is (a fifth as far with Shift), back
-    // to where it started with a double-click, stepped by the arrow keys; its name at its left and its value at its right,
+    // to where it started with a double-click, stepped by the arrow keys, typed in a field over it as a knob's value is
+    // (ValueSlider); its name at its left and its value at its right,
     // filled to its value in a colour where it is an amount (from the middle for one that goes both ways), or for a stage's
     // bend, the stage drawn bent. A right-click offers to automate or modulate it. The editor's ticker shows changes made
     // elsewhere (update()).
@@ -1328,7 +1329,8 @@ private:
     {
         const auto number = juce::String (op + 1);
         const auto bends = carrier ? juce::String() : describeTargets (algorithm, op);
-        const auto drag = juce::String (". Drag up or down, double-click for where it started, or right-click to automate or modulate it");
+        const auto drag = juce::String (". Drag up or down, or click it and type a value; double-click for where it started, or "
+                                        "right-click to automate or modulate it");
 
         header.setTooltip (carrier
                                ? "Operator " + number + " is a carrier: you hear it. Its level is how loud it plays, its ratio its pitch"

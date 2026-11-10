@@ -93,7 +93,14 @@ public:
         return juce::String (normalised, 2).substring (0, maximumLength);
     }
 
-    float getValueForText (const juce::String& text) const override { return juce::jlimit (0.0f, 1.0f, text.getFloatValue()); }
+    // As the plug-in reads text ("-6 dB"), within a quarter of a second, else as a number.
+    float getValueForText (const juce::String& text) const override
+    {
+        if (auto read = owner.remote->getParameterValue (index, text, textMilliseconds); read.has_value() && ! owner.hasCrashed())
+            return juce::jlimit (0.0f, 1.0f, *read);
+
+        return juce::jlimit (0.0f, 1.0f, text.getFloatValue());
+    }
 
     // A value set while a block played, once (on the thread that plays the next).
     bool takePending (float& newValue) noexcept
@@ -266,6 +273,11 @@ juce::String SandboxedInstance::describeValue (int parameter, float value) const
 {
     return juce::isPositiveAndBelow (parameter, (int) parameters.size()) ? parameters[(size_t) parameter]->getText (value, 1024)
                                                                          : juce::String();
+}
+
+float SandboxedInstance::readValue (int parameter, const juce::String& text) const
+{
+    return juce::isPositiveAndBelow (parameter, (int) parameters.size()) ? parameters[(size_t) parameter]->getValueForText (text) : 0.0f;
 }
 
 void SandboxedInstance::setMovedByEngine (int parameter, bool isMoved)

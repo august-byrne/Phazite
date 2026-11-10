@@ -731,7 +731,7 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
 
     showAsDecibels (volumeFader);
     volumeFader.setValue (settings.get (Settings::browserPreviewVolume, previewer.getVolume()), juce::dontSendNotification);
-    volumeFader.setTooltip ("How loud sounds play while you browse. Double-click for -6 dB");
+    volumeFader.setTooltip ("How loud sounds play while you browse. Click it and type a level, or double-click for -6 dB");
     volumeFader.onValueChange = [this]
     {
         previewer.setVolume ((float) volumeFader.getValue());

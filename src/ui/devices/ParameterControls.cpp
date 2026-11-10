@@ -47,7 +47,8 @@ namespace
 
         return name + ": from " + handle.getText (parameter.minimum) + " to " + handle.getText (parameter.maximum) + ", "
                + handle.getText (parameter.defaultValue)
-               + " at first. Drag up or down, double-click for where it started, or right-click to automate or modulate it";
+               + " at first. Drag up or down, or click it and type a value; double-click for where it started, or right-click to "
+                 "automate or modulate it";
     }
 } // namespace
 
@@ -142,6 +143,8 @@ ParameterControls::ParameterControls (const DeviceHandle& device, std::vector<st
             control->knobAttachment->setParameter (std::move (handle));
             control->knob->setTooltip (help);
             control->value = makeLabel ({});
+            control->value->setTooltip (help);
+            control->knob->setValueReadout (control->value.get()); // a click on the value types one there
             setThemeColour (*control->value, juce::Label::textColourId, &Palette::textMuted);
             addAndMakeVisible (*control->knob);
             addAndMakeVisible (*control->value);
@@ -212,6 +215,7 @@ void ParameterControls::showParameters (const DeviceHandle& device, const std::v
         {
             control.knob->setTitle (fullName);
             control.knob->setTooltip (help);
+            control.value->setTooltip (help);
             control.knob->setDoubleClickReturnValue (true, parameter.defaultValue);
             showAsParameter (*control.knob, parameter);
             control.knobAttachment->setParameter (std::move (handle));

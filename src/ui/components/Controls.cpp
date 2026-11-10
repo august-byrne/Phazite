@@ -17,7 +17,176 @@ namespace
 
     // A meter falls 30 dB a second.
     constexpr float meterFallDbPerTick = 30.0f / DisplayTicker::ticksPerSecond;
+
+    // The field a value is typed in: a line of small text in a box, at least as wide as a compact knob's place.
+    const auto valueFieldHeight = juce::roundToInt (TextSize::small) + 2 * Space::xs;
+    constexpr int valueFieldMinimumWidth = compactKnobSize + Space::l;
+
+    // Where a slider's field goes: in a call-out or a dialog that holds the keys while it is up (a modulator's editor), in it,
+    // as a field outside it would get no keys; elsewhere in its window's content (a window lays out its own children).
+    juce::Component* findValueFieldParent (juce::Component& slider)
+    {
+        if (auto* modal = juce::Component::getCurrentlyModalComponent(); modal != nullptr && modal->isParentOf (&slider))
+            return modal;
+
+        auto* window = slider.getTopLevelComponent();
+
+        if (auto* resizable = dynamic_cast<juce::ResizableWindow*> (window))
+            if (auto* content = resizable->getContentComponent(); content != nullptr && content->isParentOf (&slider))
+                return content;
+
+        return window != &slider ? window : nullptr;
+    }
 } // namespace
+
+//==============================================================================
+// The field a value is typed in, over its slider or the slider's readout. It follows the slider as the slider moves (a
+// scroll), and goes, its text untaken, as the slider hides.
+struct ValueSlider::ValueField final : public juce::TextEditor,
+                                       private juce::ComponentMovementWatcher
+{
+    explicit ValueField (ValueSlider& s)
+        : juce::ComponentMovementWatcher (&s),
+          slider (s)
+    {
+        setTitle (s.getTitle());
+        setDescription ("Type a value and press Enter; Esc leaves it as it was");
+        setMultiLine (false);
+        setReturnKeyStartsNewLine (false);
+        setScrollbarsShown (false);
+        setJustification (juce::Justification::centred);
+        setIndents (Space::xs, 0);
+        setFont (LookAndFeel::getNumberFont (TextSize::small));
+        setTooltip (getDescription());
+        setPopupMenuEnabled (false); // a menu would take the keys, which ends it: Ctrl+C and Ctrl+V work
+    }
+
+    // Opened with the slider's value, which set again unchanged would change nothing, or with what was typed.
+    void show (const juce::String& typed)
+    {
+        shownValue = typed.isEmpty() ? slider.getTextFromValue (slider.getValue()) : juce::String();
+        setText (typed.isEmpty() ? shownValue : typed, false);
+        place();
+        grabKeyboardFocus();
+
+        if (typed.isEmpty())
+            selectAll();
+        else
+            moveCaretToEnd();
+    }
+
+    // Over what it covers, as wide as the longest of the slider's texts at least, and inside its parent.
+    void place()
+    {
+        auto* parent = getParentComponent();
+
+        if (parent == nullptr)
+            return;
+
+        auto textWidth = 0.0f;
+
+        for (const auto value : { slider.getMinimum(), slider.getMaximum(), slider.getValue() })
+            textWidth = juce::jmax (textWidth, juce::GlyphArrangement::getStringWidth (getFont(), slider.getTextFromValue (value)));
+
+        const auto target = slider.getValueFieldTarget (*parent);
+        const auto width = juce::jmax (target.getWidth(), (int) std::ceil (textWidth) + 2 * Space::s, valueFieldMinimumWidth);
+        const auto height = juce::jlimit (valueFieldHeight, controlHeight, target.getHeight());
+        setBounds (juce::Rectangle<int> (width, height).withCentre (target.getCentre()).constrainedWithin (parent->getLocalBounds()));
+    }
+
+    // Ends it, once: with what it says (Enter, or the keys gone elsewhere) or without (Esc, or the slider gone), the keys back
+    // to the slider after Enter or Esc. It hides at once, and goes a message later, out of what ended it.
+    void finish (bool apply, bool keysBack)
+    {
+        if (std::exchange (finished, true))
+            return;
+
+        auto& owner = slider; // this goes with the slider, which setting the value may delete
+        const auto text = getText();
+
+        if (keysBack && owner.isShowing())
+            owner.grabKeyboardFocus();
+        else if (hasKeyboardFocus (true))
+            giveAwayKeyboardFocus();
+
+        setVisible (false);
+
+        const juce::Component::SafePointer<ValueSlider> safeSlider (&owner);
+        juce::MessageManager::callAsync (
+            [safeSlider]
+            {
+                if (safeSlider != nullptr && safeSlider->valueField != nullptr && safeSlider->valueField->finished)
+                    safeSlider->valueField = nullptr;
+            });
+
+        // A value that reads back as another (a note's length that its slider reads as a number) stays as it was.
+        if (apply && (shownValue.isEmpty() || text != shownValue))
+            owner.applyTypedText (text);
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::returnKey || key == juce::KeyPress::escapeKey)
+        {
+            finish (key == juce::KeyPress::returnKey, true);
+            return true;
+        }
+
+        return juce::TextEditor::keyPressed (key);
+    }
+
+    void focusLost (FocusChangeType cause) override
+    {
+        juce::TextEditor::focusLost (cause);
+        finish (true, false);
+    }
+
+    ValueSlider& slider;
+    bool finished = false;
+
+private:
+    juce::String shownValue; // the value's text it opened with, if it did
+
+    using juce::ComponentMovementWatcher::componentMovedOrResized;
+    using juce::ComponentMovementWatcher::componentVisibilityChanged;
+
+    void componentMovedOrResized (bool, bool) override
+    {
+        if (! finished)
+            place();
+    }
+
+    void componentPeerChanged() override { finish (false, false); }
+
+    void componentVisibilityChanged() override
+    {
+        if (! slider.isShowing())
+            finish (false, false);
+    }
+};
+
+// A slider's readout's clicks: a click types a value over it, a right-click shows the slider's menu.
+struct ValueSlider::ReadoutClicks final : public juce::MouseListener
+{
+    explicit ReadoutClicks (ValueSlider& s)
+        : slider (s)
+    {
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && slider.onContextMenu != nullptr && slider.isEnabled())
+            slider.onContextMenu();
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! e.mods.isPopupMenu() && ! e.mouseWasDraggedSinceMouseDown())
+            slider.showValueField();
+    }
+
+    ValueSlider& slider;
+};
 
 //==============================================================================
 ValueSlider::ValueSlider (SliderStyle style, const juce::String& title, double defaultValue)
@@ -36,6 +205,152 @@ ValueSlider::ValueSlider (SliderStyle style, const juce::String& title, double d
 
     // Ctrl, Alt and Cmd don't switch to JUCE's velocity-sensitive dragging, which surprises people.
     setVelocityModeParameters (1.0, 1, 0.0, false);
+}
+
+ValueSlider::~ValueSlider()
+{
+    setValueReadout (nullptr);
+}
+
+bool ValueSlider::canTypeValue() const
+{
+    return isEnabled() && isShowing() && ! isTwoValue() && ! isThreeValue();
+}
+
+void ValueSlider::showValueField (const juce::String& typed)
+{
+    if (! canTypeValue())
+        return;
+
+    if (getTextBoxPosition() != NoTextBox && isTextBoxEditable())
+    {
+        typeInTextBox (typed);
+        return;
+    }
+
+    auto* parent = findValueFieldParent (*this);
+
+    if (parent == nullptr)
+        return;
+
+    // One that has finished, hidden, goes now.
+    if (valueField == nullptr || valueField->finished)
+    {
+        valueField = std::make_unique<ValueField> (*this);
+        parent->addAndMakeVisible (*valueField);
+    }
+
+    valueField->show (typed);
+}
+
+juce::TextEditor* ValueSlider::getValueField() const noexcept
+{
+    return valueField != nullptr && ! valueField->finished ? valueField.get() : nullptr;
+}
+
+void ValueSlider::typeInTextBox (const juce::String& typed)
+{
+    // JUCE's text box, a label, shows its editor with its text selected; a number typed replaces it.
+    showTextBox();
+
+    if (typed.isEmpty())
+        return;
+
+    for (auto* child : getChildren())
+    {
+        if (auto* label = dynamic_cast<juce::Label*> (child))
+        {
+            if (auto* editor = label->getCurrentTextEditor())
+            {
+                editor->setText (typed, false);
+                editor->moveCaretToEnd();
+            }
+        }
+    }
+}
+
+void ValueSlider::applyTypedText (const juce::String& text)
+{
+    // A slider that reads no units reads numbers alone: JUCE would read text without one as 0.
+    if (valueFromTextFunction == nullptr && ! text.containsAnyOf ("0123456789"))
+        return;
+
+    // As JUCE's own text box sets what is typed in it (Slider::Pimpl::textChanged()): between a drag's start and end, which
+    // an attachment makes one undo step.
+    const auto value = snapValue (getValueFromText (text), notDragging);
+
+    if (! juce::approximatelyEqual (value, getValue()))
+    {
+        const ScopedDragNotification drag (*this);
+        setValue (value, juce::sendNotificationSync);
+    }
+}
+
+juce::Rectangle<int> ValueSlider::getValueFieldTarget (const juce::Component& parent) const
+{
+    if (readout != nullptr && readout->isShowing())
+        return parent.getLocalArea (readout.getComponent(), readout->getLocalBounds());
+
+    // A fader's: where its thumb is.
+    auto area = getLocalBounds();
+    const auto thumb = juce::roundToInt (getPositionOfValue (getValue()));
+
+    if (getSliderStyle() == LinearVertical)
+        area = juce::Rectangle<int> (getWidth(), controlHeight).withCentre ({ getWidth() / 2, thumb });
+    else if (getSliderStyle() == LinearHorizontal)
+        area = juce::Rectangle<int> (valueFieldMinimumWidth, getHeight()).withCentre ({ thumb, getHeight() / 2 });
+
+    return parent.getLocalArea (this, area);
+}
+
+void ValueSlider::setValueReadout (juce::Component* newReadout)
+{
+    if (readout != nullptr && readoutClicks != nullptr)
+        readout->removeMouseListener (readoutClicks.get());
+
+    readout = newReadout;
+
+    if (newReadout == nullptr)
+        return;
+
+    if (readoutClicks == nullptr)
+        readoutClicks = std::make_unique<ReadoutClicks> (*this);
+
+    newReadout->addMouseListener (readoutClicks.get(), false);
+    newReadout->setInterceptsMouseClicks (true, false);
+    newReadout->setMouseCursor (juce::MouseCursor::IBeamCursor);
+}
+
+void ValueSlider::setDragStep (double step)
+{
+    dragStep = juce::jmax (0.0, step);
+}
+
+double ValueSlider::snapValue (double attemptedValue, DragMode dragMode)
+{
+    if (dragMode == notDragging || dragStep <= 0.0 || fineDrag)
+        return attemptedValue;
+
+    const auto steps = std::round ((attemptedValue - getMinimum()) / dragStep);
+    return juce::jlimit (getMinimum(), getMaximum(), getMinimum() + steps * dragStep);
+}
+
+bool ValueSlider::keyPressed (const juce::KeyPress& key)
+{
+    // A number typed opens the field with it, as Ableton Live's controls take one; Shift may give the number or its sign on
+    // some keyboards. With Ctrl, Alt or Cmd, a key is a shortcut's; Enter is left to what it does where the slider is (a
+    // window's default button, the piano roll's Apply).
+    const auto mods = key.getModifiers();
+    const auto typed = key.getTextCharacter();
+
+    if (canTypeValue() && ! mods.isCtrlDown() && ! mods.isAltDown() && ! mods.isCommandDown()
+        && (juce::CharacterFunctions::isDigit (typed) || typed == '-' || typed == '+' || typed == '.'))
+    {
+        showValueField (juce::String::charToString (typed));
+        return true;
+    }
+
+    return juce::Slider::keyPressed (key);
 }
 
 void ValueSlider::mouseDown (const juce::MouseEvent& e)
@@ -376,7 +691,7 @@ bool NumberField::keyPressed (const juce::KeyPress& key)
                                                                                             : 0;
 
     if (steps == 0 || key.getModifiers().isAnyModifierKeyDown())
-        return juce::Slider::keyPressed (key);
+        return ValueSlider::keyPressed (key); // a number typed opens its text box with it
 
     setValue (juce::jlimit (getMinimum(), getMaximum(), getValue() + steps * step), juce::sendNotificationSync);
     return true;
@@ -413,6 +728,11 @@ void showAsParameter (juce::Slider& slider, const devices::ParameterInfo& parame
     slider.textFromValueFunction = [parameter] (double value) { return formatParameterValue (parameter, (float) value); };
     slider.valueFromTextFunction = [parameter, &slider] (const juce::String& text)
     { return (double) parseParameterValue (parameter, text).value_or ((float) slider.getValue()); };
+
+    // A pitch a little off is wrong: dragged, it moves in whole semitones (as Live's Transpose and Serum's Semi do), and in
+    // fine steps between them with Shift.
+    if (auto* valueSlider = dynamic_cast<ValueSlider*> (&slider))
+        valueSlider->setDragStep (parameter.unit == devices::Unit::semitones && ! parameter.step.has_value() ? 1.0 : 0.0);
 }
 
 void showAsLoudness (juce::Slider& slider)
@@ -487,8 +807,16 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s)
 
 void ParameterAttachment::showMenu()
 {
-    if (! handle.exists()) // a send that the first change makes has nothing to automate yet
-        return;
+    if (auto menu = getMenu(); menu.getNumItems() > 0)
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&slider));
+}
+
+juce::PopupMenu ParameterAttachment::getMenu()
+{
+    juce::PopupMenu menu;
+
+    if (! handle.isValid())
+        return menu;
 
     // The slider and this go together; the menu's choices come later, when either may be gone.
     const juce::Component::SafePointer<juce::Slider> safeSlider (&slider);
@@ -501,10 +829,24 @@ void ParameterAttachment::showMenu()
         };
     };
 
+    if (const auto name = handle.getName(); name.isNotEmpty())
+        menu.addSectionHeader (name);
+
+    // A value typed, as FL Studio's Type in value: the slider's field, over it.
+    menu.addItem ("Type a Value...",
+                  [safeSlider]
+                  {
+                      if (auto* valueSlider = dynamic_cast<ValueSlider*> (safeSlider.getComponent()))
+                          valueSlider->showValueField();
+                  });
+
+    // A send that the first change makes has nothing to automate or modulate yet.
+    if (! handle.exists())
+        return menu;
+
     // A device's parameter can be automated; a modulator's, in its editor, can't yet.
     const auto isDevices = handle.getRef().isValid();
-    juce::PopupMenu menu;
-    menu.addSectionHeader (handle.getName());
+    menu.addSeparator();
     menu.addItem ("Automate", isDevices, false, act ([] (ParameterHandle& h) { showAutomationLane (h); }));
     menu.addItem ("Delete Automation", isAutomated (handle), false, act ([] (ParameterHandle& h) { deleteAutomation (h); }));
 
@@ -537,7 +879,7 @@ void ParameterAttachment::showMenu()
                               act ([type] (ParameterHandle& h) { modulateWithNew (h, type, defaultModulationAmount); }));
 
     menu.addSubMenu ("Modulate", modulateMenu, isDevices);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&slider));
+    return menu;
 }
 
 void ParameterAttachment::setParameter (ParameterHandle newHandle)
@@ -557,7 +899,17 @@ void ParameterAttachment::setParameter (ParameterHandle newHandle)
 
 void ParameterAttachment::showDeviceText()
 {
-    slider.textFromValueFunction = [this] (double value) { return handle.getText ((float) value); };
+    if (const auto info = handle.getInfo())
+    {
+        showAsParameter (slider, *info);
+    }
+    else
+    {
+        slider.textFromValueFunction = [this] (double value) { return handle.getText ((float) value); };
+        slider.valueFromTextFunction = [this] (const juce::String& text)
+        { return (double) handle.readText (text).value_or ((float) slider.getValue()); };
+    }
+
     slider.updateText();
 }
 

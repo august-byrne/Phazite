@@ -20,17 +20,42 @@ namespace phazite::ui
 //==============================================================================
 // What Phazite's sliders do: double-clicking returns to the default value, dragging with Shift held
 // moves in fine steps, the value shows while dragging, and Tab and the arrow keys reach and change it.
+//
+// And a value is typed, exactly (the owner, 2026-11-09: "a tiny bit off is totally wrong" for a pitch), as Ableton Live and
+// FL Studio take one: while it has the keys (a click gives them), a number typed opens a field over it with what was typed;
+// a click on its readout and Type a Value... in its menu open one with its value, all of it selected. Enter, or a click
+// elsewhere, sets what the field says, read by valueFromTextFunction (in its units, "1.2k", "C4"), as a drag's start and
+// end, which ParameterAttachment makes one undo step; Esc leaves it as it was, and so does its own value set again. Not a
+// slider with two or three values.
 class ValueSlider : public juce::Slider
 {
 public:
     // The title is what screen readers say ("Volume"); textFromValueFunction sets what they read
     // as the value, and what shows while dragging.
     ValueSlider (SliderStyle, const juce::String& title, double defaultValue);
+    ~ValueSlider() override;
 
     // What a right-click shows, such as its parameter's menu (ParameterAttachment sets it); none by default. A right-click
     // that shows it doesn't move the value.
     std::function<void()> onContextMenu;
 
+    // Opens the field a value is typed in, with this text (as typed, the caret after it) or, with none, the value's text, all
+    // of it selected; nothing while it is off or hidden. A slider with a text box of its own (a NumberField) types there. The
+    // field while it is open, else nullptr.
+    void showValueField (const juce::String& typed = {});
+    juce::TextEditor* getValueField() const noexcept;
+
+    // The label that shows its value beside it, which its parent lays out (a device's knob's value under it), or none: a
+    // click on it opens the field, over it, and a right-click shows the slider's menu; the pointer is a text cursor over it.
+    void setValueReadout (juce::Component*);
+    juce::Component* getValueReadout() const noexcept { return readout.getComponent(); }
+
+    // While it is dragged without Shift, it moves in steps of this much from its minimum (a pitch in whole semitones); 0, the
+    // default, for none. A drag with Shift, a value typed and automation fall between them.
+    void setDragStep (double);
+
+    double snapValue (double attemptedValue, DragMode) override;
+    bool keyPressed (const juce::KeyPress&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
@@ -39,8 +64,20 @@ public:
     void resized() override;
 
 private:
+    struct ValueField;
+    struct ReadoutClicks;
+
     bool fineDrag = false;   // Shift was held when the drag started
     bool showedMenu = false; // the press was a right-click that showed the menu
+    double dragStep = 0.0;
+    std::unique_ptr<ValueField> valueField; // while it is open, and until a message after it closed
+    juce::Component::SafePointer<juce::Component> readout;
+    std::unique_ptr<ReadoutClicks> readoutClicks;
+
+    bool canTypeValue() const;
+    void typeInTextBox (const juce::String& typed);                          // a NumberField's own
+    void applyTypedText (const juce::String&);                               // what the field said
+    juce::Rectangle<int> getValueFieldTarget (const juce::Component&) const; // what it covers, in that component's coordinates
 };
 
 // A rotary control, dragged up and down or left and right. A ring around it shows what modulation does to its value
@@ -123,8 +160,9 @@ inline constexpr double wheelNotch = 60.0 / 256.0;
 
 // A number that is dragged up and down, scrolled, stepped with the arrow keys, or clicked and typed, such as the top
 // bar's tempo: its text is its face. Dragging (a fifth as far with Shift), the wheel and the keys move it in steps;
-// typing takes any value in its range, to a hundredth of a step. textFromValueFunction and valueFromTextFunction give
-// it units ("120 BPM"), which screen readers read too.
+// typing (in its own text box, which a number typed while it has the keys opens too, as on a knob) takes any value in its
+// range, to a hundredth of a step. textFromValueFunction and valueFromTextFunction give it units ("120 BPM"), which screen
+// readers read too.
 class NumberField : public ValueSlider
 {
 public:
@@ -150,7 +188,9 @@ void showAsDecibels (juce::Slider&);
 // Shows and reads a slider's value, from -1 (left) to 1 (right), as a pan position ("30% left").
 void showAsPan (juce::Slider&);
 
-// Shows and reads a slider's value as a value of one of Phazite's devices' parameters, by its unit ("1.20 kHz").
+// Shows and reads a slider's value as a value of one of Phazite's devices' parameters, by its unit ("1.20 kHz"). One of
+// Phazite's sliders with a pitch in semitones is dragged in whole semitones (ValueSlider::setDragStep()), with Shift
+// between them.
 void showAsParameter (juce::Slider&, const devices::ParameterInfo&);
 
 // Shows and reads a slider's value as an integrated loudness ("-14.0 LUFS"), or as a true peak ("-1.0 dBTP").
@@ -163,10 +203,10 @@ void setPrimary (juce::TextButton&, bool primary);
 
 //==============================================================================
 // Links a slider to a parameter of a device, such as a track's volume. Moving the slider sets the parameter, as one
-// named undo step per drag or key press, which the model's ParameterHandle owns; update() shows changes made
-// elsewhere, such as undo or automation. Right-clicking one of Phazite's sliders offers to automate the parameter: its
-// lane shows under its track in the playlist. The device may be deleted at any time (when a project closes, for
-// example): the slider then turns off.
+// named undo step per drag, key press or value typed, which the model's ParameterHandle owns; update() shows changes made
+// elsewhere, such as undo or automation. Right-clicking one of Phazite's sliders offers to type a value, and to automate
+// the parameter: its lane shows under its track in the playlist. The device may be deleted at any time (when a project
+// closes, for example): the slider then turns off.
 class ParameterAttachment
 {
 public:
@@ -176,11 +216,17 @@ public:
     // handle gives them. A handle of the parameter it has already keeps that one, and a drag in progress with it.
     void setParameter (ParameterHandle);
 
-    // The slider shows values as the device writes them ("-6.0 dB"), for plug-ins that aren't Phazite's own.
+    // The slider shows values as the parameter writes them, and reads values typed so: one with a description (a
+    // modulator's, a container's chain's crossover) by its unit, as showAsParameter() does ("1.20 kHz"); a plug-in's as
+    // the plug-in writes and reads them ("-6.0 dB"); any other as the model writes and reads it (ParameterHandle::getText()).
     void showDeviceText();
 
     // Shows the parameter's value, and a knob's modulation. Call it regularly, from a timer.
     void update();
+
+    // What a right-click on one of Phazite's sliders shows: Type a Value..., Automate, Delete Automation and Modulate, or for a
+    // parameter that the first change makes (a send to a return), Type a Value... alone. Empty without a parameter.
+    juce::PopupMenu getMenu();
 
 private:
     juce::Slider& slider;

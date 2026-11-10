@@ -48,6 +48,11 @@ public:
     // How the device itself writes a value ("-6.0 dB"), for plug-ins that aren't Phazite's own.
     juce::String getText (float value) const;
 
+    // Reads a value as getText() writes it, or as someone might type it in its units ("-6 dB", "30% left", "1.2k", a choice's
+    // name): a plug-in's as the plug-in itself reads text. Kept to its range; nothing if it can't be read, or for a parameter
+    // that isn't there.
+    std::optional<float> readText (const juce::String&) const;
+
     // For a parameter of one of Phazite's own devices: its description (unit, choices), so that controls show it as
     // its unit says. Nothing for other plug-ins.
     std::optional<devices::ParameterInfo> getInfo() const;

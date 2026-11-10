@@ -193,3 +193,46 @@ TEST_CASE ("The synth's editor drags its filter's dot for the cutoff and resonan
     CHECK (editor.getAmpEnvelope().getShownLevel() > 0.1f);
     CHECK (editor.getOscillators().isShowing());
 }
+
+TEST_CASE ("The synth's pitch knob takes a value typed at its value, exactly, and drags in whole semitones")
+{
+    // The owner, 2026-11-09: "this is very important for things like pitch where a tiny bit off is totally wrong".
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = addSynth (song);
+    auto editor = phazite::ui::createDeviceEditor (phazite::makeDeviceHandle (s, id));
+    auto* panel = dynamic_cast<phazite::ui::SynthEditor*> (editor.get());
+    REQUIRE (panel != nullptr);
+    phazite::test::TestWindow window (*panel, panel->getWidth(), panel->getHeight());
+    auto* knob = dynamic_cast<phazite::ui::Knob*> (panel->findControl ("osc2Pitch"));
+    REQUIRE (knob != nullptr);
+    auto* readout = dynamic_cast<juce::Label*> (knob->getValueReadout());
+    REQUIRE (readout != nullptr);
+    REQUIRE (readout->isShowing());
+    const auto pitch = [&s, id] { return phazite::getValueSetByHand (s, { id, "osc2Pitch" }); };
+
+    // A click on its value, under it, opens the field there; "+7" and Enter set it to 7 semitones exactly, one undo step.
+    s.getUndoManager().clearUndoHistory();
+    phazite::test::Mouse mouse (*panel);
+    mouse.click (panel->getLocalArea (readout, readout->getLocalBounds()).getCentre());
+    REQUIRE (knob->getValueField() != nullptr);
+
+    for (const auto typed : { '+', '7' })
+        window.pressKey (juce::KeyPress (typed, {}, (juce::juce_wchar) typed));
+
+    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (juce::exactlyEqual (pitch(), 7.0f));
+    CHECK (s.getUndoManager().getUndoDescription() == juce::String ("Change Osc 2 Pitch"));
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (readout->getText() == juce::String ("+7 st"));
+    phazite::test::dispatchPendingMessages();
+
+    // Dragged, it stays on whole semitones.
+    const auto centre = panel->getLocalArea (knob, knob->getLocalBounds()).getCentre();
+    mouse.pause();
+    mouse.press (centre);
+    mouse.dragTo (centre + juce::Point<int> (0, -7));
+    mouse.release();
+    CHECK (pitch() > 7.0f);
+    CHECK (juce::exactlyEqual (pitch(), std::round (pitch())));
+}

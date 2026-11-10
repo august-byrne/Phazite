@@ -21,10 +21,12 @@ TextFieldRelease::~TextFieldRelease()
 void TextFieldRelease::mouseDown (const juce::MouseEvent& e)
 {
     // JUCE has given the keys to what the press landed on already, if it takes them; this hears the press after that.
-    auto* focused = dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent());
+    auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    auto* focusedField = dynamic_cast<juce::TextEditor*> (focused);
     auto* pressed = e.eventComponent;
 
-    if (focused == nullptr || pressed == nullptr || pressed == focused || focused->isParentOf (pressed))
+    if ((focusedField == nullptr && dynamic_cast<juce::Slider*> (focused) == nullptr) || pressed == nullptr || pressed == focused
+        || focused->isParentOf (pressed))
         return;
 
     // While a menu, a call-out or a dialog is up: only a press in the one the field is in lets it go (its menu's items,
@@ -33,7 +35,9 @@ void TextFieldRelease::mouseDown (const juce::MouseEvent& e)
         if (modal->isParentOf (focused) == pressed->isCurrentlyBlockedByAnotherModalComponent())
             return;
 
-    clearSelection (*focused);
+    if (focusedField != nullptr)
+        clearSelection (*focusedField);
+
     focused->giveAwayKeyboardFocus();
 }
 

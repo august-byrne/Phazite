@@ -146,6 +146,14 @@ void Host::handle (const juce::MemoryBlock& message)
             }
             break;
 
+        case MessageType::parameterValue:
+            if (auto* instance = findInstance (reader.readInt64()))
+            {
+                const auto index = reader.readInt();
+                answer.add ((double) instance->getParameterValue (index, reader.readString()));
+            }
+            break;
+
         case MessageType::stats:
             answer.add (getProcessCpuSeconds()).add (getProcessMemoryBytes());
             break;

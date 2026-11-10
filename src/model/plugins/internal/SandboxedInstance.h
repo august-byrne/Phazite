@@ -72,13 +72,15 @@ public:
 
     // Its parameters, by their places in the plug-in's list: as the helper told them as it opened (their own IDs, names,
     // steps and defaults); one's place by its own ID (-1 for none); its value now, from 0 to 1; a value set by hand, which
-    // goes to the helper at once, unless Phazite's engine moves the parameter (then it goes with the engine's blocks); and how
-    // a value reads, as the plug-in says (within a quarter of a second, else as a number). Message thread.
+    // goes to the helper at once, unless Phazite's engine moves the parameter (then it goes with the engine's blocks); how
+    // a value reads, as the plug-in says, and the value text reads as ("-6 dB"), as the plug-in reads it (each within a
+    // quarter of a second, else as a number). Message thread.
     const std::vector<sandbox::ParameterInfo>& getParameterInfos() const noexcept { return remote->getInfo().parameters; }
     int findParameter (const juce::String& ownID) const;
     float getParameterValue (int parameter) const;
     void setParameterValue (int parameter, float value);
-    juce::String describeValue (int parameter, float value) const; // not getParameterText(), which would hide JUCE's
+    juce::String describeValue (int parameter, float value) const;   // not getParameterText(), which would hide JUCE's
+    float readValue (int parameter, const juce::String& text) const; // from 0 to 1
 
     // What the plug-in changes itself, told on the message thread: a value of its own, as its window or a program of its own
     // set it (and as it opens again after a crash), by the parameter's place; what its own window grabs and lets go of, a
