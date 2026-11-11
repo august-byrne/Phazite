@@ -169,9 +169,9 @@ TEST_CASE ("The compressor's editor compresses at first: its characters, its cur
     CHECK_FALSE (editor.getListenButton().isShowing());
     phazite::test::checkChildrenApart (editor);
 
-    // Its history beside the curve: what comes in and goes out, with no line to drag.
+    // Its history beside the curve: what comes in and goes out, and how far it turned down, with no line to drag.
     CHECK (editor.getHistory().isShowing());
-    CHECK (editor.getHistory().showsOutput());
+    CHECK (editor.getHistory().showsReduction());
     CHECK_FALSE (editor.getHistory().hasLine());
 
     // The curve whole, square, beside its meter, over its tools.
@@ -205,7 +205,7 @@ TEST_CASE ("The compressor's tabs are its modes: a click on one sets it, one und
     CHECK_FALSE (editor.getKeyPicker()->isShowing());
 
     // Duck: the mode, one undo step, and its page: the key over its cuts and Listen, its knobs, and the history with the
-    // threshold's line, the key in place of what comes in and goes out; no curve, no characters.
+    // threshold's line; no curve, no characters.
     clickMode (editor, Compressor::Mode::duck);
     CHECK (song.valueOf ("mode") == doctest::Approx ((float) Compressor::Mode::duck));
     CHECK (song.describeUndo() == juce::String ("Undo Change Mode"));
@@ -230,7 +230,6 @@ TEST_CASE ("The compressor's tabs are its modes: a click on one sets it, one und
     CHECK_FALSE (editor.getCurve().isShowing());
     CHECK (editor.getHistory().isShowing());
     CHECK (editor.getHistory().hasLine());
-    CHECK_FALSE (editor.getHistory().showsOutput());
     phazite::test::checkChildrenApart (editor);
 
     // Compress again: the curve, and no key; then undone, at the tabs' next refresh, Duck's page again.
@@ -422,10 +421,13 @@ TEST_CASE ("Ducking, the compressor's key is picked over its cuts and Listen: a 
     CHECK (picker->getButtonText() == juce::String ("Kick"));
     editor.refresh();
     CHECK (editor.getHistory().getKeyName() == juce::String ("Kick"));
+    CHECK_FALSE (editor.getHistory().showsReduction()); // what the kick does is the bass's dips
+    CHECK (editor.getHistory().getDescription().contains ("Kick, what it listens to"));
 
     // Compressing, the history shows its own sound, the kick kept for when it ducks again.
     clickMode (editor, Compressor::Mode::compress);
     CHECK (editor.getHistory().getKeyName().isEmpty());
+    CHECK (editor.getHistory().showsReduction());
     CHECK (phazite::getSidechainSource (song.context, song.compressor) == song.getTrack (0));
     clickMode (editor, Compressor::Mode::duck);
     CHECK (editor.getHistory().getKeyName() == juce::String ("Kick"));

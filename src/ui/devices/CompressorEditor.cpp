@@ -201,7 +201,10 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
     }
 
     if (auto* scope = device.getScope())
+    {
+        scope->getInputPeak().take();
         scope->getOutputPeak().take();
+    }
 
     // What both pages show: its history, scrolling; each mode shows it its own way (modeShown()).
     auto& shownHistory = keep (std::make_unique<LevelHistoryView> ("Compressor history", historyLowest, meterRange));
@@ -286,11 +289,11 @@ juce::Button& CompressorEditor::getCharacterButton (int character)
 
 void CompressorEditor::modeShown (int)
 {
-    // Compressing, what comes in and goes out, how far it turns down from the top over half the height; ducking, the key and
-    // its threshold's line, how far it turns down on the levels' own scale, as a gain.
+    // Compressing, what the detector hears and what goes out, how far it turns down from the top over half the height;
+    // ducking, the sound it ducks as it comes in and goes out, with the key (without one, how far it turns down, on the
+    // levels' own scale) and the threshold's line.
     const auto ducking = isDucking();
     const auto lineName = getInfo (Compressor::threshold).name;
-    history->setShowsOutput (! ducking);
     history->setLine (ducking ? &threshold : nullptr, juce::String (lineName.data(), lineName.size()));
     history->setReductionScale (ducking ? -historyLowest : meterRange, ducking ? 1.0f : 0.5f);
     showKey();
@@ -313,8 +316,8 @@ void CompressorEditor::refresh()
 
     characters->refresh();
 
-    // The meters jump up and fall back smoothly; the history takes each reading as it comes, with what goes out.
-    auto level = silence, reduction = 0.0f, boost = 0.0f, output = silence;
+    // The meters jump up and fall back smoothly; the history takes each reading as it comes, with what comes in and goes out.
+    auto level = silence, reduction = 0.0f, boost = 0.0f, input = silence, output = silence;
 
     if (auto* compressor = device.getProcessor<Compressor>())
     {
@@ -330,13 +333,22 @@ void CompressorEditor::refresh()
     if (auto* scope = device.getScope())
     {
         scope->setListening (true);
+        input = scope->getInputPeak().take();
         output = scope->getOutputPeak().take();
     }
 
     shownLevel = std::max (level, shownLevel - meterFall);
     shownReduction = std::max (reduction, shownReduction - meterFall);
     shownBoost = std::max (boost, shownBoost - meterFall);
-    history->push (juce::Time::getMillisecondCounterHiRes(), device.getSongTime(), level, output, reduction);
+
+    // Compressing, what the detector heard of the sound (after the input gain and the key's low cut), against the curve;
+    // ducking, the sound as it came in, and the key as the detector heard it, against the threshold.
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+
+    if (isDucking())
+        history->push (now, device.getSongTime(), input, output, reduction, level);
+    else
+        history->push (now, device.getSongTime(), level, output, reduction);
 
     // What it listens to, in its colour and named in the history, and in the picker: again as the song changes (its own
     // undo, Duck Under, a track renamed or recoloured).

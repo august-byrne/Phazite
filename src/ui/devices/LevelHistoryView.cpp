@@ -29,17 +29,16 @@ LevelHistoryView::LevelHistoryView (const juce::String& title, float lowestLevel
 
 void LevelHistoryView::describe()
 {
-    const auto shown = drawsOutput ? juce::String ("how loud the sound came in (pale, or in the colour of the track the device listens to "
-                                                   "through its sidechain) and went out")
-                                   : juce::String ("how loud the device heard what it listens to (pale for its own sound, or in the "
-                                                   "colour of the track its sidechain listens to)");
-    setDescription ("The last two bars: " + shown
-                    + ", and how far it was turned down (red, from the top), with a faint line at each beat and a stronger one at "
-                      "each bar."
+    const auto shown = keyName.isNotEmpty()
+                           ? "how loud the sound came in (pale) and went out (over it, each duck a dip under what came in), and " + keyName
+                                 + ", what it listens to, as a line in its colour"
+                           : juce::String ("how loud the sound came in (pale) and went out, and how far it was turned down (red, "
+                                           "from the top)");
+    setDescription ("The last two bars: " + shown + ", with a faint line at each beat and a stronger one at each bar."
                     + (line != nullptr ? " Drag the " + lineName.toLowerCase() + "'s line up or down to move it." : juce::String()));
 }
 
-void LevelHistoryView::push (double milliseconds, const SongTime& song, float input, float output, float reduction)
+void LevelHistoryView::push (double milliseconds, const SongTime& song, float input, float output, float reduction, float key)
 {
     // Two bars at the tempo where the playhead is.
     span = barsShown * std::max (song.barLength, 0.25) * 60000.0 / std::max (song.bpm, 1.0);
@@ -48,7 +47,7 @@ void LevelHistoryView::push (double milliseconds, const SongTime& song, float in
     if (song.playing && ! readings.empty())
         addLines (readings.back().milliseconds, milliseconds, song);
 
-    readings.push_back ({ milliseconds, input, output, reduction });
+    readings.push_back ({ milliseconds, input, output, reduction, key });
     lastSong = song;
     ++pushes;
 
@@ -112,7 +111,7 @@ bool LevelHistoryView::isFlat() const
                            [this] (const Reading& reading)
                            {
                                return reading.input <= lowest + unseenLevel && reading.output <= lowest + unseenLevel
-                                      && reading.reduction < unseenReduction;
+                                      && reading.reduction < unseenReduction && (showsReduction() || reading.key <= lowest + unseenLevel);
                            });
 }
 
@@ -157,16 +156,6 @@ void LevelHistoryView::setLine (ParameterHandle* handle, const juce::String& nam
     repaint();
 }
 
-void LevelHistoryView::setShowsOutput (bool shows)
-{
-    if (shows == drawsOutput)
-        return;
-
-    drawsOutput = shows;
-    describe();
-    repaint();
-}
-
 void LevelHistoryView::setReductionScale (float decibels, float shareOfHeight)
 {
     reductionRange = std::max (1.0f, decibels);
@@ -181,6 +170,7 @@ void LevelHistoryView::setKey (const juce::String& name, juce::Colour colour)
 
     keyName = name;
     keyColour = colour;
+    describe();
     repaint();
 }
 
@@ -252,64 +242,58 @@ void LevelHistoryView::paint (juce::Graphics& g)
                 return trace;
             };
 
-            // What comes in, pale; or the key, filled in its track's colour, outlined and named. What goes out, in the device's
-            // colour, over it, where it shows; their outlines over both, so that each hit of the key shows above what it ducks.
+            // What comes in, pale, and what goes out, in the device's colour over it, outlined: where the device turns the
+            // sound down, what went out dips under what came in.
             const auto in = makeTrace (&Reading::input, yFor);
-            const auto keyed = keyName.isNotEmpty();
-            g.setColour (keyed ? keyColour.withAlpha (GraphTint::partCurve * 2.0f)
-                               : p.textMuted.withAlpha (GraphTint::spectrumFill * 2.0f));
+            g.setColour (p.textMuted.withAlpha (GraphTint::spectrumFill * 2.0f));
             g.fillPath (filled (in, inner.getBottom()));
 
-            juce::Path out;
+            const auto out = makeTrace (&Reading::output, yFor);
+            g.setColour (tint.withAlpha (GraphTint::partCurve * 2.0f));
+            g.fillPath (filled (out, inner.getBottom()));
+            g.setColour (tint);
+            g.strokePath (out, juce::PathStrokeType (1.0f));
 
-            if (drawsOutput)
-            {
-                out = makeTrace (&Reading::output, yFor);
-                g.setColour (tint.withAlpha (GraphTint::partCurve * 2.0f));
-                g.fillPath (filled (out, inner.getBottom()));
-            }
-
-            if (keyed)
+            // Listening to another track, that track as a line in its colour, named, which the threshold's line crosses where
+            // the sound dips: how far it turned down is the dips themselves.
+            if (! showsReduction())
             {
                 g.setColour (keyColour);
-                g.strokePath (in, juce::PathStrokeType (1.0f));
+                g.strokePath (makeTrace (&Reading::key, yFor), juce::PathStrokeType (1.5f));
                 g.setFont (juce::FontOptions (TextSize::small));
                 g.drawText (keyName, inner.reduced ((float) Space::xs), juce::Justification::bottomLeft, true);
             }
-
-            if (drawsOutput)
+            else
             {
-                g.setColour (tint);
-                g.strokePath (out, juce::PathStrokeType (1.0f));
-            }
+                // Turned down: hanging from the top, as deep as it went.
+                const auto down = makeTrace (&Reading::reduction, reductionY);
+                g.setColour (p.danger.withAlpha (GraphTint::partCurve * 2.0f));
+                g.fillPath (filled (down, inner.getY()));
+                g.setColour (p.danger);
+                g.strokePath (down, juce::PathStrokeType (1.0f));
 
-            // Turned down: hanging from the top, as deep as it went.
-            const auto down = makeTrace (&Reading::reduction, reductionY);
-            g.setColour (p.danger.withAlpha (GraphTint::partCurve * 2.0f));
-            g.fillPath (filled (down, inner.getY()));
-            g.setColour (p.danger);
-            g.strokePath (down, juce::PathStrokeType (1.0f));
+                // The deepest dips numbered, each the deepest of its third of what shows.
+                const auto start = readings.back().milliseconds - span;
 
-            // The deepest dips numbered, each the deepest of its third of what shows.
-            const auto start = readings.back().milliseconds - span;
-
-            for (int stretch = 0; stretch < numberedDips; ++stretch)
-            {
-                const auto from = start + span * stretch / numberedDips, to = start + span * (stretch + 1) / numberedDips;
-                const Reading* deepest = nullptr;
-
-                for (const auto& reading : readings)
-                    if (reading.milliseconds > from && reading.milliseconds <= to
-                        && (deepest == nullptr || reading.reduction > deepest->reduction))
-                        deepest = &reading;
-
-                if (deepest != nullptr && deepest->reduction >= smallestDip)
+                for (int stretch = 0; stretch < numberedDips; ++stretch)
                 {
-                    const auto x = getXForTime (deepest->milliseconds);
-                    graph::paintReadout (g, p,
-                                         juce::Rectangle<float> (x - 30.0f, reductionY (deepest->reduction), 60.0f, TextSize::small + 6.0f)
-                                             .constrainedWithin (inner),
-                                         "-" + juce::String (deepest->reduction, 1), juce::Justification::centredTop);
+                    const auto from = start + span * stretch / numberedDips, to = start + span * (stretch + 1) / numberedDips;
+                    const Reading* deepest = nullptr;
+
+                    for (const auto& reading : readings)
+                        if (reading.milliseconds > from && reading.milliseconds <= to
+                            && (deepest == nullptr || reading.reduction > deepest->reduction))
+                            deepest = &reading;
+
+                    if (deepest != nullptr && deepest->reduction >= smallestDip)
+                    {
+                        const auto x = getXForTime (deepest->milliseconds);
+                        graph::paintReadout (
+                            g, p,
+                            juce::Rectangle<float> (x - 30.0f, reductionY (deepest->reduction), 60.0f, TextSize::small + 6.0f)
+                                .constrainedWithin (inner),
+                            "-" + juce::String (deepest->reduction, 1), juce::Justification::centredTop);
+                    }
                 }
             }
         }

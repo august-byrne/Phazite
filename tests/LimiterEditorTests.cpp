@@ -224,3 +224,55 @@ TEST_CASE ("A dynamics history's beat and bar lines are where the song passed th
     history.push (1000.0 + 50.0 * 62, song, -48.0f, -48.0f, 0.0f);
     CHECK (history.getLines().size() == 7);
 }
+
+TEST_CASE ("Listening to a key, a dynamics history shows the sound's dips under what came in and the key as a line, not a mirror")
+{
+    // The owner (2026-11-11): the key, filled, with how far it turned down hanging from the top, "just shows the duck envelope
+    // mirrored". A bass at -12 dB, ducked 14 dB for half a second in the middle of four, under a kick at -6 dB then.
+    phazite::ui::LevelHistoryView history ("History", -60.0f, 24.0f);
+    phazite::test::TestWindow window (history, 400, 160);
+    const phazite::ui::LevelHistoryView::SongTime song {};
+    const juce::Colour keyColour (0xff20c060); // no red in it: red is how far it turned down
+
+    for (int reading = 0; reading <= 80; ++reading)
+    {
+        const auto ducked = reading >= 35 && reading < 45;
+        history.push (1000.0 + 50.0 * reading, song, -12.0f, ducked ? -26.0f : -12.0f, ducked ? 14.0f : 0.0f, ducked ? -6.0f : -40.0f);
+    }
+
+    // Red, as the palette's danger colour (how far it turned down) is: far more red in a pixel than green or blue.
+    const auto countRed = [] (const juce::Image& image)
+    {
+        auto count = 0;
+
+        for (int y = 0; y < image.getHeight(); ++y)
+            for (int x = 0; x < image.getWidth(); ++x)
+                if (const auto c = image.getPixelAt (x, y); (int) c.getRed() - (int) std::max (c.getGreen(), c.getBlue()) > 40)
+                    ++count;
+
+        return count;
+    };
+
+    // Without a key, how far it turned down hangs from the top, in red.
+    CHECK (history.showsReduction());
+    CHECK (countRed (window.paintEverything()) > 50);
+
+    // With one: no red; the key's line in its colour where the kick was; and in the dip, between what went out and what came
+    // in, a bite that isn't what went out.
+    history.setKey ("Kick", keyColour);
+    CHECK_FALSE (history.showsReduction());
+    CHECK (history.getDescription().contains ("Kick, what it listens to"));
+    const auto image = window.paintEverything();
+    CHECK (countRed (image) == 0);
+
+    const auto dipX = juce::roundToInt (history.getXForTime (1000.0 + 50.0 * 40)),
+               flatX = juce::roundToInt (history.getXForTime (1000.0 + 50.0 * 20));
+    const auto keyY = juce::roundToInt (history.getYForLevel (-6.0f)), biteY = juce::roundToInt (history.getYForLevel (-19.0f));
+    auto keyShows = false;
+
+    for (int y = keyY - 2; y <= keyY + 2; ++y)
+        keyShows = keyShows || image.getPixelAt (dipX, y).getGreen() > 150;
+
+    CHECK (keyShows);
+    CHECK (image.getPixelAt (dipX, biteY) != image.getPixelAt (flatX, biteY));
+}
