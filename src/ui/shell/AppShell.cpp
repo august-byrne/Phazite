@@ -559,8 +559,19 @@ void AppShell::showCommandPalette()
     CommandPalette::show (commands, titleBar.getSearchBox());
 }
 
+void AppShell::revealLeftView (LeftView view)
+{
+    // Shown, never hidden, as what a command shows its result in.
+    if (leftWindow != nullptr || ! panels.takesRoom (Panel::left) || panels.leftView != view)
+        showLeftView (view);
+}
+
 void AppShell::showBranchPicker (BranchPicker::Mode mode)
 {
+    // A merge's lines show in the Source Control view.
+    if (mode == BranchPicker::Mode::merge)
+        revealLeftView (LeftView::versions);
+
     BranchPicker::show (commands, projectContext, titleBar.getSearchBox(), mode);
 }
 
@@ -1219,12 +1230,12 @@ void AppShell::addCommands (CommandRegistry& registry)
          "branches; or hides the panel if it shows them.",
          { "versions", "history", "branches", "git", "commits", "snapshots", "sidebar" }, [this] { showLeftView (LeftView::versions); });
 
-    // The branch picker, as the Versions view's branch button and the status bar's branch open it, and Bounce Each Version,
-    // as Save Version's menu shows it.
+    // Source control's quick inputs, as the Versions view's branch button, its menus and the status bar's branch open them,
+    // and Bounce Each Commit, as Commit's menu shows it.
     registry.add (
         { .id = "version.pickBranch",
           .name = "Checkout to...",
-          .category = "Project",
+          .category = "Source Control",
           .description = "Lists the project's branches to check out, or creates a new one from the current commit, named as you type.",
           .synonyms = { "branch", "checkout", "git", "switch", "idea", "new branch" },
           .perform = [this] { showBranchPicker (BranchPicker::Mode::pick); },
@@ -1232,15 +1243,42 @@ void AppShell::addCommands (CommandRegistry& registry)
 
     registry.add ({ .id = "version.renameBranch",
                     .name = "Rename Branch...",
-                    .category = "Project",
+                    .category = "Source Control",
                     .description = "Names the branch the song is on anew.",
                     .synonyms = { "branch", "name", "rename", "title" },
                     .perform = [this] { showBranchPicker (BranchPicker::Mode::rename); },
                     .isEnabled = [this] { return getCurrentBranch (projectContext).has_value(); } });
 
+    registry.add ({ .id = "version.mergeBranch",
+                    .name = "Merge Branch...",
+                    .category = "Source Control",
+                    .description = "Lists the other branches, to merge one into the branch the song is on: what it changed shows in "
+                                   "Source Control, each line ticked, to take into the song as one undo step.",
+                    .synonyms = { "merge", "combine", "join", "pull", "git merge", "branch" },
+                    .perform = [this] { showBranchPicker (BranchPicker::Mode::merge); },
+                    .isEnabled = [this] { return canMergeAnyBranch (projectContext); } });
+
+    registry.add ({ .id = "version.deleteBranch",
+                    .name = "Delete Branch...",
+                    .category = "Source Control",
+                    .description = "Lists the other branches, to delete one, asking first when commits no other branch has, or "
+                                   "changes left on it, would go with it.",
+                    .synonyms = { "remove", "branch", "git branch -d", "clean up", "discard branch" },
+                    .perform = [this] { showBranchPicker (BranchPicker::Mode::remove); },
+                    .isEnabled = [this] { return canDeleteAnyBranch (projectContext); } });
+
+    registry.add ({ .id = "version.editMessage",
+                    .name = "Edit Commit Message...",
+                    .category = "Source Control",
+                    .description = "Names the commit selected in the graph anew, and its note: its first line the name, the lines "
+                                   "after it the note. The commit itself stays as it is.",
+                    .synonyms = { "rename commit", "reword", "amend", "name", "note", "label", "tag" },
+                    .perform = [this] { showBranchPicker (BranchPicker::Mode::message); },
+                    .isEnabled = [this] { return canEditSelectedMessage (projectContext); } });
+
     registry.add ({ .id = "version.bounceEach",
                     .name = "Bounce Each Commit",
-                    .category = "Project",
+                    .category = "Source Control",
                     .description = "Renders the song into each commit as Commit makes it, as Export Song renders it, to hear that "
                                    "commit later against the song.",
                     .synonyms = { "bounce", "render", "audio", "with a bounce", "mixdown" },

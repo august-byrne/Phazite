@@ -96,6 +96,7 @@ project.saveAs | ctrl + shift + S
 project.save | ctrl + S
 project.autoSave
 version.save | ctrl + alt + S
+version.undoCommit
 version.stage
 version.unstage
 version.stageAll
@@ -104,6 +105,7 @@ version.discardAll
 version.putBack
 version.bringBack
 version.takeFrom
+version.restoreChange
 version.showChanges
 version.newBranch
 version.switchBranch
@@ -114,6 +116,7 @@ version.hear
 version.bounce
 version.deleteBounce
 version.exportDawProject
+version.restoreSnapshot
 version.verify
 version.recover
 project.export | ctrl + shift + R
@@ -127,6 +130,9 @@ view.project
 view.versions
 version.pickBranch
 version.renameBranch
+version.mergeBranch
+version.deleteBranch
+version.editMessage
 version.bounceEach
 device.add | F8
 device.savePreset

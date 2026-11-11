@@ -77,6 +77,10 @@ public:
     bool saveVersion (const juce::String& name, const juce::String& note, std::function<void (juce::Result)> done = {});
     bool isSaving() const noexcept { return saving; }
 
+    // What the next commit would be named while it has no message of its own: what is staged, or every change while none
+    // is ("Update Bass and Drums"), or the merge it finishes ("Merge branch 'idea-2'"); none while there is nothing to commit.
+    juce::String summariseNextCommit();
+
     // A version's song, read from its pieces, with its plug-ins' parameters' values if asked: invalid if one can't be read,
     // or, given somewhere to list what is missing, as much as can be read (SongPieces.h: joinSong()). And the current
     // branch's last version's song, which the changes are from (invalid before the first version).
@@ -113,6 +117,7 @@ public:
     juce::String selectedVersion;
     std::optional<SongChange> selectedChange;
     bool selectedChangeIsStaged = false;
+    std::optional<SongChange> selectedVersionChange; // a line of what the selected version changed, under it in the graph
     void compareWith (const juce::String& versionID);
     const juce::String& getComparedVersion() const noexcept { return comparedVersion; }
     const std::vector<SongChange>& getListedChanges();
@@ -171,8 +176,49 @@ public:
     bool renameBranch (const juce::String& branchID, const juce::String& name);
     juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to
 
+    // Delete Branch (git branch -D): a branch but the current one, and the song left on it, gone; its commits that no other
+    // branch holds go from the graph and stay in the store, where Verify History finds them and Recover Lost Commits brings
+    // them back. Its record says so (Schema.h: branchDeleted), so that every computer leaves it out, until commits made on it
+    // elsewhere since bring it back. Not while a merge of its line is under way. And what deleting one would take with it:
+    // how many commits no other branch holds, and whether the song left there had changes since its last commit.
+    bool deleteBranch (const juce::String& branchID);
+    int countVersionsOnlyOn (const juce::String& branchID) const;
+    bool hasChangesLeftOn (const juce::String& branchID) const;
+
+    // Undo Last Commit (git reset --soft HEAD~, as VS Code's): the current branch moved back to the commit before its last,
+    // what that commit recorded staged again, the song as it is, and its message the draft again while none is typed. Not
+    // for the first commit or a merge's, nor while a commit is being made or a merge is under way. The commit stays in the
+    // store, so Recover Lost Commits brings it back while no branch holds it.
+    bool canUndoLastCommit() const;
+    bool undoLastCommit();
+
+    // What a commit changed: from the commit it follows (its first parent; nothing, for the first) to it, by line, worked
+    // out once each (a commit never changes). Empty for one that can't be read.
+    const std::vector<SongChange>& getVersionChanges (const juce::String& versionID);
+
+    // Edit Commit Message...: a commit's name and note set anew (either may be empty; the summary of its changes names one
+    // without a name), kept beside its record, which never changes (VersionStore.h: writeMessage()), on every computer that
+    // has the folder. False for a commit the history doesn't hold.
+    bool editMessage (const juce::String& versionID, const juce::String& name, const juce::String& note);
+
+    //==============================================================================
+    // Local History (docs/versions.md: Local History): the song as it was at times while it differed from its last commit,
+    // kept without commits in this computer's history in the store (VersionStore.h: Snapshot), newest first. Taken as the
+    // project opens with changes since its last commit, every snapshotMinutes while the song changes, and, with a reason,
+    // before what makes the song another (Restore from This Commit, Discard All Changes, a merge taken, a snapshot
+    // restored); written on the history's thread, and only when the song differs from the snapshot before it. Thinned as it
+    // grows (thinSnapshots()). A snapshot's song, by its time: invalid for none.
+    static constexpr int snapshotMinutes = 10;
+    const std::vector<Snapshot>& getSnapshots() const noexcept { return snapshots; }
+    void takeSnapshot (const juce::String& reason);
+    juce::ValueTree readSnapshot (juce::int64 time) const;
+    juce::int64 selectedSnapshot = 0; // the one the Versions view selects, which version.restoreSnapshot restores
+
     // Where two versions' lines parted (findMergeBase()); none for two of no common line.
     juce::String findCommonVersion (const juce::String& a, const juce::String& b) const;
+
+    // How many versions one version's line holds that another's doesn't (git rev-list --count other..version).
+    int countVersionsNotIn (const juce::String& version, const juce::String& other) const;
 
     // The IDs earlier merges into this line gave anew to what the other line added (findRenumbering(), below).
     std::vector<RenumberedID> findRenumbering (const juce::String& ours, const juce::String& theirs, const juce::String& parted) const;
@@ -194,6 +240,7 @@ public:
         std::vector<MergeClash> clashes;
         std::vector<int> chosen;
         juce::StringArray notes;
+        juce::ValueTree before; // the song as it was before the merge was taken, which Abort Merge makes it again
     };
 
     std::optional<Merge> preview, merging;
@@ -261,9 +308,25 @@ private:
     std::vector<SongChange> comparedChanges;
     bool comparedReady = false;
 
+    // What each commit asked for changed (getVersionChanges()), by its id.
+    std::map<juce::String, std::vector<SongChange>> versionChanges;
+
+    // The commits' messages as they were edited (VersionStore.h: readMessages()), which name them in place of their records'.
+    std::map<juce::String, MessageEdit> messageEdits;
+    void applyMessageEdits();
+
+    // Local History, newest first; whether the song changed since the last snapshot was taken, and when it was.
+    std::vector<Snapshot> snapshots;
+    bool editedSinceSnapshot = false;
+    juce::int64 lastSnapshotTime = 0;
+    void snapshotTaken (int generation, std::vector<Snapshot> oldestFirst);
+
+    // The versions no branch's line holds any more (a branch deleted, a commit undone) let go of: they stay in the store.
+    void forgetUnreachable();
+
     void open(); // the store beside the song's file, read on the history's thread
     void opened (int generation, std::vector<BranchRecord>, const juce::String& current, std::map<juce::String, VersionRecord>,
-                 const juce::ValueTree& head, PluginParameterValues);
+                 const juce::ValueTree& head, PluginParameterValues, std::map<juce::String, MessageEdit>, std::vector<Snapshot>);
     void saved (int generation, bool ok, const VersionRecord&, const BranchRecord&, const juce::ValueTree& song, PluginParameterValues,
                 ReportCounts committed);
     void followFolder(); // the song's project moved (its first save asked where): its versions are beside it there
@@ -330,4 +393,8 @@ std::vector<BranchRecord> joinBranchRecords (const std::vector<BranchRecord>& re
 
 // What a version is called: the name it was given, or the summary of its changes.
 juce::String getDisplayName (const VersionRecord&);
+
+// A local history thinned as it grows, as of a time (docs/versions.md: Local History): every snapshot of the last two hours,
+// then the newest of each hour for a day, then the newest of each day for 30 days, and none older; oldest first, as given.
+std::vector<Snapshot> thinSnapshots (const std::vector<Snapshot>& oldestFirst, juce::int64 now);
 } // namespace phazite

@@ -14,7 +14,9 @@
 //   Stage All. A click selects its track. Or, while a merge's list shows, what the other line changed, ticked to take it;
 //   while a merge waits for its commit, its conflicts, each switched between its values;
 // - Graph: every branch's commits newest first, each on its branch's line in its color, a branch's name on its last commit,
-//   with a play mark on those with a bounce, which hears it in place of the song (the uncommitted changes', the song again);
+//   with a play mark on those with a bounce, which hears it in place of the song (the uncommitted changes', the song again).
+//   A click on a commit opens it, as a tree's row opens: what it changed shows under it, a line a track, each with its
+//   letter and, under the pointer, its Restore from This Commit; another click folds it;
 // - and the room the history takes.
 // The sections fold under their headings. By the model's functions (model/versions/VersionsModel.h) and the commands.
 #pragma once
@@ -62,8 +64,14 @@ public:
     int getNumStaged() const noexcept { return (int) staged.size(); }
     juce::String describeStaged (int row) const;
     juce::String getStagedLetter (int row) const;
-    int getNumHistoryRows() const noexcept { return (int) versions.size() + 1; } // the uncommitted changes first
+    int getNumHistoryRows() const noexcept { return (int) historyRows.size(); } // the uncommitted changes first
     juce::String describeHistoryRow (int row) const;
+
+    // The graph's commit opened, whose changes show under it (none for none), opened or folded as a click on it does; and the
+    // row of a commit, or of the uncommitted changes (none).
+    const juce::String& getOpenedVersion() const noexcept { return openedVersion; }
+    void openVersion (const juce::String& versionID);
+    int getHistoryRow (const juce::String& versionID) const;
     juce::TextEditor& getMessageField() noexcept;
     juce::Button& getSaveButton() noexcept { return saveButton; }
     juce::Button& getSaveMenuButton() noexcept { return saveMenuButton; }
@@ -78,6 +86,14 @@ public:
     juce::ListBox& getChangesList() noexcept { return changesList; }
     juce::ListBox& getStagedList() noexcept { return stagedList; }
     juce::ListBox& getHistoryList() noexcept { return historyList; }
+
+    // Local History, under the graph (folded at first): its section, its list, a row of it as screen readers say it, and
+    // where a row's Restore is, under the pointer or selected.
+    juce::Button& getLocalHistorySection() noexcept;
+    juce::ListBox& getLocalHistoryList() noexcept { return localList; }
+    int getNumSnapshots() const noexcept { return (int) snapshots.size(); }
+    juce::String describeSnapshot (int row) const;
+    juce::Rectangle<int> getSnapshotRestorePosition (int row) const;
     juce::String getChangesHeading() const;
     juce::String getRoomText() const { return roomText.getText(); }
 
@@ -92,6 +108,10 @@ public:
     juce::Rectangle<int> getPutBackPosition (int row) const;
     juce::Rectangle<int> getStagePosition (int row) const;
     juce::Rectangle<int> getUnstagePosition (int row) const;
+    juce::Rectangle<int> getRestorePosition (int row) const; // a line under an opened commit, in the graph
+
+    // The menu of the graph's row (a commit's, the uncommitted changes', or a line under a commit), as a right-click shows it.
+    juce::PopupMenu makeHistoryMenu (int row);
 
     // When a commit was made, as the graph shows it: "now", "5 min", "2 h", the day this week ("Mon"), or the date.
     static juce::String describeWhen (juce::Time saved, juce::Time now);
@@ -99,6 +119,7 @@ public:
 private:
     class ChangesModel;
     class HistoryModel;
+    class LocalHistoryModel;
     class MessageField;
     class BranchButton;
 
@@ -112,13 +133,15 @@ private:
     IconButton moreButton { "More Actions", Icon::moreActions };
     std::unique_ptr<MessageField> messageField;
     IconButton saveButton { "Commit", Icon::check }, saveMenuButton { "Commit's choices", Icon::expanded };
-    std::unique_ptr<SectionHeader> stagedSection, changesSection, historySection;
+    std::unique_ptr<SectionHeader> stagedSection, changesSection, historySection, localSection;
     juce::TextButton doneButton;                // from another commit's differences back to the changes
     juce::TextButton mergeButton, cancelButton; // a merge's list's
     std::unique_ptr<ChangesModel> stagedModel, changesModel;
     std::unique_ptr<HistoryModel> historyModel;
-    juce::ListBox stagedList, changesList, historyList;
-    std::unique_ptr<ListRowHover> stagedHover, changesHover;
+    std::unique_ptr<LocalHistoryModel> localModel;
+    juce::ListBox stagedList, changesList, historyList, localList;
+    std::unique_ptr<ListRowHover> stagedHover, changesHover, historyHover, localHover;
+    std::vector<SnapshotInfo> snapshots;
 
     Lines lines = Lines::changes;
     std::vector<VersionChange> staged, changes;
@@ -133,9 +156,28 @@ private:
     float bounceProgress = 0.0f;
     bool hasPlayMark (int row) const;
 
-    // The changes' icons (a track's, the master's, the song's) and their actions', drawn in each row's colors.
+    // The graph's rows: the uncommitted changes, then each commit, and under the one opened, a row for each line it changed.
+    struct HistoryRow
+    {
+        int version = -1; // its commit's place in versions; none for the uncommitted changes
+        int change = -1;  // its line's place in openedChanges; none for the commit itself
+    };
+
+    std::vector<HistoryRow> historyRows;
+    juce::String openedVersion;
+    std::vector<VersionChange> openedChanges;
+    const VersionInfo* getRowVersion (int row) const;  // a commit's row's commit (not a line's under it)
+    const VersionChange* getRowChange (int row) const; // a line's under its commit
+    const VersionInfo* getLineVersion (int row) const; // the commit a line under it is of
+    void refreshHistoryRows();
+    void selectHistoryRow(); // the row of what the model selects, after the rows moved
+
+    // The changes' icons (a track's, the master's, the song's) and their actions', drawn in each row's colors; and the
+    // graph's chevron on each commit, open or folded.
     TintedIcon trackIcon { Icon::sound }, masterIcon { Icon::effect }, songIcon { Icon::song };
     TintedIcon discardIcon { Icon::undo }, stageIcon { Icon::plus }, unstageIcon { Icon::minus };
+    TintedIcon openIcon { Icon::expanded }, foldedIcon { Icon::folded };
+    TintedIcon clockIcon { Icon::recent }; // a snapshot of Local History's
 
     // The graph's lines, from a row to the row of a commit it follows: down the column of the newer row's branch, turning into
     // the older's at its end (a commit's first parent: its own branch's line, or where its branch started), or turning at the

@@ -388,7 +388,8 @@ private:
 
 //==============================================================================
 // The graph: the uncommitted changes, the song as it is, then every branch's commits, newest first, each a dot on its
-// branch's line, in its branch's column, and on a branch's last commit the branch's name.
+// branch's line, in its branch's column, and on a branch's last commit the branch's name; under a commit opened, what it
+// changed, a row a line.
 class VersionsView::HistoryModel : public juce::ListBoxModel
 {
 public:
@@ -404,7 +405,7 @@ public:
         const auto& p = getPalette (view);
         auto area = juce::Rectangle<int> (width, height);
 
-        drawListRow (g, view, area.toFloat(), selected, false);
+        drawListRow (g, view, area.toFloat(), selected, view.historyHover != nullptr && row == view.historyHover->row);
 
         // From where a first level's chevron is, to inside the row's inset (VS Code's graph, SideBar).
         area = area.withTrimmedLeft (SideBar::rowChevron).withTrimmedRight (Space::s);
@@ -435,6 +436,28 @@ public:
         const auto dotAt = [&] (const juce::String& branch)
         { return juce::Rectangle<float> (History::dotSize, History::dotSize).withCentre ({ laneCentre (view.getLane (branch)), middle }); };
 
+        // A line under its commit, one level in from the commit's name: its icon, its name and what changed, its Restore under
+        // the pointer, and its letter, as git shows a commit's files.
+        if (const auto* change = view.getRowChange (row))
+        {
+            const auto theme = getThemeOf (view);
+            const auto colour = getChangeColour (getKind (*change), theme);
+            area.removeFromLeft (SideBar::chevronSize + SideBar::indent);
+            auto& icon = change->isSong ? view.songIcon : change->isMaster ? view.masterIcon : view.trackIcon;
+            icon.draw (g, takeIconColumn (area, History::rowIconSize), p.textMuted);
+            drawLetter (g, area, getLetter (*change), colour);
+
+            if (view.historyHover != nullptr && (row == view.historyHover->row || selected))
+                view.discardIcon.draw (g,
+                                       area.removeFromRight (History::actionWidth)
+                                           .toFloat()
+                                           .withSizeKeepingCentre (History::rowIconSize, History::rowIconSize),
+                                       p.text);
+
+            drawLine (g, area, colour, p.textMuted, change->name, change->what, change->kind == VersionChange::Kind::removed);
+            return;
+        }
+
         // Its play mark, while any commit has a bounce: what is heard in the accent's color.
         if (view.anyBounce)
         {
@@ -443,7 +466,8 @@ public:
 
             if (view.hasPlayMark (row))
             {
-                const auto heard = row == 0 ? view.heardVersion.isEmpty() : view.versions[(size_t) row - 1].id == view.heardVersion;
+                const auto* version = view.getRowVersion (row);
+                const auto heard = version == nullptr ? view.heardVersion.isEmpty() : version->id == view.heardVersion;
                 juce::Path triangle;
                 triangle.addTriangle (mark.getTopLeft(), mark.getBottomLeft(), { mark.getRight(), mark.getCentreY() });
                 g.setColour (heard ? p.accent : p.textMuted);
@@ -462,12 +486,20 @@ public:
             return;
         }
 
-        if (! juce::isPositiveAndBelow (row - 1, (int) view.versions.size()))
+        const auto* found = view.getRowVersion (row);
+
+        if (found == nullptr)
             return;
 
-        const auto& version = view.versions[(size_t) row - 1];
+        const auto& version = *found;
         g.setColour (view.getBranchColour (version.branch));
         g.fillEllipse (dotAt (version.branch));
+
+        // Its chevron, as a tree's row has one: open while what it changed shows under it.
+        (version.id == view.openedVersion ? view.openIcon : view.foldedIcon)
+            .draw (g,
+                   area.removeFromLeft (SideBar::chevronSize).toFloat().withSizeKeepingCentre (History::rowIconSize, History::rowIconSize),
+                   p.textMuted);
 
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::small));
@@ -516,36 +548,141 @@ public:
                    "from it."
                    + juce::String (play);
 
-        return view.describeHistoryRow (row) + ". Right-click for what can be done with it." + play;
+        if (const auto* version = view.getLineVersion (row))
+            return view.describeHistoryRow (row) + ". Its arrow restores it from \"" + version->name + "\"; right-click for more.";
+
+        return view.describeHistoryRow (row) + ". Click to show what it changed; right-click for what can be done with it." + play;
+    }
+
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override
+    {
+        selectedRowsChanged (row);
+        const auto at = e.getEventRelativeTo (&view.historyList).getPosition();
+
+        if (e.mods.isPopupMenu())
+        {
+            view.makeHistoryMenu (row).showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+            return;
+        }
+
+        // On its play mark: it is heard (the uncommitted changes': the song again).
+        if (view.hasPlayMark (row) && view.getPlayMarkPosition (row).contains (at))
+        {
+            const auto* version = view.getRowVersion (row);
+            hearVersion (view.context, version != nullptr ? version->id : juce::String());
+            return;
+        }
+
+        // A line under a commit: its arrow restores it from that commit, as one undo step; a click selects its track.
+        if (const auto* change = view.getRowChange (row))
+        {
+            if (view.getRestorePosition (row).contains (at))
+            {
+                view.commands.invoke ("version.restoreChange");
+                return;
+            }
+
+            if (change->track.isValid() && change->kind != VersionChange::Kind::removed)
+                view.context.getSongSelection().selectOnly (change->track);
+
+            return;
+        }
+
+        // A commit opens, or folds.
+        if (const auto* version = view.getRowVersion (row))
+            view.openVersion (version->id);
+    }
+
+    void returnKeyPressed (int row) override
+    {
+        if (const auto* version = view.getRowVersion (row))
+            view.openVersion (version->id);
+    }
+
+    void selectedRowsChanged (int row) override
+    {
+        // The uncommitted changes, a commit, or a line under one, which the commands act on.
+        if (const auto* change = view.getRowChange (row))
+            selectVersionChange (view.context, view.getLineVersion (row)->id, *change);
+        else if (const auto* version = view.getRowVersion (row))
+            selectVersion (view.context, version->id);
+        else
+            selectVersion (view.context, {});
+
+        view.historyList.repaint(); // the actions on the row selected now
+    }
+
+private:
+    VersionsView& view;
+};
+
+//==============================================================================
+// Local History: the song as it was at times while it differed from its last commit, newest first, each with why it was
+// taken, the branch it was on and when; its Restore under the pointer or on the row selected.
+class VersionsView::LocalHistoryModel : public juce::ListBoxModel
+{
+public:
+    explicit LocalHistoryModel (VersionsView& v)
+        : view (v)
+    {
+    }
+
+    int getNumRows() override { return view.getNumSnapshots(); }
+
+    void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
+    {
+        if (! juce::isPositiveAndBelow (row, getNumRows()))
+            return;
+
+        const auto& p = getPalette (view);
+        const auto& snapshot = view.snapshots[(size_t) row];
+        drawListRow (g, view, juce::Rectangle<int> (width, height).toFloat(), selected,
+                     view.localHover != nullptr && row == view.localHover->row);
+        auto area = getRowContent (width, height);
+
+        // Its clock, its time at its end, its Restore before it, and why it was taken with its branch.
+        view.clockIcon.draw (g, takeIconColumn (area, History::rowIconSize), p.textMuted);
+        g.setColour (p.textMuted);
+        g.setFont (juce::FontOptions (TextSize::small));
+        const auto when = describeWhen (juce::Time (snapshot.time), juce::Time::getCurrentTime());
+        g.drawText (when, area.removeFromRight (juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), when)) + Space::xs),
+                    juce::Justification::centredRight, false);
+
+        if (view.localHover != nullptr && (row == view.localHover->row || selected))
+            view.discardIcon.draw (
+                g, area.removeFromRight (History::actionWidth).toFloat().withSizeKeepingCentre (History::rowIconSize, History::rowIconSize),
+                p.text);
+
+        drawLine (g, area, p.text, p.textMuted, snapshot.reason, snapshot.branch);
+    }
+
+    juce::String getNameForRow (int row) override { return view.describeSnapshot (row); }
+
+    juce::String getTooltipForRow (int row) override
+    {
+        return view.describeSnapshot (row) + ". Its arrow restores the song to it, as one undo step; right-click for more.";
     }
 
     void listBoxItemClicked (int row, const juce::MouseEvent& e) override
     {
         selectedRowsChanged (row);
 
-        // On its play mark: it is heard (the uncommitted changes': the song again).
-        if (! e.mods.isPopupMenu() && view.hasPlayMark (row)
-            && view.getPlayMarkPosition (row).contains (e.getEventRelativeTo (&view.historyList).getPosition()))
+        if (e.mods.isPopupMenu())
         {
-            hearVersion (view.context, row == 0 ? juce::String() : view.versions[(size_t) row - 1].id);
+            juce::PopupMenu menu;
+            addCommandItems (menu, view.commands, { "version.restoreSnapshot" });
+            menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
             return;
         }
 
-        if (! e.mods.isPopupMenu())
-            return;
-
-        if (row > 0)
-            view.showMenu ({ "version.hear", "version.bringBack", "version.takeFrom", "version.newBranch", "version.merge",
-                             "version.bounce", "version.deleteBounce", "version.exportDawProject" });
-        else
-            view.showMenu ({ "version.hear", "version.newBranch", "version.exportDawProject" });
+        if (view.getSnapshotRestorePosition (row).contains (e.getEventRelativeTo (&view.localList).getPosition()))
+            view.commands.invoke ("version.restoreSnapshot");
     }
 
     void selectedRowsChanged (int row) override
     {
-        // The uncommitted changes, or a commit, which the commands act on.
-        const auto isVersion = juce::isPositiveAndBelow (row - 1, (int) view.versions.size());
-        selectVersion (view.context, isVersion ? view.versions[(size_t) row - 1].id : juce::String());
+        selectSnapshot (view.context, juce::isPositiveAndBelow (row, getNumRows()) ? view.snapshots[(size_t) row].time : 0);
+        view.localList.repaint(); // the actions on the row selected now
     }
 
 private:
@@ -562,12 +699,15 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
       stagedSection (std::make_unique<SectionHeader> ("Staged Changes", SectionHeader::Style::group)),
       changesSection (std::make_unique<SectionHeader> ("Changes", SectionHeader::Style::group)),
       historySection (std::make_unique<SectionHeader> ("Graph", SectionHeader::Style::pane)),
+      localSection (std::make_unique<SectionHeader> ("Local History", SectionHeader::Style::pane)),
       stagedModel (std::make_unique<ChangesModel> (*this, true)),
       changesModel (std::make_unique<ChangesModel> (*this, false)),
       historyModel (std::make_unique<HistoryModel> (*this)),
+      localModel (std::make_unique<LocalHistoryModel> (*this)),
       stagedList ("Staged Changes", stagedModel.get()),
       changesList ("Changes", changesModel.get()),
-      historyList ("Graph", historyModel.get())
+      historyList ("Graph", historyModel.get()),
+      localList ("Local History", localModel.get())
 {
     setTitle ("Source Control");
 
@@ -619,8 +759,10 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     changesSection->addAction (Icon::plus, "Stage All Changes", [this] { commands.invoke ("version.stageAll"); });
     changesSection->addAction (Icon::undo, "Discard All Changes", [this] { commands.invoke ("version.discardAll"); });
 
-    for (auto* section : { stagedSection.get(), changesSection.get(), historySection.get() })
+    for (auto* section : { stagedSection.get(), changesSection.get(), historySection.get(), localSection.get() })
         section->onClick = [this] { resized(); };
+
+    localSection->setToggleState (false, juce::dontSendNotification); // folded at first, its count on its badge
 
     doneButton.setButtonText ("Done");
     doneButton.onClick = [this] { commands.invoke ("version.showChanges"); };
@@ -629,7 +771,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     cancelButton.setButtonText ("Abort");
     cancelButton.onClick = [this] { commands.invoke ("version.cancelMerge"); };
 
-    for (auto* list : { &stagedList, &changesList, &historyList })
+    for (auto* list : { &stagedList, &changesList, &historyList, &localList })
     {
         list->setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
         list->setTitle (list->getName());
@@ -638,6 +780,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     stagedList.setRowHeight (History::changeRowHeight);
     changesList.setRowHeight (History::changeRowHeight);
     historyList.setRowHeight (History::versionRowHeight);
+    localList.setRowHeight (History::changeRowHeight);
 
     const auto repaintRows = [] (juce::ListBox& list)
     {
@@ -650,9 +793,12 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
 
     stagedHover = std::make_unique<ListRowHover> (stagedList, repaintRows (stagedList));
     changesHover = std::make_unique<ListRowHover> (changesList, repaintRows (changesList));
+    historyHover = std::make_unique<ListRowHover> (historyList, repaintRows (historyList));
+    localHover = std::make_unique<ListRowHover> (localList, repaintRows (localList));
 
     for (auto* c : std::initializer_list<juce::Component*> { &title, branchButton.get(), messageField.get(), &saveButton, &saveMenuButton,
-                                                             changesSection.get(), &changesList, historySection.get(), &historyList })
+                                                             changesSection.get(), &changesList, historySection.get(), &historyList,
+                                                             localSection.get(), &localList })
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText,
@@ -668,7 +814,37 @@ VersionsView::~VersionsView()
 {
     stagedHover = nullptr;
     changesHover = nullptr;
+    historyHover = nullptr;
+    localHover = nullptr;
     context.removeListener (this);
+}
+
+juce::Button& VersionsView::getLocalHistorySection() noexcept
+{
+    return *localSection;
+}
+
+juce::String VersionsView::describeSnapshot (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, (int) snapshots.size()))
+        return {};
+
+    const auto& snapshot = snapshots[(size_t) row];
+    return snapshot.reason + ", " + describeWhen (juce::Time (snapshot.time), juce::Time::getCurrentTime())
+           + (snapshot.branch.isNotEmpty() ? ", on " + snapshot.branch : juce::String());
+}
+
+juce::Rectangle<int> VersionsView::getSnapshotRestorePosition (int row) const
+{
+    // Before the time at its end (LocalHistoryModel::paintListBoxItem()), under the pointer or on the row selected.
+    if (! juce::isPositiveAndBelow (row, (int) snapshots.size()) || localHover == nullptr
+        || (row != localHover->row && ! localList.isRowSelected (row)))
+        return {};
+
+    const auto when = describeWhen (juce::Time (snapshots[(size_t) row].time), juce::Time::getCurrentTime());
+    const auto whenWidth =
+        juce::roundToInt (juce::TextLayout::getStringWidth (juce::Font (juce::FontOptions (TextSize::small)), when)) + Space::xs;
+    return localList.getRowPosition (row, true).withTrimmedRight (Space::s + whenWidth).removeFromRight (History::actionWidth);
 }
 
 juce::TextEditor& VersionsView::getMessageField() noexcept
@@ -715,11 +891,17 @@ void VersionsView::refreshTooltips()
     stagedList.setTooltip ("What the next commit records, by track. A added, M modified, D deleted");
     doneButton.setTooltip (withShortcut (commands, "Lists the changes since the last commit again", "version.showChanges"));
     mergeButton.setTooltip (withShortcut (commands, "Takes the lines ticked into the song, as one undo step", "version.finishMerge"));
-    cancelButton.setTooltip (withShortcut (commands, "Closes the merge's list, taking nothing", "version.cancelMerge"));
+    cancelButton.setTooltip (withShortcut (commands,
+                                           "Aborts the merge: closes its list, taking nothing, or, once taken, makes the song what it "
+                                           "was before it, as one undo step",
+                                           "version.cancelMerge"));
     branchButton->setTooltip (
         withShortcut (commands, "The branch the song is on: click to check out another, or to create one", "version.pickBranch"));
     moreButton.setTooltip ("More Actions: commit, changes, branches, DAWproject, clean up");
-    historyList.setTooltip ("Every commit, newest first, each on its branch's line");
+    historyList.setTooltip ("Every commit, newest first, each on its branch's line: click one to show what it changed");
+    localSection->setTooltip ("The song as it was while it differed from its last commit, kept without asking: as the project opened, "
+                              "every few minutes while it changed, and before what made it another");
+    localList.setTooltip ("Local History, newest first: each one's arrow restores the song to it, as one undo step");
     roomText.setTooltip ("What the history takes on disk: nearly all of it is bounces, each deleted on its own (Delete Bounce)");
 }
 
@@ -736,9 +918,11 @@ juce::PopupMenu VersionsView::makeMoreMenu()
 {
     // As VS Code's Source Control menu: the commands by what they act on.
     juce::PopupMenu menu, commitMenu, changesMenu, branchMenu;
-    addCommandItems (commitMenu, commands, { "version.save", "version.bounceEach" });
+    addCommandItems (commitMenu, commands, { "version.save", "version.undoCommit" });
+    commitMenu.addSeparator();
+    addCommandItems (commitMenu, commands, { "version.bounceEach" });
     addCommandItems (changesMenu, commands, { "version.stageAll", "version.unstageAll", "version.discardAll" });
-    addCommandItems (branchMenu, commands, { "version.pickBranch", "version.renameBranch", "version.merge" });
+    addCommandItems (branchMenu, commands, { "version.pickBranch", "version.mergeBranch", "version.renameBranch", "version.deleteBranch" });
     menu.addSubMenu ("Commit", commitMenu);
     menu.addSubMenu ("Changes", changesMenu);
     menu.addSubMenu ("Branch", branchMenu);
@@ -754,7 +938,163 @@ bool VersionsView::hasPlayMark (int row) const
     if (! anyBounce)
         return false;
 
-    return row == 0 || (juce::isPositiveAndBelow (row - 1, (int) versions.size()) && versions[(size_t) row - 1].hasBounce);
+    const auto* version = getRowVersion (row);
+    return row == 0 || (version != nullptr && version->hasBounce);
+}
+
+const VersionInfo* VersionsView::getRowVersion (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, (int) historyRows.size()))
+        return nullptr;
+
+    const auto& place = historyRows[(size_t) row];
+    return place.change < 0 && juce::isPositiveAndBelow (place.version, (int) versions.size()) ? &versions[(size_t) place.version]
+                                                                                               : nullptr;
+}
+
+const VersionChange* VersionsView::getRowChange (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, (int) historyRows.size()))
+        return nullptr;
+
+    const auto& place = historyRows[(size_t) row];
+    return juce::isPositiveAndBelow (place.change, (int) openedChanges.size()) ? &openedChanges[(size_t) place.change] : nullptr;
+}
+
+const VersionInfo* VersionsView::getLineVersion (int row) const
+{
+    if (getRowChange (row) == nullptr)
+        return nullptr;
+
+    const auto& place = historyRows[(size_t) row];
+    return juce::isPositiveAndBelow (place.version, (int) versions.size()) ? &versions[(size_t) place.version] : nullptr;
+}
+
+int VersionsView::getHistoryRow (const juce::String& versionID) const
+{
+    if (versionID.isEmpty())
+        return 0;
+
+    for (int row = 0; row < (int) historyRows.size(); ++row)
+        if (const auto* version = getRowVersion (row); version != nullptr && version->id == versionID)
+            return row;
+
+    return -1;
+}
+
+void VersionsView::refreshHistoryRows()
+{
+    // The commit opened, as long as it is there: what it changed under it.
+    const auto opened = std::find_if (versions.begin(), versions.end(), [this] (const VersionInfo& v) { return v.id == openedVersion; });
+
+    if (opened == versions.end())
+    {
+        openedVersion.clear();
+        openedChanges.clear();
+    }
+    else
+    {
+        openedChanges = getVersionChanges (context, openedVersion);
+    }
+
+    historyRows.clear();
+    historyRows.push_back ({});
+
+    for (int i = 0; i < (int) versions.size(); ++i)
+    {
+        historyRows.push_back ({ i, -1 });
+
+        if (versions[(size_t) i].id == openedVersion)
+            for (int c = 0; c < (int) openedChanges.size(); ++c)
+                historyRows.push_back ({ i, c });
+    }
+}
+
+void VersionsView::selectHistoryRow()
+{
+    // What the model selects, wherever its row went: a line under a commit, the commit, or the uncommitted changes.
+    const auto selected = getSelectedVersion (context);
+    const auto line = getSelectedVersionChange (context);
+    auto row = getHistoryRow (selected);
+
+    if (line.has_value() && row >= 0)
+    {
+        for (int r = row + 1; r < (int) historyRows.size() && getRowChange (r) != nullptr; ++r)
+        {
+            const auto* change = getRowChange (r);
+
+            if (change->track == line->track && change->isSong == line->isSong && change->isMaster == line->isMaster)
+                row = r;
+        }
+    }
+
+    if (row >= 0 && historyList.getSelectedRow() != row && historyList.getNumSelectedRows() > 0)
+        historyList.selectRow (row, true, true);
+}
+
+void VersionsView::openVersion (const juce::String& versionID)
+{
+    // Another click folds it; one commit opens at a time.
+    openedVersion = openedVersion == versionID ? juce::String() : versionID;
+    refreshHistoryRows();
+    refreshHistoryLines (getCurrentBranch (context).has_value() ? getCurrentBranch (context)->head : juce::String());
+    historyList.updateContent();
+
+    if (const auto row = getHistoryRow (versionID); row >= 0)
+        historyList.selectRow (row, true, true);
+
+    historyList.repaint();
+}
+
+juce::Rectangle<int> VersionsView::getRestorePosition (int row) const
+{
+    // Before the letter of a line under its commit, inside the row's margin (HistoryModel::paintListBoxItem()).
+    if (getRowChange (row) == nullptr || historyHover == nullptr || (row != historyHover->row && ! historyList.isRowSelected (row)))
+        return {};
+
+    return historyList.getRowPosition (row, true).withTrimmedRight (Space::s + History::letterWidth).removeFromRight (History::actionWidth);
+}
+
+juce::PopupMenu VersionsView::makeHistoryMenu (int row)
+{
+    // As VS Code's graph's menu, grouped: hearing it; going back to it; branching and merging; its message; its bounce; and
+    // exporting it. A line under a commit: restoring it.
+    juce::PopupMenu menu;
+    const auto group = [this, &menu] (std::initializer_list<const char*> ids)
+    {
+        if (menu.getNumItems() > 0)
+            menu.addSeparator();
+
+        addCommandItems (menu, commands, ids);
+    };
+
+    if (getRowChange (row) != nullptr)
+    {
+        group ({ "version.restoreChange" });
+        return menu;
+    }
+
+    if (const auto* version = getRowVersion (row))
+    {
+        const auto last = getLastVersion (context);
+        group ({ "version.hear" });
+        group ({ "version.bringBack", "version.takeFrom" });
+        group ({ "version.newBranch", "version.merge" });
+
+        if (last.has_value() && last->id == version->id)
+            group ({ "version.editMessage", "version.undoCommit" });
+        else
+            group ({ "version.editMessage" });
+
+        group ({ "version.bounce", "version.deleteBounce" });
+        group ({ "version.exportDawProject" });
+        return menu;
+    }
+
+    group ({ "version.hear" });
+    group ({ "version.newBranch" });
+    group ({ "version.exportDawProject" });
+    return menu;
 }
 
 juce::Rectangle<int> VersionsView::getPlayMarkPosition (int row) const
@@ -876,10 +1216,21 @@ juce::String VersionsView::describeHistoryRow (int row) const
     if (row == 0)
         return heardVersion.isEmpty() && anyBounce ? "Uncommitted Changes, heard" : "Uncommitted Changes";
 
-    if (! juce::isPositiveAndBelow (row - 1, (int) versions.size()))
+    // A line under its commit, as git names a commit's file's status: "Bass, Modified: volume".
+    if (const auto* change = getRowChange (row))
+    {
+        const juce::String status = change->kind == VersionChange::Kind::added     ? "Added"
+                                    : change->kind == VersionChange::Kind::removed ? "Deleted"
+                                                                                   : "Modified";
+        return change->name + ", " + status + (change->what.isEmpty() ? juce::String() : ": " + change->what);
+    }
+
+    const auto* found = getRowVersion (row);
+
+    if (found == nullptr)
         return {};
 
-    const auto& version = versions[(size_t) row - 1];
+    const auto& version = *found;
     juce::String text = version.name + ", " + describeWhen (version.saved, juce::Time::getCurrentTime());
 
     if (const auto branch = getBranchName (version.branch); branch.isNotEmpty())
@@ -892,6 +1243,13 @@ juce::String VersionsView::describeHistoryRow (int row) const
 
     if (version.note.isNotEmpty())
         text << ". " << version.note;
+
+    // What it changed, where its name doesn't say it; and whether what it changed shows under it.
+    if (version.hasOwnName && version.summary.isNotEmpty() && version.summary != version.name)
+        text << ". " << version.summary;
+
+    if (version.id == openedVersion)
+        text << ", open";
 
     return text;
 }
@@ -929,6 +1287,7 @@ void VersionsView::refresh()
     clashes = getClashes (context);
     versions = getVersions (context);
     branches = getBranches (context);
+    snapshots = getSnapshots (context);
     heardVersion = getHeardVersion (context);
     anyBounce = std::any_of (versions.begin(), versions.end(), [] (const VersionInfo& version) { return version.hasBounce; });
     bouncingVersion.clear();
@@ -966,6 +1325,7 @@ void VersionsView::refresh()
 
     const auto branch = getCurrentBranch (context);
     currentBranch = branch.has_value() ? branch->id : juce::String();
+    refreshHistoryRows();
     refreshHistoryLines (branch.has_value() ? branch->head : juce::String());
     branchButton->setBranch (branch.has_value() ? branch->name : juce::String(),
                              branch.has_value() ? branch->colour : getPalette (*this).textMuted);
@@ -996,10 +1356,12 @@ void VersionsView::refresh()
     stagedSection->setVisible (! staged.empty() && lines == Lines::changes && compared.isEmpty());
     stagedList.setVisible (stagedSection->isVisible());
     historySection->set ("Graph", {}, 0);
+    localSection->set ("Local History", {}, (int) snapshots.size());
+    localSection->setVisible (keeps);
     changesSection->setActionsAllowed (lines == Lines::changes && compared.isEmpty());
     doneButton.setVisible (lines == Lines::changes && compared.isNotEmpty());
     mergeButton.setVisible (lines == Lines::merge);
-    cancelButton.setVisible (lines == Lines::merge);
+    cancelButton.setVisible (lines == Lines::merge || isMerging (context)); // a merge waiting for its commit can be aborted too
 
     // What there is to say while there is nothing to list, and while a merge waits for its commit.
     juce::String said = ! keeps   ? juce::String ("Source control starts once the project has a file.")
@@ -1028,11 +1390,16 @@ void VersionsView::refresh()
         messageField->setText (draft, false);
     }
 
+    // While nothing is typed, the name the commit would get, as GitHub Desktop shows it ("Update Bass"), with the key that
+    // commits, as VS Code's field says it.
     const auto onBranch = branch.has_value() ? " on '" + branch->name + "'" : juce::String();
     const auto commitKey =
         formatKey (juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0).getTextDescription())
             .replace ("Return", "Enter");
-    messageField->setTextToShowWhenEmpty ("Message (" + commitKey + " to commit" + onBranch + ")", getPalette (*this).textMuted);
+    const auto next = describeNextCommit (context);
+    messageField->setTextToShowWhenEmpty ((next.isNotEmpty() ? next : juce::String ("Message")) + " (" + commitKey + " to commit" + onBranch
+                                              + ")",
+                                          getPalette (*this).textMuted);
     messageField->setEnabled (keeps);
 
     saveButton.setEnabled (canSaveVersion (context));
@@ -1044,9 +1411,19 @@ void VersionsView::refresh()
     stagedList.updateContent();
     changesList.updateContent();
     historyList.updateContent();
+    localList.updateContent();
+    selectHistoryRow();
+
+    // The snapshot selected, wherever its row went as new ones came.
+    if (localList.getNumSelectedRows() > 0)
+        for (int row = 0; row < (int) snapshots.size(); ++row)
+            if (snapshots[(size_t) row].time == getSelectedSnapshot (context) && localList.getSelectedRow() != row)
+                localList.selectRow (row, true, true);
+
     stagedList.repaint();
     changesList.repaint();
     historyList.repaint();
+    localList.repaint();
     resized();
 }
 
@@ -1054,10 +1431,12 @@ void VersionsView::refreshHistoryLines (const juce::String& nowFollows)
 {
     // Each commit's lines to the commits it follows, and the uncommitted changes' to the current branch's last commit (or, on a
     // branch without commits yet, the one it was made from).
-    std::map<juce::String, int> rows;
+    // By their rows, which the lines under the commit opened push down.
+    std::map<juce::String, std::pair<int, juce::String>> rows; // a commit's row and branch
 
-    for (size_t i = 0; i < versions.size(); ++i)
-        rows[versions[i].id] = (int) i + 1;
+    for (int row = 0; row < (int) historyRows.size(); ++row)
+        if (const auto* version = getRowVersion (row))
+            rows[version->id] = { row, version->branch };
 
     historyLines.clear();
 
@@ -1068,16 +1447,17 @@ void VersionsView::refreshHistoryLines (const juce::String& nowFollows)
         if (found == rows.end())
             return;
 
-        const auto& parentBranch = versions[(size_t) found->second - 1].branch;
+        const auto& [parentRow, parentBranch] = found->second;
         historyLines.push_back (
-            { row, found->second, getLane (branch), getLane (parentBranch), first, getBranchColour (first ? branch : parentBranch) });
+            { row, parentRow, getLane (branch), getLane (parentBranch), first, getBranchColour (first ? branch : parentBranch) });
     };
 
     addLine (0, currentBranch, nowFollows, true);
 
-    for (size_t i = 0; i < versions.size(); ++i)
-        for (int p = 0; p < versions[i].parents.size(); ++p)
-            addLine ((int) i + 1, versions[i].branch, versions[i].parents[p], p == 0);
+    for (const auto& [id, place] : rows)
+        if (const auto* version = getRowVersion (place.first))
+            for (int p = 0; p < version->parents.size(); ++p)
+                addLine (place.first, version->branch, version->parents[p], p == 0);
 }
 
 void VersionsView::takeMessage()
@@ -1166,12 +1546,15 @@ void VersionsView::resized()
         doneButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth(), History::buttonWidth)));
     }
 
-    if (mergeButton.isVisible() && changesOpen)
+    if (cancelButton.isVisible() && changesOpen)
     {
+        // Merge and Abort while a merge's lines show; Abort alone while it waits for its commit.
         auto buttons = inField (area.removeFromTop (SideBar::buttonRowHeight), SideBar::controlHeight);
         cancelButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth() / 2, History::buttonWidth)));
         buttons.removeFromRight (Space::xs);
-        mergeButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth(), History::buttonWidth)));
+
+        if (mergeButton.isVisible())
+            mergeButton.setBounds (buttons.removeFromRight (juce::jmin (buttons.getWidth(), History::buttonWidth)));
     }
 
     for (auto* button : { &doneButton, &mergeButton, &cancelButton })
@@ -1189,6 +1572,22 @@ void VersionsView::resized()
     const auto rows = changesOpen ? getNumChanges() : 0;
     const auto listHeight = juce::jmin (juce::jmax (listsRoom, History::changeRowHeight), rows * History::changeRowHeight);
     changesList.setBounds (rows == 0 ? juce::Rectangle<int>() : area.removeFromTop (listHeight));
+
+    // Local History at the foot, its rows (while open) up to a third of what is left, then the graph above it.
+    if (localSection->isVisible())
+    {
+        const auto localRows = localSection->getToggleState() ? (int) snapshots.size() : 0;
+        const auto localHeight =
+            localRows == 0 ? 0
+                           : juce::jmin (juce::jmax (History::changeRowHeight, area.getHeight() / 3), localRows * History::changeRowHeight);
+        localList.setBounds (localRows == 0 ? juce::Rectangle<int>() : area.removeFromBottom (localHeight));
+        localSection->setBounds (area.removeFromBottom (localSection->getPreferredHeight()));
+    }
+    else
+    {
+        localSection->setBounds ({});
+        localList.setBounds ({});
+    }
 
     historySection->setBounds (area.removeFromTop (historySection->getPreferredHeight()));
     historyList.setBounds (historySection->getToggleState() ? area : juce::Rectangle<int>());

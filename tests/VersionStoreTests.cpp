@@ -775,3 +775,37 @@ TEST_CASE ("Many packs are joined into one, every piece still read")
     CHECK (reopened.getPieces().getNumPacks() == 1);
     CHECK (reopened.readVersion (ids.back()).has_value());
 }
+
+TEST_CASE ("Commits' messages edited on each computer are kept apart and read together, the newest for each commit")
+{
+    TemporaryFolder temporary;
+    phazite::VersionStore here (getVersionsFolder (temporary), thisComputer), there (getVersionsFolder (temporary), "elsewhere");
+
+    REQUIRE (here.writeMessage ("one", { "Mine", "A note", 2000 }));
+    REQUIRE (here.writeMessage ("two", { "Mine too", {}, 1000 }));
+    REQUIRE (there.writeMessage ("two", { "Theirs", "Later", 3000 }));
+    REQUIRE (there.writeMessage ("one", { "Older", {}, 500 }));
+    REQUIRE (here.writeMessage ("one", { "Mine again", {}, 2500 })); // replaces this computer's own
+
+    const auto messages = here.readMessages();
+    REQUIRE (messages.size() == 2);
+    CHECK (messages.at ("one") == phazite::MessageEdit { "Mine again", {}, 2500 });
+    CHECK (messages.at ("two") == phazite::MessageEdit { "Theirs", "Later", 3000 });
+    CHECK (getVersionsFolder (temporary).getChildFile ("messages").findChildFiles (juce::File::findFiles, false).size() == 2);
+}
+
+TEST_CASE ("Local History is this computer's list of snapshots, oldest first, a line cut off midway left out")
+{
+    TemporaryFolder temporary;
+    phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
+    CHECK (store.readSnapshots().empty());
+
+    const std::vector<phazite::Snapshot> snapshots { { 1000, "main", "aaaa", "auto" }, { 2000, "idea", "bbbb", "restore" } };
+    REQUIRE (store.writeSnapshots (snapshots));
+    CHECK (store.readSnapshots() == snapshots);
+
+    // A crash mid-line: the last line, without its end, is left out.
+    const auto file = store.getLocalFolder().getChildFile ("history");
+    REQUIRE (file.appendText ("3000 main cc", false, false, nullptr));
+    CHECK (store.readSnapshots() == snapshots);
+}

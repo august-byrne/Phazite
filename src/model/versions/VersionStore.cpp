@@ -15,8 +15,8 @@ namespace
     // A property a branch's file holds that BranchRecord has a field for.
     bool isBranchProperty (const juce::Identifier& name)
     {
-        for (const auto* known :
-             { &versions::branchID, &versions::branchName, &versions::branchColour, &versions::branchHead, &versions::branchChanged })
+        for (const auto* known : { &versions::branchID, &versions::branchName, &versions::branchColour, &versions::branchHead,
+                                   &versions::branchChanged, &versions::branchDeleted })
             if (name == *known)
                 return true;
 
@@ -204,6 +204,7 @@ std::vector<BranchRecord> VersionStore::readBranches() const
             branch.colour = juce::Colour::fromString (xml->getStringAttribute (versions::branchColour));
             branch.head = xml->getStringAttribute (versions::branchHead);
             branch.changed = xml->getStringAttribute (versions::branchChanged).getLargeIntValue();
+            branch.deleted = xml->getBoolAttribute (versions::branchDeleted);
             branch.computer = file.getFileNameWithoutExtension();
 
             for (const auto& attribute : xml->getAttributeIterator())
@@ -234,6 +235,9 @@ bool VersionStore::writeBranch (const BranchRecord& branch)
 
     if (branch.head.isNotEmpty())
         element.setProperty (versions::branchHead, branch.head, nullptr);
+
+    if (branch.deleted)
+        element.setProperty (versions::branchDeleted, true, nullptr);
 
     for (const auto& [name, value] : branch.others)
         if (! isBranchProperty (name))
@@ -332,6 +336,92 @@ std::vector<BranchMove> VersionStore::readBranchLog (const juce::String& branchI
     }
 
     return moves;
+}
+
+//==============================================================================
+namespace
+{
+    // One computer's edited messages, by commit.
+    std::map<juce::String, MessageEdit> readMessagesFile (const juce::File& file)
+    {
+        std::map<juce::String, MessageEdit> edits;
+
+        if (const auto xml = juce::parseXML (file); xml != nullptr && xml->hasTagName (versions::MESSAGES.toString()))
+        {
+            for (const auto* message : xml->getChildWithTagNameIterator (versions::MESSAGE.toString()))
+            {
+                if (const auto commit = message->getStringAttribute (versions::messageCommit); commit.isNotEmpty())
+                    edits[commit] = { message->getStringAttribute (versions::messageName),
+                                      message->getStringAttribute (versions::messageNote),
+                                      message->getStringAttribute (versions::messageChanged).getLargeIntValue() };
+            }
+        }
+
+        return edits;
+    }
+} // namespace
+
+std::map<juce::String, MessageEdit> VersionStore::readMessages() const
+{
+    // Every computer's, the newest for each commit (this computer's, of two set at once).
+    std::map<juce::String, MessageEdit> edits;
+    const auto mine = juce::File::createLegalFileName (computer) + ".xml";
+    auto files = folder.getChildFile ("messages").findChildFiles (juce::File::findFiles, false, "*.xml");
+    std::stable_partition (files.begin(), files.end(), [&mine] (const juce::File& file) { return file.getFileName() == mine; });
+
+    for (const auto& file : files)
+        for (const auto& [commit, edit] : readMessagesFile (file))
+            if (const auto found = edits.find (commit); found == edits.end() || edit.changed > found->second.changed)
+                edits[commit] = edit;
+
+    return edits;
+}
+
+bool VersionStore::writeMessage (const juce::String& versionID, const MessageEdit& edit)
+{
+    // This computer's file, read and written whole with the commit's message as it is now.
+    const auto file = folder.getChildFile ("messages").getChildFile (juce::File::createLegalFileName (computer) + ".xml");
+    auto edits = readMessagesFile (file);
+    edits[versionID] = edit;
+    juce::ValueTree element (versions::MESSAGES);
+
+    for (const auto& [commit, message] : edits)
+        element.appendChild (juce::ValueTree (versions::MESSAGE, { { versions::messageCommit, commit },
+                                                                   { versions::messageName, message.name },
+                                                                   { versions::messageNote, message.note },
+                                                                   { versions::messageChanged, message.changed } }),
+                             nullptr);
+
+    return replaceFile (file, toText (element));
+}
+
+std::vector<Snapshot> VersionStore::readSnapshots() const
+{
+    std::vector<Snapshot> snapshots;
+    const auto text = getLocalFolder().getChildFile ("history").loadFileAsString();
+
+    // A last line without its end was cut off midway: left out.
+    auto lines = juce::StringArray::fromLines (text);
+
+    if (! text.endsWithChar ('\n') && ! lines.isEmpty())
+        lines.remove (lines.size() - 1);
+
+    for (const auto& line : lines)
+        if (const auto parts = juce::StringArray::fromTokens (line, " ", {}); parts.size() >= 4)
+            snapshots.push_back ({ parts[0].getLargeIntValue(), parts[1], parts[2], parts.joinIntoString (" ", 3) });
+
+    std::stable_sort (snapshots.begin(), snapshots.end(), [] (const auto& a, const auto& b) { return a.time < b.time; });
+    return snapshots;
+}
+
+bool VersionStore::writeSnapshots (const std::vector<Snapshot>& snapshots)
+{
+    juce::String text;
+
+    for (const auto& snapshot : snapshots)
+        text << juce::String (snapshot.time) << ' ' << snapshot.branch << ' ' << snapshot.song << ' ' << snapshot.reason << '\n';
+
+    return replaceFile (getLocalFolder().getChildFile ("history"), text);
 }
 
 //==============================================================================

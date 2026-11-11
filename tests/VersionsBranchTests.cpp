@@ -364,3 +364,116 @@ TEST_CASE ("A frozen track stays frozen through a switch where its file holds wh
     REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "idea-2"), b.s.save));
     CHECK (phazite::isFrozen (b.s.context, b.bass));
 }
+
+TEST_CASE ("Delete Branch takes another branch away, with the commits only it had, which stay in the store to recover")
+{
+    Branches b;
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save)); // idea-2, nothing of its own yet
+    const auto empty = findBranch (b.s.context, "idea-2");
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save)); // idea-3, with a commit of its own and a change left on it
+    const auto idea = findBranch (b.s.context, "idea-3");
+    b.s.setVolume (b.drums, -9.0f);
+    keepVersion (b.s.context, "Quiet drums");
+    b.s.setVolume (b.drums, -12.0f);
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+
+    // Not the branch the song is on; what goes with each, said before it goes.
+    CHECK_FALSE (phazite::canDeleteBranch (b.s.context, findBranch (b.s.context, "main")));
+    CHECK (phazite::canDeleteBranch (b.s.context, idea));
+    CHECK (phazite::canDeleteAnyBranch (b.s.context));
+    CHECK (phazite::describeBranchDeletion (b.s.context, empty).isEmpty());
+    CHECK (phazite::describeBranchDeletion (b.s.context, idea)
+           == "This also deletes 1 commit that no other branch has, and the changes left on it uncommitted. Recover Lost Commits brings "
+              "the commits back.");
+
+    // Gone, its commit out of the graph, and so on every computer as the project opens again.
+    REQUIRE (phazite::deleteBranch (b.s.context, idea));
+    REQUIRE (phazite::deleteBranch (b.s.context, empty));
+    CHECK (phazite::getBranches (b.s.context).size() == 1);
+    CHECK (phazite::getVersions (b.s.context).size() == 2); // the initial commit and First
+    CHECK_FALSE (phazite::canDeleteAnyBranch (b.s.context));
+    b.s.reopen();
+    waitForVersions (b.s.context);
+    CHECK (phazite::getBranches (b.s.context).size() == 1);
+    CHECK (b.current() == "main");
+
+    // Its commit is still in the store.
+    REQUIRE (phazite::verifyHistory (b.s.context));
+    REQUIRE (dispatchMessagesUntil ([&b] { return ! phazite::isVerifyingHistory (b.s.context); }, 20000));
+    CHECK (phazite::countLostVersions (b.s.context) == 1);
+    CHECK (phazite::recoverLostVersions (b.s.context) == 1);
+    CHECK (phazite::getBranches (b.s.context).size() == 2);
+}
+
+TEST_CASE ("A branch deleted on one computer comes back where another computer committed on it since")
+{
+    // Every computer's record of one branch, as the Versions folder holds them, and the commits they name.
+    std::map<juce::String, phazite::VersionRecord> versions;
+    versions["a"].id = "a";
+    versions["b"].id = "b";
+    versions["b"].parents.add ("a");
+
+    const auto record = [] (const juce::String& computer, const juce::String& head, juce::int64 changed, bool deleted)
+    {
+        phazite::BranchRecord branch;
+        branch.id = "idea";
+        branch.name = "idea-2";
+        branch.computer = computer;
+        branch.head = head;
+        branch.changed = changed;
+        branch.deleted = deleted;
+        return branch;
+    };
+
+    // Deleted here at its last commit, the newest word: gone.
+    CHECK (phazite::joinBranchRecords ({ record ("here", "b", 2000, true), record ("there", "a", 1000, false) }, versions, "here").empty());
+
+    // Committed on elsewhere past where it was deleted: back, at that commit.
+    const auto back =
+        phazite::joinBranchRecords ({ record ("here", "a", 2000, true), record ("there", "b", 1000, false) }, versions, "here");
+    REQUIRE (back.size() == 1);
+    CHECK (back.front().head == "b");
+    CHECK_FALSE (back.front().deleted);
+
+    // Named again elsewhere since: the newer word.
+    CHECK (phazite::joinBranchRecords ({ record ("here", "b", 2000, true), record ("there", "b", 3000, false) }, versions, "here").size()
+           == 1);
+}
+
+TEST_CASE ("Merge Branch merges another branch's last commit, and Abort Merge makes the song what it was before it")
+{
+    Branches b;
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+    const auto idea = findBranch (b.s.context, "idea-2");
+    b.s.setVolume (b.drums, -9.0f);
+    keepVersion (b.s.context, "Quiet drums");
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    const auto main = findBranch (b.s.context, "main");
+
+    // Another branch with commits main doesn't have; not main itself.
+    CHECK (phazite::countCommitsToMerge (b.s.context, idea) == 1);
+    CHECK (phazite::canMergeBranch (b.s.context, idea));
+    CHECK_FALSE (phazite::canMergeBranch (b.s.context, main));
+    CHECK (phazite::canMergeAnyBranch (b.s.context));
+
+    // Its lines listed, taken, then aborted: the song as it was, one undo step, and no merge waiting for a commit.
+    REQUIRE (phazite::mergeBranch (b.s.context, idea));
+    REQUIRE_FALSE (phazite::getMergeLines (b.s.context).empty());
+    phazite::finishTickedMerge (b.s.context);
+    CHECK (phazite::isMerging (b.s.context));
+    CHECK (b.volume (b.drums) == doctest::Approx (-9.0f));
+    CHECK (phazite::canCancelMerge (b.s.context));
+    phazite::cancelMerge (b.s.context);
+    CHECK_FALSE (phazite::isMerging (b.s.context));
+    CHECK (b.volume (b.drums) == doctest::Approx (0.0f));
+    CHECK (phazite::describeUndo (phazite::findSong (b.s.context)) == "Undo Abort Merge");
+
+    // Merged and committed: nothing more to merge from it.
+    REQUIRE (phazite::mergeBranch (b.s.context, idea));
+    phazite::finishTickedMerge (b.s.context);
+    keepVersion (b.s.context);
+    CHECK (phazite::getLastVersion (b.s.context)->name == "Merge branch 'idea-2'");
+    CHECK (phazite::countCommitsToMerge (b.s.context, idea) == 0);
+    CHECK_FALSE (phazite::canMergeBranch (b.s.context, idea));
+    CHECK_FALSE (phazite::canMergeAnyBranch (b.s.context));
+}

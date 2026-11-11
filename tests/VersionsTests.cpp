@@ -73,6 +73,20 @@ juce::String describeChanges (phazite::ProjectContext& context)
 {
     return describe (phazite::getChangesSinceLastVersion (context));
 }
+
+// The versions' commands as the app registers them (model/versions/VersionsModel.h), for a test's song, whose saves always
+// succeed; each run as a menu runs it, which must be enabled.
+struct VersionCommands
+{
+    explicit VersionCommands (TestSong& s)
+    {
+        phazite::addVersionCommands (registry, s.context, [] (std::function<void (bool)> then) { then (true); }, s.renders);
+    }
+
+    void run (const juce::String& id) { REQUIRE_MESSAGE (registry.invoke (id), (id + " is unknown or greyed out").toStdString()); }
+
+    phazite::CommandRegistry registry;
+};
 } // namespace
 
 TEST_CASE ("A project starts with its initial commit on main, and lists each commit after it")
@@ -855,4 +869,251 @@ TEST_CASE ("A project's last commit is read from its Versions folder without the
     CHECK (name == "Kept");
     CHECK (commit.hasType (schema::PHAZITE));
     CHECK (phazite::getTrackElements (commit).size() == phazite::getTrackElements (song.getState()).size());
+}
+
+TEST_CASE ("Commit can run only while there is something to commit, and says what it would be named while no message is typed")
+{
+    TestSong s;
+    VersionCommands commands (s);
+    const auto bass = s.addTrack ("Bass");
+    keepVersion (s.context, "First");
+    auto& song = *phazite::findSong (s.context);
+
+    // Nothing since: nothing to commit, as git says, and the command waits for a change.
+    CHECK_FALSE (phazite::hasSomethingToCommit (s.context));
+    CHECK_FALSE (phazite::canSaveVersion (s.context));
+    CHECK (phazite::describeNextCommit (s.context).isEmpty());
+    CHECK_FALSE (commands.registry.invoke ("version.save"));
+
+    // A change: a commit would be named by it.
+    phazite::setChannelVolume (song, bass, -6.0f);
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasSomethingToCommit (s.context); }));
+    CHECK (phazite::canSaveVersion (s.context));
+    CHECK (phazite::describeNextCommit (s.context) == "Update Bass");
+
+    // Staged: what is staged names it.
+    s.addTrack ("Keys");
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getChangesSinceLastVersion (s.context).size() == 2; }));
+    REQUIRE (phazite::stageChange (s.context, phazite::getChangesSinceLastVersion (s.context).back()));
+    CHECK (phazite::describeNextCommit (s.context) == "Add Keys");
+}
+
+TEST_CASE ("Undo Last Commit takes the last commit off its branch, stages what it recorded again, and puts its message back")
+{
+    TestSong s;
+    VersionCommands commands (s);
+    const auto bass = s.addTrack ("Bass");
+    keepVersion (s.context, "First");
+    auto& song = *phazite::findSong (s.context);
+    phazite::setChannelVolume (song, bass, -6.0f);
+    keepVersion (s.context, "Quieter", "The verse was too loud");
+    const auto quieter = phazite::getLastVersion (s.context)->id;
+    REQUIRE (phazite::getVersions (s.context).size() == 3); // and the initial commit
+
+    // The branch back at First; what Quieter recorded staged again; the song as it is; its message the draft again.
+    REQUIRE (phazite::canUndoLastCommit (s.context));
+    commands.run ("version.undoCommit");
+    waitForVersions (s.context);
+    CHECK (phazite::getLastVersion (s.context)->name == "First");
+    CHECK (phazite::getVersions (s.context).size() == 2);
+    CHECK (describe (phazite::getStagedChanges (s.context)) == "Bass: volume");
+    CHECK (phazite::getChangesSinceLastVersion (s.context).empty());
+    CHECK (phazite::getChannelVolume (song, bass) == doctest::Approx (-6.0f));
+    CHECK (phazite::getVersionDraftName (s.context) == "Quieter");
+    CHECK (phazite::getVersionDraftNote (s.context) == "The verse was too loud");
+
+    // Read again as the project next opens: the branch is at First there too.
+    {
+        phazite::VersionHistory reread (song, {});
+        REQUIRE (dispatchMessagesUntil ([&reread] { return ! reread.isReading() && ! reread.isBusy(); }, 20000));
+        REQUIRE (reread.findLastVersion() != nullptr);
+        CHECK (reread.findLastVersion()->name == "First");
+        CHECK (reread.findVersion (quieter) == nullptr);
+    }
+
+    // The commit is still in the store: Verify History finds it, for Recover Lost Commits.
+    REQUIRE (phazite::verifyHistory (s.context));
+    REQUIRE (dispatchMessagesUntil ([&s] { return ! phazite::isVerifyingHistory (s.context); }, 20000));
+    CHECK (phazite::countLostVersions (s.context) == 1);
+
+    // Committed again, with the message back in the field.
+    keepVersion (s.context, phazite::getVersionDraftName (s.context));
+    CHECK (phazite::getLastVersion (s.context)->name == "Quieter");
+    CHECK (phazite::getStagedChanges (s.context).empty());
+
+    // Never the first commit, which follows none.
+    REQUIRE (phazite::undoLastCommit (s.context));
+    REQUIRE (phazite::undoLastCommit (s.context));
+    CHECK (phazite::getLastVersion (s.context)->name == "Initial commit");
+    CHECK_FALSE (phazite::canUndoLastCommit (s.context));
+    CHECK_FALSE (phazite::undoLastCommit (s.context));
+}
+
+TEST_CASE ("Edit Commit Message names a commit anew beside its record, which keeps its id, and the name comes back as the project opens")
+{
+    TestSong s;
+    const auto bass = s.addTrack ("Bass");
+    keepVersion (s.context, "First");
+    auto& song = *phazite::findSong (s.context);
+    phazite::setChannelVolume (song, bass, -6.0f);
+    keepVersion (s.context);
+    const auto second = phazite::getLastVersion (s.context);
+    REQUIRE (second.has_value());
+    CHECK_FALSE (second->hasOwnName);
+    CHECK (second->name == "Update Bass"); // named by what it changed
+    CHECK (second->summary == "Update Bass");
+
+    // Named, with a note: the same commit, its summary still there.
+    phazite::selectVersion (s.context, second->id);
+    CHECK (phazite::canEditSelectedMessage (s.context));
+    REQUIRE (phazite::editVersionMessage (s.context, second->id, "Sent to the label", "Mix 3, quieter bass"));
+    const auto edited = phazite::getLastVersion (s.context);
+    CHECK (edited->id == second->id);
+    CHECK (edited->name == "Sent to the label");
+    CHECK (edited->note == "Mix 3, quieter bass");
+    CHECK (edited->hasOwnName);
+    CHECK (edited->summary == "Update Bass");
+
+    // As the project opens again.
+    {
+        phazite::VersionHistory reread (song, {});
+        REQUIRE (dispatchMessagesUntil ([&reread] { return ! reread.isReading() && ! reread.isBusy(); }, 20000));
+        REQUIRE (reread.findVersion (second->id) != nullptr);
+        CHECK (reread.findVersion (second->id)->name == "Sent to the label");
+        CHECK (reread.findVersion (second->id)->note == "Mix 3, quieter bass");
+    }
+
+    // An empty name leaves it named by what it changed again.
+    REQUIRE (phazite::editVersionMessage (s.context, second->id, {}, {}));
+    CHECK (phazite::getLastVersion (s.context)->name == "Update Bass");
+    CHECK_FALSE (phazite::getLastVersion (s.context)->hasOwnName);
+    CHECK_FALSE (phazite::editVersionMessage (s.context, "not-a-commit", "Name", {}));
+}
+
+TEST_CASE ("A commit's changes are what it changed since the commit before it, and each line restores from it as one undo step")
+{
+    TestSong s;
+    VersionCommands commands (s);
+    const auto bass = s.addTrack ("Bass");
+    s.addTrack ("Drums");
+    keepVersion (s.context, "First");
+    auto& song = *phazite::findSong (s.context);
+    phazite::setChannelVolume (song, bass, -6.0f);
+    keepVersion (s.context, "Quieter");
+    const auto quieter = phazite::getLastVersion (s.context)->id;
+    phazite::setChannelVolume (song, bass, -12.0f);
+    s.addTrack ("Keys");
+    keepVersion (s.context, "Keys");
+
+    const auto changes = phazite::getVersionChanges (s.context, quieter);
+    CHECK (describe (changes) == "Bass: volume");
+    CHECK (describe (phazite::getVersionChanges (s.context, phazite::getLastVersion (s.context)->id)) == "Bass: volume; + Keys");
+    CHECK (phazite::getVersionChanges (s.context, "not-a-commit").empty());
+
+    // Bass as it was in Quieter, one undo step; the rest as it is.
+    REQUIRE (changes.size() == 1);
+    phazite::selectVersionChange (s.context, quieter, changes.front());
+    CHECK (phazite::canRestoreSelectedChange (s.context));
+    CHECK (phazite::describeRestoreChange (s.context) == "Restore Bass from \"Quieter\"");
+    const auto tracks = phazite::getTrackIDs (song).size();
+    commands.run ("version.restoreChange");
+    CHECK (phazite::getChannelVolume (song, bass) == doctest::Approx (-6.0f));
+    CHECK (phazite::getTrackIDs (song).size() == tracks); // Keys stays
+    CHECK (phazite::describeUndo (&song) == "Undo Restore Bass from \"Quieter\"");
+    phazite::undo (song);
+    CHECK (phazite::getChannelVolume (song, bass) == doctest::Approx (-12.0f));
+
+    // A commit selected alone is no line to restore.
+    phazite::selectVersion (s.context, quieter);
+    CHECK_FALSE (phazite::canRestoreSelectedChange (s.context));
+}
+
+TEST_CASE (
+    "Local History keeps the song before Discard All Changes and Restore while it differs from its last commit, each restored as one undo step")
+{
+    TestSong s;
+    VersionCommands commands (s);
+    const auto bass = s.addTrack ("Bass");
+    keepVersion (s.context, "First");
+    auto& song = *phazite::findSong (s.context);
+    CHECK (phazite::getSnapshots (s.context).empty());
+
+    // Nothing to keep while the song is its last commit.
+    REQUIRE_FALSE (phazite::discardAllChanges (s.context));
+    waitForVersions (s.context);
+    CHECK (phazite::getSnapshots (s.context).empty());
+
+    // A change discarded: kept first.
+    phazite::setChannelVolume (song, bass, -6.0f);
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    REQUIRE (phazite::discardAllChanges (s.context));
+    waitForVersions (s.context);
+    auto snapshots = phazite::getSnapshots (s.context);
+    REQUIRE (snapshots.size() == 1);
+    CHECK (snapshots.front().reason == "Before Discard All Changes");
+    CHECK (snapshots.front().branch == "main");
+    CHECK (phazite::getChannelVolume (song, bass) != doctest::Approx (-6.0f));
+
+    // Restored: the change back, one undo step.
+    phazite::selectSnapshot (s.context, snapshots.front().time);
+    REQUIRE (phazite::canRestoreSelectedSnapshot (s.context));
+    CHECK (phazite::describeRestoreSnapshot (s.context).startsWith ("Restore Local History of "));
+    commands.run ("version.restoreSnapshot");
+    waitForVersions (s.context);
+    CHECK (phazite::getChannelVolume (song, bass) == doctest::Approx (-6.0f));
+    CHECK (phazite::describeUndo (&song).startsWith ("Undo Restore Local History of "));
+
+    // Restore from a commit keeps the song as it is first.
+    phazite::setChannelVolume (song, bass, -9.0f);
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    phazite::selectVersion (s.context, phazite::getLastVersion (s.context)->id);
+    commands.run ("version.bringBack");
+    waitForVersions (s.context);
+    snapshots = phazite::getSnapshots (s.context);
+    REQUIRE (snapshots.size() == 2);
+    CHECK (snapshots.front().reason == "Before Restore"); // newest first
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (s.context));
+
+    // The same song twice is kept once.
+    phazite::setChannelVolume (song, bass, -3.0f);
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::hasChangesSinceLastVersion (s.context); }));
+    auto* history = phazite::getVersionHistory (s.context);
+    history->takeSnapshot ("auto");
+    waitForVersions (s.context);
+    REQUIRE (phazite::getSnapshots (s.context).size() == 3);
+    history->takeSnapshot ("auto");
+    waitForVersions (s.context);
+    CHECK (phazite::getSnapshots (s.context).size() == 3);
+
+    // Kept in the project's folder, as the project opens again: and taken as it opens, while it has changes since its last
+    // commit.
+    phazite::setChannelVolume (song, bass, -1.0f);
+    REQUIRE (dispatchMessagesUntil ([&s] { return phazite::getChangesSinceLastVersion (s.context).size() == 1; }));
+    phazite::VersionHistory reread (song, {});
+    REQUIRE (dispatchMessagesUntil ([&reread] { return ! reread.isReading() && ! reread.isBusy(); }, 20000));
+    REQUIRE (reread.getSnapshots().size() == 4);
+    CHECK (reread.getSnapshots().front().reason == "open");
+    CHECK (reread.readSnapshot (reread.getSnapshots().front().time).isValid());
+}
+
+TEST_CASE ("Local History thins as it grows old: every snapshot of two hours, one an hour for a day, one a day for a month")
+{
+    constexpr juce::int64 minute = 60 * 1000, hour = 60 * minute, day = 24 * hour;
+    constexpr juce::int64 now = 1000 * day;
+    std::vector<phazite::Snapshot> all;
+
+    // Every ten minutes for 40 days, oldest first.
+    for (auto time = now - 40 * day; time <= now; time += 10 * minute)
+        all.push_back ({ time, "main", "song", "auto" });
+
+    const auto kept = phazite::thinSnapshots (all, now);
+    const auto count = [&kept] (juce::int64 from, juce::int64 to)
+    { return std::count_if (kept.begin(), kept.end(), [from, to] (const auto& s) { return now - s.time >= from && now - s.time < to; }); };
+
+    CHECK (count (0, 2 * hour + 1) == 13);       // every one of the last two hours
+    CHECK (count (2 * hour + 1, day + 1) == 22); // one an hour, to a day
+    CHECK (count (day + 1, 30 * day + 1) == 29); // one a day, to 30 days
+    CHECK (count (30 * day + 1, 41 * day) == 0); // none older
+    CHECK (std::is_sorted (kept.begin(), kept.end(), [] (const auto& a, const auto& b) { return a.time < b.time; }));
+    CHECK (kept.back().time == now);
 }

@@ -31,10 +31,12 @@ rules of its own.
 Versions/
   pieces/<name>.pack                 pieces, in packs (section 3)
   branches/<branch>/<computer>.xml   a branch as one computer last had it (section 6); only that computer writes it
+  messages/<computer>.xml            commits' messages as one computer edited them (section 6); only it writes it
   current                            the id of the branch the project file is (one line, no end of line needed)
   local/<computer>/files.xml         this computer's cache of its audio files' hashes (section 7)
   local/<computer>/working.xml       the songs this computer left on branches when it switched away (section 6)
   local/<computer>/logs/<branch>     each move of a branch's last commit on this computer (section 6)
+  local/<computer>/history           this computer's Local History: the song at times, without commits (section 6)
   bounces/<commit>.flac              a commit's bounce, if it has one: its song rendered, FLAC, 16 bits
 ```
 
@@ -42,7 +44,7 @@ Versions/
 dashes). A computer's id is made once, at random, and never names the user or the machine.
 
 **Who writes what.** Pieces and bounces are written once and never changed. Each computer writes only its own files: its
-record of each branch, and everything under `local/<computer>/`. So a folder that Dropbox, OneDrive or a NAS syncs
+record of each branch, its file of edited messages, and everything under `local/<computer>/`. So a folder that Dropbox, OneDrive or a NAS syncs
 between computers never has two writers on one file, but `current`, which goes with the project file, as the project file
 does.
 
@@ -156,14 +158,23 @@ Phazite that made it (`phazite`). Its children:
 A commit's id is its piece's name. Its record never changes.
 
 **A branch** is each computer's record of it, `branches/<branch>/<computer>.xml`, a `BRANCH` element with its `id`, its
-`name`, its `colour` (8 hexadecimal digits, ARGB), when the name or color were last set (`changed`, milliseconds since
-1970) and its last commit there (`head`). A reader keeps the properties it doesn't know and writes them back. The
-computers' records together make the branch:
+`name`, its `colour` (8 hexadecimal digits, ARGB), when the name or color were last set or the branch was deleted
+(`changed`, milliseconds since 1970), its last commit there (`head`), and `deleted="1"` once that computer deleted it. A
+reader keeps the properties it doesn't know and writes them back. The computers' records together make the branch:
 - its name and color are the record's whose `changed` is newest;
+- it is gone when that newest record is deleted and its head follows every other record's head; commits another computer
+  made on the branch since, or a name it gave since, bring it back;
 - its last commit is the head that follows every other record's head (a commit follows another if the other is it or
   among its parents' line), when one does;
 - otherwise the lines went their own ways: this computer's head (else the newest record's) is the branch's, and the
   others are lines to merge.
+
+A deleted branch's commits that no other branch holds leave the graph and stay in the packs, as commits no branch holds.
+
+**A commit's message, edited** (Phazite's Edit Commit Message...): a commit's record never changes, so each computer keeps
+the messages it edited in `messages/<computer>.xml`, a `MESSAGES` element with a `MESSAGE` for each commit: its id
+(`commit`), its `name` and `note` as they are now (either empty: a commit without a name is named by its `summary`), and
+when they were set (`changed`). Of every computer's, the newest names the commit, in place of its record's name and note.
 
 Where `current` names no branch, the branch made first is the current one: the branch whose oldest commit (by `saved`)
 is the oldest.
@@ -171,8 +182,15 @@ is the oldest.
 **This computer's own.** `local/<computer>/working.xml` is a `WORKING` element with a `LEFT` for each branch this
 computer switched away from with a song of its own on it: the `branch` and the `song` (a song piece, view state
 included). `local/<computer>/logs/<branch>` is a line for each move of the branch's last commit on this computer, as
-git's reflog: when (milliseconds since 1970), the commit it was at (`-` for none), the one it went to, and why (`commit`,
-`merge`, `branch`, `recover`), separated by spaces. A last line without its line end was cut off and is left out.
+git's reflog: when (milliseconds since 1970), the commit it was at (`-` for none), the one it went to (`-` for none), and
+why (`commit`, `merge`, `branch`, `recover`, `undo` for Undo Last Commit, `delete` for a branch deleted), separated by
+spaces. A last line without its line end was cut off and is left out.
+
+`local/<computer>/history` is this computer's Local History, a line for each snapshot of the song, oldest first: when it
+was taken (milliseconds since 1970), the id of the branch the song was on, the song's piece (written as a branch's song
+left on it is, view state included), and why (`open`, `auto`, `restore`, `discard`, `merge`, `history`), separated by
+spaces. Phazite writes the file whole, thinned: every snapshot of the last two hours, the newest of each hour for a day,
+the newest of each day for 30 days. A last line without its line end was cut off and is left out.
 
 **Commits no branch holds** are still in the packs: a reader finds them by the `<VERSION ` their pieces start with.
 Phazite's Verify History lists them, and Recover Lost Commits makes a branch of each line of them.

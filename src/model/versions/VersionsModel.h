@@ -25,6 +25,7 @@ struct VersionInfo
     juce::String id;
     juce::String name; // the one it was given, or the summary of its changes
     juce::String note;
+    juce::String summary; // what it changed, as its message says it while it has none of its own: "Update Bass and Drums"
     bool hasOwnName = false;
     juce::Time saved;
     juce::String branch;       // its branch's id
@@ -104,6 +105,27 @@ juce::String getVersionDraftNote (const ProjectContext&);
 bool saveVersion (ProjectContext&, std::function<void (juce::Result)> done = {});
 bool isSavingVersion (const ProjectContext&);
 
+// Whether a commit would record anything now (version.save is enabled while it would): changes, staged or not, or a merge
+// waiting for its commit; as git, which has "nothing to commit" otherwise. And what it would be named while no message is
+// typed, as the message field shows it: "Update Bass and Drums", "Merge branch 'idea-2'"; none while there is nothing.
+bool hasSomethingToCommit (const ProjectContext&);
+juce::String describeNextCommit (const ProjectContext&);
+
+// Edit Commit Message... (version.editMessage, on the commit the graph selects): a commit's name and note set anew, either
+// may be empty (the summary of its changes names one without a name). Kept beside its record, which never changes, as
+// Fossil amends a commit: its id, its place in the graph and its bounce stay. Not an undo step: it changes the history, not
+// the song. False for a commit the history doesn't hold.
+bool editVersionMessage (ProjectContext&, const juce::String& versionID, const juce::String& name, const juce::String& note);
+bool canEditSelectedMessage (const ProjectContext&);
+
+// Undo Last Commit (version.undoCommit; git reset --soft HEAD~, as VS Code's): the current branch back at the commit before
+// its last, what that commit recorded staged again, the song as it is, and its message back in the field while none is
+// typed. Not for the first commit or a merge's, nor while one is being made or a merge is under way. Not an undo step: it
+// changes the history, not the song. The commit stays in the store: while no branch holds it, Verify History finds it and
+// Recover Lost Commits brings it back.
+bool canUndoLastCommit (const ProjectContext&);
+bool undoLastCommit (ProjectContext&);
+
 // How many bytes the project's versions take on disk.
 juce::int64 getVersionsSize (const ProjectContext&);
 
@@ -122,6 +144,21 @@ void compareWithVersion (ProjectContext&, const juce::String& versionID);
 juce::String getComparedVersion (const ProjectContext&);
 std::vector<VersionChange> getListedChanges (const ProjectContext&);
 bool takeBack (ProjectContext&, const VersionChange&);
+
+// What a commit changed, from the commit it follows (nothing, for the first), by line, as the graph lists them under it
+// (git show --stat); none for a commit that can't be read. And one of them restored from that commit (git restore --source):
+// the line made what it was then, its track there again or taken away as it was or wasn't then, one undo step ("Restore
+// Bass from "Verse 2""). What it named that isn't there then is taken away: a sidechain or a modulation of what is gone.
+std::vector<VersionChange> getVersionChanges (const ProjectContext&, const juce::String& versionID);
+bool restoreFromVersion (ProjectContext&, const juce::String& versionID, const VersionChange&);
+
+// A line of what a commit changed, selected under it in the graph (with the commit; none for none), which
+// version.restoreChange restores from that commit: what it is called now ("Restore Bass from "Verse 2""), and whether it can.
+void selectVersionChange (ProjectContext&, const juce::String& versionID, std::optional<VersionChange>);
+std::optional<VersionChange> getSelectedVersionChange (const ProjectContext&);
+juce::String describeRestoreChange (const ProjectContext&);
+bool canRestoreSelectedChange (const ProjectContext&);
+void restoreSelectedChange (ProjectContext&);
 
 // The Versions view's choices, which the commands act on: the version selected in its history, and the line of the changes
 // selected (none for neither).
@@ -175,6 +212,25 @@ bool canMakeBranch (const ProjectContext&);
 // Not an undo step.
 bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::String& name);
 
+// Delete Branch... (version.deleteBranch, the branch picker's; git branch -D): a branch but the current one gone, and the
+// song left on it. Its commits that no other branch holds leave the graph and stay in the store, where Verify History finds
+// them and Recover Lost Commits brings them back; the song left on it doesn't come back. Whether one can be deleted (not
+// the current branch, nor while a merge of its line is under way); and what deleting it would take with it, as the
+// question before it says it ("Its 3 commits that no other branch has, and its uncommitted changes"), none for nothing.
+// Not an undo step.
+bool canDeleteBranch (const ProjectContext&, const juce::String& branchID);
+bool canDeleteAnyBranch (const ProjectContext&); // Delete Branch...'s: one of the branches can be
+juce::String describeBranchDeletion (const ProjectContext&, const juce::String& branchID);
+bool deleteBranch (ProjectContext&, const juce::String& branchID);
+
+// Merge Branch... (version.mergeBranch, the branch picker's; git merge <branch>): another branch's last commit merged into
+// the current branch, its lines listed to tick (startMerge()). Whether it can be (it has commits the current branch's line
+// doesn't), and how many of its commits the current branch doesn't have yet.
+bool canMergeBranch (const ProjectContext&, const juce::String& branchID);
+bool canMergeAnyBranch (const ProjectContext&); // Merge Branch...'s: one of the branches can be
+int countCommitsToMerge (const ProjectContext&, const juce::String& branchID);
+bool mergeBranch (ProjectContext&, const juce::String& branchID);
+
 // A name as git takes it for a branch: spaces as dashes (as VS Code puts them), without what a ref can't hold (control
 // characters, ~ ^ : ? * [ \, "..", "@{", a leading dash or dot, a trailing dot, slash or ".lock"). Empty if nothing is left.
 juce::String toBranchName (const juce::String& typed);
@@ -207,7 +263,12 @@ bool startMerge (ProjectContext&, const juce::String& versionID);
 std::vector<MergeLine> getMergeLines (const ProjectContext&); // the merge window's, while it shows
 juce::String describeMerge (const ProjectContext&);           // "Half-time" (the version's name), while it shows or is merging
 juce::StringArray getMergeNotes (const ProjectContext&);      // what the merge couldn't decide, once it is made
+
+// Abort Merge (version.cancelMerge; git merge --abort): the merge's list closed, taking nothing; or, once it was taken and
+// waits for its commit, the song made what it was before it, one undo step ("Abort Merge"), so that no commit says the other
+// line is merged in while the song doesn't hold it. Whether there is a merge to abort.
 void cancelMerge (ProjectContext&);
+bool canCancelMerge (const ProjectContext&);
 bool finishMerge (ProjectContext&, const std::vector<VersionChange>& lines);
 bool isMerging (const ProjectContext&); // made, until its version is saved
 
@@ -255,6 +316,30 @@ std::unique_ptr<TrackRender> startBounce (ProjectContext&, const juce::String& v
 bool startBackgroundBounce (ProjectContext&, const juce::String& versionID);
 std::optional<float> getBounceProgress (const ProjectContext&, const juce::String& versionID); // from 0 to 1
 juce::String getBounceProblem (const ProjectContext&);
+
+//==============================================================================
+// Local History (docs/versions.md: Local History), as VS Code's and JetBrains' keep a file's saves: the song as it was at
+// times while it differed from its last commit, taken without asking (as the project opens with changes, every few minutes
+// while it changes, and before Restore from This Commit, Discard All Changes, a merge taken or a snapshot restored), kept in
+// the project's Versions folder on this computer, newest first, thinned as they grow old. Each restored as one undo step,
+// the song as it is taken first.
+struct SnapshotInfo
+{
+    juce::int64 time = 0; // when it was taken, which names it
+    juce::String branch;  // the name of the branch the song was on, none for one deleted since
+    juce::String reason;  // why it was taken, as the view says it: "Auto-saved", "Before Restore"
+};
+
+std::vector<SnapshotInfo> getSnapshots (const ProjectContext&);
+bool restoreSnapshot (ProjectContext&, juce::int64 time); // "Restore Local History of 14:02"
+
+// The snapshot the Versions view selects (0 for none), which version.restoreSnapshot restores: what it is called now, and
+// whether it can.
+void selectSnapshot (ProjectContext&, juce::int64 time);
+juce::int64 getSelectedSnapshot (const ProjectContext&);
+juce::String describeRestoreSnapshot (const ProjectContext&);
+bool canRestoreSelectedSnapshot (const ProjectContext&);
+void restoreSelectedSnapshot (ProjectContext&);
 
 //==============================================================================
 // Keeping the history whole (docs/format-audit.md, R3 and R4).

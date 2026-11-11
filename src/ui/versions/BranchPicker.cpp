@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BranchPicker.h"
 #include "VersionsView.h"
+#include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 #include "ui/theme/Popups.h"
 
@@ -8,44 +9,144 @@
 
 namespace phazite::ui
 {
+//==============================================================================
+// A commit's message, edited: Enter starts a new line and Ctrl+Enter keeps it, as in the Source Control view's field.
+class BranchPicker::MessageField : public juce::TextEditor
+{
+public:
+    std::function<void()> onKeep;
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0) && onKeep != nullptr)
+        {
+            onKeep();
+            return true;
+        }
+
+        return juce::TextEditor::keyPressed (key);
+    }
+};
+
+namespace
+{
+    // How tall the message's field is, in lines, editing one.
+    constexpr int messageLines = 4;
+} // namespace
+
 BranchPicker::BranchPicker (CommandBridge& bridge, ProjectContext& projectContext, Mode m)
     : commands (bridge),
       context (projectContext),
       mode (m),
+      version (m == Mode::message ? getSelectedVersion (projectContext) : juce::String()),
       list ("Branches", this)
 {
-    const auto renaming = mode == Mode::rename;
-    setTitle (renaming ? "Rename the branch" : "Branches");
+    const auto current = getCurrentBranch (context);
+    const auto onCurrent = current.has_value() ? " into '" + current->name + "'" : juce::String();
+    const auto titles = [this, &onCurrent]() -> std::pair<juce::String, juce::String>
+    {
+        switch (mode)
+        {
+            case Mode::rename:
+                return { "Rename the branch", "The branch's new name" };
+            case Mode::merge:
+                return { "Merge a branch", "Select a branch to merge" + onCurrent };
+            case Mode::remove:
+                return { "Delete a branch", "Select a branch to delete" };
+            case Mode::message:
+                return { "Edit the commit's message", "The commit's message" };
+            case Mode::pick:
+            default:
+                return { "Branches", "Select a branch to checkout, or type a new branch's name" };
+        }
+    }();
 
-    searchField.setTitle (renaming ? "The branch's new name" : "Search the branches, or name a new one");
-    searchField.setTextToShowWhenEmpty (renaming ? "The branch's new name" : "Select a branch to checkout, or type a new branch's name",
-                                        getPalette (*this).textMuted);
+    setTitle (titles.first);
+    searchField.setTitle (mode == Mode::pick ? "Search the branches, or name a new one" : titles.second);
+    searchField.setTextToShowWhenEmpty (titles.second, getPalette (*this).textMuted);
     searchField.setFont (juce::FontOptions (TextSize::body)); // as VS Code's quick input
     searchField.addListener (this);
     searchField.setWantsKeyboardFocus (true);
     searchField.onNavigationKey = [this] (const juce::KeyPress& key) { return moveSelection (key); };
 
     // Renaming: the name as it is, to type over.
-    if (const auto current = getCurrentBranch (context); renaming && current.has_value())
+    if (mode == Mode::rename && current.has_value())
     {
         searchField.setText (current->name, false);
         searchField.selectAll();
     }
 
+    // Editing a message: the field holds it, its first line the name and the rest the note, as the commit's field does.
+    if (mode == Mode::message)
+    {
+        messageField = std::make_unique<MessageField>();
+        messageField->setTitle (titles.second);
+        messageField->setMultiLine (true, true);
+        messageField->setReturnKeyStartsNewLine (true);
+        messageField->setScrollbarsShown (true);
+        messageField->setFont (juce::FontOptions (TextSize::body));
+        messageField->addListener (this);
+        messageField->onKeep = [this] { choose (0); };
+
+        for (const auto& info : getVersions (context))
+        {
+            if (info.id == version)
+            {
+                messageField->setText (info.hasOwnName          ? info.name + (info.note.isNotEmpty() ? "\n" + info.note : juce::String())
+                                       : info.note.isNotEmpty() ? "\n" + info.note
+                                                                : juce::String(),
+                                       false);
+                messageField->setTextToShowWhenEmpty (info.summary, getPalette (*this).textMuted);
+            }
+        }
+
+        messageField->selectAll();
+        addAndMakeVisible (*messageField);
+    }
+    else
+    {
+        addAndMakeVisible (searchField);
+    }
+
+    // The confirmation before deleting what only a branch holds.
+    askToDelete = [] (juce::Component* over, const juce::String& title, const juce::String& message, std::function<void()> onYes)
+    {
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                          .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                          .withTitle (title)
+                                          .withMessage (message)
+                                          .withButton ("Delete Branch", 1)
+                                          .withButton ("Cancel", 0)
+                                          .withAssociatedComponent (over),
+                                      [yes = std::move (onYes)] (int chosen)
+                                      {
+                                          if (chosen == 1)
+                                              yes();
+                                      });
+    };
+
     list.setRowHeight (Popup::pickerRowHeight);
     list.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
-
-    addAndMakeVisible (searchField);
     addAndMakeVisible (list);
 
     updateRows();
-    setSize (Popup::pickerWidth, controlHeight + Space::s + Popup::pickerRowHeight * (renaming ? 1 : Popup::pickerRows) + Space::s * 2);
+    const auto fieldHeight = mode == Mode::message ? controlHeight * messageLines : controlHeight;
+    const auto shownRows = mode == Mode::rename || mode == Mode::message ? 1 : Popup::pickerRows;
+    setSize (Popup::pickerWidth, fieldHeight + Space::s + Popup::pickerRowHeight * shownRows + Space::s * 2);
+}
+
+BranchPicker::~BranchPicker() = default;
+
+juce::TextEditor& BranchPicker::getSearchField() noexcept
+{
+    return messageField != nullptr ? static_cast<juce::TextEditor&> (*messageField) : searchField;
 }
 
 void BranchPicker::show (CommandBridge& bridge, ProjectContext& projectContext, juce::Component& anchor, Mode mode)
 {
     auto picker = std::make_unique<BranchPicker> (bridge, projectContext, mode);
-    auto* searchField = &picker->searchField;
+    auto* field = &picker->getSearchField();
+    picker->owner = anchor.getTopLevelComponent();
 
     auto* topLevel = anchor.getTopLevelComponent();
     auto& box =
@@ -57,25 +158,59 @@ void BranchPicker::show (CommandBridge& bridge, ProjectContext& projectContext, 
 
     // Type straight away, once the call-out is on screen.
     juce::MessageManager::callAsync (
-        [field = juce::Component::SafePointer<juce::TextEditor> (searchField)]
+        [safeField = juce::Component::SafePointer<juce::TextEditor> (field)]
         {
-            if (field != nullptr)
-                field->grabKeyboardFocus();
+            if (safeField != nullptr)
+                safeField->grabKeyboardFocus();
         });
 }
 
 void BranchPicker::resized()
 {
     auto area = getLocalBounds().reduced (Space::s);
-    searchField.setBounds (area.removeFromTop (controlHeight));
+    getSearchField().setBounds (area.removeFromTop (mode == Mode::message ? controlHeight * messageLines : controlHeight));
     area.removeFromTop (Space::s);
     list.setBounds (area);
+}
+
+void BranchPicker::addBranchRows (Row::Kind kind, const juce::String& typed)
+{
+    // The other branches whose names have what was typed, each with its last commit and when it was made; merging, how many of
+    // its commits the current branch doesn't have, and not one that has none; deleting, not one a merge under way needs.
+    const auto current = getCurrentBranch (context);
+    const auto versions = getVersions (context);
+    const auto now = juce::Time::getCurrentTime();
+
+    for (const auto& branch : getBranches (context))
+    {
+        if ((current.has_value() && branch.id == current->id) || (typed.isNotEmpty() && ! branch.name.containsIgnoreCase (typed)))
+            continue;
+
+        const auto head = std::find_if (versions.begin(), versions.end(), [&branch] (const VersionInfo& v) { return v.id == branch.head; });
+        const auto last =
+            head != versions.end() ? head->name + ", " + VersionsView::describeWhen (head->saved, now) : juce::String ("no commits yet");
+        Row row { kind, branch, branch.name, last, false, true };
+
+        if (kind == Row::Kind::merge)
+        {
+            const auto toMerge = countCommitsToMerge (context, branch.id);
+            row.enabled = canMergeBranch (context, branch.id);
+            row.about = toMerge == 0 ? juce::String ("nothing to merge")
+                                     : juce::String (toMerge) + (toMerge == 1 ? " commit" : " commits") + " to merge; last " + last;
+        }
+        else
+        {
+            row.enabled = canDeleteBranch (context, branch.id);
+        }
+
+        rows.push_back (std::move (row));
+    }
 }
 
 void BranchPicker::updateRows()
 {
     rows.clear();
-    const auto typed = searchField.getText().trim();
+    const auto typed = getSearchField().getText().trim();
     const auto name = toBranchName (typed); // as git keeps it
     const auto current = getCurrentBranch (context);
     const auto branches = getBranches (context);
@@ -84,6 +219,26 @@ void BranchPicker::updateRows()
         return std::any_of (branches.begin(), branches.end(),
                             [&] (const BranchInfo& branch) { return branch.id != except && branch.name.equalsIgnoreCase (name); });
     };
+
+    const auto finish = [this] (int selected)
+    {
+        list.updateContent();
+        list.selectRow (selected);
+        list.repaint();
+    };
+
+    if (mode == Mode::message)
+    {
+        // The one row: the message kept, as typed (an empty first line leaves the commit named by what it changed).
+        const auto versions = getVersions (context);
+        const auto exists = std::any_of (versions.begin(), versions.end(), [this] (const VersionInfo& info) { return info.id == version; });
+        Row row { Row::Kind::message, {}, "Save the commit's message", {}, false, exists };
+        row.about = formatKey (juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0).getTextDescription())
+                        .replace ("Return", "Enter");
+        rows.push_back (std::move (row));
+        finish (0);
+        return;
+    }
 
     if (mode == Mode::rename)
     {
@@ -97,9 +252,17 @@ void BranchPicker::updateRows()
             rows.push_back (std::move (row));
         }
 
-        list.updateContent();
-        list.selectRow (0);
-        list.repaint();
+        finish (0);
+        return;
+    }
+
+    if (mode == Mode::merge || mode == Mode::remove)
+    {
+        addBranchRows (mode == Mode::merge ? Row::Kind::merge : Row::Kind::remove, typed);
+
+        // Enter takes the first one that can be.
+        const auto first = std::find_if (rows.begin(), rows.end(), [] (const Row& row) { return row.enabled; });
+        finish (first != rows.end() ? (int) std::distance (rows.begin(), first) : 0);
         return;
     }
 
@@ -153,9 +316,7 @@ void BranchPicker::updateRows()
     }
 
     // What Enter does: with a name typed, the first branch it matches, else the new branch; with none, the new branch.
-    list.updateContent();
-    list.selectRow (typed.isNotEmpty() && firstMatch >= 0 ? firstMatch : 0);
-    list.repaint();
+    finish (typed.isNotEmpty() && firstMatch >= 0 ? firstMatch : 0);
 }
 
 bool BranchPicker::moveSelection (const juce::KeyPress& key)
@@ -186,13 +347,17 @@ void BranchPicker::choose (int index)
     // Closing deletes this picker, so take what is needed first; then act once it has gone (the keyboard back with the
     // window), as the command palette runs its command.
     const auto row = rows[(size_t) index];
-    const auto typed = searchField.getText().trim();
+    const auto typed = getSearchField().getText().trim();
+    const auto message = getSearchField().getText();
+    const auto commit = version;
+    const auto ask = askToDelete;
+    const auto window = owner;
     auto& bridge = commands;
     auto& projectContext = context;
     close();
 
     juce::MessageManager::callAsync (
-        [&bridge, &projectContext, row, typed]
+        [&bridge, &projectContext, row, typed, message, commit, ask, window]
         {
             switch (row.kind)
             {
@@ -217,6 +382,30 @@ void BranchPicker::choose (int index)
 
                 case Row::Kind::rename:
                     renameBranch (projectContext, row.branch.id, typed);
+                    break;
+
+                case Row::Kind::merge:
+                    mergeBranch (projectContext, row.branch.id);
+                    break;
+
+                case Row::Kind::remove:
+                {
+                    // At once while nothing goes with it but its name; else after the question.
+                    const auto id = row.branch.id;
+
+                    if (const auto goes = describeBranchDeletion (projectContext, id); goes.isEmpty() || ask == nullptr)
+                        deleteBranch (projectContext, id);
+                    else
+                        ask (window.getComponent(), "Delete the branch '" + row.branch.name + "'?", goes,
+                             [&projectContext, id] { deleteBranch (projectContext, id); });
+
+                    break;
+                }
+
+                case Row::Kind::message:
+                    // Its first line the name, the lines after it the note.
+                    editVersionMessage (projectContext, commit, message.upToFirstOccurrenceOf ("\n", false, false).trim(),
+                                        message.fromFirstOccurrenceOf ("\n", false, false).trim());
                     break;
             }
         });
@@ -248,7 +437,8 @@ void BranchPicker::paintListBoxItem (int index, juce::Graphics& g, int width, in
     const auto mutedColour = (selected ? p.textOnAccent : p.textMuted).withMultipliedAlpha (alpha);
     area.reduce (Space::s, 0);
 
-    // Its icon: a plus for a new branch, a pencil for a name, else the branch's in its color; and a tick on the one the song is on.
+    // Its icon: a plus for a new branch, a pencil for a name or a message, else the branch's in its color; and a tick on the
+    // one the song is on.
     const auto iconArea = [&area] (bool fromLeft)
     {
         const auto column =
@@ -256,9 +446,11 @@ void BranchPicker::paintListBoxItem (int index, juce::Graphics& g, int width, in
         return column.toFloat().withSizeKeepingCentre (Popup::pickerIconSize, Popup::pickerIconSize);
     };
 
-    auto& icon = row.kind == Row::Kind::newBranch ? plusIcon : row.kind == Row::Kind::rename ? nameIcon : branchIcon;
-    icon.draw (g, iconArea (true),
-               row.kind == Row::Kind::branch && ! selected ? row.branch.colour.withMultipliedAlpha (alpha) : textColour);
+    const auto isBranch = row.kind == Row::Kind::branch || row.kind == Row::Kind::merge || row.kind == Row::Kind::remove;
+    auto& icon = row.kind == Row::Kind::newBranch                                  ? plusIcon
+                 : row.kind == Row::Kind::rename || row.kind == Row::Kind::message ? nameIcon
+                                                                                   : branchIcon;
+    icon.draw (g, iconArea (true), isBranch && ! selected ? row.branch.colour.withMultipliedAlpha (alpha) : textColour);
     area.removeFromLeft (Space::s);
 
     if (row.current)

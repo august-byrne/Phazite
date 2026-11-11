@@ -601,16 +601,26 @@ namespace versions
     // hexadecimal digits), its name and its color (as juce::Colour::toString() writes it), when they were last set
     // (changed, milliseconds since 1970: the newest computer's win), and its last version there (head; none before its
     // first). The computers' records together make the branch: where one's last version follows every other's, that is the
-    // branch's; where not, the lines went their own ways, to be merged (model/versions/internal/VersionHistory.h).
+    // branch's; where not, the lines went their own ways, to be merged (model/versions/internal/VersionHistory.h). Deleted
+    // (deleted, 1) on the computer whose record says so: the branch is gone where that record is the newest and its last
+    // version follows every other record's, so that commits another computer made on it since bring it back.
     inline const juce::Identifier BRANCH { "BRANCH" };
     inline const juce::Identifier branchID { "id" }, branchName { "name" }, branchColour { "colour" }, branchHead { "head" },
-        branchChanged { "changed" };
+        branchChanged { "changed" }, branchDeleted { "deleted" };
 
     // working.xml: WORKING, with a LEFT for each branch this computer left with a song of its own on it: the branch's id
     // (branch) and the song as it was left there (song: its piece, view state included).
     inline const juce::Identifier WORKING { "WORKING" };
     inline const juce::Identifier LEFT { "LEFT" };
     inline const juce::Identifier leftBranch { "branch" }, leftSong { "song" };
+
+    // messages/<computer>.xml, which only that computer writes: MESSAGES, with a MESSAGE for each commit whose message was
+    // edited there (Edit Commit Message...): the commit's id (commit), its name and note as they are now, either empty for
+    // none, and when they were set (changed, milliseconds since 1970: the newest computer's win). A commit's own record
+    // never changes; these say what it is called, as Fossil's amendments do.
+    inline const juce::Identifier MESSAGES { "MESSAGES" };
+    inline const juce::Identifier MESSAGE { "MESSAGE" };
+    inline const juce::Identifier messageCommit { "commit" }, messageName { "name" }, messageNote { "note" }, messageChanged { "changed" };
 
     // files.xml: FILES, with a FILE for each audio file read, its path, size and sha256 as a version's, and when it was last
     // written (modified: milliseconds since 1970), by which a file read before is known again.

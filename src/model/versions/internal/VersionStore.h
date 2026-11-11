@@ -14,6 +14,8 @@
 //     local/<computer>/files.xml        what each audio file this computer read hashes to (FILES)
 //     local/<computer>/working.xml      the song left on each branch this computer switched from (WORKING)
 //     local/<computer>/logs/<branch>    the branch's log on this computer: each move of its last version, a line each
+//     local/<computer>/history          this computer's local history: the song as it was at times, a line each
+//     messages/<computer>.xml           the commits' messages as that computer edited them (MESSAGES)
 //     bounces/<version>.flac            a version's bounce
 #pragma once
 
@@ -58,7 +60,8 @@ struct BranchRecord
     juce::Colour colour;
     juce::String head;       // its last version on that computer, or none before its first
     juce::String computer;   // whose record it is
-    juce::int64 changed = 0; // when its name or color were last set (milliseconds since 1970): the newest computer's win
+    juce::int64 changed = 0; // when its name or color were last set, or it was deleted (milliseconds since 1970): the newest computer's win
+    bool deleted = false;    // Delete Branch, on that computer (Schema.h: branchDeleted)
 
     // What its file holds that this build doesn't know (a later Phazite's), written back as it was whenever the branch is
     // written again (a rename), so that nothing a later build keeps there is lost.
@@ -74,8 +77,31 @@ struct BranchRecord
     bool operator== (const BranchRecord&) const = default;
 };
 
+// A commit's message as it was edited after the commit (Edit Commit Message...), which names it in place of the one its
+// record holds: its name and note (either empty), and when they were set (milliseconds since 1970).
+struct MessageEdit
+{
+    juce::String name, note;
+    juce::int64 changed = 0;
+
+    bool operator== (const MessageEdit&) const = default;
+};
+
+// The song as it was at a time, kept without a commit in this computer's local history (as VS Code's and JetBrains' Local
+// History keep a file's saves): when (milliseconds since 1970), the branch it was on, its song's piece, and why it was taken
+// ("open", as the project opened; "auto", while the song changed; "restore", "discard", "merge" and "history", before what
+// made the song another).
+struct Snapshot
+{
+    juce::int64 time = 0;
+    juce::String branch, song, reason;
+
+    bool operator== (const Snapshot&) const = default;
+};
+
 // A move of a branch's last version on this computer, as its log keeps it (git's reflog): when, from where (none for
-// none), to where, and why ("commit", "merge", "branch", "recover").
+// none), to where (none for a branch deleted), and why ("commit", "merge", "branch", "recover", "undo" for Undo Last
+// Commit, "delete").
 struct BranchMove
 {
     juce::int64 time = 0;
@@ -116,6 +142,16 @@ public:
     // A branch's log on this computer: a move appended, and the moves, oldest first (a line cut off by a crash left out).
     bool logBranchMove (const juce::String& branchID, const juce::String& from, const juce::String& to, const juce::String& why);
     std::vector<BranchMove> readBranchLog (const juce::String& branchID) const;
+
+    // The commits' messages as they were edited, every computer's taken together (the newest for each commit), by the
+    // commits' ids; and one edited on this computer, written into its own file (messages/<computer>.xml).
+    std::map<juce::String, MessageEdit> readMessages() const;
+    bool writeMessage (const juce::String& versionID, const MessageEdit&);
+
+    // This computer's local history (local/<computer>/history: a line a snapshot, "time branch song reason"), oldest first,
+    // its songs' pieces kept as a branch's song left on it is (writeSong()); and the list written whole.
+    std::vector<Snapshot> readSnapshots() const;
+    bool writeSnapshots (const std::vector<Snapshot>&);
 
     // What the audio files at these paths (as a song holds them: within the project's folder, or full ones) hash to, each
     // read once while its size and its time stay the same (files.xml). A file that is missing is left out.

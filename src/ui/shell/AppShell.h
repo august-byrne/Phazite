@@ -241,6 +241,7 @@ private:
     void placeViews();                                 // in the areas, as viewPlaces says
     void showSelectedDevice();                         // in the Devices view (the "device.show" command)
     void showLeftView (LeftView);                      // or hides the left panel if it shows it: an activity bar icon's click
+    void revealLeftView (LeftView);                    // shows it, never hiding it: where a command's result shows
     void revealBrowser(); // the browser, in the left panel or its window, shown whatever showed there: never hidden
     void placePanelButtons();
     void updateCards();         // where the panels' cards are, after they moved

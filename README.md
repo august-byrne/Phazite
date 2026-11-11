@@ -29,7 +29,7 @@ What works today, on Windows:
 - **Record:** MIDI from a keyboard or the computer keyboard, audio from an interface (ASIO®) with count-in and punch-in, and Capture, which turns what you just played into a clip.
 - **Finish:** export the song, or its stems, to WAV or FLAC, the song normalized to a loudness if you like.
 - **Share:** the song as a DAWproject, the open format that Bitwig Studio, Studio One and Cubase read, with your VST3 plug-ins and their settings, and Phazite's own devices bounced beside their notes. File > Import DAWproject opens one as a new project, so far without its plug-ins and sends.
-- **Keep versions:** Source Control, in git's words: commit the song with a message, see what changed since, track by track, go back to any commit, branch to try an idea and merge it back, and hear an earlier commit in place of the song, at the same beat and loudness.
+- **Keep versions:** Source Control, in git's words: commit the song with a message, see what changed since, track by track, go back to any commit, branch to try an idea and merge it back, and hear an earlier commit in place of the song, at the same beat and loudness; work not yet committed is kept in its Local History.
 - **Organize:** the Project view, with the song's notes, its audio files (a missing one to locate, unused ones to clean up) and its plug-ins (a crashed one to reload); Auto Save keeps it all saved.
 
 The song plays, records, exports and freezes through Phazite's own engine, built on JUCE, and plug-ins run in Phazite's own helper processes.
