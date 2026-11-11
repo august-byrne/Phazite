@@ -213,8 +213,8 @@ TEST_CASE ("The compressor's description holds together: its mode first, its cur
     CHECK (values[Compressor::hold] == doctest::Approx (0.0f));
     CHECK (values[Compressor::releaseCurve] == doctest::Approx (0.0f));
 
-    for (const auto [id, low, high] : { std::tuple ("threshold", -60.0f, 0.0f), std::tuple ("depth", 0.0f, 60.0f),
-                                        std::tuple ("hold", 0.0f, 1000.0f), std::tuple ("releaseCurve", -1.0f, 1.0f) })
+    for (const auto& [id, low, high] : { std::tuple ("threshold", -60.0f, 0.0f), std::tuple ("depth", 0.0f, 60.0f),
+                                         std::tuple ("hold", 0.0f, 1000.0f), std::tuple ("releaseCurve", -1.0f, 1.0f) })
     {
         CAPTURE (id);
         const auto& parameter = Compressor::info.parameters[(size_t) devices::findParameter (Compressor::info, id)];
@@ -693,8 +693,8 @@ TEST_CASE ("Ducking, the compressor turns the sound down by its depth once its k
     // Under a steady key at each level, once settled: nothing under the threshold, the whole depth 6 dB over it and more, and
     // a straight share between (to a twentieth of a decibel: the key's low cut passes it a hair louder). Its meters: the key's
     // level, and how far down.
-    for (const auto [key, expected] : { std::pair (-40.0f, 0.0f), std::pair (-31.0f, 0.0f), std::pair (-29.0f, 2.5f),
-                                        std::pair (-27.0f, 7.5f), std::pair (-24.0f, 15.0f), std::pair (-6.0f, 15.0f) })
+    for (const auto& [key, expected] : { std::pair (-40.0f, 0.0f), std::pair (-31.0f, 0.0f), std::pair (-29.0f, 2.5f),
+                                         std::pair (-27.0f, 7.5f), std::pair (-24.0f, 15.0f), std::pair (-6.0f, 15.0f) })
     {
         CAPTURE (key);
         Compressor compressor;

@@ -222,9 +222,9 @@ TEST_CASE ("Phazite's compressor ducks under the key chosen for it, set up to du
     phazite::setSidechainSource (model, compressor, song.kick);
     CHECK (valueOf (compressor, "mode") == doctest::Approx (duckMode));
 
-    for (const auto [id, expected] : { std::pair ("threshold", -14.0f), std::pair ("depth", 14.0f), std::pair ("attack", 1.0f),
-                                       std::pair ("hold", 120.0f), std::pair ("release", 80.0f), std::pair ("releaseCurve", 0.0f),
-                                       std::pair ("keyLowCut", 20.0f), std::pair ("keyHighCut", 20000.0f) })
+    for (const auto& [id, expected] : { std::pair ("threshold", -14.0f), std::pair ("depth", 14.0f), std::pair ("attack", 1.0f),
+                                        std::pair ("hold", 120.0f), std::pair ("release", 80.0f), std::pair ("releaseCurve", 0.0f),
+                                        std::pair ("keyLowCut", 20.0f), std::pair ("keyHighCut", 20000.0f) })
     {
         CAPTURE (id);
         CHECK (valueOf (compressor, id) == doctest::Approx (expected));

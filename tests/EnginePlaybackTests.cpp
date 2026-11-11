@@ -260,7 +260,7 @@ TEST_CASE ("A note sounding as its track's last clip goes ends at once, and one 
     const auto quietAt = [] (const juce::AudioBuffer<float>& audio, double from, double to)
     {
         const auto first = (int) (from * EnginePlayback::sampleRate);
-        return audio.getMagnitude (0, first, (int) (to * EnginePlayback::sampleRate) - first) == 0.0f;
+        return juce::exactlyEqual (audio.getMagnitude (0, first, (int) (to * EnginePlayback::sampleRate) - first), 0.0f);
     };
 
     {

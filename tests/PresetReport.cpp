@@ -1306,7 +1306,7 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
 
     for (const auto centre : responseCentres)
     {
-        const auto whole = centre == std::floor (centre);
+        const auto whole = juce::exactlyEqual (centre, std::floor (centre));
         header << " " << (centre < 1000.0f ? juce::String (centre, whole ? 0 : 1) : juce::String (centre / 1000.0f) + "k") << " |";
         rule << "---|";
     }

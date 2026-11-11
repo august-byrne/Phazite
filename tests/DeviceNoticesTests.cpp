@@ -18,8 +18,8 @@ using phazite::AudioDeviceName;
 class NamedDevice final : public juce::AudioIODevice
 {
 public:
-    NamedDevice (const juce::String& outputName, const juce::String& inputName, const juce::String& typeName)
-        : juce::AudioIODevice (outputName.isNotEmpty() ? outputName : inputName, typeName)
+    NamedDevice (const juce::String& outputName, const juce::String& inputName, const juce::String& driverName)
+        : juce::AudioIODevice (outputName.isNotEmpty() ? outputName : inputName, driverName)
     {
     }
 

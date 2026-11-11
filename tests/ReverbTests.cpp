@@ -431,7 +431,7 @@ TEST_CASE ("The plate is the paper's at the size's middle, shrinks for a decay t
             CHECK (gain > 0.0);
             CHECK (gain < 0.999);
 
-            if (diffusion == 0.5f)
+            if (juce::exactlyEqual (diffusion, 0.5f))
             {
                 CHECK (gain > last);
                 last = gain;
