@@ -1358,4 +1358,9 @@ if(PHAZITE_BUILD_TESTS)
     # is split, as SidechainPresetTests was); what it printed (each test's duration as it ends, --duration) names the last test
     # that ended, and the file's next one hung.
     set_tests_properties(${_phazite_test_names} OtherTestFiles PROPERTIES TIMEOUT 600)
+
+    # The presets' tests render every preset (each instrument's leveling, the kits' balance, each preset playing): about 3
+    # minutes in a local Debug build and three times that in linux-asan, where they ran past 10 minutes now and then. They
+    # get twice as long; a hang still ends there.
+    set_tests_properties(FactoryPresetTests PROPERTIES TIMEOUT 1200)
 endif()

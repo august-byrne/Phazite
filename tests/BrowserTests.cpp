@@ -221,17 +221,20 @@ TEST_CASE ("The browser's search finds sounds and devices, and the star keeps fa
     BrowserScreen screen;
     auto& search = screen.browser.getSearchField();
 
-    search.setText ("break", true);
-    phazite::test::dispatchPendingMessages(); // a text field tells of changes asynchronously
-    CHECK (screen.getRows() == juce::StringArray { "Break 120 BPM, 120 BPM" });
+    // The rows once a search has run. A text field tells of changes asynchronously, and a search after a slow one waits a
+    // moment for the typing to stop (Browser::textEditorTextChanged), which CI's slowest build (linux-asan) took now and then.
+    const auto rowsFor = [&screen, &search] (const juce::String& query, const juce::StringArray& expected)
+    {
+        search.setText (query, true);
+        phazite::test::dispatchPendingMessages();
+        phazite::test::runTimersUntil ([&screen, &expected] { return screen.getRows() == expected; }, 2000);
+        return screen.getRows();
+    };
 
-    search.setText ("reverb", true);
-    phazite::test::dispatchPendingMessages();
-    CHECK (screen.getRows() == juce::StringArray { "Reverb, Effect" });
-
-    search.setText ("nothing is called this", true);
-    phazite::test::dispatchPendingMessages();
-    CHECK (screen.getRows() == juce::StringArray { "Nothing matches \"nothing is called this\"" });
+    CHECK (rowsFor ("break", { "Break 120 BPM, 120 BPM" }) == juce::StringArray { "Break 120 BPM, 120 BPM" });
+    CHECK (rowsFor ("reverb", { "Reverb, Effect" }) == juce::StringArray { "Reverb, Effect" });
+    CHECK (rowsFor ("nothing is called this", { "Nothing matches \"nothing is called this\"" })
+           == juce::StringArray { "Nothing matches \"nothing is called this\"" });
 
     // Without a search, the places are back as they were.
     search.setText ({}, true);
