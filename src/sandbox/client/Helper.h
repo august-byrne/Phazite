@@ -88,9 +88,15 @@ private:
     juce::CriticalSection lock, pipeLock;
     std::vector<Waiting*> waiting;
 
+    // The process is looked at by the watching thread while others end it or wait for it, and JUCE's ChildProcess isn't safe
+    // to share (finding it gone forgets it): every use of it holds this (linux-tsan found the race, 2026-11-11).
+    juce::CriticalSection processLock;
+
     void received (const juce::MemoryBlock&);
     void helperLost();
     void closePipe(); // as the helper is lost, and before the watching thread is stopped
     void stopWaiting();
+    bool isProcessRunning();
+    void killProcess();
 };
 } // namespace phazite::sandbox

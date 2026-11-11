@@ -59,7 +59,7 @@ private:
         while (! threadShouldExit())
         {
             // Gone: what waits on the pipe is woken too, as a write to a helper that never connected would wait for ever.
-            if (! owner.process.isRunning())
+            if (! owner.isProcessRunning())
             {
                 owner.helperLost();
                 owner.closePipe();
@@ -136,8 +136,12 @@ Helper::~Helper()
     lost = true; // no loss told as it goes
     stopWaiting();
 
-    if (process.isRunning() && ! process.waitForProcessToFinish (quitMilliseconds))
-        process.kill();
+    {
+        const juce::ScopedLock held (processLock);
+
+        if (process.isRunning() && ! process.waitForProcessToFinish (quitMilliseconds))
+            process.kill();
+    }
 
     closePipe();
     watch = nullptr;
@@ -167,8 +171,12 @@ bool Helper::start (int timeoutMilliseconds)
     if (! pipe->createPipe (pipeName, pipeTimeoutMilliseconds, true))
         return false;
 
-    if (! process.start (juce::StringArray { program.getFullPathName(), juce::String ("--") + helperProcessID + ":" + pipeName }, 0))
-        return false;
+    {
+        const juce::ScopedLock held (processLock);
+
+        if (! process.start (juce::StringArray { program.getFullPathName(), juce::String ("--") + helperProcessID + ":" + pipeName }, 0))
+            return false;
+    }
 
     // Until it has answered, a loss isn't told (a start that fails says so itself), and the watching thread ends a helper
     // that doesn't answer in time: one that never connects to the pipe would keep the hello's write waiting for ever.
@@ -196,7 +204,7 @@ bool Helper::start (int timeoutMilliseconds)
 
     running = false;
     lost = true;
-    process.kill();
+    killProcess();
     closePipe();
     watch = nullptr;
     return false;
@@ -238,8 +246,20 @@ void Helper::kill()
 {
     // The process, whose end the watching thread then tells of.
     running = false;
-    process.kill();
+    killProcess();
     stopWaiting();
+}
+
+bool Helper::isProcessRunning()
+{
+    const juce::ScopedLock held (processLock);
+    return process.isRunning();
+}
+
+void Helper::killProcess()
+{
+    const juce::ScopedLock held (processLock);
+    process.kill();
 }
 
 void Helper::setHangLimits (int messageThreadMilliseconds, int audioThreadMilliseconds) noexcept
