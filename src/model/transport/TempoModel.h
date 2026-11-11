@@ -24,6 +24,7 @@ bool hasTempoChanges (const ProjectContext&);
 // two values), to draw the lane's line.
 double getTempoAt (const ProjectContext&, BeatPosition);
 std::vector<double> getTempoValues (const ProjectContext&, BeatRange, int count);
+std::vector<double> getTempoValues (const ProjectContext&, const std::vector<BeatPosition>&); // at each of some beats
 
 // A tempo from a beat, on the line there unless a bpm is given (a tempo already at that beat takes the bpm), its line to
 // the next going as the one it was on did: returns its place, or -1 while no project is open. Moving one (the first stays

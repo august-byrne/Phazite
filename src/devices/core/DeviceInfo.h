@@ -28,7 +28,8 @@ enum class Unit
     ratio,  // a compressor's ratio: 4 is "4:1"
     pan,    // from -1 (left) to 1 (right): "Center", "30% left"
     choice, // a whole number that picks one of the parameter's choices
-    toggle  // 0 (off) or 1 (on)
+    toggle, // 0 (off) or 1 (on)
+    degrees // an angle, as a part of a turn: 90 is "90°", a quarter of a cycle
 };
 
 struct ParameterInfo

@@ -2,8 +2,9 @@
 // What is being recorded, on each track it records onto, as it comes in (model/transport/RecordingModel.h:
 // getRecordingsInProgress()), as Ableton Live draws a clip growing while it records: a clip in the track's colour with its
 // edge in the danger colour, from where recording started (round a looped range, where this time round began) to the
-// playhead's line, an input's waveform drawn as it comes in and the notes as they are played. When recording stops, the
-// clips the take made take their place.
+// playhead's line, an input's waveform drawn as it comes in and the notes as they are played; and round a looped range
+// that recording started before, once it has gone round, what was played before the range beside it, which grows no more.
+// When recording stops, the clips the take made take their place.
 #include "PlaylistParts.h"
 
 #include <algorithm>
@@ -53,7 +54,7 @@ namespace
 
     bool isSame (const RecordingInProgress& a, const RecordingInProgress& b)
     {
-        return a.track == b.track && a.source == b.source;
+        return a.track == b.track && a.source == b.source && a.beforeLoop == b.beforeLoop;
     }
 } // namespace
 
@@ -117,7 +118,7 @@ void Playlist::showRecordings()
 void Playlist::layOutRecordings()
 {
     // Its end at the playhead's line while that is just past what has come in, or behind it: the line is what the eye
-    // follows, and an input comes in a few milliseconds after it is heard.
+    // follows, and an input comes in a few milliseconds after it is heard. What was played before a looped range is whole.
     const auto playheadBeat = getShownPlayheadBeat();
     const auto& timeline = getView();
     const auto reach = BeatDuration::fromBeats (RecordingTint::reach / std::max (1.0e-6, timeline.pixelsPerBeat));
@@ -135,7 +136,7 @@ void Playlist::layOutRecordings()
 
         auto recorded = shown.recording.range;
 
-        if (playheadBeat > recorded.getStart() && playheadBeat < recorded.getEnd() + reach)
+        if (! shown.recording.beforeLoop && playheadBeat > recorded.getStart() && playheadBeat < recorded.getEnd() + reach)
             recorded = BeatRange (recorded.getStart(), playheadBeat);
 
         if (recorded != clip.getInfo().range)

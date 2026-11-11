@@ -7,12 +7,17 @@
 // from a stack of four to four side by side. Feedback is averaged over the last two samples, as the DX7 does, so that it
 // doesn't hunt. Phase modulation, as the DX7 and every FM synth since do it, at twice the sample rate, so that what the
 // operators make above hearing doesn't fold back down as aliasing. Then a pitch envelope (for drums and plucks), envelopes
-// that run faster up the keys (Key Time, the DX7's rate scaling), the phases reset at each note or running free, a
-// resonant filter of any of the types of dsp/MultimodeFilter.h, one LFO (to the pitch, the modulators' levels, the level or
-// the cutoff), Timbre, which turns every modulator and every operator's feedback up or down at once, Spread, which plays
-// each note twice, detuned apart, on the left and on the right (as Operator's Spread), and 16 voices, or one in mono mode,
-// legato, with glide. A new synth plays a soft electric piano, two pairs built as the DX7's E.PIANO 1 is, so that it is
-// finished from the start.
+// that run faster up the keys (Key Time, the DX7's rate scaling), the phases reset at each note (the DX7's key sync), each
+// operator from a place in its wave of its own (its Phase, as each of Ableton Operator's oscillators has one while it
+// retriggers: what the modulators make of a carrier depends on where each is in its cycle against the others), or running
+// free, a resonant filter of any of the types of dsp/MultimodeFilter.h, with an envelope of its own and velocity as the
+// synth's filter has them (Synth.h: the same names, ranges and meanings, so that the two read alike), one LFO (to the
+// pitch, the modulators' levels, the level or the cutoff), Timbre, which turns every modulator and every operator's
+// feedback up or down at once, Spread, which plays each note twice, detuned apart, on the left and on the right (as
+// Operator's Spread), and 16 voices, or one in mono mode, legato, with glide. In poly mode every note takes a voice of its
+// own, a key played again too: what still rings of it rings out over its release, untouched, as the synth's does
+// (Synth.h). A new synth plays a soft electric piano, two pairs built as the DX7's E.PIANO 1 is, so that it is finished from
+// the start.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -40,8 +45,9 @@ public:
     enum Field
     {
         on,
-        wave,     // a Wave
-        feedback, // its own wave fed back into it, from -1 to 1: above 0 toward a saw, below 0 toward a square; ±1 the DX7's 7
+        wave,       // a Wave
+        feedback,   // its own wave fed back into it, from -1 to 1: above 0 toward a saw, below 0 toward a square; ±1 the DX7's 7
+        startPhase, // where in its wave it starts each note while the phases reset (Phase::reset), in degrees
         ratio,
         fine,   // added to the ratio, less than the ratio's step, so that each ratio is set one way
         detune, // in cents, as two operators a few cents apart beat
@@ -59,7 +65,7 @@ public:
         releaseCurve
     };
 
-    static constexpr int fieldsPerOperator = 18;
+    static constexpr int fieldsPerOperator = 19;
     static constexpr int firstOperatorParameter = 2;
 
     static constexpr int getParameterIndex (int op, Field field) noexcept
@@ -82,7 +88,16 @@ public:
         cutoff,
         resonance,
         filterSlope,
+        filterEnvelope, // how far its envelope opens the cutoff (or closes it, below 0), in semitones: the synth's
         keyTracking,
+        filterVelocity, // how far a softer note's cutoff falls: at full, four octaves at velocity 0, as the synth's
+        filterAttack,   // the filter's envelope, its times shorter up the keys with the operators' (keyTime)
+        filterDecay,
+        filterSustain,
+        filterRelease,
+        filterAttackCurve, // how each stage bends (dsp::Adsr::setCurves())
+        filterDecayCurve,
+        filterReleaseCurve,
         lfoOn,
         lfoShape,
         lfoTarget,
@@ -113,8 +128,10 @@ public:
 
     enum class Phase
     {
-        reset, // each note's operators from the start of their waves, the same every time: tight basses, plucks
-        free   // running on from where they were, a little different each time, as acoustic sounds are
+        reset, // each note's operators from their own places in their waves (startPhase; the waves' start unless set), the
+               // same every time: tight basses, plucks
+        free   // running on from where they were, a little different each time, as acoustic sounds are; an operator's own
+               // place means nothing then, and is left out
     };
 
     // An algorithm: for each operator, the operators that modulate it (bit j for operator j), and the operators heard.
@@ -139,13 +156,13 @@ public:
     // How many voices are sounding, for tests and meters. Any thread.
     int getActiveVoices() const noexcept { return activeVoices.load (std::memory_order_relaxed); }
 
-    // What its editor shows playing, once a block (devices/core/LiveValue.h): the newest voice's operators' envelopes (from
-    // 0 to 1), the cutoff it plays (in hertz; 0 while no voice plays or the filter is off), and where the LFO is in its
-    // cycle (0 to 1).
+    // What its editor shows playing, once a block (devices/core/LiveValue.h): the newest voice's operators' envelopes and
+    // its filter's (from 0 to 1), the cutoff it plays (in hertz; 0 while no voice plays or the filter is off), and where the
+    // LFO is in its cycle (0 to 1).
     struct Shown
     {
         std::array<LiveValue, numOperators> envelopes;
-        LiveValue cutoff, lfoPhase;
+        LiveValue filterEnvelope, cutoff, lfoPhase;
     };
 
     const Shown& getShown() const noexcept { return shown; }
@@ -163,7 +180,8 @@ public:
     // operator makes (at its level and envelope) and what is heard (the carriers' sum, a square root of their number down,
     // before the filter and the level), with each operator's envelope at the level given (1 for its peak) and the note at
     // full velocity, without the LFO, the pitch envelope or the spread, at 512 points a cycle. The waves are band-limited
-    // and fed back as the synth plays them. Not for the audio thread (it computes a picture's worth at once).
+    // and fed back as the synth plays them, each operator from its own place in its wave while the phases reset. Not for
+    // the audio thread (it computes a picture's worth at once).
     static constexpr int drawnPerCycle = 512, drawnLength = 2 * drawnPerCycle;
 
     struct Drawing
@@ -223,6 +241,7 @@ private:
         float timeScale = 1.0f;              // its envelopes' times, against as set, by its key (keyTime)
         std::uint64_t started = 0;
         std::array<dsp::Adsr, numOperators> envelopes;
+        dsp::Adsr filterEnvelope; // what opens and closes its filter, begun and let go with its note
         std::array<OperatorLevel, numOperators> levels;
         std::array<Lane, maxLanes> lanes;
         int numLanes = 1; // two while its note is spread, set as the note starts
@@ -264,7 +283,8 @@ private:
     void slideTo (int note, float seconds);
     void stopNote (int note, std::span<const float> parameters);
     void releaseVoice (Voice&);
-    Voice& findVoiceFor (int note);
+    void letGoOf (int note); // the voice its key or the pedal still holds, if any, lets go as its key coming up would
+    Voice& findVoice();      // a voice for a new note: a free one, or one to take (stealVoice())
     void stealVoice (Voice&);
     void render (float* left, float* right, int numSamples, std::span<const float> parameters);
 };

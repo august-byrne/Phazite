@@ -90,12 +90,12 @@ double Phaser::getMagnitude (std::span<const float> values, double centre, doubl
     const auto g = (double) values[feedback];
     auto response = (double) outputGain * (1.0 + stages / (1.0 - g * stages));
 
-    // Safe Bass: below it, the sound as it was (summed back, as process() does).
-    if (values[safeBass] > lowestCentre + 0.5f)
+    // Safe Bass: the sections hear the band above it, and the band below goes around them, added back after them, as
+    // process() plays them (SafeBass.h).
+    if (SafeBass::isOn (values[safeBass]))
     {
-        const auto low =
-            dsp::getResponse (dsp::makeFilter (dsp::FilterShape::lowPass, values[safeBass], rate, 0.70710678), frequency, rate);
-        response = low + (1.0 - low) * response;
+        const auto bands = dsp::Crossover::getResponses (values[safeBass], frequency, rate);
+        response = bands.low + bands.high * response;
     }
 
     return std::abs (response);
@@ -105,6 +105,7 @@ void Phaser::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
     lfo.prepare (sampleRate);
+    bassSplit.prepare (sampleRate);
     reset();
 }
 
@@ -114,9 +115,7 @@ void Phaser::reset()
         for (auto& section : channel)
             section.reset();
 
-    for (auto& low : lowParts)
-        low.reset();
-
+    bassSplit.reset();
     lfo.reset();
 }
 
@@ -140,15 +139,16 @@ void Phaser::process (const ProcessContext& block)
     const auto g = values[feedback];
     const auto lfoShape = values[shape] > 0.5f ? dsp::SyncedLfo::Shape::triangle : dsp::SyncedLfo::Shape::sine;
     const auto offset = 0.5 * (double) values[stereo]; // up to half a cycle, the sides opposite
-    const auto keepsBass = values[safeBass] > lowestCentre + 0.5f;
-    const auto lowCoefficients = dsp::makeFilter (dsp::FilterShape::lowPass, values[safeBass], sampleRate, 0.70710678);
     shownFeedback.store (g, std::memory_order_relaxed);
+    bassSplit.startBlock (values[safeBass]);
 
-    lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteValueBeats (values[division]), block.tempo, block.isPlaying, block.beat);
+    lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteLength (values[division]), block.tempo, block.barLength, block.isPlaying,
+                    block.beat, block.bars);
 
     for (int start = 0; start < block.numSamples; start += controlStep)
     {
         const auto length = std::min (controlStep, block.numSamples - start);
+        const auto splitting = bassSplit.startStretch (length);
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
@@ -156,16 +156,27 @@ void Phaser::process (const ProcessContext& block)
             const auto coefficients = dsp::makeFilter (dsp::FilterShape::allPass, centre, sampleRate, q);
             auto& chain = sections[(size_t) channel];
             auto* samples = block.channels[channel] + start;
+            auto* dry = block.dry != nullptr ? block.dry[channel] + start : nullptr;
 
             if (start == 0)
                 centres[(size_t) channel].set ((float) centre);
 
             for (int i = 0; i < length; ++i)
             {
-                // Safe Bass: what is below it goes around the effect, and back in after it.
+                // Safe Bass: the band below it goes around the effect, and back in after it; the sound the runner mixes in
+                // is split and added up again, to stay in phase with the two (SafeBass.h).
                 const auto x = samples[i];
-                const auto low = keepsBass ? lowParts[(size_t) channel].process (x, lowCoefficients) : 0.0f;
-                const auto in = x - low;
+                auto in = x, around = 0.0f;
+
+                if (splitting)
+                {
+                    const auto parts = bassSplit.split (channel, x, i);
+                    in = parts.through;
+                    around = parts.around;
+
+                    if (dry != nullptr)
+                        dry[i] = parts.dry;
+                }
 
                 // What comes out of the sections goes back in at once: they will put out gain * w + offset for what goes
                 // in, w = in + g * that, so the loop is solved for this sample before they take it.
@@ -183,7 +194,7 @@ void Phaser::process (const ProcessContext& block)
                 for (int s = 0; s < numSections; ++s)
                     y = chain[(size_t) s].process (y, coefficients);
 
-                samples[i] = low + outputGain * (in + y);
+                samples[i] = around + outputGain * (in + y);
             }
         }
 

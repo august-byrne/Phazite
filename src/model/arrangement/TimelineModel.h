@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The time line as the playlist and the piano roll show it (docs/design.md, sections 6 and 7), in beats from the song's
-// start: its bars, the grid that positions snap to, the playhead and the loop. Each function takes the open project's
-// context, and gives what a new song in 4/4 would, or does nothing, while no project is open.
+// start, quarter notes whatever the time signature: its bars, the grid that positions snap to, the playhead and the loop.
+// Each function takes the open project's context, and gives what a new song in 4/4 would, or does nothing, while no
+// project is open.
 #pragma once
 
 #include "GridSettings.h"
@@ -17,8 +18,11 @@ namespace phazite
 class ProjectContext;
 
 //==============================================================================
-// The song's bars, numbered from 0, as its time signature lays them out from its start.
-int getBeatsPerBar (const ProjectContext&, BeatPosition); // in the bar that is there
+// The song's bars, numbered from 0, as its time signature lays them out from its start: how long the bar that is there is,
+// and its time signature's beat, the note it counts (an eighth in 6/8), in quarter notes; the bar a beat is in; and where a
+// bar starts.
+BeatDuration getBarLength (const ProjectContext&, BeatPosition);
+BeatDuration getBeatLength (const ProjectContext&, BeatPosition);
 int getBarAt (const ProjectContext&, BeatPosition);
 BeatPosition getBarStart (const ProjectContext&, int bar);
 

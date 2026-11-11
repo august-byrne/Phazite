@@ -58,24 +58,28 @@ juce::String formatDecibels (float decibels);
 
 //==============================================================================
 // The spectrum of a device's sound (devices/core/Spectrum.h), as an analyzer shows it: a filled area and a line, each
-// level tilted up 4.5 dB an octave around 1 kHz, as analyzers show music, so that a mix looks about flat.
+// level tilted up 4.5 dB an octave around 1 kHz, as analyzers show music, so that a mix looks about flat; each pixel the
+// loudest of the frequencies it spans, and each level falling 40 dB a second, as Pro-Q's and SPAN's do by default, so that
+// a clap flashes up and falls away within a beat or two.
 class SpectrumTrace
 {
 public:
-    explicit SpectrumTrace (int order = 12);
+    SpectrumTrace();
 
     void setSampleRate (double);
 
-    // Takes the newest samples (both channels, averaged), then analyzes them; call at each refresh. update() returns whether
-    // the trace moved.
+    // Takes the newest samples (both channels, averaged), analyzing them as they come; call at each refresh, then update(),
+    // which shows them and returns whether the trace moved.
     void pull (devices::StereoTap&);
     void pull (devices::SampleTap&);
     bool update();
 
     void paint (juce::Graphics&, const FrequencyAxis&, const LevelAxis&, juce::Colour fill, juce::Colour line) const;
-    float getLevelAt (double frequency) const; // tilted, in decibels
+    float getLevelAt (double frequency) const;         // tilted, in decibels
+    float getLevelOver (double from, double to) const; // the loudest between two frequencies, tilted at their middle
 
     static constexpr float tiltPerOctave = 4.5f;
+    static constexpr float fallPerSecond = 40.0f; // decibels
 
 private:
     devices::Spectrum spectrum;

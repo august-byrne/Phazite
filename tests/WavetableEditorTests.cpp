@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The wavetable synth's editor (src/ui/devices/WavetableEditor.h), driven as the user would: its tables drawn and named,
-// the table menu, a sound dropped on a table, a drag through a table, its controls in their groups, and how it fits a
-// shorter Devices view.
+// the table menu, a sound dropped on a table, a drag through a table, its controls in their groups (the unison's stack and
+// drift among them), and how it fits a shorter Devices view.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -197,4 +197,71 @@ TEST_CASE ("The wavetable synth's editor fits the dock: its parts in pages, two 
     editor.getLayout().showPage (1);
     CHECK_FALSE (editor.getTableView (0).isShowing());
     CHECK (editor.findControl ("cutoff")->isShowing());
+}
+
+TEST_CASE ("The wavetable synth's editor shows the unison's stack and drift with its other controls, on one page of the dock")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+
+    // In the dock at the default window: the unison's six controls on the third page, whole, beside the sub, the noise and
+    // how it plays, none under a tab.
+    constexpr int dockWidth = 552, dockHeight = 268;
+    editor.setSize (dockWidth, dockHeight);
+    REQUIRE (editor.getLayout().getNumPages() == 4);
+    CHECK (editor.getLayout().getPageName (2).contains ("Unison"));
+    editor.getLayout().showPage (2);
+    phazite::test::checkChildrenApart (editor);
+
+    for (int column = 0; column < 6; ++column)
+        CHECK_FALSE (editor.getLayout().usesTabs (column));
+
+    for (const auto* id : { "unisonVoices", "unisonDetune", "unisonSpread", "unisonStack", "unisonDrift", "unisonPosition", "subLevel",
+                            "noiseLevel", "voiceMode", "glide", "bendRange", "velocity", "level" })
+    {
+        CAPTURE (id);
+        auto* control = editor.findControl (id);
+        REQUIRE (control != nullptr);
+        CHECK (control->isShowing());
+        CHECK (editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds())));
+    }
+
+    // Named within their part, as their neighbours are.
+    juce::StringArray names;
+
+    for (auto* label : phazite::test::findAll<juce::Label> (editor))
+        if (label->isShowing())
+            names.add (label->getText());
+
+    CHECK (names.contains ("Stack"));
+    CHECK (names.contains ("Drift"));
+    CHECK_FALSE (names.contains ("Unison Stack"));
+
+    // The stack is a list of its five ways, off at first, and the drift a knob in cents, at none: each changes its parameter
+    // as an undo step the model names.
+    auto* stack = dynamic_cast<juce::ComboBox*> (editor.findControl ("unisonStack"));
+    REQUIRE (stack != nullptr);
+    CHECK (stack->getTitle() == juce::String ("Unison Stack"));
+    CHECK (stack->getText() == juce::String ("Off"));
+    REQUIRE (stack->getNumItems() == 5);
+    CHECK (stack->getItemText (2) == juce::String ("Two Octaves"));
+    CHECK (stack->getItemText (4) == juce::String ("Power Chord"));
+    stack->setSelectedItemIndex ((int) WavetableSynth::Stack::twoOctaves, juce::sendNotificationSync);
+    CHECK (screen.getValue ("unisonStack") == doctest::Approx ((float) WavetableSynth::Stack::twoOctaves));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Unison Stack"));
+
+    auto* drift = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("unisonDrift"));
+    REQUIRE (drift != nullptr);
+    CHECK (drift->getTitle() == juce::String ("Unison Drift"));
+    CHECK (drift->getValue() == doctest::Approx (0.0));
+    CHECK (drift->getMaximum() == doctest::Approx (50.0));
+    drift->setValue (12.0, juce::sendNotificationSync);
+    CHECK (screen.getValue ("unisonDrift") == doctest::Approx (12.0f));
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Unison Drift"));
+
+    // Undo shows on the editor.
+    phazite::undo (screen.getSong());
+    phazite::undo (screen.getSong());
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (stack->getText() == juce::String ("Off"));
 }

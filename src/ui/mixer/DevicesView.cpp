@@ -27,7 +27,7 @@ namespace
 {
     constexpr int columnWidth = 168;            // the channel's name, its devices and its modulators
     constexpr int slotHeight = 24, slotGap = 2; // a device's line in the column
-    constexpr int extrasHeight = 26;            // under it while it shows: its Presets, its window's button and its sidechain
+    constexpr int extrasHeight = 26;            // under it while it shows: its Presets and its window's button
     constexpr int mixSize = 20;                 // an effect's mix, a small knob at its line's end
     constexpr int presetsWidth = 60, windowButtonWidth = 24;
     constexpr int keyKnobColumns = 4, maxKeyKnobs = 8;                        // a plug-in's key knobs
@@ -42,10 +42,25 @@ namespace
 
     //==============================================================================
     // A plug-in's key knobs, which the model offers, each named (its mix is in its slot): its own controls are in its window.
+    // And, for one that can listen to another track, what it listens to (SidechainMenus.h), above them, as Phazite's own
+    // devices show theirs in their editors here: also for a plug-in without a window of its own, which has no other place.
     struct KeyKnobs : public juce::Component
     {
         KeyKnobs (ProjectContext& context, const DeviceSlot& device)
         {
+            if (device.hasSidechain)
+            {
+                key = std::make_unique<SidechainButton> (context, device.id);
+                key->setTitle ("Key");
+                key->show (device.sidechain);
+                addAndMakeVisible (*key);
+
+                keyLabel.setText ("Key", juce::dontSendNotification);
+                keyLabel.setFont (juce::FontOptions (TextSize::small));
+                keyLabel.setInterceptsMouseClicks (false, false);
+                addAndMakeVisible (keyLabel);
+            }
+
             for (auto& control : getKeyControls (context, device.id, maxKeyKnobs))
                 addParameterKnob (*this, knobs, attachments, std::move (control));
 
@@ -59,26 +74,44 @@ namespace
             }
 
             const auto rows = std::max (1, (knobs.size() + keyKnobColumns - 1) / keyKnobColumns);
-            setSize (keyKnobColumns * (knobSize + Space::l) + Space::l, rows * (knobSize + labelHeight + Space::s) + Space::l);
+            setSize (keyKnobColumns * (knobSize + Space::l) + Space::l,
+                     getKnobsTop() + rows * (knobSize + labelHeight + Space::s) + Space::l);
         }
 
         void updateValues()
         {
             for (auto* attachment : attachments)
                 attachment->update();
+
+            if (key != nullptr)
+                key->refresh();
         }
 
         void resized() override
         {
+            if (key != nullptr)
+            {
+                auto row = juce::Rectangle<int> (Space::l, Space::l, getWidth() - 2 * Space::l, controlHeight);
+                keyLabel.setBounds (row.removeFromLeft (keyLabelWidth));
+                key->setBounds (row.withWidth (std::max (SidechainButton::minimumWidth, std::min (row.getWidth(), 3 * knobSize))));
+            }
+
             for (int i = 0; i < knobs.size(); ++i)
             {
                 const auto x = Space::l + (i % keyKnobColumns) * (knobSize + Space::l);
-                const auto y = Space::l + (i / keyKnobColumns) * (knobSize + labelHeight + Space::s);
+                const auto y = getKnobsTop() + (i / keyKnobColumns) * (knobSize + labelHeight + Space::s);
                 knobs[i]->setBounds (x, y, knobSize, knobSize);
                 names[i]->setBounds (x - Space::s, y + knobSize, knobSize + 2 * Space::s, labelHeight);
             }
         }
 
+        // Where the knobs start: under the key's row, when there is one.
+        int getKnobsTop() const { return Space::l + (key != nullptr ? controlHeight + Space::m : 0); }
+
+        static constexpr int keyLabelWidth = 32;
+
+        std::unique_ptr<SidechainButton> key; // a plug-in that has a sidechain
+        juce::Label keyLabel;
         juce::OwnedArray<Knob> knobs;
         juce::OwnedArray<ParameterAttachment> attachments;
         juce::OwnedArray<juce::Label> names;
@@ -227,8 +260,9 @@ struct DevicesView::DeviceList : public juce::Component,
 //==============================================================================
 // A device's line in the column: an effect's switch, its name (click to show it beside the column and select it, right-click
 // for its menu, drag to move it) and its mix; while it shows, lit (a container's while it or a device of it shows), with its
-// Presets, its window's button and its sidechain under them. An instrument's has no switch (its track's mutes it) and shows
-// its extras always, as it is alone.
+// Presets and its window's button under them. What its sidechain listens to is chosen inside it, in its editor or a plug-in's
+// window (ui/devices/SidechainMenus.h; the owner, 2026-11-10: a button here "takes up space and looks cluttered"). An
+// instrument's has no switch (its track's mutes it) and shows its extras always, as it is alone.
 struct DevicesView::Slot : public juce::Component
 {
     Slot (DevicesView& v, const DeviceSlot& device, DevicePlace p, TrackID channelTrack)
@@ -279,19 +313,6 @@ struct DevicesView::Slot : public juce::Component
             addChildComponent (*presetsButton);
         }
 
-        // What its sidechain listens to: the one place to choose it (ui/devices/SidechainMenus.h).
-        if (device.hasSidechain)
-        {
-            sidechainButton = std::make_unique<SidechainButton> (view.context, device.id);
-            const juce::Component::SafePointer<DevicesView> safeView (&view);
-            sidechainButton->onChange = [safeView]
-            {
-                if (safeView != nullptr)
-                    safeView->songChanged ({ .devices = true });
-            };
-            addChildComponent (*sidechainButton);
-        }
-
         // A plug-in's own window; or one of Phazite's own in a window of its own when the user wants, which then shows it:
         // beside the column, a word says so meanwhile (app/PluginWindow.h).
         if (device.opensWindow)
@@ -327,9 +348,6 @@ struct DevicesView::Slot : public juce::Component
                                                     : "Click to show it; right-click for its menu" + moves);
         power.setToggleState (device.isOn, juce::dontSendNotification);
 
-        if (sidechainButton != nullptr)
-            sidechainButton->show (device.sidechain);
-
         if (windowButton != nullptr && device.popsOut)
         {
             windowButton->setToggleState (device.windowOpen, juce::dontSendNotification);
@@ -338,8 +356,7 @@ struct DevicesView::Slot : public juce::Component
         }
 
         // A frozen device's sound is in its track's file: its controls are off until the track is unfrozen.
-        for (auto* control :
-             std::initializer_list<juce::Component*> { &power, windowButton.get(), sidechainButton.get(), presetsButton.get() })
+        for (auto* control : std::initializer_list<juce::Component*> { &power, windowButton.get(), presetsButton.get() })
             if (control != nullptr)
                 control->setEnabled (! device.frozen);
 
@@ -413,10 +430,10 @@ struct DevicesView::Slot : public juce::Component
 
         nameButton.setBounds (line);
 
-        // Under it while it shows: its Presets, its window's button and its sidechain, in that order.
+        // Under it while it shows: its Presets and its window's button, in that order.
         const auto extras = hasExtras();
 
-        for (auto* control : std::initializer_list<juce::Component*> { presetsButton.get(), windowButton.get(), sidechainButton.get() })
+        for (auto* control : std::initializer_list<juce::Component*> { presetsButton.get(), windowButton.get() })
             if (control != nullptr)
                 control->setVisible (extras);
 
@@ -431,13 +448,7 @@ struct DevicesView::Slot : public juce::Component
             }
 
             if (windowButton != nullptr)
-            {
                 windowButton->setBounds (row.removeFromLeft (windowButtonWidth));
-                row.removeFromLeft (Space::xs);
-            }
-
-            if (sidechainButton != nullptr)
-                sidechainButton->setBounds (row);
         }
     }
 
@@ -471,9 +482,8 @@ struct DevicesView::Slot : public juce::Component
     FlatName nameButton;
     juce::OwnedArray<Knob> mixKnob;
     std::unique_ptr<MixAttachment> mixAttachment;
-    std::unique_ptr<juce::TextButton> presetsButton;  // a device's, not a container's
-    std::unique_ptr<IconButton> windowButton;         // a plug-in's, or one of Phazite's own that pops out
-    std::unique_ptr<SidechainButton> sidechainButton; // a device's that has a sidechain
+    std::unique_ptr<juce::TextButton> presetsButton; // a device's, not a container's
+    std::unique_ptr<IconButton> windowButton;        // a plug-in's, or one of Phazite's own that pops out
 };
 
 //==============================================================================
@@ -771,10 +781,10 @@ struct DevicesView::Column : public juce::Component
 //==============================================================================
 // What shows a container, or a device in one, beside the column. Along its top, where it is: the container's name (double-
 // click to rename it); for a device in it, the container's name and its chain's, each a step back to the container's chains,
-// then the device's, with its sidechain, its Presets and its window's button at the end, as its line in the column would
-// have them (the owner, 2026-11-09: so that "you can also see that you are modifying an effect inside of a
-// container/chain"). Under it, the container's eight macros, which a grip drags onto a knob of its devices or its chains, as
-// Ableton's racks show theirs; beside them, the container's chains (ContainerEditor.h), or the device of it that shows.
+// then the device's, with its Presets and its window's button at the end, as its line in the column would have them (the
+// owner, 2026-11-09: so that "you can also see that you are modifying an effect inside of a container/chain"). Under it, the
+// container's eight macros, which a grip drags onto a knob of its devices or its chains, as Ableton's racks show theirs;
+// beside them, the container's chains (ContainerEditor.h), or the device of it that shows.
 struct DevicesView::ContainerFrame : public juce::Component
 {
     ContainerFrame (DevicesView& v, DeviceID id, std::optional<DeviceSlot> shownDevice, std::unique_ptr<juce::Component> shownInside)
@@ -841,20 +851,7 @@ struct DevicesView::ContainerFrame : public juce::Component
             addAndMakeVisible (separator);
         }
 
-        // What its sidechain listens to (ui/devices/SidechainMenus.h), its presets and its window, at the path's end.
-        if (device->hasSidechain)
-        {
-            sidechainButton = std::make_unique<SidechainButton> (context, device->id);
-            sidechainButton->show (device->sidechain);
-            const juce::Component::SafePointer<DevicesView> safeView (&view);
-            sidechainButton->onChange = [safeView]
-            {
-                if (safeView != nullptr)
-                    safeView->songChanged ({ .devices = true });
-            };
-            addAndMakeVisible (*sidechainButton);
-        }
-
+        // Its presets and its window, at the path's end.
         if (! device->isContainer)
         {
             presetsButton = std::make_unique<juce::TextButton> ("Presets");
@@ -934,8 +931,7 @@ struct DevicesView::ContainerFrame : public juce::Component
     // A frozen track's: its macros and what shows beside them are off, faint; the way back to the chains isn't.
     void setFrozen (bool frozen)
     {
-        for (auto* part :
-             std::initializer_list<juce::Component*> { inner.get(), sidechainButton.get(), presetsButton.get(), windowButton.get() })
+        for (auto* part : std::initializer_list<juce::Component*> { inner.get(), presetsButton.get(), windowButton.get() })
             if (part != nullptr)
                 part->setEnabled (! frozen);
 
@@ -998,7 +994,7 @@ struct DevicesView::ContainerFrame : public juce::Component
         area.removeFromTop (pathHeight - controlHeight);
 
         // Where it is: the container's name, or the way back to it, its chain, and the device's name, with the device's
-        // sidechain, Presets and window's button at the end.
+        // Presets and window's button at the end.
         if (device.has_value())
         {
             if (windowButton != nullptr)
@@ -1012,12 +1008,6 @@ struct DevicesView::ContainerFrame : public juce::Component
             {
                 presetsButton->setBounds (path.removeFromRight (presetsWidth).reduced (0, 2));
                 path.removeFromRight (Space::xs);
-            }
-
-            if (sidechainButton != nullptr)
-            {
-                sidechainButton->setBounds (path.removeFromRight (columnWidth).reduced (0, 2));
-                path.removeFromRight (Space::s);
             }
 
             const auto crumbWidth = [&path] (const juce::Button& crumb)
@@ -1082,7 +1072,6 @@ struct DevicesView::ContainerFrame : public juce::Component
     juce::Label name;                       // the container's, or the device's
     Crumb containerCrumb, chainCrumb;
     juce::Label firstSeparator, secondSeparator;
-    std::unique_ptr<SidechainButton> sidechainButton;
     std::unique_ptr<juce::TextButton> presetsButton;
     std::unique_ptr<IconButton> windowButton;
     juce::OwnedArray<Macro> macros;
@@ -1465,7 +1454,7 @@ void DevicesView::showBody()
         }
         else if (! device->opensWindow)
         {
-            shown = createDeviceEditor (getDeviceHandle (context, device->id));
+            shown = createDeviceEditor (context, device->id);
         }
 
         // A drum sampler's Swap tries the browser's sounds on a pad (onSwap: the app's browser).

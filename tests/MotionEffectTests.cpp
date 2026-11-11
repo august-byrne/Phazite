@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The phaser's, the flanger's and the chorus's DSP (src/devices/motion/): their notches where their responses say and as
-// deep, what they play matching those responses, their sweeps and the right side's lead, the chorus's three copies a side in
-// Ensemble, feedback that rings without running away, the flanger's sign and the chorus's mode turning without a click, Safe
-// Bass, and their LFOs in time with the song, the same at each render.
+// deep, what they play matching those responses, their sweeps and the right side's lead, the chorus's three copies a side
+// as an ensemble, feedback that rings without running away, the flanger's sign and the chorus's voices turning without a
+// click, Safe Bass (the phaser's and the flanger's split, as their runners play them), and their LFOs in time with the song,
+// the same at each render. The chorus's voices, their phase, spread and shimmer, and its split, are in ChorusTests.cpp.
+#include "MotionTestHelpers.h"
 #include "TestHelpers.h"
+#include "devices/dsp/Filters.h"
 #include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
@@ -35,7 +38,7 @@ std::vector<float> getDefaults (const devices::DeviceInfo& info)
     return values;
 }
 
-// What the song does while a sound plays: its tempo, and from which beat it plays (if it does).
+// What the song does while a sound plays: its tempo, and from which beat it plays (if it does), in 4/4.
 struct Song
 {
     bool playing = false;
@@ -68,6 +71,7 @@ juce::AudioBuffer<float> play (devices::Processor& processor, const std::vector<
         block.tempo = song.tempo;
         block.isPlaying = song.playing;
         block.beat = song.startBeat + start / rate * song.tempo / 60.0;
+        block.bars = block.beat / 4.0; // in 4/4
         processor.process (block);
 
         if (afterBlock)
@@ -513,6 +517,270 @@ TEST_CASE ("The phaser's and the flanger's LFOs follow the song while it plays: 
 }
 
 //==============================================================================
+// Safe Bass, the phaser's and the flanger's (the chorus's is in ChorusTests.cpp): the sound split at its frequency, the
+// effect hearing only the band above it, 24 dB an octave down below it, and the band below going around the effect; the
+// two bands, and what the runner mixes back in, adding up flat.
+namespace
+{
+// The phaser or the flanger, by its values' size, played through its runner (as Phazite's engine plays it, with its mix).
+juce::AudioBuffer<float> playEffect (const std::vector<float>& values, const std::vector<float>& sound,
+                                     const std::function<void (int, std::vector<float>&)>& beforeBlock = {})
+{
+    if (values.size() == Phaser::info.parameters.size())
+        return phazite::test::playThroughRunner (Phaser::info, std::make_unique<Phaser>(), values, sound, rate, blockSize, beforeBlock);
+
+    return phazite::test::playThroughRunner (Flanger::info, std::make_unique<Flanger>(), values, sound, rate, blockSize, beforeBlock);
+}
+
+// What a Linkwitz-Riley split at a frequency sends on above it, and what is left of the sound once a 12 dB Butterworth
+// low-pass is taken away (which falls only 6 dB an octave below it): their gains at a frequency.
+double getHighBand (double crossover, double hertz)
+{
+    namespace dsp = devices::dsp;
+    const auto high = dsp::getResponse (dsp::makeFilter (dsp::FilterShape::highPass, crossover, rate, 0.70710678), hertz, rate);
+    return std::abs (high * high);
+}
+
+double getLowTakenAway (double crossover, double hertz)
+{
+    namespace dsp = devices::dsp;
+    return std::abs (1.0 - dsp::getResponse (dsp::makeFilter (dsp::FilterShape::lowPass, crossover, rate, 0.70710678), hertz, rate));
+}
+
+// The largest jump from one sample to the next, on either side, between two samples.
+float largestJump (const juce::AudioBuffer<float>& sound, int from, int to)
+{
+    auto largest = 0.0f;
+
+    for (int channel = 0; channel < sound.getNumChannels(); ++channel)
+        for (int i = std::max (1, from); i < to; ++i)
+            largest = std::max (largest, std::abs (sound.getSample (channel, i) - sound.getSample (channel, i - 1)));
+
+    return largest;
+}
+
+// The phaser and the flanger each set to move the bass hard: the phaser's notches swept through it, the flanger hollowing
+// it out, fast, the sides apart.
+std::vector<float> getBassSweepingPhaser()
+{
+    auto values = getDefaults (Phaser::info);
+    values[Phaser::notches] = 1.0f;
+    values[Phaser::frequency] = 100.0f;
+    values[Phaser::depth] = 1.0f;
+    values[Phaser::sync] = 0.0f;
+    values[Phaser::rate] = 3.0f;
+    values[Phaser::feedback] = 0.5f;
+    return values;
+}
+
+std::vector<float> getBassSweepingFlanger()
+{
+    auto values = getDefaults (Flanger::info);
+    values[Flanger::delay] = 5.0f;
+    values[Flanger::depth] = 0.5f;
+    values[Flanger::sync] = 0.0f;
+    values[Flanger::rate] = 3.0f;
+    values[Flanger::feedback] = -0.6f;
+    return values;
+}
+} // namespace
+
+TEST_CASE ("The phaser's and the flanger's Safe Bass leave a 40 Hz tone under 150 Hz as it was: unmoved, the same on both sides")
+{
+    const auto tone = phazite::test::makeTone (40.0, 96000, rate);
+
+    for (auto values : { getBassSweepingPhaser(), getBassSweepingFlanger() })
+    {
+        const auto isPhaser = values.size() == Phaser::info.parameters.size();
+        const auto safeBass = isPhaser ? (size_t) Phaser::safeBass : (size_t) Flanger::safeBass;
+        const auto mix = isPhaser ? (size_t) Phaser::mix : (size_t) Flanger::mix;
+        CAPTURE (isPhaser);
+
+        // Without it, each changes the tone: the phaser moves it, the flanger hollows it out.
+        values[safeBass] = 20.0f;
+        const auto swept = phazite::test::readTone (playEffect (values, tone), 40.0, rate, 48000, 96000);
+        CHECK ((std::abs (phazite::test::inDecibels (swept.left / 0.5)) > 1.0 || phazite::test::inDecibels (swept.unsteady / 0.5) > -30.0));
+
+        // With it at 150 Hz, at any mix: as loud as it went in, within 0.2 dB, the same on both sides, and nothing of it
+        // moving, each 40 dB under the tone.
+        values[safeBass] = 150.0f;
+
+        for (const auto amount : { 1.0f, 0.5f })
+        {
+            CAPTURE (amount);
+            values[mix] = amount;
+            const auto kept = phazite::test::readTone (playEffect (values, tone), 40.0, rate, 48000, 96000);
+            CHECK (std::abs (phazite::test::inDecibels (kept.left / 0.5)) < 0.2);
+            CHECK (std::abs (phazite::test::inDecibels (kept.right / 0.5)) < 0.2);
+            CHECK (phazite::test::inDecibels (kept.side / 0.5) < -40.0);
+            CHECK (phazite::test::inDecibels (kept.unsteady / 0.5) < -40.0);
+        }
+    }
+}
+
+TEST_CASE ("The phaser's and the flanger's Safe Bass send their effects a 75 Hz tone under 150 Hz 24 dB down, an octave lower 48")
+{
+    // What of a tone reaches each one's effect: the difference between what it plays with its effect in two states that
+    // treat the tone oppositely, the band around the effect being the same in both, over how far apart the two states are.
+    // A Linkwitz-Riley split's: 24 dB an octave down below its frequency. At least 10 dB further down than what is left
+    // once a 12 dB low-pass is taken away, which falls only 6 dB an octave (2.8 dB down at 75 Hz).
+    namespace dsp = devices::dsp;
+
+    for (const auto hertz : { 75.0, 37.5 })
+    {
+        CAPTURE (hertz);
+        const auto tone = phazite::test::makeTone (hertz, 48000, rate);
+        const auto partOf = [&] (const std::vector<float>& one, const std::vector<float>& other, double apart)
+        {
+            auto difference = playEffect (one, tone);
+            const auto second = playEffect (other, tone);
+
+            for (int channel = 0; channel < 2; ++channel)
+                difference.addFrom (channel, 0, second, channel, 0, difference.getNumSamples(), -1.0f);
+
+            return phazite::test::readTone (difference, hertz, rate, 24000, 48000).left / 0.5 / apart;
+        };
+
+        // The phaser's one all-pass section standing still, without feedback, at the tone (or as low as it goes) and far
+        // above it: the band through it, half and half with the band's own sound, taken away or kept.
+        auto phaser = getDefaults (Phaser::info);
+        phaser[Phaser::notches] = 0.0f;
+        phaser[Phaser::depth] = 0.0f;
+        phaser[Phaser::feedback] = 0.0f;
+        phaser[Phaser::stereo] = 0.0f;
+        phaser[Phaser::safeBass] = 150.0f;
+        auto farPhaser = phaser;
+        phaser[Phaser::frequency] = (float) std::max (hertz, 50.0);
+        farPhaser[Phaser::frequency] = 10000.0f;
+        const auto section = [hertz] (float centre)
+        { return dsp::getResponse (dsp::makeFilter (dsp::FilterShape::allPass, centre, rate, 0.5), hertz, rate); };
+        const auto phaserApart = std::abs (0.5 * (section (phaser[Phaser::frequency]) - section (farPhaser[Phaser::frequency])));
+
+        // The flanger's copy standing still, without feedback, at two delays half the tone's period apart: half the band
+        // through it, delayed, upside down from one to the other.
+        auto flanger = getDefaults (Flanger::info);
+        flanger[Flanger::depth] = 0.0f;
+        flanger[Flanger::feedback] = 0.0f;
+        flanger[Flanger::stereo] = 0.0f;
+        flanger[Flanger::safeBass] = 150.0f;
+        auto laterFlanger = flanger;
+        flanger[Flanger::delay] = 1.0f;
+        laterFlanger[Flanger::delay] = (float) (1.0 + 500.0 / hertz);
+
+        for (const auto part : { partOf (phaser, farPhaser, phaserApart), partOf (flanger, laterFlanger, 1.0) })
+        {
+            CHECK (phazite::test::inDecibels (part)
+                   == doctest::Approx (phazite::test::inDecibels (getHighBand (150.0, hertz))).epsilon (0.02));
+            CHECK (phazite::test::inDecibels (part) < phazite::test::inDecibels (getLowTakenAway (150.0, hertz)) - 10.0);
+        }
+    }
+}
+
+TEST_CASE ("The phaser's and the flanger's Safe Bass add back up flat: set to leave the band above it alone, they play flat")
+{
+    // The phaser's one all-pass section far above, narrow; the flanger's copy at its shortest, at the bottom of a slow sweep:
+    // each leaves the band above Safe Bass all but alone. Then tones from two octaves under it to two over come out as loud
+    // as they went in, within 0.1 dB, at any mix: the two bands add back up flat, and what the runner mixes back in with them
+    // is in phase with them.
+    auto phaser = getDefaults (Phaser::info);
+    phaser[Phaser::notches] = 0.0f;
+    phaser[Phaser::frequency] = 10000.0f;
+    phaser[Phaser::depth] = 0.0f;
+    phaser[Phaser::feedback] = 0.0f;
+    phaser[Phaser::spacing] = 0.0f;
+    phaser[Phaser::stereo] = 0.0f;
+    phaser[Phaser::safeBass] = 150.0f;
+
+    auto flanger = getDefaults (Flanger::info);
+    flanger[Flanger::delay] = 0.2f;
+    flanger[Flanger::depth] = 1.0f;
+    flanger[Flanger::sync] = 0.0f;
+    flanger[Flanger::rate] = 0.05f;
+    flanger[Flanger::feedback] = 0.0f;
+    flanger[Flanger::stereo] = 0.0f;
+    flanger[Flanger::safeBass] = 150.0f;
+
+    for (auto values : { phaser, flanger })
+    {
+        const auto isPhaser = values.size() == Phaser::info.parameters.size();
+        const auto mix = isPhaser ? (size_t) Phaser::mix : (size_t) Flanger::mix;
+
+        for (const auto amount : { 1.0f, 0.5f, 0.0f })
+        {
+            values[mix] = amount;
+
+            for (int step = 0; step <= 8; ++step)
+            {
+                const auto hertz = 37.5 * std::exp2 (step / 2.0);
+                CAPTURE (isPhaser);
+                CAPTURE (amount);
+                CAPTURE (hertz);
+                const auto out = playEffect (values, phazite::test::makeTone (hertz, 24000, rate));
+                const auto parts = phazite::test::readTone (out, hertz, rate, 9600, 24000);
+                CHECK (std::abs (phazite::test::inDecibels (parts.left / 0.5)) < 0.1);
+                CHECK (std::abs (phazite::test::inDecibels (parts.right / 0.5)) < 0.1);
+            }
+        }
+    }
+}
+
+TEST_CASE ("The phaser's and the flanger's Safe Bass turn on, off and across their range without a click")
+{
+    // A low tone and a higher one, and Safe Bass turned on, across its range, off and on again while they play, by hand (its
+    // runner gliding it over a block) and at once, from one block to the next: in the 200 ms after each change, no sample
+    // jumps from the one before by much more than any does while Safe Bass stays where it is.
+    std::vector<float> tones (240000);
+
+    for (size_t i = 0; i < tones.size(); ++i)
+        tones[i] = 0.25f * (float) (std::sin (twoPi * 60.0 * (double) i / rate) + std::sin (twoPi * 250.0 * (double) i / rate));
+
+    constexpr int changes[] = { 50, 100, 150, 200 }; // blocks
+    constexpr int settling = 20;                     // blocks after a change
+    const auto changeAt = [] (int block, std::vector<float>& values, size_t safeBass)
+    {
+        for (const auto& [at, hertz] : { std::pair { 50, 150.0f }, { 100, 600.0f }, { 150, 20.0f }, { 200, 400.0f } })
+            if (block == at)
+                values[safeBass] = hertz;
+    };
+
+    for (auto values : { getDefaults (Phaser::info), getDefaults (Flanger::info) })
+    {
+        const auto isPhaser = values.size() == Phaser::info.parameters.size();
+        const auto safeBass = isPhaser ? (size_t) Phaser::safeBass : (size_t) Flanger::safeBass;
+        CAPTURE (isPhaser);
+
+        const auto byHand = playEffect (values, tones, [&] (int block, std::vector<float>& now) { changeAt (block, now, safeBass); });
+
+        std::unique_ptr<devices::Processor> effect;
+
+        if (isPhaser)
+            effect = std::make_unique<Phaser>();
+        else
+            effect = std::make_unique<Flanger>();
+
+        effect->prepare (rate, blockSize);
+        const auto atOnce = play (*effect, values, tones, nullptr, {}, [&] (int block) { changeAt (block + 1, values, safeBass); });
+
+        for (const auto* out : { &byHand, &atOnce })
+        {
+            auto steady = largestJump (*out, 10 * blockSize, changes[0] * blockSize);
+
+            for (size_t k = 0; k < std::size (changes); ++k)
+                steady = std::max (steady, largestJump (*out, (changes[k] + settling) * blockSize,
+                                                        k + 1 < std::size (changes) ? changes[k + 1] * blockSize : out->getNumSamples()));
+
+            CHECK (steady > 0.001f);
+
+            for (const auto change : changes)
+            {
+                CAPTURE (change);
+                CHECK (largestJump (*out, change * blockSize, (change + settling) * blockSize) < 2.0f * steady);
+            }
+        }
+    }
+}
+
+//==============================================================================
 TEST_CASE ("The chorus describes itself: a copy a side at first, swept as the Juno-60's mode I, half and half with the sound")
 {
     CHECK (devices::isValid (Chorus::info));
@@ -523,10 +791,13 @@ TEST_CASE ("The chorus describes itself: a copy a side at first, swept as the Ju
 
     // Its triangle at the bottom of the sweep at first: the copy at the delay less its depth (1.75 ms), the right side half a
     // cycle ahead, at the top (5.25 ms).
-    CHECK (Chorus::getVoiceDelay (values, Chorus::getVoicePhase (values, 0.0, 0, 0)) == doctest::Approx (1.75));
-    CHECK (Chorus::getVoiceDelay (values, Chorus::getVoicePhase (values, 0.0, 1, 0)) == doctest::Approx (5.25));
+    CHECK (Chorus::getVoiceDelay (values, Chorus::getVoicePhase (values, 0.0, 0, 0), 0) == doctest::Approx (1.75));
+    CHECK (Chorus::getVoiceDelay (values, Chorus::getVoicePhase (values, 0.0, 1, 0), 0) == doctest::Approx (5.25));
 
-    values[Chorus::mode] = 1.0f;
+    // Up to eight copies a side, picked by their number.
+    values[Chorus::voices] = 2.0f;
+    CHECK (Chorus::getNumVoices (values) == 3);
+    values[Chorus::voices] = Chorus::info.parameters[Chorus::voices].maximum;
     CHECK (Chorus::getNumVoices (values) == Chorus::mostVoices);
     CHECK (std::string_view (Chorus::typeID) != std::string_view (Flanger::typeID));
 
@@ -543,27 +814,27 @@ TEST_CASE ("The chorus describes itself: a copy a side at first, swept as the Ju
         CHECK (Chorus::getMagnitude (values, copy, hertz, rate) == doctest::Approx (1.0).epsilon (0.01));
 }
 
-TEST_CASE ("The chorus plays what its response says: its copies standing still, one or three a side, fed back and darkened")
+TEST_CASE ("The chorus plays what its response says: its copies standing still, one, three or eight a side, fed back and darkened")
 {
     auto values = getDefaults (Chorus::info);
     values[Chorus::depth] = 0.0f; // the copies standing still at the delay
     values[Chorus::delay] = 2.5f; // 120 samples
     values[Chorus::mix] = 1.0f;   // its response with its copies alone, as it plays them (its runner mixes in the sound)
 
-    for (const auto mode : { 0.0f, 1.0f })
+    for (const auto voices : { 0.0f, 2.0f, 7.0f })
     {
         for (const auto feedback : { 0.0f, 0.6f })
         {
             for (const auto highCut : { 20000.0f, 3000.0f })
             {
-                values[Chorus::mode] = mode;
+                values[Chorus::voices] = voices;
                 values[Chorus::feedback] = feedback;
                 values[Chorus::highCut] = highCut;
                 const std::vector<double> copies ((size_t) Chorus::getNumVoices (values), 2.5);
 
                 for (const auto hertz : { 100.0, 200.0, 400.0, 1500.0, 5000.0 })
                 {
-                    CAPTURE (mode);
+                    CAPTURE (voices);
                     CAPTURE (feedback);
                     CAPTURE (highCut);
                     CAPTURE (hertz);
@@ -577,11 +848,14 @@ TEST_CASE ("The chorus plays what its response says: its copies standing still, 
         }
     }
 
-    // Three copies together where they line up (here, standing still at one delay, everywhere): 4.8 dB louder than one.
-    values[Chorus::mode] = 1.0f;
+    // Three copies together where they line up (here, standing still at one delay, everywhere): 4.8 dB louder than one; and
+    // eight, 9 dB.
+    values[Chorus::voices] = 2.0f;
     values[Chorus::feedback] = 0.0f;
     values[Chorus::highCut] = 20000.0f;
     CHECK (toDecibels (Chorus::getMagnitude (values, std::vector<double> (3, 2.5), 1000.0, rate)) == doctest::Approx (4.77).epsilon (0.01));
+    values[Chorus::voices] = 7.0f;
+    CHECK (toDecibels (Chorus::getMagnitude (values, std::vector<double> (8, 2.5), 1000.0, rate)) == doctest::Approx (9.03).epsilon (0.01));
 }
 
 TEST_CASE ("The chorus sweeps its copies each way by its depth, the sides opposite, and three a side a third of a cycle apart")
@@ -610,9 +884,11 @@ TEST_CASE ("The chorus sweeps its copies each way by its depth, the sides opposi
     CHECK (longest == doctest::Approx (6.0).epsilon (0.01));
     CHECK (widestMismatch < 0.001);
 
-    // In Ensemble, three copies a side a third of a cycle apart, the fast sine on each: their sweeps cancel, so that together
-    // they keep to the middle, spread either way of it.
-    values[Chorus::mode] = 1.0f;
+    // As the string machines' ensemble, three copies a side a third of a cycle apart, the fast sine on each: their sweeps
+    // cancel, so that together they keep to the middle, spread either way of it.
+    constexpr int ensembleVoices = 3;
+    values[Chorus::voices] = (float) (ensembleVoices - 1);
+    values[Chorus::shimmer] = 1.0f;
     values[Chorus::rate] = 0.7f;
     chorus.prepare (rate, blockSize);
     auto worstMiddle = 0.0, widestSpread = 0.0;
@@ -623,7 +899,7 @@ TEST_CASE ("The chorus sweeps its copies each way by its depth, the sides opposi
               {
                   auto sum = 0.0, low = 1.0e9, high = 0.0;
 
-                  for (int voice = 0; voice < Chorus::mostVoices; ++voice)
+                  for (int voice = 0; voice < ensembleVoices; ++voice)
                   {
                       const auto lag = (double) chorus.getDelay (channel, voice).get();
                       sum += lag;
@@ -631,7 +907,7 @@ TEST_CASE ("The chorus sweeps its copies each way by its depth, the sides opposi
                       high = std::max (high, lag);
                   }
 
-                  worstMiddle = std::max (worstMiddle, std::abs (sum / Chorus::mostVoices - 4.0));
+                  worstMiddle = std::max (worstMiddle, std::abs (sum / ensembleVoices - 4.0));
                   widestSpread = std::max (widestSpread, high - low);
               }
           });
@@ -640,7 +916,7 @@ TEST_CASE ("The chorus sweeps its copies each way by its depth, the sides opposi
     CHECK (widestSpread > 2.0);
 }
 
-TEST_CASE ("The chorus's feedback never runs away, its mode changes without a click, and it rings no longer than its tail")
+TEST_CASE ("The chorus's feedback never runs away, its voices change without a click, and it rings no longer than its tail")
 {
     // At its most, swept fast, it stays within bounds.
     Chorus chorus;
@@ -649,16 +925,17 @@ TEST_CASE ("The chorus's feedback never runs away, its mode changes without a cl
     values[Chorus::rate] = 20.0f;
     values[Chorus::feedback] = 0.9f;
 
-    for (const auto mode : { 0.0f, 1.0f })
+    for (const auto voices : { 0.0f, 2.0f, 7.0f })
     {
         for (const auto delay : { 1.0f, 25.0f })
         {
             for (const auto highCut : { 20000.0f, 2000.0f })
             {
-                CAPTURE (mode);
+                CAPTURE (voices);
                 CAPTURE (delay);
                 CAPTURE (highCut);
-                values[Chorus::mode] = mode;
+                values[Chorus::voices] = voices;
+                values[Chorus::shimmer] = voices > 0.0f ? 1.0f : 0.0f;
                 values[Chorus::delay] = delay;
                 values[Chorus::highCut] = highCut;
                 chorus.prepare (rate, blockSize);
@@ -667,18 +944,18 @@ TEST_CASE ("The chorus's feedback never runs away, its mode changes without a cl
         }
     }
 
-    // From Classic to Ensemble and back while a tone plays: the copies fade in and out, so no sample jumps from the one before
-    // by much more than it does while the mode stays.
+    // From one copy a side to three and back while a tone plays: the copies fade in and out, so no sample jumps from the one
+    // before by much more than it does while their number stays.
     values = getDefaults (Chorus::info);
     chorus.prepare (rate, blockSize);
     const auto out = play (chorus, values, makeSine (300.0, 48000), nullptr, {},
                            [&] (int block)
                            {
                                if (block == 19)
-                                   values[Chorus::mode] = 1.0f;
+                                   values[Chorus::voices] = 2.0f;
 
                                if (block == 59)
-                                   values[Chorus::mode] = 0.0f;
+                                   values[Chorus::voices] = 0.0f;
                            });
     const auto largestStep = [&out] (int from, int to)
     {

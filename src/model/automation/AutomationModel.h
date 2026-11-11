@@ -82,9 +82,10 @@ void setAutomationLanesCollapsed (ProjectContext&, TrackID, bool);
 // Points (AutomationValues.h) of a parameter's automation, at song beats.
 std::vector<AutomationPoint> getAutomationPoints (const ProjectContext&, const ParameterRef&); // in time order
 
-// The automation's value at evenly spaced beats across a range (the first at its start, the last at its end), as the
-// engine plays it, for drawing a lane; empty without points.
+// The automation's value at evenly spaced beats across a range (the first at its start, the last at its end), or at each
+// of some beats, as the engine plays it, for drawing a lane; empty without points.
 std::vector<float> getAutomationValues (const ProjectContext&, const ParameterRef&, BeatRange, int numValues);
+std::vector<float> getAutomationValues (const ProjectContext&, const ParameterRef&, const std::vector<BeatPosition>&);
 
 // Edits. Indices are points' places in time order. Values are kept within the parameter's range, and beats at or after
 // the song's start.

@@ -31,12 +31,13 @@ public:
     {
         setTitle ("Phaser notches");
         setDescription ("Where its notches are now, over the spectrum of what it plays, and how far the sweep reaches. Drag the "
-                        "dot sideways to move the frequency and up or down for the feedback; the wheel turns the depth.");
+                        "dot, or press anywhere to put it there: sideways for the frequency, up or down for the feedback. The "
+                        "wheel turns the depth.");
     }
 
     double getCentre (int channel) const { return Phaser::getSweptCentre (values, getLfoValue (channel), getSampleRate()); }
 
-    juce::Point<float> getDotPosition() const
+    juce::Point<float> getDotPosition() const override
     {
         return { getFrequencies().xFor (values[Phaser::frequency]), yForFeedback (values[Phaser::feedback]) };
     }
@@ -112,11 +113,7 @@ protected:
         }
 
         // The dot: the frequency, as high as the feedback.
-        const auto dot = juce::Rectangle<float> (2.0f * GraphTint::dotRadius, 2.0f * GraphTint::dotRadius).withCentre (getDotPosition());
-        g.setColour (tint);
-        g.fillEllipse (dot);
-        g.setColour (p.text);
-        g.drawEllipse (dot, 1.5f);
+        dot.paint (g, p, tint);
 
         const auto notches = juce::roundToInt (values[Phaser::notches]) + 1;
         graph::paintReadouts (g, p, area,

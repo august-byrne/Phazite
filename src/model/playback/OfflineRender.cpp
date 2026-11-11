@@ -57,7 +57,8 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
 OfflineRender::~OfflineRender()
 {
     JUCE_ASSERT_MESSAGE_THREAD
-    stopThread (60000);
+    // It looks at threadShouldExit() between blocks: never ended by force, which can leave a lock it held held for ever.
+    stopThread (-1);
     jobs.clear(); // what the renders played, before the project's engine plays the plug-ins again
 
     if (setup.session != nullptr)

@@ -12,12 +12,17 @@
 // - Right-click a point for its line's shape (single or double curve, hold, stairs, smooth stairs) or to delete it; Alt and
 //   a click deletes it too. Right-click elsewhere to add a point there.
 //
-// Each change is one undo step. Its tools go under it (DynamicsCurveTools): its menu (shapes to start from, copy and paste,
-// from any device's curve to any other's, flip, smooth, reset), Freeze (no editing) and Snap, the editor's for the session.
+// Under the pointer, what a drag takes lights up, ringed in the text colour as the other graphs' handles are, the pointer
+// shows which way it moves (a hand for a point, up and down for an end point or a handle), and its tooltip, which the hint
+// bar shows, says what it does (the owner, 2026-11-10: "it should be obvious that you are able to do this gesture"). Each
+// change is one undo step. Its tools go under it
+// (DynamicsCurveTools): its menu (shapes to start from, copy and paste, from any device's curve to any other's, flip,
+// smooth, reset), Freeze (no editing) and Snap, the editor's for the session.
 #pragma once
 
 #include "devices/dynamics/DynamicsCurve.h"
 #include "model/devices/DeviceHandle.h"
+#include "ui/theme/DesignTokens.h"
 #include "ui/theme/Icons.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -28,7 +33,8 @@
 
 namespace phazite::ui
 {
-class DynamicsCurve : public juce::Component
+class DynamicsCurve : public juce::Component,
+                      public juce::TooltipClient
 {
 public:
     // The device's curve whose parameters (its count of points, then its points: devices::curves) start at the index set,
@@ -64,6 +70,10 @@ public:
     void setPointType (int point, int type);
     void deletePoint (int point);
     bool applyShape (const juce::String& name);
+
+    // What the point or handle under the pointer does, and how to work it; nothing elsewhere (the hint bar then shows the
+    // curve's description).
+    juce::String getTooltip() override;
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -101,11 +111,13 @@ private:
     void setValue (int point, devices::curves::PointField, float value, const juce::String& undoName);
     void addPoint (juce::Point<float>);
     void edited();
-    void paintHandle (juce::Graphics&, juce::Colour background, juce::Colour, Target, juce::Point<float>) const;
+    void paintHandle (juce::Graphics&, const Palette&, juce::Colour tint, Target, juce::Point<float>) const;
     void showPointMenu (int point);
+    void showCursorFor (const std::optional<Target>&);
 };
 
-// The curve's tools, under it: its menu, Freeze and Snap.
+// The curve's tools, under it: its menu, Freeze and Snap; or, compact, its menu alone, which then has Freeze and Snap in it,
+// ticked while they are on (the multiband's, beside its Monitor's switch where its column is narrow).
 class DynamicsCurveTools : public juce::Component
 {
 public:
@@ -114,12 +126,20 @@ public:
     int getPreferredWidth() const;
     void resized() override;
 
+    void setCompact (bool);
+    bool isCompact() const noexcept { return compact; }
+
+    juce::Button& getMenuButton() noexcept { return menuButton; }
     juce::Button& getFreezeButton() noexcept { return freezeButton; }
     juce::Button& getSnapButton() noexcept { return snapButton; }
+
+    // The curve's menu, as its button shows it.
+    juce::PopupMenu getMenu();
 
 private:
     DynamicsCurve& curve;
     IconButton menuButton { "Curve menu", Icon::menu }, freezeButton { "Freeze", Icon::frozen }, snapButton { "Snap", Icon::magnet };
+    bool compact = false;
 
     void showMenu();
 };

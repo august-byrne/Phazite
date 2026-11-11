@@ -15,10 +15,31 @@ class Crossover
 public:
     void setFrequency (double frequency, double sampleRate) noexcept
     {
-        constexpr double butterworthQ = 0.70710678;
         low = makeFilter (FilterShape::lowPass, frequency, sampleRate, butterworthQ);
         high = makeFilter (FilterShape::highPass, frequency, sampleRate, butterworthQ);
         allPass = makeFilter (FilterShape::allPass, frequency, sampleRate, butterworthQ);
+    }
+
+    // Another's frequency, its coefficients taken rather than worked out again: for a split's other channels.
+    void setFrequencyAs (const Crossover& other) noexcept
+    {
+        low = other.low;
+        high = other.high;
+        allPass = other.allPass;
+    }
+
+    // The two bands' responses at a frequency, split at another, for an editor's curve and tests: they add up to the
+    // all-pass's (exactly, as process() plays them).
+    struct Responses
+    {
+        std::complex<double> low, high;
+    };
+
+    static Responses getResponses (double crossover, double frequency, double sampleRate)
+    {
+        const auto low = getResponse (makeFilter (FilterShape::lowPass, crossover, sampleRate, butterworthQ), frequency, sampleRate);
+        const auto high = getResponse (makeFilter (FilterShape::highPass, crossover, sampleRate, butterworthQ), frequency, sampleRate);
+        return { low * low, high * high };
     }
 
     void reset() noexcept
@@ -41,6 +62,8 @@ public:
     float processAllPass (float input) noexcept { return phase.process (input, allPass); }
 
 private:
+    static constexpr double butterworthQ = 0.70710678;
+
     FilterCoefficients low, high, allPass;
     Filter low1, low2, high1, high2, phase;
 };

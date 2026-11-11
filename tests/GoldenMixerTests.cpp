@@ -15,9 +15,11 @@
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
+#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/mixer/FreezeModel.h"
@@ -149,6 +151,8 @@ TEST_SUITE ("golden")
         song.rename (bass, "Bass");
         song.addAudioClip (bass, writeTone (song, "Bass", 110.0), 0.0);
 
+        // The drum sampler's default kit, as one click on Duck Under hears it: its kick's long boom mustn't hold the tone down
+        // through the beat.
         const auto kick = song.addTrack ("Kick");
         song.setInstrument (kick, phazite::devices::DrumSampler::typeID);
         const auto clip = song.addMidiClip (kick, 0.0, 8.0);
@@ -300,7 +304,8 @@ TEST_SUITE ("golden")
 
     TEST_CASE ("Golden render: Phazite's chorus on a beat and stabs")
     {
-        checkEffect (phazite::devices::Chorus::typeID, "effect-chorus", { { "mode", 1.0f } },
+        // The string machines' ensemble: three copies a side, a third of a cycle apart, with their shimmer.
+        checkEffect (phazite::devices::Chorus::typeID, "effect-chorus", { { "voices", 2.0f }, { "shimmer", 1.0f } },
                      "Phazite's chorus in Ensemble, its three copies a side, on a beat and chord stabs.");
     }
 
@@ -318,6 +323,27 @@ TEST_SUITE ("golden")
     {
         checkEffect (phazite::devices::Saturator::typeID, "effect-saturator", { { "drive", 24.0f } },
                      "Phazite's saturator driven 24 dB, on a beat and chord stabs.");
+    }
+
+    TEST_CASE ("Golden render: Phazite's exciter on a beat and stabs")
+    {
+        checkEffect (phazite::devices::Exciter::typeID, "effect-exciter",
+                     { { "frequency", 2000.0f }, { "drive", 24.0f }, { "amount", 2.0f } },
+                     "Phazite's exciter, its band from 2 kHz driven 24 dB and added twice over, on a beat and chord stabs.");
+    }
+
+    TEST_CASE ("Golden render: Phazite's vinyl on a beat and stabs")
+    {
+        checkEffect (phazite::devices::Vinyl::typeID, "effect-vinyl",
+                     { { "wow", 15.0f },
+                       { "flutter", 4.0f },
+                       { "distortion", 0.6f },
+                       { "highCut", 5000.0f },
+                       { "crackle", -18.0f },
+                       { "density", 20.0f },
+                       { "hiss", -50.0f } },
+                     "Phazite's vinyl, a deep wow and some flutter, its groove distorting and its band to 5 kHz, crackling 20 times a "
+                     "second, on a beat and chord stabs.");
     }
 
     TEST_CASE ("Golden render: Phazite's stereo expander on a beat and stabs")

@@ -4,8 +4,8 @@
 // pads' order: what a new sampler's sixteen pads from DrumSampler::kitFirstNote (General MIDI's kick, 36) play. Then come
 // the kits of Phazite's drum presets (resources/presets/Drum Sampler/Kits), each sixteen sounds of its own in the same
 // order: the 808's sixteen voices, a house kit, a lo-fi kit as an old sampler plays it back, a punchy kit, the 909's, a
-// tight kit, a wide one in stereo, a trap kit, a rhythm box's (the CR-78's), hand percussion and 80s synthwave drums.
-// Projects and presets keep a pad's factory sound by its name.
+// tight kit, a wide one in stereo, a trap kit, a rhythm box's (the CR-78's), hand percussion, 80s synthwave drums, and dark
+// synthwave's natural drums in rooms that aren't gated. Projects and presets keep a pad's factory sound by its name.
 #pragma once
 
 #include "DrumSampler.h"

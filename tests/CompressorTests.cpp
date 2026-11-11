@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's compressor (src/devices/dynamics/Compressor.h): its drawn curve as it plays, down and up, its attack and release
-// times, input and makeup gains, sidechain, stereo link, key cuts, meters and characters.
+// Phazite's compressor (src/devices/dynamics/Compressor.h): compressing, its drawn curve as it plays, down and up, its attack
+// and release times, input and makeup gains, stereo link, cuts, meters and characters, deaf to a sidechain; and ducking, under
+// its key or its own sound, its threshold and depth, its attack in a straight line, its hold from the hit and while the key
+// stays loud, its release and its curve, a new hit during the release, its key's cuts and Listen, and its meters.
 #include "TestHelpers.h"
+#include "devices/dsp/Math.h"
 #include "devices/dynamics/Compressor.h"
 
 #include <algorithm>
@@ -124,14 +127,71 @@ float gainAt (const std::vector<float>& played, int time, float inputDecibels)
 {
     return 20.0f * std::log10 (std::abs (played[(size_t) time]) / toGain (inputDecibels));
 }
+
+// Ducking, set so that its timing is easy to read: from -30 dB, 15 dB down, gripping in 2 ms (96 samples), held no longer
+// than the key, and back in a straight line over 40 ms (1920 samples).
+std::vector<float> getDuckValues()
+{
+    auto values = getDefaults();
+    values[Compressor::mode] = (float) Compressor::Mode::duck;
+    values[Compressor::threshold] = -30.0f;
+    values[Compressor::depth] = 15.0f;
+    values[Compressor::attack] = 2.0f;
+    values[Compressor::hold] = 0.0f;
+    values[Compressor::release] = 40.0f;
+    values[Compressor::releaseCurve] = 0.0f;
+    return values;
+}
+
+constexpr int duckAttackSamples = 96, duckReleaseSamples = 1920;
+constexpr float duckSound = -20.0f; // the sound it ducks, steady
+
+// How far it turned the sound down at each time, in decibels (0 or more), for the steady sound at duckSound.
+std::vector<float> getDucked (const std::vector<float>& played)
+{
+    std::vector<float> ducked;
+
+    for (size_t time = 0; time < played.size(); ++time)
+        ducked.push_back (-gainAt (played, (int) time, duckSound));
+
+    return ducked;
+}
+
+// Ducks the steady sound under a key, which is loud (-6 dB) where it says so: what it turned the sound down by, sample by
+// sample.
+template <typename Loud>
+std::vector<float> duckUnder (const std::vector<float>& values, int numSamples, Loud loud)
+{
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    const auto played = play (
+        compressor, values, numSamples, [] (int t, int) { return steady (t, duckSound); },
+        [loud] (int t, int) { return loud (t) ? steady (t, -6.0f) : 0.0f; });
+    return getDucked (played[0]);
+}
+
+// The first time from a time on when the reduction is under a level.
+int findUnder (const std::vector<float>& ducked, int from, float decibels)
+{
+    for (auto time = from; time < (int) ducked.size(); ++time)
+        if (ducked[(size_t) time] < decibels)
+            return time;
+
+    return -1;
+}
 } // namespace
 
-TEST_CASE ("The compressor's description holds together: its curve's points after its knobs, at first 4:1 over -18 dB")
+TEST_CASE ("The compressor's description holds together: its mode first, its curve's points after its knobs, at first 4:1 over -18 dB")
 {
     REQUIRE (devices::isValid (Compressor::info));
     CHECK (Compressor::info.parameters.size() == (size_t) Compressor::mix + 1);
-    CHECK (devices::findParameter (Compressor::info, "character") == 0);                     // first: what kind of compressor it is
+    CHECK (devices::findParameter (Compressor::info, "mode") == 0);                          // first: what it does, compress or duck
+    CHECK (devices::findParameter (Compressor::info, "character") == 1);                     // then what kind of compressor it is
     CHECK (devices::findParameter (Compressor::info, "inputGain") == Compressor::inputGain); // then as the sound goes
+    CHECK (devices::findParameter (Compressor::info, "threshold") == Compressor::threshold); // Duck's, which the curve isn't
+    CHECK (devices::findParameter (Compressor::info, "depth") == Compressor::depth);
+    CHECK (devices::findParameter (Compressor::info, "hold") == Compressor::hold);
+    CHECK (devices::findParameter (Compressor::info, "releaseCurve") == Compressor::releaseCurve);
     CHECK (devices::findParameter (Compressor::info, "drive") == Compressor::drive);
     CHECK (devices::findParameter (Compressor::info, "keyLowCut") == Compressor::keyLowCut);
     CHECK (devices::findParameter (Compressor::info, "keyHighCut") == Compressor::keyHighCut);
@@ -139,10 +199,30 @@ TEST_CASE ("The compressor's description holds together: its curve's points afte
     CHECK (devices::findParameter (Compressor::info, "point8Type")
            == Compressor::points + curves::getPointParameter (curves::maxPoints - 1, curves::pointType));
     CHECK (devices::findParameter (Compressor::info, "mix") == Compressor::mix); // which its thin plug-in applies
-    CHECK (devices::findParameter (Compressor::info, "threshold") < 0);          // the curve says where it starts
+
+    // Its modes, saved by their names, Compress at first; and Duck's settings at first: from -24 dB, 12 dB down, held no
+    // longer than the key, back in a straight line.
+    const auto& mode = Compressor::info.parameters[(size_t) Compressor::mode];
+    CHECK (mode.unit == devices::Unit::choice);
+    CHECK (devices::getChoiceName (mode, 0) == "Compress");
+    CHECK (devices::getChoiceName (mode, 1) == "Duck");
+    CHECK (Compressor::getMode (mode.defaultValue) == Compressor::Mode::compress);
+    const auto values = getDefaults();
+    CHECK (values[Compressor::threshold] == doctest::Approx (-24.0f));
+    CHECK (values[Compressor::depth] == doctest::Approx (12.0f));
+    CHECK (values[Compressor::hold] == doctest::Approx (0.0f));
+    CHECK (values[Compressor::releaseCurve] == doctest::Approx (0.0f));
+
+    for (const auto [id, low, high] : { std::tuple ("threshold", -60.0f, 0.0f), std::tuple ("depth", 0.0f, 60.0f),
+                                        std::tuple ("hold", 0.0f, 1000.0f), std::tuple ("releaseCurve", -1.0f, 1.0f) })
+    {
+        CAPTURE (id);
+        const auto& parameter = Compressor::info.parameters[(size_t) devices::findParameter (Compressor::info, id)];
+        CHECK (parameter.minimum == doctest::Approx (low));
+        CHECK (parameter.maximum == doctest::Approx (high));
+    }
 
     // At first, as a compressor with a threshold at -18 dB and a ratio of 4:1 would be set.
-    const auto values = getDefaults();
     const auto expected = curves::makeCompression (-18.0f, 4.0f);
     REQUIRE (values[Compressor::points] == doctest::Approx ((float) expected.size()));
 
@@ -249,7 +329,7 @@ TEST_CASE ("The compressor's makeup gain moves smoothly")
     CHECK (gainAt (played[0], 9599, -46.0f) == doctest::Approx (12.0f).epsilon (0.001));
 }
 
-TEST_CASE ("The compressor's input gain drives the sound into it, and into its detector unless a sidechain feeds it")
+TEST_CASE ("The compressor's input gain drives the sound into it and into its detector; compressing, it doesn't hear a sidechain")
 {
     // 10 dB under where its curve starts: untouched at 0 dB in; 16 dB more goes 6 dB over, which it turns down.
     auto values = getTestValues();
@@ -264,44 +344,68 @@ TEST_CASE ("The compressor's input gain drives the sound into it, and into its d
     CHECK (getCurveGain (values, -20.0f) < -1.0f);
     CHECK (gainAt (played[0], 23999, -36.0f) == doctest::Approx (16.0f + getCurveGain (values, -20.0f)).epsilon (0.003));
 
-    // With a sidechain, the sound goes in louder, and the key, which says how far down, is as it was.
+    // A loud sidechain changes nothing while it compresses: it hears its own sound, quiet, and plays it as it would without
+    // one, sample for sample, its key kept for when it ducks.
     values[Compressor::inputGain] = 6.0f;
-    Compressor ducking;
-    ducking.prepare (testRate, testBlockSize);
-    played = play (ducking, values, 12000, [] (int t, int) { return steady (t, -46.0f); }, [] (int t, int) { return steady (t, -6.0f); });
-    CHECK (gainAt (played[0], 11999, -46.0f) == doctest::Approx (6.0f - 15.0f).epsilon (0.001));
+    Compressor keyed, alone;
+    keyed.prepare (testRate, testBlockSize);
+    alone.prepare (testRate, testBlockSize);
+    const auto quiet = [] (int t, int) { return steady (t, -46.0f); };
+    played = play (keyed, values, 12000, quiet, [] (int t, int) { return steady (t, -6.0f); });
+    CHECK (gainAt (played[0], 11999, -46.0f) == doctest::Approx (6.0f).epsilon (0.001));
+    CHECK (played == play (alone, values, 12000, quiet));
 }
 
-TEST_CASE ("The compressor listens to its sidechain when one feeds it, and to both channels alike")
+TEST_CASE ("The compressor turns both channels alike, compressing and ducking; ducking, it hears its key when one feeds it")
 {
-    const auto values = getTestValues();
-
-    SUBCASE ("Ducking: a quiet sound turned down by a loud sidechain")
+    SUBCASE ("Ducking: a quiet sound turned down by a loud key, both sides alike")
     {
         Compressor compressor;
         compressor.prepare (testRate, testBlockSize);
-        const auto played =
-            play (compressor, values, 12000, [] (int t, int) { return steady (t, -46.0f); }, [] (int t, int) { return steady (t, -6.0f); });
+        const auto played = play (
+            compressor, getDuckValues(), 12000, [] (int t, int) { return steady (t, -46.0f); },
+            [] (int t, int) { return steady (t, -6.0f); });
 
         for (const auto& channel : played)
             CHECK (gainAt (channel, 11999, -46.0f) == doctest::Approx (-15.0f).epsilon (0.001));
     }
 
-    SUBCASE ("A loud sound with a silent sidechain isn't turned down")
+    SUBCASE ("Ducking: a loud sound with a silent key isn't turned down")
     {
         Compressor compressor;
         compressor.prepare (testRate, testBlockSize);
-        const auto played = play (compressor, values, 12000, [] (int t, int) { return steady (t, -6.0f); }, [] (int, int) { return 0.0f; });
+        const auto played =
+            play (compressor, getDuckValues(), 12000, [] (int t, int) { return steady (t, -6.0f); }, [] (int, int) { return 0.0f; });
         CHECK (std::abs (gainAt (played[0], 11999, -6.0f)) < 0.001f);
     }
 
-    SUBCASE ("Loud on the left only: both sides go down alike")
+    SUBCASE ("Ducking without a key: a loud sound turned down under itself")
     {
         Compressor compressor;
         compressor.prepare (testRate, testBlockSize);
-        const auto played = play (compressor, values, 12000, [] (int t, int side) { return steady (t, side == 0 ? -6.0f : -46.0f); });
+        const auto played = play (compressor, getDuckValues(), 12000, [] (int t, int) { return steady (t, -6.0f); });
+        CHECK (gainAt (played[0], 11999, -6.0f) == doctest::Approx (-15.0f).epsilon (0.001));
+    }
+
+    SUBCASE ("Compressing, loud on the left only: both sides go down alike")
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        const auto played =
+            play (compressor, getTestValues(), 12000, [] (int t, int side) { return steady (t, side == 0 ? -6.0f : -46.0f); });
         CHECK (gainAt (played[0], 11999, -6.0f) == doctest::Approx (-15.0f).epsilon (0.001));
         CHECK (gainAt (played[1], 11999, -46.0f) == doctest::Approx (-15.0f).epsilon (0.001));
+    }
+
+    SUBCASE ("Ducking, loud on the left only: both sides go down alike")
+    {
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        const auto played = play (
+            compressor, getDuckValues(), 12000, [] (int t, int) { return steady (t, duckSound); },
+            [] (int t, int side) { return side == 0 ? steady (t, -6.0f) : 0.0f; });
+        CHECK (gainAt (played[0], 11999, duckSound) == doctest::Approx (-15.0f).epsilon (0.001));
+        CHECK (gainAt (played[1], 11999, duckSound) == doctest::Approx (-15.0f).epsilon (0.001));
     }
 }
 
@@ -325,6 +429,11 @@ TEST_CASE ("The compressor's key low cut keeps bass from pushing it, and its met
     CHECK (mostReduction (20.0f) > 10.0f);
     CHECK (mostReduction (300.0f) < 0.1f);
 
+    // Compressing, the high cut is Duck's and changes nothing: a bass heard through a 100 Hz high cut is turned down as far.
+    values[Compressor::keyHighCut] = 100.0f;
+    CHECK (mostReduction (20.0f) > 10.0f);
+    values[Compressor::keyHighCut] = 20000.0f;
+
     // The meters: how loud the detector heard it and how far it went down, until taken. (Their first readings hold the
     // low cut's overshoot as the sound starts.)
     values = getTestValues();
@@ -340,10 +449,10 @@ TEST_CASE ("The compressor's key low cut keeps bass from pushing it, and its met
     CHECK (compressor.getReductionMeter().take() == doctest::Approx (0.0f));
 }
 
-TEST_CASE ("The compressor's key high cut lets a kick duck the sound, and not hats on the same track")
+TEST_CASE ("Ducking, the compressor's key high cut lets a kick duck the sound, and not hats on the same track")
 {
     // A key of two parts: a 50 Hz kick for the first half second, then 8 kHz hats as loud.
-    auto values = getTestValues();
+    auto values = getDuckValues();
     const auto key = [] (int t, int)
     {
         const auto hertz = t < 24000 ? 50.0 : 8000.0;
@@ -376,9 +485,9 @@ TEST_CASE ("The compressor's key high cut lets a kick duck the sound, and not ha
     CHECK (hatsCut < 1.0f);
 }
 
-TEST_CASE ("The compressor plays its key while its editor listens, through its cuts, and stops half a second after it last asks")
+TEST_CASE ("Ducking, the compressor plays its key while its editor listens, through its cuts, and stops half a second after it last asks")
 {
-    auto values = getTestValues();
+    auto values = getDuckValues();
     values[Compressor::keyLowCut] = 300.0f;
     Compressor compressor;
     compressor.prepare (testRate, testBlockSize);
@@ -542,8 +651,8 @@ TEST_CASE ("A curve made as a threshold, a ratio and a knee set it follows them,
     };
 
     // Exact at its points, and between them as near as its lines' tensions bend them: within a tenth of a decibel for the
-    // presets' settings and the default, a fifth for the ducking a sidechain sets up; a lower corner, further from the
-    // middle of Maximus's axes, less closely.
+    // presets' settings and the default, a fifth for 8:1 over -30 dB; a lower corner, further from the middle of Maximus's
+    // axes, less closely.
     for (const auto& setting :
          { Setting { -18.0f, 4.0f, 0.0f, 0.1f }, Setting { -14.0f, 2.0f, 12.0f, 0.1f }, Setting { -24.0f, 10.0f, 6.0f, 0.1f },
            Setting { -20.0f, 3.0f, 10.0f, 0.1f }, Setting { -30.0f, 8.0f, 0.0f, 0.2f }, Setting { -36.0f, 4.0f, 0.0f, 0.6f } })
@@ -576,4 +685,176 @@ TEST_CASE ("A curve made as a threshold, a ratio and a knee set it follows them,
     auto values = getDefaults();
     setCurve (values, straight);
     CHECK (std::abs (getCurveGain (values, -18.0f) + 13.5f) > 1.0f);
+}
+
+//==============================================================================
+TEST_CASE ("Ducking, the compressor turns the sound down by its depth once its key is 6 dB over its threshold, less the less it is over")
+{
+    // Under a steady key at each level, once settled: nothing under the threshold, the whole depth 6 dB over it and more, and
+    // a straight share between (to a twentieth of a decibel: the key's low cut passes it a hair louder). Its meters: the key's
+    // level, and how far down.
+    for (const auto [key, expected] : { std::pair (-40.0f, 0.0f), std::pair (-31.0f, 0.0f), std::pair (-29.0f, 2.5f),
+                                        std::pair (-27.0f, 7.5f), std::pair (-24.0f, 15.0f), std::pair (-6.0f, 15.0f) })
+    {
+        CAPTURE (key);
+        Compressor compressor;
+        compressor.prepare (testRate, testBlockSize);
+        const auto values = getDuckValues();
+        const auto played = play (
+            compressor, values, 12000, [] (int t, int) { return steady (t, duckSound); }, [key] (int t, int) { return steady (t, key); });
+        CHECK (std::abs (-gainAt (played[0], 11999, duckSound) - expected) < 0.05f);
+        compressor.getLevelMeter().take();
+        compressor.getReductionMeter().take();
+        play (compressor, values, 4800, [] (int t, int) { return steady (t, duckSound); }, [key] (int t, int) { return steady (t, key); });
+        CHECK (std::abs (compressor.getLevelMeter().take() - key) < 0.05f);
+        CHECK (std::abs (compressor.getReductionMeter().take() - expected) < 0.05f);
+    }
+
+    // A deeper depth goes as deep; and none of what only compressing uses (its curve, character, input gain, drive and makeup)
+    // changes a sample of it.
+    auto deeper = getDuckValues();
+    deeper[Compressor::depth] = 36.0f;
+    CHECK (duckUnder (deeper, 12000, [] (int) { return true; })[11999] == doctest::Approx (36.0f).epsilon (0.002));
+
+    auto coloured = getDuckValues();
+    setCurve (coloured, curves::findShape ("Limit at 0 dB")->points);
+    coloured[Compressor::character] = (float) Compressor::Character::tube;
+    coloured[Compressor::inputGain] = 12.0f;
+    coloured[Compressor::drive] = 1.0f;
+    coloured[Compressor::makeup] = 9.0f;
+    const auto burst = [] (int t) { return t % 9600 < 2400; };
+    CHECK (duckUnder (coloured, 24000, burst) == duckUnder (getDuckValues(), 24000, burst));
+}
+
+TEST_CASE ("Ducking, the compressor grips in a straight line in decibels, its whole depth over its attack, at once with none")
+{
+    // The key from silence to 24 dB over the threshold at a time: the reduction rises by the same step each sample, the
+    // whole 15 dB over the 96 samples of its 2 ms attack.
+    constexpr int onset = 4800;
+    const auto ducked = duckUnder (getDuckValues(), onset + 4800, [] (int t) { return t >= onset; });
+    CHECK (ducked[onset - 1] == doctest::Approx (0.0f));
+
+    for (const auto steps : { 1, 24, 48, 72, duckAttackSamples })
+    {
+        CAPTURE (steps);
+        CHECK (ducked[(size_t) (onset + steps - 1)] == doctest::Approx (15.0f * (float) steps / duckAttackSamples).epsilon (0.001));
+    }
+
+    CHECK (ducked[onset + duckAttackSamples + 100] == doctest::Approx (15.0f).epsilon (0.001));
+
+    // Its shortest attack, a tenth of a millisecond, is all but at once.
+    auto quick = getDuckValues();
+    quick[Compressor::attack] = 0.1f;
+    CHECK (duckUnder (quick, onset + 480, [] (int t) { return t >= onset; })[onset + 4] == doctest::Approx (15.0f).epsilon (0.001));
+}
+
+TEST_CASE ("Ducking, the compressor holds for its hold from the hit, and as long as its key stays over its threshold")
+{
+    constexpr int hit = 4800;
+    constexpr int window = Compressor::keyPeakMilliseconds * 48 + 48; // how long the key's level takes to fall, at most
+
+    // A short kick, 5 ms, with a hold of 100 ms: down until 100 ms after the hit, then letting go: a duck of a set length.
+    auto values = getDuckValues();
+    values[Compressor::hold] = 100.0f;
+    auto ducked = duckUnder (values, hit + 9600, [] (int t) { return t >= hit && t < hit + 240; });
+    CHECK (ducked[hit + 4799] == doctest::Approx (15.0f).epsilon (0.001));
+    CHECK (findUnder (ducked, hit + duckAttackSamples, 14.999f) == hit + 4800);
+
+    // Without one, it lets go as the kick's level falls under the threshold.
+    values[Compressor::hold] = 0.0f;
+    ducked = duckUnder (values, hit + 9600, [] (int t) { return t >= hit && t < hit + 240; });
+    const auto letGo = findUnder (ducked, hit + duckAttackSamples, 14.999f);
+    CHECK (letGo > hit + 240);
+    CHECK (letGo <= hit + 240 + window);
+
+    // A key held longer than the hold keeps it down for as long as it stays over the threshold: 300 ms here.
+    values[Compressor::hold] = 100.0f;
+    ducked = duckUnder (values, hit + 24000, [] (int t) { return t >= hit && t < hit + 14400; });
+    CHECK (ducked[hit + 14399] == doctest::Approx (15.0f).epsilon (0.001));
+    const auto heldUntil = findUnder (ducked, hit + duckAttackSamples, 14.999f);
+    CHECK (heldUntil > hit + 14400);
+    CHECK (heldUntil <= hit + 14400 + window);
+}
+
+TEST_CASE ("Ducking, the compressor lets go over its release, straight in decibels at its curve's middle, slow at first above it")
+{
+    // A short kick; from the sample it lets go, the release's share of the way back after each sample, eased by the curve.
+    const auto releaseWith = [] (float curve)
+    {
+        auto values = getDuckValues();
+        values[Compressor::releaseCurve] = curve;
+        return duckUnder (values, 24000, [] (int t) { return t >= 4800 && t < 5040; });
+    };
+
+    for (const auto curve : { 0.0f, 0.6f, -0.6f })
+    {
+        CAPTURE (curve);
+        const auto ducked = releaseWith (curve);
+        const auto start = findUnder (ducked, 4800 + duckAttackSamples, 14.999f);
+        REQUIRE (start > 0);
+
+        for (const auto share : { 0.25, 0.5, 0.75 })
+        {
+            CAPTURE (share);
+            const auto steps = (int) std::lround (share * duckReleaseSamples);
+            const auto expected = 15.0f * (1.0f - (float) devices::dsp::getEasedProgress (share, curve));
+            CHECK (ducked[(size_t) (start + steps - 1)] == doctest::Approx (expected).epsilon (0.002));
+        }
+
+        // Back whole after the release's 40 ms, not before.
+        CHECK (ducked[(size_t) (start + duckReleaseSamples - 2)] > 0.0f);
+        CHECK (std::abs (ducked[(size_t) (start + duckReleaseSamples - 1)]) < 0.001f);
+    }
+
+    // Straight in decibels at 0: half way back half way through. Slow at first above it (staying down, then springing back),
+    // quick at first below it.
+    const auto halfWay = [&releaseWith] (float curve)
+    {
+        const auto ducked = releaseWith (curve);
+        const auto start = findUnder (ducked, 4800 + duckAttackSamples, 14.999f);
+        return ducked[(size_t) (start + duckReleaseSamples / 2 - 1)];
+    };
+
+    CHECK (halfWay (0.0f) == doctest::Approx (7.5f).epsilon (0.002));
+    CHECK (halfWay (0.6f) > 10.0f);
+    CHECK (halfWay (-0.6f) < 5.0f);
+}
+
+TEST_CASE ("Ducking, a new hit during the compressor's release grips again from where it is")
+{
+    // A kick, then another half way through its release: from where the release had got to, up by the attack's step, to the
+    // whole depth again, and held.
+    auto values = getDuckValues();
+    const auto first = duckUnder (values, 24000, [] (int t) { return t >= 4800 && t < 5040; });
+    const auto start = findUnder (first, 4800 + duckAttackSamples, 14.999f);
+    const auto again = start + duckReleaseSamples / 2;
+    const auto ducked = duckUnder (values, 24000, [again] (int t) { return (t >= 4800 && t < 5040) || (t >= again && t < again + 240); });
+    const auto from = ducked[(size_t) (again - 1)];
+    CHECK (from == doctest::Approx (7.5f).epsilon (0.01));
+    CHECK (ducked[(size_t) (again + 23)] == doctest::Approx (from + 24.0f * 15.0f / duckAttackSamples).epsilon (0.002));
+    CHECK (ducked[(size_t) (again + duckAttackSamples)] == doctest::Approx (15.0f).epsilon (0.001));
+
+    // Then it lets go again, over its whole release.
+    const auto secondStart = findUnder (ducked, again + duckAttackSamples, 14.999f);
+    REQUIRE (secondStart > again + 240);
+    CHECK (ducked[(size_t) (secondStart + duckReleaseSamples / 2 - 1)] == doctest::Approx (7.5f).epsilon (0.002));
+}
+
+TEST_CASE ("Ducking, a kick's low notes don't let the compressor go between their cycles")
+{
+    // A 40 Hz kick, held 200 ms: its level, the loudest over the last 10 ms, stays over the threshold as its wave crosses 0, so
+    // the sound stays down the whole time, without a ripple.
+    auto values = getDuckValues();
+    Compressor compressor;
+    compressor.prepare (testRate, testBlockSize);
+    const auto played = play (
+        compressor, values, 24000, [] (int t, int) { return steady (t, duckSound); },
+        [] (int t, int) { return t < 9600 ? 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 40.0 * t / testRate) : 0.0f; });
+    const auto ducked = getDucked (played[0]);
+
+    for (int t = 200; t < 9600; t += 7)
+    {
+        CAPTURE (t);
+        CHECK (ducked[(size_t) t] == doctest::Approx (15.0f).epsilon (0.001));
+    }
 }

@@ -3,21 +3,33 @@
 // each band, as high as the voice is in it, standing where the carrier plays that band, over a mark where the band listens
 // to the voice, so that Formant shows as the columns leaning away from their marks; what the carrier is (the buzz's note,
 // or the track that feeds it, or a warning that none does), how loud it plays, and a light for the consonants it hears. A
-// drag sideways moves the carrier's bands (Formant), as one undo step. Then its carrier's controls, its Formant and
-// Unvoiced, large, and its bands' and their response's controls.
+// drag sideways moves the carrier's bands (Formant), as one undo step: over the picture the pointer is a left-and-right
+// arrow, the lines from the marks to the columns light up, and the hint bar says what a drag does. Then its carrier's
+// controls, with the track that carries picked beside them (SidechainMenus.h; given the project), which makes Track the
+// carrier in the same undo step; its Formant and Unvoiced, large; and its bands' and their response's controls.
 #pragma once
 
 #include "DeviceEditorBase.h"
 
+namespace phazite
+{
+class ProjectContext;
+}
+
 namespace phazite::ui
 {
+class SidechainButton;
+
 class VocoderEditor : public DeviceEditorBase
 {
 public:
-    explicit VocoderEditor (const DeviceHandle&);
+    // Given the project and the device's ID, it has the carrier track's picker too.
+    explicit VocoderEditor (const DeviceHandle&, ProjectContext* = nullptr, DeviceID = {});
     ~VocoderEditor() override;
 
     juce::Component& getBands() const noexcept;
+    SidechainButton* getTrackPicker() const noexcept { return trackPicker; } // nullptr without the project
+    bool isBandsLit() const;                                                 // under the pointer, or dragged
 
     // What the bands show now: a band's level (a gain), the consonant light (0 to 1), and the carrier's description.
     float getShownLevel (int band) const;
@@ -29,6 +41,8 @@ public:
 
 private:
     class Bands;
+    class CarrierPart;
     Bands* bands = nullptr;
+    SidechainButton* trackPicker = nullptr;
 };
 } // namespace phazite::ui

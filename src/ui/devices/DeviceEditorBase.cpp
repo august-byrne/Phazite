@@ -22,15 +22,31 @@ DeviceEditorBase::~DeviceEditorBase() = default;
 
 juce::Component* DeviceEditorBase::findControl (std::string_view parameterID) const
 {
+    // Where several show it (in each of a device's modes), the one that shows now.
+    const auto isShown = [this] (const juce::Component& control)
+    {
+        for (const auto* each = &control; each != nullptr && each != this; each = each->getParentComponent())
+            if (! each->isVisible())
+                return false;
+
+        return true;
+    };
+
+    juce::Component* found = nullptr;
+    const auto consider = [&found, &isShown] (juce::Component* control)
+    {
+        if (control != nullptr && (found == nullptr || (! isShown (*found) && isShown (*control))))
+            found = control;
+    };
+
     for (auto* each : controls)
-        if (auto* control = each->findControl (parameterID))
-            return control;
+        consider (each->findControl (parameterID));
 
     for (const auto& [id, control] : ownControls)
         if (id == parameterID)
-            return control;
+            consider (control);
 
-    return nullptr;
+    return found;
 }
 
 void DeviceEditorBase::addControl (std::string_view parameterID, juce::Component& control)
@@ -147,10 +163,10 @@ DeviceLayout::Part DeviceEditorBase::makePicturePart (const juce::String& title,
 
 void DeviceEditorBase::setParts (std::vector<DeviceLayout::Column> columns, std::vector<int> sideTabColumns)
 {
-    layout = std::make_unique<DeviceLayout> (*this, std::move (columns));
+    layouts.push_back (std::make_unique<DeviceLayout> (*this, std::move (columns)));
 
     for (const auto column : sideTabColumns)
-        layout->setSideTabs (column);
+        layouts.back()->setSideTabs (column);
 
     // Its own size, as a window of its own first shows it: its parts side by side, or where that is wider than such a window
     // should be, wrapped into rows that wide.
@@ -158,37 +174,104 @@ void DeviceEditorBase::setParts (std::vector<DeviceLayout::Column> columns, std:
     setSize (width, getHeightForWidth (width));
 }
 
+void DeviceEditorBase::setModes (std::string_view modeParameterID, std::vector<std::vector<DeviceLayout::Column>> modes,
+                                 const std::vector<juce::String>& tooltips)
+{
+    auto& tabs = keep (std::make_unique<ChoiceTabs> (device, modeParameterID, tooltips));
+    modeTabs = &tabs;
+    addControl (modeParameterID, tabs);
+    addAndMakeVisible (tabs);
+
+    for (auto& columns : modes)
+        layouts.push_back (std::make_unique<DeviceLayout> (*this, std::move (columns)));
+
+    // The mode's parts at once, and as the mode changes: by a tab's click, or elsewhere.
+    shownMode = juce::jlimit (0, (int) layouts.size() - 1, tabs.getChosen());
+    tabs.onChange = [this] (int mode) { showMode (mode); };
+
+    const auto width = std::min (getWidthForHeight (0), maximumWindowWidth);
+    setSize (width, getHeightForWidth (width));
+    showMode (shownMode);
+}
+
+void DeviceEditorBase::showMode (int mode)
+{
+    if (! juce::isPositiveAndBelow (mode, (int) layouts.size()))
+        return;
+
+    shownMode = mode;
+    resized();
+    repaint();
+    modeShown (mode);
+}
+
+int DeviceEditorBase::getTabsHeight() const noexcept
+{
+    return modeTabs != nullptr ? ChoiceTabs::height + Space::xs : 0;
+}
+
+juce::Rectangle<int> DeviceEditorBase::getPartsArea() const
+{
+    return getLocalBounds().reduced (margin, marginY).withTrimmedTop (getTabsHeight());
+}
+
+// With modes, as wide and as tall as the widest and tallest of them, so that it keeps its size from mode to mode.
 int DeviceEditorBase::getMinimumHeight() const
 {
-    return 2 * marginY + (layout != nullptr ? layout->getMinimumHeight() : 0);
+    auto height = 0;
+
+    for (const auto& layout : layouts)
+        height = std::max (height, layout->getMinimumHeight());
+
+    return 2 * marginY + getTabsHeight() + height;
 }
 
 int DeviceEditorBase::getWidthForHeight (int) const
 {
-    return 2 * margin + (layout != nullptr ? layout->getWidth() : 0);
+    auto width = 0;
+
+    for (const auto& layout : layouts)
+        width = std::max (width, layout->getWidth());
+
+    return 2 * margin + width;
 }
 
 int DeviceEditorBase::getHeightForWidth (int width) const
 {
-    return 2 * marginY + (layout != nullptr ? layout->getHeightForWidth (width - 2 * margin) : 0);
+    auto height = 0;
+
+    for (const auto& layout : layouts)
+        height = std::max (height, layout->getHeightForWidth (width - 2 * margin));
+
+    return 2 * marginY + getTabsHeight() + height;
 }
 
 int DeviceEditorBase::getMinimumWidth() const
 {
-    return 2 * margin + (layout != nullptr ? layout->getMinimumWidth() : 0);
+    auto width = 0;
+
+    for (const auto& layout : layouts)
+        width = std::max (width, layout->getMinimumWidth());
+
+    return 2 * margin + width;
 }
 
 int DeviceEditorBase::getMinimumHeightAtWidth (int width) const
 {
-    return 2 * marginY + (layout != nullptr ? layout->getMinimumHeightForWidth (width - 2 * margin) : 0);
+    auto height = 0;
+
+    for (const auto& layout : layouts)
+        height = std::max (height, layout->getMinimumHeightForWidth (width - 2 * margin));
+
+    return 2 * marginY + getTabsHeight() + height;
 }
 
 void DeviceEditorBase::paint (juce::Graphics& g)
 {
     g.fillAll (getPalette (*this).surface);
 
-    if (layout != nullptr)
-        layout->paint (g);
+    if (! layouts.empty())
+        getLayout().paint (g);
 }
 
 void DeviceEditorBase::lookAndFeelChanged()
@@ -198,7 +281,17 @@ void DeviceEditorBase::lookAndFeelChanged()
 
 void DeviceEditorBase::resized()
 {
-    if (layout != nullptr)
-        layout->layOut (getLocalBounds().reduced (margin, marginY));
+    if (layouts.empty())
+        return;
+
+    if (modeTabs != nullptr)
+        modeTabs->setBounds (getLocalBounds().reduced (margin, marginY).removeFromTop (ChoiceTabs::height));
+
+    // The other modes' parts hidden first, as a part they share shows in the mode shown.
+    for (size_t i = 0; i < layouts.size(); ++i)
+        if ((int) i != shownMode)
+            layouts[i]->hide();
+
+    getLayout().layOut (getPartsArea());
 }
 } // namespace phazite::ui

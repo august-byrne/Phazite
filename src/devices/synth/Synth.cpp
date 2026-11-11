@@ -162,8 +162,7 @@ namespace
 
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
     constexpr std::uint32_t noiseSeed = 0x51a7e5u, unisonSeed = 0x0715e5u, driftSeed = 0xd71f75u;
-    constexpr double lowestCutoff = 20.0;        // where the filter's envelope, keys and LFO can take it, at the lowest
-    constexpr float filterVelocityRange = 48.0f; // semitones a note at velocity 0 closes the cutoff by, at full
+    constexpr double lowestCutoff = 20.0; // where the filter's envelope, keys and LFO can take it, at the lowest
 
     // Drift at full: how far each oscillator wanders (in cents) and the cutoff (in semitones), each toward a new place
     // every so often, gliding there, as an analog voice's tuning and filter wander with its temperature.
@@ -224,7 +223,6 @@ void Synth::reset()
         voice.filterEnvelope.reset();
         voice.note = -1;
         voice.held = voice.sustained = false;
-        voice.filterEnvelopeLevel = 0.0f;
         voice.fade = 1.0f;
         voice.fadeStep = 0.0f;
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
@@ -265,15 +263,23 @@ void Synth::releaseVoice (Voice& voice)
     voice.filterEnvelope.noteOff();
 }
 
-Synth::Voice& Synth::findVoiceFor (int note)
+void Synth::letGoOf (int note)
 {
-    // The voice playing this note already, then a free one, then the one ringing out longest, then the oldest: among
-    // those that play notes, not the last, which fades out a voice taken (stealVoice()).
-    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
+    // A key played again while its key or the pedal still holds its voice (two keyboards, or the song and a player, can
+    // send that) lets the voice go as its key coming up would, as JUCE's synthesiser and Serum 2 under the pedal do: it rings
+    // out over its release while the new note takes a voice of its own, and the key's first note-off lets go of that. So a
+    // key never holds two voices, which would double it, or pile up under the pedal and take the voices it holds for others.
+    for (size_t i = 0; i < (size_t) maxVoices; ++i)
+        if (auto& voice = voices[i]; voice.note == note && (voice.held || voice.sustained))
+            releaseVoice (voice);
+}
 
-    for (auto& voice : playing)
-        if (voice.note == note && voice.amp.isActive())
-            return voice;
+Synth::Voice& Synth::findVoice()
+{
+    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the last, which
+    // fades out a voice taken (stealVoice()). A key played again as it rings out takes one too, as LMMS's notes and most
+    // polyphonic synths' do: its tail rings on untouched, and the new note starts from its waves' starts and its envelopes'.
+    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
 
     for (auto& voice : playing)
         if (! voice.amp.isActive())
@@ -405,37 +411,33 @@ void Synth::startNote (int note, float velocityValue, std::span<const float> val
         return;
     }
 
-    auto& voice = findVoiceFor (note);
+    letGoOf (note);
+    auto& voice = findVoice();
 
-    if (voice.amp.isActive() && (voice.note != note || voice.fadeStep > 0.0f))
+    if (voice.amp.isActive())
         stealVoice (voice);
 
-    if (! voice.amp.isActive())
+    // Every note from silence: the first oscillators from the start of their waves, as always; the unison's others anywhere,
+    // so they don't start in phase and sweep.
+    voice.osc1[0].setPhase (0.0f);
+    voice.osc2[0].setPhase (0.0f);
+
+    for (size_t u = 1; u < (size_t) maxUnison; ++u)
     {
-        // The first oscillators from the start of their waves, as always; the unison's others anywhere, so they don't
-        // start in phase and sweep.
-        voice.osc1[0].setPhase (0.0f);
-        voice.osc2[0].setPhase (0.0f);
-
-        for (size_t u = 1; u < (size_t) maxUnison; ++u)
-        {
-            voice.osc1[u].setPhase (voice.unisonPhases.nextUnipolar());
-            voice.osc2[u].setPhase (voice.unisonPhases.nextUnipolar());
-        }
-
-        voice.sub.setPhase (0.0f);
-
-        for (auto& filter : voice.filters)
-            filter.reset();
-
-        for (auto& shaper : voice.drives)
-            shaper.reset();
-
-        voice.driveBlend = 0.0f;
-        voice.filterIsSet = false;
-        voice.filterEnvelopeLevel = 0.0f;
+        voice.osc1[u].setPhase (voice.unisonPhases.nextUnipolar());
+        voice.osc2[u].setPhase (voice.unisonPhases.nextUnipolar());
     }
 
+    voice.sub.setPhase (0.0f);
+
+    for (auto& filter : voice.filters)
+        filter.reset();
+
+    for (auto& shaper : voice.drives)
+        shaper.reset();
+
+    voice.driveBlend = 0.0f;
+    voice.filterIsSet = false;
     voice.note = note;
     voice.held = true;
     voice.sustained = false;
@@ -491,6 +493,8 @@ void Synth::stopNote (int note, std::span<const float> values)
         return;
     }
 
+    // The voice its key holds, one at most (letGoOf()): what rings out of the key already rings on, its release not begun
+    // again.
     for (auto& voice : voices)
     {
         if (voice.note == note && voice.held)
@@ -626,7 +630,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
     const auto pitchFallPerSample = 1.0 / (std::max (1.0f, values[pitchDecay]) * 0.001 * sampleRate);
     const auto driftAmount = values[drift];
     const auto drifting = driftAmount > 0.0f;
-    const auto velocityRange = values[filterVelocity] * filterVelocityRange;
+    const auto velocityRange = values[filterVelocity] * dsp::filterVelocityRange;
     const auto driveGain = dsp::decibelsToGain (values[drive]);
     const auto driveWanted = filtered && driveGain > 1.0001f ? 1.0f : 0.0f;
     const auto nyquistLimit = 0.45 * sampleRate;
@@ -699,15 +703,18 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
             const auto semitones = (double) (voice.pitch + bent + pitchMove + sweep);
             const auto frequency = dsp::noteToFrequency (semitones);
 
-            // Each oscillator's own drift, and osc 2's sweep by the filter envelope.
+            // Each oscillator's own drift, and osc 2's sweep by the filter envelope, from where the envelope is now: at its
+            // top as a note with no attack starts.
             if (drifting)
                 moveDrift (voice);
+
+            const auto envelopeLevel = voice.filterEnvelope.getLevel();
 
             const auto frequency1 = drifting ? frequency * std::exp2 (driftAmount * driftCents / 1200.0f * voice.driftNow[0]) : frequency;
             auto frequency2 = drifting ? frequency * std::exp2 (driftAmount * driftCents / 1200.0f * voice.driftNow[1]) : frequency;
 
             if (! juce::exactlyEqual (osc2Sweep, 0.0f))
-                frequency2 *= std::exp2 (osc2Sweep * voice.filterEnvelopeLevel / 12.0f);
+                frequency2 *= std::exp2 (osc2Sweep * envelopeLevel / 12.0f);
 
             for (int u = 0; u < numUnison; ++u)
             {
@@ -719,7 +726,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
             const auto syncRatio = synced ? (float) (osc2Ratio * frequency2 / frequency1) : 1.0f;
             voice.sub.setFrequency (subRatio * frequency1, sampleRate);
 
-            auto moves = envelopeAmount * voice.filterEnvelopeLevel + values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
+            auto moves = envelopeAmount * envelopeLevel + values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
 
             if (velocityRange > 0.0f)
                 moves += velocityRange * (voice.velocity - 1.0f);
@@ -799,7 +806,7 @@ void Synth::render (float* left, float* right, int numSamples, std::span<const f
                     soundRight += noise;
                 }
 
-                voice.filterEnvelopeLevel = voice.filterEnvelope.next();
+                voice.filterEnvelope.next();
                 auto gain = voice.amp.next() * voice.velocityGain * outputGain * voice.fade;
 
                 // A voice taken for another note, or cut as playback stopped, fades out; faded, it is free.
@@ -920,7 +927,7 @@ void Synth::process (const ProcessContext& block)
             newest = &voice;
 
     shown.amp.set (newest != nullptr ? newest->amp.getLevel() : 0.0f);
-    shown.filterEnvelope.set (newest != nullptr ? newest->filterEnvelopeLevel : 0.0f);
+    shown.filterEnvelope.set (newest != nullptr ? newest->filterEnvelope.getLevel() : 0.0f);
     shown.cutoff.set (newest != nullptr && newest->filterIsSet ? (float) newest->filterSettings.frequency : 0.0f);
     shown.lfoPhase.set (lfo.getPhase());
 }

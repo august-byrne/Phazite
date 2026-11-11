@@ -56,8 +56,11 @@ an element or property it doesn't know through a load and a save.
 - `AUTOMATION`: the curves, each a parameter's by its device's ID and the parameter's ID;
 - `SECTIONS`, `CHORDLANE`: the song's parts and its chords.
 
-**Time** is in beats from the song's start, as doubles, so that the song keeps its notes on their beats when its tempo
-changes; an audio clip's part of its file is in seconds of the file.
+**Time** is in beats from the song's start, as doubles, a beat being a quarter note whatever the time signature, as
+MIDI files and DAWproject count it, so that the song keeps its notes on their beats when its tempo changes. A tempo
+(`bpm` on `TEMPO`) counts quarter notes a minute, and a time signature (`TIMESIGNATURE`) only makes its bars
+`numerator` x 4 / `denominator` beats long (3 in 6/8, 3.5 in 7/8). An audio clip's part of its file is in seconds of
+the file.
 
 **IDs.** Every track, clip, note (within its clip), device, container, chain, send, modulator, macro and section has an
 ID, a positive 64-bit number the song gives (`nextID` on `PHAZITE` is the next), never twice. What one element says of

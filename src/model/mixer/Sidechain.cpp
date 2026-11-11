@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Sidechain.h"
 #include "devices/dynamics/Compressor.h"
+#include "devices/dynamics/Multiband.h"
+#include "devices/vocoder/Vocoder.h"
 #include "internal/Containers.h"
 #include "internal/Mixer.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -73,44 +75,102 @@ namespace
         return std::any_of (devices.begin(), devices.end(), [] (const juce::ValueTree& device) { return isDrumSampler (device); });
     }
 
-    // A compressor still as it was made starts ducking, joining the caller's step (setSidechainSource()): its values set
-    // by hand, which the song holds.
+    // Whether every parameter of a device's is still as it was made, as the song holds its values set by hand, but the one
+    // given, if any.
+    bool isAsMade (const juce::ValueTree& state, const devices::DeviceInfo& info, std::string_view except = {})
+    {
+        for (const auto& parameter : info.parameters)
+            if (parameter.id != except && std::abs (readValueSetByHand (state, parameter) - parameter.defaultValue) > 1.0e-4f)
+                return false;
+
+        return true;
+    }
+
+    bool isCompressor (const juce::ValueTree& state)
+    {
+        return state[schema::deviceType].toString() == juce::String (devices::Compressor::typeID);
+    }
+
+    // Phazite's compressor ducks under the key chosen for it (its Duck mode, as its Duck tab sets it), joining the caller's step
+    // (setSidechainSource()): compressing, it would hear its own sound. Still as it was made (but for its mode, set by its Duck
+    // tab first), it is set up to pump under a kick (docs/design.md, section 8): from -14 dB, 14 dB down, in 1 ms, held 120 ms
+    // from the hit and as long as the key stays over -14 dB, and back in a straight line over 80 ms. When the key plays a drum
+    // sampler it hears only its kick's body from 60 to 150 Hz: below 60 Hz a kick's long boom would hold it down through the
+    // beat, and the snare, clap and hats on the same track sound above 150 Hz. Under every factory kit's kick at velocity 100 at
+    // 120 BPM it ducks 6 to 14 dB and is back within 3 dB in 180 to 270 ms, and no kit's snare, clap, hats or cymbals move it
+    // (measured as docs/presets.md measures the sidechain presets). And a multiband still as it was made, its low band, which
+    // then hears the key, so that the lows duck under it and the rest plays on (every band's Key is off at first, and a band at
+    // first limits at 0 dB, which a kick under full scale never reaches).
     void startDucking (Song& song, DeviceID id, TrackID source)
     {
-        using devices::Compressor;
+        using devices::Compressor, devices::Multiband;
         const auto state = findDeviceState (song, id);
-
-        if (state[schema::deviceType].toString() != juce::String (Compressor::typeID))
-            return;
-
-        for (const auto& parameter : Compressor::info.parameters)
-            if (std::abs (readValueSetByHand (state, parameter) - parameter.defaultValue) > 1.0e-4f)
-                return;
-
         auto* undo = &song.getUndoManager();
-        const auto setValue = [&] (std::string_view parameter, float value)
+        const auto setValue = [&state, undo] (const devices::DeviceInfo& info, std::string_view parameter, float value)
         {
-            if (const auto index = devices::findParameter (Compressor::info, parameter); index >= 0)
-                keepValueSetByHand (state, Compressor::info.parameters[(size_t) index], value, undo);
+            if (const auto index = devices::findParameter (info, parameter); index >= 0)
+                keepValueSetByHand (state, info.parameters[(size_t) index], value, undo);
         };
 
-        // Its curve: 8:1 over -30 dB, its last point in the places the others leave.
+        if (isCompressor (state))
+        {
+            const auto& info = Compressor::info;
+            const auto asMade = isAsMade (state, info, info.parameters[(size_t) Compressor::mode].id);
+            setValue (info, "mode", (float) Compressor::Mode::duck);
+
+            if (! asMade)
+                return;
+
+            setValue (info, "threshold", -14.0f);
+            setValue (info, "depth", 14.0f);
+            setValue (info, "attack", 1.0f);
+            setValue (info, "hold", 120.0f);
+            setValue (info, "release", 80.0f);
+            setValue (info, "releaseCurve", 0.0f);
+
+            if (playsDrumSampler (song, source))
+            {
+                setValue (info, "keyLowCut", 60.0f);
+                setValue (info, "keyHighCut", 150.0f);
+            }
+
+            return;
+        }
+
+        if (state[schema::deviceType].toString() != juce::String (Multiband::typeID) || ! isAsMade (state, Multiband::info))
+            return;
+
+        // Its low band's curve: 8:1 over -30 dB, its last point in the places the others leave.
         namespace curves = devices::curves;
+        const auto& info = Multiband::info;
+        const auto firstPoint = Multiband::getBandParameter (Multiband::low, Multiband::points);
         const auto points = curves::makeCompression (-30.0f, 8.0f);
-        setValue (Compressor::info.parameters[(size_t) Compressor::points].id, (float) points.size());
+        setValue (info, info.parameters[(size_t) firstPoint].id, (float) points.size());
 
         for (int point = 0; point < curves::maxPoints; ++point)
             for (int field = 0; field < curves::pointFields; ++field)
-                setValue (Compressor::info
-                              .parameters[(size_t) (Compressor::points + curves::getPointParameter (point, (curves::PointField) field))]
-                              .id,
+                setValue (info, info.parameters[(size_t) (firstPoint + curves::getPointParameter (point, (curves::PointField) field))].id,
                           points[(size_t) std::min (point, (int) points.size() - 1)][(size_t) field]);
 
-        setValue ("attack", 1.0f);
-        setValue ("release", 150.0f);
+        // Quick to grip, and letting go over the second release, the slowing one, as long.
+        setValue (info, "lowKey", 1.0f);
+        setValue (info, "lowAttack", 1.0f);
+        setValue (info, "lowRelease2", 150.0f);
 
         if (playsDrumSampler (song, source))
-            setValue ("keyHighCut", 150.0f);
+            setValue (info, "keyHighCut", 150.0f);
+    }
+
+    // A vocoder plays the track it listens to: its carrier becomes Track, joining the caller's step (setSidechainSource()),
+    // so that the track chosen is heard at once, whatever carrier it had.
+    void startCarrying (Song& song, DeviceID id)
+    {
+        using devices::Vocoder;
+        const auto state = findDeviceState (song, id);
+
+        if (state[schema::deviceType].toString() == juce::String (Vocoder::typeID))
+            keepValueSetByHand (state, Vocoder::info.parameters[(size_t) Vocoder::carrier], (float) Vocoder::Carrier::track,
+                                &song.getUndoManager());
     }
 } // namespace
 
@@ -177,6 +237,23 @@ TrackID getSidechainSource (const Song& song, DeviceID id)
     return state.hasType (schema::TRACK) && ! isFolderState (state) ? source : TrackID();
 }
 
+bool hearsSidechain (const Song& song, DeviceID id)
+{
+    if (! getSidechainSource (song, id).isValid())
+        return false;
+
+    const auto state = findDeviceState (song, id);
+    const auto& mode = devices::Compressor::info.parameters[(size_t) devices::Compressor::mode];
+    return ! isCompressor (state) || devices::Compressor::getMode (readValueSetByHand (state, mode)) == devices::Compressor::Mode::duck;
+}
+
+bool switchesSidechain (const juce::ValueTree& values, const juce::Identifier& property)
+{
+    const auto mode = devices::Compressor::info.parameters[(size_t) devices::Compressor::mode].id;
+    return values.hasType (schema::VALUES) && isCompressor (values.getParent())
+           && property.toString() == juce::String (mode.data(), mode.size());
+}
+
 SidechainChoice describeSidechainSource (const Song& song, DeviceID id)
 {
     const auto source = getSidechainSource (song, id);
@@ -231,7 +308,10 @@ void setSidechainSource (Song& song, DeviceID id, TrackID source)
         state.removeProperty (schema::deviceSidechain, undo);
 
     if (source.isValid())
+    {
         startDucking (song, id, source);
+        startCarrying (song, id);
+    }
 }
 
 DeviceID duckUnder (Song& song, TrackID ducked, TrackID key)

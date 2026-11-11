@@ -371,6 +371,18 @@ std::vector<double> getTempoValues (const Song& song, BeatRange range, int count
     return values;
 }
 
+std::vector<double> getTempoValues (const Song& song, const std::vector<BeatPosition>& beats)
+{
+    const auto map = getTempoMap (song);
+    std::vector<double> values;
+    values.reserve (beats.size());
+
+    for (const auto beat : beats)
+        values.push_back (map.getTempoAt (beat.inBeats()));
+
+    return values;
+}
+
 int addTempoChange (Song& song, BeatPosition beat, std::optional<double> bpm)
 {
     const auto at = std::max (BeatPosition(), beat);

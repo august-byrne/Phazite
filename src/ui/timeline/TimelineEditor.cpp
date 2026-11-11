@@ -168,7 +168,7 @@ void TimelineRuler::paint (juce::Graphics& g)
     }
 
     // Bar numbers, as far apart as they need to be to read: every bar, or every 2nd, 4th, ...
-    const auto barWidth = view.pixelsPerBeat * getBeatsPerBar (context, visible.getStart());
+    const auto barWidth = view.pixelsPerBeat * getBarLength (context, visible.getStart()).inBeats();
     auto every = 1;
 
     while (every * barWidth < RulerTint::numberSpacing && every < (1 << 20))

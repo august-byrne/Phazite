@@ -8,6 +8,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
 
@@ -176,6 +177,48 @@ TEST_CASE ("A MIDI file becomes a MIDI clip where it is dropped")
     CHECK ((int) control[phazite::schema::controlNumber] == 74);
     CHECK ((int) control[phazite::schema::controlValue] == 100);
     CHECK ((double) control[phazite::schema::controlBeat] == doctest::Approx (0.5));
+}
+
+TEST_CASE ("A MIDI file's quarter notes are a song's in 6/8: at 120 BPM, a note a quarter note in plays half a second in")
+{
+    TemporaryFolder temp;
+
+    // A note a quarter note in and one three in, a quarter note each, at 120 BPM until the tempo halves two quarter notes in.
+    juce::MidiMessageSequence events;
+    events.addEvent (juce::MidiMessage::tempoMetaEvent (500000), 0.0);
+    events.addEvent (juce::MidiMessage::tempoMetaEvent (1000000), 2.0 * 960.0);
+    events.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 960.0);
+    events.addEvent (juce::MidiMessage::noteOff (1, 60), 2.0 * 960.0);
+    events.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 3.0 * 960.0);
+    events.addEvent (juce::MidiMessage::noteOff (1, 64), 4.0 * 960.0);
+    events.updateMatchedPairs();
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote (960);
+    midi.addTrack (events);
+    const auto file = temp.folder.getChildFile ("Two notes.mid");
+    {
+        juce::FileOutputStream stream (file);
+        REQUIRE (midi.writeTo (stream));
+    }
+
+    auto project = createProject (temp.folder.getChildFile ("Projects"));
+    auto& song = project->getSong();
+    phazite::setTimeSignature (song, { 6, 8 });
+    const auto clip = phazite::importFile (song, phazite::getTrackIDs (song).front(), file, beats (0.0));
+    REQUIRE (clip.isValid());
+
+    // The notes on the song's quarter notes, where the file has them in time too: half a second in, and two seconds (a
+    // second at 120, then one at 60). The second is in the second bar, three quarter notes in, and the clip lasts two bars.
+    const auto notes = phazite::getClipNotes (song, clip);
+    REQUIRE (notes.size() == 2);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (1.0));
+    CHECK (notes[1].start.inBeats() == doctest::Approx (3.0));
+    CHECK (phazite::toSeconds (song, notes[0].start) == doctest::Approx (0.5));
+    CHECK (phazite::toSeconds (song, notes[0].start + notes[0].length) == doctest::Approx (1.0));
+    CHECK (phazite::toSeconds (song, notes[1].start) == doctest::Approx (2.0));
+    CHECK (phazite::getBars (song).getBarAt (notes[1].start) == 1);
+    CHECK (phazite::getClipRange (song, clip).getLength().inBeats() == doctest::Approx (6.0));
+    CHECK (phazite::toSeconds (song, phazite::getClipRange (song, clip).getEnd()) == doctest::Approx (5.0));
 }
 
 TEST_CASE ("Track colors follow the words in a file's name")

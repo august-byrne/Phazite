@@ -26,6 +26,7 @@
 #include "ui/devices/DeviceMenus.h"
 #include "ui/devices/EqEditor.h"
 #include "ui/devices/ModulatorEditor.h"
+#include "ui/devices/SidechainMenus.h"
 #include "ui/devices/SynthEditor.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/ChannelStrip.h"
@@ -415,8 +416,7 @@ TEST_CASE ("Effects Ctrl- or Shift-clicked are selected together and drawn so, i
     CHECK (inside == effects);
 }
 
-TEST_CASE (
-    "An effect's slot has what every effect has along its line, its switch, name and mix; the one that shows, its Presets and sidechain under it")
+TEST_CASE ("An effect's slot has what every effect has along its line, its switch, name and mix; the one that shows, its Presets under it")
 {
     // The owner (2026-11-06): stacked as FL Studio's mixer slots, in place of a row of cards that grew narrower as it grew.
     Screen screen;
@@ -457,12 +457,11 @@ TEST_CASE (
             CHECK (presets->getY() >= name->getBottom());
     }
 
-    // The compressor's sidechain, under its line with its Presets.
+    // The compressor's sidechain isn't chosen under its line, which has its Presets and window's button alone: its editor has
+    // its key (the owner, 2026-11-10: a button here "takes up space and looks cluttered").
     auto* compressor = view.findPanel (effects[1]);
-    auto* sidechain = phazite::test::findComponentWithTitle (*compressor, "Sidechain");
-    REQUIRE (sidechain != nullptr);
-    CHECK (sidechain->isVisible());
-    CHECK (sidechain->getY() >= findNameButton (*compressor, "Compressor")->getBottom());
+    CHECK (phazite::test::findComponentWithTitle (*compressor, "Sidechain") == nullptr);
+    CHECK (phazite::test::findComponentWithTitle (*compressor, "Key") == nullptr);
 }
 
 TEST_CASE ("A modulator dragged by its grip lights every knob it can modulate as the drag starts, until it is let go")
@@ -909,35 +908,65 @@ TEST_CASE ("The Devices view shows its track's modulators as chips, a macro with
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return slots->getOpenEditor() == nullptr; }));
 }
 
-TEST_CASE ("A device with a sidechain shows in its header what it listens to: the one place to choose it")
+TEST_CASE (
+    "A device's sidechain is chosen inside it: the column has no Sidechain button, the compressor's editor its key, the mixer slot a stripe")
 {
+    // The owner (2026-11-10): the button in the effect list "takes up space and looks cluttered, so it should be moved inside of
+    // the effect".
     Screen screen;
     auto& view = screen.view;
     const auto effects = screen.effects (0);
     REQUIRE (effects.size() == 3);
 
-    const auto findSidechain = [&view, &effects] (size_t effect)
+    for (const auto& effect : effects)
     {
-        auto* panel = view.findPanel (effects[effect]);
+        auto* panel = view.findPanel (effect);
         REQUIRE (panel != nullptr);
-        return dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*panel, "Sidechain"));
+        CAPTURE (panel->getTitle());
+        CHECK (phazite::test::findComponentWithTitle (*panel, "Sidechain") == nullptr);
+    }
+
+    // The compressor shows beside the column, with its key's picker in its editor: none at first.
+    REQUIRE (view.isOpen (effects[1]));
+    const auto findPicker = [&view]
+    {
+        auto* editor = dynamic_cast<phazite::ui::CompressorEditor*> (view.getShownBody());
+        REQUIRE (editor != nullptr);
+        return editor->getKeyPicker();
     };
 
-    // The EQ has none; the compressor's listens to the sound passing through it, at first.
-    CHECK (findSidechain (0) == nullptr);
-    auto* button = findSidechain (1);
-    REQUIRE (button != nullptr);
-    CHECK (button->getButtonText() == juce::String ("Sidechain"));
+    REQUIRE (findPicker() != nullptr);
+    CHECK (findPicker()->getTitle() == juce::String ("Key"));
+    CHECK (findPicker()->getButtonText() == juce::String ("None"));
 
-    // Listening to the other track: its name, once the view has heard.
+    // Listening to the other track, as an undo or Duck Under would make it: the picker names it once the editor looks again,
+    // and the compressor's slot in the mixer names it too, with a stripe of its colour down its left edge.
     phazite::setSidechainSource (screen.context, effects[1], screen.track (1));
     phazite::test::dispatchPendingMessages();
-    button = findSidechain (1);
-    REQUIRE (button != nullptr);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     const auto other = phazite::getChannel (screen.context, screen.track (1));
     REQUIRE (other.has_value());
-    CHECK (button->getButtonText() == other->name);
-    phazite::test::checkChildrenApart (view);
+    REQUIRE (findPicker() != nullptr);
+    CHECK (findPicker()->getButtonText() == other->name);
+
+    for (const auto& effect : effects)
+        CHECK (phazite::test::findComponentWithTitle (*view.findPanel (effect), "Sidechain") == nullptr);
+
+    phazite::ui::ChannelStrip strip { screen.commands, screen.context };
+    phazite::test::TestWindow stripWindow { strip, phazite::ui::ChannelStrip::width, 900 };
+    strip.setTrack (screen.track (0));
+    auto* name = dynamic_cast<juce::TextButton*> (findNameButton (strip, "Compressor"));
+    REQUIRE (name != nullptr);
+    CHECK (name->getTooltip().contains ("Listens to " + other->name));
+    auto* slot = name->getParentComponent();
+    REQUIRE (slot != nullptr);
+    juce::Image picture (juce::Image::ARGB, slot->getWidth(), slot->getHeight(), true, juce::SoftwareImageType());
+    {
+        juce::Graphics g (picture);
+        slot->paint (g); // its own picture, under its name
+    }
+
+    CHECK (picture.getPixelAt (1, slot->getHeight() / 2) == other->colour);
 }
 
 TEST_CASE ("A mixer slot of a device that turns the sound down shows how far, along its edge, as the sound plays")
@@ -1127,9 +1156,9 @@ TEST_CASE ("At the default window size, every built-in instrument and effect sho
     // Each effect alone in the chain, showing beside the column, on the Effects tab.
     REQUIRE (screen.registry.invoke ("view.effects"));
 
-    for (const auto* type :
-         { "phaziteEq", "phaziteCompressor", "phaziteLimiter", "phaziteMultiband", "phaziteSaturator", "phaziteFilter", "phaziteDelay",
-           "phaziteReverb", "phazitePhaser", "phaziteFlanger", "phaziteChorus", "phaziteStereoExpander", "phaziteVocoder" })
+    for (const auto* type : { "phaziteEq", "phaziteCompressor", "phaziteLimiter", "phaziteMultiband", "phaziteSaturator", "phaziteExciter",
+                              "phaziteVinyl", "phaziteFilter", "phaziteDelay", "phaziteReverb", "phazitePhaser", "phaziteFlanger",
+                              "phaziteChorus", "phaziteStereoExpander", "phaziteVocoder" })
     {
         phazite::addEffect (context, track, findType (type));
         phazite::test::dispatchPendingMessages();

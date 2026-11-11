@@ -610,19 +610,30 @@ bool hasPoints (const Song& song, const ParameterRef& parameter)
 
 std::vector<float> getValues (const Song& song, const ParameterRef& parameter, BeatRange range, int numValues)
 {
+    std::vector<BeatPosition> beats;
+    beats.reserve ((size_t) std::max (0, numValues));
+    const auto step = numValues > 1 ? range.getLength() / (double) (numValues - 1) : BeatDuration();
+
+    for (int i = 0; i < numValues; ++i)
+        beats.push_back (range.getStart() + step * (double) i);
+
+    return getValues (song, parameter, beats);
+}
+
+std::vector<float> getValues (const Song& song, const ParameterRef& parameter, const std::vector<BeatPosition>& beats)
+{
     // As Phazite's engine plays the song's points.
     std::vector<float> values;
     const auto state = findCurveState (song, parameter);
 
-    if (! state.isValid() || state.getNumChildren() == 0 || numValues <= 0)
+    if (! state.isValid() || state.getNumChildren() == 0 || beats.empty())
         return values;
 
     const auto curve = makeEngineCurve (state);
-    values.reserve ((size_t) numValues);
-    const auto step = numValues > 1 ? range.getLength() / (double) (numValues - 1) : BeatDuration();
+    values.reserve (beats.size());
 
-    for (int i = 0; i < numValues; ++i)
-        values.push_back (curve.getValueAt (std::max (0.0, (range.getStart() + step * (double) i).inBeats())));
+    for (const auto beat : beats)
+        values.push_back (curve.getValueAt (std::max (0.0, beat.inBeats())));
 
     return values;
 }

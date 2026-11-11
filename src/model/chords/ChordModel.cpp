@@ -229,13 +229,11 @@ std::optional<BeatRange> getWholeSongRange (const ProjectContext& context)
 BeatDuration getProgressionLength (const ProjectContext& context, const Progression& progression, BeatPosition from)
 {
     auto* song = findSong (context);
+    const auto bars = song != nullptr ? getBars (*song) : Bars();
     auto beat = from;
 
     for (const auto& chord : progression.chords)
-    {
-        const auto beatsPerBar = song != nullptr ? getBars (*song).getBeatsPerBar (beat) : 4;
-        beat += BeatDuration::fromBeats (chord.bars * std::max (1, beatsPerBar));
-    }
+        beat += bars.getBarLength (beat) * chord.bars;
 
     return beat - from;
 }
@@ -248,12 +246,12 @@ bool writeProgressionPreview (const ProjectContext& context, const Progression& 
     const auto key = getLaneKeyAt (context, from);
     const auto progressionKey = getKeyForProgression (key, progression.scale);
     auto* song = findSong (context);
+    const auto bars = song != nullptr ? getBars (*song) : Bars();
     auto beat = BeatPosition();
 
     for (const auto& chord : progression.chords)
     {
-        const auto beatsPerBar = song != nullptr ? getBars (*song).getBeatsPerBar (from + (beat - BeatPosition())) : 4;
-        const auto length = BeatDuration::fromBeats (chord.bars * std::max (1, beatsPerBar));
+        const auto length = bars.getBarLength (from + (beat - BeatPosition())) * chord.bars;
         chords.push_back ({ { beat, length }, chord.numeral, progressionKey });
         beat += length;
     }

@@ -118,7 +118,7 @@ VersionHistory::VersionHistory (Song& s, std::function<void()> changeCallback)
     : song (s),
       state (s.getState()),
       onChange (std::move (changeCallback)),
-      thread (juce::ThreadPoolOptions {}.withThreadName ("Phazite versions").withNumberOfThreads (1))
+      thread ("Phazite versions", 1, juce::Thread::Priority::normal)
 {
     changesOutsideHistory = song.getChangesOutsideHistory();
     state.addListener (this);
@@ -131,7 +131,7 @@ VersionHistory::~VersionHistory()
     stopTimer();
     backgroundBounce = nullptr; // cancelled, before what it renders goes
     state.removeListener (this);
-    thread.removeAllJobs (false, 30000); // a version being written is finished, never cut short
+    thread.removeAll (false); // a version being written is finished, never cut short, however long that takes
 }
 
 bool VersionHistory::keepsVersions() const
@@ -142,19 +142,16 @@ bool VersionHistory::keepsVersions() const
 void VersionHistory::run (std::function<void()> job)
 {
     ++pendingJobs;
-    thread.addJob (std::move (job));
+    thread.add ([work = std::move (job)] (const BackgroundJobs::ShouldStop&) { work(); });
 }
 
 void VersionHistory::waitForThread() const
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    // Its jobs tell the message thread what they did with callAsync and never wait for it, so it can wait for them, as long
-    // as the destructor does at most.
-    const auto until = juce::Time::getMillisecondCounter() + 30000;
-
-    while (thread.getNumJobs() > 0 && juce::Time::getMillisecondCounter() < until)
-        juce::Thread::sleep (1);
+    // Its jobs tell the message thread what they did with callAsync and never wait for it, so it can wait for them,
+    // however long they take: a folder copied while a job still writes into it wouldn't be whole.
+    thread.waitForAll();
 }
 
 void VersionHistory::open()

@@ -6,6 +6,8 @@
 #include "UiTestHelpers.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/eq/Equalizer.h"
+#include "devices/fm/FmSynth.h"
+#include "devices/sampler/Sampler.h"
 #include "devices/synth/Synth.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "model/arrangement/Outlines.h"
@@ -488,10 +490,15 @@ TEST_CASE ("A new project opens from its first save with what it starts with, wi
         for (const auto id : phazite::getTrackIDs (song))
             tracks[phazite::getTrackName (song, id)] = id;
 
-        // Its tracks with clips, each played by one of Phazite's own instruments: the drum sampler and the wavetable.
+        // Its tracks with clips, each played by one of Phazite's own instruments: each drum on the drum sampler, the bass's
+        // two parts and the sparkle over them, and the arpeggio's three layers.
         for (const auto& [name, instrumentType] :
-             { std::pair ("Drums", phazite::devices::DrumSampler::typeID), std::pair ("Bass", phazite::devices::WavetableSynth::typeID),
-               std::pair ("Arp", phazite::devices::WavetableSynth::typeID) })
+             { std::pair ("Kick", phazite::devices::DrumSampler::typeID), std::pair ("Snare", phazite::devices::DrumSampler::typeID),
+               std::pair ("Clap", phazite::devices::DrumSampler::typeID), std::pair ("Open Hat", phazite::devices::DrumSampler::typeID),
+               std::pair ("Perc", phazite::devices::DrumSampler::typeID), std::pair ("Rolling Bass", phazite::devices::FmSynth::typeID),
+               std::pair ("Sub", phazite::devices::WavetableSynth::typeID), std::pair ("Sparkle", phazite::devices::FmSynth::typeID),
+               std::pair ("Square", phazite::devices::Synth::typeID), std::pair ("Wide Saw", phazite::devices::Sampler::typeID),
+               std::pair ("Supersaw", phazite::devices::WavetableSynth::typeID) })
         {
             CAPTURE (name);
             REQUIRE (tracks.contains (name));

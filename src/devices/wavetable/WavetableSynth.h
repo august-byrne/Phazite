@@ -3,13 +3,17 @@
 // (docs/design.md, section 9). Two wavetable oscillators morph through their tables' frames (Wavetable.h: a factory table
 // or a sound of the user's), each with a pitch, a level and a warp that reshapes its wave (hard sync, bend, pulse width,
 // mirror, or FM or ring modulation from the other oscillator); then a sub oscillator and noise. Unison plays both
-// oscillators up to eight times at once, detuned, spread across the stereo field and across the table. A resonant filter
+// oscillators up to eight times at once, detuned, spread across the stereo field and across the table; its stack puts
+// every second or third of those copies an octave or two up, or a fifth, as Serum's unison stack and Vital's stack styles
+// do (an octave pile or a power chord from one key), and its drift lets each copy's pitch wander on its own, as
+// ZynAddSubFX's unison vibrato does, the way the synth's Drift lets an analog voice's oscillators wander. A resonant filter
 // with drive follows, of any type of dsp/MultimodeFilter.h (low-pass, high-pass, band-pass or notch at 12 or 24 dB, comb,
 // vowel, phaser, sample and hold); three envelopes (the first shapes the level) and two LFOs, free or starting again with
 // each note; and eight modulation slots, each a source moving a destination by an amount, for each voice on its own, so
-// an envelope sweeps every note's table from its start. 16 voices, or one in mono mode, legato, with glide. It has no
-// effects of its own: Phazite's devices follow it. Its noise, unison phases and random values come from fixed seeds, so
-// it renders the same every time.
+// an envelope sweeps every note's table from its start. 16 voices, or one in mono mode, legato, with glide; in poly mode
+// every note takes a voice of its own, a key played again too: what still rings of it rings out over its release,
+// untouched, as the synth's does (Synth.h). It has no effects of its own: Phazite's devices follow it. Its noise, unison
+// phases, drift and random values come from fixed seeds, so it renders the same every time.
 #pragma once
 
 #include "Wavetable.h"
@@ -26,6 +30,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace phazite::devices
@@ -61,6 +66,8 @@ public:
         unisonDetune,
         unisonSpread,
         unisonPosition,
+        unisonStack, // a Stack
+        unisonDrift, // how far each copy's pitch wanders, in cents
         filterOn,
         filterType, // a dsp::FilterMode
         cutoff,
@@ -195,6 +202,23 @@ public:
         ringMod     // the other oscillator multiplies it
     };
 
+    // Where the unison's copies play, one after another from the first: all on the note, or every second or third of them
+    // above it, an octave or two up, or a fifth and an octave, as Serum's unison stack and Vital's stack styles put theirs.
+    // With two copies or more.
+    enum class Stack
+    {
+        off,
+        octave,     // the note, an octave up, the note, ...
+        twoOctaves, // the note, an octave up, two octaves up, the note, ...
+        fifth,      // the note, a fifth up, ...
+        powerChord  // the note, a fifth up, an octave up, ...
+    };
+
+    static constexpr int maxStackSteps = 3;
+
+    // A stack's steps above the note, in semitones, which the copies take in turn.
+    static std::span<const float> getStackSteps (Stack) noexcept;
+
     enum class ModSource
     {
         none,
@@ -281,6 +305,15 @@ private:
         float left = 1.0f, right = 1.0f;
     };
 
+    // Where a unison voice's pitch has wandered (the unison's drift), from -1 to 1, toward a new place every so often, at
+    // a pace of its own.
+    struct Wander
+    {
+        float now = 0.0f, to = 0.0f;
+        float pace = 1.0f; // how fast it wanders against the others, from half to twice
+        int stepsLeft = 0; // control steps until it wanders toward a new place
+    };
+
     struct OscillatorRun
     {
         bool on = false;
@@ -288,6 +321,7 @@ private:
         float warpAmount = 0.0f, level = 0.0f, position = 0.0f;
         float syncRatio = 1.0f, bend = 1.0f, pulseWidth = 1.0f; // what its warp reads by, this control step
         std::array<Reader, maxUnison> readers {};
+        std::array<Wander, maxUnison> wanders {};
     };
 
     struct Voice
@@ -301,6 +335,7 @@ private:
         std::array<OscillatorRun, numOscillators> oscillators;
         dsp::Oscillator sub;
         dsp::Random noise, phases;
+        dsp::Random drifting;                         // where its unison's drift wanders, the same every time
         dsp::Adsr amp, envelope2, envelope3;          // the second and third at the control rate
         std::array<dsp::Lfo, 2> lfos;                 // those that start again with each note, at the control rate
         std::array<dsp::MultimodeFilter, 2> filters;  // each side
@@ -327,6 +362,10 @@ private:
     static constexpr double justBegunSeconds = 0.1;   // how young that is
     static constexpr double portamentoSeconds = 0.1;  // a portamento note's glide while Glide is off
     bool songPlaying = false;                         // as the block being processed began
+
+    // The unison's drift, at the control rate: the steps between a unison voice's new places, and how far it glides toward
+    // its place each step, for one at the middle pace.
+    float driftWanderSteps = 1.0f, driftFollow = 1.0f;
 
     // The last fades out what a voice played when another note took it (stealVoice()); notes never start on it.
     std::array<Voice, maxVoices + 1> voices;
@@ -357,8 +396,11 @@ private:
     void slideTo (int note, float seconds); // every sounding voice, evenly
     void stopNote (int note, std::span<const float> parameters);
     void startVoice (Voice&);
+    void startDrift (Voice&) noexcept;            // a note's drift, each unison voice from somewhere new
+    void moveDrift (Voice&, int unison) noexcept; // a control step on
     void releaseVoice (Voice&);
-    Voice& findVoiceFor (int note);
+    void letGoOf (int note); // the voice its key or the pedal still holds, if any, lets go as its key coming up would
+    Voice& findVoice();      // a voice for a new note: a free one, or one to take (stealVoice())
     void stealVoice (Voice&);
     void render (float* left, float* right, int numSamples, std::span<const float> parameters);
     void freeRetired();

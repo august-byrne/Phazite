@@ -453,6 +453,58 @@ namespace
         }
     };
 
+    class TestPlayhead final : public StandIn
+    {
+    public:
+        TestPlayhead()
+            : StandIn (Kind::playhead, stereoEffect())
+        {
+            add ("50", "Watch", 0.5f);
+        }
+
+        using StandIn::processBlock;
+        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override
+        {
+            // Its sound passes as it came; where the song is, as its playhead says, is kept for its state.
+            const auto* head = getPlayHead();
+            const auto position = head != nullptr ? head->getPosition() : juce::Optional<juce::AudioPlayHead::PositionInfo>();
+
+            if (! position.hasValue())
+                return;
+
+            const auto signature = position->getTimeSignature();
+            ppq = position->getPpqPosition().orFallback (-1.0);
+            sample = position->getTimeInSamples().orFallback (-1);
+            bpm = position->getBpm().orFallback (-1.0);
+            numerator = signature.hasValue() ? signature->numerator : 0;
+            denominator = signature.hasValue() ? signature->denominator : 0;
+            playing = position->getIsPlaying();
+            barStart = position->getPpqPositionOfLastBarStart().orFallback (-1.0);
+            barCount = position->getBarCount().orFallback (-1);
+        }
+
+        void getStateInformation (juce::MemoryBlock& data) override
+        {
+            juce::MemoryOutputStream out (data, false);
+            out.writeDouble (ppq.load());
+            out.writeInt64 (sample.load());
+            out.writeDouble (bpm.load());
+            out.writeInt (numerator.load());
+            out.writeInt (denominator.load());
+            out.writeBool (playing.load());
+            out.writeDouble (barStart.load());
+            out.writeInt64 (barCount.load());
+        }
+
+        void setStateInformation (const void*, int) override {}
+
+    private:
+        std::atomic<double> ppq { -1.0 }, bpm { -1.0 }, barStart { -1.0 };
+        std::atomic<juce::int64> sample { -1 }, barCount { -1 };
+        std::atomic<int> numerator { 0 }, denominator { 0 };
+        std::atomic<bool> playing { false };
+    };
+
     // Each kind's name, its "file" in the format, and its number.
     struct Described
     {
@@ -480,6 +532,8 @@ namespace
                 return { "Test Sidechain", "PhaziteTestSidechain", 0x7e5751 + 1, false };
             case Kind::crashLoading:
                 return { "Test Crash Loading", "PhaziteTestCrashLoading", 0x7e57c2, false };
+            case Kind::playhead:
+                return { "Test Playhead", "PhaziteTestPlayhead", 0x7e57b1, false };
         }
 
         return { "Test Effect", "PhaziteTestEffect", 0x7e57e5, false };
@@ -578,9 +632,30 @@ std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind, int v
         case Kind::crashLoading:
             crashNow(); // as a plug-in that crashes as it loads does
             return nullptr;
+        case Kind::playhead:
+            return std::make_unique<TestPlayhead>();
     }
 
     return nullptr;
+}
+
+TestPlugins::Playhead TestPlugins::Playhead::read (const juce::MemoryBlock& state)
+{
+    juce::MemoryInputStream in (state, false);
+    Playhead heard;
+
+    if (state.getSize() < 49)
+        return heard;
+
+    heard.ppq = in.readDouble();
+    heard.sample = in.readInt64();
+    heard.bpm = in.readDouble();
+    heard.numerator = in.readInt();
+    heard.denominator = in.readInt();
+    heard.playing = in.readBool();
+    heard.barStart = in.readDouble();
+    heard.barCount = in.readInt64();
+    return heard;
 }
 
 std::unique_ptr<juce::AudioPluginFormat> TestPlugins::createFormat()

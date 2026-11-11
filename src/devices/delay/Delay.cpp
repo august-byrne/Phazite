@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Delay.h"
 #include "devices/dsp/Math.h"
+#include "devices/dsp/NoteValues.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -11,11 +12,16 @@ namespace phazite::devices
 {
 namespace
 {
-    // The note values a synced echo takes, and their lengths in beats (quarter notes): T for a triplet, D for dotted.
+    // The note values a synced echo takes, and their lengths in beats (quarter notes, NoteValues.h): T for a triplet, D for
+    // dotted; and a bar of the song's.
     constexpr std::string_view noteValues[] = { "1/32", "1/16T", "1/16", "1/16D", "1/8T", "1/8",  "1/8D",
                                                 "1/4T", "1/4",   "1/4D", "1/2T",  "1/2",  "1/2D", "1 bar" };
-    constexpr double noteBeats[] = { 0.125, 1.0 / 6.0, 0.25, 0.375, 1.0 / 3.0, 0.5, 0.75, 2.0 / 3.0, 1.0, 1.5, 4.0 / 3.0, 2.0, 3.0, 4.0 };
-    static_assert (std::size (noteValues) == std::size (noteBeats));
+    constexpr dsp::NoteLength noteLengths[] = { { .beats = 0.125 }, { .beats = 1.0 / 6.0 }, { .beats = 0.25 },
+                                                { .beats = 0.375 }, { .beats = 1.0 / 3.0 }, { .beats = 0.5 },
+                                                { .beats = 0.75 },  { .beats = 2.0 / 3.0 }, { .beats = 1.0 },
+                                                { .beats = 1.5 },   { .beats = 4.0 / 3.0 }, { .beats = 2.0 },
+                                                { .beats = 3.0 },   { .bars = 1.0 } };
+    static_assert (std::size (noteValues) == std::size (noteLengths));
 
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
@@ -57,14 +63,14 @@ namespace
 
 const DeviceInfo Delay::info { .typeID = typeID, .name = "Delay", .kind = DeviceKind::effect, .parameters = parameters };
 
-double Delay::getDelaySeconds (std::span<const float> values, double tempo)
+double Delay::getDelaySeconds (std::span<const float> values, double tempo, double barLength)
 {
     auto seconds = (double) values[milliseconds] * 0.001;
 
     if (values[sync] > 0.5f)
     {
-        const auto index = (size_t) juce::jlimit (0, (int) std::size (noteBeats) - 1, (int) std::lround (values[time]));
-        seconds = noteBeats[index] * 60.0 / std::max (tempo, 1.0);
+        const auto index = (size_t) juce::jlimit (0, (int) std::size (noteLengths) - 1, (int) std::lround (values[time]));
+        seconds = noteLengths[index].inBeats (barLength) * 60.0 / std::max (tempo, 1.0);
     }
 
     return std::min (seconds, maximumSeconds);
@@ -102,7 +108,7 @@ void Delay::process (const ProcessContext& block)
     if (numChannels <= 0)
         return;
 
-    const auto seconds = getDelaySeconds (values, block.tempo);
+    const auto seconds = getDelaySeconds (values, block.tempo, block.barLength);
     const auto target = (float) juce::jlimit (1.0, maximumSeconds * sampleRate, seconds * sampleRate);
 
     if (isFirstBlock)
@@ -120,6 +126,7 @@ void Delay::process (const ProcessContext& block)
     const auto repeats = amount > 0.001f ? std::log (0.001) / std::log ((double) amount) : 1.0;
     tailSeconds.store (std::min (60.0, seconds * (repeats + 1.0)), std::memory_order_relaxed);
     shownTempo.set ((float) block.tempo);
+    shownBarLength.set ((float) block.barLength);
 
     auto* left = block.channels[0];
     auto* right = numChannels > 1 ? block.channels[1] : nullptr;

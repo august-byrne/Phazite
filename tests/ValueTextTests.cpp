@@ -109,6 +109,19 @@ TEST_CASE ("A device parameter's value reads as its unit says, and back")
     CHECK (formatParameterValue (fine, 12.5f) == "+12.5 ct");
     CHECK (parse (fine, "-15 cents") == doctest::Approx (-15.0f));
 
+    // An angle to a tenth of a degree, with its sign or in words.
+    const ParameterInfo angle { .id = "a", .name = "A", .maximum = 360.0f, .unit = Unit::degrees };
+    const auto degreeSign = juce::String::fromUTF8 ("\xc2\xb0");
+    CHECK (formatParameterValue (angle, 180.0f) == "180" + degreeSign);
+    CHECK (formatParameterValue (angle, 320.4f) == "320.4" + degreeSign);
+    CHECK (formatParameterValue (angle, 0.0f) == "0" + degreeSign);
+    CHECK (parse (angle, "90") == doctest::Approx (90.0f));
+    CHECK (parseParameterValue (angle, "320.4" + degreeSign).value_or (-999.0f) == doctest::Approx (320.4f));
+    CHECK (parse (angle, "45 deg") == doctest::Approx (45.0f));
+    CHECK (parse (angle, "270 degrees") == doctest::Approx (270.0f));
+    CHECK (parse (angle, "400") == doctest::Approx (360.0f)); // kept to its range
+    CHECK_FALSE (parseParameterValue (angle, "half").has_value());
+
     const ParameterInfo root { .id = "k", .name = "K", .maximum = 127.0f, .defaultValue = 60.0f, .unit = Unit::note, .step = 1.0f };
     CHECK (formatParameterValue (root, 61.0f) == "C#4");
     CHECK (parse (root, "C4") == doctest::Approx (60.0f));

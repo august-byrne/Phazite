@@ -6,6 +6,9 @@
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/synth/Synth.h"
+#include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/TimelineModel.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
@@ -15,8 +18,11 @@
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/Preview.h"
+#include "model/engine/internal/AudioIO.h"
 #include "model/engine/internal/EngineContext.h"
+#include "model/engine/internal/LiveInput.h"
 #include "model/engine/internal/Preview.h"
+#include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
@@ -27,6 +33,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 
 namespace
 {
@@ -682,6 +689,100 @@ TEST_CASE ("A loop that follows the tempo plays along the song's tempo changes, 
     CHECK_FALSE (phazite::isRendered (song, loop));
 }
 
+TEST_CASE ("A loop that follows the tempo plays at its own speed in 6/8 and 2/2: warped, quantized and under a tempo change")
+{
+    // Known bug 11 until 2026-11-10: a song's beat was its time signature's note, and a loop that follows the tempo along
+    // markers or tempo changes, which counts its file's quarter notes, played twice as fast in 6/8, half as fast in 2/2.
+    for (const auto& [numerator, denominator] : { std::pair (6, 8), std::pair (2, 2) })
+    {
+        CAPTURE (numerator);
+        CAPTURE (denominator);
+        phazite::test::TemporaryFolder temp;
+        const auto songPtr = phazite::createSong();
+        auto& song = *songPtr;
+        phazite::setTimeSignature (song, { numerator, denominator });
+
+        // Eight hits at 120 BPM, the song's tempo, one a quarter note (half a second): four seconds, eight quarter notes.
+        const auto file = writeHits (temp.folder, 8, 120.0);
+        const auto loop = phazite::importFile (song, phazite::getTrackIDs (song)[0], file, phazite::BeatPosition());
+        REQUIRE (isAudioClip (song, loop));
+        REQUIRE (phazite::getClipTempo (song, loop) == doctest::Approx (120.0));
+        CHECK (playedSecondsOf (song, loop) == doctest::Approx (4.0));
+        CHECK (phazite::getClipRange (song, loop).getLength().inBeats() == doctest::Approx (8.0));
+
+        // Where each hit plays, in seconds, as the song places the clip; and rendered through Phazite's engine, as export
+        // renders it, each hit there (give or take what Rubber Band moves an attack by: it is found by its first 10 ms).
+        const auto checkHits = [&] (const std::function<double (int)>& expectedSeconds)
+        {
+            for (int hit = 0; hit < 8; ++hit)
+            {
+                CAPTURE (hit);
+                const auto beat = phazite::getBeatOfFileTime (song, loop, hit * 0.5);
+                CHECK (phazite::toSeconds (song, beat) == doctest::Approx (expectedSeconds (hit)).epsilon (0.0001));
+            }
+
+            REQUIRE (phazite::renderMissingClipAudio (song));
+            constexpr double rate = 44100.0;
+            const auto audio = phazite::renderWithOwnEngine (song, (int) std::lround ((expectedSeconds (7) + 0.7) * rate), rate, 512);
+            const std::unique_ptr<juce::AudioFormatReader> reader (phazite::getAudioFormats().createReaderFor (file));
+            REQUIRE (reader != nullptr);
+            juce::AudioBuffer<float> hits (1, (int) reader->lengthInSamples);
+            reader->read (&hits, 0, hits.getNumSamples(), 0, true, false);
+            constexpr int length = 441, near = 441;
+
+            for (int hit = 1; hit < 8; ++hit)
+            {
+                CAPTURE (hit);
+                const auto expected = (int) std::lround (expectedSeconds (hit) * rate);
+                const auto* sound = hits.getReadPointer (0, hit * 22050);
+                auto best = 0.0;
+                auto at = expected;
+
+                for (auto lag = std::max (0, expected - near); lag <= expected + near && lag + length <= audio.getNumSamples(); ++lag)
+                {
+                    auto dot = 0.0;
+
+                    for (int i = 0; i < length; ++i)
+                        dot += (double) audio.getSample (0, lag + i) * sound[i];
+
+                    if (dot > best)
+                    {
+                        best = dot;
+                        at = lag;
+                    }
+                }
+
+                CHECK (best > 0.0);
+                CHECK (std::abs ((at - expected) / rate * 1000.0) < 2.5);
+            }
+        };
+
+        // A warp marker where its audio plays moves nothing: it plays straight on at its own speed, four seconds long.
+        REQUIRE (phazite::addWarpMarker (song, loop, 1.0));
+        REQUIRE (phazite::followsTempoChanges (song, phazite::findClipState (song, loop)));
+        CHECK (playedSecondsOf (song, loop) == doctest::Approx (4.0));
+        CHECK (phazite::getClipRange (song, loop).getLength().inBeats() == doctest::Approx (8.0));
+        checkHits ([] (int hit) { return hit * 0.5; });
+
+        // Quantized to quarter notes, on which every hit is already: nothing moves.
+        phazite::quantizeClipAudio (song, loop, { 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5 }, phazite::test::lasting (1.0), 1.0);
+        CHECK (playedSecondsOf (song, loop) == doctest::Approx (4.0));
+
+        for (int hit = 0; hit < 8; ++hit)
+            CHECK (phazite::getBeatOfFileTime (song, loop, hit * 0.5).inBeats() == doctest::Approx ((double) hit));
+
+        // Without markers, the tempo down to 90 BPM two quarter notes in (a second): after it, each quarter note of the loop
+        // two thirds of a second, the loop five seconds long. (A step to half the tempo would do as well but for Rubber Band,
+        // which puts a hit stretched to twice as long after silence 5 to 8 ms early.)
+        phazite::removeWarpMarkers (song, loop);
+        phazite::addTempoChange (song, phazite::test::at (2.0), 90.0);
+        REQUIRE (phazite::followsTempoChanges (song, phazite::findClipState (song, loop)));
+        CHECK (playedSecondsOf (song, loop) == doctest::Approx (5.0));
+        CHECK (phazite::getClipRange (song, loop).getLength().inBeats() == doctest::Approx (8.0));
+        checkHits ([] (int hit) { return hit <= 2 ? hit * 0.5 : 1.0 + (hit - 2) * 2.0 / 3.0; });
+    }
+}
+
 TEST_CASE ("A MIDI file's tempo changes come into a song without clips; a song with clips keeps its tempo")
 {
     phazite::test::TemporaryFolder temp;
@@ -725,4 +826,47 @@ TEST_CASE ("A MIDI file's tempo changes come into a song without clips; a song w
     REQUIRE (phazite::insertMidiClip (song, track, { phazite::BeatPosition(), phazite::test::at (4.0) }, nullptr).isValid());
     REQUIRE (phazite::importFile (song, track, file, phazite::test::at (8.0)).isValid());
     CHECK_FALSE (phazite::hasTempoChanges (song));
+}
+
+TEST_CASE ("Capture in 6/8 makes a clip of whole bars of the song's, three quarter notes each, at the bar where playback starts")
+{
+    // A song in 6/8 at 120 BPM with a clip in its first bar, playback starting a quarter note and a half into its second.
+    phazite::test::TestSong song;
+    song.setTempo (120.0);
+    song.setTimeSignature (6, 8);
+    song.setInstrument (song.firstTrack, phazite::devices::Synth::typeID);
+    song.setSwitch ("transport.countIn", false);
+    song.addMidiClip (song.firstTrack, 0.0, 3.0);
+    phazite::routeLiveMidiInput (*phazite::findSong (song.context)); // live MIDI plays the track with an instrument
+    phazite::test::EnginePlayback playback;
+    playback.play (0.01);
+    REQUIRE (phazite::getLiveMidiTrack (song.context) == song.firstTrack);
+    phazite::movePlayhead (song.context, phazite::test::at (4.5));
+
+    // Four eighths played while stopped, two quarter notes in all: one bar of 6/8, from the start of the second bar.
+    auto& audio = phazite::getAudioIO (phazite::test::getEngineContext());
+
+    for (const auto pitch : { 60, 62, 64, 65 })
+    {
+        playback.play (0.125);
+        audio.playLive (juce::MidiMessage::noteOn (1, pitch, 0.8f));
+        playback.play (0.125);
+        audio.playLive (juce::MidiMessage::noteOff (1, pitch));
+    }
+
+    song.run ("transport.capture");
+    const auto clips = phazite::getClips (song.context, song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (3.0));
+    CHECK (clips[1].range.getLength().inBeats() == doctest::Approx (3.0));
+
+    auto notes = phazite::getNotes (song.context, { clips[1].id });
+    std::sort (notes.begin(), notes.end(), [] (const auto& a, const auto& b) { return a.start < b.start; });
+    REQUIRE (notes.size() == 4);
+
+    for (size_t i = 0; i < notes.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK (notes[i].start.inBeats() == doctest::Approx (3.0 + 0.5 * (double) i).epsilon (0.01));
+    }
 }

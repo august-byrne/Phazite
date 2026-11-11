@@ -3,7 +3,8 @@
 // driven into, lit as far as the sound reaches into it, so turning the drive up shows the sound pushing into the bend; and
 // beside it the wave itself, coming in (pale) and going out (in its colour), held still on the wave's start, so the
 // rounded or folded tops show. Five buttons, each drawn with its curve, pick the shape; a drag up or down the curve turns the
-// drive, as one undo step. Then its Drive, large, its Tone and Output, and Auto Gain.
+// drive, as one undo step, the pointer pointing up and down over it and the whole curve lit. Then its Drive, large, its Tone
+// and Output, and Auto Gain.
 #pragma once
 
 #include "DeviceEditorBase.h"

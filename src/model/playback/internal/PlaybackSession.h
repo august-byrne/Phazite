@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -79,6 +80,11 @@ public:
     bool startTake();
     std::unique_ptr<Take> releaseTake();
     Take* getTake() noexcept { return take.get(); } // while it records, or nullptr
+
+    // What tells the user of a problem with what it recorded that the model can't show itself, a title and a message (a take
+    // kept in time with silence where its sound was lost: Take::finish()). The project context that makes the session sets
+    // it (model/project/internal/ProjectContext.h: setProblemReporter()); unset, nothing is said.
+    std::function<void (const juce::String& title, const juce::String& message)> onProblem;
 
     // The audio device's inputs and their delays, as the host has them (PlaybackHost.h); and the notes played live in the
     // last 30 seconds, and from a clock on while a take records.

@@ -57,7 +57,8 @@ std::optional<SampleSettings> readSampleSettings (const juce::File&);
 bool setSampleFile (Song&, DeviceID, const juce::File&);
 
 // One of its factory sounds, as one undo step named after it, at the sound's root key, its markers on the whole sound, its
-// loop off and no slices changed by hand; nothing if it plays that one already.
+// loop off (or on, over the whole of a sound that is one seamless loop) and no slices changed by hand; nothing if it plays
+// that one already.
 void setFactorySample (Song&, DeviceID, int index);
 
 // Sets its root key and fine from the sound it plays, as readSampleSettings() finds them, as one undo step ("Find Root

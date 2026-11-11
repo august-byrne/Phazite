@@ -14,12 +14,19 @@ namespace
 {
     using Lfo = dsp::SyncedLfo;
 
-    constexpr std::string_view modes[] = { "Classic", "Ensemble" };
+    constexpr std::string_view voiceCounts[] = { "1", "2", "3", "4", "5", "6", "7", "8" };
     constexpr std::string_view shapes[] = { "Sine", "Triangle" }; // as the phaser's and the flanger's
+
+    static_assert (std::size (voiceCounts) == (size_t) Chorus::mostVoices);
 
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
-        { .id = "mode", .name = "Mode", .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::choice, .choices = modes },
+        { .id = "voices",
+          .name = "Voices",
+          .maximum = (float) Chorus::mostVoices - 1.0f,
+          .defaultValue = 0.0f,
+          .unit = Unit::choice,
+          .choices = voiceCounts },
         { .id = "delay",
           .name = "Delay",
           .minimum = 1.0f,
@@ -37,6 +44,9 @@ namespace
           .choices = dsp::noteValueNames },
         { .id = "rate", .name = "Rate", .minimum = 0.05f, .maximum = 20.0f, .defaultValue = 0.5f, .unit = Unit::hertz, .midpoint = 1.0f },
         { .id = "shape", .name = "Shape", .maximum = 1.0f, .defaultValue = 1.0f, .unit = Unit::choice, .choices = shapes },
+        { .id = "shimmer", .name = "Shimmer", .defaultValue = 0.0f, .unit = Unit::percent },
+        { .id = "voicePhase", .name = "Voice Phase", .defaultValue = 1.0f, .unit = Unit::percent },
+        { .id = "spread", .name = "Spread", .defaultValue = 0.0f, .unit = Unit::percent },
         { .id = "feedback", .name = "Feedback", .maximum = 0.9f, .defaultValue = 0.0f, .unit = Unit::percent },
         { .id = "stereo", .name = "Stereo", .defaultValue = 1.0f, .unit = Unit::percent },
         { .id = "highCut",
@@ -56,35 +66,68 @@ namespace
         { .id = mixParameterID, .name = "Mix", .defaultValue = 0.5f, .unit = Unit::percent },
     };
 
-    // Ensemble's fast sine: ten times the rate, a whole number of times, so that it goes on smoothly as the slow LFO's cycle
-    // starts again; and a tenth as deep, so that it wavers the pitch about as much as the slow one does.
+    // Shimmer's fast sine: ten times the rate, a whole number of times, so that it goes on smoothly as the slow LFO's cycle
+    // starts again; and at its most a tenth as deep, so that it wavers the pitch about as much as the slow one does.
     constexpr double wobbleRatio = 10.0;
     constexpr float wobbleShare = 0.1f;
 
-    constexpr float lowestBass = 20.0f;          // Safe Bass's lowest: off
     constexpr float highestCut = 20000.0f;       // High Cut's highest: off
     constexpr double longestMilliseconds = 50.0; // the longest Delay, swept as far as Depth goes
-    constexpr double gainGlideSeconds = 0.01;    // a copy fading in or out as the mode changes
+    constexpr double fadeSeconds = 0.01;         // a set of copies fading in or out as their number changes
     constexpr float shortestSamples = 2.0f;      // the least a copy lags: what reading the line between samples needs
 
-    bool isEnsemble (std::span<const float> values)
+    int getCount (std::span<const float> values)
     {
-        return values[Chorus::mode] > 0.5f;
+        return std::clamp ((int) std::lround (values[Chorus::voices]) + 1, 1, Chorus::mostVoices);
     }
 
-    bool keepsBass (std::span<const float> values)
+    // How far apart in the LFO's cycle neighbouring copies are, of so many a side. At the most (Voice Phase at 100 %) the
+    // copies of both sides, the right side half a cycle ahead, are spread evenly round the cycle: a quarter of it apart with
+    // two a side, a third with three (the string machines' 120 degrees), three eighths with four, and so on toward a half,
+    // which also spreads an odd number evenly on each side by itself.
+    double getPhaseStep (std::span<const float> values, int count)
     {
-        return values[Chorus::safeBass] > lowestBass + 0.5f;
+        return (double) values[Chorus::voicePhase] * (double) (count - 1) / (2.0 * (double) count);
+    }
+
+    double getPhaseOf (std::span<const float> values, int count, double lfoPhase, int channel, int voice)
+    {
+        // The right side up to half a cycle ahead, the sides opposite.
+        const auto side = channel == 1 ? 0.5 * (double) values[Chorus::stereo] : 0.0;
+        return lfoPhase + side + (double) voice * getPhaseStep (values, count);
+    }
+
+    // A copy's part of the whole sweep (Spread): its middle, from -1 (the whole sweep's bottom) to 1 (its top), and how far
+    // it goes each way, as a part of the whole. As MultiChorus lays its voices out, its overlap 1 - Spread: each covers
+    // 1 / (1 + Spread (count - 1)) of the sweep, Spread of that further along than the copy before, so that at 100 % the
+    // parts lie end to end and at none every copy has the whole sweep.
+    struct Part
+    {
+        double middle = 0.0, reach = 1.0;
+    };
+
+    Part getPart (std::span<const float> values, int count, int voice)
+    {
+        const auto apart = std::clamp ((double) values[Chorus::spread], 0.0, 1.0);
+
+        if (apart <= 0.0 || count <= 1)
+            return {};
+
+        const auto reach = 1.0 / (1.0 + apart * (double) (count - 1));
+        return { (2.0 * (double) voice * apart + 1.0) * reach - 1.0, reach };
+    }
+
+    double getDelayOf (std::span<const float> values, int count, double phase, int voice)
+    {
+        const auto sweep = (double) Chorus::getSweep (values, phase);
+        const auto part = getPart (values, count, voice);
+        const auto at = part.reach < 1.0 ? part.middle + part.reach * sweep : sweep;
+        return (double) values[Chorus::delay] * (1.0 + (double) values[Chorus::depth] * at);
     }
 
     bool cutsHighs (std::span<const float> values)
     {
         return values[Chorus::highCut] < highestCut - 0.5f;
-    }
-
-    dsp::FilterCoefficients makeBassFilter (std::span<const float> values, double sampleRate)
-    {
-        return dsp::makeFilter (dsp::FilterShape::lowPass, values[Chorus::safeBass], sampleRate, 0.70710678);
     }
 
     dsp::FilterCoefficients makeCutFilter (std::span<const float> values, double sampleRate)
@@ -98,19 +141,19 @@ namespace
         return std::clamp ((double) values[Chorus::feedback], 0.0, 0.9);
     }
 
-    // Each copy's share of what comes out: as loud, with its copies together, as the sound that went in, over most of the
-    // spectrum (where they don't line up); and with feedback, its peaks rising by as many decibels as what lies between them
-    // falls.
-    float getOutGain (std::span<const float> values)
+    // Each copy's share of what comes out, of so many a side: as loud, with its copies together, as the sound that went in,
+    // over most of the spectrum (where they don't line up), however many they are; and with feedback, its peaks rising by as
+    // many decibels as what lies between them falls.
+    float getOutGain (std::span<const float> values, int count)
     {
         const auto feedback = getFeedback (values);
-        return (float) (std::sqrt (1.0 - feedback * feedback) / std::sqrt ((double) Chorus::getNumVoices (values)));
+        return (float) (std::sqrt (1.0 - feedback * feedback) / std::sqrt ((double) count));
     }
 
     // And of what goes back into the line: the copies' average, so that the loop never gains.
-    float getLoopGain (std::span<const float> values)
+    float getLoopGain (std::span<const float> values, int count)
     {
-        return (float) (getFeedback (values) / Chorus::getNumVoices (values));
+        return (float) (getFeedback (values) / count);
     }
 } // namespace
 
@@ -118,31 +161,36 @@ const DeviceInfo Chorus::info { .typeID = typeID, .name = "Chorus", .kind = Devi
 
 int Chorus::getNumVoices (std::span<const float> values)
 {
-    return isEnsemble (values) ? mostVoices : 1;
+    return getCount (values);
 }
 
 double Chorus::getVoicePhase (std::span<const float> values, double lfoPhase, int channel, int voice)
 {
-    // The right side up to half a cycle ahead, the sides opposite; each copy a third of a cycle after the one before (in
-    // Classic only the first plays, so that the mode's change fades the others in or out where they are).
-    const auto side = channel == 1 ? 0.5 * (double) values[stereo] : 0.0;
-    return lfoPhase + side + (double) voice / mostVoices;
+    return getPhaseOf (values, getCount (values), lfoPhase, channel, voice);
 }
 
 float Chorus::getSweep (std::span<const float> values, double phase)
 {
     const auto slow = Lfo::getValue (values[shape] > 0.5f ? Lfo::Shape::triangle : Lfo::Shape::sine, phase);
+    const auto share = wobbleShare * std::clamp (values[shimmer], 0.0f, 1.0f);
 
-    if (! isEnsemble (values))
+    if (share <= 0.0f)
         return slow;
 
     const auto fast = Lfo::getValue (Lfo::Shape::sine, phase * wobbleRatio);
-    return (slow + wobbleShare * fast) / (1.0f + wobbleShare);
+    return (slow + share * fast) / (1.0f + share);
 }
 
-double Chorus::getVoiceDelay (std::span<const float> values, double phase)
+double Chorus::getVoiceDelay (std::span<const float> values, double phase, int voice)
 {
-    return (double) values[delay] * (1.0 + (double) values[depth] * (double) getSweep (values, phase));
+    return getDelayOf (values, getCount (values), phase, voice);
+}
+
+Chorus::Reach Chorus::getVoiceReach (std::span<const float> values, int voice)
+{
+    const auto part = getPart (values, getCount (values), voice);
+    const auto middle = (double) values[delay], reach = (double) values[depth];
+    return { middle * (1.0 + reach * (part.middle - part.reach)), middle * (1.0 + reach * (part.middle + part.reach)) };
 }
 
 double Chorus::getMagnitude (std::span<const float> values, std::span<const double> milliseconds, double frequency, double rate)
@@ -165,23 +213,27 @@ double Chorus::getMagnitude (std::span<const float> values, std::span<const doub
     const auto cut = cutsHighs (values) ? dsp::getResponse (makeCutFilter (values, rate), frequency, rate) : std::complex<double> (1.0);
     const auto fedBack = getFeedback (values);
     const auto line = cut / (1.0 - fedBack * cut * average);
-    auto wet = (double) getOutGain (values) * (double) milliseconds.size() * average * line;
+    auto wet = (double) getOutGain (values, getCount (values)) * (double) milliseconds.size() * average * line;
 
-    // Safe Bass: below it, the sound as it was.
-    if (keepsBass (values))
+    // Safe Bass: the copies hear the band above it, the band below goes around them, and the sound its runner mixes in is
+    // the two added up, as process() plays them (SafeBass.h).
+    std::complex<double> dry (1.0);
+
+    if (SafeBass::isOn (values[safeBass]))
     {
-        const auto low = dsp::getResponse (makeBassFilter (values, rate), frequency, rate);
-        wet = low + (1.0 - low) * wet;
+        const auto bands = dsp::Crossover::getResponses (values[safeBass], frequency, rate);
+        wet = bands.low + bands.high * wet;
+        dry = bands.low + bands.high;
     }
 
     const auto mixed = (double) values[mix];
-    return std::abs ((1.0 - mixed) + mixed * wet);
+    return std::abs ((1.0 - mixed) * dry + mixed * wet);
 }
 
 void Chorus::prepare (double newSampleRate, int)
 {
     sampleRate = newSampleRate;
-    gainStep = (float) std::min (1.0, controlStep / (gainGlideSeconds * sampleRate));
+    fadeStep = (float) std::min (1.0, controlStep / (fadeSeconds * sampleRate));
     lfo.prepare (sampleRate);
 
     const auto longest = (int) std::ceil (longestMilliseconds * 0.001 * sampleRate) + 4;
@@ -190,6 +242,7 @@ void Chorus::prepare (double newSampleRate, int)
     for (auto& side : sides)
         side.line.prepare (longest);
 
+    bassSplit.prepare (sampleRate);
     reset();
 }
 
@@ -199,9 +252,9 @@ void Chorus::reset()
     {
         side.line.reset();
         side.cut.reset();
-        side.low.reset();
     }
 
+    bassSplit.reset();
     lfo.reset();
     fresh = true;
 }
@@ -215,11 +268,10 @@ void Chorus::process (const ProcessContext& block)
     if (numChannels <= 0)
         return;
 
-    const auto numVoices = getNumVoices (values);
-    const auto outWanted = getOutGain (values), loopWanted = getLoopGain (values);
-    const auto bassKept = keepsBass (values), cutting = cutsHighs (values);
-    const auto bassFilter = makeBassFilter (values, sampleRate);
+    const auto wantedCount = getCount (values);
+    const auto cutting = cutsHighs (values);
     const auto cutFilter = makeCutFilter (values, sampleRate);
+    bassSplit.startBlock (values[safeBass]);
 
     // How long it rings: its longest copy, gone round as often as its feedback takes to fall by 60 dB.
     const auto fedBack = getFeedback (values);
@@ -227,74 +279,133 @@ void Chorus::process (const ProcessContext& block)
     const auto rounds = fedBack > 0.001 ? 3.0 / std::log10 (1.0 / fedBack) : 0.0;
     tailSeconds.store (longest * (1.0 + rounds) + 0.01, std::memory_order_relaxed);
 
-    lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteValueBeats (values[division]), block.tempo, block.isPlaying, block.beat);
+    lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteLength (values[division]), block.tempo, block.barLength, block.isPlaying,
+                    block.beat, block.bars);
 
     for (int start = 0; start < block.numSamples; start += controlStep)
     {
         const auto length = std::min (controlStep, block.numSamples - start);
         const auto lfoPhase = lfo.getPhase();
+        const auto splitting = bassSplit.startStretch (length);
+
+        // Another number of copies: a set of that many fades in where they are, as the set that played fades out where it
+        // was. One change at a time: the next waits until the set before has faded out.
+        auto started = false; // the front set's copies start where they are, rather than gliding there
+
+        if (fresh)
+        {
+            front = 0;
+            sets[0] = { .count = wantedCount, .fade = 1.0f };
+            sets[1] = {};
+        }
+        else if (wantedCount != sets[(size_t) front].count && sets[(size_t) (1 - front)].count == 0)
+        {
+            front = 1 - front;
+            sets[(size_t) front].count = wantedCount;
+            started = true;
+        }
+
+        // Each set's copies' gains, gliding over the step to where its fade and the feedback put them: a set's copies
+        // together send back the feedback's share, and two sets, while one gives way to the other, no more than one does.
+        std::array<float, numSets> outFrom {}, loopFrom {}, outStep {}, loopStep {};
+
+        for (size_t s = 0; s < (size_t) numSets; ++s)
+        {
+            auto& set = sets[s];
+
+            if (set.count == 0)
+                continue;
+
+            if (! fresh)
+                set.fade = std::clamp (set.fade + ((int) s == front ? fadeStep : -fadeStep), 0.0f, 1.0f);
+
+            const auto outTo = set.fade * getOutGain (values, set.count), loopTo = set.fade * getLoopGain (values, set.count);
+            outFrom[s] = fresh ? outTo : set.outGain;
+            loopFrom[s] = fresh ? loopTo : set.loopGain;
+            outStep[s] = (outTo - outFrom[s]) / (float) length;
+            loopStep[s] = (loopTo - loopFrom[s]) / (float) length;
+            set.outGain = outTo;
+            set.loopGain = loopTo;
+        }
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
             auto& side = sides[(size_t) channel];
-            std::array<float, mostVoices> target {};
-            auto playing = 0; // the copies that play or fade, from the first
+            std::array<std::array<float, mostVoices>, numSets> target {};
 
-            for (int voice = 0; voice < mostVoices; ++voice)
+            for (size_t s = 0; s < (size_t) numSets; ++s)
             {
-                const auto v = (size_t) voice;
-                const auto milliseconds = getVoiceDelay (values, getVoicePhase (values, lfoPhase, channel, voice));
-                target[v] = std::clamp ((float) (milliseconds * 0.001 * sampleRate), shortestSamples, longestSamples);
-                const auto on = voice < numVoices;
-                const auto outTarget = on ? outWanted : 0.0f, loopTarget = on ? loopWanted : 0.0f;
+                const auto count = sets[s].count;
+                const auto isFront = (int) s == front;
 
-                if (fresh)
+                for (int voice = 0; voice < count; ++voice)
                 {
-                    side.now[v] = target[v];
-                    side.outGain[v] = outTarget;
-                    side.loopGain[v] = loopTarget;
+                    const auto v = (size_t) voice;
+                    const auto milliseconds = getDelayOf (values, count, getPhaseOf (values, count, lfoPhase, channel, voice), voice);
+                    target[s][v] = std::clamp ((float) (milliseconds * 0.001 * sampleRate), shortestSamples, longestSamples);
+
+                    if (fresh || (started && isFront))
+                        side.now[s][v] = target[s][v];
+
+                    side.step[s][v] = (target[s][v] - side.now[s][v]) / (float) length;
+
+                    if (start == 0 && isFront)
+                        delays[(size_t) channel][v].set ((float) milliseconds);
                 }
-                else
-                {
-                    side.outGain[v] += std::clamp (outTarget - side.outGain[v], -gainStep, gainStep);
-                    side.loopGain[v] += std::clamp (loopTarget - side.loopGain[v], -gainStep, gainStep);
-                }
-
-                side.step[v] = (target[v] - side.now[v]) / (float) length;
-
-                if (side.outGain[v] > 0.0f || side.loopGain[v] > 0.0f)
-                    playing = voice + 1;
-
-                if (start == 0)
-                    delays[(size_t) channel][v].set ((float) milliseconds);
             }
 
             auto* samples = block.channels[channel] + start;
+            auto* dry = block.dry != nullptr ? block.dry[channel] + start : nullptr;
+            auto outGain = outFrom, loopGain = loopFrom;
 
             for (int i = 0; i < length; ++i)
             {
-                // Safe Bass: what is below it goes around the copies, and back in after them.
+                // Safe Bass: the band below it goes around the copies, and back in after them; the sound the runner mixes
+                // in is split and added up again, to stay in phase with the two (SafeBass.h).
                 const auto x = samples[i];
-                const auto low = bassKept ? side.low.process (x, bassFilter) : 0.0f;
+                auto in = x, around = 0.0f;
+
+                if (splitting)
+                {
+                    const auto parts = bassSplit.split (channel, x, i);
+                    in = parts.through;
+                    around = parts.around;
+
+                    if (dry != nullptr)
+                        dry[i] = parts.dry;
+                }
+
                 auto out = 0.0f, back = 0.0f;
 
                 // Each copy a delay behind what goes in now (one sample less, from the last one in).
-                for (int voice = 0; voice < playing; ++voice)
+                for (size_t s = 0; s < (size_t) numSets; ++s)
                 {
-                    const auto v = (size_t) voice;
-                    side.now[v] += side.step[v];
-                    const auto copy = side.line.read (side.now[v] - 1.0f);
-                    out += side.outGain[v] * copy;
-                    back += side.loopGain[v] * copy;
+                    const auto count = (size_t) sets[s].count;
+                    outGain[s] += outStep[s];
+                    loopGain[s] += loopStep[s];
+
+                    for (size_t v = 0; v < count; ++v)
+                    {
+                        side.now[s][v] += side.step[s][v];
+                        const auto copy = side.line.read (side.now[s][v] - 1.0f);
+                        out += outGain[s] * copy;
+                        back += loopGain[s] * copy;
+                    }
                 }
 
-                const auto in = x - low + back;
-                side.line.push (cutting ? side.cut.process (in, cutFilter) : in);
-                samples[i] = low + out;
+                const auto line = in + back;
+                side.line.push (cutting ? side.cut.process (line, cutFilter) : line);
+                samples[i] = around + out;
             }
 
-            side.now = target;
+            for (size_t s = 0; s < (size_t) numSets; ++s)
+                for (size_t v = 0; v < (size_t) sets[s].count; ++v)
+                    side.now[s][v] = target[s][v];
         }
+
+        // A set that has faded out rests.
+        if (auto& behind = sets[(size_t) (1 - front)]; behind.count != 0 && behind.fade <= 0.0f)
+            behind = {};
 
         fresh = false;
         lfo.advance (length);

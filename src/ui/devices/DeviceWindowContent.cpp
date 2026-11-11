@@ -6,8 +6,18 @@
 
 namespace phazite::ui
 {
+DeviceWindowContent::DeviceWindowContent (ProjectContext& context, DeviceID id)
+    : DeviceWindowContent (createDeviceEditor (context, id))
+{
+}
+
 DeviceWindowContent::DeviceWindowContent (const DeviceHandle& device)
-    : editor (createDeviceEditor (device))
+    : DeviceWindowContent (createDeviceEditor (device))
+{
+}
+
+DeviceWindowContent::DeviceWindowContent (std::unique_ptr<juce::Component> shownEditor)
+    : editor (std::move (shownEditor))
 {
     setTitle ("Device");
     view.setTitle ("Controls"); // what a screen reader says as the keys go to it, to scroll it

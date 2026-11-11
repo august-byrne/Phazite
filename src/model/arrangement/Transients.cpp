@@ -17,7 +17,8 @@ Transients::~Transients()
 {
     signalThreadShouldExit();
     wake.signal();
-    stopThread (30000); // a long file's analysis finishes first
+    // A long file's analysis finishes first: never ended by force, which can leave a lock it held held for ever.
+    stopThread (-1);
 }
 
 juce::String Transients::getKey (const juce::File& file)

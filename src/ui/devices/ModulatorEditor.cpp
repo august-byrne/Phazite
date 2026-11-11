@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModulatorEditor.h"
 #include "DeviceGraph.h"
+#include "GraphDot.h"
 #include "devices/dsp/Math.h"
 #include "model/commands/SongGesture.h"
 #include "ui/theme/LookAndFeel.h"
@@ -89,7 +90,7 @@ struct ModulatorEditor::Scope : public juce::Component
 
 //==============================================================================
 // A step sequencer's steps, as bars from the middle (each from -1 to 1): a click sets the step under it, and a drag each
-// step it passes, as one undo step.
+// step it passes, as one undo step, each as high as the pointer: the crosshair over them, the step under it lit.
 struct ModulatorEditor::Steps : public juce::Component
 {
     Steps (ProjectContext& c, ModulatorID m)
@@ -97,7 +98,8 @@ struct ModulatorEditor::Steps : public juce::Component
           modulator (m)
     {
         setTitle ("Steps");
-        setDescription ("Click or drag to set the steps.");
+        setDescription ("Click a step to set it as high as the pointer, or drag across the steps to draw them.");
+        setMouseCursor (juce::MouseCursor::CrosshairCursor);
     }
 
     void refresh()
@@ -129,30 +131,54 @@ struct ModulatorEditor::Steps : public juce::Component
         {
             const auto step = getStepArea (i).reduced (1.0f, 0.0f);
             const auto y = valueToY (area, values[(size_t) i], true);
+            const auto bar = juce::Rectangle<float>::leftTopRightBottom (step.getX(), std::min (y, middle), step.getRight(),
+                                                                         std::max (y, middle) + 1.0f);
             g.setColour (p.modulation);
-            g.fillRect (juce::Rectangle<float>::leftTopRightBottom (step.getX(), std::min (y, middle), step.getRight(),
-                                                                    std::max (y, middle) + 1.0f));
+            g.fillRect (bar);
+
+            if (i == hovered)
+                paintLitRing (g, p, bar, 0.0f);
         }
 
         g.setColour (p.border.withAlpha (GraphTint::zeroLine));
         g.drawHorizontalLine (juce::roundToInt (middle), area.getX(), area.getRight());
     }
 
+    // The step under a place across, or -1.
+    int findStep (float x) const
+    {
+        for (int i = 0; i < (int) values.size(); ++i)
+            if (getStepArea (i).getHorizontalRange().contains (x))
+                return i;
+
+        return -1;
+    }
+
     void setAt (juce::Point<float> position)
     {
-        const auto area = getLocalBounds().toFloat().reduced (1.0f);
+        const auto i = findStep (position.x);
+        setHovered (i);
 
-        for (int i = 0; i < (int) values.size(); ++i)
+        if (i < 0)
+            return;
+
+        const auto area = getLocalBounds().toFloat().reduced (1.0f);
+        const auto value = 1.0f - 2.0f * juce::jlimit (0.0f, 1.0f, (position.y - area.getY()) / std::max (1.0f, area.getHeight()));
+        setStep (context, modulator, i, value);
+        refresh();
+    }
+
+    void setHovered (int step)
+    {
+        if (step != hovered)
         {
-            if (getStepArea (i).getHorizontalRange().contains (position.x))
-            {
-                const auto value = 1.0f - 2.0f * juce::jlimit (0.0f, 1.0f, (position.y - area.getY()) / std::max (1.0f, area.getHeight()));
-                setStep (context, modulator, i, value);
-                refresh();
-                return;
-            }
+            hovered = step;
+            repaint();
         }
     }
+
+    void mouseMove (const juce::MouseEvent& e) override { setHovered (findStep (e.position.x)); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered (-1); }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
@@ -167,6 +193,7 @@ struct ModulatorEditor::Steps : public juce::Component
     const ModulatorID modulator;
     std::vector<float> values;
     std::unique_ptr<SongGesture> gesture; // a drag's one undo step
+    int hovered = -1;                     // the step under the pointer, lit
 };
 
 //==============================================================================

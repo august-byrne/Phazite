@@ -11,6 +11,8 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/playback/internal/PlaybackSession.h"
+#include "model/transport/internal/Playback.h"
+#include "model/transport/internal/Tempo.h"
 
 namespace phazite
 {
@@ -80,6 +82,23 @@ SidechainChoice DeviceHandle::getSidechainSource() const
 {
     auto* song = songOf (impl);
     return song != nullptr ? describeSidechainSource (*song, impl->id) : SidechainChoice();
+}
+
+DeviceHandle::SongTime DeviceHandle::getSongTime() const
+{
+    auto* song = songOf (impl);
+
+    if (song == nullptr)
+        return {};
+
+    const auto playhead = getPlayheadBeat (*song);
+    const auto bars = getBars (*song);
+    return { .beat = playhead.inBeats(),
+             .playing = isSongPlaying (*song),
+             .bpm = getTempoAt (*song, playhead),
+             .barStart = bars.getBarStart (bars.getBarAt (playhead)).inBeats(),
+             .barLength = bars.getBarLength (playhead).inBeats(),
+             .beatLength = bars.getBeatLength (playhead).inBeats() };
 }
 
 juce::String DeviceHandle::getPadName (int pad, int layer) const

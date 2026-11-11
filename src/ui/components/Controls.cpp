@@ -660,6 +660,16 @@ NumberField::NumberField (const juce::String& title, double minimum, double maxi
     setPopupDisplayEnabled (false, false, nullptr);  // the field shows its value itself
 }
 
+void NumberField::setStep (double newStep)
+{
+    if (newStep <= 0.0 || juce::exactlyEqual (newStep, step))
+        return;
+
+    step = newStep;
+    setRange (getMinimum(), getMaximum(), step / 100.0);
+    setMouseDragSensitivity (juce::roundToInt ((getMaximum() - getMinimum()) / step) * pixelsPerStep);
+}
+
 double NumberField::snapValue (double attemptedValue, DragMode dragMode)
 {
     if (dragMode == notDragging)

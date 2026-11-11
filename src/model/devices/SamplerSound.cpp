@@ -115,11 +115,14 @@ namespace
         return values;
     }
 
+    // The sound's slices at the song's tempo, a bar of them as long as the bar where playback starts, where Slices to Clip
+    // writes them.
     Sampler::Slices findSlices (const Song& song, DeviceID id, const Sampler::Sound& sound)
     {
         const auto values = getValues (song, id);
         const auto manual = readManualSlices (findSamplerSounds (song, id));
-        return Sampler::getSlices (sound, &manual, values, getTempo (song));
+        const auto barLength = getBars (song).getBarLength (getPlayStartBeat (song)).inBeats();
+        return Sampler::getSlices (sound, &manual, values, getTempo (song), barLength);
     }
 
     // A slice of the sound, counted from 1, and where it starts as a part of the sound's length; none for one that isn't.
@@ -277,7 +280,7 @@ void setFactorySample (Song& song, DeviceID id, int index)
     const UndoStep step (song, "Put " + name + " on the Sampler");
     setDeviceSound (song, id, schema::samplerSampleFile, {});
     setDeviceSound (song, id, schema::samplerSample, index == 0 ? juce::String() : name);
-    setSoundSettings (song, id, devices::getFactorySampleRoot (index), 0.0f, {});
+    setSoundSettings (song, id, devices::getFactorySampleRoot (index), 0.0f, devices::getFactorySampleLoop (index));
 }
 
 void findRootKey (Song& song, DeviceID id)
@@ -451,17 +454,25 @@ ClipID writeSliceNotes (Song& song, DeviceID id, Selection* selection)
     const auto beatsPerSample = sound->beats > 0.0 ? sound->beats / frames : getTempo (song) / 60.0 / sound->sampleRate;
     const auto first = slices.bounds[0];
     const auto beatOf = [&] (int sample) { return (double) (sample - first) * beatsPerSample; };
-    const auto length = std::max (4.0, std::ceil (beatOf (slices.bounds[(size_t) slices.count]) / 4.0) * 4.0); // whole bars
 
-    // At the play start, or after the track's last clip, on a bar, where one is in the way.
+    // Whole bars, as long as the time signature makes them, at the play start, or after the track's last clip, on a bar,
+    // where one is in the way.
+    const auto bars = getBars (song);
     auto start = getPlayStartBeat (song).inBeats();
+    const auto bar = bars.getBarLength (BeatPosition::fromBeats (start)).inBeats();
+    const auto length = std::max (bar, std::ceil (beatOf (slices.bounds[(size_t) slices.count]) / bar) * bar);
     const auto clips = getClips (song, track);
     const auto inTheWay = [&] (ClipID clip)
     { return getClipRange (song, clip).overlaps (BeatRange (BeatPosition::fromBeats (start), BeatDuration::fromBeats (length))); };
 
     if (std::any_of (clips.begin(), clips.end(), inTheWay))
         for (const auto& clip : clips)
-            start = std::max (start, std::ceil (getClipRange (song, clip).getEnd().inBeats() / 4.0) * 4.0);
+        {
+            const auto end = getClipRange (song, clip).getEnd();
+            const auto endBar = bars.getBarAt (end);
+            const auto barLine = bars.getBarStart (endBar) >= end ? bars.getBarStart (endBar) : bars.getBarStart (endBar + 1);
+            start = std::max (start, barLine.inBeats());
+        }
 
     const UndoStep step (song, "Slices to Clip");
     const auto clip = insertMidiClip (song, track, BeatRange (BeatPosition::fromBeats (start), BeatDuration::fromBeats (length)), selection,

@@ -2,18 +2,25 @@
 // Phazite's sampler (roadmap step 4.6; docs/design.md, section 9): one sound played across the keys, as Ableton's Simpler,
 // Logic's Quick Sampler and FL Studio's Sampler and Slicex play one. Three modes:
 // - Classic: each note plays the sound at its pitch against the root key, from its start marker to its end, for as long as
-//   it is held, through an amp envelope; a loop, crossfaded so that its seam doesn't click, holds it on.
+//   it is held, through an amp envelope, whose times can follow the key (Key Time, as the FM synth's: shorter up the keys
+//   from the root, as a plucked string's are); a loop, crossfaded so that its seam doesn't click, holds it on.
 // - One-Shot: each note plays it from its start to its end, however short the note (Trigger) or while it is held (Gate),
 //   with a fade in and a fade out, as a drum pad does.
 // - Slice: the sound cut where its hits begin (by its transients, a sensitivity choosing how many), into beats, into equal
 //   parts, or only where the user put slices; slices put by hand stay whatever slices it, and those it found that were
 //   taken away stay away. Each slice is on a note of its own from note 36 up, played at its own pitch, with the fades,
 //   triggered or gated, to its end or on through the sound, each cutting off the one before unless choke is off.
-// Then a resonant filter of any of the types of dsp/MultimodeFilter.h with an envelope of its own, one LFO, and 16 voices,
-// or one in mono mode, legato, gliding between the keys held without starting the sound again, as an 808 played as a
-// bass line glides. The sound reads between its samples by a windowed sinc whose cutoff follows its pitch
-// (dsp/SincReader.h), forward or reversed. The model loads the sound, with where its hits begin found as it loads
-// (SampleAnalysis.h), and the sampler swaps it in without the audio thread ever waiting or freeing memory.
+// A note can start at a random place in the sound (Start Random, as a wavetable synth's random phase: at full, anywhere in
+// it), so that no two notes of a steady sound are alike; the places come from a fixed seed, so it renders the same every
+// time. Then a resonant filter of any of the types of dsp/MultimodeFilter.h, which softer notes can close (Filter Velocity,
+// as the synth's), with an envelope of its own, one LFO, and 16 voices, or one in mono mode, legato, gliding between the
+// keys held without starting the sound again, as an 808 played as a bass line glides. In poly mode every note takes a voice
+// of its own, a key played again too: what still rings of it rings on, a release, a one-shot or a slice that choke leaves
+// playing, as the synth's does (Synth.h) and the drum sampler's pads do. The sound reads between its samples by a windowed
+// sinc whose cutoff follows its pitch (dsp/SincReader.h), forward or reversed; a sound that is one seamless loop (a factory
+// sound made from its spectrum, FactorySamples.h) reads on from its end into its start. The model loads the sound, with
+// where its hits begin found as it loads (SampleAnalysis.h), and the sampler swaps it in without the audio thread ever
+// waiting or freeing memory.
 #pragma once
 
 #include "SampleAnalysis.h"
@@ -23,6 +30,7 @@
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/MultimodeFilter.h"
 #include "devices/dsp/Oscillators.h"
+#include "devices/dsp/Random.h"
 #include "devices/dsp/SincReader.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -51,6 +59,7 @@ public:
         transpose,
         fine,
         start,
+        startRandom, // how far past the start marker a note may start, at random: at full, anywhere in what it plays
         end,
         reverse,
         loopOn,
@@ -73,12 +82,14 @@ public:
         attackCurve, // how each stage bends (dsp::Adsr::setCurves())
         decayCurve,
         releaseCurve,
+        keyTime, // how much shorter the amp envelope's times are each octave up from the root (longer below it): at full, half
         filterOn,
         filterType, // a dsp::FilterMode
         cutoff,
         resonance,
         filterSlope,
         keyTracking,
+        filterVelocity, // how far a softer note's cutoff falls: at full, four octaves at velocity 0
         filterEnvelope,
         filterEnvelopeOn,
         filterAttack,
@@ -127,7 +138,9 @@ public:
     // A sound it plays, at its own sample rate, in mono or stereo, with where its hits begin (SampleAnalysis.h) and, for a
     // loop that says, how many beats it lasts (0 for one that doesn't); and the sound an octave, two and three octaves down,
     // each at half the rate of the one before (dsp::SincReader::halve()), which a voice pitched up an octave or more reads,
-    // stepping over fewer samples for the same sound (makeOctaves()).
+    // stepping over fewer samples for the same sound (makeOctaves()). A seamless sound is one loop, which goes on from its
+    // end into its start (dsp/SpectralLoop.h makes such): what reads between its samples near either end reads round, so
+    // that a loop over the whole of it has no seam at any pitch. Its length is a multiple of 2^numOctaves samples.
     static constexpr int numOctaves = 3;
 
     struct Sound
@@ -136,11 +149,12 @@ public:
         double sampleRate = 48000.0;
         std::vector<Onset> onsets;
         double beats = 0.0;
+        bool seamless = false;
         std::array<juce::AudioBuffer<float>, numOctaves> octaves;
     };
 
-    // Makes a sound's octaves from its audio, before anything plays it. Not on the audio thread: a minute of stereo sound
-    // takes about 90 ms, less than half the time detectOnsets() takes.
+    // Makes a sound's octaves from its audio, before anything plays it: a seamless sound's read round its ends, as it plays.
+    // Not on the audio thread: a minute of stereo sound takes about 90 ms, less than half the time detectOnsets() takes.
     static void makeOctaves (Sound&);
 
     // The slices the user put in by hand, and where the slices it found were taken away, as parts of the sound's length from
@@ -161,10 +175,11 @@ public:
 
     // The slices of what a sound plays (from its start marker to its end) for the parameters' values: at the transients as
     // strong as the sensitivity takes, each beat division at the sound's own tempo (or the song's, for a sound that doesn't
-    // say how many beats it lasts), in equal parts or none, less those taken away, with those put in by hand; at most
-    // maxSlices, the first at the start. Two closer than samplesApart are one. Real-time safe: the audio thread finds a
-    // note's slice with it, the editor draws them and the model edits and writes them.
-    static Slices getSlices (const Sound&, const ManualSlices*, std::span<const float> parameters, double tempo) noexcept;
+    // say how many beats it lasts), a bar's as long as the song's bar (barLength, in beats), in equal parts or none, less those
+    // taken away, with those put in by hand; at most maxSlices, the first at the start. Two closer than samplesApart are
+    // one. Real-time safe: the audio thread finds a note's slice with it, the editor draws them and the model edits and
+    // writes them.
+    static Slices getSlices (const Sound&, const ManualSlices*, std::span<const float> parameters, double tempo, double barLength) noexcept;
     static constexpr int samplesApart = 64;
 
     Sampler();
@@ -199,7 +214,7 @@ public:
     struct Shown
     {
         std::array<LiveValue, maxVoices> positions;
-        LiveValue amp, filterEnvelope, cutoff, slice { -1.0f }, lfoPhase, tempo { 120.0f };
+        LiveValue amp, filterEnvelope, cutoff, slice { -1.0f }, lfoPhase, tempo { 120.0f }, barLength { 4.0f };
 
         Shown()
         {
@@ -237,11 +252,13 @@ private:
         // start to its end, the loop between loopStart and loopEnd, its seam crossfaded over fadeLength before loopEnd.
         bool reversed = false, loops = false;
         double position = 0.0, regionStart = 0.0, regionEnd = 0.0;
+        double startAt = 0.0; // where its note began: regionStart, or past it at random (startRandom)
         double loopStartAt = 0.0, loopEndAt = 0.0, fadeLength = 0.0;
         double step = 1.0; // samples of its sound for each one it plays, set each control step
         int fadeIn = 0;    // samples of a short fade at a start in the middle of the sound, so that it doesn't click
 
-        float velocityGain = 1.0f;
+        float velocity = 1.0f, velocityGain = 1.0f;
+        float timeScale = 1.0f;              // its amp envelope's times, against as set, by its key (keyTime)
         float pitch = 60.0f, target = 60.0f; // in semitones, gliding to the target
         float slidePerSample = 0.0f;         // while it slides there evenly (a slide or portamento note): semitones a sample
         std::uint64_t started = 0;           // when it began, so that the oldest is taken first
@@ -275,10 +292,11 @@ private:
     float lastNote = -1.0f; // where a new note glides from
     float bend = 0.0f;
     bool pedalDown = false, songPlaying = false;
-    int shownMode = -1;       // the mode and the voices' mode as the last block played
-    double songTempo = 120.0; // as the block being processed began
+    int shownMode = -1;                            // the mode and the voices' mode as the last block played
+    double songTempo = 120.0, songBarLength = 4.0; // as the block being processed began, a bar's length in beats
     dsp::Lfo lfo;
     dsp::SincReader reader;
+    dsp::Random startPlaces; // where notes start at random (startRandom), the same every time
     std::atomic<float> tailSeconds { 0.05f };
     std::atomic<int> activeVoices { 0 };
     Shown shown;
@@ -310,11 +328,14 @@ private:
     void startNote (int note, float velocity, std::span<const float> parameters, bool portamento = false);
     void startSlice (int note, float velocity, std::span<const float> parameters);
     void placeVoice (Voice&, const Sound&, int from, int to, std::span<const float> parameters, bool loops) const noexcept;
+    void moveStart (Voice&, std::span<const float> parameters) noexcept;
+    void setAmp (Voice&, std::span<const float> parameters) noexcept;
     void startVoice (Voice&, float velocity, std::span<const float> parameters);
     void slideTo (int note, float seconds);
     void stopNote (int note, std::span<const float> parameters);
     void releaseVoice (Voice&);
-    Voice& findVoiceFor (int note);
+    void letGoOf (int note); // the voice its key or the pedal still holds, if any, lets go as its key coming up would
+    Voice& findVoice();      // a voice for a new note: a free one, or one to take (stealVoice())
     void stealVoice (Voice&);
     void readAt (const Voice&, double position, float& left, float& right) const noexcept;
     void render (float* left, float* right, int numSamples, std::span<const float> parameters);

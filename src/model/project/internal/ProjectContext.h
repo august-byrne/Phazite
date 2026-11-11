@@ -75,4 +75,10 @@ struct DeviceWindowHost
 
 void setDeviceWindows (ProjectContext&, DeviceWindowHost*);
 DeviceWindowHost* getDeviceWindows (const ProjectContext&);
+
+// What tells the user of a problem with the open song that the model can't show itself, a title and a message (a take
+// kept in time with silence where its sound was lost: model/transport/internal/Take.h): the app's, which shows it as an
+// error (src/app/ProjectSession.h), and which it sets as it starts; without one (as in most tests), nothing is said.
+using ProblemReporter = std::function<void (const juce::String& title, const juce::String& message)>;
+void setProblemReporter (ProjectContext&, ProblemReporter);
 } // namespace phazite

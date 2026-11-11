@@ -66,6 +66,8 @@ const char* getUnitName (phazite::devices::Unit unit)
             return "choice";
         case Unit::toggle:
             return "toggle";
+        case Unit::degrees:
+            return "degrees";
     }
 
     return "none";

@@ -21,12 +21,12 @@ class Delay final : public Processor
 {
 public:
     static constexpr const char* typeID = "phaziteDelay";
-    static constexpr double maximumSeconds = 5.0; // the longest echo: a bar at 48 BPM
+    static constexpr double maximumSeconds = 5.0; // the longest echo: a bar of 4/4 at 48 BPM
 
     enum Parameter
     {
         sync, // the time is a note value at the song's tempo (on) or milliseconds (off)
-        time, // the note value
+        time, // the note value, a bar the song's (as long as its time signature makes it)
         milliseconds,
         feedback,
         pingPong,
@@ -37,12 +37,14 @@ public:
 
     static const DeviceInfo info;
 
-    // How long the echo takes for the parameters' values at a tempo (in beats per minute, a beat being a quarter note):
-    // the note value's length, or the milliseconds; at most maximumSeconds.
-    static double getDelaySeconds (std::span<const float> parameters, double tempo);
+    // How long the echo takes for the parameters' values at a tempo (in beats per minute, a beat being a quarter note) and a
+    // bar so many beats long: the note value's length, or the milliseconds; at most maximumSeconds.
+    static double getDelaySeconds (std::span<const float> parameters, double tempo, double barLength);
 
-    // The tempo it last played at, in beats per minute (devices/core/LiveValue.h), for its editor's note values.
+    // The tempo it last played at, in beats per minute, and the length of the song's bar there, in beats (devices/core/
+    // LiveValue.h), for its editor's note values.
     const LiveValue& getShownTempo() const noexcept { return shownTempo; }
+    const LiveValue& getShownBarLength() const noexcept { return shownBarLength; }
 
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
@@ -57,6 +59,6 @@ private:
     std::array<dsp::DelayLine, 2> lines;
     std::array<dsp::Filter, 2> lowCuts {}, highCuts {};
     std::atomic<double> tailSeconds { 2.0 };
-    LiveValue shownTempo { 120.0f };
+    LiveValue shownTempo { 120.0f }, shownBarLength { 4.0f };
 };
 } // namespace phazite::devices

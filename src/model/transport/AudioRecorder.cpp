@@ -11,6 +11,7 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace phazite
 {
@@ -212,31 +213,32 @@ juce::File AudioRecorder::getTakeFile (TrackID track) const
             return file;
 }
 
-void placeTake (Song& song, TrackID track, const juce::File& file, const TakePlace& take)
+std::vector<juce::Range<std::int64_t>> placeTake (Song& song, TrackID track, const juce::File& file, const TakePlace& take)
 {
     const auto rate = take.sampleRate;
 
     if (const auto state = findTrackState (song, track); ! state.hasType (schema::TRACK) || isFolderState (state))
     {
         file.deleteFile();
-        return;
+        return {};
     }
 
-    // Where in the song, as if nothing looped, each frame of the file was played; and the frame played at a time.
-    const auto timeOf = [&] (double frame) { return take.firstFrame + frame / rate; };
-    const auto frameOf = [&] (double seconds) { return (seconds - take.firstFrame) * rate; };
+    // What the file holds of the recording, in the song's samples as if nothing looped: from where recording started (what
+    // came in first was played earlier, which the input brought in late, after the file's lead of silence) to where it
+    // stopped, or the file's end; and a sample of the song, or a stretch of them, in seconds.
+    const auto cameIn = take.firstFrame + take.lead; // where what came in first was played
+    const auto first = std::max (take.start, cameIn);
+    const auto last = std::min (take.stop, take.firstFrame + take.frames);
+    const auto seconds = [rate] (std::int64_t samples) { return (double) samples / rate; };
 
-    const auto from = std::max (take.start, timeOf (0.0));
-    const auto to = std::min (take.stop, timeOf ((double) take.frames));
-
-    if (take.frames <= 0 || to - from < shortestRecording)
+    if (take.frames <= take.lead || seconds (last - first) < shortestRecording)
     {
         file.deleteFile();
-        return;
+        return {};
     }
 
     const auto name = getTrackName (song, track);
-    const auto beatsOf = [&song] (double seconds) { return toBeats (song, seconds); };
+    const auto beatsOf = [&song] (double time) { return toBeats (song, time); };
 
     // A clip of the song's playing the file from a time in it, as it was recorded: following the song's tempo from the tempo it
     // was played at, as Ableton Live warps a recording, while the tempo holds steady over it, so that it keeps to its beats
@@ -253,17 +255,22 @@ void placeTake (Song& song, TrackID track, const juce::File& file, const TakePla
         return clip;
     };
 
+    // The clip between two samples of the song, playing the file from what was played at a moment, as if nothing looped.
+    const auto placeBetween = [&] (std::int64_t clipStart, std::int64_t clipEnd, std::int64_t playedAt)
+    { return place (seconds (clipStart), seconds (clipEnd), seconds (playedAt - take.firstFrame)); };
+
     // Punched in: only what falls in the range, in place of what was there, cross-fading at the edges: the new clip
     // reaches half a fade past each, fading in and out over what was there, which fades out and in where it is cut.
     if (take.punch.has_value())
     {
-        const auto in = std::max (from, take.punch->getStart());
-        const auto out = std::min (to, take.punch->getEnd());
+        const auto from = seconds (first), to = seconds (last);
+        const auto in = std::max (from, seconds (take.punch->getStart()));
+        const auto out = std::min (to, seconds (take.punch->getEnd()));
 
         if (out - in < shortestRecording)
         {
             file.deleteFile();
-            return;
+            return {};
         }
 
         const auto half = crossfadeSeconds / 2.0;
@@ -284,62 +291,62 @@ void placeTake (Song& song, TrackID track, const juce::File& file, const TakePla
                 setClipFade (song, getClipID (clipState), true, crossfadeSeconds);
         }
 
-        if (const auto clip = place (clipStart, clipEnd, frameOf (clipStart) / rate); clip.isValid())
+        if (const auto clip = place (clipStart, clipEnd, clipStart - seconds (take.firstFrame)); clip.isValid())
         {
             setClipFade (song, clip, true, crossfadeSeconds);
             setClipFade (song, clip, false, crossfadeSeconds);
+            return { juce::Range<std::int64_t> (std::llround (clipStart * rate), std::llround (clipEnd * rate)) };
         }
 
-        return;
+        return {};
     }
 
-    // Round a looped range: a take for each time round that began within the recording, in one clip over the range, the
-    // last whole one playing (or the last one, if none was whole). Once round or less, a clip of what was played.
-    if (take.loop.has_value() && take.loop->getLength() > 0.0)
+    std::vector<juce::Range<std::int64_t>> kept;
+
+    // Round a looped range, once recording has gone round it (TakeLoop says when): what was played before the range, in a
+    // clip of its own where it was played (unless it is too short to keep); and a take for each time round, from the first,
+    // in one clip over the range, the last whole one playing (or the last one, if none was whole). The takes lie one after
+    // another in the file, each as long as the range, the first from the range's start (Take.h: a file starts with silence
+    // there, for a recording started within the range). A time round is whole if the file holds what was played over all
+    // of it, so the first one of a recording started within the range isn't.
+    if (const auto& loop = take.loop; loop.has_value() && loop->getLength() > 0)
     {
-        const auto loopStart = take.loop->getStart(), length = take.loop->getLength();
-        const auto firstLoopStart = take.firstLoopStart; // where the first time round began
-        const auto passOf = [&] (double seconds) { return (int) std::floor ((seconds - firstLoopStart) / length + 1.0e-9); };
-
-        if (passOf (to - 1.0e-6) > passOf (from))
+        if (const auto lastRound = loop->getRound (last - 1); lastRound > 0)
         {
-            std::vector<int> takes; // the times round that began within the recording
+            if (seconds (loop->start - first) >= shortestRecording && placeBetween (first, loop->start, first).isValid())
+                kept.emplace_back (first, loop->start);
 
-            for (auto pass = passOf (from); pass <= passOf (to - 1.0e-6); ++pass)
-                if (frameOf (firstLoopStart + pass * length) >= 0.0 && firstLoopStart + pass * length < to)
-                    takes.push_back (pass);
+            auto playing = lastRound;
 
-            if (! takes.empty())
+            for (auto pass = lastRound; pass >= 0; --pass)
             {
-                auto playing = takes.back();
-
-                for (auto pass : takes)
-                    if (firstLoopStart + (pass + 1) * length <= to + 1.0e-6)
-                        playing = pass;
-
-                const auto passStart = firstLoopStart + playing * length;
-
-                if (const auto clip = place (loopStart, loopStart + length, frameOf (passStart) / rate); clip.isValid())
+                if (const auto roundStart = loop->getRoundStart (pass); roundStart >= cameIn && roundStart + loop->getLength() <= last)
                 {
-                    auto clipState = findClipState (song, clip);
-                    auto* undo = &song.getUndoManager();
-                    clipState.setProperty (schema::clipTakes, (int) takes.size(), undo);
-                    clipState.setProperty (schema::clipTake, (int) (std::find (takes.begin(), takes.end(), playing) - takes.begin()) + 1,
-                                           undo);
-                    clipState.setProperty (schema::clipTakeLength, length, undo);
+                    playing = pass;
+                    break;
                 }
-
-                return;
             }
-        }
 
-        // Not round once: where it was played in the range.
-        const auto offsetInLoop = loopStart - firstLoopStart - passOf (from) * length;
-        place (from + offsetInLoop, to + offsetInLoop, frameOf (from) / rate);
-        return;
+            if (const auto clip = placeBetween (loop->start, loop->end, loop->getRoundStart (playing)); clip.isValid())
+            {
+                auto clipState = findClipState (song, clip);
+                auto* undo = &song.getUndoManager();
+                clipState.setProperty (schema::clipTakes, lastRound + 1, undo);
+                clipState.setProperty (schema::clipTake, playing + 1, undo);
+                clipState.setProperty (schema::clipTakeLength, seconds (loop->getLength()), undo);
+                kept.emplace_back (std::max (first, loop->start), last);
+            }
+
+            return kept;
+        }
     }
 
-    place (from, to, frameOf (from) / rate);
+    // Once round or less, or straight on: what was played, where it was played (the first time round a looped range is
+    // where it was played), past the file's lead of silence.
+    if (placeBetween (first, last, first).isValid())
+        kept.emplace_back (first, last);
+
+    return kept;
 }
 
 //==============================================================================

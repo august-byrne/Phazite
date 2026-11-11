@@ -1,22 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The tempo's limits, the time signature and the song's bars, as plain values (Tempo.h changes them; TransportModel.h
-// shows them).
+// shows them). Places and lengths count beats, quarter notes whatever the time signature (Beats.h), and a tempo counts
+// them a minute.
 #pragma once
 
 #include "model/base/Beats.h"
 
+#include <algorithm>
 #include <array>
 #include <vector>
 
 namespace phazite
 {
-// The tempo's limits, in beats per minute.
+// The tempo's limits, in beats (quarter notes) per minute.
 inline constexpr double minTempo = 20.0, maxTempo = 300.0;
 
+// A time signature sets two things only: how long a bar is, and its own beat, the note it counts, which the grid, the
+// inspector's bar and beat, the count-in and the metronome go by.
 struct TimeSignature
 {
     int numerator = 4;   // beats in a bar
-    int denominator = 4; // the note that counts as a beat: 4 for a quarter note
+    int denominator = 4; // the note that counts as a beat: 4 for a quarter note, 8 for an eighth
+
+    // How long its beat is, and its bar, numerator of them, in quarter notes: 4 / denominator, and numerator x 4 /
+    // denominator (an eighth and three quarter notes in 6/8, an eighth and three and a half in 7/8, a half and four in 2/2).
+    constexpr BeatDuration getBeatLength() const noexcept { return BeatDuration::fromBeats (4.0 / std::max (1, denominator)); }
+    constexpr BeatDuration getBarLength() const noexcept { return getBeatLength() * (double) std::max (1, numerator); }
 
     bool operator== (const TimeSignature&) const = default;
 };
@@ -62,7 +71,10 @@ public:
 
     int getBarAt (BeatPosition) const;
     BeatPosition getBarStart (int bar) const;
-    int getBeatsPerBar (BeatPosition) const; // in the bar that is there
+
+    // How long the bar that is there is, and its time signature's beat, in quarter notes (TimeSignature's lengths).
+    BeatDuration getBarLength (BeatPosition) const;
+    BeatDuration getBeatLength (BeatPosition) const;
 
     // How far into the song a beat is in bars, with the part of its bar it is through: 2.5 half way through bar 2.
     double getBarsAt (BeatPosition) const;
@@ -73,7 +85,8 @@ private:
     {
         double startBeat = 0.0;
         int firstBar = 0;
-        int beatsPerBar = 4;
+        TimeSignature signature {};
+        double barLength = 4.0; // the signature's, in quarter notes
     };
 
     std::vector<Run> runs;

@@ -28,8 +28,9 @@ public:
 
     ~Worker() override
     {
+        // Woken by setNumThreads(), and waited for: never ended by force, which can leave a lock it held held for ever.
         signalThreadShouldExit();
-        stopThread (2000);
+        stopThread (-1);
     }
 
 private:

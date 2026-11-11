@@ -4,6 +4,7 @@
 // DeviceHandle and ParameterHandles, so the model owns every undo step and the editors reach the song by IDs alone.
 #pragma once
 
+#include "model/base/IDs.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
 
@@ -11,10 +12,19 @@
 
 #include <memory>
 
+namespace phazite
+{
+class ProjectContext;
+}
+
 namespace phazite::ui
 {
 // The editor for one of Phazite's devices, or nullptr if the handle has none.
 std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle&);
+
+// The same for a device of the open project, by its ID, as the Devices view and a device's window show it: given the
+// project, the editors that choose what the device's sidechain listens to have their picker (SidechainMenus.h).
+std::unique_ptr<juce::Component> createDeviceEditor (ProjectContext&, DeviceID);
 
 // An editor that also fits a shorter space than the size it gives itself, as the Devices view's panels are (a graph
 // shrinks, or parts show one at a time under tabs): the least height it needs, and how wide it is at a height; and how tall

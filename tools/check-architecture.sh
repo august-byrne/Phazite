@@ -53,6 +53,12 @@
 #                             tracktion_* module), a te:: or tracktion:: name, or a namespace that names it
 #                             (namespace te = ..., namespace x = tracktion..., using namespace tracktion).
 #                             Phazite has no Tracktion Engine; nothing may name or include it.
+#   thread-kills              calls that can end a thread by force, in src/, tests/ or tools/: stopThread with a
+#                             time limit (anything but -1 or nothing), killThread, and JUCE's ThreadPool, which
+#                             ends a thread that hasn't stopped within half a second. On Windows a thread ended so
+#                             can leave a lock it held held for ever (the system's loader lock, held by a thread
+#                             still starting, hung every thread started after it): stop a thread with
+#                             stopThread (-1), and run jobs with phazite::BackgroundJobs.
 # Comments and the text of string and character literals don't count. A C/C++ file in src/ outside the eight
 # layers fails the check whatever the budgets.
 # Exit codes: 0 = every count equals its budget (and every raise checked says why); 1 = a count differs from
@@ -128,7 +134,7 @@ function setup(    i, n, s, parts) {
 
     ruleNames = "upward-includes model-window-includes model-window-references model-undo-steps"
     ruleNames = ruleNames " model-include-loops ui-internal-includes ui-undo-steps flat-files unresolved-includes"
-    ruleNames = ruleNames " cmake-sources tracktion"
+    ruleNames = ruleNames " cmake-sources tracktion thread-kills"
     nrules = split(ruleNames, rules, " ")
     for (i = 1; i <= nrules; i++) known[rules[i]] = 1
 
@@ -156,6 +162,10 @@ function setup(    i, n, s, parts) {
     # tracktion, namespace tracktion_engine {... (using namespace tracktion::x counts as a name only).
     reTracktionNamespace = W "namespace[[:blank:]]+((::)?(te|tracktion[A-Za-z0-9_]*)[^A-Za-z0-9_:]"
     reTracktionNamespace = reTracktionNamespace "|[A-Za-z_][A-Za-z0-9_]*[[:blank:]]*=[[:blank:]]*(::)?tracktion)"
+    # A call that can end a thread by force: stopThread with a time limit (anything but -1 or nothing), killThread,
+    # and JUCE's ThreadPool (and its ThreadPoolJob and ThreadPoolOptions), which ends a thread that hasn't stopped in
+    # half a second.
+    reThreadKill = W "(stopThread[[:blank:]]*[(][[:blank:]]*[^-)[:blank:]]|killThread[[:blank:]]*[(]|(juce::)?ThreadPool)"
 
     n = split(undo_implementation, parts, " ")
     for (i = 1; i <= n; i++) isUndoCode[parts[i]] = 1
@@ -186,6 +196,8 @@ function setup(    i, n, s, parts) {
     instead["cmake-sources"] = "list the file in its target" q "s target_sources, spelled as git ls-files prints it."
     what["tracktion"] = "Tracktion Engine in src/, tests/ or tools/: includes of its headers (tracktion_engine/, tracktion_graph/, tracktion_core/...), te:: and tracktion:: names, and namespaces that name it"
     instead["tracktion"] = "Phazite has no Tracktion Engine; nothing may name or include it. Use Phazite" q "s own engine (src/engine), devices (src/devices) and model, by IDs, beats and plain values."
+    what["thread-kills"] = "calls that can end a thread by force in src/, tests/ or tools/: stopThread with a time limit, killThread, and JUCE" q "s ThreadPool (which ends a thread that hasn" q "t stopped within half a second)"
+    instead["thread-kills"] = "stop a thread with stopThread (-1), once whatever it waits on is woken or cancelled, and run jobs with phazite::BackgroundJobs (src/model/base/BackgroundJobs.h): on Windows a thread ended by force can leave a lock it held held for ever."
 }
 
 { sub(CR "$", "") }
@@ -343,6 +355,7 @@ function treeLine(line,    path, lineno, text, s, n) {
     if (index(s, "::")) n += count(s, reTracktionName)
     if (index(s, "namespace")) n += count(s, reTracktionNamespace)
     hitLine("tracktion", path, lineno, text, n)
+    if (index(s, "Thread")) hitLine("thread-kills", path, lineno, text, count(s, reThreadKill))
     if (curLayer == "model" || curLayer == "services" || curLayer == "engine" || curLayer == "sandbox" || curLayer == "devices") {
         if (index(s, "juce::")) hitLine("model-window-references", path, lineno, text, count(s, reWindowClass))
         if ((curLayer == "model" || curLayer == "services") && index(s, "beginNewTransaction") && !(path in isUndoCode))
@@ -928,11 +941,13 @@ src/engine/x/Eng.h:2:#include <tracktion_graph/tracktion_graph.h>
 src/engine/x/Eng.h:3:#include "model/b/One.h"
 src/engine/x/Eng.cpp:1:#include "Eng.h"
 src/engine/x/Eng.cpp:2:te::Edit* e; juce::KeyPress k; juce::AudioBuffer<float> b; // tracktion::Edit
+src/engine/x/Eng.cpp:3:void stop() { stopThread (2000); stopThread (-1); stopThread(); } // stopThread (5)
 src/engine/Flat.cpp:1:int y;
 src/sandbox/x/Shm.h:1:#include "engine/x/Eng.h"
 src/host/x/Host.cpp:1:#include "sandbox/x/Shm.h"
 src/host/x/Host.cpp:2:#include "model/b/One.h"
 src/host/x/Host.cpp:3:te::Engine* e; juce::Component* c;
+src/host/x/Host.cpp:4:thread.killThread(); juce::ThreadPool pool; juce::ThreadPoolJob* job; auto s = "stopThread (1)";
 src/Fixture.cpp:1:int x; te::Edit* e;
 src/ui/Fixture.txt:1:te::NotCxx
 tests/Fixture.cpp:1:#include "TestHelpers.h"
@@ -940,6 +955,7 @@ tests/Fixture.cpp:2:#include "model/b/one.h"
 tests/Fixture.cpp:3:#include "model/b/One.h"
 tests/Fixture.cpp:4:std::unique_ptr<te::Edit> edit; // te::Track
 tests/Fixture.cpp:5:namespace tr = tracktion::engine; using namespace te; auto p = "#include <tracktion_engine/tracktion_engine.h>";
+tests/Fixture.cpp:6:stopThread (timeout); waitForThreadToExit (100);
 tests/TestHelpers.h:1:// test helpers
 tools/x/Tool.cpp:1:#include "Missing.h"
 tools/x/Tool.cpp:2:#include <tracktion_core/tracktion_core.h>
@@ -978,6 +994,7 @@ fixture_expectations() {
 @expect unresolved-includes 5
 @expect cmake-sources 3
 @expect tracktion 32
+@expect thread-kills 5
 @expect no-layer 1
 EXPECT
 }

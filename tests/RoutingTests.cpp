@@ -261,7 +261,7 @@ TEST_CASE ("A strip has a send knob for every return, and one drag sends the tra
     CHECK (cpu->isVisible());
 }
 
-TEST_CASE ("The sidechain's menu lists Off and every other track, greys one that would make a loop with why, and picks one")
+TEST_CASE ("The sidechain's menu lists None and every other track, greys one that would make a loop with why, and picks one")
 {
     Mix mix;
     const auto compressor = mix.compressor;
@@ -284,7 +284,7 @@ TEST_CASE ("The sidechain's menu lists Off and every other track, greys one that
     auto menu = phazite::ui::makeSidechainMenu (mix.context, compressor);
     auto items = itemsOf (menu);
     REQUIRE (items.size() == 5);
-    CHECK (items[0].text == juce::String ("Off: the sound passing through it"));
+    CHECK (items[0].text == juce::String ("None (its own sound)"));
     CHECK (items[0].isTicked);
     CHECK (items[1].text == juce::String ("Kick"));
     CHECK (items[2].text == juce::String ("Keys (its sound comes from Bass)"));
@@ -294,8 +294,8 @@ TEST_CASE ("The sidechain's menu lists Off and every other track, greys one that
     // Kick: one step, the compressor ducking, and its slot in the mixer shows where it listens.
     items[1].action();
     CHECK (mix.describeUndo() == juce::String ("Undo Sidechain from Kick"));
-    CHECK (phazite::getValueSetByHand (*mix.song, { mix.compressor, "point2X" })
-           == doctest::Approx (phazite::devices::curves::axisForDecibels (-30.0f))); // ducking, 8:1 over -30 dB
+    CHECK (phazite::getValueSetByHand (*mix.song, { mix.compressor, "mode" })
+           == doctest::Approx ((float) phazite::devices::Compressor::Mode::duck)); // ducking, in its Duck mode
     const auto slots = phazite::getEffects (mix.context, mix.bass);
     REQUIRE (slots.size() == 1);
     CHECK (slots[0].hasSidechain);

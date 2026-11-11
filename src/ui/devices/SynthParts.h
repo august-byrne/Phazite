@@ -6,6 +6,7 @@
 #pragma once
 
 #include "DeviceGraph.h"
+#include "GraphDot.h"
 #include "model/devices/ParameterHandle.h"
 #include "ui/components/DisplayTicker.h"
 
@@ -138,7 +139,7 @@ private:
 float getDrawnLfoValue (int shape, float phase);
 
 // A filter's response: at its cutoff as set, and, fainter, where the newest note plays it now; a dot at the cutoff, as high
-// as the resonance, which a drag moves (both, as one undo step).
+// as the resonance, which a drag moves (both, as one undo step) and a press anywhere puts under the pointer (GraphDot).
 class FilterView : public juce::Component,
                    private DisplayTicker::Display
 {
@@ -163,6 +164,7 @@ private:
     std::function<float()> playing;
     float shownPlaying = 0.0f;
     DrawnNumbers drawn;
+    GraphDot dot { *this, [this] { return getDotPosition(); } };
 
     graph::FrequencyAxis getFrequencies() const;
     void dragTo (juce::Point<float>);

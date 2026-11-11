@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The grid, as plain values: its settings (how fine it is and whether positions snap to it, which editor keeps which),
-// its sizes and the lines it draws over the song's bars. Positions are in beats, as in FL Studio and Ableton Live, so a
-// tempo change doesn't move the grid. TimelineModel.h is how the editors reach it in the open project.
+// its sizes and the lines it draws over the song's bars. Positions are in beats (quarter notes), as in FL Studio and Ableton
+// Live, so a tempo change doesn't move the grid. TimelineModel.h is how the editors reach it in the open project.
 #pragma once
 
 #include "model/base/Beats.h"
@@ -16,7 +16,9 @@ namespace phazite
 {
 //==============================================================================
 // The grid's sizes are levels: 3 to 8 parts of a beat, from a 64th to a half, each twice the last (in triplets, a third
-// shorter: a 96th to a third); 9 a beat; 10 a bar; and above, bars, each twice as many as the last, to 1,024 at 20.
+// shorter: a 96th to a third); 9 a beat; 10 a bar; and above, bars, each twice as many as the last, to 1,024 at 20. A beat
+// is the time signature's, the note it counts (a quarter note in 4/4, an eighth in 6/8, a half in 2/2), and a bar as long
+// as it says (TempoValues.h: TimeSignature).
 // Projects save a fixed size by name (getSavedGridStep()), not as a level.
 struct GridSettings
 {
@@ -72,7 +74,8 @@ struct GridStep
     bool operator== (const GridStep&) const = default;
 };
 
-// How long a step is, in beats, in the bar at a beat (bars are as long as their time signature says).
+// How long a step is, in beats (quarter notes), in the bar at a beat (bars and their beats are as long as their time
+// signature says).
 double getStepInBeats (GridStep, const Bars&, BeatPosition where);
 
 // The finest step whose lines are no closer than minLineSpacing at a zoom (widthPerBeat, in the same unit: the editors

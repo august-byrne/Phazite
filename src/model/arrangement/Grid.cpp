@@ -23,7 +23,8 @@ namespace
         return std::clamp (level, GridSettings::minLevel, GridSettings::maxLevel);
     }
 
-    // A level finer than a beat, as a part of one: halved at each level down, and in triplets two thirds of that.
+    // A level finer than a beat (the time signature's: an eighth in 6/8), as a part of one: halved at each level down, and in
+    // triplets two thirds of that.
     double getPartOfBeat (int level, bool triplets)
     {
         const auto straight = std::ldexp (1.0, level - beatLevel);
@@ -48,8 +49,9 @@ namespace
             return bars.getBarStart (barsPerStep * (int) rounding (bars.getBarsAt (beat) / barsPerStep));
         }
 
-        const auto size = level < beatLevel ? getPartOfBeat (level, step.triplets) : 1.0;
         const auto barStart = bars.getBarStart (bars.getBarAt (beat));
+        const auto beatLength = bars.getBeatLength (barStart).inBeats();
+        const auto size = level < beatLevel ? getPartOfBeat (level, step.triplets) * beatLength : beatLength;
         return barStart + BeatDuration::fromBeats (size * rounding ((beat - barStart).inBeats() / size));
     }
 } // namespace
@@ -129,12 +131,12 @@ double getStepInBeats (GridStep step, const Bars& bars, BeatPosition where)
     const auto level = clampLevel (step.level);
 
     if (level < beatLevel)
-        return getPartOfBeat (level, step.triplets);
+        return getPartOfBeat (level, step.triplets) * bars.getBeatLength (where).inBeats();
 
     if (level == beatLevel)
-        return 1.0;
+        return bars.getBeatLength (where).inBeats();
 
-    return getBarsPerStep (level) * bars.getBeatsPerBar (where);
+    return getBarsPerStep (level) * bars.getBarLength (where).inBeats();
 }
 
 GridStep getAdaptiveGridStep (const Bars& bars, BeatPosition where, double widthPerBeat, bool triplets, double minLineSpacing)
@@ -190,11 +192,11 @@ void forEachGridLine (const Bars& bars, GridStep step, BeatRange range, const st
     const auto level = clampLevel (step.level);
     const auto start = range.getStart(), end = range.getEnd();
 
-    // Bar lines so many bars apart (one, at a bar or finer), from the song's start; and the lines inside each beat, so
-    // far apart as a part of it (none at a beat or coarser).
+    // Bar lines so many bars apart (one, at a bar or finer), from the song's start; and in each bar its time signature's
+    // beats, and the lines inside each beat, so far apart as a part of it (none at a beat or coarser).
     const auto barsPerLine = getBarsPerStep (level);
-    const auto part = level < beatLevel ? getPartOfBeat (level, step.triplets) : 0.0;
-    const auto partsPerBeat = part > 0.0 ? (int) std::round (1.0 / part) : 1;
+    const auto partOfBeat = level < beatLevel ? getPartOfBeat (level, step.triplets) : 0.0;
+    const auto partsPerBeat = partOfBeat > 0.0 ? (int) std::round (1.0 / partOfBeat) : 1;
 
     auto bar = std::max (0, bars.getBarAt (start));
     bar -= bar % barsPerLine;
@@ -213,8 +215,10 @@ void forEachGridLine (const Bars& bars, GridStep step, BeatRange range, const st
             continue;
 
         const auto barEnd = bars.getBarStart (bar + 1) - BeatDuration::fromBeats (tiny);
+        const auto beatLength = bars.getBeatLength (barStart);
+        const auto part = beatLength * partOfBeat;
 
-        for (auto beat = barStart; beat < barEnd; beat += BeatDuration::fromBeats (1.0))
+        for (auto beat = barStart; beat < barEnd; beat += beatLength)
         {
             if (beat > end)
                 return;
@@ -224,7 +228,7 @@ void forEachGridLine (const Bars& bars, GridStep step, BeatRange range, const st
 
             for (int i = 1; i < partsPerBeat; ++i)
             {
-                const auto line = beat + BeatDuration::fromBeats (part * i);
+                const auto line = beat + part * (double) i;
 
                 if (line > end || line >= barEnd)
                     break;

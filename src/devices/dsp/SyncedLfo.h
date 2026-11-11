@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// An LFO for the effects that sweep (the phaser, the flanger): a sine or a triangle, at a rate in hertz or on a note value at
-// the song's tempo (NoteValues.h). In time with the song, while the song plays, its phase comes from where the song is, so a
-// sweep lands on the same beat each time round and a render plays it the same each time; stopped, it runs free. When the
-// song jumps (a loop going round, the playhead moved), the phase glides to where the song is over 10 ms rather than
-// jumping. The right channel reads it a part of a cycle ahead. Real-time safe.
+// An LFO for the effects that sweep (the phaser, the flanger, the chorus): a sine or a triangle, at a rate in hertz or on a
+// note value at the song's tempo (NoteValues.h). In time with the song, while the song plays, its phase comes from where the
+// song is, a note value's from its beats and a bar's from its bars, so a sweep lands on the same beat each time round, a
+// bar's cycle starts with each bar whatever the time signature, and a render plays it the same each time; stopped, it runs
+// free. When the song jumps (a loop going round, the playhead moved), the phase glides to where the song is over 10 ms
+// rather than jumping. The right channel reads it a part of a cycle ahead. Real-time safe.
 #pragma once
+
+#include "NoteValues.h"
 
 #include <cmath>
 
@@ -34,10 +37,18 @@ public:
         fresh = true;
     }
 
-    // At each block's start: its rate, and, in time with the song while it plays, where the song is (in beats).
-    void startBlock (bool synced, double hertz, double beatsPerCycle, double tempo, bool playing, double beat) noexcept
+    // At each block's start: its rate, and, in time with the song while it plays, where the song is. In time with it, a cycle
+    // is a note value (NoteValues.h), so many beats (quarter notes) or so many of the song's bars, at its tempo (beats a
+    // minute) and its bar's length (in beats), and it follows the song's place: its beat, or its bars (2.5 half way through
+    // bar 2).
+    void startBlock (bool synced, double hertz, NoteLength cycle, double tempo, double barLength, bool playing, double beat,
+                     double bars) noexcept
     {
-        const auto cyclesPerSecond = synced ? tempo / 60.0 / (beatsPerCycle > 0.0 ? beatsPerCycle : 1.0) : hertz;
+        // A note value counts the song's beats, a bar its bars: how many go by a second, and how many a cycle is.
+        const auto inBars = cycle.bars > 0.0;
+        const auto units = inBars ? cycle.bars : (cycle.beats > 0.0 ? cycle.beats : 1.0);
+        const auto unitsPerSecond = inBars ? tempo / 60.0 / (barLength > 0.0 ? barLength : 4.0) : tempo / 60.0;
+        const auto cyclesPerSecond = synced ? unitsPerSecond / units : hertz;
         increment = cyclesPerSecond / sampleRate;
 
         if (! synced || ! playing)
@@ -46,7 +57,7 @@ public:
             return;
         }
 
-        const auto wanted = beat / (beatsPerCycle > 0.0 ? beatsPerCycle : 1.0);
+        const auto wanted = (inBars ? bars : beat) / units;
         const auto target = wanted - std::floor (wanted);
 
         if (fresh)

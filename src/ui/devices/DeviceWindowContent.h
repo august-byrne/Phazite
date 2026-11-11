@@ -10,12 +10,20 @@
 
 #include <memory>
 
+namespace phazite
+{
+class ProjectContext;
+}
+
 namespace phazite::ui
 {
 class DeviceWindowContent : public juce::Component
 {
 public:
-    explicit DeviceWindowContent (const DeviceHandle&); // as large as the editor wants, at first
+    // As large as the editor wants, at first: a device of the open project's, as the app's device windows show it (with what
+    // only the project gives, such as the compressor's key's picker: createDeviceEditor()); or the editor a handle makes.
+    DeviceWindowContent (ProjectContext&, DeviceID);
+    explicit DeviceWindowContent (const DeviceHandle&);
 
     bool hasEditor() const noexcept { return editor != nullptr; }
     juce::Component* getEditor() const noexcept { return editor.get(); }
@@ -31,5 +39,7 @@ private:
     std::unique_ptr<juce::Component> editor;
     juce::Viewport view;
     int naturalWidth = 0;
+
+    explicit DeviceWindowContent (std::unique_ptr<juce::Component> shownEditor);
 };
 } // namespace phazite::ui

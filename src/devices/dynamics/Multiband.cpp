@@ -49,6 +49,11 @@ namespace
         return { .id = id, .name = name, .minimum = -1.0f, .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::percent };
     }
 
+    constexpr ParameterInfo makeToggle (std::string_view id, std::string_view name)
+    {
+        return { .id = id, .name = name, .maximum = 1.0f, .unit = Unit::toggle };
+    }
+
     // A point of a band's curve, from its band's prefix: at first the curve is a limiter at 0 dB, as Maximus's default is: up
     // the diagonal to 0 dB (the middle), then level to the end.
 #define PHAZITE_MULTIBAND_POINT(band, Band, n, x, y)                                                                                       \
@@ -59,8 +64,7 @@ namespace
 
     // A band's parameters, in the order of Multiband::BandField. The master looks ahead by its attack, so it starts quicker.
 #define PHAZITE_MULTIBAND_BAND(band, Band, attackDefault)                                                                                  \
-    makeChoice (band "Mode", Band " Mode", modes, 0.0f),                                                                                   \
-        { .id = band "Solo", .name = Band " Solo", .maximum = 1.0f, .unit = Unit::toggle }, makeBipolar (band "Stereo", Band " Stereo"),   \
+    makeChoice (band "Mode", Band " Mode", modes, 0.0f), makeBipolar (band "Stereo", Band " Stereo"),                                      \
         makeDecibels (band "Pre", Band " Pre", -24.0f, 24.0f), makeDecibels (band "Post", Band " Post", -24.0f, 24.0f),                    \
         makeTime (band "Attack", Band " Attack", 500.0f, attackDefault, 20.0f),                                                            \
         makeTime (band "Release", Band " Release", 2000.0f, 0.0f, 200.0f),                                                                 \
@@ -68,7 +72,7 @@ namespace
         makeTime (band "Sustain", Band " Sustain", 1000.0f, 20.0f, 100.0f), makeChoice (band "Curve", Band " Curve", curveShapes, 1.0f),   \
         makeChoice (band "ReleaseCurve", Band " Release Curve", curveShapes, 2.0f),                                                        \
         makeChoice (band "Detection", Band " Detection", detections, 0.0f), makeBipolar (band "Saturation", Band " Saturation"),           \
-        makeDecibels (band "Ceiling", Band " Ceiling", -24.0f, 6.0f),                                                                      \
+        makeDecibels (band "Ceiling", Band " Ceiling", -24.0f, 6.0f), makeToggle (band "Key", Band " Key"),                                \
         { .id = band "Points", .name = Band " Points", .minimum = 2.0f, .maximum = 8.0f, .defaultValue = 3.0f },                           \
         PHAZITE_MULTIBAND_POINT (band, Band, 1, 0.0f, 0.0f), PHAZITE_MULTIBAND_POINT (band, Band, 2, 0.5f, 0.5f),                          \
         PHAZITE_MULTIBAND_POINT (band, Band, 3, 1.0f, 0.5f), PHAZITE_MULTIBAND_POINT (band, Band, 4, 1.0f, 0.5f),                          \
@@ -102,7 +106,24 @@ namespace
         makeChoice ("highSlope", "High Slope", slopes, 1.0f),
         { .id = "lmhDelay", .name = "LMH Delay", .maximum = 5.0f, .defaultValue = 2.0f, .unit = Unit::milliseconds },
         { .id = "lmhMix", .name = "LMH Mix", .defaultValue = 1.0f, .unit = Unit::percent },
-        { .id = "midDrivesMaster", .name = "Mid Drives Master", .maximum = 1.0f, .unit = Unit::toggle },
+        makeToggle ("midDrivesMaster", "Mid Drives Master"),
+        makeToggle ("lowSolo", "Low Solo"),
+        makeToggle ("midSolo", "Mid Solo"),
+        makeToggle ("highSolo", "High Solo"),
+        { .id = "keyLowCut",
+          .name = "Key Low Cut",
+          .minimum = 20.0f,
+          .maximum = 500.0f,
+          .defaultValue = 20.0f,
+          .unit = Unit::hertz,
+          .midpoint = 100.0f },
+        { .id = "keyHighCut",
+          .name = "Key High Cut",
+          .minimum = 100.0f,
+          .maximum = 20000.0f,
+          .defaultValue = 20000.0f,
+          .unit = Unit::hertz,
+          .midpoint = 1500.0f },
         PHAZITE_MULTIBAND_BAND ("low", "Low", 10.0f),
         PHAZITE_MULTIBAND_BAND ("mid", "Mid", 10.0f),
         PHAZITE_MULTIBAND_BAND ("high", "High", 10.0f),
@@ -115,8 +136,11 @@ namespace
     static_assert (std::size (parameters) == (size_t) Multiband::getBandParameter (Multiband::numBands, Multiband::mode));
     static_assert (Multiband::getPointParameter (Multiband::master, curves::maxPoints - 1, curves::pointType) + 1
                    == (int) std::size (parameters));
+    static_assert (Multiband::getSoloParameter (Multiband::high) == Multiband::highSolo);
 
-    constexpr double gainSeconds = 0.02; // how long a change of a band's pre or post gain takes, about
+    constexpr double gainSeconds = 0.02;      // how long a change of a band's pre or post gain takes, about
+    constexpr float keyHighCutOff = 19999.0f; // the key's high cut at its top: off
+    constexpr double keyFadeSeconds = 0.005;  // between the key and what it puts out, as Listen turns on or off
 
     int roundToChoice (float value, int count) noexcept
     {
@@ -140,7 +164,11 @@ namespace
     }
 } // namespace
 
-const DeviceInfo Multiband::info { .typeID = typeID, .name = "Multiband", .kind = DeviceKind::effect, .parameters = parameters };
+const DeviceInfo Multiband::info { .typeID = typeID,
+                                   .name = "Multiband",
+                                   .kind = DeviceKind::effect,
+                                   .parameters = parameters,
+                                   .hasSidechain = true };
 
 // The saturation: up to its threshold the sound passes as it is, then it rounds off into the ceiling (type A, softly, as
 // tanh does) or bends more firmly (type B, a cubic that reaches the ceiling flat). The further the knob turns either way,
@@ -202,6 +230,11 @@ void Multiband::prepare (double newSampleRate, int)
         compressor.gains.reset(); // made again from the parameters at the first block
     }
 
+    keyStep = (float) std::min (1.0, 1.0 / (keyFadeSeconds * sampleRate));
+
+    for (auto& line : keyDelays)
+        line.prepare (getLatencySamples());
+
     reset();
 }
 
@@ -258,7 +291,23 @@ void Multiband::reset()
         compressor.shownGain = 0.0f;
     }
 
+    resetKey();
+    keyShare = 0.0f;
+    keyRunning = false;
     isFirstBlock = true;
+}
+
+void Multiband::resetKey() noexcept
+{
+    for (auto& filter : keyLowCuts)
+        filter.reset();
+
+    for (auto& channel : keyHighCuts)
+        for (auto& filter : channel)
+            filter.reset();
+
+    for (auto& line : keyDelays)
+        line.reset();
 }
 
 float Multiband::compress (Compressor& c, std::span<const float> values, int band, float level, bool compresses) noexcept
@@ -390,8 +439,8 @@ void Multiband::process (const ProcessContext& block)
     std::array<float, numBands> targetPre {}, targetPost {}, saturations {}, ceilings {}, widths {};
     std::array<int, numBands> holdSamples {};
     std::array<float, numBands> rmsShare {};
-    std::array<bool, numBands> averages {}, compresses {};
-    auto soloed = false;
+    std::array<bool, numBands> averages {}, compresses {}, hearsKey {}, solos {};
+    auto soloed = false, anyHearsKey = false;
 
     for (int band = 0; band < numBands; ++band)
     {
@@ -406,8 +455,41 @@ void Multiband::process (const ProcessContext& block)
         rmsShare[b] = getCoefficient (std::max (0.001, bandValue (band, sustain) * 0.001), sampleRate);
         averages[b] = roundToChoice (bandValue (band, detection), 2) == 1;
         compresses[b] = bandModes[b] == Mode::on && ! (midDrives && (band == low || band == high));
-        soloed = soloed || (band != master && bandValue (band, solo) > 0.5f && bandModes[b] != Mode::off);
+        hearsKey[b] = bandValue (band, key) > 0.5f;
+        anyHearsKey = anyHearsKey || hearsKey[b];
+
+        if (band != master)
+        {
+            solos[b] = values[(size_t) getSoloParameter (band)] > 0.5f;
+            soloed = soloed || (solos[b] && bandModes[b] != Mode::off);
+        }
     }
+
+    // The key: what the sidechain feeds, or with none what comes in, through its low cut and (unless it is at its top) its
+    // high cut, as the compressor's key; worked out while a band hears it or Listen plays it.
+    const float* const* keyIn = nullptr; // the sidechain's channels; none for what comes in
+    auto numKeyChannels = 0;
+
+    if (block.sidechain != nullptr && block.numSidechainChannels > 0)
+    {
+        keyIn = block.sidechain;
+        numKeyChannels = std::min (block.numSidechainChannels, 2);
+    }
+
+    const auto keyWanted = isPlayingKey() ? 1.0f : 0.0f;
+    const auto keyNeeded = anyHearsKey || keyWanted > 0.0f || keyShare > 0.0f;
+
+    // Worked out again, it starts from silence, so that neither a band nor Listen hears it from where it stopped.
+    if (keyNeeded && ! keyRunning)
+        resetKey();
+
+    keyRunning = keyNeeded;
+    const auto keyLow = dsp::makeFilter (dsp::FilterShape::highPass, global (Global::keyLowCut), sampleRate, 0.70710678);
+    const auto keyCutsHigh = global (Global::keyHighCut) < keyHighCutOff;
+    const auto keyHighFrequency = std::min ((double) global (Global::keyHighCut), 0.45 * sampleRate);
+    const std::array keyHigh { dsp::makeFilter (dsp::FilterShape::lowPass, keyHighFrequency, sampleRate, dsp::getButterworthQ (4, 0)),
+                               dsp::makeFilter (dsp::FilterShape::lowPass, keyHighFrequency, sampleRate, dsp::getButterworthQ (4, 1)) };
+    const auto latency = getLatencySamples();
 
     if (isFirstBlock)
     {
@@ -506,6 +588,24 @@ void Multiband::process (const ProcessContext& block)
         std::array<float, 2> input { left[i], right != nullptr ? right[i] : left[i] };
         loudestMain = std::max ({ loudestMain, std::abs (input[0]), std::abs (input[1]) });
 
+        // The key, through its cuts.
+        std::array<float, 2> keyed {};
+
+        if (keyNeeded)
+        {
+            for (size_t channel = 0; channel < 2; ++channel)
+            {
+                auto x = keyIn != nullptr ? keyIn[std::min ((int) channel, numKeyChannels - 1)][i] : input[channel];
+                x = keyLowCuts[channel].process (x, keyLow);
+
+                if (keyCutsHigh)
+                    x = keyHighCuts[channel][1].process (keyHighCuts[channel][0].process (x, keyHigh[0]), keyHigh[1]);
+
+                keyed[channel] = x;
+                keyDelays[channel].push (x);
+            }
+        }
+
         // The low cut, then the split into three bands; and the dry sound, in the phase the bands add up to and delayed as they
         // are.
         std::array<std::array<float, 2>, 3> bands {};
@@ -565,8 +665,9 @@ void Multiband::process (const ProcessContext& block)
             }
         }
 
-        // Each band: its stereo separation, its pre gain, what its compressor hears (ahead of the sound), the gain, its post
-        // gain and its saturation; the mid band's sound, as its compressor gets it, for a master the mid band drives.
+        // Each band: its stereo separation, its pre gain, what its compressor hears (its band, or the key while its Key is on,
+        // ahead of the sound), the gain, its post gain and its saturation; the mid band's sound, as its compressor gets it, for
+        // a master the mid band drives.
         std::array<float, 2> sum {}, midHeard {};
 
         for (int band = low; band <= high; ++band)
@@ -584,7 +685,7 @@ void Multiband::process (const ProcessContext& block)
             }
 
             auto& c = compressors[b];
-            const auto heard = hear (band, l, r);
+            const auto heard = hearsKey[b] ? hear (band, keyed[0], keyed[1]) : hear (band, l, r);
             c.heard.push (heard);
             const auto ahead = c.heard.read (lookahead - bandAhead);
 
@@ -616,7 +717,7 @@ void Multiband::process (const ProcessContext& block)
             loudestIn[b] = std::max (loudestIn[b], std::max (std::abs (bandDelays[b][0].read (0)), std::abs (bandDelays[b][1].read (0))));
             loudestHeard[b] = std::max (loudestHeard[b], heard);
 
-            if (bandModes[b] == Mode::muted || (soloed && bandValue (band, solo) <= 0.5f))
+            if (bandModes[b] == Mode::muted || (soloed && ! solos[b]))
                 l = r = 0.0f;
 
             loudestOut[b] = std::max ({ loudestOut[b], std::abs (l), std::abs (r) });
@@ -648,8 +749,13 @@ void Multiband::process (const ProcessContext& block)
             r *= preGains[m];
         }
 
+        // What the master's compressor hears: the key while its Key is on (as late as the bands, which its sound comes through),
+        // else the mid band while it drives the master, else what it plays.
         auto& c = compressors[m];
-        const auto heard = midDrives ? hear (master, midHeard[0] * preGains[m], midHeard[1] * preGains[m]) : hear (master, l, r);
+        const auto heard = hearsKey[m] ? hear (master, keyDelays[0].read (lookahead + saturationLatency),
+                                               keyDelays[1].read (lookahead + saturationLatency))
+                           : midDrives ? hear (master, midHeard[0] * preGains[m], midHeard[1] * preGains[m])
+                                       : hear (master, l, r);
         c.heard.push (heard);
         const auto ahead = c.heard.read (lookahead - masterAhead);
         loudestIn[m] = std::max ({ loudestIn[m], std::abs (l), std::abs (r) });
@@ -686,6 +792,16 @@ void Multiband::process (const ProcessContext& block)
             l = r = 0.0f;
 
         loudestOut[m] = std::max ({ loudestOut[m], std::abs (l), std::abs (r) });
+
+        // Listen: the key, as late as what it puts out, faded in and out.
+        keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
+
+        if (keyShare > 0.0f)
+        {
+            l += keyShare * (keyDelays[0].read (latency) - l);
+            r += keyShare * (keyDelays[1].read (latency) - r);
+        }
+
         left[i] = l;
 
         if (right != nullptr)

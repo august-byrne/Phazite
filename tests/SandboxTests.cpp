@@ -4,7 +4,7 @@
 // plug-in opened from its description with its parameters by their own IDs, parameters' changes played at their
 // samples, values set by hand and the plug-in's own changes and gestures, its state, an instrument's notes, latency, a
 // sidechain, the text of a value, another sample rate, two instances side by side, a pipe kept up while quiet, a
-// plug-in that hangs and one that crashes, and a helper ended.
+// plug-in that hangs and one that crashes, a helper ended, and one that never connects to its pipe as it starts.
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
 #include "host/SandboxTestHelpers.h"
@@ -89,6 +89,36 @@ bool waitFor (const std::function<bool()>& condition, int milliseconds = 5000)
 {
     return phazite::test::dispatchMessagesUntil (condition, milliseconds);
 }
+
+// A variable of the tests' environment, which the helpers they start inherit, set while it lasts.
+class EnvironmentVariable
+{
+public:
+    EnvironmentVariable (const char* variableName, const char* value)
+        : name (variableName)
+    {
+#if JUCE_WINDOWS
+        _putenv_s (name, value);
+#else
+        setenv (name, value, 1);
+#endif
+    }
+
+    ~EnvironmentVariable()
+    {
+#if JUCE_WINDOWS
+        _putenv_s (name, "");
+#else
+        unsetenv (name);
+#endif
+    }
+
+    EnvironmentVariable (const EnvironmentVariable&) = delete;
+    EnvironmentVariable& operator= (const EnvironmentVariable&) = delete;
+
+private:
+    const char* name;
+};
 } // namespace
 
 TEST_CASE ("A block channel hands a block over and gets it back played, one round trip")
@@ -427,4 +457,39 @@ TEST_CASE ("A plug-in that crashes ends its helper alone, which Phazite hears of
     REQUIRE (waitFor ([&] { return helper.getLosses() > 0; }, 10000));
     CHECK (helper.getLosses() == 1);
     helper.forget (*effect);
+}
+
+TEST_CASE ("A helper that doesn't connect to its pipe as it starts is ended once its time is up, and lost at once if it ends")
+{
+    // Phazite's hello is a write, which waits for the helper to connect to the pipe: neither may leave it waiting for ever.
+    const auto failsSoon = [] (const juce::File& program, int timeoutMilliseconds)
+    {
+        sandbox::Helper helper (program);
+        const auto from = juce::Time::getMillisecondCounterHiRes();
+        CHECK_FALSE (helper.start (timeoutMilliseconds));
+        CHECK (juce::Time::getMillisecondCounterHiRes() - from < timeoutMilliseconds + 5000.0);
+        CHECK_FALSE (helper.isRunning());
+    };
+
+    SUBCASE ("It hangs before it connects: ended once the time start() gives it is up")
+    {
+        const EnvironmentVariable hangs ("PHAZITE_TEST_HOST_HANGS_AT_START", "1");
+        failsSoon (phazite::test::getTestHost(), 2000);
+    }
+
+    SUBCASE ("It ends before it connects, as a helper that can't start does: lost at once")
+    {
+        // A program that ends at once on an argument it doesn't know, as the helper's is.
+#if JUCE_WINDOWS
+        const auto program = juce::File::getSpecialLocation (juce::File::windowsSystemDirectory).getChildFile ("whoami.exe");
+#else
+        const juce::File program ("/bin/false");
+#endif
+        REQUIRE (program.existsAsFile());
+        failsSoon (program, 60000);
+    }
+
+    // The tests' helper starts as before.
+    sandbox::Helper helper (phazite::test::getTestHost());
+    CHECK (helper.start (30000));
 }

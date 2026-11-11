@@ -571,9 +571,17 @@ TEST_CASE ("A view its key shows gets the keyboard, and a screen reader its name
     phazite::test::dispatchPendingMessages();
     CHECK (focusedView() == "Devices");
 
-    // A clip selected for the piano roll: F7 gives it the keys (or, where it showed, hides it: then again shows it).
+    // A clip selected for the piano roll, the first track's that has clips (the first is a folder): F7 gives it the keys (or,
+    // where it showed, hides it: then again shows it).
     auto& context = screen.session.getContext();
-    context.getSongSelection().selectOnly (phazite::getClips (context, phazite::getAllPlaylistTracks (context).front()).front().id);
+    std::vector<phazite::ClipInfo> clips;
+
+    for (const auto track : phazite::getAllPlaylistTracks (context))
+        if (clips = phazite::getClips (context, track); ! clips.empty())
+            break;
+
+    REQUIRE_FALSE (clips.empty());
+    context.getSongSelection().selectOnly (clips.front().id);
     phazite::test::dispatchPendingMessages();
     const auto findPianoRoll = [&screen]() -> juce::Component*
     {

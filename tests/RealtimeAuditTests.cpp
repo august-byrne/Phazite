@@ -32,12 +32,15 @@
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/Sampler.h"
+#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "engine/core/Recording.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Import.h"
@@ -70,7 +73,9 @@
 #include "model/versions/VersionsModel.h"
 #include "model/versions/internal/VersionHistory.h"
 
+#include <array>
 #include <chrono>
+#include <limits>
 #include <string_view>
 #include <thread>
 
@@ -367,13 +372,13 @@ juce::String keepAndBounce (TestSong& song, const juce::String& name)
         return history != nullptr && ! history->isBusy();
     };
 
-    REQUIRE (phazite::test::dispatchMessagesUntil (idle));
+    REQUIRE (phazite::test::dispatchMessagesUntil (idle, phazite::test::versionHistoryTimeout));
     phazite::setVersionDraft (song.context, name, {});
     std::optional<juce::Result> saved;
     REQUIRE (phazite::saveVersion (song.context, [&saved] (juce::Result r) { saved = r; }));
     REQUIRE (phazite::test::dispatchMessagesUntil ([&saved] { return saved.has_value(); }));
     REQUIRE (saved->wasOk());
-    REQUIRE (phazite::test::dispatchMessagesUntil (idle));
+    REQUIRE (phazite::test::dispatchMessagesUntil (idle, phazite::test::versionHistoryTimeout));
 
     const auto version = phazite::getLastVersion (song.context)->id;
     phazite::bounceVersion (song.context, version, song.renders);
@@ -578,6 +583,72 @@ TEST_SUITE ("realtime-audit")
         CHECK (phazite::getClips (song.context, voice).size() == 1);           // the input's take
         CHECK (phazite::getClips (song.context, song.firstTrack).size() == 1); // the notes'
         checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: a take's input that falls a whole buffer behind notes what it loses without allocating, past its room to")
+    {
+        // Known bug 12's fix (engine/core/Recording.h): while the writing thread stalls, the audio thread notes where frames
+        // were lost, for that thread to write silence there. A buffer of 1000 frames in blocks of 10, which a reader keeps
+        // full by taking a block's worth at a time from what came in first: each block lost is a gap, noted once the next
+        // has room, until there is no room to note more (31 gaps), when what comes in is lost into the gap open. Frame n
+        // is n + 1, so that silence shows.
+        phazite::engine::Recording::Input input ({ 0 }, 1000);
+        constexpr int blockFrames = 10;
+        std::array<float, blockFrames> block {};
+        auto next = 1.0f;
+        std::vector<float> taken;
+        taken.reserve (4000);
+
+        const auto write = [&input, &block, &next]
+        {
+            for (auto& sample : block)
+                sample = next++;
+
+            const float* channels[] = { block.data() };
+            const AudioThreadMonitor::ScopedAudioThread audioThread;
+            input.write (channels, 1, 0, blockFrames);
+        };
+
+        const auto take = [&input, &taken] (std::int64_t most)
+        {
+            input.read (
+                most,
+                [&taken] (const float* const* channels, int, int count) { taken.insert (taken.end(), channels[0], channels[0] + count); },
+                [&taken] (std::int64_t count) { taken.insert (taken.end(), (size_t) count, 0.0f); });
+        };
+
+        AudioThreadMonitor::reset();
+
+        for (int i = 0; i < 100; ++i)
+            write(); // 99 blocks fit, and the last is lost
+
+        for (int i = 0; i < 60; ++i)
+        {
+            take (blockFrames);
+            write(); // has room, after the gap before it is noted, until there is no room to note it
+            write(); // lost
+        }
+
+        take (std::numeric_limits<std::int64_t>::max());
+
+        if (AudioThreadMonitor::isAvailable())
+        {
+            const auto counts = AudioThreadMonitor::getCounts();
+            CHECK (counts.allocations == 0);
+            CHECK (counts.frees == 0);
+        }
+
+        // What came in before the first gap, then 31 gaps noted, each with the block that came in after it; what came in
+        // later was lost into the gap still open, which the take's end makes silence (model/transport/internal/Take.h).
+        // Everything is where it came in.
+        REQUIRE (taken.size() == (size_t) (990 + 31 * 2 * blockFrames));
+
+        for (size_t i = 0; i < taken.size(); ++i)
+        {
+            CAPTURE (i);
+            const auto lost = i >= 990 && (i - 990) % (size_t) (2 * blockFrames) < (size_t) blockFrames;
+            CHECK (taken[i] == (lost ? 0.0f : (float) (i + 1)));
+        }
     }
 
     TEST_CASE ("Real-time audit: Phazite's own engine, chords through a plug-in in its helper (the tests' stand-in) after Phazite's synth")
@@ -817,17 +888,101 @@ TEST_SUITE ("realtime-audit")
         phazite::setTrackMuted (getSong (song), source, true); // still heard by the sidechain
 
         const auto compressor = song.addEffect (track, Compressor::typeID);
-        // Its curve turning down from -40 dB, so that the tone ducks it.
-        song.setParameter (compressor, "point2X", phazite::devices::curves::axisForDecibels (-40.0f));
-        song.setParameter (compressor, "point2Y", phazite::devices::curves::axisForDecibels (-40.0f));
+        // Ducking from -40 dB, so that the tone ducks it (its key chosen makes it duck).
+        song.setParameter (compressor, "threshold", -40.0f);
         song.setParameter (compressor, "mix", 0.7f);
         phazite::setSidechainSource (getSong (song), compressor, source);
         REQUIRE (phazite::getSidechainSource (getSong (song), compressor) == source);
+        REQUIRE (phazite::hearsSidechain (getSong (song), compressor));
 
         const auto meter = [&song, compressor]() -> auto&
         { return dynamic_cast<Compressor&> (getPlayed (song, compressor).getProcessor()).getReductionMeter(); };
         const auto m = playAndMeasure (song, [&meter] { meter().take(); }, [&meter] { CHECK (meter().take() > 1.0f); });
         report ("Phazite's compressor, ducked by another track at 70 % mix, with its meters read", m);
+        CHECK (m.peakLevel > 0.001f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's compressor ducking under a kick track, held and let go along a curve, Listen on")
+    {
+        // Duck mode under a drum sampler's kick on every beat, muted (its sidechain still hears it): each kick grips, holds and
+        // lets go, its release bent, the history's meters read; and Listen asked for as it starts (it plays the key for half a
+        // second, then the sound again).
+        using phazite::devices::Compressor;
+        TestSong song;
+        const auto track = song.firstTrack;
+        addTone (song, track);
+        const auto kick = song.addTrack ("Kick");
+        song.setInstrument (kick, phazite::devices::DrumSampler::typeID);
+        const auto beats = song.addMidiClip (kick, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addNote (beats, 36, beat, 0.25);
+
+        phazite::setTrackMuted (getSong (song), kick, true);
+        const auto compressor = phazite::duckUnder (song.context, track, kick);
+        REQUIRE (compressor.isValid());
+        REQUIRE (phazite::hearsSidechain (getSong (song), compressor));
+        song.setParameter (compressor, "threshold", -10.0f); // the kick's tail falls under it within the beat, and it lets go
+        song.setParameter (compressor, "hold", 60.0f);
+        song.setParameter (compressor, "releaseCurve", 0.5f);
+        song.setParameter (compressor, "depth", 18.0f);
+
+        const auto played = [&song, compressor]() -> auto&
+        { return dynamic_cast<Compressor&> (getPlayed (song, compressor).getProcessor()); };
+        const auto m = playAndMeasure (
+            song,
+            [&played]
+            {
+                played().getReductionMeter().take();
+                played().getLevelMeter().take();
+                played().listenToKey();
+            },
+            [&played] { CHECK (played().getReductionMeter().take() > 1.0f); });
+        report ("Phazite's compressor ducking under a kick track, held and let go along a curve, Listen on", m);
+        CHECK (m.peakLevel > 0.001f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's multiband, its low band and master keyed by another track through the sidechain, Listen on")
+    {
+        using phazite::devices::Multiband;
+        TestSong song;
+        const auto track = song.firstTrack;
+        const auto source = song.addTrack ("Source");
+        addTone (song, track);
+        addTone (song, source);
+        phazite::setTrackMuted (getSong (song), source, true); // still heard by the sidechain
+
+        // The low band and the master limiting at -40 dB, each hearing the key through its cuts, so that the tone ducks them.
+        const auto multiband = song.addEffect (track, Multiband::typeID);
+
+        for (const auto* band : { "low", "master" })
+        {
+            const auto prefix = juce::String (band);
+            const auto place = phazite::devices::curves::axisForDecibels (-40.0f);
+            song.setParameter (multiband, prefix + "Point2X", place);
+            song.setParameter (multiband, prefix + "Point2Y", place);
+            song.setParameter (multiband, prefix + "Point3Y", place);
+            song.setParameter (multiband, prefix + "Key", 1.0f);
+        }
+
+        song.setParameter (multiband, "keyLowCut", 60.0f);
+        song.setParameter (multiband, "keyHighCut", 2000.0f);
+        phazite::setSidechainSource (getSong (song), multiband, source);
+        REQUIRE (phazite::getSidechainSource (getSong (song), multiband) == source);
+
+        // Listen asked for as it starts (it plays the key for half a second, then the sound again), its meters read.
+        const auto played = [&song, multiband]() -> auto& { return dynamic_cast<Multiband&> (getPlayed (song, multiband).getProcessor()); };
+        const auto m = playAndMeasure (
+            song,
+            [&played]
+            {
+                played().getReductionMeter (Multiband::master).take();
+                played().listenToKey();
+            },
+            [&played] { CHECK (played().getReductionMeter (Multiband::master).take() > 1.0f); });
+        report ("Phazite's multiband, its low band and master keyed by another track through the sidechain, Listen on", m);
         CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
@@ -943,7 +1098,8 @@ TEST_SUITE ("realtime-audit")
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
-    TEST_CASE ("Real-time audit: Phazite's wavetable synth, eight unison voices and warps, an envelope sweeping each note's table")
+    TEST_CASE ("Real-time audit: Phazite's wavetable synth, eight unison voices, stacked and drifting, and warps, an envelope "
+               "sweeping each note's table")
     {
         using phazite::devices::WavetableSynth;
         TestSong song;
@@ -954,6 +1110,8 @@ TEST_SUITE ("realtime-audit")
         const auto set = [&song, wavetable] (const char* id, float value) { song.setParameter (wavetable, id, value); };
         set ("unisonVoices", 7.0f); // eight
         set ("unisonPosition", 0.5f);
+        set ("unisonStack", (float) WavetableSynth::Stack::twoOctaves);
+        set ("unisonDrift", 25.0f);
         set ("osc1Warp", (float) WavetableSynth::Warp::sync);
         set ("osc1WarpAmount", 0.4f);
         set ("osc2On", 1.0f);
@@ -973,7 +1131,9 @@ TEST_SUITE ("realtime-audit")
         addChords (song, track);
 
         const auto m = playAndMeasure (song);
-        report ("Phazite's wavetable synth, eight unison voices and warps, an envelope sweeping each note's table", m);
+        report ("Phazite's wavetable synth, eight unison voices, stacked and drifting, and warps, an envelope sweeping each note's "
+                "table",
+                m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
@@ -985,7 +1145,7 @@ TEST_SUITE ("realtime-audit")
         const auto track = song.firstTrack;
         addTone (song, track);
 
-        phazite::DeviceID filter, chorus;
+        phazite::DeviceID filter, phaser, flanger, chorus;
 
         for (const auto* type :
              { phazite::devices::FilterEffect::typeID, phazite::devices::Saturator::typeID, phazite::devices::Multiband::typeID,
@@ -997,16 +1157,35 @@ TEST_SUITE ("realtime-audit")
             if (! filter.isValid())
                 filter = device;
 
+            if (std::string_view (type) == phazite::devices::Phaser::typeID)
+                phaser = device;
+
+            if (std::string_view (type) == phazite::devices::Flanger::typeID)
+                flanger = device;
+
             if (std::string_view (type) == phazite::devices::Chorus::typeID)
                 chorus = device;
         }
 
         // The filter swept by a lane, a cycle a beat, so its cutoff glides all the time; the others well into their work, the
-        // chorus in Ensemble with its feedback, High Cut and Safe Bass on.
+        // phaser and the flanger with Safe Bass on (their split, and the sound their runners mix back in turned with it, at
+        // half their mix), and the chorus with eight copies a side, each in its part of the sweep, with their shimmer, its
+        // feedback, High Cut and Safe Bass on.
         sweepCutoff (song, filter, 200.0f, 8000.0f);
 
-        for (const auto& [id, value] :
-             { std::pair<const char*, float> { "mode", 1.0f }, { "feedback", 0.4f }, { "highCut", 6000.0f }, { "safeBass", 150.0f } })
+        for (const auto device : { phaser, flanger })
+        {
+            song.setParameter (device, "safeBass", 120.0f);
+            song.setParameter (device, "mix", 0.5f);
+        }
+
+        for (const auto& [id, value] : { std::pair<const char*, float> { "voices", 7.0f },
+                                         { "shimmer", 1.0f },
+                                         { "voicePhase", 0.5f },
+                                         { "spread", 0.6f },
+                                         { "feedback", 0.4f },
+                                         { "highCut", 6000.0f },
+                                         { "safeBass", 150.0f } })
             song.setParameter (chorus, id, value);
 
         const auto m = playAndMeasure (song);
@@ -1015,6 +1194,97 @@ TEST_SUITE ("realtime-audit")
                 m);
         CHECK (m.peakLevel > 0.001f);
         CHECK (m.peakLevel < juce::Decibels::decibelsToGain (-1.0f) * 1.001f); // the limiter's ceiling
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's exciter on the synth's chords, its band swept, with its editor listening and Listen on")
+    {
+        using phazite::devices::Exciter;
+        TestSong song;
+        const auto track = song.firstTrack;
+        song.setInstrument (track, phazite::devices::Synth::typeID);
+        addChords (song, track);
+        const auto exciter = song.addEffect (track, Exciter::typeID);
+
+        // Driven hard and added whole, High Cut on; where its band starts swept by a lane, a cycle a beat, so that the
+        // filter after its curve is worked out again all the time.
+        for (const auto& [id, value] : { std::pair<const char*, float> { "drive", 30.0f }, { "amount", 1.0f }, { "highCut", 12000.0f } })
+            song.setParameter (exciter, id, value);
+
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            phazite::addPoint (getSong (song), { exciter, "frequency" }, { phazite::BeatPosition::fromBeats (beat), 1000.0f, 0.0f });
+            phazite::addPoint (getSong (song), { exciter, "frequency" }, { phazite::BeatPosition::fromBeats (beat + 0.5), 8000.0f, 0.0f });
+        }
+
+        // As its open editor has it: its scope and what it adds tapped, its meter read, and Listen held on.
+        const auto played = [&song, exciter]() -> auto& { return dynamic_cast<Exciter&> (getPlayed (song, exciter).getProcessor()); };
+        std::vector<float> tapped (32768);
+
+        const auto m = playAndMeasure (
+            song,
+            [&]
+            {
+                getPlayed (song, exciter).getScope().setListening (true);
+                played().getAddedTap().setListening (true);
+                played().getReach().take();
+                played().listenToAdded();
+            },
+            [&]
+            {
+                CHECK (played().getAddedTap().pull (tapped.data(), (int) tapped.size()) > 0);
+                CHECK (played().getReach().take() > 1.0f); // well into its curve
+            });
+        report ("Phazite's exciter on the synth's chords, its band swept by a lane, its editor's displays listening and Listen on", m);
+        CHECK (m.peakLevel > 0.001f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's vinyl on the synth's chords, everything on, its band swept, with its editor listening")
+    {
+        using phazite::devices::Vinyl;
+        TestSong song;
+        const auto track = song.firstTrack;
+        song.setInstrument (track, phazite::devices::Synth::typeID);
+        addChords (song, track);
+        const auto vinyl = song.addEffect (track, Vinyl::typeID);
+
+        // A deep wow and flutter, the groove distorting, the lows in mono, hiss and dense crackle; its high cut swept by a lane,
+        // a cycle a beat, so that its band glides all the time.
+        for (const auto& [id, value] : { std::pair<const char*, float> { "wow", 20.0f },
+                                         { "flutter", 8.0f },
+                                         { "distortion", 0.8f },
+                                         { "bassMono", 200.0f },
+                                         { "hiss", -50.0f },
+                                         { "crackle", -18.0f },
+                                         { "density", 300.0f } })
+            song.setParameter (vinyl, id, value);
+
+        for (int beat = 0; beat < 8; ++beat)
+        {
+            phazite::addPoint (getSong (song), { vinyl, "highCut" }, { phazite::BeatPosition::fromBeats (beat), 2000.0f, 0.0f });
+            phazite::addPoint (getSong (song), { vinyl, "highCut" }, { phazite::BeatPosition::fromBeats (beat + 0.5), 16000.0f, 0.0f });
+        }
+
+        // As its open editor has it: its scope and its pitch tapped, its clicks counted.
+        const auto played = [&song, vinyl]() -> auto& { return dynamic_cast<Vinyl&> (getPlayed (song, vinyl).getProcessor()); };
+        std::vector<float> readings (4096);
+
+        const auto m = playAndMeasure (
+            song,
+            [&]
+            {
+                getPlayed (song, vinyl).getScope().setListening (true);
+                played().getPitchTap().setListening (true);
+                played().getSurfaceNoise().takeClicks();
+            },
+            [&]
+            {
+                CHECK (played().getPitchTap().pull (readings.data(), (int) readings.size()) > 0);
+                CHECK (played().getSurfaceNoise().takeClicks() > 100); // it crackled all along
+            });
+        report ("Phazite's vinyl on the synth's chords, everything on, its high cut swept by a lane, its editor's displays listening", m);
+        CHECK (m.peakLevel > 0.001f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }
 
@@ -1176,7 +1446,8 @@ TEST_SUITE ("realtime-audit")
     }
 
     TEST_CASE ("Real-time audit: Phazite's sampler, a crash chopped into reversed slices that choke each other, an 808 gliding "
-               "in mono through its filter, a loop crossfading under more notes than voices, a slice played from its editor")
+               "in mono through its filter, a loop crossfading under more notes than voices, a seamless sound plucked from "
+               "random starts with times and a filter that follow the key and the velocity, a slice played from its editor")
     {
         using phazite::devices::Sampler;
         using phazite::test::at, phazite::test::lasting;
@@ -1227,11 +1498,29 @@ TEST_SUITE ("realtime-audit")
         for (int i = 0; i < 20; ++i)
             phazite::test::addMidiNote (played, held, 60 + i, at (i * 0.125), lasting (4.0), 90);
 
+        // The sound made from its spectrum, one seamless loop, plucked in sixteenths up and down the keys, each note from a
+        // random start (read round the loop's end from its octaves), its times by its key and its filter by its velocity.
+        const auto arp = song.addTrack ("Wide");
+        const auto plucker = song.setInstrument (arp, Sampler::typeID);
+        phazite::setFactorySample (played, plucker, phazite::devices::findFactorySample ("Wide Saw"));
+        song.setParameter (plucker, "startRandom", 1.0f);
+        song.setParameter (plucker, "keyTime", 1.0f);
+        song.setParameter (plucker, "filterOn", 1.0f);
+        song.setParameter (plucker, "filterVelocity", 0.5f);
+        song.setParameter (plucker, "decay", 250.0f);
+        song.setParameter (plucker, "sustain", 0.0f);
+        const auto plucked = phazite::test::addMidiClip (played, arp, { at (0.0), at (8.0) }, "Plucks");
+        REQUIRE (plucked.isValid());
+
+        for (int i = 0; i < 32; ++i)
+            phazite::test::addMidiNote (played, plucked, 45 + (i * 7) % 48, at (i * 0.25), lasting (0.25), 40 + (i * 29) % 88);
+
         const auto m = playAndMeasure (song, [&song, slicer] { // a slice, as a press on the drawing plays it
             dynamic_cast<Sampler&> (getPlayed (song, slicer).getProcessor()).audition (Sampler::firstSliceNote + 3, 1.0f);
         });
         report ("Phazite's sampler, a crash chopped into reversed slices that choke each other, an 808 gliding in mono through "
-                "its filter, a loop crossfading under more notes than voices, a slice played from its editor",
+                "its filter, a loop crossfading under more notes than voices, a seamless sound plucked from random starts with "
+                "times and a filter that follow the key and the velocity, a slice played from its editor",
                 m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
@@ -1252,6 +1541,9 @@ TEST_SUITE ("realtime-audit")
         song.setParameter (stack, "op2Wave", (float) FmSynth::Wave::saw);
         song.setParameter (stack, "pitchAmount", 12.0f);
         song.setParameter (stack, "filterOn", 1.0f);
+        song.setParameter (stack, "filterEnvelope", 30.0f); // its filter opened by its envelope on every note, and by velocity
+        song.setParameter (stack, "filterDecay", 120.0f);
+        song.setParameter (stack, "filterVelocity", 0.5f);
         song.setParameter (stack, "lfoOn", 1.0f);
         song.setParameter (stack, "lfoTarget", (float) FmSynth::LfoTarget::timbre);
         song.setParameter (stack, "phase", (float) FmSynth::Phase::free);
@@ -1264,6 +1556,8 @@ TEST_SUITE ("realtime-audit")
         song.setParameter (organ, "op3Fixed", 1.0f);
         song.setParameter (organ, "op3Frequency", 2000.0f);
         song.setParameter (organ, "op1Feedback", -1.0f);
+        song.setParameter (organ, "op2Phase", 90.0f); // each note's operators from their own places in their waves
+        song.setParameter (organ, "op4Phase", 180.0f);
         song.setParameter (organ, "spread", 12.0f);
         song.setParameter (organ, "voiceMode", 1.0f);
         song.setParameter (organ, "glide", 60.0f);
@@ -1295,6 +1589,28 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playAndMeasure (song);
         report ("Phazite's reverb on a return, with an 8-second decay", m);
+        CHECK (m.peakLevel > 0.01f);
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's reverb as a plate on a return, large and fully diffused, with an 8-second decay")
+    {
+        TestSong song;
+        const auto track = song.firstTrack;
+        addTone (song, track);
+
+        const auto reverbReturn = song.addReturn (track, phazite::devices::Reverb::typeID);
+        const auto effects = phazite::getEffects (getSong (song), reverbReturn);
+        REQUIRE (effects.size() == 1);
+        song.setParameter (effects.front(), "mode", (float) phazite::devices::Reverb::plate);
+        song.setParameter (effects.front(), "decay", 8.0f);
+        song.setParameter (effects.front(), "size", 1.0f);
+        song.setParameter (effects.front(), "diffusion", 1.0f);
+        song.setParameter (effects.front(), "highCut", 3000.0f);
+        song.setParameter (effects.front(), "highCutSlope", 0.0f);
+
+        const auto m = playAndMeasure (song);
+        report ("Phazite's reverb as a plate on a return, large and fully diffused, with an 8-second decay", m);
         CHECK (m.peakLevel > 0.01f);
         checkSteadyPlaybackDoesNotAllocate (m);
     }

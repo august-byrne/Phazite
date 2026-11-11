@@ -19,6 +19,7 @@
 #include "ui/theme/DesignTokens.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace
 {
@@ -479,4 +480,73 @@ TEST_CASE ("Right-clicking a fader shows its menu instead of moving it")
     CHECK (fader.getValue() == doctest::Approx (before));
     CHECK (screen.describeUndo() == stepBefore); // no step
     CHECK (screen.song->getUndoManager().getNumActionsInCurrentTransaction() == undoBefore);
+}
+
+TEST_CASE ("A lane's line moves with the song as the view scrolls by whole pixels, a jump straight up its beat's column")
+{
+    // The owner, 2026-11-10: where a lane's line went straight up, it wobbled sideways as the playlist followed the playhead.
+    // The line was worked out at pixels counted from the lane's edge, which the song moved under, rather than along the
+    // song's own.
+    LaneScreen screen;
+    const auto point = [&screen] (double beat, float value, float curve)
+    { phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (beat), value, curve }); };
+
+    point (8.0, 0.2f, 1.0f);   // held, then a jump up at beat 12.25
+    point (12.25, 0.9f, 0.3f); // bending down to beat 16
+    point (16.0, 0.1f, 0.0f);
+    phazite::test::dispatchPendingMessages();
+
+    // At 54 pixels a beat, the jump's beat is half a pixel in, as scrolling continuously leaves lines.
+    screen.playlist.zoom (1.5);
+    screen.playlist.zoom (1.5);
+    REQUIRE (screen.playlist.getView().pixelsPerBeat == 54.0);
+    auto& lane = screen.lane();
+
+    const auto paint = [&lane]
+    {
+        juce::Image image (juce::Image::ARGB, lane.getWidth(), lane.getHeight(), true, juce::SoftwareImageType());
+        juce::Graphics g (image);
+        lane.paintEntireComponent (g, false);
+        return image;
+    };
+
+    // The view starting a pixel later each time: the lane's picture moves a pixel left, and nothing else in it changes.
+    const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
+    const auto firstPixel = juce::roundToInt (6.0 * pixelsPerBeat);
+    std::optional<juce::Image> before;
+
+    for (int step = 0; step < 6; ++step)
+    {
+        CAPTURE (step);
+        screen.playlist.setViewStart (BeatPosition::fromBeats ((firstPixel + step) / pixelsPerBeat));
+        const auto now = paint();
+
+        if (before.has_value())
+        {
+            // Shades apart, past what a stroke's edges round to differently (a level or two) where it lies.
+            const auto differ = [] (juce::Colour a, juce::Colour b)
+            {
+                return std::abs (a.getRed() - b.getRed()) > 8 || std::abs (a.getGreen() - b.getGreen()) > 8
+                       || std::abs (a.getBlue() - b.getBlue()) > 8 || std::abs (a.getAlpha() - b.getAlpha()) > 8;
+            };
+            auto differing = 0;
+
+            for (int y = 0; y < now.getHeight(); ++y)
+                for (int x = 1; x + 2 < now.getWidth(); ++x)
+                    if (differ (now.getPixelAt (x, y), before->getPixelAt (x + 1, y)))
+                        ++differing;
+
+            CHECK (differing == 0);
+        }
+
+        before = now;
+    }
+
+    // The jump goes straight up the column the view puts its beat in (the lane starts where the view does): halfway between
+    // its values, the line's colour there, and the lane's own a few columns before it, over the value held.
+    const auto jumpColumn = screen.playlist.getView().beatToColumn (BeatPosition::fromBeats (12.25));
+    const auto middle = (screen.at (12.25, 0.25f).y + screen.at (12.25, 0.85f).y) / 2;
+    REQUIRE (jumpColumn > 3);
+    CHECK (before->getPixelAt (jumpColumn, middle) != before->getPixelAt (jumpColumn - 3, middle));
+    CHECK (before->getPixelAt (jumpColumn - 3, middle) == before->getPixelAt (jumpColumn - 6, middle));
 }

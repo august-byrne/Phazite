@@ -131,7 +131,12 @@ float Playlist::AutomationLaneView::yToValue (float y) const
 
 float Playlist::AutomationLaneView::beatToX (BeatPosition beat) const
 {
-    return (float) (playlist.getView().beatToX (beat) - playlist.lanes->getLocalPoint (this, juce::Point<int>()).x);
+    return (float) (playlist.getView().beatToX (beat) - getViewOffset());
+}
+
+int Playlist::AutomationLaneView::getViewOffset() const
+{
+    return playlist.lanes->getLocalPoint (this, juce::Point<int>()).x;
 }
 
 BeatPosition Playlist::AutomationLaneView::xToBeat (float x) const
@@ -320,17 +325,29 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
     }
     else
     {
-        // The line as the engine plays it, across what shows, with a wash under it.
-        const auto left = clip.getX() - pixelsPerValue, right = clip.getRight() + pixelsPerValue;
-        const auto numValues = std::max (2, (right - left) / pixelsPerValue + 1);
-        const auto values =
-            getAutomationValues (playlist.context, parameter, { xToBeat ((float) left), xToBeat ((float) right) }, numValues);
+        // The line as the engine plays it, across what shows, with a wash under it: worked out along the song's own
+        // pixels and drawn in the columns that move with the song (TimelineView::getLineSamples()), so that it keeps its
+        // shape as the view scrolls, its jumps straight up their beats' columns.
+        const auto offset = getViewOffset();
+        std::vector<BeatPosition> pointBeats;
+        pointBeats.reserve (points.size());
+
+        for (const auto& point : points)
+            pointBeats.push_back (point.beat);
+
+        const auto samples = playlist.getView().getLineSamples (clip.getX() + offset, clip.getRight() + offset, pixelsPerValue, pointBeats);
+        std::vector<BeatPosition> beats;
+        beats.reserve (samples.size());
+
+        for (const auto& sample : samples)
+            beats.push_back (sample.beat);
+
+        const auto values = getAutomationValues (playlist.context, parameter, beats);
         juce::Path line;
 
-        for (int i = 0; i < (int) values.size(); ++i)
+        for (size_t i = 0; i < values.size() && i < samples.size(); ++i)
         {
-            const auto x = (float) left + (float) (right - left) * (float) i / (float) (numValues - 1);
-            const juce::Point<float> at (x, valueToY (values[(size_t) i]));
+            const juce::Point<float> at (TimelineView::getColumnMiddle (samples[i].column - offset), valueToY (values[i]));
 
             if (i == 0)
                 line.startNewSubPath (at);
@@ -341,9 +358,10 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
         // The wash goes down to the line under the lane, past the room kept for the points' dots, so that the lane is filled
         // as a clip fills its row.
         const auto washBottom = (float) getHeight() - 1.0f;
+        const auto left = line.getBounds().getX(), right = line.getBounds().getRight();
         auto wash = line;
-        wash.lineTo ((float) right, washBottom);
-        wash.lineTo ((float) left, washBottom);
+        wash.lineTo (right, washBottom);
+        wash.lineTo (left, washBottom);
         wash.closeSubPath();
         g.setColour (colour.withAlpha (LaneTint::wash));
         g.fillPath (wash);
@@ -363,7 +381,10 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
 
         for (int i = 0; i < (int) points.size(); ++i)
         {
-            const juce::Point<float> centre (beatToX (points[(size_t) i].beat), valueToY (points[(size_t) i].value));
+            // On the line, in its point's column.
+            const juce::Point<float> centre (
+                TimelineView::getColumnMiddle (playlist.getView().beatToColumn (points[(size_t) i].beat) - offset),
+                valueToY (points[(size_t) i].value));
             const auto chosen = isSelected (i);
             const auto radius = chosen ? LaneTint::selectedPointRadius : LaneTint::pointRadius;
             const auto dot = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);

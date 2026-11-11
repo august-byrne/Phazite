@@ -19,6 +19,7 @@ namespace
     constexpr std::string_view subOctaves[] = { "-1 Octave", "-2 Octaves" };
     constexpr std::string_view subShapes[] = { "Sine", "Triangle", "Saw", "Square" };
     constexpr std::string_view unisonCounts[] = { "1", "2", "3", "4", "5", "6", "7", "8" };
+    constexpr std::string_view unisonStacks[] = { "Off", "Octave", "Two Octaves", "Fifth", "Power Chord" };
     constexpr std::string_view lfoShapes[] = { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random" };
     constexpr std::string_view modSources[] = { "None",     "Envelope 2", "Envelope 3", "LFO 1", "LFO 2",
                                                 "Velocity", "Note",       "Mod Wheel",  "Random" };
@@ -31,7 +32,7 @@ namespace
 
     // The note values an LFO in time with the song takes (devices/dsp/NoteValues.h).
     constexpr auto& divisions = dsp::noteValueNames;
-    constexpr auto& divisionBeats = dsp::noteValueBeats;
+    constexpr auto& divisionLengths = dsp::noteValueLengths;
 
     // An envelope's time, from minimum to 10 s, with 300 ms halfway along its knob.
     constexpr ParameterInfo makeTime (std::string_view id, std::string_view name, float minimum, float defaultValue)
@@ -122,6 +123,8 @@ namespace
         { .id = "unisonDetune", .name = "Unison Detune", .maximum = 100.0f, .defaultValue = 20.0f, .unit = Unit::cents },
         makePercent ("unisonSpread", "Unison Spread", 0.8f),
         makePercent ("unisonPosition", "Unison Position Spread", 0.0f),
+        makeChoice ("unisonStack", "Unison Stack", unisonStacks, 0.0f),
+        { .id = "unisonDrift", .name = "Unison Drift", .maximum = 50.0f, .defaultValue = 0.0f, .unit = Unit::cents },
         makeToggle ("filterOn", "Filter On", 1.0f),
         makeChoice ("filterType", "Filter Type", dsp::filterModeNames, 0.0f),
         { .id = "cutoff",
@@ -211,9 +214,26 @@ namespace
     static_assert (Synth::getModParameter (Synth::numModSlots - 1, Synth::modAmount) == Synth::mod8Amount);
     static_assert (std::size (modTargets) == (size_t) Synth::ModTarget::unisonDetune + 1);
     static_assert (std::size (modSources) == (size_t) Synth::ModSource::random + 1);
+    static_assert (std::size (unisonStacks) == (size_t) Synth::Stack::powerChord + 1);
 
     constexpr int sustainPedal = 64, modulationWheel = 1; // MIDI controller numbers
     constexpr std::uint32_t noiseSeed = 0x7ab1e5u, unisonSeed = 0x0715e7u, lfoSeed = 0x1f0e5u, randomSeed = 0x2a7d0u;
+    constexpr std::uint32_t driftSeed = 0xd71f77u;
+
+    // The unison's drift: each copy's pitch wanders toward a new place every so often, gliding there, at the pace of the
+    // synth's Drift (Synth.cpp), but each copy at a pace of its own, from half to twice that, so that no two move together,
+    // as ZynAddSubFX gives each copy of its unison its own vibrato rate. Zyn's copies swing faster (0.5 to 2 Hz), but at
+    // this pace a held note's beating already never repeats, as theirs doesn't.
+    constexpr double driftWanderSeconds = 0.45, driftGlideSeconds = 0.3;
+    constexpr double centsToLog = 0.69314718055994531 / 1200.0; // a pitch in cents as the natural logarithm of its ratio
+
+    // A stack's steps, in semitones, in Synth::Stack's order.
+    constexpr float stackSteps[][Synth::maxStackSteps] = {
+        { 0.0f, 0.0f, 0.0f }, { 0.0f, 12.0f, 0.0f }, { 0.0f, 12.0f, 24.0f }, { 0.0f, 7.0f, 0.0f }, { 0.0f, 7.0f, 12.0f },
+    };
+    constexpr int stackLengths[] = { 1, 2, 3, 2, 3 };
+
+    static_assert (std::size (stackSteps) == std::size (unisonStacks) && std::size (stackLengths) == std::size (unisonStacks));
 
     // What 100 % of a modulation slot moves each destination by.
     constexpr float pitchRange = 24.0f;   // semitones
@@ -334,6 +354,12 @@ void WavetableSynth::renderStep (const OscillatorRun& run, Reader& reader, float
 
 const DeviceInfo WavetableSynth::info { .typeID = typeID, .name = "Wavetable", .kind = DeviceKind::instrument, .parameters = parameters };
 
+std::span<const float> WavetableSynth::getStackSteps (Stack stack) noexcept
+{
+    const auto index = (size_t) std::clamp ((int) stack, 0, (int) std::size (stackSteps) - 1);
+    return { stackSteps[index], (size_t) stackLengths[index] };
+}
+
 namespace
 {
     // What a block's parameters say, read once for all its voices.
@@ -346,8 +372,9 @@ namespace
         int subOctaves = 1;
         dsp::Waveform subWave = dsp::Waveform::sine;
         int unison = 1;
-        float detune = 0.0f, positionSpread = 0.0f;
+        float detune = 0.0f, positionSpread = 0.0f, drift = 0.0f;
         std::array<float, Synth::maxUnison> places {}, lefts {}, rights {};
+        std::span<const float> stack; // the semitones above the note its copies take in turn (Synth::getStackSteps())
         bool stereo = false;
         bool filterOn = false, steep = true;
         dsp::FilterMode filterMode = dsp::FilterMode::lowPass;
@@ -385,6 +412,8 @@ namespace
         settings.unison = std::clamp (choiceOf<int> (values[Synth::unisonVoices]) + 1, 1, Synth::maxUnison);
         settings.detune = values[Synth::unisonDetune];
         settings.positionSpread = values[Synth::unisonPosition];
+        settings.stack = Synth::getStackSteps (choiceOf<Synth::Stack> (values[Synth::unisonStack]));
+        settings.drift = values[Synth::unisonDrift];
         settings.stereo = settings.unison > 1 && hasRight;
         const auto norm = 1.0f / std::sqrt ((float) settings.unison);
 
@@ -491,6 +520,8 @@ void WavetableSynth::prepare (double newSampleRate, int)
     // A harmonic may play up to where its alias, folded back from the sample rate, is above 20 kHz.
     aliasLimit = std::clamp (1.0 - 20000.0 / sampleRate, 0.45, 0.9);
     const auto controlRate = sampleRate / controlStep;
+    driftWanderSteps = (float) (driftWanderSeconds * controlRate);
+    driftFollow = (float) (1.0 - std::exp (-1.0 / (driftGlideSeconds * controlRate)));
 
     for (auto& voice : voices)
     {
@@ -526,6 +557,10 @@ void WavetableSynth::reset()
         voice.fadeStep = 0.0f;
         voice.noise.setSeed (noiseSeed + (std::uint32_t) index);
         voice.phases.setSeed (unisonSeed + (std::uint32_t) index);
+        voice.drifting.setSeed (driftSeed + (std::uint32_t) index);
+
+        for (auto& oscillator : voice.oscillators)
+            oscillator.wanders = {};
 
         for (auto& filter : voice.filters)
             filter.reset();
@@ -559,15 +594,22 @@ void WavetableSynth::releaseVoice (Voice& voice)
     voice.envelope3.noteOff();
 }
 
-WavetableSynth::Voice& WavetableSynth::findVoiceFor (int note)
+void WavetableSynth::letGoOf (int note)
 {
-    // The voice playing this note already, then a free one, then the one ringing out longest, then the oldest: among
-    // those that play notes, not the last, which fades out a voice taken (stealVoice()).
-    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
+    // A key played again while its key or the pedal still holds its voice lets the voice go as its key coming up would: it
+    // rings out over its release while the new note takes a voice of its own, and the key's first note-off lets go of that,
+    // so that a key never holds two voices (Synth::letGoOf()).
+    for (size_t i = 0; i < (size_t) maxVoices; ++i)
+        if (auto& voice = voices[i]; voice.note == note && (voice.held || voice.sustained))
+            releaseVoice (voice);
+}
 
-    for (auto& voice : playing)
-        if (voice.note == note && voice.amp.isActive())
-            return voice;
+WavetableSynth::Voice& WavetableSynth::findVoice()
+{
+    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the last, which
+    // fades out a voice taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail
+    // rings on untouched, and the new note starts from its waves' starts and its envelopes'.
+    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
 
     for (auto& voice : playing)
         if (! voice.amp.isActive())
@@ -633,6 +675,43 @@ void WavetableSynth::startVoice (Voice& voice)
         voice.lfos[i].reset (0.0f, lfoSeed + (std::uint32_t) (notesPlayed * 2 + i));
 }
 
+// Each note's unison voices from places of their own, part of the way to their next, each at its own pace: no two notes
+// beat alike, as ZynAddSubFX draws its unison again for every note. A voice starts about as far out as its wandering
+// keeps it (the mean of two places: gliding, it never gets all the way to one), so that a held note's unison is as wide
+// at its start as later.
+void WavetableSynth::startDrift (Voice& voice) noexcept
+{
+    for (auto& oscillator : voice.oscillators)
+    {
+        for (auto& wander : oscillator.wanders)
+        {
+            wander.now = 0.5f * (voice.drifting.nextBipolar() + voice.drifting.nextBipolar());
+            wander.to = voice.drifting.nextBipolar();
+            wander.pace = std::exp2 (voice.drifting.nextBipolar());
+            wander.stepsLeft = std::max (1, (int) (voice.drifting.nextUnipolar() * driftWanderSteps / wander.pace));
+        }
+    }
+}
+
+void WavetableSynth::moveDrift (Voice& voice, int unison) noexcept
+{
+    for (auto& oscillator : voice.oscillators)
+    {
+        for (int u = 0; u < unison; ++u)
+        {
+            auto& wander = oscillator.wanders[(size_t) u];
+
+            if (--wander.stepsLeft <= 0)
+            {
+                wander.to = voice.drifting.nextBipolar();
+                wander.stepsLeft = std::max (1, (int) (driftWanderSteps / wander.pace));
+            }
+
+            wander.now += (wander.to - wander.now) * std::min (1.0f, driftFollow * wander.pace);
+        }
+    }
+}
+
 void WavetableSynth::startNote (int note, float velocityValue, std::span<const float> values, bool portamento)
 {
     const auto sensitivity = values[velocity];
@@ -685,20 +764,20 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
             voice.envelope2.noteOn();
             voice.envelope3.noteOn();
             voice.stepPending = true;
+            startDrift (voice);
         }
 
         voice.slidePerSample = slideFrom (voice.pitch);
         return;
     }
 
-    auto& voice = findVoiceFor (note);
+    letGoOf (note);
+    auto& voice = findVoice();
 
-    if (voice.amp.isActive() && (voice.note != note || voice.fadeStep > 0.0f))
+    if (voice.amp.isActive())
         stealVoice (voice);
 
-    if (! voice.amp.isActive())
-        startVoice (voice);
-
+    startVoice (voice);
     voice.note = note;
     voice.held = true;
     voice.sustained = false;
@@ -714,6 +793,7 @@ void WavetableSynth::startNote (int note, float velocityValue, std::span<const f
     voice.envelope2.noteOn();
     voice.envelope3.noteOn();
     voice.stepPending = true;
+    startDrift (voice);
 }
 
 void WavetableSynth::stopNote (int note, std::span<const float> values)
@@ -755,6 +835,8 @@ void WavetableSynth::stopNote (int note, std::span<const float> values)
         return;
     }
 
+    // The voice its key holds, one at most (letGoOf()): what rings out of the key already rings on, its release not begun
+    // again.
     for (auto& voice : voices)
     {
         if (voice.note == note && voice.held)
@@ -944,11 +1026,21 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 const auto basePitch = voice.pitch + settings.bent + pitchRange * moveOf (moves, ModTarget::pitch);
                 const auto detune = std::max (0.0f, settings.detune + detuneRange * moveOf (moves, ModTarget::unisonDetune));
 
-                // Each unison voice's pitch as a ratio of its oscillator's, the same for both (docs/performance-audit.md, A4).
+                // Each unison voice's pitch as a ratio of its oscillator's, the same for both (docs/performance-audit.md, A4):
+                // its place in the detune, and the step of the stack it takes in its turn.
                 std::array<double, maxUnison> unisonRatios {};
+                const auto stackLength = settings.stack.size();
 
                 for (int u = 0; u < settings.unison; ++u)
-                    unisonRatios[(size_t) u] = std::exp2 ((double) (settings.places[(size_t) u] * detune) * 0.01 / 12.0);
+                    unisonRatios[(size_t) u] = std::exp2 (
+                        ((double) (settings.places[(size_t) u] * detune) * 0.01 + (double) settings.stack[(size_t) u % stackLength])
+                        / 12.0);
+
+                // The unison's drift: each voice of each oscillator a little further on its own way.
+                const auto drifting = settings.drift > 0.0f;
+
+                if (drifting)
+                    moveDrift (voice, settings.unison);
 
                 for (int osc = 0; osc < numOscillators; ++osc)
                 {
@@ -974,18 +1066,34 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                         (double) (basePitch + settings.pitch[(size_t) osc] + pitchRange * moveOf (moves, targetOf (ModTarget::osc1Pitch)));
                     const auto speed = getWarpSpeed (run.warp, run.warpAmount, otherRatios[(size_t) osc]);
 
-                    // Each unison voice's pitch, then the level that its fastest allows.
+                    // Each unison voice's pitch, then the level that its fastest allows: for each step of the stack its
+                    // own, so that the voices on the note keep the harmonics those above it can't play.
                     const auto oscillatorIncrement = dsp::noteToFrequency (semitones) / sampleRate;
-                    auto fastest = 0.0;
+                    std::array<double, maxStackSteps> fastest {};
 
                     for (int u = 0; u < settings.unison; ++u)
                     {
-                        const auto increment = std::min (0.49, oscillatorIncrement * unisonRatios[(size_t) u]);
+                        auto ratio = unisonRatios[(size_t) u];
+
+                        if (drifting)
+                        {
+                            // As far off as its wander has taken it: a few cents, so e^x by its first terms is within a
+                            // hundredth of a cent.
+                            const auto x = (double) (settings.drift * run.wanders[(size_t) u].now) * centsToLog;
+                            ratio *= 1.0 + x + 0.5 * x * x;
+                        }
+
+                        const auto increment = std::min (0.49, oscillatorIncrement * ratio);
                         run.readers[(size_t) u].increment = (float) increment;
-                        fastest = std::max (fastest, increment);
+                        auto& ofStep = fastest[(size_t) u % stackLength];
+                        ofStep = std::max (ofStep, increment);
                     }
 
-                    const auto mipLevel = Wavetable::chooseLevel (aliasLimit / std::max (1.0e-9, fastest * (double) speed));
+                    std::array<int, maxStackSteps> mipLevels {};
+
+                    for (size_t step = 0; step < stackLength; ++step)
+                        mipLevels[step] = Wavetable::chooseLevel (aliasLimit / std::max (1.0e-9, fastest[step] * (double) speed));
+
                     const auto lastFrame = table->getNumFrames() - 1;
 
                     for (int u = 0; u < settings.unison; ++u)
@@ -994,6 +1102,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                         const auto spread = settings.places[(size_t) u] * settings.positionSpread * 0.5f;
                         const auto frame = std::clamp (run.position + spread, 0.0f, 1.0f) * (float) lastFrame;
                         const auto firstFrame = std::min ((int) frame, lastFrame);
+                        const auto mipLevel = mipLevels[(size_t) u % stackLength];
                         reader.from = table->getLevel (firstFrame, mipLevel);
                         reader.to = table->getLevel (std::min (firstFrame + 1, lastFrame), mipLevel);
                         reader.morph = frame - (float) firstFrame;
@@ -1268,7 +1377,7 @@ void WavetableSynth::process (const ProcessContext& block)
         envelope.setCurves (value (envAttackCurve), value (envDecayCurve), value (envReleaseCurve));
     };
 
-    // The LFOs' rates: in hertz, or a note value at the song's tempo.
+    // The LFOs' rates: in hertz, or a note value at the song's tempo, a bar's as long as its time signature makes it.
     std::array<double, 2> rates {};
 
     for (size_t i = 0; i < rates.size(); ++i)
@@ -1276,9 +1385,9 @@ void WavetableSynth::process (const ProcessContext& block)
         const auto lfo = (int) i;
         const auto synced = values[(size_t) getLfoParameter (lfo, lfoSync)] > 0.5f;
         const auto division =
-            std::clamp (choiceOf<int> (values[(size_t) getLfoParameter (lfo, lfoDivision)]), 0, (int) std::size (divisionBeats) - 1);
-        rates[i] =
-            synced ? block.tempo / 60.0 / divisionBeats[(size_t) division] : (double) values[(size_t) getLfoParameter (lfo, lfoRate)];
+            std::clamp (choiceOf<int> (values[(size_t) getLfoParameter (lfo, lfoDivision)]), 0, (int) std::size (divisionLengths) - 1);
+        rates[i] = synced ? block.tempo / 60.0 / divisionLengths[(size_t) division].inBeats (block.barLength)
+                          : (double) values[(size_t) getLfoParameter (lfo, lfoRate)];
         freeLfos[i].setRate (rates[i]);
     }
 

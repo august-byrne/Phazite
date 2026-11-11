@@ -14,7 +14,7 @@ namespace phazite::sandbox
 // The program's argument that names the pipe it connects to ("--PhaziteSandbox:<pipe>"), and the messages' version,
 // which both sides must have.
 inline constexpr const char* helperProcessID = "PhaziteSandbox";
-inline constexpr std::int32_t protocolVersion = 5;
+inline constexpr std::int32_t protocolVersion = 6;
 
 enum class MessageType : std::int32_t
 {

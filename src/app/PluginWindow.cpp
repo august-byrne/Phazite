@@ -2,8 +2,7 @@
 #include "PluginWindow.h"
 #include "SandboxedEditor.h"
 #include "model/arrangement/internal/Tracks.h"
-#include "model/devices/DeviceHandle.h"
-#include "model/devices/internal/DeviceHandle.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -14,6 +13,7 @@
 #include "ui/browser/Browser.h"
 #include "ui/devices/DeviceWindowContent.h"
 #include "ui/devices/DrumSamplerEditor.h"
+#include "ui/devices/SidechainMenus.h"
 #include "ui/input/PluginKeys.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -25,6 +25,8 @@ namespace
 
     constexpr int checksPerSecond = 2; // how often a window looks whether what it shows is still there
     constexpr int cascadeOffset = 30;  // how far right and down of the last a window opens, when it has no place kept
+
+    constexpr int keyLabelWidth = 32, keyPickerWidth = 160; // the header's key, at its right end
 
     // How the settings know a plug-in in every project: by its format, maker and name ("VST3/Xfer Records/Serum").
     juce::String getIdentity (const juce::PluginDescription& plugin)
@@ -305,8 +307,9 @@ namespace
     };
 
     //==============================================================================
-    // A plug-in's window: its own editor, under the Plug-in menu. It shows its instance in the song's playback session
-    // (model/plugins/internal/PluginInstances.h), and that instance's editor again after the plug-in was reloaded.
+    // A plug-in's window: its own editor, under the header with the Plug-in menu and, for a plug-in with a sidechain, its key.
+    // It shows its instance in the song's playback session (model/plugins/internal/PluginInstances.h), and that instance's
+    // editor again after the plug-in was reloaded.
     class PluginWindow final : public DeviceWindowFrame
     {
     public:
@@ -315,7 +318,9 @@ namespace
               menu (context, d, *this)
         {
             setName (getDeviceName (s, d));
-            setMenuBar (&menu);
+            setMenuBar (&menu); // the bar's height, then the header in its place, which the window owns
+            header = new PluginWindowHeader (context, d, menu);
+            setMenuBarComponent (header);
 
             if (auto* session = findSession (s))
             {
@@ -335,7 +340,8 @@ namespace
                     session->getPlugins().store (id);
 
             setEditor (nullptr);
-            setMenuBar (nullptr); // before the menu goes
+            header = nullptr;
+            setMenuBar (nullptr); // before the menu goes, the header with it
         }
 
         bool hasEditor() const override { return editor != nullptr; }
@@ -343,6 +349,7 @@ namespace
 
     private:
         PluginMenu menu;
+        PluginWindowHeader* header = nullptr;        // the window's, along its top
         std::shared_ptr<SandboxedInstance> instance; // what the editor shows
         int generation = 0;                          // the instance's reloads, as the editor was made
         std::unique_ptr<SandboxedEditor> editor;
@@ -392,6 +399,9 @@ namespace
                 return hasEditor();
             }
 
+            if (header != nullptr)
+                header->refresh();
+
             return true;
         }
 
@@ -399,14 +409,14 @@ namespace
     };
 
     // One of Phazite's own devices out of the Devices view, when the user wants it: its editor, in a window named after it
-    // and its channel ("EQ - Bass"), as large as its editor at first and then as the user makes it. The Devices view says
-    // meanwhile where it is, and its row there keeps its switch, mix and sidechain.
+    // and its channel ("EQ - Bass"), as large as its editor at first and then as the user makes it, its key's picker in it
+    // (a compressor's, a vocoder's). The Devices view says meanwhile where it is, and its row there keeps its switch and mix.
     class DeviceWindow final : public DeviceWindowFrame
     {
     public:
-        DeviceWindow (DeviceWindows& windows, Song& s, DeviceID d)
+        DeviceWindow (DeviceWindows& windows, ProjectContext& context, Song& s, DeviceID d)
             : DeviceWindowFrame (windows, s, d),
-              content (makeDeviceHandle (s, d))
+              content (context, d)
         {
             setName (getTitleOf (s, d));
             setContentNonOwned (&content, true);
@@ -520,7 +530,7 @@ void DeviceWindows::show (DeviceID id)
     if (opensWindow (*song, id))
         window = std::make_unique<PluginWindow> (*this, context, *song, id);
     else if (popsOut (*song, id))
-        window = std::make_unique<DeviceWindow> (*this, *song, id);
+        window = std::make_unique<DeviceWindow> (*this, context, *song, id);
 
     if (window == nullptr || ! window->hasEditor())
         return; // a plug-in that didn't load, or makes no editor
@@ -585,5 +595,82 @@ void setPluginWindowServices (const PluginWindowServices* newServices)
 std::unique_ptr<juce::MenuBarModel> createPluginMenu (ProjectContext& context, DeviceID id, juce::Component& window)
 {
     return std::make_unique<PluginMenu> (context, id, window);
+}
+
+//==============================================================================
+struct PluginWindowHeader::Parts
+{
+    Parts (ProjectContext& c, DeviceID id, juce::MenuBarModel& model)
+        : context (c),
+          bar (&model)
+    {
+        if (hasSidechain (context, id))
+            key = std::make_unique<ui::SidechainButton> (context, id);
+    }
+
+    ProjectContext& context;
+    juce::MenuBarComponent bar;
+    juce::Label keyLabel { {}, "Key" };
+    std::unique_ptr<ui::SidechainButton> key; // a plug-in's with a sidechain
+    int shownSongVersion = -1;
+};
+
+PluginWindowHeader::PluginWindowHeader (ProjectContext& context, DeviceID id, juce::MenuBarModel& model)
+    : parts (std::make_unique<Parts> (context, id, model))
+{
+    setTitle ("Plug-in window's header");
+    parts->bar.getProperties().set (ui::LookAndFeel::onBarProperty, true); // on the header's background
+    addAndMakeVisible (parts->bar);
+
+    if (auto* key = parts->key.get())
+    {
+        key->setTitle ("Key");
+        parts->keyLabel.setFont (juce::FontOptions (ui::TextSize::small));
+        parts->keyLabel.setJustificationType (juce::Justification::centredRight);
+        parts->keyLabel.setAccessible (false); // the picker's title says it
+        parts->keyLabel.setInterceptsMouseClicks (false, false);
+        ui::setThemeColour (parts->keyLabel, juce::Label::textColourId, &ui::Palette::textMuted);
+        addAndMakeVisible (parts->keyLabel);
+        addAndMakeVisible (*key);
+    }
+}
+
+PluginWindowHeader::~PluginWindowHeader() = default;
+
+juce::Component* PluginWindowHeader::getKeyPicker() const noexcept
+{
+    return parts->key.get();
+}
+
+void PluginWindowHeader::refresh()
+{
+    if (parts->key != nullptr && parts->context.getSongVersion() != parts->shownSongVersion)
+    {
+        parts->shownSongVersion = parts->context.getSongVersion();
+        parts->key->refresh();
+    }
+}
+
+void PluginWindowHeader::paint (juce::Graphics& g)
+{
+    g.fillAll (ui::getPalette (*this).surfaceRaised); // as a plug-in window's menu bar is
+}
+
+void PluginWindowHeader::resized()
+{
+    // The menu at the left; the key at the right end, as wide as it has room for, beside half of the row.
+    auto area = getLocalBounds();
+
+    if (auto* key = parts->key.get())
+    {
+        auto right = area.removeFromRight (std::min (keyLabelWidth + ui::Space::xs + keyPickerWidth, area.getWidth() / 2))
+                         .withTrimmedRight (ui::Space::xs)
+                         .reduced (0, 2);
+        parts->keyLabel.setBounds (right.removeFromLeft (keyLabelWidth));
+        right.removeFromLeft (ui::Space::xs);
+        key->setBounds (right);
+    }
+
+    parts->bar.setBounds (area);
 }
 } // namespace phazite

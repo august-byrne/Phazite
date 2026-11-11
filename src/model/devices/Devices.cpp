@@ -13,9 +13,11 @@
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
+#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 
@@ -30,9 +32,9 @@ std::span<const devices::DeviceInfo* const> getOwnDevices()
     static const devices::DeviceInfo* const own[] = {
         &devices::Synth::info,       &devices::WavetableSynth::info, &devices::FmSynth::info,      &devices::Sampler::info,
         &devices::DrumSampler::info, &devices::Equalizer::info,      &devices::FilterEffect::info, &devices::Compressor::info,
-        &devices::Multiband::info,   &devices::Limiter::info,        &devices::Saturator::info,    &devices::Delay::info,
-        &devices::Reverb::info,      &devices::Phaser::info,         &devices::Flanger::info,      &devices::Chorus::info,
-        &devices::Vocoder::info,     &devices::StereoExpander::info,
+        &devices::Multiband::info,   &devices::Limiter::info,        &devices::Saturator::info,    &devices::Exciter::info,
+        &devices::Vinyl::info,       &devices::Delay::info,          &devices::Reverb::info,       &devices::Phaser::info,
+        &devices::Flanger::info,     &devices::Chorus::info,         &devices::Vocoder::info,      &devices::StereoExpander::info,
     };
     return own;
 }
@@ -63,6 +65,8 @@ namespace
         { &devices::Multiband::info, make<devices::Multiband> },
         { &devices::Limiter::info, make<devices::Limiter> },
         { &devices::Saturator::info, make<devices::Saturator> },
+        { &devices::Exciter::info, make<devices::Exciter> },
+        { &devices::Vinyl::info, make<devices::Vinyl> },
         { &devices::Delay::info, make<devices::Delay> },
         { &devices::Reverb::info, make<devices::Reverb> },
         { &devices::Phaser::info, make<devices::Phaser> },

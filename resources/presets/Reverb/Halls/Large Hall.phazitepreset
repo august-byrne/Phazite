@@ -5,12 +5,15 @@
     "instrument": false,
     "type": "phaziteReverb",
     "parameters": {
+      "mode": "Room",
       "size": 0.85,
       "decay": 3.2,
       "predelay": 25.0,
+      "diffusion": 0.5,
       "damping": 5000.0,
       "lowCut": 120.0,
       "highCut": 20000.0,
+      "highCutSlope": "12 dB",
       "width": 1.0,
       "mix": 0.25
     }

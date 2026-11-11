@@ -137,6 +137,7 @@ struct Playlist::AutomationLaneView : public juce::Component,
     float yToValue (float) const;
     float beatToX (BeatPosition) const;
     BeatPosition xToBeat (float) const;
+    int getViewOffset() const;                   // where the lane starts in the view's columns (TimelineView::beatToColumn())
     BeatPosition limitBeat (BeatPosition) const; // where points can go: the song
     std::optional<int> getPointAt (juce::Point<float>) const;
     std::optional<float> getValueAt (BeatPosition) const;         // the line's, as the engine plays it

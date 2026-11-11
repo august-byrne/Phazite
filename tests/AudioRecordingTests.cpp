@@ -11,6 +11,8 @@
 #include "UiTestHelpers.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/TimelineModel.h"
+#include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -27,7 +29,10 @@
 #include "model/transport/internal/Metronome.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
+#include "model/transport/internal/Take.h"
 #include "model/transport/internal/Tempo.h"
+
+#include <algorithm>
 
 namespace
 {
@@ -231,6 +236,339 @@ TEST_CASE ("Recording round a looped range of any length makes takes of one clip
     phazite::setClipTake (studio.song.context, clips[0].id, 1);
     CHECK (phazite::getClipTakes (studio.song.context, clips[0].id).playing == 1);
     CHECK (studio.song.context.getUndoManager()->getUndoDescription() == juce::String ("Choose Take"));
+}
+
+TEST_CASE ("Recorded from before a looped range, a take keeps its first time round whole, the part before the range a clip of its own")
+{
+    // Known bug 10 until 2026-11-10: what was played before the range was a take of the range's clip, which played it there.
+    // The engine plays on from where recording starts to the range's end before it first goes round, as Bitwig records a
+    // first take longer than the rest. Here beats 4 to 8 (2 to 4 seconds) are looped, and recording starts at the song's
+    // start.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    const auto track = studio.song.firstTrack;
+    auto& song = *phazite::findSong (context);
+    phazite::loopBeatRange (song, 4.0, 8.0);
+    constexpr auto lateBlock = 256.0 / 24000.0;  // in beats: what came in a block late ends a block early
+    constexpr auto firstFrame = 256.0 / 48000.0; // in seconds: the file's first frame came in a block after recording started
+
+    // Where in its file a clip starts playing, in seconds.
+    const auto playedFrom = [&song] (phazite::ClipID clip) { return phazite::getFilePart (phazite::findClipState (song, clip)).start; };
+
+    // The clicks of the song rendered, each on its beat, from the first to the last given.
+    const auto checkClicks = [&studio] (double seconds, int firstBeat, int lastBeat)
+    {
+        const auto clicks = studio.renderClicks (seconds);
+        REQUIRE (clicks.size() == (size_t) (lastBeat - firstBeat + 1));
+
+        for (size_t i = 0; i < clicks.size(); ++i)
+        {
+            CAPTURE (i);
+            CHECK (clicks[i] == clickOn ((double) firstBeat + (double) i));
+        }
+    };
+
+    SUBCASE ("Stopped in the range before going round: one clip of what was played, where it was played")
+    {
+        studio.record (3.0); // to beat 6
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (6.0 - lateBlock));
+        CHECK (clips[0].takes == 0);
+        CHECK (playedFrom (clips[0].id) == doctest::Approx (firstFrame));
+        checkClicks (3.2, 0, 5);
+    }
+
+    SUBCASE ("Stopped before the range: one clip of what was played, where it was played")
+    {
+        studio.record (1.0); // to beat 2
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (2.0 - lateBlock));
+        CHECK (clips[0].takes == 0);
+        checkClicks (1.2, 0, 1);
+    }
+
+    SUBCASE ("Round once and part of the second time round: the part before the range, and the range's takes, the first playing")
+    {
+        studio.record (5.0); // to beat 10, beat 6 the second time round
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 2);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[0].takes == 0);
+        CHECK (playedFrom (clips[0].id) == doctest::Approx (firstFrame));
+
+        // The first time round's part in the range is the first take, the last whole one; the second is the second time round.
+        CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[1].range.getEnd().inBeats() == doctest::Approx (8.0));
+        CHECK (clips[1].takes == 2);
+        CHECK (clips[1].take == 1);
+        CHECK (playedFrom (clips[1].id) == doctest::Approx (2.0 + firstFrame));
+        checkClicks (4.2, 0, 7);
+
+        phazite::setClipTake (context, clips[1].id, 2);
+        CHECK (playedFrom (clips[1].id) == doctest::Approx (4.0 + firstFrame));
+    }
+
+    SUBCASE ("Round twice and part of the third time round: the second time round's take playing, the last whole one")
+    {
+        studio.record (7.0); // to beat 14, beat 6 the third time round
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 2);
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[1].range.getEnd().inBeats() == doctest::Approx (8.0));
+        CHECK (clips[1].takes == 3);
+        CHECK (clips[1].take == 2);
+        CHECK (playedFrom (clips[1].id) == doctest::Approx (4.0 + firstFrame));
+        checkClicks (4.2, 0, 7);
+    }
+
+    SUBCASE ("Recorded from a moment before the range, too short to keep: no clip of it, and the range's takes as from its start")
+    {
+        phazite::movePlayhead (context, phazite::BeatPosition::fromBeats (4.0 - 0.01)); // 5 ms before
+        studio.record (2.5);                                                            // to beat 8.99, beat 4.99 the second time round
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[0].takes == 2);
+        CHECK (clips[0].take == 1);
+    }
+
+    // Recorded from beat 5, within the range, for so long: the take that shows while it records, just before it stops
+    // (RecordingModel.h), which is the finished clip's last. Every time round is a take, the first too, as Logic Pro and Bitwig
+    // keep a partial first pass: its file starts with silence from the range's start, so that each take lies where the range
+    // does, as long as it, one after another.
+    const auto recordFromWithin = [&studio, &context] (double seconds)
+    {
+        phazite::movePlayhead (context, phazite::BeatPosition::fromBeats (5.0));
+        studio.song.run ("transport.record");
+        REQUIRE (studio.isRecording());
+        studio.playback.play (seconds);
+        const auto shown = phazite::getRecordingsInProgress (context);
+        REQUIRE (shown.size() == 1);
+        studio.song.run ("transport.record");
+        return shown[0].take;
+    };
+
+    SUBCASE ("Recorded from within the range, stopped before going round: one clip of what was played, without the silence before it")
+    {
+        const auto shownTake = recordFromWithin (1.0); // from beat 5 to beat 7
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (5.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (7.0 - lateBlock));
+        CHECK (clips[0].takes == 0);
+        CHECK (shownTake == 1);
+        CHECK (playedFrom (clips[0].id) == doctest::Approx (0.5)); // past the silence from the range's start
+        checkClicks (3.6, 5, 6);
+    }
+
+    SUBCASE ("Recorded from within the range, stopped in the second time round: two takes, the first holding the first time round")
+    {
+        const auto shownTake = recordFromWithin (3.0); // from beat 5 to beat 11, beat 7 the second time round
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (8.0));
+        CHECK (clips[0].takes == 2);
+        CHECK (clips[0].take == 2); // neither is whole: the last plays
+        CHECK (shownTake == clips[0].takes);
+        CHECK (playedFrom (clips[0].id) == doctest::Approx (2.0));
+        checkClicks (4.2, 4, 6);
+
+        // The first take: silence from the range's start, then what was played from beat 5, where it was played.
+        phazite::setClipTake (context, clips[0].id, 1);
+        CHECK (playedFrom (clips[0].id) == doctest::Approx (0.0));
+        checkClicks (4.2, 5, 7);
+    }
+
+    SUBCASE ("Recorded from within the range, stopped in the third time round: three takes, the whole second one playing")
+    {
+        const auto shownTake = recordFromWithin (5.0); // from beat 5 to beat 15, beat 7 the third time round
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].takes == 3);
+        CHECK (clips[0].take == 2);
+        CHECK (shownTake == clips[0].takes);
+        CHECK (playedFrom (clips[0].id) == doctest::Approx (2.0));
+        checkClicks (4.2, 4, 7);
+    }
+}
+
+TEST_CASE ("While recording from before a looped range, the part before it shows as a clip of its own once recording has gone round")
+{
+    // Ableton Live draws a recording growing where it goes (RecordingModel.h: getRecordingsInProgress()). Beats 4 to 8 are
+    // looped; a tone on another track plays before them, which comes back into the input with the clicks.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    const auto track = studio.song.firstTrack;
+    phazite::test::TemporaryFolder sounds;
+    const auto tone = studio.song.addTrack ("Tone");
+    studio.song.addAudioClip (tone, phazite::test::writeSound (sounds.folder.getChildFile ("Tone.wav"), 2.0), 0.0); // beats 0 to 4
+    phazite::loopBeatRange (*phazite::findSong (context), 4.0, 8.0);
+    EnginePlayback::waitForFiles();
+
+    // The first time round: one clip, from where recording started, as it will be if it stops before going round.
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (3.0); // to beat 6
+    auto recordings = phazite::getRecordingsInProgress (context);
+    REQUIRE (recordings.size() == 1);
+    CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (6.0 - 256.0 / 24000.0));
+    CHECK (recordings[0].take == 1);
+
+    // Round once: the part before the range, whole, and this time round from the range's start, its second take.
+    studio.playback.play (2.0); // to beat 10, beat 6 the second time round
+    recordings = phazite::getRecordingsInProgress (context);
+    REQUIRE (recordings.size() == 2);
+    std::sort (recordings.begin(), recordings.end(), [] (const auto& a, const auto& b) { return a.range.getStart() < b.range.getStart(); });
+    CHECK (recordings[0].track == track);
+    CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (4.0));
+    CHECK (recordings[0].take == 1);
+    CHECK (recordings[1].track == track);
+    CHECK (recordings[1].range.getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (recordings[1].range.getEnd().inBeats() == doctest::Approx (6.0 - 256.0 / 24000.0));
+    CHECK (recordings[1].take == 2);
+
+    // The part before the range draws the first time round's sound, the tone (between the clicks too); the range, this time
+    // round's, the clicks alone.
+    const auto levels = [&context, track] (double from, double to)
+    {
+        return phazite::getRecordingLevels (
+            context, track, phazite::BeatRange (phazite::BeatPosition::fromBeats (from), phazite::BeatPosition::fromBeats (to)), 4);
+    };
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&levels] { return levels (5.0, 6.0)[0] > 0.0f; }));
+    CHECK (levels (2.0, 3.0)[1] > 0.1f);  // a quarter of a beat after a click: the tone
+    CHECK (levels (5.0, 6.0)[1] == 0.0f); // the same, this time round: silence
+    studio.song.run ("transport.record");
+
+    // Stopped, the clips it made are where they showed.
+    const auto clips = phazite::getClips (context, track);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (4.0));
+    CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (4.0));
+}
+
+TEST_CASE ("A take whose writing thread stalls stays in time, with silence where its sound was lost, and Phazite says where")
+{
+    // Known bug 12 until 2026-11-10: what came in after a stall longer than the inputs' buffers (8 seconds) played early by
+    // as long as was lost, without a word. Ableton Live leaves "a gap in the recorded sample", Audacity "will insert zeroes
+    // into the recording to keep the other good parts synchronized" and labels where, and Pro Tools stops with an alert.
+    EngineStudio studio;
+    auto& context = studio.song.context;
+    const auto track = studio.song.firstTrack;
+    const auto trackName = phazite::getTrackName (*phazite::findSong (context), track);
+    juce::StringArray problems;
+    phazite::setProblemReporter (context, [&problems] (const juce::String& title, const juce::String& message)
+                                 { problems.add (title + ": " + message); });
+
+    // Records with the drive stalled for ten seconds: the input's buffer holds the first eight, less the block that no longer
+    // fits, and the rest is lost (from 7.99 seconds, beat 4 of bar 4, for 2.0 seconds).
+    const auto recordStalled = [&studio, &context]
+    {
+        studio.song.run ("transport.record");
+        REQUIRE (studio.isRecording());
+        auto* take = phazite::getSession (context)->getTake();
+        REQUIRE (take != nullptr);
+        take->holdWriting (true);
+        studio.playback.play (10.0);
+        return take;
+    };
+
+    // The drive catches up: the writing thread let go, and what waited in the buffer written (its click on beat 15 drawn).
+    const auto catchUp = [&context, track] (phazite::Take& take)
+    {
+        take.holdWriting (false);
+        const auto span = phazite::BeatRange (phazite::BeatPosition::fromBeats (15.0), phazite::BeatPosition::fromBeats (15.5));
+        REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return phazite::getRecordingLevels (context, track, span, 1)[0] > 0.0f; }));
+    };
+
+    // Each click on its beat, as far as the last, but those of beats 16 to 19, which were lost.
+    const auto clicksTo = [] (int lastBeat)
+    {
+        std::vector<juce::int64> clicks;
+
+        for (int beat = 0; beat <= lastBeat; ++beat)
+            if (beat < 16 || beat > 19)
+                clicks.push_back (clickOn (beat));
+
+        return clicks;
+    };
+
+    // What says where it was lost: one message.
+    const auto checkSaid = [&problems] (const juce::String& where)
+    {
+        REQUIRE (problems.size() == 1);
+        CHECK (problems[0].startsWith ("Part of the recording was lost: "));
+        CHECK (problems[0].endsWith (": " + where + "."));
+    };
+
+    SUBCASE ("The drive catches up, and the song plays on: what came in after the stall is where it was played")
+    {
+        catchUp (*recordStalled());
+        studio.playback.play (3.0);
+        studio.song.run ("transport.record");
+
+        // One clip of all thirteen seconds (26 beats, less the block that came in late).
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (26.0 - 256.0 / 24000.0));
+        CHECK (studio.renderClicks (13.0) == clicksTo (25));
+        checkSaid (trackName + " at bar 4, beat 4 (2.0 s)");
+    }
+
+    SUBCASE ("Stopped while the drive still stalls: what was lost at the end, which the engine noted no gap for, is silence too")
+    {
+        recordStalled();
+        studio.song.run ("transport.record");
+
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (20.0 - 256.0 / 24000.0));
+        CHECK (studio.renderClicks (10.0) == clicksTo (19));
+        checkSaid (trackName + " at bar 4, beat 4 (2.0 s)");
+    }
+
+    SUBCASE ("Round a looped range: where it was lost in the range, and in which take")
+    {
+        phazite::loopBeatRange (*phazite::findSong (context), 0.0, 8.0); // four seconds: lost from the second time round
+        recordStalled();
+        studio.song.run ("transport.record");
+
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].takes == 3);
+        CHECK (clips[0].take == 2);
+        checkSaid (trackName + " at bar 2, beat 4 of take 2 (2.0 s)");
+    }
+
+    SUBCASE ("Lost before a looped range that recording then went round: said where, before the range, whose clip keeps it")
+    {
+        phazite::loopBeatRange (*phazite::findSong (context), 24.0, 32.0); // 12 to 16 seconds
+        catchUp (*recordStalled());
+        studio.playback.play (7.0); // to beat 34, beat 26 the second time round
+        studio.song.run ("transport.record");
+
+        const auto clips = phazite::getClips (context, track);
+        REQUIRE (clips.size() == 2);
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (24.0));
+        CHECK (clips[1].takes == 2);
+        checkSaid (trackName + " at bar 4, beat 4 (2.0 s)");
+    }
+
+    SUBCASE ("Nothing lost, nothing said")
+    {
+        studio.record (1.0);
+        CHECK (phazite::getClips (context, track).size() == 1);
+        CHECK (problems.isEmpty());
+    }
 }
 
 TEST_CASE ("Punched in, only what falls in the looped range is kept, in place of what was there")

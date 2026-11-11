@@ -11,6 +11,7 @@
 #include "engine/automation/Curve.h"
 #include "engine/core/Engine.h"
 #include "engine/core/Handover.h"
+#include "engine/core/Recording.h"
 #include "engine/core/TempoMap.h"
 #include "engine/core/Workers.h"
 #include "engine/nodes/Channel.h"
@@ -499,6 +500,42 @@ TEST_CASE ("A continuous parameter that moves between blocks glides there over t
     CHECK (buffer.getSample (0, 0) == doctest::Approx (-0.5f).epsilon (0.001));
 }
 
+TEST_CASE ("Each stretch of a block played in stretches is handed where the song is as the stretch starts")
+{
+    // An LFO in time with the song takes its phase from the beat it is handed: handed the block's start again for each
+    // stretch, it would be pulled back every few milliseconds while a parameter glides or is automated.
+    auto device = std::make_unique<TestGain>();
+    auto& gain = *device;
+    engine::DeviceRunner runner (TestGain::info, std::move (device));
+    runner.prepare (rate, deviceBlock);
+    constexpr auto step = engine::DeviceRunner::smoothingStep;
+    std::vector<float> values { 0.0f, 0.0f };
+    engine::DeviceRunner::Block block;
+    block.values = values;
+    block.isPlaying = true;
+    block.tempo = 120.0;
+    block.beatsPerSample = block.tempo / 60.0 / rate;
+    block.beat = 8.0;
+    auto buffer = makeLevel (2, deviceBlock, 1.0f);
+    runner.process (buffer, 0, deviceBlock, block);
+    CHECK (gain.beats[0] == doctest::Approx (8.0));
+
+    // A value that moves: the next block plays in stretches.
+    values[0] = -6.0206f;
+    block.beat = 8.0 + deviceBlock * block.beatsPerSample;
+    const auto before = gain.processed;
+    buffer = makeLevel (2, deviceBlock, 1.0f);
+    runner.process (buffer, 0, deviceBlock, block);
+    REQUIRE (gain.processed - before == deviceBlock / step);
+
+    for (int stretch = 0; stretch < deviceBlock / step; ++stretch)
+    {
+        CAPTURE (stretch);
+        CHECK (gain.beats[(size_t) (before + stretch) % gain.beats.size()]
+               == doctest::Approx (block.beat + stretch * step * block.beatsPerSample));
+    }
+}
+
 TEST_CASE ("A device's node keeps its values set by hand in their ranges, plays them, and nothing while it is off")
 {
     engine::DeviceNode node (TestGain::info, std::make_unique<TestGain>());
@@ -564,7 +601,7 @@ TEST_CASE ("A device's node keeps its values set by hand in their ranges, plays 
 }
 
 //==============================================================================
-TEST_CASE ("The tempo map places each beat in samples, beats of the time signature's own at a tempo in quarter notes")
+TEST_CASE ("The tempo map places each beat in samples, beats being quarter notes whatever the time signature")
 {
     const engine::TempoMap plain ({ { 0.0, 120.0 } }, { { 0.0, 4, 4 } }, rate);
     CHECK (plain.toSamples (1.0) == doctest::Approx (24000.0));
@@ -577,13 +614,17 @@ TEST_CASE ("The tempo map places each beat in samples, beats of the time signatu
     const engine::TempoMap slower ({ { 0.0, 120.0 }, { 4.0, 60.0 } }, {}, rate);
     CHECK (slower.toSamples (5.0) == doctest::Approx (4 * 24000.0 + 48000.0));
     CHECK (slower.toBeats (4 * 24000.0 + 24000.0) == doctest::Approx (4.5));
-    CHECK (slower.getSamplesPerBeat (3.0) == doctest::Approx (24000.0));
-    CHECK (slower.getSamplesPerBeat (4.0) == doctest::Approx (48000.0));
+    CHECK (slower.getSamplesPerQuarterNote (3.0) == doctest::Approx (24000.0));
+    CHECK (slower.getSamplesPerQuarterNote (4.0) == doctest::Approx (48000.0));
 
-    // In 6/8 a beat is an eighth, half a quarter note; in 3/4 a bar has three.
+    // In 6/8 a beat is still a quarter note, and a bar three of them, its own beat an eighth; in 3/4 a bar has three.
     const engine::TempoMap eighths ({ { 0.0, 120.0 } }, { { 0.0, 6, 8 } }, rate);
-    CHECK (eighths.toSamples (1.0) == doctest::Approx (12000.0));
+    CHECK (eighths.toSamples (1.0) == doctest::Approx (24000.0));
     CHECK (eighths.getBarStart (7.0) == doctest::Approx (6.0));
+    CHECK (eighths.getBarLength (7.0) == doctest::Approx (3.0));
+    CHECK (eighths.getBeatLength (7.0) == doctest::Approx (0.5));
+    CHECK (eighths.getBarsAt (7.5) == doctest::Approx (2.5));
+    CHECK (eighths.getSamplesPerQuarterNote (1.0) == doctest::Approx (24000.0));
 
     const engine::TempoMap waltz ({ { 0.0, 90.0 } }, { { 0.0, 3, 4 } }, rate);
     CHECK (waltz.getBarStart (4.5) == doctest::Approx (3.0));
@@ -599,7 +640,7 @@ TEST_CASE ("The tempo map ramps from tempo to tempo, straight or bent, holds and
     CHECK (ramp.getTempoAt (6.0) == doctest::Approx (120.0));
     CHECK (ramp.toSamples (4.0) == doctest::Approx (rate * 4.0 * std::log (2.0)));
     CHECK (ramp.toSamples (5.0) == doctest::Approx (rate * (4.0 * std::log (2.0) + 0.5)));
-    CHECK (ramp.getSamplesPerBeat (2.0) == doctest::Approx (rate * 60.0 / 90.0));
+    CHECK (ramp.getSamplesPerQuarterNote (2.0) == doctest::Approx (rate * 60.0 / 90.0));
     CHECK_FALSE (ramp.isSteadyBetween (1.0, 3.0));
     CHECK (ramp.isSteadyBetween (4.0, 10.0));
     CHECK (ramp.isSteadyBetween (-2.0, 0.0)); // before the song's start, its first tempo goes on as it is
@@ -628,6 +669,61 @@ TEST_CASE ("The tempo map ramps from tempo to tempo, straight or bent, holds and
     const engine::TempoMap down ({ { 0.0, 120.0, 0.0f }, { 4.0, 60.0 } }, {}, rate);
     CHECK (down.toSamples (4.0) == doctest::Approx (ramp.toSamples (4.0)));
     CHECK (down.getTempoAt (1.0) == doctest::Approx (105.0));
+}
+
+TEST_CASE ("At 120 BPM a quarter note lasts half a second in any time signature: a bar of 6/8 1.5 s, of 7/8 1.75 s")
+{
+    struct Signature
+    {
+        int numerator, denominator;
+        double bar; // in quarter notes
+    };
+
+    for (const auto& signature : { Signature { 4, 4, 4.0 }, Signature { 6, 8, 3.0 }, Signature { 7, 8, 3.5 }, Signature { 3, 8, 1.5 },
+                                   Signature { 2, 2, 4.0 }, Signature { 3, 4, 3.0 } })
+    {
+        CAPTURE (signature.numerator);
+        CAPTURE (signature.denominator);
+        const engine::TempoMap map ({ { 0.0, 120.0 } }, { { 0.0, signature.numerator, signature.denominator } }, rate);
+        const auto bar = signature.bar;
+
+        // Places count quarter notes, each half a second, whatever the time signature.
+        CHECK (map.toSamples (1.0) == doctest::Approx (0.5 * rate));
+        CHECK (map.toBeats (1.5 * rate) == doctest::Approx (3.0));
+        CHECK (map.getTempoAt (bar) == doctest::Approx (120.0));
+
+        // A bar is as many quarter notes as the time signature says (numerator x 4 / denominator), each half a second.
+        CHECK (map.getBarStart (bar - 0.25) == doctest::Approx (0.0));
+        CHECK (map.getBarStart (bar) == doctest::Approx (bar));
+        CHECK (map.getBarStart (2.5 * bar) == doctest::Approx (2.0 * bar));
+        CHECK (map.toSamples (map.getBarStart (bar + 0.1)) == doctest::Approx (bar * 0.5 * rate));
+    }
+
+    // A bar of 4/4, then 6/8: its bars three quarter notes, a second and a half each.
+    const engine::TempoMap changing ({ { 0.0, 120.0 } }, { { 0.0, 4, 4 }, { 4.0, 6, 8 } }, rate);
+    CHECK (changing.getBarStart (6.9) == doctest::Approx (4.0));
+    CHECK (changing.getBarStart (7.0) == doctest::Approx (7.0));
+    CHECK (changing.toSamples (7.0) == doctest::Approx (3.5 * rate));
+    CHECK (changing.getTimeSignatureAt (7.0).denominator == 8);
+
+    // Its bars counted from the song's start; its beats quarter notes, then eighths.
+    CHECK (changing.getBarsAt (2.0) == doctest::Approx (0.5));
+    CHECK (changing.getBarsAt (8.5) == doctest::Approx (2.5));
+    CHECK (changing.getBarLength (3.0) == doctest::Approx (4.0));
+    CHECK (changing.getBeatLength (5.0) == doctest::Approx (0.5));
+    CHECK (changing.getBeatAtOrAfter (3.2) == doctest::Approx (4.0));
+    CHECK (changing.getBeatAtOrAfter (4.2) == doctest::Approx (4.5));
+    CHECK (changing.getBeatAtOrAfter (5.0) == doctest::Approx (5.0));
+    CHECK (changing.getNextBeat (3.0) == doctest::Approx (4.0));
+    CHECK (changing.getNextBeat (4.0) == doctest::Approx (4.5));
+
+    // 6/8 part of the way through a bar of 4/4 ends that bar there, and starts on a beat of its own.
+    const engine::TempoMap cut ({ { 0.0, 120.0 } }, { { 0.0, 4, 4 }, { 2.5, 6, 8 } }, rate);
+    CHECK (cut.getNextBeat (2.0) == doctest::Approx (2.5));
+    CHECK (cut.getNextBeat (2.5) == doctest::Approx (3.0));
+    CHECK (cut.getBarStart (2.6) == doctest::Approx (2.5));
+    CHECK (cut.getBarsAt (2.5) == doctest::Approx (1.0));
+    CHECK (cut.getBarsAt (7.0) == doctest::Approx (2.5));
 }
 
 namespace
@@ -688,6 +784,97 @@ TEST_CASE ("The engine's metronome clicks on each beat's sample, a bar's first l
 
         // Two seconds at 120 BPM: four beats, the first a bar's.
         requireSame (player.render (96000), expectClicks (96000, { { 0, true }, { 24000, false }, { 48000, false }, { 72000, false } }));
+    }
+}
+
+TEST_CASE ("In 6/8 and 7/8 the metronome clicks on each eighth, a bar's first louder: six a bar, and seven")
+{
+    // At 120 BPM an eighth lasts a quarter of a second, 12000 samples. Played from bar 2, three quarter notes into 6/8 and
+    // three and a half into 7/8: the first click a bar's, and the next bar's first click 1.5 and 1.75 seconds later.
+    for (const auto& [numerator, barStart] : { std::pair (6, 3.0), std::pair (7, 3.5) })
+    {
+        CAPTURE (numerator);
+        engine::Engine player;
+        player.prepare (rate, blockSize);
+        auto plan = makeClickPlan();
+        plan->tempo = engine::TempoMap ({ { 0.0, 120.0 } }, { { 0.0, numerator, 8 } }, rate);
+        player.setPlan (std::move (plan));
+        player.locate (barStart);
+
+        std::vector<std::pair<int, bool>> clicks;
+
+        for (int eighth = 0; eighth <= numerator; ++eighth)
+            clicks.emplace_back (eighth * 12000, eighth % numerator == 0);
+
+        const auto length = numerator * 12000 + 6000;
+        auto expected = expectClicks (length, {});
+
+        for (const auto& [start, accented] : clicks)
+        {
+            const auto sound = engine::makeClick (rate, accented);
+
+            for (int channel = 0; channel < 2; ++channel)
+            {
+                expected.clear (channel, start, length - start);
+                expected.copyFrom (channel, start, sound, 0, 0, std::min (sound.getNumSamples(), length - start));
+            }
+        }
+
+        requireSame (player.render (length), expected);
+    }
+}
+
+TEST_CASE ("The count-in lasts a bar of the time signature where playback starts, a click on each of its beats, its first louder")
+{
+    // From bar 2 at 120 BPM, the metronome on: a bar of eighths (six in 6/8, 1.5 s; seven in 7/8, 1.75 s), the first a bar's,
+    // then the song from bar 2, its first click a bar's again. In 4/4, four quarter notes, two seconds.
+    struct Case
+    {
+        int numerator, denominator;
+        double barStart;  // in quarter notes
+        int clickSamples; // from one click to the next
+    };
+
+    for (const auto& [numerator, denominator, barStart, clickSamples] :
+         { Case { 6, 8, 3.0, 12000 }, Case { 7, 8, 3.5, 12000 }, Case { 4, 4, 4.0, 24000 } })
+    {
+        CAPTURE (numerator);
+        CAPTURE (denominator);
+        engine::Engine player;
+        player.prepare (rate, blockSize);
+        auto plan = makeClickPlan();
+        plan->tempo = engine::TempoMap ({ { 0.0, 120.0 } }, { { 0.0, numerator, denominator } }, rate);
+        player.setPlan (std::move (plan));
+        player.locate (barStart);
+        player.play (true);
+
+        const auto bar = numerator * clickSamples;
+        const auto length = bar + 2 * clickSamples;
+        juce::AudioBuffer<float> played (2, length);
+        played.clear();
+
+        for (int done = 0; done < length; done += blockSize)
+        {
+            float* channels[] = { played.getWritePointer (0, done), played.getWritePointer (1, done) };
+            player.process (channels, 2, std::min (blockSize, length - done));
+        }
+
+        juce::AudioBuffer<float> expected (2, length);
+        expected.clear();
+
+        for (int click = 0; click <= numerator + 1; ++click)
+        {
+            const auto start = click * clickSamples;
+            const auto sound = engine::makeClick (rate, click == 0 || click == numerator);
+
+            for (int channel = 0; channel < 2; ++channel)
+            {
+                expected.clear (channel, start, length - start);
+                expected.copyFrom (channel, start, sound, 0, 0, std::min (sound.getNumSamples(), length - start));
+            }
+        }
+
+        requireSame (played, expected);
     }
 }
 
@@ -1445,6 +1632,83 @@ TEST_CASE ("A file at another rate played from inside, or after a jump, fades in
     }
 }
 
+TEST_CASE ("A recorded input whose reader falls a whole buffer behind gives silence for what it lost, and what came after it in its place")
+{
+    // Known bug 12 until 2026-11-10: what came in after the frames lost was read straight after what came before them, so
+    // that a take played early after its writing thread stalled. A mono input into a buffer of 1000 frames (which holds 999),
+    // in blocks of 100, each frame its own number from 1, so that silence shows.
+    engine::Recording::Input input ({ 0 }, 1000);
+    std::array<float, 100> block {};
+    auto next = 1.0f;
+    std::vector<float> taken;
+    std::int64_t silent = 0;
+
+    const auto write = [&input, &block, &next]
+    {
+        for (auto& sample : block)
+            sample = next++;
+
+        const float* channels[] = { block.data() };
+        input.write (channels, 1, 0, (int) block.size());
+    };
+
+    const auto take = [&input, &taken, &silent] (std::int64_t most)
+    {
+        return input.read (
+            most,
+            [&taken] (const float* const* channels, int numChannels, int count)
+            {
+                CHECK (numChannels == 1);
+                taken.insert (taken.end(), channels[0], channels[0] + count);
+            },
+            [&taken, &silent] (std::int64_t count)
+            {
+                taken.insert (taken.end(), (size_t) count, 0.0f);
+                silent += count;
+            });
+    };
+
+    // Nine blocks fit, frames 1 to 900; the next three find the buffer full, and are lost.
+    for (int i = 0; i < 12; ++i)
+        write();
+
+    // The reader takes 500, which makes room: the next block comes in, the gap before it noted.
+    CHECK (take (500) == 500);
+    write();
+
+    // The rest: what came in before the gap, silence for the 300 frames lost, then what came after, in its place.
+    CHECK (take (1 << 16) == 800);
+    CHECK (silent == 300);
+    REQUIRE (taken.size() == 1300);
+
+    for (size_t i = 0; i < taken.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK (taken[i] == (i >= 900 && i < 1200 ? 0.0f : (float) (i + 1)));
+    }
+
+    CHECK (take (1 << 16) == 0);
+
+    // A reader asked for less stops inside a gap, and goes on from there.
+    for (int i = 0; i < 9; ++i)
+        write(); // frames 1301 to 2200
+
+    for (int i = 0; i < 2; ++i)
+        write(); // lost: frames 2201 to 2400
+
+    CHECK (take (100) == 100);     // room for the next block
+    write();                       // frames 2401 to 2500, the gap before them noted
+    CHECK (take (900) == 900);     // up to frame 2300, the last 100 of them silence
+    CHECK (take (1 << 16) == 200); // the rest of the gap, then what came after it
+    REQUIRE (taken.size() == 2500);
+
+    for (size_t i = 1300; i < taken.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK (taken[i] == (i >= 2200 && i < 2400 ? 0.0f : (float) (i + 1)));
+    }
+}
+
 TEST_CASE ("A long audio file is read ahead of where it plays, each clip's start kept, and what it played long ago let go of")
 {
     // At 1 kHz, 200 s is 7 chunks, of which it reads one ahead.
@@ -1889,7 +2153,7 @@ std::vector<float> getModulatorValues (dev::ModulatorKind kind, std::initializer
 // Where a song at 120 BPM in 4/4 is at a beat.
 dev::SongPlace placeAt (double beat)
 {
-    return { beat / 2.0, beat, 120.0, 4 };
+    return { beat / 2.0, beat, 120.0, 4.0, beat / 4.0 };
 }
 } // namespace
 
@@ -1925,6 +2189,39 @@ TEST_CASE ("An LFO runs free at its rate from its start, or follows the transpor
     CHECK (lfo.next (noted, {}, placeAt (0.0), secondsPerPoint) > 0.05f);
     lfo.noteOn (60, 100);
     CHECK (lfo.next (noted, {}, placeAt (0.0), secondsPerPoint) == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("An LFO's bar is as long as the time signature's, three quarter notes in 6/8, and its 1/4 a quarter note in any")
+{
+    using dev::ModulatorKind;
+    constexpr double secondsPerPoint = engine::controlPointSpacing / rate;
+
+    // Where a song at 120 BPM in 6/8 is at a beat.
+    const auto placeIn68 = [] (double beat) { return dev::SongPlace { beat / 2.0, beat, 120.0, 3.0, beat / 3.0 }; };
+
+    // With the transport, a saw a bar a cycle: where the song is in its bar; and a quarter note a cycle.
+    dev::Modulator lfo (ModulatorKind::lfo);
+    lfo.prepare (rate, 1);
+    const auto bar = getModulatorValues (ModulatorKind::lfo, { { "syncType", 1.0f }, { "wave", 2.0f } });
+
+    for (const auto beat : { 0.0, 1.0, 2.5, 4.0, 7.5 })
+        CHECK (lfo.next (bar, {}, placeIn68 (beat), secondsPerPoint) == doctest::Approx (std::fmod (beat / 3.0, 1.0)).epsilon (1.0e-5));
+
+    const auto quarter = getModulatorValues (ModulatorKind::lfo, { { "syncType", 1.0f }, { "wave", 2.0f }, { "rateType", 8.0f } });
+
+    for (const auto beat : { 0.25, 1.5, 2.75 })
+        CHECK (lfo.next (quarter, {}, placeIn68 (beat), secondsPerPoint) == doctest::Approx (std::fmod (beat, 1.0)).epsilon (1.0e-5));
+
+    // Free, a bar a cycle: half way round three quarters of a second in, half a bar of 6/8 at 120 BPM.
+    dev::Modulator free (ModulatorKind::lfo);
+    free.prepare (rate, 1);
+    const auto freeBar = getModulatorValues (ModulatorKind::lfo, { { "wave", 2.0f } });
+    const auto halfBar = (int) std::lround (0.75 / secondsPerPoint);
+
+    for (int point = 0; point < halfBar; ++point)
+        free.next (freeBar, {}, placeIn68 (point * secondsPerPoint * 2.0), secondsPerPoint);
+
+    CHECK (free.next (freeBar, {}, placeIn68 (1.5), secondsPerPoint) == doctest::Approx (0.5).epsilon (1.0e-4));
 }
 
 TEST_CASE ("A step sequencer, a breakpoint envelope and a random source move as they are set, the random one the same each time")

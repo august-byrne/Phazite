@@ -28,7 +28,7 @@ The Welcome window opens the first time Phazite starts. Everything in it is opti
 
 - **House Groove:** house at 124 BPM with a breakdown and two drops, a bass and chords that pump under the kick, risers, and sends to a reverb and a delay.
 - **Lo-fi Beat:** a lazy, swung kit at 82 BPM with vinyl and rain, ninth chords on a wobbling e-piano, a walking bass and a dub delay.
-- **Exodus:** synthwave at 114 BPM, Exodus by XCALIBUR (CC BY 4.0) on Phazite's instruments, its tempo speeding up and slowing down in the tempo lane.
+- **Exodus:** dark synthwave at 114 BPM, Exodus by XCALIBUR (CC BY 4.0) on presets made after its original sounds: a rolling bass over a sub, an arpeggio in four layers, two buses that pump under the kick, and its tempo speeding up and slowing down in the tempo lane.
 
 ## Take a lesson
 

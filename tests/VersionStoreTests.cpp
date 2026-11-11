@@ -3,6 +3,7 @@
 // one and the audio files' hashes beside them.
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
@@ -688,7 +689,7 @@ TEST_CASE ("A history whose current branch is gone opens on the branch made firs
     REQUIRE (store.writeCurrentBranch ("gone"));
 
     phazite::VersionHistory history (*song, {});
-    REQUIRE (dispatchMessagesUntil ([&history] { return ! history.isReading() && ! history.isBusy(); }));
+    REQUIRE (dispatchMessagesUntil ([&history] { return ! history.isReading() && ! history.isBusy(); }, versionHistoryTimeout));
     REQUIRE (history.findCurrentBranch() != nullptr);
     CHECK (history.findCurrentBranch()->id == "first");
 

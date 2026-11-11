@@ -5,10 +5,11 @@
 // Depth says, in time with the song (a bar at first) or in hertz, as a sine or a triangle, the right side a part of a cycle
 // ahead (Stereo). Feedback makes it ring, as a filter's resonance does: above 0, at the peaks between the notches; below 0,
 // at the notches themselves, which fill in and then turn into peaks. It is solved within the sample, so it never runs away.
-// Spacing spreads the notches apart or draws them together; Safe Bass leaves what is below a frequency as it was. No
-// latency.
+// Spacing spreads the notches apart or draws them together; Safe Bass leaves what is below a frequency as it was, the
+// notches sweeping only what is above it, 24 dB an octave down below it (SafeBass.h). No latency.
 #pragma once
 
+#include "SafeBass.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
@@ -68,7 +69,7 @@ private:
     double sampleRate = 44100.0;
     dsp::SyncedLfo lfo;
     std::array<std::array<dsp::Filter, maxNotches>, 2> sections {};
-    std::array<dsp::Filter, 2> lowParts {};    // Safe Bass's: what is kept as it was
+    SafeBass bassSplit;
     std::atomic<float> shownFeedback { 0.0f }; // for its tail, which the message thread asks for
     std::array<LiveValue, 2> centres;
     LiveValue shownPhase;

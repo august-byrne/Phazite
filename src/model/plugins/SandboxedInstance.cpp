@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/SandboxedInstance.h"
+#include "model/transport/TempoValues.h"
 
 #include <algorithm>
+#include <cmath>
 #include <thread>
 #include <utility>
 
@@ -417,6 +419,11 @@ void SandboxedInstance::playBlock (juce::AudioBuffer<float>& buffer, const juce:
             info.timeSignatureNumerator = signature->numerator;
             info.timeSignatureDenominator = signature->denominator;
         }
+
+        // The bar it is in, counted from the song's start in its time signature where the playhead doesn't say.
+        info.barLength = TimeSignature { info.timeSignatureNumerator, info.timeSignatureDenominator }.getBarLength().inBeats();
+        info.barCount = position->getBarCount().orFallback ((std::int64_t) std::floor (info.beat / info.barLength));
+        info.barStart = position->getPpqPositionOfLastBarStart().orFallback ((double) info.barCount * info.barLength);
     }
 
     info.isRendering = 1;

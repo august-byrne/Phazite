@@ -9,9 +9,11 @@
 // in over a fade after each note starts as a Juno's LFO delay does; the mod wheel adds to it. Drift lets each voice's
 // oscillators and cutoff wander a little, as an analog synth's do. In mono mode one voice plays, legato, gliding between
 // the keys held, as a bassline does, every note or only those played over a held one (a TB-303's slides). Pitch bend and
-// the sustain pedal work as on a keyboard. Unison plays each oscillator up to seven times at once, detuned against each
-// other and spread across the stereo field, for a wide, thick sound (a "supersaw"). Its noise, its unison's starting
-// phases and its drift come from fixed seeds, so it renders the same every time.
+// the sustain pedal work as on a keyboard. In poly mode every note takes a voice of its own, a key played again too: what
+// still rings of it rings out over its release, untouched, as LMMS and most polyphonic synths let it, and the new note
+// starts as any note does. Unison plays each oscillator up to seven times at once, detuned against each other and spread
+// across the stereo field, for a wide, thick sound (a "supersaw"). Its noise, its unison's starting phases and its drift
+// come from fixed seeds, so it renders the same every time.
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -161,9 +163,8 @@ private:
         float driveBlend = 0.0f;                      // how far the sound goes through them: fades as the drive comes on or off
         dsp::FilterSettings filterSettings {};        // what they were last set to,
         bool filterIsSet = false;                     // if they were since the voice started
-        float filterEnvelopeLevel = 0.0f;
-        float fade = 1.0f, fadeStep = 0.0f; // fading out: taken for another note, or cut as playback stopped
-        int age = 0;                        // the samples since its note began (up to a limit)
+        float fade = 1.0f, fadeStep = 0.0f;           // fading out: taken for another note, or cut as playback stopped
+        int age = 0;                                  // the samples since its note began (up to a limit)
     };
 
     double sampleRate = 44100.0;
@@ -192,7 +193,8 @@ private:
     void slideTo (int note, float seconds); // every sounding voice, evenly
     void stopNote (int note, std::span<const float> parameters);
     void releaseVoice (Voice&);
-    Voice& findVoiceFor (int note);
+    void letGoOf (int note); // the voice its key or the pedal still holds, if any, lets go as its key coming up would
+    Voice& findVoice();      // a voice for a new note: a free one, or one to take (stealVoice())
     void stealVoice (Voice&);
     bool isAnotherKeyHeld (int note) const noexcept; // a voice but one playing this note is held: a legato note glides
     void startDrift (Voice&) noexcept;               // a note's drift, from somewhere new

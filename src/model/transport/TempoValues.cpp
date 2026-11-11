@@ -29,12 +29,12 @@ Bars::Bars (const std::vector<TimeSignatureChange>& changes)
 {
     for (const auto& change : changes)
     {
-        const auto beatsPerBar = std::max (1, change.signature.numerator);
+        const auto barLength = change.signature.getBarLength().inBeats();
 
         // The first is at the song's start, whatever beat it says.
         if (runs.empty())
         {
-            runs.push_back ({ 0.0, 0, beatsPerBar });
+            runs.push_back ({ 0.0, 0, change.signature, barLength });
             continue;
         }
 
@@ -44,13 +44,14 @@ Bars::Bars (const std::vector<TimeSignatureChange>& changes)
         // Two at one beat: the later one counts.
         if (beat <= last.startBeat + tiny)
         {
-            runs.back().beatsPerBar = beatsPerBar;
+            runs.back().signature = change.signature;
+            runs.back().barLength = barLength;
             continue;
         }
 
         // One part of the way through a bar ends that bar there.
-        const auto barsBefore = (int) std::ceil ((beat - last.startBeat) / last.beatsPerBar - tiny);
-        runs.push_back ({ beat, last.firstBar + barsBefore, beatsPerBar });
+        const auto barsBefore = (int) std::ceil ((beat - last.startBeat) / last.barLength - tiny);
+        runs.push_back ({ beat, last.firstBar + barsBefore, change.signature, barLength });
     }
 
     if (runs.empty())
@@ -80,7 +81,7 @@ const Bars::Run& Bars::findRunOfBar (int bar) const
 double Bars::getBarsAt (BeatPosition beat) const
 {
     const auto& run = findRunAtBeat (beat.inBeats());
-    return run.firstBar + (beat.inBeats() - run.startBeat) / run.beatsPerBar;
+    return run.firstBar + (beat.inBeats() - run.startBeat) / run.barLength;
 }
 
 int Bars::getBarAt (BeatPosition beat) const
@@ -91,11 +92,16 @@ int Bars::getBarAt (BeatPosition beat) const
 BeatPosition Bars::getBarStart (int bar) const
 {
     const auto& run = findRunOfBar (bar);
-    return BeatPosition::fromBeats (run.startBeat + (double) (bar - run.firstBar) * run.beatsPerBar);
+    return BeatPosition::fromBeats (run.startBeat + (double) (bar - run.firstBar) * run.barLength);
 }
 
-int Bars::getBeatsPerBar (BeatPosition beat) const
+BeatDuration Bars::getBarLength (BeatPosition beat) const
 {
-    return findRunAtBeat (beat.inBeats()).beatsPerBar;
+    return BeatDuration::fromBeats (findRunAtBeat (beat.inBeats()).barLength);
+}
+
+BeatDuration Bars::getBeatLength (BeatPosition beat) const
+{
+    return findRunAtBeat (beat.inBeats()).signature.getBeatLength();
 }
 } // namespace phazite

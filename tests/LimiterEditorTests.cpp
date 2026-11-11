@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The limiter's editor (src/ui/devices/LimiterEditor.h) and the meters it shows (ui::ValueMeter).
+// The limiter's editor (src/ui/devices/LimiterEditor.h), the meters it shows (ui::ValueMeter), and the history it shares with the
+// compressor (src/ui/devices/LevelHistoryView.h): its ceiling's line to drag, and its beats and bars.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -124,4 +125,102 @@ TEST_CASE ("The limiter's editor shows its knobs, meters and history, with the c
     mouse.pause();
     mouse.doubleClick ({ 40, y });
     CHECK (ceiling() == doctest::Approx (-1.0f));
+}
+
+TEST_CASE (
+    "The ceiling's line shows it can be dragged: near it an up-and-down arrow, the line lit, the hint saying so; a press away moves nothing")
+{
+    // The owner (2026-11-10): "it should be obvious that you are able to do this gesture".
+    phazite::test::TestSong song;
+    auto& s = *phazite::findSong (song.context);
+    const auto id = phazite::insertDeviceState (s, phazite::getMasterID (s), phazite::makeOwnDeviceState (s, Limiter::typeID));
+    REQUIRE (id.isValid());
+    phazite::getSession (song.context)->update();
+    const auto ceiling = [&s, id] { return phazite::getValueSetByHand (s, phazite::ParameterRef { id, "ceiling" }); };
+
+    phazite::ui::LimiterEditor editor (phazite::makeDeviceHandle (s, id));
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& history = editor.getDisplay().getHistory();
+    phazite::test::Mouse mouse (history);
+    const auto y = juce::roundToInt (history.getYForLevel (ceiling()));
+
+    // Away from the line: nothing to drag, and what the history shows is what the hint bar says.
+    mouse.moveTo ({ 60, history.getHeight() - 10 });
+    CHECK_FALSE (history.isLineLit());
+    CHECK (history.getMouseCursor() == juce::MouseCursor::NormalCursor);
+    CHECK (history.getTooltip().isEmpty());
+
+    // On it: an up-and-down arrow, the line lit, and the drag said.
+    mouse.moveTo ({ 60, y + 3 });
+    CHECK (history.isLineLit());
+    CHECK (history.getMouseCursor() == juce::MouseCursor::UpDownResizeCursor);
+    CHECK (history.getTooltip().contains ("Drag up or down to move the ceiling"));
+
+    // Off it again, and a drag that starts away from it moves nothing.
+    mouse.moveTo ({ 60, history.getHeight() - 10 });
+    CHECK_FALSE (history.isLineLit());
+    mouse.press ({ 60, history.getHeight() - 10 });
+    mouse.dragTo ({ 60, history.getHeight() - 40 });
+    mouse.release();
+    CHECK (ceiling() == doctest::Approx (-1.0f));
+    CHECK_FALSE (history.isLineLit());
+}
+
+TEST_CASE ("A dynamics history's beat and bar lines are where the song passed them, and move with what it shows")
+{
+    // At 120 in 4/4, a reading every 50 ms (a tenth of a beat), loud on each beat, as a kick on every beat would be heard.
+    phazite::ui::LevelHistoryView history ("History", -48.0f, 24.0f);
+    phazite::test::TestWindow window (history, 400, 160);
+    phazite::ui::LevelHistoryView::SongTime song { .beat = 0.0, .playing = true, .bpm = 120.0 };
+    const auto push = [&history, &song] (int reading)
+    {
+        song.beat = 0.1 * reading;
+        song.barStart = 4.0 * std::floor (song.beat / 4.0 + 1.0e-9);
+        const auto onBeat = reading % 10 == 0;
+        history.push (1000.0 + 50.0 * reading, song, onBeat ? -6.0f : -48.0f, -48.0f, 0.0f);
+    };
+
+    for (int reading = 0; reading <= 50; ++reading)
+        push (reading);
+
+    // Two bars at 120: four seconds across. A line at each beat the song passed, at the moment of the kick on it, the fourth
+    // beat a bar's.
+    CHECK (history.getSpanMilliseconds() == doctest::Approx (4000.0));
+    auto lines = history.getLines();
+    REQUIRE (lines.size() == 5);
+
+    for (size_t n = 0; n < lines.size(); ++n)
+    {
+        CAPTURE (n);
+        CHECK (lines[n].milliseconds == doctest::Approx (1500.0 + 500.0 * (double) n));
+        CHECK (lines[n].bar == (n == 3));
+    }
+
+    // Each at the right edge's distance from the newest reading, two bars across the width; and half a second on, every line,
+    // as each kick, half a second further left.
+    const auto before = history.getXForTime (lines[1].milliseconds);
+    const auto perMillisecond = (float) (history.getWidth() - 2) / 4000.0f;
+    CHECK (before == doctest::Approx ((float) (history.getWidth() - 1) - (3500.0f - 2000.0f) * perMillisecond).epsilon (0.001));
+
+    for (int reading = 51; reading <= 60; ++reading)
+        push (reading);
+
+    CHECK (history.getXForTime (lines[1].milliseconds) == doctest::Approx (before - 500.0f * perMillisecond).epsilon (0.001));
+    lines = history.getLines();
+    REQUIRE (lines.size() == 6);
+    CHECK (lines.back().milliseconds == doctest::Approx (4000.0)); // the second bar's third beat
+
+    // A loop going round, back to the first bar: a bar's line where the song came back to its start.
+    song.beat = 0.04;
+    song.barStart = 0.0;
+    history.push (1000.0 + 50.0 * 61, song, -48.0f, -48.0f, 0.0f);
+    lines = history.getLines();
+    REQUIRE (lines.size() == 7);
+    CHECK (lines.back().bar);
+    CHECK (lines.back().milliseconds == doctest::Approx (1000.0 + 50.0 * 61 - 20.0));
+
+    // Stopped, the song passes no beats: the lines scroll on, but none comes.
+    song.playing = false;
+    history.push (1000.0 + 50.0 * 62, song, -48.0f, -48.0f, 0.0f);
+    CHECK (history.getLines().size() == 7);
 }

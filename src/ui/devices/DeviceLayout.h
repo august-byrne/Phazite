@@ -59,6 +59,10 @@ public:
     void layOut (juce::Rectangle<int>);
     void paint (juce::Graphics&) const; // the parts' titles, and a line between columns
 
+    // Hides every part, with its tabs, switches and pages' bar, until it is laid out again: for an editor that shows another
+    // layout in its place (DeviceEditorBase::setModes()).
+    void hide();
+
     // Whether a column shows its parts under tabs now; and which one it shows (for tests).
     bool usesTabs (int column) const;
     int getShownPart (int column) const;

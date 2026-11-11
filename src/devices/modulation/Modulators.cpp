@@ -18,22 +18,32 @@ namespace
         note
     };
 
-    // Its rate, in hertz (0) or in lengths of the bar: four bars, two, one, then each note value from a half to a
-    // sixty-fourth as a triplet, straight and dotted (1 to 21).
-    constexpr int inHertz = 0, longestLength = 1, shortestLength = 21;
+    // Its rate, in hertz (0) or in lengths of the song: four bars, two, one (1 to 3), each as long as the time signature
+    // makes a bar, then each note value from a half to a sixty-fourth as a triplet, straight and dotted (4 to 21), whatever
+    // the time signature.
+    constexpr int inHertz = 0, longestLength = 1, longestNote = 4, shortestLength = 21;
 
-    // A length's part of a bar.
-    double getBarFraction (int rateType) noexcept
+    bool isInBars (int rateType) noexcept
     {
-        if (rateType < longestLength || rateType > shortestLength)
-            return 1.0;
+        return rateType >= longestLength && rateType < longestNote;
+    }
 
-        if (rateType <= 3)
-            return std::ldexp (1.0, 3 - rateType); // four bars, two, one
+    bool isNoteValue (int rateType) noexcept
+    {
+        return rateType >= longestNote && rateType <= shortestLength;
+    }
 
-        constexpr double feels[] = { 2.0 / 3.0, 1.0, 1.5 }; // a triplet, straight, dotted
-        const auto noteValue = (rateType - 4) / 3;          // a half note, then a quarter, down to a sixty-fourth
-        return std::ldexp (1.0, -(noteValue + 1)) * feels[(rateType - 4) % 3];
+    double getBars (int rateType) noexcept
+    {
+        return std::ldexp (1.0, 3 - rateType); // four, two, one
+    }
+
+    // A note value's length in beats (quarter notes): a whole note is four.
+    double getNoteBeats (int rateType) noexcept
+    {
+        constexpr double feels[] = { 2.0 / 3.0, 1.0, 1.5 };  // a triplet, straight, dotted
+        const auto noteValue = (rateType - longestNote) / 3; // a half note, then a quarter, down to a sixty-fourth
+        return 4.0 * std::ldexp (1.0, -(noteValue + 1)) * feels[(rateType - longestNote) % 3];
     }
 
     // What the parameters that pick one of several mean, each from 0 up.
@@ -48,7 +58,8 @@ namespace
     constexpr std::string_view followsChoices[] = { "Pitch", "Velocity" };
     constexpr std::string_view modeChoices[] = { "Absolute", "Relative" };
 
-    // What several kinds share: how a cycle is timed, and its rate, in hertz or in lengths of the bar (getBarFraction()).
+    // What several kinds share: how a cycle is timed, and its rate, in hertz or in lengths of the song (getBars(),
+    // getNoteBeats()).
     constexpr ParameterInfo syncParameter { "syncType", "Sync", 0.0f, 2.0f, 0.0f, Unit::choice, {}, syncChoices };
     constexpr ParameterInfo rateParameter { "rate", "Rate", 0.01f, 50.0f, 1.0f, Unit::hertz, 1.0f };
     constexpr ParameterInfo rateTypeParameter { "rateType", "Rate Type", 0.0f, 21.0f, 3.0f, Unit::choice, {}, rateTypeChoices };
@@ -385,13 +396,14 @@ double Modulator::movePhase (std::span<const float> parameters, double units, co
     const auto sync = juce::roundToInt (parameters[(size_t) timing.syncType]);
     const auto rateType = juce::roundToInt (parameters[(size_t) timing.rateType]);
     const auto rate = std::max (0.01, (double) parameters[(size_t) timing.rate]);
-    const auto inBars = rateType >= longestLength && rateType <= shortestLength;
+    const auto inBars = isInBars (rateType), inNotes = isNoteValue (rateType);
 
-    // With the transport: as many cycles in as the song is, from its start, in seconds or in bars.
+    // With the transport: as many cycles in as the song is, from its start, in bars, in beats or in seconds.
     if (sync == transport)
     {
-        const auto cycles = inBars ? std::max (0.0, place.beats) / place.numerator / getBarFraction (rateType) * rate
-                                   : std::max (0.0, place.seconds) * rate;
+        const auto cycles = inBars    ? std::max (0.0, place.bars) / getBars (rateType) * rate
+                            : inNotes ? std::max (0.0, place.beats) / getNoteBeats (rateType) * rate
+                                      : std::max (0.0, place.seconds) * rate;
         return getFraction (cycles / units);
     }
 
@@ -399,8 +411,11 @@ double Modulator::movePhase (std::span<const float> parameters, double units, co
     if (sync == note && noteStarted)
         cycle = 0.0;
 
-    const auto barSeconds = 60.0 / place.tempo * place.numerator;
-    const auto cycleSeconds = units * (inBars ? getBarFraction (rateType) * barSeconds / rate : 1.0 / rate);
+    const auto beatSeconds = 60.0 / place.tempo;
+    const auto lengthSeconds = inBars    ? getBars (rateType) * (beatSeconds * place.barLength)
+                               : inNotes ? getNoteBeats (rateType) * beatSeconds
+                                         : 1.0;
+    const auto cycleSeconds = units * (inBars || inNotes ? lengthSeconds / rate : 1.0 / rate);
     const auto at = cycle;
     cycle = getFraction (cycle + seconds / cycleSeconds);
     return at;

@@ -30,6 +30,12 @@ std::vector<double> getTempoValues (const ProjectContext& context, BeatRange ran
     return song != nullptr ? getTempoValues (*song, range, count) : std::vector<double>();
 }
 
+std::vector<double> getTempoValues (const ProjectContext& context, const std::vector<BeatPosition>& beats)
+{
+    const auto* song = findSong (context);
+    return song != nullptr ? getTempoValues (*song, beats) : std::vector<double>();
+}
+
 int addTempoChange (ProjectContext& context, BeatPosition beat, std::optional<double> bpm)
 {
     auto* song = findSong (context);

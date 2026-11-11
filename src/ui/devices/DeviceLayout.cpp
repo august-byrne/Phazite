@@ -466,6 +466,15 @@ void DeviceLayout::layOut (juce::Rectangle<int> area)
     placeRow (shown, area);
 }
 
+void DeviceLayout::hide()
+{
+    for (size_t i = 0; i < columns.size(); ++i)
+        hide (i);
+
+    for (auto* tab : pageTabs)
+        tab->setVisible (false);
+}
+
 void DeviceLayout::hide (size_t index)
 {
     auto& state = *states[index];

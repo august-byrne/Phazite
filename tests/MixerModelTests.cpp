@@ -639,3 +639,32 @@ TEST_CASE ("Delay compensation: how long the song's sound waits, and for which d
     device.process (20);
     CHECK (phazite::getDelayCompensation (context).seconds == doctest::Approx (compensation.seconds));
 }
+
+TEST_CASE ("A bus ducks under a track outside it as a track does; a plain folder, which has no effects, doesn't")
+{
+    TwoTracks tracks;
+    auto& context = tracks.context;
+    auto& song = *tracks.song;
+    const auto bus = phazite::groupIntoFolder (song, { tracks.b }, nullptr); // a bus, as every new folder is
+    REQUIRE (bus.isValid());
+
+    // The tracks it can duck under: the one outside it, and its own, whose sound comes to it and not from it.
+    const auto choices = phazite::getDuckUnderChoices (context, bus);
+    REQUIRE (choices.size() == 2);
+    CHECK (std::all_of (choices.begin(), choices.end(), [] (const phazite::SidechainChoice& choice) { return choice.whyNot.isEmpty(); }));
+
+    const auto compressor = phazite::duckUnder (context, bus, tracks.a);
+    REQUIRE (compressor.isValid());
+    CHECK (phazite::getDeviceChannel (context, compressor) == bus);
+    CHECK (phazite::getSidechainSource (context, compressor) == tracks.a);
+
+    // What plays follows: the bus's compressor hears the track.
+    auto* played = tracks.findPlayedDevice (compressor);
+    REQUIRE (played != nullptr);
+
+    // A plain folder has no effects to duck with, and offers none.
+    phazite::undo (song);
+    phazite::setMixedAsBus (context, bus, false);
+    CHECK (phazite::getDuckUnderChoices (context, bus).empty());
+    CHECK_FALSE (phazite::duckUnder (context, bus, tracks.a).isValid());
+}

@@ -42,27 +42,31 @@ namespace
 
     // Each operator's parameters' IDs, saved in projects, and names.
     constexpr std::string_view operatorIDs[numOperators][FmSynth::fieldsPerOperator] = {
-        { "op1On", "op1Wave", "op1Feedback", "op1Ratio", "op1Fine", "op1Detune", "op1Fixed", "op1Frequency", "op1Level", "op1Velocity",
-          "op1KeyScale", "op1Attack", "op1Decay", "op1Sustain", "op1Release", "op1AttackCurve", "op1DecayCurve", "op1ReleaseCurve" },
-        { "op2On", "op2Wave", "op2Feedback", "op2Ratio", "op2Fine", "op2Detune", "op2Fixed", "op2Frequency", "op2Level", "op2Velocity",
-          "op2KeyScale", "op2Attack", "op2Decay", "op2Sustain", "op2Release", "op2AttackCurve", "op2DecayCurve", "op2ReleaseCurve" },
-        { "op3On", "op3Wave", "op3Feedback", "op3Ratio", "op3Fine", "op3Detune", "op3Fixed", "op3Frequency", "op3Level", "op3Velocity",
-          "op3KeyScale", "op3Attack", "op3Decay", "op3Sustain", "op3Release", "op3AttackCurve", "op3DecayCurve", "op3ReleaseCurve" },
-        { "op4On", "op4Wave", "op4Feedback", "op4Ratio", "op4Fine", "op4Detune", "op4Fixed", "op4Frequency", "op4Level", "op4Velocity",
-          "op4KeyScale", "op4Attack", "op4Decay", "op4Sustain", "op4Release", "op4AttackCurve", "op4DecayCurve", "op4ReleaseCurve" },
+        { "op1On", "op1Wave", "op1Feedback", "op1Phase", "op1Ratio", "op1Fine", "op1Detune", "op1Fixed", "op1Frequency", "op1Level",
+          "op1Velocity", "op1KeyScale", "op1Attack", "op1Decay", "op1Sustain", "op1Release", "op1AttackCurve", "op1DecayCurve",
+          "op1ReleaseCurve" },
+        { "op2On", "op2Wave", "op2Feedback", "op2Phase", "op2Ratio", "op2Fine", "op2Detune", "op2Fixed", "op2Frequency", "op2Level",
+          "op2Velocity", "op2KeyScale", "op2Attack", "op2Decay", "op2Sustain", "op2Release", "op2AttackCurve", "op2DecayCurve",
+          "op2ReleaseCurve" },
+        { "op3On", "op3Wave", "op3Feedback", "op3Phase", "op3Ratio", "op3Fine", "op3Detune", "op3Fixed", "op3Frequency", "op3Level",
+          "op3Velocity", "op3KeyScale", "op3Attack", "op3Decay", "op3Sustain", "op3Release", "op3AttackCurve", "op3DecayCurve",
+          "op3ReleaseCurve" },
+        { "op4On", "op4Wave", "op4Feedback", "op4Phase", "op4Ratio", "op4Fine", "op4Detune", "op4Fixed", "op4Frequency", "op4Level",
+          "op4Velocity", "op4KeyScale", "op4Attack", "op4Decay", "op4Sustain", "op4Release", "op4AttackCurve", "op4DecayCurve",
+          "op4ReleaseCurve" },
     };
 
     constexpr std::string_view operatorNames[numOperators][FmSynth::fieldsPerOperator] = {
-        { "Op 1 On", "Op 1 Wave", "Op 1 Feedback", "Op 1 Ratio", "Op 1 Fine", "Op 1 Detune", "Op 1 Fixed", "Op 1 Frequency",
+        { "Op 1 On", "Op 1 Wave", "Op 1 Feedback", "Op 1 Phase", "Op 1 Ratio", "Op 1 Fine", "Op 1 Detune", "Op 1 Fixed", "Op 1 Frequency",
           "Op 1 Level", "Op 1 Velocity", "Op 1 Key Scale", "Op 1 Attack", "Op 1 Decay", "Op 1 Sustain", "Op 1 Release",
           "Op 1 Attack Curve", "Op 1 Decay Curve", "Op 1 Release Curve" },
-        { "Op 2 On", "Op 2 Wave", "Op 2 Feedback", "Op 2 Ratio", "Op 2 Fine", "Op 2 Detune", "Op 2 Fixed", "Op 2 Frequency",
+        { "Op 2 On", "Op 2 Wave", "Op 2 Feedback", "Op 2 Phase", "Op 2 Ratio", "Op 2 Fine", "Op 2 Detune", "Op 2 Fixed", "Op 2 Frequency",
           "Op 2 Level", "Op 2 Velocity", "Op 2 Key Scale", "Op 2 Attack", "Op 2 Decay", "Op 2 Sustain", "Op 2 Release",
           "Op 2 Attack Curve", "Op 2 Decay Curve", "Op 2 Release Curve" },
-        { "Op 3 On", "Op 3 Wave", "Op 3 Feedback", "Op 3 Ratio", "Op 3 Fine", "Op 3 Detune", "Op 3 Fixed", "Op 3 Frequency",
+        { "Op 3 On", "Op 3 Wave", "Op 3 Feedback", "Op 3 Phase", "Op 3 Ratio", "Op 3 Fine", "Op 3 Detune", "Op 3 Fixed", "Op 3 Frequency",
           "Op 3 Level", "Op 3 Velocity", "Op 3 Key Scale", "Op 3 Attack", "Op 3 Decay", "Op 3 Sustain", "Op 3 Release",
           "Op 3 Attack Curve", "Op 3 Decay Curve", "Op 3 Release Curve" },
-        { "Op 4 On", "Op 4 Wave", "Op 4 Feedback", "Op 4 Ratio", "Op 4 Fine", "Op 4 Detune", "Op 4 Fixed", "Op 4 Frequency",
+        { "Op 4 On", "Op 4 Wave", "Op 4 Feedback", "Op 4 Phase", "Op 4 Ratio", "Op 4 Fine", "Op 4 Detune", "Op 4 Fixed", "Op 4 Frequency",
           "Op 4 Level", "Op 4 Velocity", "Op 4 Key Scale", "Op 4 Attack", "Op 4 Decay", "Op 4 Sustain", "Op 4 Release",
           "Op 4 Attack Curve", "Op 4 Decay Curve", "Op 4 Release Curve" },
     };
@@ -140,6 +144,14 @@ namespace
             made[at (Field::wave)] = makeChoice (ids[Field::wave], names[Field::wave], waves, 0.0f);
             made[at (Field::feedback)] = makePercent (ids[Field::feedback], names[Field::feedback], defaults.feedback, -1.0f, 1.0f);
 
+            // Where in its wave it starts each note while the phases reset: a whole turn is the start again.
+            made[at (Field::startPhase)] = { .id = ids[Field::startPhase],
+                                             .name = names[Field::startPhase],
+                                             .minimum = 0.0f,
+                                             .maximum = 360.0f,
+                                             .defaultValue = 0.0f,
+                                             .unit = Unit::degrees };
+
             // Whole ratios and halves, the harmonics and the octave below, which keep a sound in tune; Fine between them.
             made[at (Field::ratio)] = { .id = ids[Field::ratio],
                                         .name = names[Field::ratio],
@@ -208,7 +220,24 @@ namespace
                                   .midpoint = 632.456f };
         made[FmSynth::resonance] = makePercent ("resonance", "Resonance", 0.1f);
         made[FmSynth::filterSlope] = makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 1.0f);
+
+        // The filter's envelope and velocity as the synth's are (Synth.cpp), but for an amount of none at first: the filter
+        // stays where its cutoff is until its envelope is turned up.
+        made[FmSynth::filterEnvelope] = { .id = "filterEnvelope",
+                                          .name = "Filter Envelope",
+                                          .minimum = -48.0f,
+                                          .maximum = 48.0f,
+                                          .defaultValue = 0.0f,
+                                          .unit = Unit::semitones };
         made[FmSynth::keyTracking] = makePercent ("keyTracking", "Key Tracking", 0.5f);
+        made[FmSynth::filterVelocity] = makePercent ("filterVelocity", "Filter Velocity", 0.0f);
+        made[FmSynth::filterAttack] = makeTime ("filterAttack", "Filter Attack", 0.0f, 1.0f);
+        made[FmSynth::filterDecay] = makeTime ("filterDecay", "Filter Decay", 0.0f, 400.0f);
+        made[FmSynth::filterSustain] = makePercent ("filterSustain", "Filter Sustain", 0.2f);
+        made[FmSynth::filterRelease] = makeTime ("filterRelease", "Filter Release", 0.0f, 300.0f);
+        made[FmSynth::filterAttackCurve] = makeCurve ("filterAttackCurve", "Filter Attack Curve", dsp::Adsr::analogAttackCurve);
+        made[FmSynth::filterDecayCurve] = makeCurve ("filterDecayCurve", "Filter Decay Curve", dsp::Adsr::analogSettleCurve);
+        made[FmSynth::filterReleaseCurve] = makeCurve ("filterReleaseCurve", "Filter Release Curve", dsp::Adsr::analogSettleCurve);
         made[FmSynth::lfoOn] = makeToggle ("lfoOn", "LFO On", 0.0f);
         made[FmSynth::lfoShape] = makeChoice ("lfoShape", "LFO Shape", lfoShapes, 0.0f);
         made[FmSynth::lfoTarget] = makeChoice ("lfoTarget", "LFO Target", lfoTargets, 0.0f);
@@ -261,6 +290,14 @@ namespace
     Enum choiceOf (float value)
     {
         return static_cast<Enum> (std::lround (value));
+    }
+
+    // Where an operator starts each note while the phases reset, in cycles, from 0 up to 1: its Phase's degrees, a whole
+    // turn the start again.
+    float getStartPhase (std::span<const float> values, int op) noexcept
+    {
+        const auto turns = values[(size_t) FmSynth::getParameterIndex (op, Field::startPhase)] / 360.0f;
+        return turns - std::floor (turns);
     }
 
     // A band-limited wave's level at a place in its cycle (from 0 to 1), by straight lines between its samples.
@@ -421,6 +458,8 @@ void FmSynth::prepare (double newSampleRate, int)
         for (auto& envelope : voice.envelopes)
             envelope.prepare (sampleRate);
 
+        voice.filterEnvelope.prepare (sampleRate);
+
         for (auto& lane : voice.lanes)
             lane.filter.prepare (dsp::getLongestCombDelay (lowestCutoff, sampleRate));
     }
@@ -435,6 +474,8 @@ void FmSynth::reset()
     {
         for (auto& envelope : voice.envelopes)
             envelope.reset();
+
+        voice.filterEnvelope.reset();
 
         for (auto& lane : voice.lanes)
         {
@@ -473,17 +514,27 @@ void FmSynth::releaseVoice (Voice& voice)
 
     for (auto& envelope : voice.envelopes)
         envelope.noteOff();
+
+    voice.filterEnvelope.noteOff();
 }
 
-FmSynth::Voice& FmSynth::findVoiceFor (int note)
+void FmSynth::letGoOf (int note)
 {
-    // The voice playing this note already, then a free one, then the one ringing out longest, then the oldest: among those
-    // that play notes, not the last, which fades out a voice taken (stealVoice()).
-    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
+    // A key played again while its key or the pedal still holds its voice lets the voice go as its key coming up would: it
+    // rings out over its release while the new note takes a voice of its own, and the key's first note-off lets go of that,
+    // so that a key never holds two voices (Synth::letGoOf()).
+    for (size_t i = 0; i < (size_t) maxVoices; ++i)
+        if (auto& voice = voices[i]; voice.note == note && (voice.held || voice.sustained))
+            releaseVoice (voice);
+}
 
-    for (auto& voice : playing)
-        if (voice.note == note && voice.active)
-            return voice;
+FmSynth::Voice& FmSynth::findVoice()
+{
+    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the last, which fades
+    // out a voice taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail rings
+    // on untouched, and the new note starts as any does (its operators from their places in their waves, unless the phases
+    // run free).
+    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
 
     for (auto& voice : playing)
         if (! voice.active)
@@ -518,6 +569,7 @@ void FmSynth::stealVoice (Voice& voice)
     for (auto& envelope : voice.envelopes)
         envelope.reset();
 
+    voice.filterEnvelope.reset();
     voice.active = false;
     voice.fade = 1.0f;
     voice.fadeStep = 0.0f;
@@ -541,18 +593,22 @@ void FmSynth::beginNote (Voice& voice, int note, float velocityValue, std::span<
         voice.envelopes[(size_t) i].noteOn();
     }
 
-    // Two lanes while it is spread, for the note's whole life; each from the start of its waves unless the phases run free.
+    voice.filterEnvelope.noteOn();
+
+    // Two lanes while it is spread, for the note's whole life; in each, every operator from its own place in its wave (the
+    // wave's start, unless its Phase says otherwise), unless the phases run free.
     const auto resets = choiceOf<Phase> (values[phase]) == Phase::reset;
     voice.numLanes = values[spread] > 0.0f ? maxLanes : 1;
 
     for (auto& lane : voice.lanes)
     {
-        for (auto& op : lane.ops)
+        for (int i = 0; i < numOperators; ++i)
         {
+            auto& op = lane.ops[(size_t) i];
             op.fedBack = op.before = 0.0f;
 
             if (resets)
-                op.phase = 0.0f;
+                op.phase = getStartPhase (values, i);
         }
 
         lane.down.reset();
@@ -584,6 +640,12 @@ void FmSynth::setEnvelopes (Voice& voice, std::span<const float> values) noexcep
         envelope.setParameters (at (Field::attack) * scale, at (Field::decay) * scale, at (Field::sustain), at (Field::release) * scale);
         envelope.setCurves (at (Field::attackCurve), at (Field::decayCurve), at (Field::releaseCurve));
     }
+
+    // The filter's too: Key Time shortens every envelope of a note alike, as Operator's Time < Key does, so that a pluck's
+    // filter closes with its level up the keys.
+    voice.filterEnvelope.setParameters (values[filterAttack] * scale, values[filterDecay] * scale, values[filterSustain],
+                                        values[filterRelease] * scale);
+    voice.filterEnvelope.setCurves (values[filterAttackCurve], values[filterDecayCurve], values[filterReleaseCurve]);
 }
 
 void FmSynth::startNote (int note, float velocityValue, std::span<const float> values, bool portamento)
@@ -632,7 +694,8 @@ void FmSynth::startNote (int note, float velocityValue, std::span<const float> v
         return;
     }
 
-    auto& voice = findVoiceFor (note);
+    letGoOf (note);
+    auto& voice = findVoice();
 
     if (voice.active)
         stealVoice (voice);
@@ -672,6 +735,8 @@ void FmSynth::stopNote (int note, std::span<const float> values)
         }
     }
 
+    // The voice its key holds, one at most (letGoOf()): what rings out of the key already rings on, its release not begun
+    // again.
     for (auto& voice : voices)
     {
         if (voice.note == note && voice.held)
@@ -784,6 +849,8 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
     const auto lfoAim = choiceOf<LfoTarget> (values[lfoTarget]);
     const auto depth = values[lfoOn] > 0.5f ? std::clamp (values[lfoDepth] + modWheel, 0.0f, 1.0f) : 0.0f;
     const auto filtered = values[filterOn] > 0.5f;
+    const auto envelopeAmount = values[filterEnvelope];
+    const auto velocityRange = values[filterVelocity] * dsp::filterVelocityRange;
     const auto lfoWave = choiceOf<dsp::LfoShape> (values[lfoShape]);
     const auto glideSamples = (double) values[glide] * 0.001 * sampleRate;
     const auto bent = bend * values[bendRange];
@@ -862,7 +929,16 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
 
             if (filtered)
             {
-                const auto moves = values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
+                // The cutoff by the key and the LFO, then by its envelope, as far as that has got, and by the note's velocity,
+                // as the synth's filter moves (Synth.cpp); an amount and a velocity of none leave it as it was.
+                auto moves = values[keyTracking] * (voice.pitch - 60.0f) + cutoffMove;
+
+                if (! juce::exactlyEqual (envelopeAmount, 0.0f))
+                    moves += envelopeAmount * voice.filterEnvelope.getLevel();
+
+                if (velocityRange > 0.0f)
+                    moves += velocityRange * (voice.velocity - 1.0f);
+
                 const auto cutoffHertz = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
                 const dsp::FilterSettings settings { .mode = filterMode,
                                                      .frequency = cutoffHertz,
@@ -890,6 +966,7 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
                 for (int o = 0; o < numOperators; ++o)
                     envelopes[(size_t) o] = voice.envelopes[(size_t) o].next();
 
+                voice.filterEnvelope.next();
                 voice.pitchEnvelope *= pitchFall;
                 std::array<float, maxLanes> lanes {};
 
@@ -920,6 +997,8 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
 
                     for (auto& envelope : voice.envelopes)
                         envelope.reset();
+
+                    voice.filterEnvelope.reset();
                 }
 
                 if (lfoAim == LfoTarget::level)
@@ -946,10 +1025,13 @@ void FmSynth::render (float* left, float* right, int numSamples, std::span<const
                 if (roles.carries[(size_t) o] && roles.isOn[(size_t) o] && voice.envelopes[(size_t) o].isActive())
                     sounding = true;
 
+            // Its filter's envelope ends with it, wherever it had got to, so that the voice's next note starts it from
+            // nothing.
             if (! sounding)
             {
                 voice.active = false;
                 voice.note = -1;
+                voice.filterEnvelope.reset();
             }
         }
     }
@@ -1022,6 +1104,7 @@ void FmSynth::process (const ProcessContext& block)
     for (size_t o = 0; o < (size_t) numOperators; ++o)
         shown.envelopes[o].set (newest != nullptr ? newest->envelopes[o].getLevel() : 0.0f);
 
+    shown.filterEnvelope.set (newest != nullptr ? newest->filterEnvelope.getLevel() : 0.0f);
     shown.cutoff.set (newest != nullptr && newest->filterIsSet && values[filterOn] > 0.5f ? (float) newest->filterSettings.frequency
                                                                                           : 0.0f);
     shown.lfoPhase.set (lfo.getPhase());
@@ -1030,9 +1113,11 @@ void FmSynth::process (const ProcessContext& block)
 void FmSynth::draw (std::span<const float> values, std::span<const float, numOperators> envelopeLevels, Drawing& drawing)
 {
     // A note at middle C as render() plays it, at drawnPerCycle samples a cycle of its pitch rather than at twice the sample
-    // rate, each operator's envelope held where given; two cycles first, so that what is fed back settles.
+    // rate, each operator's envelope held where given, and each from its own place in its wave while the phases reset; two
+    // cycles first, so that what is fed back settles (an operator at a whole or a half ratio is back at its place by then).
     const auto& shape = getAlgorithm (choiceOf<int> (values[algorithm]));
     const auto roles = getRoles (shape, values);
+    const auto resets = choiceOf<Phase> (values[phase]) == Phase::reset;
     const auto noteFrequency = dsp::noteToFrequency (60.0);
     const auto rate = noteFrequency * (double) drawnPerCycle;
     constexpr double limit = 0.45; // the highest an operator plays, as a part of the rate
@@ -1053,6 +1138,7 @@ void FmSynth::draw (std::span<const float> values, std::span<const float, numOpe
             at (Field::fixed) > 0.5f ? (double) at (Field::frequency) : noteFrequency * (double) (at (Field::ratio) + at (Field::fine));
         const auto increment = std::max (0.0, tuned * std::exp2 ((double) at (Field::detune) / 1200.0)) / rate;
         auto& op = ops[(size_t) i];
+        op.phase = resets ? getStartPhase (values, i) : 0.0f;
         op.silent = increment >= limit;
         op.increment = (float) increment;
         const auto chosen = Wavetable::chooseLevel (limit / std::max (1.0e-9, increment));

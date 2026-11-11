@@ -130,8 +130,9 @@ BeatPosition TempoLane::xToBeat (float x) const
 
 juce::Point<float> TempoLane::getPointPosition (int index) const
 {
+    // On the line, in its beat's column (TimelineView::getLineSamples()).
     const auto& tempo = tempos[(size_t) juce::jlimit (0, (int) tempos.size() - 1, index)];
-    return { beatToX (tempo.beat), tempoToY (tempo.bpm) };
+    return { TimelineView::getColumnMiddle (editor.getView().beatToColumn (tempo.beat)), tempoToY (tempo.bpm) };
 }
 
 std::optional<int> TempoLane::getPointAt (juce::Point<float> position) const
@@ -227,17 +228,29 @@ void TempoLane::paint (juce::Graphics& g)
     if (! context.hasProject())
         return;
 
-    // The line as the engine plays it, across what shows, with a wash under it.
+    // The line as the engine plays it, across what shows, with a wash under it: worked out along the song's own pixels and
+    // drawn in the columns that move with the song (TimelineView::getLineSamples()), so that it keeps its shape as the view
+    // scrolls, its jumps straight up their beats' columns.
     const auto clip = g.getClipBounds();
-    const auto left = clip.getX() - pixelsPerValue, right = clip.getRight() + pixelsPerValue;
-    const auto numValues = std::max (2, (right - left) / pixelsPerValue + 1);
-    const auto values = getTempoValues (context, { xToBeat ((float) left), xToBeat ((float) right) }, numValues);
+    std::vector<BeatPosition> pointBeats;
+    pointBeats.reserve (tempos.size());
+
+    for (const auto& tempo : tempos)
+        pointBeats.push_back (tempo.beat);
+
+    const auto samples = editor.getView().getLineSamples (clip.getX(), clip.getRight(), pixelsPerValue, pointBeats);
+    std::vector<BeatPosition> beats;
+    beats.reserve (samples.size());
+
+    for (const auto& sample : samples)
+        beats.push_back (sample.beat);
+
+    const auto values = getTempoValues (context, beats);
     juce::Path line;
 
-    for (int i = 0; i < (int) values.size(); ++i)
+    for (size_t i = 0; i < values.size() && i < samples.size(); ++i)
     {
-        const auto x = (float) left + (float) (right - left) * (float) i / (float) (numValues - 1);
-        const juce::Point<float> at (x, tempoToY (values[(size_t) i]));
+        const juce::Point<float> at (TimelineView::getColumnMiddle (samples[i].column), tempoToY (values[i]));
 
         if (i == 0)
             line.startNewSubPath (at);
@@ -246,9 +259,10 @@ void TempoLane::paint (juce::Graphics& g)
     }
 
     const auto washBottom = (float) getHeight() - 1.0f;
+    const auto left = line.getBounds().getX(), right = line.getBounds().getRight();
     auto wash = line;
-    wash.lineTo ((float) right, washBottom);
-    wash.lineTo ((float) left, washBottom);
+    wash.lineTo (right, washBottom);
+    wash.lineTo (left, washBottom);
     wash.closeSubPath();
     g.setColour (p.accent.withAlpha (TempoTint::wash));
     g.fillPath (wash);

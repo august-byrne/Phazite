@@ -11,6 +11,7 @@ namespace phazite::devices
 {
 namespace
 {
+    constexpr std::string_view modes[] = { "Compress", "Duck" };
     constexpr std::string_view characters[] = { "Clean", "VCA", "FET", "Opto", "Tube" };
 
     // A point of its curve. At first it compresses 4:1 over -18 dB (curves::makeCompression(), as a test checks).
@@ -30,6 +31,12 @@ namespace
 
     // The IDs are saved in projects.
     constexpr ParameterInfo parameters[] = {
+        { .id = "mode",
+          .name = "Mode",
+          .maximum = (float) std::size (modes) - 1.0f,
+          .defaultValue = 0.0f,
+          .unit = Unit::choice,
+          .choices = modes },
         { .id = "character",
           .name = "Character",
           .maximum = (float) std::size (characters) - 1.0f,
@@ -37,6 +44,14 @@ namespace
           .unit = Unit::choice,
           .choices = characters },
         { .id = "inputGain", .name = "Input Gain", .minimum = -24.0f, .maximum = 24.0f, .unit = Unit::decibels },
+        { .id = "threshold", .name = "Threshold", .minimum = -60.0f, .maximum = 0.0f, .defaultValue = -24.0f, .unit = Unit::decibels },
+        { .id = "depth",
+          .name = "Depth",
+          .minimum = 0.0f,
+          .maximum = 60.0f,
+          .defaultValue = 12.0f,
+          .unit = Unit::decibels,
+          .midpoint = 15.0f },
         { .id = "attack",
           .name = "Attack",
           .minimum = 0.1f,
@@ -44,6 +59,13 @@ namespace
           .defaultValue = 10.0f,
           .unit = Unit::milliseconds,
           .midpoint = 10.0f },
+        { .id = "hold",
+          .name = "Hold",
+          .minimum = 0.0f,
+          .maximum = 1000.0f,
+          .defaultValue = 0.0f,
+          .unit = Unit::milliseconds,
+          .midpoint = 100.0f },
         { .id = "release",
           .name = "Release",
           .minimum = 5.0f,
@@ -51,6 +73,7 @@ namespace
           .defaultValue = 120.0f,
           .unit = Unit::milliseconds,
           .midpoint = 100.0f },
+        { .id = "releaseCurve", .name = "Release Curve", .minimum = -1.0f, .maximum = 1.0f, .defaultValue = 0.0f, .unit = Unit::percent },
         { .id = "makeup", .name = "Makeup", .minimum = -12.0f, .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
         { .id = "drive", .name = "Drive", .defaultValue = 0.0f, .unit = Unit::percent },
         { .id = "keyLowCut",
@@ -82,6 +105,7 @@ namespace
 #undef PHAZITE_COMPRESSOR_POINT
 
     static_assert (std::size (parameters) == (size_t) Compressor::mix + 1);
+    static_assert (std::size (modes) == (size_t) Compressor::Mode::duck + 1);
     static_assert (std::size (characters) == (size_t) Compressor::Character::tube + 1);
 
     constexpr double makeupSeconds = 0.02;   // how long a change of the input or makeup gain, or of the drive, takes, about
@@ -106,6 +130,11 @@ namespace
     // tube's with how far its bias shifts).
     constexpr float colourShares[] = { 0.0f, 0.0f, 0.1f, 0.0f, 0.1f };
     constexpr float colourReduction = 12.0f;
+
+    // Duck: how far over its threshold the key has to be for the whole depth (less, a share of it), and the most samples a
+    // hit is counted from (a hold of a second at 384 kHz, and more).
+    constexpr float duckKnee = 6.0f;
+    constexpr int mostSinceHit = 1 << 30;
 
     Compressor::Character getCharacter (float value) noexcept
     {
@@ -142,12 +171,29 @@ void Compressor::prepare (double newSampleRate, int)
     rmsSmoothing = (float) (1.0 - std::exp (-1.0 / (rmsSeconds * sampleRate)));
     memoryRise = (float) (1.0 - std::exp (-1.0 / (memoryRiseSeconds * sampleRate)));
     memoryFall = (float) (1.0 - std::exp (-1.0 / (memoryFallSeconds * sampleRate)));
+    samplesPerPeak = std::max (1, (int) std::lround (sampleRate * 0.001));
     reset();
 }
 
 void Compressor::reset()
 {
     reduction.reset();
+
+    keyPeaks = {};
+    keyPeakIndex = 0;
+    keyPeakSamples = 0;
+    keyPeakNow = 0.0f;
+    keyPeakBefore = 0.0f;
+    lastKeyPeak = -1.0f;
+    keyDecibels = -120.0f;
+    ducked = 0.0f;
+    lastDucked = -1.0f;
+    duckGain = 1.0f;
+    sinceHit = mostSinceHit;
+    releaseFrom = 0.0f;
+    releaseAlong = 0.0;
+    releasing = false;
+    wasOver = false;
 
     for (auto& filter : lowCuts)
         filter.reset();
@@ -175,28 +221,29 @@ void Compressor::reset()
 void Compressor::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+
+    if (getMode (block.parameters[mode]) == Mode::duck)
+        duck (block);
+    else
+        compress (block);
+}
+
+void Compressor::compress (const ProcessContext& block)
+{
     const auto& values = block.parameters;
     const auto numChannels = std::min (block.numChannels, 2);
     const auto type = getCharacter (values[character]);
 
-    // What the detector hears: the sidechain if one feeds it, else the sound itself as it comes in.
+    // What the detector hears: the sound itself as it comes in, after the input gain; not a sidechain, which only Duck hears.
+    // Through the key's low cut alone, as a bus compressor's sidechain high-pass keeps the bass from pumping it: the high cut
+    // is Duck's, for a kick's body heard from a whole kit, and its page shows it there alone.
     const float* const* heard = block.channels;
-    auto numHeard = numChannels;
-
-    if (block.sidechain != nullptr && block.numSidechainChannels > 0)
-    {
-        heard = block.sidechain;
-        numHeard = std::min (block.numSidechainChannels, 2);
-    }
+    const auto numHeard = numChannels;
 
     const auto targetMakeup = values[makeup];
     const auto targetInput = values[inputGain];
-    const auto hearsItself = heard == block.channels; // the input gain drives the detector too, unless a sidechain feeds it
     const auto hearsAverage = type == Character::vca || type == Character::opto || type == Character::tube;
     const auto lowCut = dsp::makeFilter (dsp::FilterShape::highPass, values[keyLowCut], sampleRate, 0.70710678);
-    const auto cutsHigh = values[keyHighCut] < highCutOff;
-    const std::array highCut { dsp::makeFilter (dsp::FilterShape::lowPass, values[keyHighCut], sampleRate, dsp::getButterworthQ (4, 0)),
-                               dsp::makeFilter (dsp::FilterShape::lowPass, values[keyHighCut], sampleRate, dsp::getButterworthQ (4, 1)) };
     const auto keyWanted = isPlayingKey() ? 1.0f : 0.0f;
     const auto targetDrive = std::min (1.0f, values[drive] + colourShares[(size_t) type] * std::min (1.0f, lastMost / colourReduction));
     const auto even = evenShares[(size_t) type];
@@ -230,19 +277,13 @@ void Compressor::process (const ProcessContext& block)
             lastInput = dsp::decibelsToGain (inputDecibels);
         }
 
-        // The key, through its cuts.
-        const auto keyGain = hearsItself ? lastInput : 1.0f;
+        // What it hears, through its low cut.
         auto peak = 0.0f, squares = 0.0f;
         std::array<float, 2> key {};
 
         for (int channel = 0; channel < numHeard; ++channel)
         {
-            auto& cut = highCuts[(size_t) channel];
-            auto x = lowCuts[(size_t) channel].process (heard[channel][i] * keyGain, lowCut);
-
-            if (cutsHigh)
-                x = cut[1].process (cut[0].process (x, highCut[0]), highCut[1]);
-
+            const auto x = lowCuts[(size_t) channel].process (heard[channel][i] * lastInput, lowCut);
             key[(size_t) channel] = x;
             peak = std::max (peak, std::abs (x));
             squares = std::max (squares, x * x);
@@ -352,5 +393,141 @@ void Compressor::process (const ProcessContext& block)
     boostMeter.raise (-least);
     gainReduction.push (most);
     lastMost = most;
+}
+
+void Compressor::duck (const ProcessContext& block)
+{
+    const auto& values = block.parameters;
+    const auto numChannels = std::min (block.numChannels, 2);
+
+    // What the detector hears: the key, the track the sidechain listens to, else the sound itself, as each comes in.
+    const float* const* heard = block.channels;
+    auto numHeard = numChannels;
+
+    if (block.sidechain != nullptr && block.numSidechainChannels > 0)
+    {
+        heard = block.sidechain;
+        numHeard = std::min (block.numSidechainChannels, 2);
+    }
+
+    const auto lowCut = dsp::makeFilter (dsp::FilterShape::highPass, values[keyLowCut], sampleRate, 0.70710678);
+    const auto cutsHigh = values[keyHighCut] < highCutOff;
+    const std::array highCut { dsp::makeFilter (dsp::FilterShape::lowPass, values[keyHighCut], sampleRate, dsp::getButterworthQ (4, 0)),
+                               dsp::makeFilter (dsp::FilterShape::lowPass, values[keyHighCut], sampleRate, dsp::getButterworthQ (4, 1)) };
+    const auto keyWanted = isPlayingKey() ? 1.0f : 0.0f;
+
+    // The whole depth over the attack, a straight line in decibels (at once without one); held at least the hold from a hit;
+    // then back over the release, its way bent by the release curve.
+    const auto mostDucked = std::max (0.0f, values[depth]);
+    const auto attackSamples = (double) values[attack] * 0.001 * sampleRate;
+    const auto attackStep = attackSamples >= 1.0 ? (float) (mostDucked / attackSamples) : mostDucked;
+    const auto holdSamples = (int) std::min ((double) mostSinceHit, std::max (0.0, (double) values[hold] * 0.001 * sampleRate));
+    const auto releaseStep = 1.0 / std::max (1.0, (double) values[release] * 0.001 * sampleRate);
+    const auto curve = (double) juce::jlimit (-1.0f, 1.0f, values[releaseCurve]);
+    const auto threshold = values[Compressor::threshold];
+
+    // Compress's drive starts again from where the sound is when it compresses again.
+    wasDriven = false;
+    auto loudestKey = 0.0f, most = 0.0f;
+
+    for (int i = 0; i < block.numSamples; ++i)
+    {
+        // The key, through its cuts, and its loudest over the last few milliseconds.
+        auto peak = 0.0f;
+        std::array<float, 2> key {};
+
+        for (int channel = 0; channel < numHeard; ++channel)
+        {
+            auto& cut = highCuts[(size_t) channel];
+            auto x = lowCuts[(size_t) channel].process (heard[channel][i], lowCut);
+
+            if (cutsHigh)
+                x = cut[1].process (cut[0].process (x, highCut[0]), highCut[1]);
+
+            key[(size_t) channel] = x;
+            peak = std::max (peak, std::abs (x));
+        }
+
+        keyPeakNow = std::max (keyPeakNow, peak);
+
+        if (++keyPeakSamples >= samplesPerPeak)
+        {
+            keyPeaks[(size_t) keyPeakIndex] = keyPeakNow;
+            keyPeakIndex = (keyPeakIndex + 1) % (int) keyPeaks.size();
+            keyPeakSamples = 0;
+            keyPeakNow = 0.0f;
+            keyPeakBefore = *std::max_element (keyPeaks.begin(), keyPeaks.end());
+        }
+
+        if (const auto level = std::max (keyPeakBefore, keyPeakNow); ! juce::exactlyEqual (level, lastKeyPeak))
+        {
+            lastKeyPeak = level;
+            keyDecibels = dsp::gainToDecibels (level);
+        }
+
+        // How far it wants the sound down: the whole depth 6 dB over the threshold, a share of it less far over. A hit is
+        // the key rising over the threshold.
+        const auto over = keyDecibels > threshold;
+        const auto wanted = over ? mostDucked * std::min (1.0f, (keyDecibels - threshold) / duckKnee) : 0.0f;
+
+        if (over && ! wasOver)
+        {
+            sinceHit = 0;
+            releasing = false;
+        }
+
+        wasOver = over;
+
+        if (wanted > ducked)
+        {
+            // Gripping, from where it is.
+            ducked = std::min (wanted, ducked + attackStep);
+            releasing = false;
+        }
+        else if (! releasing && ! over && ducked > 0.0f && sinceHit >= holdSamples)
+        {
+            // Held long enough, and the key under the threshold: letting go, from where it is.
+            releasing = true;
+            releaseFrom = ducked;
+            releaseAlong = 0.0;
+        }
+
+        if (releasing)
+        {
+            releaseAlong = std::min (1.0, releaseAlong + releaseStep);
+            ducked = releaseFrom * (float) (1.0 - dsp::getEasedProgress (releaseAlong, curve));
+
+            if (releaseAlong >= 1.0)
+            {
+                releasing = false;
+                ducked = 0.0f;
+            }
+        }
+
+        sinceHit = std::min (sinceHit + 1, mostSinceHit);
+
+        if (! juce::exactlyEqual (ducked, lastDucked))
+        {
+            lastDucked = ducked;
+            duckGain = dsp::decibelsToGain (-ducked);
+        }
+
+        // The sound, turned down; or what it hears, to listen to, faded in and out.
+        keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
+
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            const auto turnedDown = block.channels[channel][i] * duckGain;
+            block.channels[channel][i] = turnedDown + keyShare * (key[(size_t) std::min (channel, numHeard - 1)] - turnedDown);
+        }
+
+        loudestKey = std::max (loudestKey, lastKeyPeak);
+        most = std::max (most, ducked);
+    }
+
+    levelMeter.raise (dsp::gainToDecibels (loudestKey));
+    reductionMeter.raise (most);
+    gainReduction.push (most);
+    lastMost = 0.0f; // Compress's colour, which nothing turned down for
 }
 } // namespace phazite::devices

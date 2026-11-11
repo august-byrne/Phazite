@@ -6,6 +6,7 @@
 #pragma once
 
 #include "devices/stretch/Stretch.h"
+#include "model/base/BackgroundJobs.h"
 #include "model/base/Song.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -63,8 +64,6 @@ public:
     std::optional<double> getProgressOf (const juce::File& render) const;
 
 private:
-    class Job;
-
     // A render being made, as its job and the keeper share it: the switch that stops it, and its frames, written and all.
     struct Render
     {
@@ -77,9 +76,9 @@ private:
 
     const Song& song;
     juce::ValueTree state; // the song's
-    juce::ThreadPool pool;
+    BackgroundJobs jobs;
 
-    // The renders being made: never the jobs themselves, which the pool deletes as they end, between any two calls here.
+    // The renders being made: never the jobs themselves, which go as they end, between any two calls here.
     std::map<juce::File, std::shared_ptr<Render>> running;
 
     // The frames of the renders made and being made since none was, those stopped left out, for getProgress().

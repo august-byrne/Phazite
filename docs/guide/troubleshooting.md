@@ -24,6 +24,10 @@ Run **Scan for Plug-ins**, in the menu of the gear at the bottom left, after ins
 
 Each plug-in plays in a process of its own. One that crashes or hangs says so in its slot, with **Reload**, and the song plays on. The Project view, down the left, lists the project's plug-ins, with a crashed one to reload.
 
+## Part of a recording was lost
+
+Phazite writes what you record as it comes in, with 8 seconds to spare. If the drive stalls for longer, the sound in between is lost: the take has silence there, so that everything after it stays in time, and Phazite says which track, where and how long. Record that part again with Punch In, and keep projects on a fast internal drive.
+
 ## Phazite closed unexpectedly
 
 When Phazite starts after it didn't close properly, it says which project was open and asks what to do:

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iterator>
 #include <mutex>
+#include <utility>
 
 namespace phazite::devices
 {
@@ -174,6 +175,71 @@ namespace
         }
 
         return sound;
+    }
+
+    // The dark synthwave kit (docs/presets.md): natural drums, clean and full band, each fitted to a measured drum of the
+    // kind dark synthwave plays. Its snares, clap, perc and toms ring in rooms that aren't gated (DrumSynthesis.h's
+    // addRoom()), dry and in the middle as they are hit, then wide and darkening as they fall.
+    Audio inRoom (const Audio& drum, const drums::RoomShape& shape)
+    {
+        return drums::addRoom (drum, rate, shape);
+    }
+
+    // Sounds added together, each at its gain: as long as the longest, in stereo if any of them is.
+    Audio layered (std::initializer_list<std::pair<Audio, float>> layers)
+    {
+        auto channels = 1, length = 0;
+
+        for (const auto& layer : layers)
+        {
+            channels = std::max (channels, layer.first.getNumChannels());
+            length = std::max (length, layer.first.getNumSamples());
+        }
+
+        Audio mixed (channels, length);
+        mixed.clear();
+
+        for (const auto& layer : layers)
+            for (int channel = 0; channel < channels; ++channel)
+                mixed.addFrom (channel, 0, layer.first, std::min (channel, layer.first.getNumChannels() - 1), 0,
+                               layer.first.getNumSamples(), layer.second);
+
+        return mixed;
+    }
+
+    // Its toms, synth toms as the 80s' drum pads made them, one rule fitted to three measured ones: a triangle falling
+    // all the way through the hit from its pitch (140.7 Hz for the lowest to 297.6 Hz for the highest), the high ones
+    // further and faster; held at its level (0.517 s for the lowest, less the higher) and saturated, under bright noise
+    // whose low-pass closes as it fades; in a room that spreads it wide. The place is 0 for the lowest tom and 1 for the
+    // highest.
+    Audio darkTom (double place)
+    {
+        const auto hz = 140.7 * std::pow (297.6 / 140.7, place);
+        const auto hold = 0.517 - 0.3993 * place;
+        const auto seed = 50 + (int) std::lround (10.0 * place);
+        const auto tom = drums::makeSimmons (rate, { .startHz = hz,
+                                                     .endHz = hz * (0.4926 - 0.25 * place * place),
+                                                     .bendSeconds = 0.4573 - 0.1132 * place,
+                                                     .toneSeconds = 0.1137,
+                                                     .noise = 0.3098,
+                                                     .noiseFromHz = 12050.0 + 5795.0 * place,
+                                                     .noiseToHz = 11840.0,
+                                                     .sweepSeconds = 0.1713,
+                                                     .noiseSeconds = 0.256,
+                                                     .click = 0.3197,
+                                                     .length = hold + 0.5,
+                                                     .drive = 2.64,
+                                                     .seed = seed,
+                                                     .holdSeconds = hold });
+        return inRoom (tom, { .preDelaySeconds = 0.01064,
+                              .onsetSeconds = 0.02486,
+                              .decaySeconds = 0.5754,
+                              .highDecay = 0.5408,
+                              .dampingHz = 2269.0,
+                              .level = 1.489,
+                              .lowCut = 115.7,
+                              .highCut = 8829.0,
+                              .seed = seed + 10 });
     }
 
     //==============================================================================
@@ -798,6 +864,329 @@ namespace
               return sampledMetal ({ { { .noise = 0.15, .centreHz = 3440.0, .lowCut = 2800.0, .seed = 105 }, 1.0f },
                                      { { .noise = 0.15, .centreHz = 7100.0, .lowCut = 6000.0, .seed = 106 }, 0.5f } },
                                    0.0, 0.33, 1.8);
+          } },
+
+        // Dark synthwave: the natural, dark drums of darksynth and outrun as they are played now (docs/presets.md), each
+        // fitted to a measured drum of that kind and made clean and full band. A short, boomed kick; a low snare, a clap
+        // of five strikes and a struck-metal perc, each in a wide room left to ring; a flat, bright open hat, cut; synth
+        // toms, a crash and a ride.
+        { "Dark Synthwave Kick",
+          []
+          {
+              // A sine falling from 410 Hz in its first milliseconds to 80 Hz, swelling in over 9 ms and held 50 ms, then
+              // cut; its body through a bell at 64 Hz and a shelf under 45 Hz of its own, the boom an engineer's equalizer
+              // gives a kick, which rings on at about 65 Hz once the body is cut; and a broad knock around 800 Hz, partly
+              // struck, partly noise. No room.
+              return makeKick (rate, { .chirpHz = 408.2,
+                                       .chirpSeconds = 0.008165,
+                                       .startHz = 113.8,
+                                       .endHz = 78.56,
+                                       .pitchSeconds = 0.01051,
+                                       .attackSeconds = 0.008913,
+                                       .holdSeconds = 0.04873,
+                                       .decaySeconds = 0.006267,
+                                       .boostHz = 64.44,
+                                       .boostQ = 1.53,
+                                       .boostDecibels = 15.16,
+                                       .shelfHz = 45.45,
+                                       .shelfDecibels = 16.65,
+                                       .click = 4.757,
+                                       .clickHz = 796.6,
+                                       .clickSeconds = 0.007664,
+                                       .clickQ = 3.09,
+                                       .clickKnock = 0.1313,
+                                       .noise = 0.7088,
+                                       .noiseHz = 2155.0,
+                                       .noiseSeconds = 0.001247,
+                                       .length = 0.2,
+                                       .drive = 0.428,
+                                       .seed = 5 });
+          } },
+        { "Dark Synthwave Perc",
+          []
+          {
+              // Struck metal: a cluster of partials around 1 kHz and 1.7 kHz and a denser one from 3 to 6 kHz, held for the
+              // strike's 20 ms under its noise, then let go, a few of them ringing on; in a small room that answers after
+              // 22 ms.
+              return inRoom (drums::makeStruck (rate, { .partials = { { .hz = 598.0, .tau = 0.003443, .level = 0.3524, .hold = 0.01957 },
+                                                                      { .hz = 960.0, .tau = 0.003443, .level = 0.7591, .hold = 0.01957 },
+                                                                      { .hz = 990.0, .tau = 0.003443, .level = 0.764, .hold = 0.01957 },
+                                                                      { .hz = 1045.0, .tau = 0.003443, .level = 0.4641, .hold = 0.01957 },
+                                                                      { .hz = 1071.0, .tau = 0.003443, .level = 1.0, .hold = 0.01957 },
+                                                                      { .hz = 1236.0, .tau = 0.003443, .level = 0.3233, .hold = 0.01957 },
+                                                                      { .hz = 1293.0, .tau = 0.003443, .level = 0.2748, .hold = 0.01957 },
+                                                                      { .hz = 1427.0, .tau = 0.003443, .level = 0.291, .hold = 0.01957 },
+                                                                      { .hz = 1693.0, .tau = 0.003443, .level = 0.9164, .hold = 0.01957 },
+                                                                      { .hz = 1760.0, .tau = 0.003443, .level = 0.9646, .hold = 0.01957 },
+                                                                      { .hz = 3183.0, .tau = 0.00559, .level = 0.3494, .hold = 0.01566 },
+                                                                      { .hz = 3567.0, .tau = 0.00559, .level = 0.3494, .hold = 0.01566 },
+                                                                      { .hz = 3953.0, .tau = 0.00559, .level = 0.4368, .hold = 0.01566 },
+                                                                      { .hz = 4475.0, .tau = 0.00559, .level = 0.546, .hold = 0.01566 },
+                                                                      { .hz = 5086.0, .tau = 0.00559, .level = 0.415, .hold = 0.01566 },
+                                                                      { .hz = 6093.0, .tau = 0.00559, .level = 0.3931, .hold = 0.01566 },
+                                                                      { .hz = 598.0, .tau = 0.02381, .level = 0.03994 },
+                                                                      { .hz = 990.0, .tau = 0.02381, .level = 0.08987 },
+                                                                      { .hz = 1071.0, .tau = 0.02381, .level = 0.09985 },
+                                                                      { .hz = 1693.0, .tau = 0.02381, .level = 0.05991 },
+                                                                      { .hz = 1760.0, .tau = 0.02381, .level = 0.06989 } },
+                                                        .click = 2.481,
+                                                        .clickHz = 3193.0,
+                                                        .clickQ = 1.327,
+                                                        .clickHighCut = 8257.0,
+                                                        .clickHoldSeconds = 0.01221,
+                                                        .clickSeconds = 0.008901,
+                                                        .length = 0.25,
+                                                        .drive = 0.6164,
+                                                        .seed = 31 }),
+                             { .preDelaySeconds = 0.02193,
+                               .onsetSeconds = 0.01069,
+                               .decaySeconds = 0.2539,
+                               .highDecay = 0.4808,
+                               .dampingHz = 3830.0,
+                               .level = 0.4513,
+                               .lowCut = 177.9,
+                               .highCut = 8977.0,
+                               .width = 1.0,
+                               .seed = 32 });
+          } },
+        { "Dark Synthwave Snare",
+          []
+          {
+              // A low shell, 148 and 170 Hz, beating, with its further modes from 124 to 295 Hz, under snares from 3.9 to
+              // 9.4 kHz; in a dark room that takes most of a second to fall, its top sooner.
+              return inRoom (makeSnare (rate, { .lowHz = 147.7,
+                                                .highHz = 169.2,
+                                                .lowSeconds = 0.04048,
+                                                .highSeconds = 0.0246,
+                                                .snaresSeconds = 0.07189,
+                                                .snaresLevel = 0.5167,
+                                                .snaresLowCut = 3890.0,
+                                                .snaresHighCut = 9440.0,
+                                                .length = 0.5,
+                                                .drive = 1.211,
+                                                .seed = 7,
+                                                .lowLevel = 0.7959,
+                                                .highLevel = 0.3261,
+                                                .modes = { { .hz = 205.0, .tau = 0.1966, .level = 0.0302 },
+                                                           { .hz = 221.5, .tau = 0.02009, .level = 0.2157 },
+                                                           { .hz = 237.8, .tau = 0.02009, .level = 0.1664 },
+                                                           { .hz = 256.2, .tau = 0.02009, .level = 0.2646 },
+                                                           { .hz = 295.2, .tau = 0.02009, .level = 0.1064 },
+                                                           { .hz = 123.5, .tau = 0.1966, .level = 0.009919 } } }),
+                             { .preDelaySeconds = 0.008361,
+                               .onsetSeconds = 0.03066,
+                               .decaySeconds = 0.7679,
+                               .highDecay = 0.5499,
+                               .dampingHz = 5605.0,
+                               .level = 0.8868,
+                               .lowCut = 249.3,
+                               .highCut = 2733.0,
+                               .width = 1.0,
+                               .seed = 11 });
+          } },
+        { "Dark Synthwave Clap",
+          []
+          {
+              // Five strikes through a narrow band at 1.19 kHz, a little wide, with a breath of air above them (30 dB
+              // under); in a room that answers after 24 ms, nearly as loud as they are.
+              return inRoom (layered ({ { makeClap (rate, { .centreHz = 1189.0,
+                                                            .q = 4.799,
+                                                            .lowCut = 703.2,
+                                                            .spread = 1.03,
+                                                            .tailSeconds = 0.01902,
+                                                            .length = 0.3,
+                                                            .seed = 22,
+                                                            .tailLevel = 0.6144,
+                                                            .strikes = 5,
+                                                            .width = 0.3003 }),
+                                          1.0f },
+                                        { makeClap (rate, { .centreHz = 5758.0,
+                                                            .q = 0.6749,
+                                                            .lowCut = 2092.0,
+                                                            .spread = 1.03,
+                                                            .tailSeconds = 0.01902,
+                                                            .length = 0.3,
+                                                            .seed = 122,
+                                                            .tailLevel = 0.6144,
+                                                            .strikes = 5,
+                                                            .width = 0.3003 }),
+                                          0.0301f } }),
+                             { .preDelaySeconds = 0.02386,
+                               .onsetSeconds = 0.02746,
+                               .decaySeconds = 0.9233,
+                               .highDecay = 0.685,
+                               .dampingHz = 2715.0,
+                               .level = 0.5103,
+                               .lowCut = 892.9,
+                               .highCut = 8125.0,
+                               .width = 1.0,
+                               .seed = 23 });
+          } },
+        { "Dark Synthwave Snare 2",
+          []
+          {
+              // The snare a little higher, in a smaller room: a tighter backbeat (made in the kit's character: no measured
+              // second snare).
+              return inRoom (makeSnare (rate, { .lowHz = 165.0,
+                                                .highHz = 190.0,
+                                                .lowSeconds = 0.04048,
+                                                .highSeconds = 0.0246,
+                                                .snaresSeconds = 0.07189,
+                                                .snaresLevel = 0.5167,
+                                                .snaresLowCut = 3890.0,
+                                                .snaresHighCut = 9440.0,
+                                                .length = 0.5,
+                                                .drive = 1.211,
+                                                .seed = 8,
+                                                .lowLevel = 0.7959,
+                                                .highLevel = 0.3261,
+                                                .modes = { { .hz = 230.0, .tau = 0.1966, .level = 0.0302 },
+                                                           { .hz = 248.0, .tau = 0.02009, .level = 0.2157 },
+                                                           { .hz = 266.0, .tau = 0.02009, .level = 0.1664 },
+                                                           { .hz = 287.0, .tau = 0.02009, .level = 0.2646 },
+                                                           { .hz = 331.0, .tau = 0.02009, .level = 0.1064 },
+                                                           { .hz = 138.0, .tau = 0.1966, .level = 0.009919 } } }),
+                             { .preDelaySeconds = 0.008361,
+                               .onsetSeconds = 0.03066,
+                               .decaySeconds = 0.35,
+                               .highDecay = 0.5499,
+                               .dampingHz = 5605.0,
+                               .level = 0.67,
+                               .lowCut = 249.3,
+                               .highCut = 2733.0,
+                               .width = 1.0,
+                               .seed = 12 });
+          } },
+        { "Dark Synthwave Low Tom", [] { return darkTom (0.0); } },
+        { "Dark Synthwave Closed Hat",
+          []
+          {
+              // The open hat's metal, full band above 3 kHz, falling for 90 ms and then shut; a brighter tick over its start.
+              return layered ({ { makeHat (rate, { .decaySeconds = 0.05291,
+                                                   .length = 0.25,
+                                                   .noise = 0.2135,
+                                                   .centreHz = 9394.0,
+                                                   .lowCut = 3104.0,
+                                                   .pitch = 0.973,
+                                                   .seed = 43,
+                                                   .lowCutQ = 0.5,
+                                                   .holdSeconds = 0.08655,
+                                                   .fadeSeconds = 0.1028 }),
+                                  1.0f },
+                                { makeHat (rate, { .decaySeconds = 0.04263,
+                                                   .length = 0.25,
+                                                   .noise = 0.2135,
+                                                   .centreHz = 11980.0,
+                                                   .lowCut = 9379.0,
+                                                   .pitch = 0.973,
+                                                   .seed = 44,
+                                                   .lowCutQ = 0.5 }),
+                                  0.8622f } });
+          } },
+        { "Dark Synthwave Floor Tom", [] { return darkTom (0.2); } },
+        { "Dark Synthwave Pedal Hat",
+          []
+          {
+              // The closed hat coming in over 3 ms and shut sooner, as a pedal closes it.
+              return layered ({ { makeHat (rate, { .decaySeconds = 0.025,
+                                                   .length = 0.2,
+                                                   .noise = 0.2135,
+                                                   .centreHz = 9394.0,
+                                                   .lowCut = 3104.0,
+                                                   .pitch = 0.973,
+                                                   .seed = 47,
+                                                   .lowCutQ = 0.5,
+                                                   .holdSeconds = 0.04,
+                                                   .fadeSeconds = 0.06,
+                                                   .attackSeconds = 0.003 }),
+                                  1.0f },
+                                { makeHat (rate, { .decaySeconds = 0.04263,
+                                                   .length = 0.2,
+                                                   .noise = 0.2135,
+                                                   .centreHz = 11980.0,
+                                                   .lowCut = 9379.0,
+                                                   .pitch = 0.973,
+                                                   .seed = 48,
+                                                   .lowCutQ = 0.5,
+                                                   .attackSeconds = 0.003 }),
+                                  0.43f } });
+          } },
+        { "Dark Synthwave Mid Tom", [] { return darkTom (0.4); } },
+        { "Dark Synthwave Open Hat",
+          []
+          {
+              // The 808's metal a little low, with noise, full band above a gentle low cut near 5.7 kHz, held almost flat
+              // for 270 ms and then cut in 50, as a sampled hat stops; a brighter tick over its start.
+              return layered ({ { makeHat (rate, { .decaySeconds = 0.5839,
+                                                   .length = 0.45,
+                                                   .noise = 0.1967,
+                                                   .centreHz = 7970.0,
+                                                   .lowCut = 5661.0,
+                                                   .pitch = 0.8042,
+                                                   .seed = 41,
+                                                   .lowCutQ = 0.5,
+                                                   .holdSeconds = 0.2716,
+                                                   .fadeSeconds = 0.05102 }),
+                                  1.0f },
+                                { makeHat (rate, { .decaySeconds = 0.04605,
+                                                   .length = 0.45,
+                                                   .noise = 0.1967,
+                                                   .centreHz = 13180.0,
+                                                   .lowCut = 9709.0,
+                                                   .pitch = 0.8042,
+                                                   .seed = 42,
+                                                   .lowCutQ = 0.5 }),
+                                  1.437f } });
+          } },
+        { "Dark Synthwave Mid Tom 2", [] { return darkTom (0.6); } },
+        { "Dark Synthwave High Tom", [] { return darkTom (0.8); } },
+        { "Dark Synthwave Crash",
+          []
+          {
+              // The metal a third up and noise, from 1.5 kHz up, ringing for a second and a half, brighter as it is struck.
+              return layered ({ { makeHat (rate, { .decaySeconds = 0.254,
+                                                   .length = 1.6,
+                                                   .noise = 0.2641,
+                                                   .centreHz = 8419.0,
+                                                   .lowCut = 1488.0,
+                                                   .pitch = 1.262,
+                                                   .seed = 45,
+                                                   .lowCutQ = 0.6824 }),
+                                  1.0f },
+                                { makeHat (rate, { .decaySeconds = 0.03298,
+                                                   .length = 1.6,
+                                                   .noise = 0.2641,
+                                                   .centreHz = 10490.0,
+                                                   .lowCut = 8036.0,
+                                                   .pitch = 1.262,
+                                                   .seed = 46,
+                                                   .lowCutQ = 0.5 }),
+                                  0.5897f } });
+          } },
+        { "Dark Synthwave High Tom 2", [] { return darkTom (1.0); } },
+        { "Dark Synthwave Ride",
+          []
+          {
+              // The metal a third up with little noise, ringing two seconds, and a ping as it is struck (made in the kit's
+              // character: no measured ride).
+              return layered ({ { makeHat (rate, { .decaySeconds = 0.6,
+                                                   .length = 2.0,
+                                                   .noise = 0.15,
+                                                   .centreHz = 6000.0,
+                                                   .lowCut = 3000.0,
+                                                   .pitch = 1.25,
+                                                   .seed = 49,
+                                                   .lowCutQ = 0.5 }),
+                                  1.0f },
+                                { makeHat (rate, { .decaySeconds = 0.03,
+                                                   .length = 2.0,
+                                                   .noise = 0.15,
+                                                   .centreHz = 9000.0,
+                                                   .lowCut = 6000.0,
+                                                   .pitch = 1.25,
+                                                   .seed = 50,
+                                                   .lowCutQ = 0.5 }),
+                                  0.4f } });
           } },
     };
 

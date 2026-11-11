@@ -14,11 +14,13 @@ namespace
 {
     using devices::Chorus;
 
-    constexpr float lowestGain = -36.0f, highestGain = 12.0f;  // the response's levels, in decibels
-    constexpr float rateStep = 0.05f;                          // a notch of the wheel, along the rate's knob
-    constexpr int tapeHeight = 22;                             // the strip of the delay
-    constexpr double shortestShown = 0.5, longestShown = 60.0; // its milliseconds, on a log scale
-    constexpr float headRadius = 4.0f;
+    constexpr float lowestGain = -36.0f, highestGain = 12.0f;                             // the response's levels, in decibels
+    constexpr float rateStep = 0.05f;                                                     // a notch of the wheel, along the rate's knob
+    constexpr int tapeHeight = 22;                                                        // the strip of the delay
+    constexpr double shortestShown = 0.5, longestShown = 60.0;                            // its milliseconds, on a log scale
+    constexpr float headRadius = 4.0f, smallHeadRadius = 3.0f, smallestHeadRadius = 2.5f; // for up to 3, 5 and 8 copies a side
+    constexpr float fullFanSpread = 0.25f; // the Spread from which each copy has a line of its own on the strip
+    constexpr float partHeight = 6.0f;     // the bar of the part of the sweep a copy has
 
     juce::String toPercent (float value)
     {
@@ -44,8 +46,8 @@ public:
     {
         setTitle ("Chorus copies");
         setDescription ("The comb its copies make with the sound now, over the spectrum of what it plays, and under it how far each "
-                        "copy lags, in milliseconds. Drag the dot sideways to change the delay and up or down for the depth; the "
-                        "wheel turns the rate.");
+                        "copy lags, in milliseconds. Drag the dot, or press anywhere to put it there: sideways for the delay, up or "
+                        "down for the depth. The wheel turns the rate.");
     }
 
     int getNumVoices() const override { return Chorus::getNumVoices (values); }
@@ -54,9 +56,16 @@ public:
 
     float getSweepValue (double at) const override { return Chorus::getSweep (values, at); }
 
-    double getDelay (int channel, int voice) const { return Chorus::getVoiceDelay (values, getVoicePhase (channel, voice)); }
+    double getDelay (int channel, int voice) const { return Chorus::getVoiceDelay (values, getVoicePhase (channel, voice), voice); }
 
-    juce::Point<float> getDotPosition() const
+    // Where the strip of the delay shows a side's copy now.
+    juce::Point<float> getHeadPosition (int channel, int voice) const
+    {
+        const auto strip = getStripArea();
+        return { xForMilliseconds (strip.reduced ((float) Space::s, 0.0f), getDelay (channel, voice)), getLineY (strip, voice) };
+    }
+
+    juce::Point<float> getDotPosition() const override
     {
         return { getFrequencies().xFor (1000.0 / (double) values[Chorus::delay]), yForDepth (values[Chorus::depth]) };
     }
@@ -133,15 +142,10 @@ protected:
         }
 
         // The dot: the delay's frequency, as high as the depth.
-        const auto dot = juce::Rectangle<float> (2.0f * GraphTint::dotRadius, 2.0f * GraphTint::dotRadius).withCentre (getDotPosition());
-        g.setColour (tint);
-        g.fillEllipse (dot);
-        g.setColour (p.text);
-        g.drawEllipse (dot, 1.5f);
+        dot.paint (g, p, tint);
 
-        const auto mode = Chorus::info.parameters[Chorus::mode].choices[(size_t) (getNumVoices() > 1 ? 1 : 0)];
         graph::paintReadouts (g, p, area, formatMilliseconds (values[Chorus::delay]) + "  Depth " + toPercent (values[Chorus::depth]),
-                              juce::String (mode.data(), mode.size()));
+                              juce::String (getNumVoices()) + (getNumVoices() == 1 ? " voice" : " voices"));
 
         paintTape (g, p, tint);
     }
@@ -172,7 +176,31 @@ private:
         return area.getX() + (float) at * area.getWidth();
     }
 
-    // The delay as a tape's heads: how far the sweep reaches, and where each copy lags now.
+    float getHeadRadius() const
+    {
+        const auto numVoices = getNumVoices();
+        return numVoices <= 3 ? headRadius : (numVoices <= 5 ? smallHeadRadius : smallestHeadRadius);
+    }
+
+    // How far apart the copies' lines are on the strip of the delay: none while they all sweep the whole of it, and opening
+    // as Spread gives each its part.
+    float getLineGap (juce::Rectangle<float> strip) const
+    {
+        const auto numVoices = getNumVoices();
+
+        if (numVoices <= 1)
+            return 0.0f;
+
+        const auto room = strip.getHeight() - 2.0f * getHeadRadius() - 2.0f;
+        return juce::jlimit (0.0f, 1.0f, values[Chorus::spread] / fullFanSpread) * room / (float) (numVoices - 1);
+    }
+
+    float getLineY (juce::Rectangle<float> strip, int voice) const
+    {
+        return strip.getCentreY() + ((float) voice - 0.5f * (float) (getNumVoices() - 1)) * getLineGap (strip);
+    }
+
+    // The delay as a tape's heads: how far each copy's sweep reaches, and where each copy lags now.
     void paintTape (juce::Graphics& g, const Palette& p, juce::Colour tint) const
     {
         const auto strip = getStripArea();
@@ -184,17 +212,26 @@ private:
         for (const auto milliseconds : { 1.0, 2.0, 5.0, 10.0, 20.0, 50.0 })
             g.drawVerticalLine (juce::roundToInt (xForMilliseconds (inner, milliseconds)), strip.getY() + 2.0f, strip.getBottom() - 2.0f);
 
-        const auto middle = (double) values[Chorus::delay], reach = middle * (double) values[Chorus::depth];
-        const auto shortest = xForMilliseconds (inner, middle - reach), longest = xForMilliseconds (inner, middle + reach);
+        // The part of the sweep each copy has: one bar while they share the whole of it, a bar each on its line otherwise.
+        const auto gap = getLineGap (strip);
+        const auto bar = gap > 0.0f ? juce::jlimit (2.0f, partHeight, gap - 1.0f) : partHeight;
         g.setColour (tint.withAlpha (GraphTint::partCurve));
-        g.fillRoundedRectangle ({ shortest, strip.getCentreY() - 3.0f, std::max (2.0f, longest - shortest), 6.0f }, 3.0f);
+
+        for (int voice = 0; voice < (gap > 0.0f ? getNumVoices() : 1); ++voice)
+        {
+            const auto reach = Chorus::getVoiceReach (values, voice);
+            const auto shortest = xForMilliseconds (inner, reach.shortest), longest = xForMilliseconds (inner, reach.longest);
+            g.fillRoundedRectangle ({ shortest, getLineY (strip, voice) - 0.5f * bar, std::max (2.0f, longest - shortest), bar },
+                                    0.5f * bar);
+        }
+
+        const auto radius = getHeadRadius();
 
         for (int channel = 1; channel >= 0; --channel)
         {
             for (int voice = 0; voice < getNumVoices(); ++voice)
             {
-                const auto head = juce::Rectangle<float> (2.0f * headRadius, 2.0f * headRadius)
-                                      .withCentre ({ xForMilliseconds (inner, getDelay (channel, voice)), strip.getCentreY() });
+                const auto head = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (getHeadPosition (channel, voice));
                 g.setColour (tint);
 
                 if (channel == 0)
@@ -224,7 +261,8 @@ private:
 
 //==============================================================================
 ChorusEditor::ChorusEditor (const DeviceHandle& handle)
-    : DeviceEditorBase (handle)
+    : DeviceEditorBase (handle),
+      DisplayTicker::Display (static_cast<juce::Component&> (*this))
 {
     auto& shown = keep (std::make_unique<Picture> (device));
     picture = &shown;
@@ -232,9 +270,11 @@ ChorusEditor::ChorusEditor (const DeviceHandle& handle)
     const auto sweep = makeControlsPart ("Sweep", { "delay", "depth" }, 2, ParameterControls::Size::large);
     const auto lfo = makeControlsPart ("LFO", { "sync", "division", "rate", "shape" }, 4, ParameterControls::Size::compact,
                                        { "Sync", "Note", "Rate", "Shape" });
-    const auto copies = makeControlsPart ("Copies", { "mode", "stereo", "feedback" }, 3);
-    const auto tone = makeControlsPart ("Tone", { "highCut", "safeBass" }, 2);
+    const auto copies = makeControlsPart ("Voices", { "voices", "voicePhase", "spread", "shimmer" }, 4, ParameterControls::Size::compact,
+                                          { "Voices", "Phase", "Spread", "Shimmer" });
+    const auto tone = makeControlsPart ("Tone", { "stereo", "feedback", "highCut", "safeBass" }, 4);
     setParts ({ { { "Comb", &shown, 320, 252, 166, true, GraphTint::minimumWidth } }, { sweep, lfo }, { copies, tone } });
+    refresh();
 }
 
 ChorusEditor::~ChorusEditor() = default;
@@ -257,5 +297,20 @@ int ChorusEditor::getShownVoices() const
 double ChorusEditor::getShownDelay (int channel, int voice) const
 {
     return picture->getDelay (channel, voice);
+}
+
+juce::Point<float> ChorusEditor::getHeadPosition (int channel, int voice) const
+{
+    return picture->getHeadPosition (channel, voice);
+}
+
+void ChorusEditor::refresh()
+{
+    // One voice a side has no others to be a phase from, or to share the sweep with: those two controls faint.
+    const auto severalVoices = juce::roundToInt (device.getParameter ("voices").getValue()) > 0;
+
+    for (const auto* id : { "voicePhase", "spread" })
+        if (auto* control = findControl (id))
+            control->setAlpha (severalVoices ? 1.0f : SwitchTint::partOff);
 }
 } // namespace phazite::ui

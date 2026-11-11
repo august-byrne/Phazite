@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The multiband's editor (src/ui/devices/MultibandEditor.h), in Maximus's layout: a control for every parameter but its curves'
-// points, the selected band's showing; the curve (src/ui/devices/DynamicsCurve.h, the compressor's too), its line and its
-// area lit up to the level heard, its points, tension handles and menus, each one undo step; and the Bands view's crossovers
-// and band levels.
+// The multiband's editor (src/ui/devices/MultibandEditor.h): a control for every parameter but its curves' points, the
+// selected band's showing; all of it on one page in the default dock, the bands' graph always with its knobs; a band's level
+// dragged in the graph and turned on its knob, the same parameter; the pointer and the hint over everything a drag moves; the
+// curve (src/ui/devices/DynamicsCurve.h, the compressor's too), its line and its area lit up to the level heard, its points,
+// tension handles and menus, each one undo step; and the Sidechain part, its key's track named in Monitor.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -13,6 +14,7 @@
 #include "model/devices/DeviceHandle.h"
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
@@ -20,12 +22,16 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/MultibandEditor.h"
+#include "ui/devices/SidechainMenus.h"
 #include "ui/theme/DesignTokens.h"
 
 namespace
 {
 using phazite::devices::Multiband;
 namespace curves = phazite::devices::curves;
+
+// The default dock, beside the Devices view's column.
+constexpr int dockWidth = 552, dockHeight = 268;
 
 // A multiband on a track of its own song, open in a context of its own whose session plays it.
 struct Song
@@ -71,24 +77,61 @@ bool isPoint (std::string_view id)
     return id.find ("Point") != std::string_view::npos && id.find ("Points") == std::string_view::npos;
 }
 
-// Every control of a band, and every global one, shows whole inside the editor: none squeezed out of its room.
-void checkShownWhole (phazite::ui::MultibandEditor& editor, int band)
+// Whether a parameter's control shows with a band selected: a global one always (but the key's cuts only where the Sidechain
+// part shows), and the low, mid and high bands' levels, under the bands' graph; a band's solo with that band, Mid Drives
+// Master with the master, and a band's own with it.
+bool showsWith (int index, int band, bool sidechainShows)
+{
+    if (index == Multiband::keyLowCut || index == Multiband::keyHighCut)
+        return sidechainShows;
+
+    for (int other = Multiband::low; other <= Multiband::high; ++other)
+    {
+        if (index == Multiband::getBandParameter (other, Multiband::post))
+            return true;
+
+        if (index == Multiband::getSoloParameter (other))
+            return band == other;
+    }
+
+    if (index == Multiband::midDrivesMaster)
+        return band == Multiband::master;
+
+    if (index < Multiband::numGlobals)
+        return true;
+
+    return index >= Multiband::getBandParameter (band, Multiband::mode) && index < Multiband::getBandParameter (band + 1, Multiband::mode);
+}
+
+// Every control that shows with a band selected shows whole inside the editor: none squeezed out of its room, none hidden.
+void checkShownWhole (phazite::ui::MultibandEditor& editor, int band, bool sidechainShows)
 {
     for (int i = 0; i < (int) Multiband::info.parameters.size(); ++i)
     {
         const auto& parameter = Multiband::info.parameters[(size_t) i];
-        const auto ofBand =
-            i >= Multiband::getBandParameter (band, Multiband::mode) && i < Multiband::getBandParameter (band + 1, Multiband::mode);
+        auto* control = editor.findControl (parameter.id);
 
-        if (auto* control = editor.findControl (parameter.id); control != nullptr && (i < Multiband::numGlobals || ofBand))
+        if (control == nullptr)
+            continue;
+
+        CAPTURE (std::string (parameter.id));
+        const auto shown = showsWith (i, band, sidechainShows);
+        CHECK (control->isShowing() == shown);
+
+        if (shown)
         {
-            CAPTURE (std::string (parameter.id));
-            CHECK (control->isShowing());
             CHECK (control->getWidth() > 0);
             CHECK (control->getHeight() > 0);
             CHECK (editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds())));
         }
     }
+}
+
+juce::String getTooltipOf (juce::Component& component)
+{
+    auto* client = dynamic_cast<juce::TooltipClient*> (&component);
+    REQUIRE (client != nullptr);
+    return client->getTooltip();
 }
 } // namespace
 
@@ -97,7 +140,9 @@ TEST_CASE ("The multiband's editor has a control for every parameter but its cur
     Song song;
     const auto device = song.getDevice();
     CHECK (dynamic_cast<phazite::ui::MultibandEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
+    CHECK (dynamic_cast<phazite::ui::MultibandEditor*> (phazite::ui::createDeviceEditor (song.context, song.multiband).get()) != nullptr);
 
+    // In a window of its own, as wide as it wants: Monitor and the Sidechain part beside the band, without their switch and tab.
     phazite::ui::MultibandEditor editor (device);
     phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
     CHECK (editor.getSelectedBand() == Multiband::master); // as Maximus opens
@@ -105,25 +150,35 @@ TEST_CASE ("The multiband's editor has a control for every parameter but its cur
     for (const auto& parameter : Multiband::info.parameters)
     {
         CAPTURE (std::string (parameter.id));
-        // The curves' points are the curve's to edit; the master has no solo, as in Maximus.
+        // The curves' points are the curve's to edit.
         const auto id = juce::String (parameter.id.data(), parameter.id.size());
-        const auto hasNone = isPoint (parameter.id) || id.endsWith ("Points") || id == "masterSolo";
+        const auto hasNone = isPoint (parameter.id) || id.endsWith ("Points");
         CHECK ((editor.findControl (parameter.id) != nullptr) == ! hasNone);
     }
 
-    // The master's controls show, then the mid band's, picked by its tab; the master has no solo.
-    checkShownWhole (editor, Multiband::master);
+    CHECK (editor.isMonitorShowing());
+    CHECK (editor.isSidechainShowing());
+    CHECK_FALSE (editor.getMonitorButton().isVisible());
+    CHECK_FALSE (editor.getSidechainTab().isVisible());
+
+    // The master's controls show, then the mid band's, picked by its tab; the master has no solo, and Mid Drives is its.
+    checkShownWhole (editor, Multiband::master, true);
     CHECK (editor.findControl ("masterPre")->isShowing());
+    CHECK (editor.findControl ("masterPost")->isShowing());
+    CHECK (editor.findControl ("midDrivesMaster")->isShowing());
     CHECK_FALSE (editor.findControl ("midPre")->isShowing());
     phazite::test::Mouse mouse (editor.getBandButton (Multiband::mid));
     mouse.click (editor.getBandButton (Multiband::mid).getLocalBounds().getCentre());
     CHECK (editor.getSelectedBand() == Multiband::mid);
     CHECK (editor.findControl ("midPre")->isShowing());
     CHECK (editor.findControl ("midSolo")->isShowing());
+    CHECK (editor.findControl ("midKey")->isShowing());
     CHECK_FALSE (editor.findControl ("masterPre")->isShowing());
-    CHECK (editor.findControl ("lmhMix")->isShowing()); // the global controls always show
-    checkShownWhole (editor, Multiband::mid);
-    phazite::test::checkChildrenApart (editor.getDisplay());
+    CHECK (editor.findControl ("lmhMix")->isShowing());  // the bands' knobs always show
+    CHECK (editor.findControl ("midPost")->isShowing()); // the mid band's level, under the bands' graph
+    checkShownWhole (editor, Multiband::mid, true);
+    phazite::test::checkChildrenApart (editor);
+    phazite::test::checkChildrenApart (*editor.getLayout().getContent (1, 0));
 
     // Monitor's traces are in its Traces menu, each ticked while it shows; an item switches it.
     const auto menu = editor.getTracesMenu();
@@ -136,6 +191,198 @@ TEST_CASE ("The multiband's editor has a control for every parameter but its cur
     REQUIRE (phazite::test::runMenuItem (menu, { "Heard" }));
     const auto after = editor.getTracesMenu();
     CHECK (phazite::test::findMenuItem (after, { "Heard" })->isTicked != heard);
+}
+
+TEST_CASE ("The multiband's editor fits the default dock on one page, its bands' graph with every one of its knobs")
+{
+    // The owner, 2026-11-10: "the multiband compressor can't be separating the knobs for the frequency bands/graph from the
+    // graph by putting it on a separate tab. you must figure out how to put everything on one page."
+    Song song;
+    phazite::ui::MultibandEditor editor (song.getDevice());
+    REQUIRE (editor.getMinimumHeightAtWidth (dockWidth) <= dockHeight);
+    phazite::test::TestWindow window (editor, dockWidth, dockHeight);
+    CHECK_FALSE (editor.getLayout().usesPages());
+    CHECK_FALSE (editor.getLayout().usesTabs (0));
+    CHECK_FALSE (editor.getLayout().usesTabs (1));
+
+    // The graph, and the knobs it is drawn by beside it: the crossovers with their slopes, the low cut, the bands' levels and
+    // LMH Mix and Delay, every one whole in the editor.
+    CHECK (editor.getBandsGraph().isShowing());
+    CHECK (editor.getBandsGraph().getWidth() >= 200);
+
+    for (const auto* id :
+         { "lowCut", "lowFrequency", "highFrequency", "lowSlope", "highSlope", "lowPost", "midPost", "highPost", "lmhMix", "lmhDelay" })
+    {
+        CAPTURE (id);
+        auto* control = editor.findControl (id);
+        REQUIRE (control != nullptr);
+        CHECK (control->isShowing());
+        CHECK (editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds())));
+    }
+
+    // And the band beside them: its curve, and all of its controls but the key's cuts, which are the Sidechain part's.
+    CHECK (editor.getCurve().isShowing());
+    CHECK (editor.getCurve().getWidth() >= 116);
+    checkShownWhole (editor, Multiband::master, false);
+    phazite::test::checkChildrenApart (editor);
+
+    for (int column = 0; column < 2; ++column)
+        phazite::test::checkChildrenApart (*editor.getLayout().getContent (column, 0));
+
+    phazite::test::checkChildrenApart (editor.getBandsGraph());
+
+    // The Sidechain part by its tab, in the band's place: the key's cuts, Listen; the bands' graph still beside it.
+    CHECK_FALSE (editor.isSidechainShowing());
+    REQUIRE (editor.getSidechainTab().isShowing());
+    phazite::test::Mouse mouse (editor);
+    const auto clickOn = [&editor, &mouse] (juce::Component& c)
+    { mouse.click (editor.getLocalPoint (&c, c.getLocalBounds().getCentre())); };
+    clickOn (editor.getSidechainTab());
+    CHECK (editor.isSidechainShowing());
+    CHECK (editor.findControl ("keyLowCut")->isShowing());
+    CHECK (editor.getListenButton().isShowing());
+    CHECK_FALSE (editor.getCurve().isShowing());
+    CHECK (editor.getBandsGraph().isShowing());
+    phazite::test::checkChildrenApart (*editor.getLayout().getContent (1, 0));
+
+    // A band's tab brings the band back.
+    clickOn (editor.getBandButton (Multiband::low));
+    CHECK (editor.getSelectedBand() == Multiband::low);
+    CHECK_FALSE (editor.isSidechainShowing());
+    CHECK (editor.getCurve().isShowing());
+    checkShownWhole (editor, Multiband::low, false);
+
+    // Monitor by its switch, in the place of the band's knobs, the curve still showing; and back.
+    CHECK_FALSE (editor.isMonitorShowing());
+    REQUIRE (editor.getMonitorButton().isShowing());
+    clickOn (editor.getMonitorButton());
+    CHECK (editor.isMonitorShowing());
+    CHECK_FALSE (editor.findControl ("lowPre")->isShowing());
+    CHECK (editor.getCurve().isShowing());
+    CHECK (editor.findControl ("lowFrequency")->isShowing());
+    clickOn (editor.getMonitorButton());
+    CHECK_FALSE (editor.isMonitorShowing());
+    CHECK (editor.findControl ("lowPre")->isShowing());
+}
+
+TEST_CASE ("The multiband's graph: a crossover drags left or right, a band's level up or down, its knob the same, one undo step each")
+{
+    Song song;
+    phazite::ui::MultibandEditor editor ((song.getDevice()));
+    phazite::test::TestWindow window (editor, dockWidth, dockHeight);
+    auto& graph = editor.getBandsGraph();
+    phazite::test::Mouse mouse (graph);
+    const auto middle = juce::roundToInt (editor.getBandsY (-12.0f));
+
+    // The low crossover, from 120 Hz to 240 Hz.
+    mouse.press ({ juce::roundToInt (editor.getBandsX (120.0)), middle });
+    mouse.dragTo ({ juce::roundToInt (editor.getBandsX (180.0)), middle });
+    mouse.dragTo ({ juce::roundToInt (editor.getBandsX (240.0)), middle });
+    mouse.release();
+    CHECK (song.valueOf ("lowFrequency") == doctest::Approx (240.0f).epsilon (0.04));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Low Frequency"));
+
+    // The mid band, up by 6 dB: its level, which is its Post (Pre stays as it was), as one undo step.
+    const auto inMid = juce::roundToInt (editor.getBandsX (1000.0));
+    mouse.press ({ inMid, juce::roundToInt (editor.getBandsY (0.0f)) });
+    mouse.dragTo ({ inMid, juce::roundToInt (editor.getBandsY (3.0f)) });
+    mouse.dragTo ({ inMid, juce::roundToInt (editor.getBandsY (6.0f)) });
+    mouse.release();
+    CHECK (std::abs (song.valueOf ("midPost") - 6.0f) < 0.6f); // within a pixel of the graph
+    CHECK (song.valueOf ("midPre") == doctest::Approx (0.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Mid Post"));
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("midPost") == doctest::Approx (0.0f));
+    editor.refresh();
+
+    // Its knob, under the graph, is the same parameter: turned up, one undo step of the same name.
+    auto* knob = dynamic_cast<juce::Slider*> (editor.findControl ("midPost"));
+    REQUIRE (knob != nullptr);
+    CHECK (knob->isShowing());
+    phazite::test::Mouse knobMouse (*knob);
+    const auto centre = knob->getLocalBounds().getCentre();
+    knobMouse.press (centre);
+    knobMouse.dragTo (centre - juce::Point<int> (0, 10));
+    knobMouse.dragTo (centre - juce::Point<int> (0, 20));
+    knobMouse.release();
+    const auto turned = song.valueOf ("midPost");
+    CHECK (turned > 0.5f);
+    CHECK (song.describeUndo() == juce::String ("Undo Change Mid Post"));
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("midPost") == doctest::Approx (0.0f));
+
+    // A level set on the knob is where the graph's band stands: dragged from there, it goes on from it.
+    song.getDevice().getParameter ("midPost").setValue (-6.0f);
+    editor.refresh();
+    mouse.press ({ inMid, juce::roundToInt (editor.getBandsY (-6.0f)) });
+    mouse.dragTo ({ inMid, juce::roundToInt (editor.getBandsY (-3.0f)) });
+    mouse.dragTo ({ inMid, juce::roundToInt (editor.getBandsY (0.0f)) });
+    mouse.release();
+    CHECK (std::abs (song.valueOf ("midPost")) < 0.6f);
+
+    // A click on a band, without a drag, shows its curve and controls, and changes nothing.
+    phazite::undo (*song.song);
+    mouse.click ({ juce::roundToInt (editor.getBandsX (60.0)), middle });
+    CHECK (editor.getSelectedBand() == Multiband::low);
+    CHECK (song.valueOf ("lowPost") == doctest::Approx (0.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change Mid Post"));
+
+    // A double-click puts a crossover back where it started.
+    mouse.doubleClick ({ juce::roundToInt (editor.getBandsX (240.0)), middle });
+    CHECK (song.valueOf ("lowFrequency") == doctest::Approx (120.0f));
+}
+
+TEST_CASE ("Over the multiband's graphs, the pointer shows which way a drag goes, what it moves lights up, and its hint says what")
+{
+    Song song;
+    phazite::ui::MultibandEditor editor ((song.getDevice()));
+    phazite::test::TestWindow window (editor, dockWidth, dockHeight);
+    auto& graph = editor.getBandsGraph();
+    phazite::test::Mouse mouse (graph);
+    const auto middle = juce::roundToInt (editor.getBandsY (-12.0f));
+
+    // A crossover: sideways; a band's level: up and down; each named in the hint.
+    mouse.moveTo ({ juce::roundToInt (editor.getBandsX (5000.0)), middle });
+    CHECK (graph.getMouseCursor() == juce::MouseCursor::LeftRightResizeCursor);
+    CHECK (getTooltipOf (graph).contains ("crossover between the mid and high bands"));
+
+    mouse.moveTo ({ juce::roundToInt (editor.getBandsX (1000.0)), middle });
+    CHECK (graph.getMouseCursor() == juce::MouseCursor::UpDownResizeCursor);
+    CHECK (getTooltipOf (graph).contains ("mid band's level"));
+
+    // The low cut's edge, at the left: sideways.
+    mouse.moveTo ({ juce::roundToInt (editor.getBandsX (20.0)) + 2, middle });
+    CHECK (graph.getMouseCursor() == juce::MouseCursor::LeftRightResizeCursor);
+    CHECK (getTooltipOf (graph).contains ("low cut"));
+
+    // Off the graph, the plain pointer, and no hint of its own.
+    mouse.moveTo ({ -20, -20 });
+    CHECK (graph.getMouseCursor() == juce::MouseCursor::NormalCursor);
+    CHECK (getTooltipOf (graph).isEmpty());
+
+    // The curve: a point both ways, the curve's ends and a line's handle up and down, each with its hint.
+    auto& curve = editor.getCurve();
+    phazite::test::Mouse onCurve (curve);
+    onCurve.moveTo (curve.getPointPosition (1).roundToInt());
+    CHECK (curve.getMouseCursor() == juce::MouseCursor::DraggingHandCursor);
+    CHECK (getTooltipOf (curve).startsWith ("Point 2"));
+
+    onCurve.moveTo (curve.getPointPosition (0).roundToInt());
+    CHECK (curve.getMouseCursor() == juce::MouseCursor::UpDownResizeCursor);
+    CHECK (getTooltipOf (curve).contains ("start"));
+
+    REQUIRE (curve.getTensionPosition (1).has_value());
+    onCurve.moveTo (curve.getTensionPosition (1)->roundToInt());
+    CHECK (curve.getMouseCursor() == juce::MouseCursor::UpDownResizeCursor);
+    CHECK (getTooltipOf (curve).contains ("bend"));
+
+    // Out, and back in away from any handle: the plain pointer, none left from before (2026-11-10).
+    onCurve.moveTo (curve.getPointPosition (1).roundToInt());
+    onCurve.moveTo ({ -20, -20 });
+    CHECK (curve.getMouseCursor() == juce::MouseCursor::NormalCursor);
+    onCurve.moveTo (curve.getPosition (0.9f, 0.1f).roundToInt());
+    CHECK (curve.getMouseCursor() == juce::MouseCursor::NormalCursor);
+    CHECK (getTooltipOf (curve).isEmpty());
 }
 
 TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and deleted, each one undo step")
@@ -192,43 +439,29 @@ TEST_CASE ("The multiband's curve: points drag, lines bend, points are added and
     CHECK_FALSE (curve.applyShape ("No Such Shape"));
 }
 
-TEST_CASE ("The multiband's Bands view: a band's edge moves its crossover, a band up or down its pre gain")
+TEST_CASE ("In the dock, the multiband's curve's menu holds Freeze and Snap, its toolbar too narrow for their buttons")
 {
     Song song;
     phazite::ui::MultibandEditor editor ((song.getDevice()));
-    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
-    editor.showBands (true);
-    CHECK (editor.isShowingBands());
-    auto& display = editor.getDisplay();
-    phazite::test::Mouse mouse (display);
-    const auto middle = juce::roundToInt (editor.getBandsY (-12.0f));
+    phazite::test::TestWindow window (editor, dockWidth, dockHeight);
+    auto* tools = phazite::test::findAll<phazite::ui::DynamicsCurveTools> (editor).getFirst();
+    REQUIRE (tools != nullptr);
+    CHECK (tools->isCompact());
+    CHECK_FALSE (tools->getFreezeButton().isVisible());
 
-    // The low crossover, from 120 Hz to 240 Hz.
-    mouse.press ({ juce::roundToInt (editor.getBandsX (120.0)), middle });
-    mouse.dragTo ({ juce::roundToInt (editor.getBandsX (240.0)), middle });
-    mouse.release();
-    CHECK (song.valueOf ("lowFrequency") == doctest::Approx (240.0f).epsilon (0.03));
+    // Freeze from the menu: the curve takes no edits until Freeze is off again.
+    const auto menu = tools->getMenu();
+    REQUIRE (phazite::test::findMenuItem (menu, { "Snap" }) != nullptr);
+    CHECK (phazite::test::findMenuItem (menu, { "Snap" })->isTicked);
+    REQUIRE (phazite::test::runMenuItem (menu, { "Freeze" }));
+    CHECK (editor.getCurve().isFrozen());
+    REQUIRE (phazite::test::runMenuItem (tools->getMenu(), { "Freeze" }));
+    CHECK_FALSE (editor.getCurve().isFrozen());
 
-    // The mid band, up to +6 dB.
-    const auto inMid = juce::roundToInt (editor.getBandsX (1000.0));
-    mouse.press ({ inMid, juce::roundToInt (editor.getBandsY (0.0f)) });
-    mouse.dragTo ({ inMid, juce::roundToInt (editor.getBandsY (6.0f)) });
-    mouse.release();
-    CHECK (song.valueOf ("midPre") == doctest::Approx (6.0f).epsilon (0.05));
-
-    // Under Monitor, a crossover moved elsewhere brings Bands up for a moment.
-    editor.showBands (false);
-    CHECK_FALSE (editor.isShowingBands());
-    song.getDevice().getParameter ("highFrequency").setValue (8000.0f);
-    editor.refresh();
-    CHECK (editor.isShowingBands());
-
-    // When the moment is over, Monitor comes back, repainted though nothing plays.
-    window.takeRepaintedArea();
-    juce::Thread::sleep (1600);
-    editor.refresh();
-    CHECK_FALSE (editor.isShowingBands());
-    CHECK (window.takeRepaintedArea().intersectsRectangle (window.getLocalArea (&display, display.getLocalBounds())));
+    // In a window of its own, wide enough, its three buttons.
+    editor.setSize (editor.getWidthForHeight (0), editor.getHeightForWidth (editor.getWidthForHeight (0)));
+    CHECK_FALSE (tools->isCompact());
+    CHECK (tools->getFreezeButton().isVisible());
 }
 
 TEST_CASE ("The multiband's curve draws its line, and lights the area under it up to the level the band's compressor hears")
@@ -287,4 +520,61 @@ TEST_CASE ("The multiband's curve draws its line, and lights the area under it u
     editor.refresh();
     auto image = window.paintEverything();
     CHECK (pixelAt (image, quiet, 0.02f).getRed() > pixelAt (image, loud, 0.02f).getRed() + 40);
+}
+
+TEST_CASE ("The multiband's Sidechain part picks the key's track, which Monitor names while the band shown hears it")
+{
+    Song song;
+    const auto kick = phazite::ensureTracks (*song.song, 2)[1];
+    phazite::setTrackName (*song.song, kick, "Kick");
+    auto shown = phazite::ui::createDeviceEditor (song.context, song.multiband);
+    auto* editor = dynamic_cast<phazite::ui::MultibandEditor*> (shown.get());
+    REQUIRE (editor != nullptr);
+    phazite::test::TestWindow window (*editor, editor->getWidth(), editor->getHeight());
+
+    // Its picker, at the Sidechain part's top; the kick chosen there (as its menu chooses it), the bands whose Key is on hear it.
+    auto* picker = editor->getSidechainButton();
+    REQUIRE (picker != nullptr);
+    CHECK (picker->isShowing());
+    CHECK (picker->getY() <= editor->getListenButton().getY());
+    phazite::setSidechainSource (song.context, song.multiband, kick);
+    editor->refresh();
+    CHECK (phazite::getSidechainSource (song.context, song.multiband) == kick);
+
+    // The part says which bands hear the key, under Listen.
+    const auto listeners = [editor]
+    {
+        for (auto* child : editor->getSidechainPart().getChildren())
+            if (auto* label = dynamic_cast<juce::Label*> (child))
+                return label->getText();
+
+        return juce::String();
+    };
+
+    // As it was made, it starts ducking its lows under the kick: Monitor names the kick while the low band shows, which hears
+    // it through its Key, and not for another band, nor once the low band's Key is off.
+    editor->selectBand (Multiband::low);
+    editor->refresh();
+    CHECK (song.valueOf ("lowKey") == doctest::Approx (1.0f));
+    CHECK (editor->getMonitorKeyName() == juce::String ("Kick"));
+    CHECK (listeners() == juce::String ("Heard by the low band, in place of its own sound"));
+    song.getDevice().getParameter ("highKey").setValue (1.0f);
+    song.getDevice().getParameter ("masterKey").setValue (1.0f);
+    editor->refresh();
+    CHECK (listeners() == juce::String ("Heard by the low, high and master bands, in place of their own sound"));
+    song.getDevice().getParameter ("highKey").setValue (0.0f);
+    song.getDevice().getParameter ("masterKey").setValue (0.0f);
+    editor->selectBand (Multiband::mid);
+    editor->refresh();
+    CHECK (editor->getMonitorKeyName().isEmpty());
+    song.getDevice().getParameter ("lowKey").setValue (0.0f);
+    editor->selectBand (Multiband::low);
+    editor->refresh();
+    CHECK (editor->getMonitorKeyName().isEmpty());
+    CHECK (listeners().startsWith ("No band hears it yet"));
+
+    // Without the project, its editor has no picker.
+    phazite::ui::MultibandEditor alone (song.getDevice());
+    CHECK (alone.getSidechainButton() == nullptr);
+    shown = nullptr;
 }

@@ -11,9 +11,11 @@
 // - Beside it, the four operators in columns, each headed by its switch, its number in its role's colour and what it does in
 //   the algorithm ("Heard", or what it modulates: "→ 1"), then its envelope, whose points drag and whose stages bend, its
 //   level and its ratio and fine (or its frequency, while fixed). Under them, tabs for the rest of their controls, all four
-//   at once: Envelope (times, sustain and bends), Tone (wave and feedback), Pitch (Fixed and detune) and Scaling
-//   (velocity and key). An operator's column shows faint while it is off; the one under the pointer lights its box.
-// Then Pitch over Voice, the Filter and the LFO, each switched on at its title. A dock narrower than them shows them in pages.
+//   at once: Envelope (times, sustain and bends), Tone (wave, feedback and where in its wave it starts each note, faint
+//   while the phases run free), Pitch (Fixed and detune) and Scaling (velocity and key). An operator's column shows faint
+//   while it is off; the one under the pointer lights its box.
+// Then Pitch over Voice, the Filter, switched on at its title, with its envelope beside it as the synth's editor has it
+// (faint while the filter is off), and the LFO, switched on at its title. A dock narrower than them shows them in pages.
 #pragma once
 
 #include "DeviceEditorBase.h"
@@ -78,6 +80,8 @@ private:
     std::array<GroupTab*, numGroups> groupTabs {};
     std::unique_ptr<HoverWatcher> hoverWatcher; // the operator whose column or group the pointer is over
     juce::Component::SafePointer<juce::CallOutBox> gridBox;
+    juce::Component* filterEnvelopePart = nullptr; // faint while the filter is off
+    ParameterHandle filterOn;
     Group shownGroup = Group::envelope;
     int hovered = -1, hoveredColumn = -1;
 

@@ -266,6 +266,13 @@ std::vector<float> getAutomationValues (const ProjectContext& context, const Par
     return song != nullptr ? getValues (*song, parameter, range, numValues) : std::vector<float>();
 }
 
+std::vector<float> getAutomationValues (const ProjectContext& context, const ParameterRef& parameter,
+                                        const std::vector<BeatPosition>& beats)
+{
+    auto* song = findSong (context);
+    return song != nullptr ? getValues (*song, parameter, beats) : std::vector<float>();
+}
+
 int addAutomationPoint (ProjectContext& context, const ParameterRef& parameter, AutomationPoint point)
 {
     auto* song = findSong (context);

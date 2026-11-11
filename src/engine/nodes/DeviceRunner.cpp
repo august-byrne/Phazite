@@ -2,6 +2,7 @@
 #include "DeviceRunner.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace phazite::engine
@@ -260,6 +261,12 @@ devices::ProcessContext DeviceRunner::makeContext (const Block& in) const noexce
     block.isRendering = in.isRendering;
     block.tempo = in.tempo;
     block.beat = in.beat;
+    block.bars = in.bars;
+    block.songSample = in.songSample;
+    block.timeSignatureNumerator = in.timeSignatureNumerator;
+    block.timeSignatureDenominator = in.timeSignatureDenominator;
+    block.barLength = in.barLength;
+    block.barStart = in.barStart;
     return block;
 }
 
@@ -332,6 +339,16 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         block.numSidechainChannels = 2;
     }
 
+    // What comes in, copied for the mix, which the device may turn as it turns its own sound (devices::ProcessContext::dry).
+    float* dryChannels[2] = {};
+
+    if (mixIndex >= 0)
+    {
+        dryChannels[0] = dry.getWritePointer (0);
+        dryChannels[1] = dry.getWritePointer (1);
+        block.dry = dryChannels;
+    }
+
     // A stretch at a time, as long as the scratch buffers prepared beforehand, the first of smoothingStep ending on the
     // song's next control point; or taken whole, as long as those buffers, each ending on a control point but the block's
     // last. A mono channel plays in stereo, through a scratch buffer, and gets the average of the two sides back.
@@ -388,6 +405,12 @@ void DeviceRunner::process (juce::AudioBuffer<float>& buffer, int start, int num
         block.numChannels = 2;
         block.numSamples = length;
         block.outputOffset = in.outputOffset + done;
+        // Where the song is as this stretch starts, which a synced LFO follows: in the bar after the block's first once it has
+        // crossed into it.
+        block.beat = in.beat + done * in.beatsPerSample;
+        block.bars = in.bars + done * in.barsPerSample;
+        block.barStart = in.barStart + (std::floor (block.bars) - std::floor (in.bars)) * in.barLength;
+        block.songSample = in.songSample + (in.isPlaying ? done : 0);
         block.events = in.events.subspan ((size_t) firstEvent, (size_t) (nextEvent - firstEvent));
         block.changes = changes;
 

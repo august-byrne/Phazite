@@ -3,7 +3,8 @@
 // goes through them. First its oscillators, each showing its table as its frames one behind another, as Serum and Ableton
 // Live's Wavetable draw theirs, the frame it plays lit as the newest note moves through the table; above, a button with the
 // table's name opens a menu of the factory tables and Load Wavetable File..., a sound dropped on the drawing (from the
-// browser or Explorer) becomes the table, and a drag across it moves the oscillator's position. Then its filter's response,
+// browser or Explorer) becomes the table, and a drag across it moves the oscillator's position (the grabbing hand over it,
+// the frame it plays ringed). Then its filter's response,
 // which follows the newest note, with the cutoff a dot to drag, and the amp's envelope; then the sub and noise over the
 // unison, and how it plays. Last, its other envelopes and LFOs, each drawn with how far the newest note has got, and the
 // modulation matrix, in a list down the side. A dock narrower than them shows them in pages.

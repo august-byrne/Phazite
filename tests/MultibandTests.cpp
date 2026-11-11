@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's multiband (src/devices/dynamics/Multiband.h), in Maximus's image: its description, its curves' axis and shapes,
 // what it does to quiet and loud sound, its band modes and solo, LMH Mix, the master band driven by the mid band, its
-// saturation, stereo separation and releases.
+// saturation, stereo separation and releases; and its sidechain: the bands whose Key is on ducking under the key, through
+// its cuts, and Listen.
 #include "TestHelpers.h"
 #include "devices/dynamics/Multiband.h"
 
 #include <cmath>
+#include <functional>
 #include <vector>
 
 namespace
@@ -40,11 +42,13 @@ struct Stereo
     std::vector<float> left, right;
 };
 
-// Plays the multiband in blocks of 10 ms on a sound (input gives each channel's sample at a time) and returns what comes out.
+// Plays the multiband in blocks of 10 ms on a sound (input gives each channel's sample at a time), with a key on its sidechain
+// if one is given (as input gives its), and returns what comes out.
 template <typename Input>
-Stereo play (Multiband& multiband, const std::vector<float>& values, int numSamples, Input input)
+Stereo play (Multiband& multiband, const std::vector<float>& values, int numSamples, Input input,
+             const std::function<std::pair<float, float> (int)>& key = {})
 {
-    juce::AudioBuffer<float> buffer (2, testBlockSize);
+    juce::AudioBuffer<float> buffer (2, testBlockSize), keyBuffer (2, testBlockSize);
     Stereo played;
 
     for (int done = 0; done < numSamples; done += testBlockSize)
@@ -56,14 +60,29 @@ Stereo play (Multiband& multiband, const std::vector<float>& values, int numSamp
             const auto [left, right] = input (done + i);
             buffer.setSample (0, i, left);
             buffer.setSample (1, i, right);
+
+            if (key)
+            {
+                const auto [keyLeft, keyRight] = key (done + i);
+                keyBuffer.setSample (0, i, keyLeft);
+                keyBuffer.setSample (1, i, keyRight);
+            }
         }
 
         float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+        const float* keyChannels[] = { keyBuffer.getReadPointer (0), keyBuffer.getReadPointer (1) };
         devices::ProcessContext context;
         context.channels = channels;
         context.numChannels = 2;
         context.numSamples = length;
         context.parameters = values;
+
+        if (key)
+        {
+            context.sidechain = keyChannels;
+            context.numSidechainChannels = 2;
+        }
+
         multiband.process (context);
 
         for (int i = 0; i < length; ++i)
@@ -137,6 +156,17 @@ TEST_CASE ("The multiband describes itself: global parameters, then each band's,
     CHECK (devices::findParameter (Multiband::info, "highPoint8Type")
            == Multiband::getPointParameter (Multiband::high, curves::maxPoints - 1, curves::pointType));
     CHECK (devices::findParameter (Multiband::info, devices::mixParameterID) < 0); // LMH Mix, before the master band, is its mix
+
+    // A solo for the low, mid and high bands, and none for the master, which did nothing; a Key for each of the four, and the
+    // key's cuts, for its sidechain.
+    CHECK (devices::findParameter (Multiband::info, "lowSolo") == Multiband::getSoloParameter (Multiband::low));
+    CHECK (devices::findParameter (Multiband::info, "highSolo") == Multiband::getSoloParameter (Multiband::high));
+    CHECK (devices::findParameter (Multiband::info, "masterSolo") < 0);
+    CHECK (devices::findParameter (Multiband::info, "lowKey") == Multiband::getBandParameter (Multiband::low, Multiband::key));
+    CHECK (devices::findParameter (Multiband::info, "masterKey") == Multiband::getBandParameter (Multiband::master, Multiband::key));
+    CHECK (devices::findParameter (Multiband::info, "keyLowCut") == Multiband::keyLowCut);
+    CHECK (devices::findParameter (Multiband::info, "keyHighCut") == Multiband::keyHighCut);
+    CHECK (Multiband::info.hasSidechain);
 
     // Its latency is the most both look-aheads take, whatever they are set to, and the two saturations' at twice the rate.
     Multiband multiband;
@@ -311,4 +341,173 @@ TEST_CASE ("The multiband's releases: the first speeds up and is done in its tim
 
     // The second alone, 100 ms, through one stage (curve 1): further back at the same time, as it starts fast and slows.
     CHECK (reductionAfter (0.0f, 100.0f, 2400, 0.0f) < reductionAfter (100.0f, 0.0f, 2400) - 1.0f);
+}
+
+TEST_CASE ("A band whose Key is on ducks under the sidechain's key, through the key's cuts; the others hear their own bands")
+{
+    // The low and mid bands limit at -30 dB: a quiet bass (40 Hz at -40 dB, so low that the mid band takes next to none of it
+    // over the crossover) passes them, and a key louder than that ducks a band that hears it, as far as it is over.
+    auto values = getDefaults();
+    limitAt (values, "low", -30.0f);
+    limitAt (values, "mid", -30.0f);
+    const auto bass = sine (40.0, -40.0f), kick = sine (80.0, -6.0f), hats = sine (5000.0, -6.0f);
+    const auto keyed = [] (const std::vector<float>& v, auto input, const std::function<std::pair<float, float> (int)>& key)
+    {
+        Multiband multiband;
+        multiband.prepare (testRate, testBlockSize);
+        return play (multiband, v, 48000, input, key);
+    };
+
+    // With no band's Key on, the key changes nothing at all.
+    {
+        Multiband alone;
+        alone.prepare (testRate, testBlockSize);
+        const auto plain = play (alone, values, 48000, bass);
+        CHECK (keyed (values, bass, kick).left == plain.left);
+    }
+
+    // The low band's Key on: the bass ducks under the kick, about 24 dB; a tone in the mid band, whose Key is off, doesn't.
+    set (values, "lowKey", 1.0f);
+    CHECK (getLevel (keyed (values, bass, kick).left) < -60.0f);
+    CHECK (getLevel (keyed (values, sine (1000.0, -40.0f), kick).left) == doctest::Approx (-40.0f).epsilon (0.02));
+
+    // The key's low cut over the kick takes it away: the bass passes again.
+    set (values, "keyLowCut", 500.0f);
+    CHECK (getLevel (keyed (values, bass, kick).left) == doctest::Approx (-40.0f).epsilon (0.05));
+
+    // Hats on the key duck the bass too, unless its high cut is under them.
+    set (values, "keyLowCut", 20.0f);
+    CHECK (getLevel (keyed (values, bass, hats).left) < -60.0f);
+    set (values, "keyHighCut", 300.0f);
+    CHECK (getLevel (keyed (values, bass, hats).left) == doctest::Approx (-40.0f).epsilon (0.05));
+
+    // The master's Key: it ducks what the bands put out under the key, whatever they hear.
+    values = getDefaults();
+    limitAt (values, "master", -30.0f);
+    set (values, "masterKey", 1.0f);
+    CHECK (getLevel (keyed (values, sine (1000.0, -40.0f), kick).left) < -60.0f);
+}
+
+TEST_CASE ("With no sidechain feeding it, a band whose Key is on hears what comes in, through the key's cuts")
+{
+    // The mid band limiting at -30 dB turns a 1 kHz tone at -10 dB down to it, hearing itself or what comes in alike.
+    auto values = getDefaults();
+    limitAt (values, "mid", -30.0f);
+    CHECK (levelOut (values, 1000.0, -10.0f) == doctest::Approx (-30.0f).epsilon (0.05));
+    set (values, "midKey", 1.0f);
+    CHECK (levelOut (values, 1000.0, -10.0f) == doctest::Approx (-30.0f).epsilon (0.05));
+
+    // Through a high cut far under the tone, it hears nearly nothing: the tone passes.
+    set (values, "keyHighCut", 100.0f);
+    CHECK (levelOut (values, 1000.0, -10.0f) == doctest::Approx (-10.0f).epsilon (0.05));
+}
+
+TEST_CASE ("Listen plays the key, through its cuts, in place of what comes out and as late as it, while it is asked for")
+{
+    const auto values = getDefaults();
+    const auto silence = [] (int) { return std::pair { 0.0f, 0.0f }; };
+    Multiband multiband;
+    multiband.prepare (testRate, testBlockSize);
+    CHECK_FALSE (multiband.isPlayingKey());
+    multiband.listenToKey();
+    CHECK (multiband.isPlayingKey());
+
+    // A click on the key, in silence: it comes out as late as the multiband's sound does, as loud.
+    const auto latency = multiband.getLatencySamples();
+    const auto clicked =
+        play (multiband, values, 4800, silence, [] (int t) { return t == 0 ? std::pair { 0.5f, 0.5f } : std::pair { 0.0f, 0.0f }; });
+    size_t loudest = 0;
+
+    for (size_t i = 0; i < clicked.left.size(); ++i)
+        if (std::abs (clicked.left[i]) > std::abs (clicked.left[loudest]))
+            loudest = i;
+
+    CHECK (loudest == (size_t) latency);
+    CHECK (clicked.left[loudest] == doctest::Approx (0.5f).epsilon (0.02));
+    CHECK (multiband.overridesMix());
+
+    // Half a second by the clock after it was last asked for, the sound comes back, and the key no longer plays.
+    juce::Thread::sleep (600);
+    CHECK_FALSE (multiband.isPlayingKey());
+    const auto after = play (multiband, values, 9600, sine (1000.0, -20.0f), sine (80.0, -6.0f));
+    CHECK (getLevel (after.left) == doctest::Approx (-20.0f).epsilon (0.02));
+    CHECK_FALSE (multiband.overridesMix());
+
+    // Asked for again, it starts from silence, not from the key it heard as it last played it: once it has faded in over its
+    // first 5 ms (from the sound's tail, which the multiband still holds), a silent key plays nothing.
+    multiband.listenToKey();
+    const auto again = play (multiband, values, 4800, silence, silence);
+    CHECK (getPeak (again.left, 300) < 1.0e-6f);
+}
+
+TEST_CASE ("Every parameter of the multiband but its curves' changes what it plays, in a setting where it matters")
+{
+    // The master's solo went on 2026-11-10: the multiband never read it. Each band limits at a level of its own, grips and lets
+    // go within milliseconds through both releases, at times of its own, hears the key, and is driven by its post gain well
+    // into its saturation, under a ceiling; on bursts of three tones, wider on one side, and a key of bursts of its own, so that
+    // times, curves, look-aheads and splits all show, and a band off sounds through the mid band's chain unlike its own.
+    auto base = getDefaults();
+    const std::pair<const char*, float> bands[] = { { "low", -20.0f }, { "mid", -24.0f }, { "high", -16.0f }, { "master", -20.0f } };
+    auto attack = 3.0f;
+
+    for (const auto& [band, limit] : bands)
+    {
+        const auto prefix = std::string (band);
+        limitAt (base, band, limit);
+        set (base, prefix + "Attack", attack += 2.0f);
+        set (base, prefix + "Release", 40.0f);
+        set (base, prefix + "Release2", 60.0f);
+        set (base, prefix + "Sustain", 10.0f);
+        set (base, prefix + "Post", 18.0f);
+        set (base, prefix + "Saturation", 0.5f);
+        set (base, prefix + "Ceiling", -6.0f);
+        set (base, prefix + "Key", 1.0f);
+    }
+
+    const auto burst = [] (int t, int period) { return (t / period) % 2 == 0 ? 1.0f : 0.0f; };
+    const auto input = [&burst] (int t)
+    {
+        const auto at = [t] (double frequency) { return (float) std::sin (twoPi * frequency * t / testRate); };
+        const auto mix = burst (t, 2400) * (0.5f * at (60.0) + 0.3f * at (1000.0) + 0.2f * at (8000.0));
+        return std::pair { mix, 0.6f * mix + 0.2f * burst (t, 1600) * at (3000.0) };
+    };
+    const auto key = [&burst] (int t)
+    {
+        const auto value =
+            burst (t, 1800)
+            * (0.5f * (float) std::sin (twoPi * 100.0 * t / testRate) + 0.3f * (float) std::sin (twoPi * 3000.0 * t / testRate));
+        return std::pair { value, value };
+    };
+    const auto playWith = [&input, &key] (const std::vector<float>& values)
+    {
+        Multiband multiband;
+        multiband.prepare (testRate, testBlockSize);
+        return play (multiband, values, 14400, input, key);
+    };
+
+    const auto before = playWith (base);
+
+    for (int index = 0; index < (int) Multiband::info.parameters.size(); ++index)
+    {
+        const auto& parameter = Multiband::info.parameters[(size_t) index];
+        const auto id = std::string (parameter.id);
+
+        if (id.find ("Point") != std::string::npos) // the curves' own, which their shapes test
+            continue;
+
+        CAPTURE (id);
+        auto values = base;
+        auto& value = values[(size_t) index];
+        value = parameter.unit == devices::Unit::choice || parameter.unit == devices::Unit::toggle
+                    ? (value + 1.0f > parameter.maximum ? parameter.minimum : parameter.maximum)
+                    : (juce::approximatelyEqual (value, parameter.maximum) ? parameter.minimum : parameter.maximum);
+
+        const auto after = playWith (values);
+        auto difference = 0.0f;
+
+        for (size_t i = 0; i < after.left.size(); ++i)
+            difference = std::max ({ difference, std::abs (after.left[i] - before.left[i]), std::abs (after.right[i] - before.right[i]) });
+
+        CHECK (difference > 1.0e-4f);
+    }
 }

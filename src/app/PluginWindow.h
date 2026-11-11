@@ -5,9 +5,11 @@
 // show in the Devices view only. The windows stay above the main window and open where they were last, which the project
 // keeps as view state. Play and stop, and the computer keyboard, work in a plug-in's (ui/input/PluginKeys.h), and every
 // shortcut in one of Phazite's own, as in the main window. A plug-in's has a menu bar with one menu, Plug-in (roadmap step
-// 2.12): Save Preset..., Load Preset (the presets saved for the plug-in) and Send All Keys to the Plug-in. They are the
-// app's: the model asks for them by the devices' IDs (model/mixer/MixerModel.h: showDeviceWindow()), through the project
-// context's DeviceWindowHost, which DeviceWindows is.
+// 2.12): Save Preset..., Load Preset (the presets saved for the plug-in) and Send All Keys to the Plug-in; and at its right
+// end, for a plug-in with a sidechain, what the sidechain listens to, its key, picked there (ui/devices/SidechainMenus.h),
+// as Logic's and Cubase's plug-in windows have theirs: the one place to choose it, inside the plug-in, beside its own
+// controls. They are the app's: the model asks for them by the devices' IDs (model/mixer/MixerModel.h: showDeviceWindow()),
+// through the project context's DeviceWindowHost, which DeviceWindows is.
 #pragma once
 
 #include "model/base/IDs.h"
@@ -76,4 +78,25 @@ void setPluginWindowServices (const PluginWindowServices*);
 // The menu bar of a plug-in's window, for a plug-in of a project context's song, the window given: its keys
 // (ui/input/PluginKeys.h) follow the menu's switch. Its presets are those of the services' project only.
 std::unique_ptr<juce::MenuBarModel> createPluginMenu (ProjectContext&, DeviceID, juce::Component& window);
+
+// The header row of a plug-in's window, along its top: the menu bar of a menu (createPluginMenu()), which must outlive it,
+// and at its right end, for a plug-in with a sidechain, its key's picker, titled "Key".
+class PluginWindowHeader : public juce::Component
+{
+public:
+    PluginWindowHeader (ProjectContext&, DeviceID, juce::MenuBarModel&);
+    ~PluginWindowHeader() override;
+
+    juce::Component* getKeyPicker() const noexcept; // nullptr for a plug-in without a sidechain
+
+    // Shows what the key is now, after a change made elsewhere (an undo); the window does it, twice a second.
+    void refresh();
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+private:
+    struct Parts;
+    std::unique_ptr<Parts> parts;
+};
 } // namespace phazite

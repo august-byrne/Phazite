@@ -2,7 +2,9 @@
 #include "VocoderEditor.h"
 #include "DeviceGraph.h"
 #include "DeviceTint.h"
+#include "SidechainMenus.h"
 #include "devices/vocoder/Vocoder.h"
+#include "model/project/ProjectContext.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <cmath>
@@ -22,9 +24,11 @@ namespace
     constexpr float consonantRadius = 5.0f;
     constexpr float carrierBarWidth = 64.0f; // how loud the carrier plays, under its name
     constexpr float carrierBarHeight = 3.0f;
+    constexpr int trackPickerWidth = 112; // the carrier track's picker, beside the carrier's controls
 } // namespace
 
 class VocoderEditor::Bands : public juce::Component,
+                             public juce::SettableTooltipClient,
                              private DisplayTicker::Display
 {
 public:
@@ -36,6 +40,10 @@ public:
         setTitle ("Vocoder bands");
         setDescription ("The voice's level in each band, a column of lights where the carrier plays the band, over a mark where it "
                         "listens to the voice. Drag sideways to move the carrier's bands up or down (Formant).");
+
+        // The whole picture moves the carrier's bands: a left-and-right arrow over it, and the hint bar says so.
+        setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        setTooltip ("Drag sideways to move the carrier's bands up or down (Formant): a smaller or larger voice");
 
         for (const auto& parameter : Vocoder::info.parameters)
         {
@@ -64,8 +72,11 @@ public:
         }
 
         const auto source = device.getSidechainSource();
-        return source.track.isValid() ? "Track: " + source.name : juce::String ("Track: pick one with Sidechain, above");
+        return source.track.isValid() ? "Track: " + source.name : juce::String ("Track: pick one by the carrier");
     }
+
+    // Under the pointer, or dragged: the lines from the marks to the columns, which a drag leans, light up.
+    bool isLit() const { return hovered || formant.isInGesture(); }
 
     bool needsTrack() const
     {
@@ -100,9 +111,9 @@ public:
             const auto x = getColumnPosition (band).x;
             const auto listensAt = frequencies.xFor (Vocoder::getBandFrequency (values, band));
 
-            // Where it listens, and the lean from there to where it plays.
-            g.setColour (p.textMuted.withAlpha (GraphTint::marker));
-            g.drawLine (listensAt, area.getBottom() - 1.0f, x, columns.getBottom() + 1.0f, 1.0f);
+            // Where it listens, and the lean from there to where it plays: lit while a drag would lean it.
+            g.setColour (isLit() ? p.text : p.textMuted.withAlpha (GraphTint::marker));
+            g.drawLine (listensAt, area.getBottom() - 1.0f, x, columns.getBottom() + 1.0f, isLit() ? 1.5f : 1.0f);
 
             // Its column: every light, faint; those the voice reaches, lit.
             const auto decibels = juce::Decibels::gainToDecibels (shown[(size_t) band], quietest);
@@ -158,12 +169,16 @@ public:
                     juce::Justification::centredRight, true);
     }
 
+    void mouseEnter (const juce::MouseEvent&) override { setHovered (true); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered (false); }
+
     // A drag sideways moves the carrier's bands by as far as the pointer goes, in semitones, as one undo step.
     void mouseDown (const juce::MouseEvent& e) override
     {
         formant.beginGesture();
         startFormant = formant.getValue();
         startHertz = getFrequencies().frequencyAt (e.position.x);
+        repaint();
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
@@ -175,7 +190,12 @@ public:
         repaint();
     }
 
-    void mouseUp (const juce::MouseEvent&) override { formant.endGesture(); }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        formant.endGesture();
+        setHovered (getLocalBounds().contains (e.getPosition()));
+        repaint();
+    }
 
 private:
     DeviceHandle device;
@@ -187,6 +207,16 @@ private:
     DrawnNumbers drawn;
     float startFormant = 0.0f;
     double startHertz = 1000.0;
+    bool hovered = false;
+
+    void setHovered (bool isOver)
+    {
+        if (isOver != hovered)
+        {
+            hovered = isOver;
+            repaint();
+        }
+    }
 
     juce::Rectangle<float> getColumnArea() const
     {
@@ -240,13 +270,86 @@ private:
 };
 
 //==============================================================================
-VocoderEditor::VocoderEditor (const DeviceHandle& handle)
+//==============================================================================
+// The carrier's controls and, given the project, beside them the track that carries (the vocoder's sidechain): its picker,
+// level with the carrier's list, its name under it as the knobs' names are. Picking a track makes Track the carrier, in the
+// same undo step (model/mixer/MixerModel.h: setSidechainSource()). The picker shows the track again as the song changes (an
+// undo, a track renamed).
+class VocoderEditor::CarrierPart : public juce::Component,
+                                   private DisplayTicker::Display
+{
+public:
+    CarrierPart (ParameterControls& c, const DeviceHandle& d, ProjectContext* projectContext, DeviceID id)
+        : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
+          controls (c),
+          picker (projectContext != nullptr ? std::make_unique<SidechainButton> (*projectContext, id) : nullptr),
+          device (d),
+          context (projectContext)
+    {
+        addAndMakeVisible (controls);
+
+        if (picker != nullptr)
+        {
+            picker->setTitle ("Carrier track");
+            picker->setNoneMeaning ({});
+            name.setFont (juce::FontOptions (TextSize::small));
+            name.setJustificationType (juce::Justification::centred);
+            name.setAccessible (false); // the picker's title says it
+            name.setInterceptsMouseClicks (false, false);
+            addAndMakeVisible (name);
+            addAndMakeVisible (*picker);
+        }
+    }
+
+    int getPreferredWidth() const { return controls.getPreferredWidth() + (picker != nullptr ? Space::xs + trackPickerWidth : 0); }
+    int getPreferredHeight() const { return controls.getPreferredHeight(); }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        controls.setBounds (area.removeFromLeft (controls.getPreferredWidth()));
+
+        if (picker == nullptr)
+            return;
+
+        area.removeFromLeft (Space::xs);
+        const auto top = area.removeFromTop (compactKnobSize);
+        picker->setBounds (top.withSizeKeepingCentre (top.getWidth(), controlHeight));
+        name.setBounds (area.removeFromTop (nameHeight));
+    }
+
+    ParameterControls& controls;
+    const std::unique_ptr<SidechainButton> picker; // given the project
+
+private:
+    DeviceHandle device;
+    ProjectContext* const context;
+    int shownSongVersion = -1;
+    juce::Label name { {}, "Track" };
+    const int nameHeight = juce::roundToInt (TextSize::small) + Space::xs; // as ParameterControls' names
+
+    void tick() override
+    {
+        if (picker == nullptr || context->getSongVersion() == shownSongVersion)
+            return;
+
+        shownSongVersion = context->getSongVersion();
+        picker->show (device.getSidechainSource());
+    }
+};
+
+//==============================================================================
+VocoderEditor::VocoderEditor (const DeviceHandle& handle, ProjectContext* context, DeviceID id)
     : DeviceEditorBase (handle)
 {
     auto& shown = keep (std::make_unique<Bands> (device));
     bands = &shown;
 
-    const auto carrier = makeControlsPart ("Carrier", { "carrier", "pitch" }, 2, ParameterControls::Size::compact, { "Carrier", "Pitch" });
+    auto& carrierControls = makeControls ({ "carrier", "pitch" }, 2, ParameterControls::Size::compact, "Carrier", { "Carrier", "Pitch" });
+    auto& shownCarrier = keep (std::make_unique<CarrierPart> (carrierControls, device, context, id));
+    trackPicker = shownCarrier.picker.get();
+    const DeviceLayout::Part carrier { "Carrier", &shownCarrier, shownCarrier.getPreferredWidth(), shownCarrier.getPreferredHeight(),
+                                       shownCarrier.getPreferredHeight() };
     const auto voice = makeControlsPart ("Voice", { "formant", "unvoiced" }, 2, ParameterControls::Size::large);
     const auto range = makeControlsPart ("Range", { "bands", "lowFrequency", "highFrequency", "bandWidth" }, 4,
                                          ParameterControls::Size::compact, { "Bands", "Low", "High", "Width" });
@@ -260,6 +363,11 @@ VocoderEditor::~VocoderEditor() = default;
 juce::Component& VocoderEditor::getBands() const noexcept
 {
     return *bands;
+}
+
+bool VocoderEditor::isBandsLit() const
+{
+    return bands->isLit();
 }
 
 float VocoderEditor::getShownLevel (int band) const

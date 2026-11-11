@@ -10,6 +10,7 @@
 #include "TestSong.h"
 #include "app/SandboxedEditor.h"
 #include "model/arrangement/SongSelection.h"
+#include "model/arrangement/TimelineModel.h"
 #include "model/automation/AutomationModel.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
@@ -26,6 +27,7 @@
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/input/Keymap.h"
@@ -496,6 +498,103 @@ TEST_CASE ("A plug-in in a helper that listens to another track hears it on its 
     // Listening to the tone's track: the tone from it too, twice as loud together.
     phazite::setSidechainSource (song.context, effect, heard);
     CHECK (levelOf (playback.play (0.6), 0, 0.2, 0.5) == doctest::Approx (toneLevel + 6.02f).epsilon (0.002));
+}
+
+TEST_CASE ("A plug-in in a helper hears where the song is in quarter notes, samples and bars, and its time signature, in 6/8")
+{
+    using Playhead = phazite::test::TestPlugins::Playhead;
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    song.setTimeSignature (6, 8);
+    song.addMidiClip (song.firstTrack, 0.0, 24.0); // eight bars: playback stops at the song's end
+
+    // From bar 2, three quarter notes in, the tempo halves; and from bar 3, six quarter notes in, the song is in 4/4, as its
+    // tempo map can hold it.
+    phazite::addTempoChange (getSong (song), phazite::BeatPosition::fromBeats (3.0), 60.0);
+    namespace schema = phazite::schema;
+    auto tempoMap = getSong (song).getState().getChildWithName (schema::TEMPOMAP);
+    tempoMap.appendChild (
+        juce::ValueTree (schema::TIMESIGNATURE, { { schema::mapBeat, 6.0 }, { schema::numerator, 4 }, { schema::denominator, 4 } }),
+        nullptr);
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestPlayhead");
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+
+    // Where its playhead said the song was as its last block started.
+    const auto heard = [&song, effect]
+    {
+        juce::MemoryBlock state;
+        getSandboxed (song, effect).getStateInformation (state);
+        return Playhead::read (state);
+    };
+
+    // A second in, its last block starting at sample 47872: at 120 BPM a quarter note is half a second (24000 samples), in
+    // the first bar.
+    song.run ("transport.playStop");
+    playback.play (1.0);
+    auto playhead = heard();
+    CHECK (playhead.ppq == doctest::Approx (47872.0 / 24000.0));
+    CHECK (playhead.sample == 47872);
+    CHECK (playhead.bpm == doctest::Approx (120.0));
+    CHECK (playhead.numerator == 6);
+    CHECK (playhead.denominator == 8);
+    CHECK (playhead.playing);
+    CHECK (playhead.barStart == doctest::Approx (0.0));
+    CHECK (playhead.barCount == 0);
+
+    // A second later, its last block starting at sample 95872, past the tempo change a bar (three quarter notes, 1.5 s) in:
+    // a quarter note a second since, and its time in samples where the song is, however its quarter notes went.
+    playback.play (1.0);
+    playhead = heard();
+    CHECK (playhead.ppq == doctest::Approx (3.0 + (95872.0 - 72000.0) / 48000.0));
+    CHECK (playhead.sample == 95872);
+    CHECK (playhead.bpm == doctest::Approx (60.0));
+    CHECK (playhead.numerator == 6);
+    CHECK (playhead.denominator == 8);
+    CHECK (playhead.barStart == doctest::Approx (3.0));
+    CHECK (playhead.barCount == 1);
+
+    // Three seconds later, its last block starting at sample 239872, in the first bar of 4/4, which starts six quarter notes
+    // in (4.5 s), its third.
+    playback.play (3.0);
+    playhead = heard();
+    CHECK (playhead.ppq == doctest::Approx (6.0 + (239872.0 - 216000.0) / 48000.0));
+    CHECK (playhead.sample == 239872);
+    CHECK (playhead.numerator == 4);
+    CHECK (playhead.denominator == 4);
+    CHECK (playhead.barStart == doctest::Approx (6.0));
+    CHECK (playhead.barCount == 2);
+    song.run ("transport.playStop");
+}
+
+TEST_CASE ("Stopped, a plug-in in a helper hears where the playhead is in every piece of a block its parameters' changes cut")
+{
+    using Playhead = phazite::test::TestPlugins::Playhead;
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    song.setTimeSignature (6, 8);
+    song.addMidiClip (song.firstTrack, 0.0, 24.0);
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestPlayhead");
+
+    // An LFO on its Watch moves it on every control point, stopped too, which cuts each block into pieces in its helper.
+    const auto lfo = song.addModulator (song.firstTrack, phazite::ModulatorType::lfo);
+    song.setModulatorParameter (lfo, "rateType", 0.0f); // in hertz, at 1 Hz
+    song.modulate (lfo, phazite::ParameterRef { effect, "50" }, 0.5f);
+
+    // The playhead in bar 2 of 6/8, a quarter note and a half into it: 2.25 s in at 120 BPM.
+    phazite::movePlayhead (song.context, phazite::BeatPosition::fromBeats (4.5));
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    playback.play (0.2);
+
+    juce::MemoryBlock state;
+    getSandboxed (song, effect).getStateInformation (state);
+    const auto playhead = Playhead::read (state);
+    CHECK_FALSE (playhead.playing);
+    CHECK (playhead.ppq == doctest::Approx (4.5));
+    CHECK (playhead.sample == 108000);
+    CHECK (playhead.barStart == doctest::Approx (3.0));
+    CHECK (playhead.barCount == 1);
 }
 
 TEST_CASE ("A plug-in whose audio thread hangs in its helper is ended for it, says it crashed, and reloads as it was")

@@ -25,6 +25,13 @@ namespace
         return copied;
     }
 
+    // A place on the curve's axis as a level: "-12.0 dB", or silence at its start.
+    juce::String describeLevel (float place)
+    {
+        const auto amplitude = curves::fromAxis (place);
+        return amplitude <= 1.0e-6f ? juce::String ("silence") : graph::formatDecibels (20.0f * std::log10 (amplitude));
+    }
+
     // To the nearest of the grid's lines, the middle and the ends, within a few pixels of it.
     float snap (float place, float size)
     {
@@ -83,7 +90,39 @@ void DynamicsCurve::setFrozen (bool shouldBeFrozen)
 {
     frozen = shouldBeFrozen;
     hovered.reset();
+    showCursorFor (hovered);
     repaint();
+}
+
+juce::String DynamicsCurve::getTooltip()
+{
+    if (! hovered.has_value() || hovered->index >= getCount())
+        return {};
+
+    const auto i = hovered->index;
+
+    if (! hovered->point)
+        return "The line before point " + juce::String (i + 1)
+               + ": drag up or down to bend it (Ctrl in fine steps), or right-click it to straighten it";
+
+    const auto levels = describeLevel (getValue (i, curves::pointX)) + " in, " + describeLevel (getValue (i, curves::pointY)) + " out";
+
+    if (i == 0 || i == getCount() - 1)
+        return "The curve's " + juce::String (i == 0 ? "start" : "end") + " (" + levels
+               + "): drag it up or down, as it stays at the curve's end; right-click for the line's shape";
+
+    return "Point " + juce::String (i + 1) + " (" + levels
+           + "): drag it (Shift keeps it level, Ctrl where it is across); right-click for its line's shape or to delete it, "
+             "or Alt-click to delete it";
+}
+
+void DynamicsCurve::showCursorFor (const std::optional<Target>& target)
+{
+    // A point moves both ways, but the ends of the curve only up and down, as a handle bends its line.
+    const auto isEnd = target.has_value() && target->point && (target->index == 0 || target->index == getCount() - 1);
+    setMouseCursor (! target.has_value()       ? juce::MouseCursor::NormalCursor
+                    : target->point && ! isEnd ? juce::MouseCursor::DraggingHandCursor
+                                               : juce::MouseCursor::UpDownResizeCursor);
 }
 
 juce::Rectangle<float> DynamicsCurve::getArea() const
@@ -289,24 +328,24 @@ void DynamicsCurve::paint (juce::Graphics& g)
     g.setColour (tint);
     g.strokePath (line, juce::PathStrokeType (GraphTint::curveWidth));
 
-    // Its points filled, its tension handles hollow; larger under the pointer and while dragged. Frozen, none.
+    // Its points filled, its tension handles hollow; lit under the pointer and while dragged. Frozen, none.
     if (frozen)
         return;
 
     for (int i = 0; i < getCount(); ++i)
     {
         if (const auto handle = getTensionPosition (i))
-            paintHandle (g, p.background, tint, { false, i }, *handle);
+            paintHandle (g, p, tint, { false, i }, *handle);
 
-        paintHandle (g, p.background, tint, { true, i }, getPointPosition (i));
+        paintHandle (g, p, tint, { true, i }, getPointPosition (i));
     }
 }
 
-void DynamicsCurve::paintHandle (juce::Graphics& g, juce::Colour background, juce::Colour tint, Target target, juce::Point<float> at) const
+void DynamicsCurve::paintHandle (juce::Graphics& g, const Palette& p, juce::Colour tint, Target target, juce::Point<float> at) const
 {
-    const auto radius = target == hovered || target == dragged ? GraphTint::handleRadius * 1.5f : GraphTint::handleRadius;
+    const auto radius = GraphTint::handleRadius;
     const auto dot = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (at);
-    g.setColour (background);
+    g.setColour (p.background);
     g.fillEllipse (dot.expanded (1.0f));
     g.setColour (tint);
 
@@ -314,6 +353,13 @@ void DynamicsCurve::paintHandle (juce::Graphics& g, juce::Colour background, juc
         g.fillEllipse (dot);
     else
         g.drawEllipse (dot.reduced (GraphTint::handleOutline / 2.0f), GraphTint::handleOutline);
+
+    // Under the pointer, or dragged, lit as the other graphs' handles are: ringed in the text colour from its edge out.
+    if (target == (dragged.has_value() ? dragged : hovered))
+    {
+        g.setColour (p.text);
+        g.drawEllipse (dot.expanded (GraphTint::litGap), GraphTint::litWidth);
+    }
 }
 
 //==============================================================================
@@ -344,22 +390,26 @@ std::optional<DynamicsCurve::Target> DynamicsCurve::findTarget (juce::Point<floa
 
 void DynamicsCurve::mouseMove (const juce::MouseEvent& e)
 {
+    // The pointer at each move, so that it is never one left from before (on entering away from a handle, say).
     const auto target = frozen ? std::optional<Target>() : findTarget (e.position);
+    showCursorFor (target);
 
     if (target != hovered)
     {
         hovered = target;
-        setMouseCursor (! target.has_value() ? juce::MouseCursor::NormalCursor
-                        : target->point      ? juce::MouseCursor::DraggingHandCursor
-                                             : juce::MouseCursor::UpDownResizeCursor);
         repaint();
     }
 }
 
 void DynamicsCurve::mouseExit (const juce::MouseEvent&)
 {
-    hovered.reset();
-    repaint();
+    setMouseCursor (juce::MouseCursor::NormalCursor);
+
+    if (hovered.has_value())
+    {
+        hovered.reset();
+        repaint();
+    }
 }
 
 void DynamicsCurve::mouseDown (const juce::MouseEvent& e)
@@ -513,7 +563,19 @@ DynamicsCurveTools::DynamicsCurveTools (DynamicsCurve& c)
 
 int DynamicsCurveTools::getPreferredWidth() const
 {
-    return 3 * (controlHeight + Space::s) + 2 * Space::xs;
+    return compact ? controlHeight + Space::s : 3 * (controlHeight + Space::s) + 2 * Space::xs;
+}
+
+void DynamicsCurveTools::setCompact (bool shouldBeCompact)
+{
+    if (compact == shouldBeCompact)
+        return;
+
+    compact = shouldBeCompact;
+    menuButton.setTooltip (compact ? "The curve's menu: shapes to start from, copy and paste, flip, smooth all points, reset, Freeze "
+                                     "and Snap"
+                                   : "The curve's menu: shapes to start from, copy and paste, flip, smooth all points, reset");
+    resized();
 }
 
 void DynamicsCurveTools::resized()
@@ -523,12 +585,18 @@ void DynamicsCurveTools::resized()
 
     for (auto* button : { &menuButton, &freezeButton, &snapButton })
     {
+        button->setVisible (button == &menuButton || ! compact);
         button->setBounds (area.removeFromLeft (width));
         area.removeFromLeft (Space::xs);
     }
 }
 
 void DynamicsCurveTools::showMenu()
+{
+    getMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&menuButton));
+}
+
+juce::PopupMenu DynamicsCurveTools::getMenu()
 {
     juce::PopupMenu shapes;
     const juce::Component::SafePointer<DynamicsCurveTools> safe (this);
@@ -587,6 +655,24 @@ void DynamicsCurveTools::showMenu()
                           safe->curve.applyShape (
                               juce::String (curves::getShapes().front().name.data(), curves::getShapes().front().name.size()));
                   });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&menuButton));
+
+    // Compact, Freeze and Snap are here, as their buttons don't show.
+    if (compact)
+    {
+        menu.addSeparator();
+
+        for (auto* button : { &freezeButton, &snapButton })
+            menu.addItem (button->getTitle(), true, button->getToggleState(),
+                          [safe, which = button == &freezeButton]
+                          {
+                              if (safe != nullptr)
+                              {
+                                  auto& toggled = which ? safe->freezeButton : safe->snapButton;
+                                  toggled.setToggleState (! toggled.getToggleState(), juce::sendNotificationSync);
+                              }
+                          });
+    }
+
+    return menu;
 }
 } // namespace phazite::ui

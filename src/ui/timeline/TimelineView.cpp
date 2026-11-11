@@ -38,6 +38,47 @@ double TimelineView::beatToEdge (BeatPosition beat, float scale) const
     return std::clamp (edge, -1.0e9, 1.0e9);
 }
 
+std::vector<TimelineView::LineSample> TimelineView::getLineSamples (int firstColumn, int lastColumn, int step,
+                                                                    const std::vector<BeatPosition>& pointBeats) const
+{
+    // The song's own pixels, counted from its start, a step apart, from one step before the first column to one after the
+    // last: the view's start in whole pixels is where beatToEdge() counts its columns from.
+    step = std::max (1, step);
+    const auto whole = std::round (start.inBeats() * pixelsPerBeat);
+    const auto first = std::max (0.0, std::floor ((whole + firstColumn) / step) * step - step);
+    const auto last = std::ceil ((whole + lastColumn) / step) * step + step;
+    std::vector<LineSample> samples;
+
+    if (last < first)
+        return samples;
+
+    samples.reserve ((size_t) ((last - first) / step) + 2 * pointBeats.size() + 1);
+
+    for (auto pixel = first; pixel <= last; pixel += step)
+    {
+        const auto beat = BeatPosition::fromBeats (pixel / pixelsPerBeat);
+        samples.push_back ({ beat, beatToColumn (beat) });
+    }
+
+    // Each point's beat, where the line may jump: what it comes in at, a moment before, and leaves at, in one column. A
+    // billionth of a beat is far under a sample, and over the rounding of any beat a view reaches (latestStart).
+    constexpr double justBefore = 1.0e-9;
+    const auto from = samples.front().beat, to = samples.back().beat;
+
+    for (const auto beat : pointBeats)
+    {
+        if (beat < from || beat > to)
+            continue;
+
+        const auto column = beatToColumn (beat);
+        samples.push_back ({ BeatPosition::fromBeats (beat.inBeats() - justBefore), column });
+        samples.push_back ({ beat, column });
+    }
+
+    std::stable_sort (samples.begin(), samples.end(), [] (const LineSample& a, const LineSample& b) { return a.beat < b.beat; });
+    return samples;
+}
+
 void TimelineView::zoomAround (double x, double factor)
 {
     const auto anchor = xToBeat (x);

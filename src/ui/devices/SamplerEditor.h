@@ -7,10 +7,11 @@
 // voice's place in the sound as it plays. Every marker drags, snapping to the zero crossing nearest (Alt places it
 // anywhere, Shift in fine steps), each drag one undo step; the loop's band drags whole; a click under the drawing adds a
 // slice there and a double-click on a slice takes it away; a press on the sound plays it (in Slice mode, the slice under
-// the pointer) while it is held. Under the drawing, in one row, the controls of the mode it plays in (in Slice mode, the knob
-// of the way it slices). Then Pitch over Voice, the Amp
-// envelope (Classic's; faint in the other modes, where the fades shape a note), the Filter, its Envelope and the LFO,
-// each switched on at its title. A dock narrower than them shows them in pages.
+// the pointer) while it is held. Under the drawing, in one row, the controls of the mode it plays in (Classic's and
+// One-Shot's with Start Random beside Start; in Slice mode, the knob of the way it slices). Then Pitch over Voice, the Amp
+// envelope with its Key Time (Classic's; faint in the other modes, where the fades shape a note), the Filter with how far
+// velocity and the keys move it, its Envelope and the LFO, each switched on at its title. A dock narrower than them shows
+// them in pages.
 #pragma once
 
 #include "DeviceEditorBase.h"

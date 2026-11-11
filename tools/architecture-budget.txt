@@ -21,3 +21,6 @@ cmake-sources                  0
 
 # Phazite has no Tracktion Engine: nothing in src/, tests/ or tools/ may include or name it, and this stays 0.
 tracktion                      0
+
+# No thread is ended by force (stopThread with a time limit, killThread, JUCE's ThreadPool), and this stays 0.
+thread-kills                   0

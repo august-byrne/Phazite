@@ -24,25 +24,15 @@ namespace
 {
 using namespace phazite::test;
 
-void waitForVersions (phazite::ProjectContext& context)
-{
-    REQUIRE (dispatchMessagesUntil (
-        [&context]
-        {
-            const auto* history = phazite::getVersionHistory (context);
-            return history == nullptr || ! history->isBusy();
-        }));
-}
-
 juce::String keepVersion (phazite::ProjectContext& context, const juce::String& name = {})
 {
-    waitForVersions (context);
+    REQUIRE (waitForVersionHistory (context));
     phazite::setVersionDraft (context, name, {});
     std::optional<juce::Result> result;
     REQUIRE (phazite::saveVersion (context, [&result] (juce::Result r) { result = r; }));
-    REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }));
+    REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }, versionHistoryTimeout));
     REQUIRE (result->wasOk());
-    waitForVersions (context);
+    REQUIRE (waitForVersionHistory (context));
     return phazite::getLastVersion (context)->id;
 }
 
@@ -117,7 +107,7 @@ TEST_CASE ("Switching keeps each branch's song as it was left there, unsaved cha
 
     // It opens again on the branch it was on.
     b.s.reopen();
-    waitForVersions (b.s.context);
+    REQUIRE (waitForVersionHistory (b.s.context));
     CHECK (b.current() == "main");
 }
 
@@ -393,13 +383,13 @@ TEST_CASE ("Delete Branch takes another branch away, with the commits only it ha
     CHECK (phazite::getVersions (b.s.context).size() == 2); // the initial commit and First
     CHECK_FALSE (phazite::canDeleteAnyBranch (b.s.context));
     b.s.reopen();
-    waitForVersions (b.s.context);
+    REQUIRE (waitForVersionHistory (b.s.context));
     CHECK (phazite::getBranches (b.s.context).size() == 1);
     CHECK (b.current() == "main");
 
     // Its commit is still in the store.
     REQUIRE (phazite::verifyHistory (b.s.context));
-    REQUIRE (dispatchMessagesUntil ([&b] { return ! phazite::isVerifyingHistory (b.s.context); }, 20000));
+    REQUIRE (dispatchMessagesUntil ([&b] { return ! phazite::isVerifyingHistory (b.s.context); }, versionHistoryTimeout));
     CHECK (phazite::countLostVersions (b.s.context) == 1);
     CHECK (phazite::recoverLostVersions (b.s.context) == 1);
     CHECK (phazite::getBranches (b.s.context).size() == 2);

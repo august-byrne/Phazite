@@ -126,32 +126,7 @@ namespace
         return sum / (double) squares.size();
     }
 
-    // A rung resonator, as the bridged-T and twin-T circuits ring when struck: a sine whose frequency starts `bend` times as
-    // high and settles over bendTau, its level falling with tau and swelling in over swell.
-    struct Ring
-    {
-        double hz = 100.0, tau = 0.1, bend = 1.0, bendTau = 0.01, swell = 0.0, level = 1.0;
-    };
-
-    struct Ringing
-    {
-        Ring ring;
-        double rate, phase = 0.0;
-
-        Ringing (const Ring& r, double sampleRate)
-            : ring (r),
-              rate (sampleRate)
-        {
-        }
-
-        double at (double t) noexcept
-        {
-            const auto hz = ring.hz * (1.0 + (ring.bend - 1.0) * std::exp (-t / ring.bendTau));
-            const auto value = std::sin (phase) * std::exp (-t / ring.tau) * (ring.swell > 0.0 ? 1.0 - std::exp (-t / ring.swell) : 1.0);
-            phase += twoPi * hz / rate;
-            return ring.level * value;
-        }
-    };
+    // The rung resonators of the bridged-T and twin-T circuits are DrumSynthesis.h's Ring, as each sounds: Ringing.
 
     // A gate that closes over fall seconds from `at` on, as the 808's mutes cut its claves and its rim shot.
     double gate (double t, double at, double fall)

@@ -59,6 +59,12 @@ struct ProcessContext
     int numChannels = 0;
     int numSamples = 0;
 
+    // For an effect whose runner mixes what came in back in with what it plays (its mix, DeviceInfo.h): a copy of what came
+    // in, on as many channels, which an effect that turns the phase of its whole sound turns the same, in place, so that the
+    // two stay in phase at any mix (Safe Bass's split, whose bands add up to an all-pass: devices/motion/SafeBass.h); most
+    // leave it alone. None where nothing mixes it back in.
+    float* const* dry = nullptr;
+
     // A sidechain's audio, for a device that has one and a source feeding it; otherwise none.
     const float* const* sidechain = nullptr;
     int numSidechainChannels = 0;
@@ -76,8 +82,15 @@ struct ProcessContext
     // again, in time order; nothing for those set by hand alone, which reach it otherwise.
     std::span<const ParameterChange> changes {};
 
-    double tempo = 120.0;     // beats per minute at the block's start, for rates in time with the song
-    double beat = 0.0;        // where the song is at the block's start, in beats (quarter notes), for sweeps in time with it
+    // Where the song is as the block (or stretch) starts, for rates and sweeps in time with it and for a plug-in's playhead:
+    // its tempo there, in beats (quarter notes) a minute; its place, in beats from its start, in bars (2.5 half way through
+    // bar 2) and in samples at the device's rate; and its time signature there, with how long its bar is and where the bar
+    // the song is in starts, in beats. A rate in bars counts the song's bars (dsp/NoteValues.h).
+    double tempo = 120.0, beat = 0.0, bars = 0.0;
+    std::int64_t songSample = 0;
+    int timeSignatureNumerator = 4, timeSignatureDenominator = 4;
+    double barLength = 4.0, barStart = 0.0;
+
     bool isPlaying = false;   // whether the song is playing (rather than only the computer keyboard)
     bool isRendering = false; // a render, offline, which waits for what it plays rather than keep to real time
 };

@@ -145,8 +145,18 @@ TempoMap::TempoMap (std::vector<Tempo> tempos, std::vector<TimeSignature> timeSi
             }
         }
 
-        const auto denominator = std::max (1, signatures[signature].denominator);
-        segments.push_back ({ start, sample, bpm, bpmPerBeat, sampleRate * 240.0 / denominator, (int) signature });
+        segments.push_back ({ start, sample, bpm, bpmPerBeat, sampleRate * 60.0, (int) signature });
+    }
+
+    // Each time signature's first bar: one that starts part of the way through a bar of the one before ends that bar there,
+    // and of two at one beat the later counts, as the song's bars have them (model/transport/TempoValues.h: Bars).
+    firstBars.assign (signatures.size(), 0.0);
+
+    for (size_t i = 1; i < signatures.size(); ++i)
+    {
+        const auto& last = signatures[i - 1];
+        const auto barsBefore = std::ceil ((signatures[i].beat - last.beat) / last.getBarLength() - 1.0e-9);
+        firstBars[i] = firstBars[i - 1] + std::max (0.0, barsBefore);
     }
 }
 
@@ -176,7 +186,7 @@ double TempoMap::toBeats (double sample) const noexcept
     return segment.beat + beatsAfter (segment.bpm, segment.bpmPerBeat, segment.scale, sample - segment.sample);
 }
 
-double TempoMap::getSamplesPerBeat (double beat) const noexcept
+double TempoMap::getSamplesPerQuarterNote (double beat) const noexcept
 {
     return findByBeat (beat).scale / getTempoAt (beat);
 }
@@ -192,11 +202,47 @@ TempoMap::TimeSignature TempoMap::getTimeSignatureAt (double beat) const noexcep
     return signatures[(size_t) findByBeat (beat).signature];
 }
 
+double TempoMap::getBarLength (double beat) const noexcept
+{
+    return getTimeSignatureAt (beat).getBarLength();
+}
+
+double TempoMap::getBeatLength (double beat) const noexcept
+{
+    return getTimeSignatureAt (beat).getBeatLength();
+}
+
 double TempoMap::getBarStart (double beat) const noexcept
 {
     const auto signature = getTimeSignatureAt (beat);
-    const auto beatsPerBar = (double) std::max (1, signature.numerator);
-    return signature.beat + std::floor ((beat - signature.beat) / beatsPerBar) * beatsPerBar;
+    const auto bar = signature.getBarLength();
+    return signature.beat + std::floor ((beat - signature.beat) / bar) * bar;
+}
+
+double TempoMap::getBarsAt (double beat) const noexcept
+{
+    const auto index = (size_t) findByBeat (beat).signature;
+    const auto& signature = signatures[index];
+    return firstBars[index] + (beat - signature.beat) / signature.getBarLength();
+}
+
+double TempoMap::getBeatAtOrAfter (double beat) const noexcept
+{
+    const auto index = (size_t) findByBeat (beat).signature;
+    const auto& signature = signatures[index];
+    const auto length = signature.getBeatLength();
+    const auto next = signature.beat + std::ceil ((beat - signature.beat) / length - 1.0e-9) * length;
+    return index + 1 < signatures.size() ? std::min (next, signatures[index + 1].beat) : next;
+}
+
+double TempoMap::getNextBeat (double beat) const noexcept
+{
+    // The one after the beat it is on (or the last one before it), each later than the last however far into the song.
+    const auto index = (size_t) findByBeat (beat).signature;
+    const auto& signature = signatures[index];
+    const auto length = signature.getBeatLength();
+    const auto next = signature.beat + (std::floor ((beat - signature.beat) / length + 1.0e-9) + 1.0) * length;
+    return index + 1 < signatures.size() ? std::min (next, signatures[index + 1].beat) : next;
 }
 
 bool TempoMap::isSteadyBetween (double fromBeat, double toBeat) const noexcept

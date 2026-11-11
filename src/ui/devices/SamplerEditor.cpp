@@ -35,7 +35,8 @@ namespace
         return Sampler::info.parameters[(size_t) parameter].id;
     }
 
-    // The sounds that come with the sampler in a menu: the 808 bass, then each drum kit's sixteen under the kit's name.
+    // The sounds that come with the sampler in a menu: those made to play across the keys (the 808 bass, the sounds made
+    // from their spectra), one by one, then each drum kit's sixteen under the kit's name.
     struct FactoryKit
     {
         juce::String name;
@@ -46,12 +47,13 @@ namespace
     {
         std::vector<FactoryKit> kits;
         const auto names = devices::getFactorySampleNames();
+        const auto firstDrum = devices::getNumPitchedFactorySamples();
 
-        for (int first = 1; first < (int) names.size(); first += 16)
+        for (int first = firstDrum; first < (int) names.size(); first += 16)
         {
             const auto kick = toString (names[(size_t) first]);
             const auto prefix = kick.upToLastOccurrenceOf (" ", false, false);
-            kits.push_back ({ first == 1 || prefix == kick ? juce::String ("Default Kit") : prefix + " Kit", first,
+            kits.push_back ({ first == firstDrum || prefix == kick ? juce::String ("Default Kit") : prefix + " Kit", first,
                               std::min (16, (int) names.size() - first) });
         }
 
@@ -146,11 +148,12 @@ public:
         manual = sampler != nullptr ? (sampler->getManualSlices() != nullptr ? *sampler->getManualSlices() : Sampler::ManualSlices())
                                     : editor.getDevice().getManualSlices();
         tempo = sampler != nullptr ? (double) sampler->getShown().tempo.get() : 120.0;
+        barLength = sampler != nullptr ? (double) sampler->getShown().barLength.get() : 4.0;
 
         for (size_t i = 0; i < handles.size(); ++i)
             values[i] = handles[i].getValue();
 
-        slices = sound != nullptr ? Sampler::getSlices (*sound, &manual, values, tempo) : Sampler::Slices();
+        slices = sound != nullptr ? Sampler::getSlices (*sound, &manual, values, tempo, barLength) : Sampler::Slices();
 
         std::vector<float> numbers (values.begin(), values.end());
 
@@ -494,7 +497,7 @@ private:
     juce::String fallbackName;
     Sampler::ManualSlices manual;
     Sampler::Slices slices;
-    double tempo = 120.0;
+    double tempo = 120.0, barLength = 4.0;      // the song's as the sampler last played, a bar's length in beats
     std::vector<std::pair<float, float>> peaks; // each column's lowest and highest
     int peaksWidth = 0, soundsShown = 0;
     DrawnNumbers drawn;
@@ -790,7 +793,8 @@ SamplerEditor::SamplerEditor (const DeviceHandle& handle)
                                     "Cuts the sound into slices, each on a key of its own from C2 up" }));
     addControl (getID (Sampler::mode), modes);
 
-    // Each mode's controls in one row: Classic's markers and loop, One-Shot's markers, playback and fades, and Slice's way to
+    // Each mode's controls in one row: Classic's markers and loop, One-Shot's markers, playback and fades (each with how far
+    // a note's start is random, beside its Start), and Slice's way to
     // slice, with the knob that way has (none by hand), its playback, fades, choke and play-through.
     const auto row = [this] (std::vector<std::string_view> ids, std::vector<juce::String> names) -> ParameterControls&
     {
@@ -817,9 +821,10 @@ SamplerEditor::SamplerEditor (const DeviceHandle& handle)
     };
 
     std::array<ParameterControls*, SamplePart::numControls> rows {
-        &row ({ "start", "end", "loopOn", "loopStart", "loopEnd", "loopCrossfade" },
-              { "Start", "End", "Loop", "Loop Start", "Loop End", "Crossfade" }),
-        &row ({ "start", "end", "playback", "fadeIn", "fadeOut" }, { "Start", "End", "Playback", "Fade In", "Fade Out" }),
+        &row ({ "start", "startRandom", "end", "loopOn", "loopStart", "loopEnd", "loopCrossfade" },
+              { "Start", "Random", "End", "Loop", "Loop Start", "Loop End", "Crossfade" }),
+        &row ({ "start", "startRandom", "end", "playback", "fadeIn", "fadeOut" },
+              { "Start", "Random", "End", "Playback", "Fade In", "Fade Out" }),
         &sliceRow (std::pair<std::string_view, juce::String> { "sensitivity", "Sensitivity" }),
         &sliceRow (std::pair<std::string_view, juce::String> { "sliceDivision", "Division" }),
         &sliceRow (std::pair<std::string_view, juce::String> { "sliceCount", "Slices" }),
@@ -851,9 +856,9 @@ SamplerEditor::SamplerEditor (const DeviceHandle& handle)
                                                           parameter (Sampler::sustain), parameter (Sampler::release),
                                                           [shown] { return shown() != nullptr ? shown()->amp.get() : 0.0f; }));
     ampView.setCurves (parameter (Sampler::attackCurve), parameter (Sampler::decayCurve), parameter (Sampler::releaseCurve));
-    const auto amp =
-        makePicturePart ("Amp", ampView, 56, 32, { "attack", "decay", "sustain", "release", "attackCurve", "decayCurve", "releaseCurve" },
-                         4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release", "A Curve", "D Curve", "R Curve" });
+    const auto amp = makePicturePart (
+        "Amp", ampView, 56, 32, { "attack", "decay", "sustain", "release", "attackCurve", "decayCurve", "releaseCurve", "keyTime" }, 4,
+        ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release", "A Curve", "D Curve", "R Curve", "Key Time" });
     ampContent = amp.content;
 
     // The filter, its envelope and the LFO, each switched on at its title.
@@ -879,9 +884,10 @@ SamplerEditor::SamplerEditor (const DeviceHandle& handle)
             return Sampler::getFilterMagnitude (values, cutoffHertz, frequency, scope != nullptr ? scope->getSampleRate() : 48000.0);
         },
         [shown] { return shown() != nullptr ? shown()->cutoff.get() : 0.0f; }));
-    auto filter = makePicturePart ("Filter", filterView, 70, 40,
-                                   { "filterType", "cutoff", "resonance", "filterSlope", "filterEnvelope", "keyTracking" }, 3,
-                                   ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Slope", "Envelope", "Key" });
+    auto filter =
+        makePicturePart ("Filter", filterView, 70, 40,
+                         { "filterType", "cutoff", "resonance", "keyTracking", "filterSlope", "filterEnvelope", "filterVelocity" }, 4,
+                         ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Key", "Slope", "Envelope", "Velocity" });
     filter.titleSwitch = &makePartSwitch ("filterOn", *filter.content);
 
     auto& filterEnvelopeView = keep (std::make_unique<EnvelopeView> (
@@ -961,7 +967,9 @@ juce::PopupMenu SamplerEditor::getSoundMenu()
     };
 
     const auto names = devices::getFactorySampleNames();
-    menu.addItem (toString (names[0]), true, factory == 0, [put] { put (0); });
+
+    for (int index = 0; index < devices::getNumPitchedFactorySamples(); ++index)
+        menu.addItem (toString (names[(size_t) index]), true, factory == index, [put, index] { put (index); });
 
     for (const auto& kit : getFactoryKits())
     {

@@ -4,7 +4,8 @@
 // the middle in turn when it bounces from side to side. What plays lights the bar coming in, then each echo in its turn. A
 // drag puts the first echo under the pointer, sideways for the time (a note value while it follows the tempo) and up or
 // down for the feedback, as one undo step. Under them, the band its echoes keep, between the low and the high cut, whose
-// ends drag. Then the time's controls and the feedback, large.
+// ends drag. Over the echoes the pointer is the crosshair and the first echo lights up; over the band it points sideways
+// and the end a press takes, the nearer, lights up (GraphDot.h). Then the time's controls and the feedback, large.
 #pragma once
 
 #include "DeviceEditorBase.h"

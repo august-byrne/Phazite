@@ -917,3 +917,33 @@ plug-in with many parameters gains the same: 20 synths' tracks stopped went from
 holds did 30 times a second for each control; and `isValid()` searched for each parameter, five million comparisons for the
 drum sampler's 3,201 parameters. A device can now find its parameters itself (`DeviceInfo::findByID`): the drum sampler reads
 the pad and the field from the ID at once. `isValid()` sorts the IDs instead.
+
+## 19. The sounds of Exodus (2026-11-10)
+
+Roadmap step 4.13 added the Exciter and the Vinyl, the reverb's plate, the chorus's voices, the wavetable synth's unison
+stack and drift, the sampler's and the FM synth's new parts, and every poly note on a voice of its own. Measured from
+`windows-profile` ("Benchmark: each device's CPU", three runs, steady to a few per cent), in % of a core:
+
+| Device | Now | Before | Why |
+|---|---|---|---|
+| Exciter (its band from 5 kHz; from 1 kHz) | 2.57; 2.72 | new | Its curve at four times the rate through linear-phase half-bands, and the band's filters played backwards (2 ms) so that it never combs |
+| Vinyl (stopped; playing, everything on; silence in, stopped) | 1.32; 1.48; 0.005 | new | Its delay line read at twice the rate, the groove's distortion at twice the rate, its noise; it rests while stopped and silent |
+| Reverb, plate | 0.43 | new | Dattorro's tank is lighter than the room's eight lines (0.91, as before) |
+| Chorus, three voices with Shimmer; eight voices spread | 0.36; 0.72 | new cases | A copy a voice, each its own delay line read by its interpolation |
+| Wavetable, 8 notes, full unison, stacked and drifting | 4.2 | new case | 3 % over full unison alone (4.1): the stack picks a table per step; the drift moves once a control step |
+| Wavetable: 1 note / 8 notes / 8 notes, full unison | 0.19 / 1.4 / 4.1 | 0.18 / 1.35 / 3.78 (2026-11-06) | Within 8 %, with what 2026-11-08 added |
+| FM: 1 note / 8 notes / 16 notes, filtered | 0.68 / 5.6 / 12.4 | 0.64 / 5.4 / 12.0 (2026-11-07) | 4 %: the filter's envelope runs on every voice |
+| Sampler: 1 / 8 / 16 notes | 0.10 / 4.7 / 12.6 | 0.09 / 4.5 / 12.2 (2026-11-07) | 4 %: Key Time and Filter Velocity on every voice |
+| Synth: 1 note / 8 notes / 16 notes, 7-voice unison | 0.15 / 1.0 / 2.0 | 0.13 / 0.81 / 1.60 (2026-11-07) | The synth's parts for the classic sounds came between (2026-11-08: osc 2's sweep, drift, the sub's shapes, the filter's drive at twice the rate); this pass changed only its note-ons and a value it reads once a control step. Not measured apart |
+
+The other effects cost what they did on 2026-11-06 (the saturator 0.80, the limiter 0.34, the delay 0.15, the
+multiband 1.51, the filter 0.09).
+
+**A project:** 20 tracks, each a synth, an EQ, a compressor and a reverb playing chords, 41.9 % of a core on one thread
+and 13.2 % on four, against 34.1 and 11.6 on 2026-11-06. Besides the synth's own cost above, its chords now ring into
+each other's releases: a key played again lets its tail ring on under the new note on a voice of its own, as other
+synths play it, where it took the key's voice back. The other projects cost no more: 20 empty tracks 0.38 %, and 20
+drum samplers 1.81 % playing on one thread, against 2.96 % measured on 2026-11-09 while a build ran.
+
+**Turned on, Safe Bass** in the chorus, the phaser and the flanger is a Linkwitz-Riley split, four filter sections a
+sample on each side where it had one; off, it costs nothing. The benchmarks leave it off.

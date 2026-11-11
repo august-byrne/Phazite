@@ -2069,6 +2069,77 @@ TEST_CASE ("While recording, what comes in shows on its track as a clip growing 
     CHECK (screen.boundsOf (clips[0]).getX() == shown.getX());
 }
 
+TEST_CASE ("Recording from before a looped range, the part before it shows on its own once round it, this time round beside it")
+{
+    // Known bug 10 until 2026-11-10: the part before the range was a take of the range's clip. Beats 4 to 8 are looped.
+    PlaylistScreen screen;
+    phazite::test::EnginePlayback playback (phazite::test::EnginePlayback::Input::loopback);
+    auto& song = screen.getSong();
+    phazite::setTrackInput (screen.context, screen.tracks[1], "1");
+    phazite::setInputMonitoring (screen.context, screen.tracks[1], phazite::InputMonitoring::never);
+    phazite::setArmed (screen.context, screen.tracks[1], true);
+    REQUIRE (phazite::isArmed (screen.context, screen.tracks[1]));
+    phazite::loopBeatRange (song, 4.0, 8.0);
+
+    // The clips that show what is being recorded, left to right, and where each is in the lanes.
+    const auto areaOf = [&screen] (juce::Component* clip) { return screen.lanes->getLocalArea (clip, clip->getLocalBounds()); };
+    const auto findRecordings = [&screen, &areaOf]
+    {
+        std::vector<phazite::ui::ClipComponent*> found;
+
+        for (auto* clip : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (clip->isRecording() && clip->isVisible())
+                found.push_back (clip);
+
+        std::sort (found.begin(), found.end(), [&areaOf] (auto* a, auto* b) { return areaOf (a).getX() < areaOf (b).getX(); });
+        return found;
+    };
+
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+
+    // The first time round: one clip, growing from where recording started.
+    playback.play (3.0); // to beat 6
+    ticker.tickNow();
+    auto shown = findRecordings();
+    REQUIRE (shown.size() == 1);
+    CHECK (std::abs (areaOf (shown[0]).getX() - screen.at (0.0, 1).x) <= 1);
+    CHECK (std::abs (areaOf (shown[0]).getRight() - screen.at (6.0, 1).x) <= 1);
+
+    // Round once: the part before the range, which grows no more, and this time round from the range's start to the playhead.
+    playback.play (2.0); // to beat 10, beat 6 the second time round
+    ticker.tickNow();
+    shown = findRecordings();
+    REQUIRE (shown.size() == 2);
+    CHECK (std::abs (areaOf (shown[0]).getX() - screen.at (0.0, 1).x) <= 1);
+    CHECK (std::abs (areaOf (shown[0]).getRight() - screen.at (4.0, 1).x) <= 1);
+    CHECK (shown[0]->getLabel() == "Recording");
+    CHECK (std::abs (areaOf (shown[1]).getX() - screen.at (4.0, 1).x) <= 1);
+    CHECK (std::abs (areaOf (shown[1]).getRight() - screen.at (6.0, 1).x) <= 1);
+    CHECK (shown[1]->getLabel() == "Recording take 2");
+
+    // Just round again, the playhead within the reach that a growing recording's end keeps to it, the part before the range
+    // still ends at the range's start.
+    const auto pastStart = phazite::ui::RecordingTint::reach / 2.0 / screen.playlist.getView().pixelsPerBeat; // in beats
+    playback.play (1.0 + pastStart * 0.5);                                                                    // at 120 BPM
+    ticker.tickNow();
+    shown = findRecordings();
+    REQUIRE (shown.size() == 2);
+    CHECK (std::abs (areaOf (shown[0]).getRight() - screen.at (4.0, 1).x) <= 1);
+    CHECK (std::abs (areaOf (shown[1]).getRight() - screen.at (4.0 + pastStart, 1).x) <= 1);
+
+    // Stopped: the clips the take made are where they showed.
+    phazite::stopRecording (song);
+    phazite::test::dispatchPendingMessages();
+    ticker.tickNow();
+    CHECK (findRecordings().empty());
+    const auto clips = phazite::getClips (song, screen.tracks[1]);
+    REQUIRE (clips.size() == 2);
+    CHECK (std::abs (screen.boundsOf (clips[0]).getRight() - screen.at (4.0, 1).x) <= 1);
+    CHECK (std::abs (screen.boundsOf (clips[1]).getX() - screen.at (4.0, 1).x) <= 1);
+}
+
 TEST_CASE ("A clip shows a tag with its name only where that isn't its track's or like it, and a link while it is an alias")
 {
     // The owner, 2026-11-07: a strip along the top of every clip repeated its track's name, with a "*" after an alias's.

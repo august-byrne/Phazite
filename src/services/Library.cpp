@@ -413,7 +413,8 @@ struct Library::Indexer : public juce::Thread
     {
     }
 
-    ~Indexer() override { stopThread (4000); }
+    // It looks at threadShouldExit() between files: never ended by force, which can leave a lock it held held for ever.
+    ~Indexer() override { stopThread (-1); }
 
     // A file found, with its root, its size and when it was last changed (in milliseconds).
     struct Found

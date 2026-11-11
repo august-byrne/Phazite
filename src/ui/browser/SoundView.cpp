@@ -63,6 +63,10 @@ SoundView::SoundView()
 SoundView::~SoundView()
 {
     thumbnail.removeChangeListener (this);
+
+    // The cache's thread stopped first, however long the slice of a file it reads takes: JUCE's own stop, as the cache goes,
+    // ends a thread that hasn't stopped within 2 s by force, which can leave a lock it held held for ever.
+    cache.getTimeSliceThread().stopThread (-1);
 }
 
 void SoundView::show (const std::optional<LibraryItem>& item)

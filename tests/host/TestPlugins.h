@@ -24,10 +24,28 @@ struct TestPlugins
         latency,      // delays its sound by 64 samples, or 128 while its Latency ("40") is on, and says so
         sidechain,    // plays what comes into its sidechain bus in place of its sound
         crashLoading, // crashes as it is made: in the helper, never in the tests' process
+        playhead,     // passes its sound, and keeps as its state where its playhead said the song was as the last piece of a
+                      // block it played started (TestPlugins::Playhead); its Watch ("50") does nothing, but moved by a
+                      // modulator it cuts the helper's blocks into pieces
     };
 
-    static constexpr Kind kinds[] = {
-        Kind::effect, Kind::synth, Kind::crash, Kind::hang, Kind::latency, Kind::sidechain, Kind::crashLoading
+    static constexpr Kind kinds[] = { Kind::effect,  Kind::synth,     Kind::crash,        Kind::hang,
+                                      Kind::latency, Kind::sidechain, Kind::crashLoading, Kind::playhead };
+
+    // The playhead stand-in's state: its place in quarter notes (ppqPosition), its time in samples, its tempo, its time
+    // signature, whether the song played, and where the bar it is in starts, in quarter notes, and which bar that is; each
+    // -1 (0 for the time signature) where the playhead said nothing.
+    struct Playhead
+    {
+        double ppq = -1.0;
+        juce::int64 sample = -1;
+        double bpm = -1.0;
+        int numerator = 0, denominator = 0;
+        bool playing = false;
+        double barStart = -1.0;
+        juce::int64 barCount = -1;
+
+        static Playhead read (const juce::MemoryBlock& state);
     };
 
     static juce::PluginDescription getDescription (Kind);

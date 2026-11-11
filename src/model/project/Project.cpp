@@ -245,13 +245,16 @@ public:
     {
     }
 
-    ~BackgroundWriter() override { stopThread (30000); } // a write under way is never cut short: run() doesn't check
+    // A write under way is never cut short (run() doesn't check), however long the drive takes, as the autosave a recording's
+    // end starts may meet a drive that stalls: a time limit here would end the thread with Windows' TerminateThread, which can
+    // leave the file broken and a lock of the heap's or the C runtime's held.
+    ~BackgroundWriter() override { stopThread (-1); }
 
     bool isBusy() const noexcept { return busy.load(); }
     bool takeFailure() noexcept { return failed.exchange (false); }
     juce::int64 getWrittenAt() const noexcept { return writtenAt.load(); } // the last whole write, or 0
     void forgetWritten() noexcept { writtenAt = 0; }
-    void wait() { waitForThreadToExit (30000); }
+    void wait() { waitForThreadToExit (-1); } // the write under way, which a save of the same file mustn't overlap
 
     // Writes a state that nothing else changes (a copy) into a file.
     void write (juce::ValueTree copy, const juce::File& target)

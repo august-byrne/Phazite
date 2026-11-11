@@ -26,6 +26,10 @@ namespace
     struct Levels
     {
         juce::AudioThumbnailCache cache { 200 };
+
+        // Its thread stopped first, however long the slice of a file it reads takes: JUCE's own stop, as the cache goes,
+        // ends a thread that hasn't stopped within 2 s by force, which can leave a lock it held held for ever.
+        ~Levels() { cache.getTimeSliceThread().stopThread (-1); }
     };
 
     constexpr int samplesPerLevel = 256; // how many of a file's samples each level the cache keeps sums up

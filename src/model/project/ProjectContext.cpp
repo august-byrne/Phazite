@@ -10,6 +10,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/mixer/internal/Freeze.h"
+#include "model/mixer/internal/Sidechain.h"
 #include "model/notes/internal/Notes.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -176,6 +177,11 @@ namespace
 
         void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override
         {
+            // A device's value that turns what its sidechain hears on or off (a compressor's mode) changes what the mixer
+            // shows of it.
+            if (switchesSidechain (tree, property))
+                return add (pending.devices);
+
             // A parameter's value is no change to what views show: controls read values as they show them, and a knob's drag
             // makes one at each move (docs/performance-audit.md, U1); a channel's or a container's chain's volume and pan, a
             // chain's crossover, a send's level and a macro's value neither. Nor is where a device's window was, which no
@@ -248,6 +254,7 @@ struct ProjectContext::Impl
     std::unique_ptr<PlaybackSession> playback;     // the song as Phazite's engine plays it
     std::unique_ptr<VersionHistory> versions;      // the project's versions, beside its file
     DeviceWindowHost* windows = nullptr;           // what shows the devices' windows, the app's
+    ProblemReporter problems;                      // what tells the user of a problem with the song, the app's
     Clipboard clipboard;                           // what Cut and Copy keep for Paste
     std::unique_ptr<SongWatcher> songWatcher;
     Transients transients; // the hits found in audio files, whichever project plays them
@@ -396,6 +403,11 @@ DeviceWindowHost* getDeviceWindows (const ProjectContext& context)
     return context.getImpl().windows;
 }
 
+void setProblemReporter (ProjectContext& context, ProblemReporter reporter)
+{
+    context.getImpl().problems = std::move (reporter);
+}
+
 void setSong (ProjectContext& context, Song* song)
 {
     auto& impl = context.getImpl();
@@ -419,6 +431,11 @@ void setSong (ProjectContext& context, Song* song)
         impl.clipRenders = std::make_unique<ClipRenders> (*song);
         impl.automation = std::make_unique<AutomationWatcher> (*song);
         impl.playback = std::make_unique<PlaybackSession> (*song, getPlaybackHost (impl.engine));
+        impl.playback->onProblem = [&impl] (const juce::String& title, const juce::String& message)
+        {
+            if (impl.problems != nullptr)
+                impl.problems (title, message);
+        };
         impl.versions = std::make_unique<VersionHistory> (
             *song, [&impl] { impl.listeners.call ([] (ProjectContext::Listener& l) { l.versionsChanged(); }); });
     }

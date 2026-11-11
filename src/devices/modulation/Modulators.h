@@ -33,13 +33,15 @@ enum class ModulatorKind
 std::span<const ParameterInfo> getModulatorParameters (ModulatorKind);
 int findModulatorParameter (ModulatorKind, std::string_view id); // -1 for none
 
-// Where the song is at a control point, for the modulators that follow it.
+// Where the song is at a control point, for the modulators that follow it: from its start in seconds, in beats (quarter
+// notes, whatever the time signature) and in bars, with the part of its bar it is through (2.5 half way through bar 2);
+// the tempo there, in beats a minute, and how long the bar there is, in beats (numerator x 4 / denominator: 3 in 6/8).
 struct SongPlace
 {
-    double seconds = 0.0; // from the song's start
-    double beats = 0.0;   // in the time signature's own beats
-    double tempo = 120.0; // in beats a minute
-    int numerator = 4;    // beats in a bar
+    double seconds = 0.0, beats = 0.0;
+    double tempo = 120.0;
+    double barLength = 4.0;
+    double bars = 0.0;
 };
 
 class Modulator

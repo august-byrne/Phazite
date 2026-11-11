@@ -60,14 +60,16 @@ inline const juce::Identifier LASTKEY { "LASTKEY" };
 
 //==============================================================================
 // The song's tempo map (model/transport/internal/Tempo.h): its tempos and time signatures, each from a beat on, which
-// everything in the song is placed on. The playlist's tempo lane adds tempos along the song, each held until the next or
+// everything in the song is placed on. Everything in the song counts beats, quarter notes whatever the time signature, and a
+// tempo counts them a minute; a time signature sets only how long a bar is and which note its own beats count
+// (model/transport/TempoValues.h). The playlist's tempo lane adds tempos along the song, each held until the next or
 // ramping to it; for now a song has one time signature, from its start. song
 
 // Child of PHAZITE, which every project has (Project adds it as the project opens): the song's tempos (TEMPO) and time
 // signatures (TIMESIGNATURE), in no particular order. Without one, the song is at 120 BPM in 4/4.
 inline const juce::Identifier TEMPOMAP { "TEMPOMAP" };
 
-// Child of TEMPOMAP: a tempo, from where it starts (mapBeat) to the next one's start, in beats per minute (bpm, 20..300,
+// Child of TEMPOMAP: a tempo, from where it starts (mapBeat) to the next one's start, in quarter notes per minute (bpm, 20..300,
 // to a hundredth), and how it goes on to the next (tempoCurve, float -1..1, as an automation point's pointCurve; without
 // it, 1: held until the next tempo, which it jumps to; 0 ramps straight to the next, and between, the ramp bends). The
 // first starts at 0.
@@ -76,7 +78,7 @@ inline const juce::Identifier bpm { "bpm" };
 inline const juce::Identifier tempoCurve { "curve" };
 
 // Child of TEMPOMAP: a time signature, from where it starts (mapBeat), as many beats in a bar (numerator, int 1..32) of a
-// note value (denominator: 2, 4, 8 or 16). The first starts at 0.
+// note value (denominator: 2, 4, 8 or 16): its bars are numerator x 4 / denominator quarter notes long. The first starts at 0.
 inline const juce::Identifier TIMESIGNATURE { "TIMESIGNATURE" };
 inline const juce::Identifier numerator { "numerator" };
 inline const juce::Identifier denominator { "denominator" };

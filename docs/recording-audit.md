@@ -184,6 +184,8 @@ What Phazite takes, and why, by the owner's principles: one way to do each thing
 - **A clip grows on each track that records** (`src/ui/playlist/PlaylistRecording.cpp`, from `getRecordingsInProgress()`).
   - It is drawn in its track's colour with a red edge, tagged "Recording", or "Recording take 2" round a loop.
   - It starts where recording started. Round a loop it starts where this time round began; punched in, at the punch's start.
+  - Round a loop that recording started before, once round, the part before the loop shows beside it, whole
+    (2026-11-10).
   - Its end follows the playhead's line at each frame of the display.
 - **An input's waveform draws as it comes in.**
   - The take's writing thread keeps the loudest sample of every 256 frames beside the file it writes.
@@ -262,11 +264,18 @@ What Phazite takes, and why, by the owner's principles: one way to do each thing
 
 - `tests/AudioRecordingTests.cpp`:
   - An input's growing range, the take it is on round a loop and the punch.
+  - Takes from before a looped range (stopped before it, in it, round once and twice, a moment before it) and from
+    within it (stopped in the first, second and third time round: the partial first one a take after silence, and the
+    take shown while recording the finished clip's last).
+  - A writing thread that stalls (caught up, still stalled at Stop, round a loop, before a range then gone round), and
+    its message.
   - Its waveform's levels: the metronome's clicks where they were played.
   - The new track for an input.
-- `tests/RecordingTests.cpp`: notes shown as they are played, held and let go, folded round a loop.
+- `tests/RecordingTests.cpp`: notes shown as they are played, held and let go, folded round a loop; notes from before a
+  looped range, with and without Overdub, and what shows meanwhile.
 - `tests/PlaylistTests.cpp`:
   - The recording clip on its row, from the start to the playhead, growing, and replaced by the take's clip.
+  - The part before a looped range beside this time round.
   - The instrument track's arm switch and its "MIDI" label.
 - `tests/ConsolidateTests.cpp`:
   - MIDI clips joined, their notes cut as they played.
@@ -280,6 +289,21 @@ What Phazite takes, and why, by the owner's principles: one way to do each thing
   - Hits found in the background.
   - Quantize Audio at full and half strength, with the hits rendered on their beats.
 - `tests/AudioClipEditorTests.cpp`: a marker added by a double-click, dragged and removed, each one undo step.
+- `tests/EngineTests.cpp`: an input's gaps read as silence in place.
+- `tests/RealtimeAuditTests.cpp`: noting gaps allocates nothing on the audio thread.
+
+### 5.8 Since: every time round a take, and a drive that stalls (2026-11-10)
+
+- **A take round a looped range keeps everything played** (known bug 10).
+  - Started before the range, the part before it is a clip of its own, as Bitwig and Live keep it, and the range's
+    clip has a take for each time round from its start.
+  - Started within the range, the first, partial time round is a take too, as Logic Pro and Bitwig keep a partial
+    first pass: its file starts with silence from the range's start, so every take lies where the range does.
+  - The last whole take plays. Stopped before the range's end, it is one clip of what was played. Notes alike.
+- **Sound lost while the drive didn't keep up** (past 8 seconds of buffer) is silence in the take, and what follows
+  stays in time, as Live leaves a gap and Audacity fills one (known bug 12).
+  - One error names each track, where and how long, wherever a clip keeps the sound.
+  - Stop waits for the writing thread however long the drive takes, never ending it in the middle of a write.
 
 ## 6. What is left
 

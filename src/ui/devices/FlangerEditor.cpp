@@ -41,13 +41,13 @@ public:
     {
         setTitle ("Flanger comb");
         setDescription ("Its comb of notches now, over the spectrum of what it plays, and under it how far the copy lags each side, "
-                        "in milliseconds. Drag the dot sideways to change the delay and up or down for the "
-                        "feedback; the wheel turns the depth.");
+                        "in milliseconds. Drag the dot, or press anywhere to put it there: sideways for the delay, up or down for "
+                        "the feedback. The wheel turns the depth.");
     }
 
     double getDelay (int channel) const { return Flanger::getSweptDelay (values, getLfoValue (channel)); }
 
-    juce::Point<float> getDotPosition() const
+    juce::Point<float> getDotPosition() const override
     {
         return { getFrequencies().xFor (1000.0 / (double) values[Flanger::delay]), yForFeedback (values[Flanger::feedback]) };
     }
@@ -123,11 +123,7 @@ protected:
         }
 
         // The dot: the longest delay's frequency, as high as the feedback.
-        const auto dot = juce::Rectangle<float> (2.0f * GraphTint::dotRadius, 2.0f * GraphTint::dotRadius).withCentre (getDotPosition());
-        g.setColour (tint);
-        g.fillEllipse (dot);
-        g.setColour (p.text);
-        g.drawEllipse (dot, 1.5f);
+        dot.paint (g, p, tint);
 
         graph::paintReadouts (g, p, area, formatMilliseconds (values[Flanger::delay]) + "  Depth " + toPercent (values[Flanger::depth]),
                               "Feedback " + toPercent (values[Flanger::feedback]));

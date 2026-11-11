@@ -10,14 +10,13 @@ namespace
     using devices::Limiter;
 
     constexpr float historyLowest = -48.0f, historyReduction = 24.0f;
-    constexpr int historyTicks = 4 * DisplayTicker::ticksPerSecond; // four seconds
 
     const auto labelHeight = juce::roundToInt (TextSize::small) + Space::xs;
 } // namespace
 
 LimiterDisplay::LimiterDisplay (ParameterHandle c)
     : ceiling (std::move (c)),
-      history ("Limiter history", historyLowest, historyReduction, historyTicks)
+      history ("Limiter history", historyLowest, historyReduction)
 {
     setTitle ("Limiter");
     history.setLine (&ceiling, "Ceiling");
@@ -36,7 +35,7 @@ LimiterDisplay::LimiterDisplay (ParameterHandle c)
     }
 }
 
-void LimiterDisplay::show (float input, float reduction, float output)
+void LimiterDisplay::show (double milliseconds, const LevelHistoryView::SongTime& song, float input, float reduction, float output)
 {
     inputMeter.update (input);
     reductionMeter.update (reduction);
@@ -45,7 +44,7 @@ void LimiterDisplay::show (float input, float reduction, float output)
     const auto mark = ceiling.isValid() ? std::optional<float> (ceiling.getValue()) : std::nullopt;
     inputMeter.setMark (mark);
     outputMeter.setMark (mark);
-    history.push (input, output, reduction);
+    history.push (milliseconds, song, input, output, reduction);
 }
 
 int LimiterDisplay::getMetersWidth()
@@ -98,6 +97,7 @@ LimiterEditor::~LimiterEditor() = default;
 void LimiterEditor::refresh()
 {
     if (auto* limiter = device.getProcessor<Limiter>())
-        display->show (limiter->getInputMeter().take(), limiter->getReductionMeter().take(), limiter->getOutputMeter().take());
+        display->show (juce::Time::getMillisecondCounterHiRes(), device.getSongTime(), limiter->getInputMeter().take(),
+                       limiter->getReductionMeter().take(), limiter->getOutputMeter().take());
 }
 } // namespace phazite::ui

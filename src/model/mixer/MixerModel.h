@@ -116,7 +116,8 @@ struct DeviceSlot
     // nothing (an effect lets its sound through) until it is reloaded (reloadDevice()).
     bool crashed = false;
 
-    // It can listen to another track (a sidechain): the one it does, if any, with its name and colour.
+    // It can listen to another track (a sidechain): the one it hears, if any, with its name and colour (none for Phazite's
+    // compressor while it compresses, its key kept for when it ducks: internal/Sidechain.h, hearsSidechain()).
     bool hasSidechain = false;
     SidechainChoice sidechain {};
 };
@@ -224,16 +225,16 @@ void setOutput (ProjectContext&, TrackID, TrackID bus);
 //==============================================================================
 // A device's sidechain (docs/design.md, section 8), Phazite's own or a plug-in's: whether it has one, every track but its
 // own with why it can't listen to one whose sound comes from its own, the one it listens to (none: the sound passing
-// through it), and choosing one, as one undo step (Phazite's compressor, still as it was made, starts ducking then:
-// internal/Sidechain.h).
+// through it), and choosing one, as one undo step (Phazite's compressor ducks under it then, set up to duck if it was still
+// as it was made, and its vocoder plays the track as its carrier: internal/Sidechain.h).
 bool hasSidechain (const ProjectContext&, DeviceID);
 std::vector<SidechainChoice> getSidechainChoices (const ProjectContext&, DeviceID);
 TrackID getSidechainSource (const ProjectContext&, DeviceID);
 void setSidechainSource (ProjectContext&, DeviceID, TrackID source);
 
-// Ducking a track under another, as one undo step ("Duck Bass Under Kick"): Phazite's compressor after its effects, its
-// sidechain listening to the other. The tracks it can duck under: every track but itself, with why not one whose sound
-// comes from it. Returns the compressor.
+// Ducking a track, or a bus, under another track, as one undo step ("Duck Bass Under Kick"): Phazite's compressor after
+// its effects, its sidechain listening to the other. The tracks it can duck under: every track but itself, with why not
+// one whose sound comes from it; none for a plain folder, which has no effects. Returns the compressor.
 std::vector<SidechainChoice> getDuckUnderChoices (const ProjectContext&, TrackID ducked);
 DeviceID duckUnder (ProjectContext&, TrackID ducked, TrackID key);
 
@@ -245,7 +246,8 @@ float getCpuLoad (const ProjectContext&, TrackID);
 
 //==============================================================================
 // What links the channels (docs/design.md, section 8), which the mixer outlines from the selection: where each channel's
-// sound goes (its bus, or the master), its sends to returns, and the sidechains that listen to it.
+// sound goes (its bus, or the master), its sends to returns, and the sidechains that hear it (not a compressor's key while
+// it compresses).
 struct Connection
 {
     enum class Kind

@@ -736,6 +736,29 @@
         "default": 0.0
       },
       {
+        "id": "unisonStack",
+        "name": "Unison Stack",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": "Off",
+        "choices": [
+          "Off",
+          "Octave",
+          "Two Octaves",
+          "Fifth",
+          "Power Chord"
+        ]
+      },
+      {
+        "id": "unisonDrift",
+        "name": "Unison Drift",
+        "unit": "cents",
+        "minimum": 0.0,
+        "maximum": 50.0,
+        "default": 0.0
+      },
+      {
         "id": "filterOn",
         "name": "Filter On",
         "unit": "toggle",
@@ -1648,6 +1671,14 @@
         "default": 0.0
       },
       {
+        "id": "op1Phase",
+        "name": "Op 1 Phase",
+        "unit": "degrees",
+        "minimum": 0.0,
+        "maximum": 360.0,
+        "default": 0.0
+      },
+      {
         "id": "op1Ratio",
         "name": "Op 1 Ratio",
         "unit": "none",
@@ -1795,6 +1826,14 @@
         "unit": "percent",
         "minimum": -1.0,
         "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "op2Phase",
+        "name": "Op 2 Phase",
+        "unit": "degrees",
+        "minimum": 0.0,
+        "maximum": 360.0,
         "default": 0.0
       },
       {
@@ -1948,6 +1987,14 @@
         "default": 0.0
       },
       {
+        "id": "op3Phase",
+        "name": "Op 3 Phase",
+        "unit": "degrees",
+        "minimum": 0.0,
+        "maximum": 360.0,
+        "default": 0.0
+      },
+      {
         "id": "op3Ratio",
         "name": "Op 3 Ratio",
         "unit": "none",
@@ -2096,6 +2143,14 @@
         "minimum": -1.0,
         "maximum": 1.0,
         "default": 0.100000001490116
+      },
+      {
+        "id": "op4Phase",
+        "name": "Op 4 Phase",
+        "unit": "degrees",
+        "minimum": 0.0,
+        "maximum": 360.0,
+        "default": 0.0
       },
       {
         "id": "op4Ratio",
@@ -2309,12 +2364,84 @@
         ]
       },
       {
+        "id": "filterEnvelope",
+        "name": "Filter Envelope",
+        "unit": "semitones",
+        "minimum": -48.0,
+        "maximum": 48.0,
+        "default": 0.0
+      },
+      {
         "id": "keyTracking",
         "name": "Key Tracking",
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
         "default": 0.5
+      },
+      {
+        "id": "filterVelocity",
+        "name": "Filter Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "filterAttack",
+        "name": "Filter Attack",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 1.0
+      },
+      {
+        "id": "filterDecay",
+        "name": "Filter Decay",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 400.0
+      },
+      {
+        "id": "filterSustain",
+        "name": "Filter Sustain",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.200000002980232
+      },
+      {
+        "id": "filterRelease",
+        "name": "Filter Release",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 10000.0,
+        "default": 300.0
+      },
+      {
+        "id": "filterAttackCurve",
+        "name": "Filter Attack Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.146633714437485
+      },
+      {
+        "id": "filterDecayCurve",
+        "name": "Filter Decay Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
+      },
+      {
+        "id": "filterReleaseCurve",
+        "name": "Filter Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": -0.461512058973312
       },
       {
         "id": "lfoOn",
@@ -2461,6 +2588,14 @@
       {
         "id": "start",
         "name": "Start",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "startRandom",
+        "name": "Start Random",
         "unit": "percent",
         "minimum": 0.0,
         "maximum": 1.0,
@@ -2672,6 +2807,14 @@
         "default": -0.461512058973312
       },
       {
+        "id": "keyTime",
+        "name": "Key Time",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
         "id": "filterOn",
         "name": "Filter On",
         "unit": "toggle",
@@ -2733,6 +2876,14 @@
         "minimum": 0.0,
         "maximum": 1.0,
         "default": 0.5
+      },
+      {
+        "id": "filterVelocity",
+        "name": "Filter Velocity",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
       },
       {
         "id": "filterEnvelope",
@@ -32571,6 +32722,18 @@
     "kind": "effect",
     "parameters": [
       {
+        "id": "mode",
+        "name": "Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Compress",
+        "choices": [
+          "Compress",
+          "Duck"
+        ]
+      },
+      {
         "id": "character",
         "name": "Character",
         "unit": "choice",
@@ -32594,6 +32757,22 @@
         "default": 0.0
       },
       {
+        "id": "threshold",
+        "name": "Threshold",
+        "unit": "decibels",
+        "minimum": -60.0,
+        "maximum": 0.0,
+        "default": -24.0
+      },
+      {
+        "id": "depth",
+        "name": "Depth",
+        "unit": "decibels",
+        "minimum": 0.0,
+        "maximum": 60.0,
+        "default": 12.0
+      },
+      {
         "id": "attack",
         "name": "Attack",
         "unit": "milliseconds",
@@ -32602,12 +32781,28 @@
         "default": 10.0
       },
       {
+        "id": "hold",
+        "name": "Hold",
+        "unit": "milliseconds",
+        "minimum": 0.0,
+        "maximum": 1000.0,
+        "default": 0.0
+      },
+      {
         "id": "release",
         "name": "Release",
         "unit": "milliseconds",
         "minimum": 5.0,
         "maximum": 2000.0,
         "default": 120.0
+      },
+      {
+        "id": "releaseCurve",
+        "name": "Release Curve",
+        "unit": "percent",
+        "minimum": -1.0,
+        "maximum": 1.0,
+        "default": 0.0
       },
       {
         "id": "makeup",
@@ -33049,6 +33244,46 @@
         "default": 0.0
       },
       {
+        "id": "lowSolo",
+        "name": "Low Solo",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "midSolo",
+        "name": "Mid Solo",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "highSolo",
+        "name": "High Solo",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "keyLowCut",
+        "name": "Key Low Cut",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 500.0,
+        "default": 20.0
+      },
+      {
+        "id": "keyHighCut",
+        "name": "Key High Cut",
+        "unit": "hertz",
+        "minimum": 100.0,
+        "maximum": 20000.0,
+        "default": 20000.0
+      },
+      {
         "id": "lowMode",
         "name": "Low Mode",
         "unit": "choice",
@@ -33061,14 +33296,6 @@
           "Muted",
           "Off"
         ]
-      },
-      {
-        "id": "lowSolo",
-        "name": "Low Solo",
-        "unit": "toggle",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.0
       },
       {
         "id": "lowStereo",
@@ -33188,6 +33415,14 @@
         "unit": "decibels",
         "minimum": -24.0,
         "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowKey",
+        "name": "Low Key",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -33525,14 +33760,6 @@
         ]
       },
       {
-        "id": "midSolo",
-        "name": "Mid Solo",
-        "unit": "toggle",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.0
-      },
-      {
         "id": "midStereo",
         "name": "Mid Stereo",
         "unit": "percent",
@@ -33650,6 +33877,14 @@
         "unit": "decibels",
         "minimum": -24.0,
         "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "midKey",
+        "name": "Mid Key",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -33987,14 +34222,6 @@
         ]
       },
       {
-        "id": "highSolo",
-        "name": "High Solo",
-        "unit": "toggle",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.0
-      },
-      {
         "id": "highStereo",
         "name": "High Stereo",
         "unit": "percent",
@@ -34112,6 +34339,14 @@
         "unit": "decibels",
         "minimum": -24.0,
         "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "highKey",
+        "name": "High Key",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -34449,14 +34684,6 @@
         ]
       },
       {
-        "id": "masterSolo",
-        "name": "Master Solo",
-        "unit": "toggle",
-        "minimum": 0.0,
-        "maximum": 1.0,
-        "default": 0.0
-      },
-      {
         "id": "masterStereo",
         "name": "Master Stereo",
         "unit": "percent",
@@ -34574,6 +34801,14 @@
         "unit": "decibels",
         "minimum": -24.0,
         "maximum": 6.0,
+        "default": 0.0
+      },
+      {
+        "id": "masterKey",
+        "name": "Master Key",
+        "unit": "toggle",
+        "minimum": 0.0,
+        "maximum": 1.0,
         "default": 0.0
       },
       {
@@ -34992,6 +35227,164 @@
     ]
   },
   {
+    "type": "phaziteExciter",
+    "name": "Exciter",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "frequency",
+        "name": "Frequency",
+        "unit": "hertz",
+        "minimum": 1000.0,
+        "maximum": 12000.0,
+        "default": 5000.0
+      },
+      {
+        "id": "drive",
+        "name": "Drive",
+        "unit": "decibels",
+        "minimum": 0.0,
+        "maximum": 36.0,
+        "default": 18.0
+      },
+      {
+        "id": "colour",
+        "name": "Colour",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
+        "id": "amount",
+        "name": "Amount",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 4.0,
+        "default": 0.349999994039536
+      },
+      {
+        "id": "highCut",
+        "name": "High Cut",
+        "unit": "hertz",
+        "minimum": 2000.0,
+        "maximum": 20000.0,
+        "default": 20000.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
+    "type": "phaziteVinyl",
+    "name": "Vinyl",
+    "kind": "effect",
+    "parameters": [
+      {
+        "id": "wow",
+        "name": "Wow",
+        "unit": "cents",
+        "minimum": 0.0,
+        "maximum": 25.0,
+        "default": 4.0
+      },
+      {
+        "id": "wowRate",
+        "name": "Wow Rate",
+        "unit": "hertz",
+        "minimum": 0.25,
+        "maximum": 4.0,
+        "default": 0.555555582046509
+      },
+      {
+        "id": "flutter",
+        "name": "Flutter",
+        "unit": "cents",
+        "minimum": 0.0,
+        "maximum": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": "lowCut",
+        "name": "Low Cut",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 1000.0,
+        "default": 30.0
+      },
+      {
+        "id": "highCut",
+        "name": "High Cut",
+        "unit": "hertz",
+        "minimum": 1000.0,
+        "maximum": 20000.0,
+        "default": 14000.0
+      },
+      {
+        "id": "distortion",
+        "name": "Distortion",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.150000005960464
+      },
+      {
+        "id": "width",
+        "name": "Width",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.899999976158142
+      },
+      {
+        "id": "bassMono",
+        "name": "Bass Mono",
+        "unit": "hertz",
+        "minimum": 20.0,
+        "maximum": 500.0,
+        "default": 100.0
+      },
+      {
+        "id": "hiss",
+        "name": "Hiss",
+        "unit": "decibels",
+        "minimum": -96.0,
+        "maximum": -30.0,
+        "default": -64.0
+      },
+      {
+        "id": "crackle",
+        "name": "Crackle",
+        "unit": "decibels",
+        "minimum": -96.0,
+        "maximum": -6.0,
+        "default": -30.0
+      },
+      {
+        "id": "density",
+        "name": "Density",
+        "unit": "hertz",
+        "minimum": 0.5,
+        "maximum": 500.0,
+        "default": 5.0
+      },
+      {
+        "id": "mix",
+        "name": "Mix",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      }
+    ]
+  },
+  {
     "type": "phaziteDelay",
     "name": "Delay",
     "kind": "effect",
@@ -35084,6 +35477,18 @@
     "kind": "effect",
     "parameters": [
       {
+        "id": "mode",
+        "name": "Mode",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "Room",
+        "choices": [
+          "Room",
+          "Plate"
+        ]
+      },
+      {
         "id": "size",
         "name": "Size",
         "unit": "percent",
@@ -35108,6 +35513,14 @@
         "default": 10.0
       },
       {
+        "id": "diffusion",
+        "name": "Diffusion",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.5
+      },
+      {
         "id": "damping",
         "name": "Damping",
         "unit": "hertz",
@@ -35130,6 +35543,18 @@
         "minimum": 1000.0,
         "maximum": 20000.0,
         "default": 20000.0
+      },
+      {
+        "id": "highCutSlope",
+        "name": "High Cut Slope",
+        "unit": "choice",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": "12 dB",
+        "choices": [
+          "6 dB",
+          "12 dB"
+        ]
       },
       {
         "id": "width",
@@ -35399,15 +35824,21 @@
     "kind": "effect",
     "parameters": [
       {
-        "id": "mode",
-        "name": "Mode",
+        "id": "voices",
+        "name": "Voices",
         "unit": "choice",
         "minimum": 0.0,
-        "maximum": 1.0,
-        "default": "Classic",
+        "maximum": 7.0,
+        "default": "1",
         "choices": [
-          "Classic",
-          "Ensemble"
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8"
         ]
       },
       {
@@ -35480,6 +35911,30 @@
           "Sine",
           "Triangle"
         ]
+      },
+      {
+        "id": "shimmer",
+        "name": "Shimmer",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": "voicePhase",
+        "name": "Voice Phase",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": "spread",
+        "name": "Spread",
+        "unit": "percent",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.0
       },
       {
         "id": "feedback",

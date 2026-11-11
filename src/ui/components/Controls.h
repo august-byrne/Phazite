@@ -170,6 +170,10 @@ public:
 
     double getStep() const noexcept { return step; }
 
+    // Another step, which a drag, the wheel and the keys move it by, and a value typed is taken to a hundredth of; its value
+    // as it was (a value between the old steps' hundredths kept to the new's).
+    void setStep (double newStep);
+
     double snapValue (double attemptedValue, DragMode) override; // a drag moves in whole steps
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool keyPressed (const juce::KeyPress&) override; // up and right step up, down and left down
@@ -177,7 +181,7 @@ public:
 
 private:
     static constexpr int pixelsPerStep = 2;
-    const double step;
+    double step;
     double wheelNotches = 0.0; // a trackpad's movements, added up until they make a step
 };
 

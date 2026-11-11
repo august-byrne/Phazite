@@ -16,7 +16,6 @@ namespace
     constexpr double lowestFrequency = 20.0, highestFrequency = 20000.0;
     constexpr double gainRange = 24.0;      // the graph shows the bands' whole range, -24 to +24 dB
     constexpr double analyzerFloor = -90.0; // the analyzer's bottom, in dB; its top is 0 dB
-    constexpr float analyzerFall = 3.0f;    // dB per refresh: 90 dB a second
     constexpr double defaultSampleRate = 48000.0;
     constexpr int bandsGroup = 1;   // the band buttons' radio group
     constexpr int graphWidth = 400; // as wide at any height
@@ -97,7 +96,6 @@ public:
 
     float yForGain (double decibels) const { return (float) ((0.5 - decibels / (2.0 * gainRange)) * getHeight()); }
     double gainFor (float y) const { return (0.5 - (double) y / getHeight()) * 2.0 * gainRange; }
-    float yForLevel (double decibels) const { return (float) (decibels / analyzerFloor * getHeight()); }
 
     // A shelf's or bell's dot is at its gain; a cut's or notch's on the line at 0 dB.
     juce::Point<float> getDot (int band) const
@@ -129,29 +127,20 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto& palette = getPalette (*this);
-        const auto width = (float) getWidth(), height = (float) getHeight();
+        const auto width = (float) getWidth();
         g.setColour (palette.background);
         g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
 
         paintGrid (g, palette);
 
-        // What the EQ plays, behind its curve.
-        juce::Path played;
-        played.startNewSubPath (0.0f, height);
-
-        for (auto x = 0.0f; x <= width; x += 2.0f)
-            played.lineTo (x, yForLevel (juce::jlimit (analyzerFloor, 0.0, (double) editor.spectrum.getLevelAt (frequencyFor (x)))));
-
-        played.lineTo (width, height);
-        played.closeSubPath();
-
-        // What comes in, faint, then what it plays, in the EQ's colour.
+        // Behind its curve, what comes in, faint, then what the EQ plays, in its colour, each tilted alike.
         const graph::FrequencyAxis frequencies { getLocalBounds().toFloat(), lowestFrequency, highestFrequency };
-        editor.input.paint (g, frequencies, { getLocalBounds().toFloat(), (float) analyzerFloor, 0.0f },
-                            palette.textMuted.withAlpha (GraphTint::spectrumFill),
+        const graph::LevelAxis levels { getLocalBounds().toFloat(), (float) analyzerFloor, 0.0f };
+        editor.input.paint (g, frequencies, levels, palette.textMuted.withAlpha (GraphTint::spectrumFill),
                             palette.textMuted.withAlpha (GraphTint::spectrumLine * 0.5f));
-        g.setColour (getDeviceTint (*this).withAlpha (GraphTint::spectrumFill * 1.5f));
-        g.fillPath (played);
+        const auto tint = getDeviceTint (*this);
+        editor.output.paint (g, frequencies, levels, tint.withAlpha (GraphTint::spectrumFill * 1.5f),
+                             tint.withAlpha (GraphTint::spectrumLine));
 
         // The selected band's own curve, filled to 0 dB, and the curve of every band together.
         const auto sampleRate = editor.getSampleRate();
@@ -181,6 +170,10 @@ public:
 
         paintDots (g, palette);
     }
+
+    // Over a dot, the pointer shows it can be grabbed, and the dot lights up.
+    void mouseMove (const juce::MouseEvent& e) override { hover (findBandAt (e.position)); }
+    void mouseExit (const juce::MouseEvent&) override { hover (-1); }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
@@ -248,9 +241,23 @@ public:
         editor.refresh();
     }
 
+    int getHoveredBand() const noexcept { return hovered; }
+
 private:
     EqEditor& editor;
     ParameterHandle dragFrequency, dragGain;
+    int hovered = -1; // the band whose dot the pointer is over
+
+    void hover (int band)
+    {
+        setMouseCursor (band >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::NormalCursor);
+
+        if (band != hovered)
+        {
+            hovered = band;
+            repaint();
+        }
+    }
 
     void paintGrid (juce::Graphics& g, const Palette& palette)
     {
@@ -300,9 +307,9 @@ private:
                 g.fillEllipse (dot);
             }
 
-            const auto selected = band == editor.selectedBand;
-            g.setColour (selected ? palette.accent : (on ? palette.text : palette.textMuted));
-            g.drawEllipse (dot, selected ? 2.0f : 1.0f);
+            const auto selected = band == editor.selectedBand, lit = band == hovered;
+            g.setColour (selected ? palette.accent : (on || lit ? palette.text : palette.textMuted));
+            g.drawEllipse (lit ? dot.expanded (1.0f) : dot, selected || lit ? 2.0f : 1.0f);
             g.setColour (on ? getInkFor (colour) : palette.textMuted);
             g.drawText (juce::String (band + 1), dot, juce::Justification::centred);
         }
@@ -362,8 +369,7 @@ private:
 //==============================================================================
 EqEditor::EqEditor (const DeviceHandle& handle)
     : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
-      device (handle),
-      pulled (8192)
+      device (handle)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     for (const auto& parameter : Eq::info.parameters)
@@ -527,14 +533,9 @@ void EqEditor::refresh()
 
     if (auto* eq = device.getProcessor<Eq>())
     {
-        auto& tap = eq->getOutputTap();
-        tap.setListening (true);
-        spectrum.setSampleRate (getSampleRate());
-
-        for (int n; (n = tap.pull (pulled.data(), (int) pulled.size())) > 0;)
-            spectrum.add (pulled.data(), n);
-
-        spectraMoved = spectrum.update (analyzerFall);
+        output.setSampleRate (getSampleRate());
+        output.pull (eq->getOutputTap());
+        spectraMoved = output.update();
     }
 
     // And, fainter behind it, what comes in.

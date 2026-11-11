@@ -52,7 +52,8 @@ public:
     {
         setTitle ("Saturation");
         setDescription ("The curve the sound is driven into, lit as far as the sound reaches, and the wave coming in and going out. "
-                        "Drag up or down to turn the drive.");
+                        "Drag up or down anywhere on them to turn the drive.");
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
     }
 
     ~Display() override
@@ -96,16 +97,31 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override { drive.endGesture(); }
 
+    // Under the pointer, what a drag bends lights up: the whole curve.
+    void mouseEnter (const juce::MouseEvent&) override { setHovered (true); }
+    void mouseMove (const juce::MouseEvent&) override { setHovered (true); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered (false); }
+
 private:
     DeviceHandle device;
     ParameterHandle drive, shape;
     float startDrive = 0.0f, reach = 0.0f;
+    bool hovered = false;
     std::vector<float> inputs, outputs; // the newest samples, oldest first
     std::vector<float> lefts, rights;   // pulled from the taps
     DrawnNumbers drawn;
 
     Saturator::Shape getShape() const { return (Saturator::Shape) juce::roundToInt (shape.getValue()); }
     float getDriveGain() const { return juce::Decibels::decibelsToGain (drive.getValue()); }
+
+    void setHovered (bool isHovered)
+    {
+        if (isHovered != hovered)
+        {
+            hovered = isHovered;
+            repaint();
+        }
+    }
 
     // Takes a tap's newest samples into a store of the last ones, both channels averaged.
     void pull (devices::StereoTap& tap, std::vector<float>& store)
@@ -161,10 +177,11 @@ private:
         g.drawHorizontalLine (juce::roundToInt (inner.getCentreY()), inner.getX(), inner.getRight());
         g.drawVerticalLine (juce::roundToInt (inner.getCentreX()), inner.getY(), inner.getBottom());
 
-        // The curve for an input up to full scale, then lit as far as the sound reaches.
+        // The curve for an input up to full scale (faint, but under the pointer or dragged), then lit as far as the sound
+        // reaches.
         constexpr float extent = 1.0f;
         const auto driveGain = getDriveGain();
-        g.setColour (tint.withAlpha (GraphTint::partOff));
+        g.setColour (hovered || drive.isInGesture() ? tint : tint.withAlpha (GraphTint::partOff));
         g.strokePath (makeShape (getShape(), driveGain, inner, extent), juce::PathStrokeType (GraphTint::curveWidth));
 
         if (const auto lit = juce::jlimit (0.0f, extent, reach / std::max (driveGain, 1.0e-3f)); lit > 0.01f)

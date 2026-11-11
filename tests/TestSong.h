@@ -121,5 +121,20 @@ private:
     // within the same moment would keep.
     const juce::File folder;
     std::unique_ptr<Project> project;
+
+    // Takes the song out of the context first as the test song goes, before the project and its song do: also when the
+    // constructor gave up part way (a REQUIRE failed), when the destructor doesn't run. The members go in the reverse of
+    // their order, so this one, the last, goes first.
+    struct SongDetacher
+    {
+        ProjectContext& context;
+        ~SongDetacher();
+    } detacher { context };
 };
+
+// How long a test waits for a song's version history to finish what it is doing (reading itself as the song opens, a
+// commit, a merge): a minute, far longer than its work takes on a quiet machine, so that a loaded machine slows a test
+// rather than failing it, while a history that hangs still fails it. And the wait: whether it finished within it.
+inline constexpr int versionHistoryTimeout = 60000;
+bool waitForVersionHistory (ProjectContext&);
 } // namespace phazite::test

@@ -205,6 +205,23 @@ TEST_CASE ("A sound with a loop of its own puts the loop on the sampler; one of 
     CHECK_FALSE (phazite::hasSampleFile (song, screen.sampler));
     CHECK (screen.getValue ("loopOn") == 0.0f);
     CHECK (screen.getValue ("root") == (float) phazite::devices::getFactorySampleRoot (phazite::devices::findFactorySample ("808 Kick")));
+
+    // A factory sound that is one seamless loop is put on it looping, the whole of it, at the note it was made at; the
+    // engine plays it; and Undo brings the kick back, without its loop.
+    phazite::setFactorySample (song, screen.sampler, phazite::devices::findFactorySample ("Wide Saw"));
+    CHECK (screen.describeUndo() == juce::String ("Undo Put Wide Saw on the Sampler"));
+    CHECK (phazite::getSampleName (song, screen.sampler) == juce::String ("Wide Saw"));
+    CHECK (screen.getValue ("loopOn") == 1.0f);
+    CHECK (screen.getValue ("loopStart") == 0.0f);
+    CHECK (screen.getValue ("loopEnd") == 1.0f);
+    CHECK (screen.getValue ("root") == 57.0f);
+    REQUIRE (screen.getPlayed().getSound() != nullptr);
+    CHECK (screen.getPlayed().getSound()->seamless);
+    CHECK (screen.getPlayed().getSound() == phazite::devices::getFactorySample (phazite::devices::findFactorySample ("Wide Saw")).get());
+
+    phazite::undo (song);
+    CHECK (phazite::getSampleName (song, screen.sampler) == juce::String ("808 Kick"));
+    CHECK (screen.getValue ("loopOn") == 0.0f);
 }
 
 TEST_CASE ("Slices moved, added and taken away by hand stay whatever slices the sound, each one undo step")
@@ -287,6 +304,31 @@ TEST_CASE ("Slices to Clip writes a slice's note at each slice's beat, so that t
     // Another in the way: after it, on a bar.
     const auto second = phazite::writeSliceNotes (song, screen.sampler, nullptr);
     CHECK (phazite::getClipRange (song, second).getStart().inBeats() >= phazite::getClipRange (song, clip).getEnd().inBeats());
+}
+
+TEST_CASE ("In 6/8 Slices to Clip writes whole bars of the song's, three quarter notes each, from a bar after a clip in the way")
+{
+    Screen screen;
+    auto& song = screen.getSong();
+    screen.song.setTempo (120.0);
+    screen.song.setTimeSignature (6, 8);
+    const auto loop = phazite::test::writeClicks (screen.temp.folder, 2, 120.0); // two beats, a click on each
+    REQUIRE (phazite::setSampleFile (song, screen.sampler, loop));
+    screen.song.setParameter (screen.sampler, "mode", (float) Sampler::Mode::slice);
+    screen.song.setParameter (screen.sampler, "sensitivity", 1.0f);
+
+    // A clip to the middle of the second bar is in the way: the slices' clip goes on the third bar's start, six quarter
+    // notes in, a bar long, its two beats in it.
+    screen.song.addMidiClip (screen.song.firstTrack, 0.0, 4.0);
+    const auto clip = phazite::writeSliceNotes (song, screen.sampler, nullptr);
+    REQUIRE (clip.isValid());
+    CHECK (phazite::getClipRange (song, clip).getStart().inBeats() == doctest::Approx (6.0));
+    CHECK (phazite::getClipRange (song, clip).getLength().inBeats() == doctest::Approx (3.0));
+
+    const auto notes = phazite::getClipNotes (song, clip);
+    REQUIRE (notes.size() == 2);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (6.0).epsilon (0.005));
+    CHECK (notes[1].start.inBeats() == doctest::Approx (7.0).epsilon (0.005));
 }
 
 TEST_CASE ("A sampler's preset carries its sound file to another project, and its factory sound by name")

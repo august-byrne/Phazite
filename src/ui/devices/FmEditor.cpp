@@ -1051,7 +1051,8 @@ public:
     OperatorColumn (FmEditor& e, int index)
         : op (index),
           fixed (e.getDevice().getParameter (getID (index, Field::fixed))),
-          on (e.getDevice().getParameter (getID (index, Field::on)))
+          on (e.getDevice().getParameter (getID (index, Field::on))),
+          phaseMode (e.getDevice().getParameter (getID (FmSynth::phase)))
     {
         const auto& handle = e.getDevice();
         const auto make = [this, &handle, &e] (Field field, const juce::String& caption, ParameterStrip::Look look) -> ParameterStrip&
@@ -1097,8 +1098,8 @@ public:
         for (auto* strip : { level, ratio, fine, frequency })
             content.addAndMakeVisible (*strip);
 
-        // The groups: the envelope's times, sustain and bends; the wave and the feedback; Fixed and the detune; velocity and
-        // key scaling.
+        // The groups: the envelope's times, sustain and bends; the wave, the feedback and where the wave starts; Fixed and
+        // the detune; velocity and key scaling.
         attack = &make (Field::attack, "A", ParameterStrip::Look::field);
         decay = &make (Field::decay, "D", ParameterStrip::Look::field);
         sustain = &make (Field::sustain, "S", ParameterStrip::Look::field);
@@ -1113,6 +1114,7 @@ public:
             const auto percent = juce::String (juce::roundToInt (std::abs (value) * 100.0)) + "%";
             return value > 0.005 ? "Saw " + percent : value < -0.005 ? "Square " + percent : juce::String ("No feedback");
         };
+        startPhase = &make (Field::startPhase, "Phase", ParameterStrip::Look::field);
         detune = &make (Field::detune, "Detune", ParameterStrip::Look::field);
         velocity = &make (Field::velocity, "Velocity", ParameterStrip::Look::amount);
         keyScale = &make (Field::keyScale, "Key", ParameterStrip::Look::amount);
@@ -1136,6 +1138,7 @@ public:
         groups[(size_t) Group::tone].addAndMakeVisible (*wave);
         groups[(size_t) Group::tone].addAndMakeVisible (*feedbackCaption);
         groups[(size_t) Group::tone].addAndMakeVisible (*feedback);
+        groups[(size_t) Group::tone].addAndMakeVisible (*startPhase);
         groups[(size_t) Group::pitch].addAndMakeVisible (*fixedSwitch);
         groups[(size_t) Group::pitch].addAndMakeVisible (*detune);
         groups[(size_t) Group::scaling].addAndMakeVisible (*velocity);
@@ -1177,6 +1180,9 @@ public:
         const auto alpha = on.getValue() > 0.5f ? 1.0f : SwitchTint::partOff;
         header.setAlpha (alpha);
         groupArea.setAlpha (alpha);
+
+        // Where its wave starts means something only while each note starts its waves again.
+        startPhase->setAlpha (juce::roundToInt (phaseMode.getValue()) == (int) FmSynth::Phase::reset ? 1.0f : SwitchTint::partOff);
 
         const auto carrier = FmSynth::isCarrier (algorithm, op);
 
@@ -1247,6 +1253,8 @@ public:
         tone.removeFromTop (groupRowGap);
         feedbackCaption->setBounds (tone.removeFromTop (14));
         feedback->setBounds (tone.removeFromTop (stripHeight));
+        tone.removeFromTop (groupRowGap);
+        startPhase->setBounds (tone.removeFromTop (stripHeight));
 
         auto pitch = area;
         fixedSwitch->setBounds (pitch.removeFromTop (stripHeight + 3));
@@ -1306,7 +1314,7 @@ private:
     };
 
     const int op;
-    ParameterHandle fixed, on;
+    ParameterHandle fixed, on, phaseMode;
     juce::Component content, groupArea;
     std::array<juce::Component, numGroups> groups;
     Header header;
@@ -1315,7 +1323,7 @@ private:
     ParameterStrip *level = nullptr, *ratio = nullptr, *fine = nullptr, *frequency = nullptr;
     ParameterStrip *attack = nullptr, *decay = nullptr, *sustain = nullptr, *release = nullptr;
     ParameterStrip *attackBend = nullptr, *decayBend = nullptr, *releaseBend = nullptr;
-    ParameterStrip *feedback = nullptr, *detune = nullptr, *velocity = nullptr, *keyScale = nullptr;
+    ParameterStrip *feedback = nullptr, *startPhase = nullptr, *detune = nullptr, *velocity = nullptr, *keyScale = nullptr;
     WaveChoice* wave = nullptr;
     juce::Component* fixedSwitch = nullptr;
     juce::Component* feedbackCaption = nullptr;
@@ -1352,6 +1360,10 @@ private:
                                 "harmonics only), each brightest at 50 % (the DX7's feedback 6); further, rougher, toward noise at 100 % "
                                 "(its 7)"
                               + drag);
+        startPhase->setTooltip ("Where in its wave operator " + number
+                                + " starts each note, while Phase (under Voice) is Reset: 180 degrees turns a sine or a triangle upside "
+                                  "down. What the operators make together depends on where each starts against the others"
+                                + drag);
         detune->setTooltip ("Pulls operator " + number + " a few cents off its ratio: two operators a little apart beat, as a chorus does"
                             + drag);
         velocity->setTooltip ("How much a harder note makes operator " + number + (carrier ? " louder" : " bend harder, brighter") + drag);
@@ -1542,7 +1554,8 @@ FmEditor::FmEditor (const DeviceHandle& handle)
 
     groupTabs = { &keep (std::make_unique<GroupTab> (*this, Group::envelope, "Envelope",
                                                      "Shows the operators' envelopes: the times, the sustain and how each stage bends")),
-                  &keep (std::make_unique<GroupTab> (*this, Group::tone, "Tone", "Shows the operators' waves and feedback")),
+                  &keep (std::make_unique<GroupTab> (*this, Group::tone, "Tone",
+                                                     "Shows the operators' waves, their feedback and where each wave starts a note")),
                   &keep (std::make_unique<GroupTab> (*this, Group::pitch, "Pitch",
                                                      "Shows whether the operators play at a fixed frequency, and their detune")),
                   &keep (std::make_unique<GroupTab> (*this, Group::scaling, "Scaling",
@@ -1584,9 +1597,25 @@ FmEditor::FmEditor (const DeviceHandle& handle)
             return FmSynth::getFilterMagnitude (values, cutoffHertz, frequency, scope != nullptr ? scope->getSampleRate() : 48000.0);
         },
         [shown] { return shown() != nullptr ? shown()->cutoff.get() : 0.0f; }));
-    auto filter = makePicturePart ("Filter", filterView, 70, 40, { "filterType", "cutoff", "resonance", "filterSlope", "keyTracking" }, 3,
-                                   ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Slope", "Key" });
+    auto filter =
+        makePicturePart ("Filter", filterView, 70, 40,
+                         { "filterType", "cutoff", "resonance", "keyTracking", "filterSlope", "filterEnvelope", "filterVelocity" }, 4,
+                         ParameterControls::Size::compact, { "Type", "Cutoff", "Resonance", "Key", "Slope", "Envelope", "Velocity" });
     filter.titleSwitch = &makePartSwitch ("filterOn", *filter.content);
+
+    // The filter's envelope, as the synth's editor shows its own: its picture, whose points drag and whose stages bend, over
+    // its times, sustain and bends. It shows faint with the filter while that is off (refresh()).
+    auto& filterEnvelopeView = keep (std::make_unique<EnvelopeView> (
+        "Filter envelope", parameter (FmSynth::filterAttack), parameter (FmSynth::filterDecay), parameter (FmSynth::filterSustain),
+        parameter (FmSynth::filterRelease), [shown] { return shown() != nullptr ? shown()->filterEnvelope.get() : 0.0f; }));
+    filterEnvelopeView.setCurves (parameter (FmSynth::filterAttackCurve), parameter (FmSynth::filterDecayCurve),
+                                  parameter (FmSynth::filterReleaseCurve));
+    const auto filterEnvelope = makePicturePart (
+        "Filter Envelope", filterEnvelopeView, 56, 32,
+        { "filterAttack", "filterDecay", "filterSustain", "filterRelease", "filterAttackCurve", "filterDecayCurve", "filterReleaseCurve" },
+        4, ParameterControls::Size::compact, { "Attack", "Decay", "Sustain", "Release", "A Curve", "D Curve", "R Curve" });
+    filterEnvelopePart = filterEnvelope.content;
+    filterOn = parameter (FmSynth::filterOn);
 
     auto lfoShape = std::make_shared<ParameterHandle> (parameter (FmSynth::lfoShape));
     auto& lfoView = keep (std::make_unique<LfoView> (
@@ -1597,8 +1626,9 @@ FmEditor::FmEditor (const DeviceHandle& handle)
                                 ParameterControls::Size::compact, { "Shape", "Rate", "Target", "Depth" });
     lfo.titleSwitch = &makePartSwitch ("lfoOn", *lfo.content);
 
-    // The operators alone on the first page of the default dock, as wide as the dock; then how it plays, the filter and the LFO.
-    setParts ({ { operatorsPart }, { pitch, voice }, { filter }, { lfo } });
+    // The operators alone on the first page of the default dock, as wide as the dock; then how it plays, the filter, its
+    // envelope and the LFO.
+    setParts ({ { operatorsPart }, { pitch, voice }, { filter }, { filterEnvelope }, { lfo } });
     showGroup (Group::envelope);
     refresh();
 }
@@ -1695,5 +1725,9 @@ void FmEditor::refresh()
         columns[(size_t) op]->refresh (algorithm, op == hovered);
 
     algorithmView->refresh();
+
+    // The filter's envelope does nothing while the filter is off, and shows faint with it.
+    if (filterEnvelopePart != nullptr)
+        filterEnvelopePart->setAlpha (filterOn.getValue() > 0.5f ? 1.0f : SwitchTint::partOff);
 }
 } // namespace phazite::ui

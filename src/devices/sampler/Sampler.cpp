@@ -78,6 +78,7 @@ namespace
           .step = 1.0f },
         { .id = "fine", .name = "Fine", .minimum = -50.0f, .maximum = 50.0f, .defaultValue = 0.0f, .unit = Unit::cents },
         makePercent ("start", "Start", 0.0f),
+        makePercent ("startRandom", "Start Random", 0.0f), // every note from the start marker, until turned up
         makePercent ("end", "End", 1.0f),
         makeToggle ("reverse", "Reverse", 0.0f),
         makeToggle ("loopOn", "Loop On", 0.0f),
@@ -107,6 +108,7 @@ namespace
         makeCurve ("attackCurve", "Attack Curve", dsp::Adsr::analogAttackCurve),
         makeCurve ("decayCurve", "Decay Curve", dsp::Adsr::analogSettleCurve),
         makeCurve ("releaseCurve", "Release Curve", dsp::Adsr::analogSettleCurve),
+        makePercent ("keyTime", "Key Time", 0.0f),  // the times as set on every key, until turned up
         makeToggle ("filterOn", "Filter On", 0.0f), // the sound as it is, until switched on
         makeChoice ("filterType", "Filter Type", dsp::filterModeNames, 0.0f),
         { .id = "cutoff",
@@ -119,6 +121,7 @@ namespace
         makePercent ("resonance", "Resonance", 0.15f),
         makeChoice ("filterSlope", "Filter Slope", dsp::filterSlopeNames, 0.0f),
         makePercent ("keyTracking", "Key Tracking", 0.5f),
+        makePercent ("filterVelocity", "Filter Velocity", 0.0f),
         { .id = "filterEnvelope",
           .name = "Filter Envelope",
           .minimum = -48.0f,
@@ -161,6 +164,8 @@ namespace
 
     constexpr int sustainPedal = 64; // the MIDI controller
     constexpr double lowestCutoff = 20.0;
+    constexpr float shortestTimeScale = 0.125f, longestTimeScale = 8.0f; // what Key Time makes of the times, as the FM synth's
+    constexpr std::uint32_t startSeed = 0x57a127u;
     constexpr int mostCandidates = 4 * Sampler::maxSlices; // slices found, before those put by hand join them
 
     template <typename Enum>
@@ -183,7 +188,8 @@ namespace
 
 const DeviceInfo Sampler::info { .typeID = typeID, .name = "Sampler", .kind = DeviceKind::instrument, .parameters = parameters };
 
-Sampler::Slices Sampler::getSlices (const Sound& sound, const ManualSlices* manual, std::span<const float> values, double tempo) noexcept
+Sampler::Slices Sampler::getSlices (const Sound& sound, const ManualSlices* manual, std::span<const float> values, double tempo,
+                                    double barLength) noexcept
 {
     Slices slices;
     const auto frames = sound.audio.getNumSamples();
@@ -227,7 +233,7 @@ Sampler::Slices Sampler::getSlices (const Sound& sound, const ManualSlices* manu
         {
             // At the sound's own tempo, where it says how many beats it lasts; else at the song's.
             const auto perBeat = sound.beats > 0.0 ? (double) frames / sound.beats : sound.sampleRate * 60.0 / std::max (1.0, tempo);
-            const auto length = dsp::getNoteValueBeats (values[sliceDivision]) * perBeat;
+            const auto length = dsp::getNoteLength (values[sliceDivision]).inBeats (barLength) * perBeat;
 
             if (length >= samplesApart)
                 for (auto at = (double) from + length; at < (double) to && numFound < mostCandidates; at += length)
@@ -400,6 +406,7 @@ void Sampler::reset()
     }
 
     lfo.reset();
+    startPlaces.setSeed (startSeed);
     numHeld = 0;
     notesPlayed = 0;
     lastNote = -1.0f;
@@ -424,15 +431,22 @@ void Sampler::releaseVoice (Voice& voice)
     voice.filterEnvelope.noteOff();
 }
 
-Sampler::Voice& Sampler::findVoiceFor (int note)
+void Sampler::letGoOf (int note)
 {
-    // The voice playing this note already, then a free one, then the one ringing out longest, then the oldest: among those
-    // that play notes, not the last, which fades out a voice taken (stealVoice()).
-    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
+    // A key played again while its key or the pedal still holds its voice lets the voice go as its key coming up would (a
+    // one-shot plays on to its end): it rings out while the new note takes a voice of its own, and the key's first note-off
+    // lets go of that, so that a key never holds two voices (Synth::letGoOf()).
+    for (size_t i = 0; i < (size_t) maxVoices; ++i)
+        if (auto& voice = voices[i]; voice.note == note && (voice.held || voice.sustained))
+            releaseVoice (voice);
+}
 
-    for (auto& voice : playing)
-        if (voice.note == note && voice.amp.isActive())
-            return voice;
+Sampler::Voice& Sampler::findVoice()
+{
+    // A free voice, then the one ringing out longest, then the oldest: among those that play notes, not the last, which fades
+    // out a voice taken (stealVoice()). A key played again as it rings out takes one too, as the synth's does: its tail rings
+    // on untouched, and the new note plays the sound from its start.
+    const std::span<Voice> playing (voices.data(), (size_t) maxVoices);
 
     for (auto& voice : playing)
         if (! voice.amp.isActive())
@@ -477,7 +491,7 @@ void Sampler::placeVoice (Voice& voice, const Sound& playing, int from, int to, 
     voice.reversed = values[reverse] > 0.5f;
     voice.regionStart = voice.reversed ? (double) (frames - to) : (double) from;
     voice.regionEnd = voice.reversed ? (double) (frames - from) : (double) to;
-    voice.position = voice.regionStart;
+    voice.position = voice.startAt = voice.regionStart;
     voice.fadeIn = (voice.reversed ? to < frames : from > 0) ? declickSamples : 0;
     voice.loops = false;
     voice.fadeLength = 0.0;
@@ -503,6 +517,38 @@ void Sampler::placeVoice (Voice& voice, const Sound& playing, int from, int to, 
     voice.fadeLength = std::min ({ (double) values[loopCrossfade] * length, 0.5 * length, voice.loopStartAt });
 }
 
+void Sampler::moveStart (Voice& voice, std::span<const float> values) noexcept
+{
+    // Start Random: the note starts as far into what it plays as the next of the places says, at full anywhere in it, and
+    // in its loop where that is past the loop's end; with a few samples' fade in, as any start in the middle of the sound.
+    const auto amount = values[startRandom];
+
+    if (amount <= 0.0f)
+        return;
+
+    auto at = voice.regionStart + (double) (amount * startPlaces.nextUnipolar()) * (voice.regionEnd - voice.regionStart);
+
+    if (voice.loops && at >= voice.loopEndAt)
+        at = voice.loopStartAt + std::fmod (at - voice.loopStartAt, voice.loopEndAt - voice.loopStartAt);
+
+    voice.position = voice.startAt = at;
+    voice.fadeIn = declickSamples;
+}
+
+void Sampler::setAmp (Voice& voice, std::span<const float> values) noexcept
+{
+    // A voice its fades shape lets go as a gated note does, over the fade out; the amp envelope shapes the others, its
+    // times as the note's key makes them (Key Time).
+    if (voice.fades)
+    {
+        voice.amp.setParameters (0.0f, 0.0f, 1.0f, std::max (0.0005f, values[fadeOut] * 0.001f));
+        return;
+    }
+
+    const auto scale = voice.timeScale * 0.001f;
+    voice.amp.setParameters (values[attack] * scale, values[decay] * scale, values[sustain], values[release] * scale);
+}
+
 void Sampler::startVoice (Voice& voice, float velocityValue, std::span<const float> values)
 {
     for (auto& filter : voice.filters)
@@ -511,6 +557,7 @@ void Sampler::startVoice (Voice& voice, float velocityValue, std::span<const flo
     const auto sensitivityValue = values[velocity];
     voice.filterIsSet = false;
     voice.filterEnvelopeLevel = 0.0f;
+    voice.velocity = velocityValue;
     voice.velocityGain = 1.0f - sensitivityValue + sensitivityValue * velocityValue * velocityValue;
     voice.age = 0;
     voice.started = ++notesPlayed;
@@ -520,12 +567,7 @@ void Sampler::startVoice (Voice& voice, float velocityValue, std::span<const flo
     voice.fade = 1.0f;
     voice.fadeStep = 0.0f;
 
-    // A voice its fades shape lets go as a gated note does, over the fade out; the amp envelope shapes the others.
-    if (voice.fades)
-        voice.amp.setParameters (0.0f, 0.0f, 1.0f, std::max (0.0005f, values[fadeOut] * 0.001f));
-    else
-        voice.amp.setParameters (values[attack] * 0.001f, values[decay] * 0.001f, values[sustain], values[release] * 0.001f);
-
+    setAmp (voice, values);
     voice.amp.noteOn();
     voice.filterEnvelope.noteOn();
 }
@@ -558,9 +600,18 @@ void Sampler::startNote (int note, float velocityValue, std::span<const float> v
     const auto loops = playMode == Mode::classic && values[loopOn] > 0.5f;
     const auto oneShot = playMode == Mode::oneShot;
 
+    // Key Time: the amp envelope's times halve with each octave above the root, at full, and double below it, as far as the
+    // FM synth's go; a note keeps what it started with.
+    const auto keyTimeValue = values[keyTime];
+    const auto timeScale = keyTimeValue > 0.0f ? std::clamp (std::exp2 (-keyTimeValue * ((float) note - values[root]) / 12.0f),
+                                                             shortestTimeScale, longestTimeScale)
+                                               : 1.0f;
+
     const auto begin = [&] (Voice& voice, float pitchFrom)
     {
         placeVoice (voice, *playing, region.first, region.second, values, loops);
+        moveStart (voice, values);
+        voice.timeScale = timeScale;
         voice.fades = oneShot;
         voice.oneShot = oneShot && choiceOf<int> (values[playback]) == 0;
         voice.slice = -1;
@@ -600,7 +651,8 @@ void Sampler::startNote (int note, float velocityValue, std::span<const float> v
         return;
     }
 
-    auto& voice = findVoiceFor (note);
+    letGoOf (note);
+    auto& voice = findVoice();
 
     if (voice.amp.isActive())
         stealVoice (voice);
@@ -616,19 +668,21 @@ void Sampler::startNote (int note, float velocityValue, std::span<const float> v
 void Sampler::startSlice (int note, float velocityValue, std::span<const float> values)
 {
     const auto* playing = sound.load (std::memory_order_acquire);
-    const auto slices = getSlices (*playing, manualSlices.load (std::memory_order_acquire), values, songTempo);
+    const auto slices = getSlices (*playing, manualSlices.load (std::memory_order_acquire), values, songTempo, songBarLength);
     const auto index = note - firstSliceNote;
 
     if (! juce::isPositiveAndBelow (index, slices.count))
         return;
 
-    // With choke, a slice cuts off the one playing, as a chopped break's slices do.
+    // With choke, a slice cuts off the one playing, as a chopped break's slices do, its own too; without, it plays on under
+    // the next, as a key played again rings on.
     if (values[choke] > 0.5f)
         for (size_t i = 0; i < (size_t) maxVoices; ++i)
             if (auto& other = voices[i]; other.amp.isActive() && other.slice >= 0)
                 stealVoice (other);
 
-    auto& voice = findVoiceFor (note);
+    letGoOf (note);
+    auto& voice = findVoice();
 
     if (voice.amp.isActive())
         stealVoice (voice);
@@ -637,6 +691,7 @@ void Sampler::startSlice (int note, float velocityValue, std::span<const float> 
     placeVoice (voice, *playing, slices.bounds[(size_t) index],
                 through ? slices.bounds[(size_t) slices.count] : slices.bounds[(size_t) index + 1], values, false);
     voice.fades = true;
+    voice.timeScale = 1.0f;
     voice.oneShot = choiceOf<int> (values[playback]) == 0;
     voice.slice = index;
     voice.note = note;
@@ -676,6 +731,8 @@ void Sampler::stopNote (int note, std::span<const float> values)
         }
     }
 
+    // The voice its key holds, one at most (letGoOf()): what rings out of the key already rings on, its release not begun
+    // again.
     for (auto& voice : voices)
     {
         if (voice.note == note && voice.held)
@@ -782,13 +839,35 @@ void Sampler::makeOctaves (Sound& sound)
 {
     const auto* above = &sound.audio;
 
+    // A seamless sound's octaves are seamless too: each halved with as much of its other end before its start and after its
+    // end as the halving reaches, an even number of samples, so that every second sample is still one of its own.
+    constexpr int around = 2 * dsp::SincReader::zeroCrossings;
+    jassert (! sound.seamless || sound.audio.getNumSamples() % (1 << numOctaves) == 0);
+    std::vector<float> wrapped, halved;
+
     for (auto& octave : sound.octaves)
     {
         const auto length = above->getNumSamples();
         octave.setSize (above->getNumChannels(), (length + 1) / 2);
 
         for (int channel = 0; channel < above->getNumChannels(); ++channel)
-            dsp::SincReader::halve (above->getReadPointer (channel), length, octave.getWritePointer (channel));
+        {
+            const auto* samples = above->getReadPointer (channel);
+
+            if (! sound.seamless || length < around)
+            {
+                dsp::SincReader::halve (samples, length, octave.getWritePointer (channel));
+                continue;
+            }
+
+            wrapped.assign ((size_t) (length + 2 * around), 0.0f);
+            std::copy (samples + length - around, samples + length, wrapped.begin());
+            std::copy (samples, samples + length, wrapped.begin() + around);
+            std::copy (samples, samples + around, wrapped.begin() + around + length);
+            halved.assign ((wrapped.size() + 1) / 2, 0.0f);
+            dsp::SincReader::halve (wrapped.data(), (int) wrapped.size(), halved.data());
+            std::copy_n (halved.begin() + around / 2, octave.getNumSamples(), octave.getWritePointer (channel));
+        }
 
         above = &octave;
     }
@@ -836,12 +915,30 @@ void Sampler::readAt (const Voice& voice, double position, float& left, float& r
     }
 
     if (! stereo)
-    {
         left = right = reader.read (first, length, at, step);
-        return;
-    }
+    else
+        reader.read (first, second, length, at, step, left, right);
 
-    reader.read (first, second, length, at, step, left, right);
+    if (! voice.sound->seamless)
+        return;
+
+    // A seamless sound read near an end reads on round into its other end: what the reader left out as past the end is a
+    // whole length back, and what it left out as before the start a whole length on.
+    const auto reach = (double) dsp::SincReader::zeroCrossings * std::max (1.0, step) + 1.0;
+
+    const auto readRound = [&] (double from)
+    {
+        auto moreLeft = 0.0f, moreRight = 0.0f;
+        reader.read (first, second, length, from, step, moreLeft, moreRight);
+        left += moreLeft;
+        right += moreRight;
+    };
+
+    if (at > (double) length - reach)
+        readRound (at - (double) length);
+
+    if (at < reach)
+        readRound (at + (double) length);
 }
 
 void Sampler::render (float* left, float* right, int numSamples, std::span<const float> values)
@@ -854,6 +951,7 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
     const auto depth = values[lfoOn] > 0.5f ? values[lfoDepth] : 0.0f;
     const auto envelopeAmount = values[filterEnvelopeOn] > 0.5f ? values[filterEnvelope] : 0.0f;
     const auto filtered = values[filterOn] > 0.5f;
+    const auto velocityRange = values[filterVelocity] * dsp::filterVelocityRange; // as every synth's Filter Velocity
     const auto lfoWave = choiceOf<dsp::LfoShape> (values[lfoShape]);
     const auto glideSamples = (double) values[glide] * 0.001 * sampleRate;
     const auto bent = bend * values[bendRange];
@@ -904,7 +1002,11 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
 
             if (filtered)
             {
-                const auto moves = envelopeAmount * voice.filterEnvelopeLevel + values[keyTracking] * keyed + cutoffMove;
+                auto moves = envelopeAmount * voice.filterEnvelopeLevel + values[keyTracking] * keyed + cutoffMove;
+
+                if (velocityRange > 0.0f)
+                    moves += velocityRange * (voice.velocity - 1.0f);
+
                 const auto frequency = std::clamp ((double) values[cutoff] * std::pow (2.0, moves / 12.0), lowestCutoff, nyquistLimit);
                 const dsp::FilterSettings settings { .mode = filterMode,
                                                      .frequency = frequency,
@@ -969,7 +1071,7 @@ void Sampler::render (float* left, float* right, int numSamples, std::span<const
 
                 // Its fades (One-Shot, a slice), or at a start or an end in the middle of the sound a few samples' fade, so
                 // that it doesn't click: each in the samples it plays.
-                const auto played = (voice.position - voice.regionStart) / voice.step;
+                const auto played = (voice.position - voice.startAt) / voice.step;
                 const auto remaining = (voice.regionEnd - voice.position) / voice.step;
                 const auto fadingIn = voice.fades ? std::max (fadeInSamples, (double) voice.fadeIn) : (double) voice.fadeIn;
                 const auto fadingOut = voice.fades ? std::max (fadeOutSamples, (double) declickSamples) : (double) declickSamples;
@@ -1026,6 +1128,7 @@ void Sampler::process (const ProcessContext& block)
 
     songPlaying = block.isPlaying;
     songTempo = block.tempo > 0.0 ? block.tempo : 120.0;
+    songBarLength = block.barLength > 0.0 ? block.barLength : 4.0;
     const auto* playing = sound.load (std::memory_order_acquire);
 
     // A voice of a sound swapped out fades out within this block, which the sound outlives.
@@ -1059,11 +1162,7 @@ void Sampler::process (const ProcessContext& block)
     // Each voice's envelopes: Classic's from the amp's knobs, a voice its fades shape letting go over the fade out.
     for (auto& voice : voices)
     {
-        if (voice.fades)
-            voice.amp.setParameters (0.0f, 0.0f, 1.0f, std::max (0.0005f, values[fadeOut] * 0.001f));
-        else
-            voice.amp.setParameters (values[attack] * 0.001f, values[decay] * 0.001f, values[sustain], values[release] * 0.001f);
-
+        setAmp (voice, values);
         voice.amp.setCurves (values[attackCurve], values[decayCurve], values[releaseCurve]);
         voice.filterEnvelope.setParameters (values[filterAttack] * 0.001f, values[filterDecay] * 0.001f, values[filterSustain],
                                             values[filterRelease] * 0.001f);
@@ -1072,11 +1171,12 @@ void Sampler::process (const ProcessContext& block)
 
     lfo.setRate (values[lfoRate]);
 
-    // How long it rings on after its notes end: its release, or a sound played to its end, at most an octave down.
+    // How long it rings on after its notes end: its release (the lowest notes', at its longest, where Key Time stretches it),
+    // or a sound played to its end, at most an octave down.
     const auto playMode = choiceOf<Mode> (values[mode]);
     const auto playsToEnd = playMode != Mode::classic && choiceOf<int> (values[playback]) == 0;
     const auto soundSeconds = playing != nullptr ? playing->audio.getNumSamples() / std::max (1.0, playing->sampleRate) : 0.0;
-    const auto letGo = playMode == Mode::classic ? values[release] : values[fadeOut];
+    const auto letGo = playMode == Mode::classic ? values[release] * (values[keyTime] > 0.0f ? longestTimeScale : 1.0f) : values[fadeOut];
     tailSeconds.store ((float) std::max ((double) letGo * 0.001, playsToEnd ? std::min (60.0, 2.0 * soundSeconds) : 0.0),
                        std::memory_order_relaxed);
 
@@ -1165,6 +1265,7 @@ void Sampler::process (const ProcessContext& block)
     shown.slice.set (newest != nullptr ? (float) newest->slice : -1.0f);
     shown.lfoPhase.set (lfo.getPhase());
     shown.tempo.set ((float) songTempo);
+    shown.barLength.set ((float) songBarLength);
     blocksDone.fetch_add (1, std::memory_order_release);
 }
 } // namespace phazite::devices

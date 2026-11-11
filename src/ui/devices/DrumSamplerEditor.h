@@ -6,7 +6,8 @@
 // 36). Each pad shows its note, what it plays (an empty one, faintly, the drum General MIDI puts on its note), its choke
 // group in its corner, M while it is muted (faint) and S while it is soloed, and lights when it plays. Clicking a pad, or
 // Space or Enter on it, plays it and shows it: its Sound, drawn as it plays (reversed, from its end), with its envelope over
-// it: its start, the attack's ramp, the hold and the decay, each a handle dragged sideways as one undo step; and a line
+// it: its start, the attack's ramp, the hold and the decay, each a handle dragged sideways as one undo step (a press takes
+// the nearest, which lights up under the pointer); and a line
 // where it is as it plays, with Reverse, Swap (model/devices/SwapModel.h) and Reset beside its name and its start, attack,
 // hold, decay and mode under it. Its Layers: how its sounds share its hits, and each layer's sound, which a sound dropped
 // on it replaces and its Clear takes off, with its level. Then the pad's own level, pan, velocity, choke group, mute and solo, its

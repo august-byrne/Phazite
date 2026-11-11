@@ -2,6 +2,7 @@
 #include "ReverbEditor.h"
 #include "DeviceGraph.h"
 #include "DeviceTint.h"
+#include "GraphDot.h"
 #include "devices/reverb/Reverb.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -17,6 +18,31 @@ namespace
     constexpr int rows = 40;                                     // bands of pitch drawn
     constexpr float grabDistance = 10.0f;                        // pixels from a handle that a press takes it
     constexpr int historyTicks = 6 * DisplayTicker::ticksPerSecond;
+
+    const juce::String about ("How the tail fades: time across, pitch up, each pitch lit until it has faded. Drag the wedge's end, or "
+                              "anywhere in the tail, for the decay; the gap at its start for the pre-delay; its top corner for the "
+                              "damping; its floor for the low cut and its ceiling for the high cut.");
+
+    // What the hint bar says of the handle a press takes, by its parameter (-1 for none).
+    juce::String describe (int handle)
+    {
+        switch (handle)
+        {
+            case Reverb::decay:
+                return "Drag sideways for the decay: how long the tail takes to fade away. A press anywhere in the tail puts its "
+                       "end there.";
+            case Reverb::predelay:
+                return "Drag sideways for the pre-delay: the gap before the tail starts.";
+            case Reverb::damping:
+                return "Drag up or down for the damping: the pitch above which the tail fades sooner.";
+            case Reverb::lowCut:
+                return "Drag up or down for the low cut: the tail keeps nothing below it.";
+            case Reverb::highCut:
+                return "Drag up or down for the high cut: the tail keeps nothing above it.";
+            default:
+                return about;
+        }
+    }
 } // namespace
 
 class ReverbEditor::Graph : public juce::Component,
@@ -29,9 +55,7 @@ public:
           hits (historyTicks, 0.0f)
     {
         setTitle ("Reverb decay");
-        setDescription ("How the tail fades: time across, pitch up, each pitch lit until it has faded. Drag the wedge's end for the "
-                        "decay, the gap at its start for the pre-delay, its top corner for the damping, its floor for the low cut and its "
-                        "ceiling for the high cut.");
+        setDescription (about);
 
         for (const auto& parameter : Reverb::info.parameters)
         {
@@ -165,16 +189,28 @@ public:
         }
 
         // The edges that drag: the decay's end, the pre-delay's gap, the damping's corner, the low cut's floor and the high
-        // cut's ceiling.
-        g.setColour (p.text.withAlpha (GraphTint::marker));
-        g.drawVerticalLine (juce::roundToInt (start), area.getY(), area.getBottom());
-        g.drawHorizontalLine (juce::roundToInt (getLowCutY()), area.getX(), area.getRight());
-        g.drawHorizontalLine (juce::roundToInt (getHighCutY()), area.getX(), area.getRight());
-
-        for (const auto handle : { getDecayHandle(), getDampingHandle() })
+        // cut's ceiling; the one a press takes, under the pointer or dragged, lit.
+        const auto lit = dragged >= 0 ? dragged : hovered;
+        const auto paintLine = [&] (int handle, bool across, float at)
         {
+            const auto place = (float) juce::roundToInt (at), thickness = handle == lit ? GraphTint::litWidth : 1.0f;
+            g.setColour (handle == lit ? p.text : p.text.withAlpha (GraphTint::marker));
+            g.fillRect (across ? juce::Rectangle<float> (area.getX(), place, area.getWidth(), thickness)
+                               : juce::Rectangle<float> (place, area.getY(), thickness, area.getHeight()));
+        };
+
+        paintLine (Reverb::predelay, false, start);
+        paintLine (Reverb::lowCut, true, getLowCutY());
+        paintLine (Reverb::highCut, true, getHighCutY());
+
+        for (const auto handle : { (int) Reverb::decay, (int) Reverb::damping })
+        {
+            const auto at = handle == Reverb::decay ? getDecayHandle() : getDampingHandle();
             g.setColour (tint);
-            g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (handle));
+            g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (at));
+
+            if (handle == lit)
+                paintLitRing (g, p, at, GraphTint::levelDotRadius);
         }
 
         // Its time scale, and what it says.
@@ -188,31 +224,67 @@ public:
                         juce::Rectangle<float> (xFor (t) - 20.0f, area.getBottom(), 40.0f, TextSize::small + 2.0f),
                         juce::Justification::centred, false);
 
-        graph::paintReadout (g, p, area,
-                             juce::String (values[Reverb::decay], 1) + " s  Pre-delay "
-                                 + juce::String (juce::roundToInt (values[Reverb::predelay])) + " ms",
-                             juce::Justification::topRight);
+        graph::paintReadouts (g, p, area, getModeText(),
+                              juce::String (values[Reverb::decay], 1) + " s  Pre-delay "
+                                  + juce::String (juce::roundToInt (values[Reverb::predelay])) + " ms");
     }
+
+    // The mode, and what a plate holds back: its diffusion where the decay is shorter than its filters would ring, and its
+    // size where the decay is shorter than a plate so large fades in (Reverb::getPlateSetting()).
+    juce::String getModeText() const
+    {
+        const auto& modes = Reverb::info.parameters[Reverb::mode].choices;
+        const auto isPlate = values[Reverb::mode] > 0.5f;
+        const auto name = modes[(size_t) (isPlate ? Reverb::plate : Reverb::room)];
+        juce::String text (name.data(), name.size());
+
+        if (isPlate)
+        {
+            const auto setting = Reverb::getPlateSetting (values);
+            const auto size = Reverb::getPlateSize (setting.scale);
+
+            if (setting.diffusion < (double) values[Reverb::diffusion] - 0.005)
+                text << "  Diffusion " << juce::roundToInt (setting.diffusion * 100.0) << "%";
+
+            if (size < (double) values[Reverb::size] - 0.005)
+                text << "  Size " << juce::roundToInt (size * 100.0) << "%";
+        }
+
+        return text;
+    }
+
+    // The handle a press takes, by its parameter (-1 for none): the first within reach of the decay's end, the damping's
+    // corner, the pre-delay's gap, the low cut's floor and the high cut's ceiling; anywhere else in the tail, its length.
+    int findTarget (juce::Point<float> at) const
+    {
+        if (at.getDistanceFrom (getDecayHandle()) < grabDistance)
+            return Reverb::decay;
+
+        if (at.getDistanceFrom (getDampingHandle()) < grabDistance)
+            return Reverb::damping;
+
+        if (std::abs (at.x - getPredelayHandle().x) < grabDistance)
+            return Reverb::predelay;
+
+        if (std::abs (at.y - getLowCutY()) < grabDistance)
+            return Reverb::lowCut;
+
+        if (std::abs (at.y - getHighCutY()) < grabDistance)
+            return Reverb::highCut;
+
+        if (at.x > getPredelayHandle().x)
+            return Reverb::decay;
+
+        return -1;
+    }
+
+    // The pointer says which way the handle a press takes moves, and the handle lights up.
+    void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
+    void mouseExit (const juce::MouseEvent&) override { hover (-1); }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        // The handle nearest, within reach: the decay's end, the damping's corner, the pre-delay's gap, the low cut's floor or
-        // the high cut's ceiling.
-        dragged = -1;
-        const auto at = e.position;
-
-        if (at.getDistanceFrom (getDecayHandle()) < grabDistance)
-            dragged = Reverb::decay;
-        else if (at.getDistanceFrom (getDampingHandle()) < grabDistance)
-            dragged = Reverb::damping;
-        else if (std::abs (at.x - getPredelayHandle().x) < grabDistance)
-            dragged = Reverb::predelay;
-        else if (std::abs (at.y - getLowCutY()) < grabDistance)
-            dragged = Reverb::lowCut;
-        else if (std::abs (at.y - getHighCutY()) < grabDistance)
-            dragged = Reverb::highCut;
-        else if (at.x > getPredelayHandle().x)
-            dragged = Reverb::decay; // anywhere else in the tail: its length
+        dragged = findTarget (e.position);
 
         if (dragged >= 0)
         {
@@ -245,22 +317,37 @@ public:
         repaint();
     }
 
-    void mouseUp (const juce::MouseEvent&) override
+    void mouseUp (const juce::MouseEvent& e) override
     {
         if (dragged >= 0)
             parameters[(size_t) dragged].endGesture();
 
         dragged = -1;
+        hover (getLocalBounds().toFloat().contains (e.position) ? findTarget (e.position) : -1);
     }
 
 private:
     DeviceHandle device;
     std::vector<ParameterHandle> parameters; // every parameter, in the reverb's order, for the map
     std::vector<float> values;
-    graph::LevelHistory hits; // what came in, a peak a tick, as a gain
-    int dragged = -1;
+    graph::LevelHistory hits;       // what came in, a peak a tick, as a gain
+    int dragged = -1, hovered = -1; // handles, by their parameters
     double dragStartSeconds = 1.0;
     DrawnNumbers drawn;
+
+    void hover (int handle)
+    {
+        setMouseCursor (handle == Reverb::decay || handle == Reverb::predelay ? juce::MouseCursor::LeftRightResizeCursor
+                        : handle >= 0                                         ? juce::MouseCursor::UpDownResizeCursor
+                                                                              : juce::MouseCursor::NormalCursor);
+        setDescription (describe (handle));
+
+        if (handle != hovered)
+        {
+            hovered = handle;
+            repaint();
+        }
+    }
 
     void tick() override
     {
@@ -289,8 +376,10 @@ ReverbEditor::ReverbEditor (const DeviceHandle& handle)
     graph = &shown;
 
     const auto space = makeControlsPart ("Space", { "decay", "size" }, 2, ParameterControls::Size::large);
-    const auto tone = makeControlsPart ("Tone", { "predelay", "damping", "lowCut", "highCut", "width" }, 5);
-    setParts ({ { { "Decay", &shown, 300, 196, 110, true, GraphTint::minimumWidth } }, { space, tone } });
+    const auto shape = makeControlsPart ("Shape", { "mode", "diffusion", "predelay" }, 3);
+    const auto tone = makeControlsPart ("Tone", { "lowCut", "highCut", "damping", "width", "highCutSlope" }, 3,
+                                        ParameterControls::Size::compact, { "Low Cut", "High Cut", "Damping", "Width", "Slope" });
+    setParts ({ { { "Decay", &shown, 300, 196, 110, true, GraphTint::minimumWidth } }, { space, shape }, { tone } });
 }
 
 ReverbEditor::~ReverbEditor() = default;
@@ -313,6 +402,16 @@ juce::Point<float> ReverbEditor::getDecayHandle() const
 juce::Point<float> ReverbEditor::getPredelayHandle() const
 {
     return graph->getPredelayHandle();
+}
+
+juce::Point<float> ReverbEditor::getDampingHandle() const
+{
+    return graph->getDampingHandle();
+}
+
+juce::String ReverbEditor::getModeText() const
+{
+    return graph->getModeText();
 }
 
 void ReverbEditor::refresh()

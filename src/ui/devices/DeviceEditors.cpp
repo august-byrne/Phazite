@@ -5,6 +5,7 @@
 #include "DelayEditor.h"
 #include "DrumSamplerEditor.h"
 #include "EqEditor.h"
+#include "ExciterEditor.h"
 #include "FilterEditor.h"
 #include "FlangerEditor.h"
 #include "FmEditor.h"
@@ -16,6 +17,7 @@
 #include "SaturatorEditor.h"
 #include "StereoExpanderEditor.h"
 #include "SynthEditor.h"
+#include "VinylEditor.h"
 #include "VocoderEditor.h"
 #include "WavetableEditor.h"
 #include "devices/delay/Delay.h"
@@ -31,11 +33,14 @@
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
+#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
+#include "model/mixer/MixerModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -91,6 +96,12 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
     if (info->typeID == devices::Saturator::typeID)
         return std::make_unique<SaturatorEditor> (device);
 
+    if (info->typeID == devices::Exciter::typeID)
+        return std::make_unique<ExciterEditor> (device);
+
+    if (info->typeID == devices::Vinyl::typeID)
+        return std::make_unique<VinylEditor> (device);
+
     if (info->typeID == devices::FilterEffect::typeID)
         return std::make_unique<FilterEditor> (device);
 
@@ -113,6 +124,27 @@ std::unique_ptr<juce::Component> createDeviceEditor (const DeviceHandle& device)
         return std::make_unique<VocoderEditor> (device);
 
     return std::make_unique<DeviceKnobs> (device);
+}
+
+std::unique_ptr<juce::Component> createDeviceEditor (ProjectContext& context, DeviceID id)
+{
+    // The editors that pick what the device's sidechain listens to, given the project: the compressor's and the
+    // multiband's key, the vocoder's carrier track.
+    const auto device = getDeviceHandle (context, id);
+
+    if (const auto* info = device.getInfo())
+    {
+        if (info->typeID == devices::Compressor::typeID)
+            return std::make_unique<CompressorEditor> (device, &context, id);
+
+        if (info->typeID == devices::Multiband::typeID)
+            return std::make_unique<MultibandEditor> (device, &context, id);
+
+        if (info->typeID == devices::Vocoder::typeID)
+            return std::make_unique<VocoderEditor> (device, &context, id);
+    }
+
+    return createDeviceEditor (device);
 }
 
 //==============================================================================

@@ -174,15 +174,18 @@ void Engine::takeCommands (const Plan& plan) noexcept
             switch (command.type)
             {
                 case Command::Type::play:
-                    // The notes sounding where it starts start too. A count-in from a stop: a bar there, on its beats.
+                    // The notes sounding where it starts start too. A count-in from a stop: a bar there, on its time
+                    // signature's beats, at the tempo there.
                     if (command.countIn && ! transport.playing)
                     {
                         auto& countIn = transport.countIn;
-                        countIn.beatsPerBar = std::max (1, plan.tempo.getTimeSignatureAt (transport.beat).numerator);
-                        countIn.samplesPerBeat = plan.tempo.getSamplesPerBeat (transport.beat);
-                        countIn.length = std::llround (countIn.beatsPerBar * countIn.samplesPerBeat);
+                        const auto signature = plan.tempo.getTimeSignatureAt (transport.beat);
+                        countIn.barLength = signature.getBarLength();
+                        countIn.beatLength = signature.getBeatLength();
+                        countIn.samplesPerBeat = plan.tempo.getSamplesPerQuarterNote (transport.beat);
+                        countIn.length = std::llround (countIn.barLength * countIn.samplesPerBeat);
                         countIn.left = countIn.length;
-                        countIn.firstBeat = transport.beat - countIn.beatsPerBar;
+                        countIn.firstBeat = transport.beat - countIn.barLength;
                         countIn.barStart = plan.tempo.getBarStart (transport.beat);
                         clicking = nullptr;
                     }
@@ -414,7 +417,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
 
             // Where this part started, and when: the block's start on its smoothed clock and the samples before the part.
             const auto beatsPerSecond =
-                transport.playing && transport.countIn.left == 0 ? sampleRate / plan->tempo.getSamplesPerBeat (startBeat) : 0.0;
+                transport.playing && transport.countIn.left == 0 ? sampleRate / plan->tempo.getSamplesPerQuarterNote (startBeat) : 0.0;
             publishPlayhead (startBeat, beatsPerSecond, startMilliseconds + done * 1000.0 / sampleRate, length * 1000.0 / sampleRate);
         }
         else
@@ -498,11 +501,20 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
     // playhead while the song is stopped. The control points it and modulation move on are the song's while it plays,
     // time's while it is stopped.
     Span span { this, &plan, offset, numSamples };
+    span.songSample = transport.sample;
     span.beat = plan.tempo.toBeats ((double) transport.sample);
     span.tempo = plan.tempo.getTempoAt (span.beat);
-    span.beatsPerSample = transport.playing && numSamples > 0
-                              ? (plan.tempo.toBeats ((double) (transport.sample + numSamples)) - span.beat) / numSamples
-                              : 0.0;
+    span.timeSignature = plan.tempo.getTimeSignatureAt (span.beat);
+    span.bars = plan.tempo.getBarsAt (span.beat);
+    span.barStart = plan.tempo.getBarStart (span.beat);
+
+    if (transport.playing && numSamples > 0)
+    {
+        const auto endBeat = plan.tempo.toBeats ((double) (transport.sample + numSamples));
+        span.beatsPerSample = (endBeat - span.beat) / numSamples;
+        span.barsPerSample = (plan.tempo.getBarsAt (endBeat) - span.bars) / numSamples;
+    }
+
     span.gridSample = transport.playing ? transport.sample : clock + partStart + offset;
     span.pass = ++passes;
     span.flush = transport.flush;
@@ -650,9 +662,16 @@ DeviceRunner::Block Engine::getDeviceBlock (const Span& span, const Plan::Strip&
     DeviceRunner::Block block;
     block.tempo = span.tempo;
     block.beat = span.beat;
+    block.bars = span.bars;
+    block.songSample = span.songSample;
+    block.timeSignatureNumerator = span.timeSignature.numerator;
+    block.timeSignatureDenominator = span.timeSignature.denominator;
+    block.barLength = span.timeSignature.getBarLength();
+    block.barStart = span.barStart;
     block.isPlaying = transport.playing;
     block.isRendering = rendering || playingAsRender;
     block.beatsPerSample = span.beatsPerSample;
+    block.barsPerSample = span.barsPerSample;
     block.sample = span.gridSample;
     block.automationBeat = transport.playing && device.latency > 0 && ! device.automation.empty()
                                ? span.plan->tempo.toBeats ((double) (transport.sample - device.latency))
@@ -971,7 +990,8 @@ void Engine::findControlPoints (const Plan& plan, std::int64_t gridSample, int n
         point.sample = std::max (0, k * controlPointSpacing - since);
         const auto songSample = transport.playing ? (double) (gridSample - since + k * controlPointSpacing) : (double) transport.sample;
         const auto beat = plan.tempo.toBeats (songSample);
-        point.place = { songSample / sampleRate, beat, plan.tempo.getTempoAt (beat), plan.tempo.getTimeSignatureAt (beat).numerator };
+        point.place = { songSample / sampleRate, beat, plan.tempo.getTempoAt (beat), plan.tempo.getBarLength (beat),
+                        plan.tempo.getBarsAt (beat) };
     }
 }
 
@@ -1162,23 +1182,25 @@ void Engine::continueClick (float* const* outputs, int numOutputs, int offset, i
 
 void Engine::playCountIn (float* const* outputs, int numOutputs, int numSamples) noexcept
 {
-    // The song's beats in the bar before where it starts, as long as the beats there: each starts a click, a bar's first
-    // the accented one.
+    // The time signature's beats in the bar before where the song starts, as long as a bar there at the tempo there, each
+    // counted from the bar the playhead is in: each starts a click, a bar's first the accented one.
     const auto& countIn = transport.countIn;
     const auto from = (double) (countIn.length - countIn.left);
+    const auto now = countIn.firstBeat + from / countIn.samplesPerBeat;
     auto done = 0;
 
-    for (auto beat = std::ceil (countIn.firstBeat + from / countIn.samplesPerBeat - 1.0e-9);; beat += 1.0)
+    for (auto count = std::ceil ((now - countIn.barStart) / countIn.beatLength - 1.0e-9);; count += 1.0)
     {
+        const auto beat = countIn.barStart + count * countIn.beatLength;
         const auto at = std::ceil ((beat - countIn.firstBeat) * countIn.samplesPerBeat - 1.0e-6) - from;
 
-        if (at >= numSamples || beat >= countIn.firstBeat + countIn.beatsPerBar - 1.0e-9)
+        if (at >= numSamples || beat >= countIn.firstBeat + countIn.barLength - 1.0e-9)
             break;
 
         const auto start = std::max (0, (int) at);
         continueClick (outputs, numOutputs, 0, done, start);
         done = start;
-        const auto inBar = (beat - countIn.barStart) / countIn.beatsPerBar;
+        const auto inBar = (beat - countIn.barStart) / countIn.barLength;
         clicking = std::abs (inBar - std::round (inBar)) < 1.0e-6 ? &accentClick : &click;
         clickPosition = 0;
     }
@@ -1188,12 +1210,12 @@ void Engine::playCountIn (float* const* outputs, int numOutputs, int numSamples)
 
 void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept
 {
-    // Each beat starts a click at the first sample at or after it, a bar's first beat the accented one.
+    // Each of the time signature's beats starts a click at the first sample at or after it, a bar's first the accented one.
     const auto from = (double) transport.sample;
     const auto to = from + numSamples;
     auto done = 0;
 
-    for (auto beat = std::ceil (plan.tempo.toBeats (from) - 1.0e-9);; beat += 1.0)
+    for (auto beat = plan.tempo.getBeatAtOrAfter (plan.tempo.toBeats (from));; beat = plan.tempo.getNextBeat (beat))
     {
         const auto at = std::ceil (plan.tempo.toSamples (beat) - 1.0e-6);
 

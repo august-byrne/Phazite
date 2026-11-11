@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Phazite's synth (src/devices/synth/Synth.h): its pitch and velocity, its voices, filter and combs, its parts switched
-// off, pitch bend, mono glide and sustain pedal, and that it plays the same every time.
+// Phazite's synth (src/devices/synth/Synth.h): its pitch and velocity, its voices (a key played again, as it rings out,
+// while it is held or under the pedal, each note on a voice of its own), filter and combs, its parts switched off, pitch
+// bend, mono glide and sustain pedal, and that it plays the same every time.
 #include "TestHelpers.h"
 #include "devices/dsp/Math.h"
 #include "devices/synth/Synth.h"
@@ -153,6 +154,64 @@ float peakOf (const std::vector<float>& sound, size_t from, size_t to)
 
     return peak;
 }
+
+// The largest step from one sample to the next.
+float largestStep (const std::vector<float>& sound, size_t from, size_t to)
+{
+    auto largest = 0.0f;
+
+    for (auto i = std::max<size_t> (from, 1); i < to && i < sound.size(); ++i)
+        largest = std::max (largest, std::abs (sound[i] - sound[i - 1]));
+
+    return largest;
+}
+
+float largestDifference (const std::vector<float>& a, const std::vector<float>& b)
+{
+    auto largest = 0.0f;
+
+    for (size_t i = 0; i < a.size() && i < b.size(); ++i)
+        largest = std::max (largest, std::abs (a[i] - b[i]));
+
+    return largest;
+}
+
+NoteEvent pedal (int sample, bool down)
+{
+    return { NoteEvent::Type::controller, sample, 64, down ? 1.0f : 0.0f };
+}
+
+// What a new synth plays of some events, with the voices sounding after each block, and what new synths play of each group
+// of them alone, added: a key played again plays each of its notes as it would alone, what rings out of the one before
+// untouched and the new one from its start, as a note on a voice of its own does. The tests' events are on the synth's
+// control grid (16 samples), as its blocks are, so that each note's voice moves at the same samples both ways.
+struct Apart
+{
+    std::vector<float> together, added;
+    std::vector<int> voicesAfter;
+};
+
+Apart playApart (const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& together,
+                 const std::vector<std::vector<NoteEvent>>& groups)
+{
+    Apart played;
+    Synth synth;
+    synth.prepare (testRate, testBlockSize);
+    played.together = play (synth, values, numSamples, together, [&] (int) { played.voicesAfter.push_back (synth.getActiveVoices()); });
+    played.added.assign (played.together.size(), 0.0f);
+
+    for (const auto& group : groups)
+    {
+        Synth alone;
+        alone.prepare (testRate, testBlockSize);
+        const auto part = play (alone, values, numSamples, group);
+
+        for (size_t i = 0; i < part.size(); ++i)
+            played.added[i] += part[i];
+    }
+
+    return played;
+}
 } // namespace
 
 TEST_CASE ("The synth's description holds together")
@@ -302,6 +361,35 @@ TEST_CASE ("The synth's filter darkens its saw, and the filter envelope opens it
     // An envelope of +48 semitones opens the 500 Hz filter at the note's start and closes it as it decays.
     const auto swept = trebleOf (500.0f, 48.0f);
     CHECK (swept.first > 5.0 * swept.second);
+}
+
+TEST_CASE ("A note whose filter envelope has no attack plays its filter open from its first sample")
+{
+    // A saw through a 200 Hz low-pass that its envelope opens two octaves at once and holds there, against the same saw
+    // through the filter set at 800 Hz, still: the two alike from the note's start, not darker for its first samples.
+    auto values = getSineValues();
+    values[Synth::osc1Wave] = 2.0f; // saw
+    values[Synth::filterOn] = 1.0f;
+    values[Synth::filterEnvelopeOn] = 1.0f;
+    values[Synth::filterAttack] = 0.0f;
+    values[Synth::filterSustain] = 1.0f;
+    const auto playThrough = [&values] (float cutoffHertz, float envelope)
+    {
+        values[Synth::cutoff] = cutoffHertz;
+        values[Synth::filterEnvelope] = envelope;
+        Synth synth;
+        synth.prepare (testRate, testBlockSize);
+        return play (synth, values, 1024, { noteOn (100, 60) });
+    };
+
+    const auto opened = playThrough (200.0f, 24.0f), still = playThrough (800.0f, 0.0f);
+    REQUIRE (peakOf (still, 100, 132) > 0.01f);
+    auto difference = 0.0f;
+
+    for (size_t i = 0; i < opened.size(); ++i)
+        difference = std::max (difference, std::abs (opened[i] - still[i]));
+
+    CHECK (difference < 1.0e-6f);
 }
 
 TEST_CASE ("The synth's combs: on a note's pitch, Comb + keeps a saw's harmonics and Comb - leaves out its even ones")
@@ -544,6 +632,81 @@ TEST_CASE ("The synth's sustain pedal holds notes until it lifts, and it plays t
     // All notes off lets everything go.
     play (first, values, 24000, { { NoteEvent::Type::allNotesOff, 0, 0, 0.0f } }); // and the 200 ms release passes
     CHECK (first.getActiveVoices() == 0);
+}
+
+TEST_CASE ("A key played again as it rings out takes a voice of its own: its tail rings on, and the new note starts afresh")
+{
+    // A new synth's two detuned saws through its filter, which its envelope opens and closes: C3 let go, then played again a
+    // third of the way through its 200 ms release. It plays each note as it does alone, added: the first's tail as it would
+    // have rung out, the second from the start of its waves and of its envelopes, as LMMS and most polyphonic synths play a
+    // key again. Its voice taken back, the second would have gone on with the first's waves and envelopes.
+    const auto played = playApart (getDefaults(), 36000, { noteOn (0, 48), noteOff (4800, 48), noteOn (8000, 48), noteOff (19200, 48) },
+                                   { { noteOn (0, 48), noteOff (4800, 48) }, { noteOn (8000, 48), noteOff (19200, 48) } });
+    REQUIRE (peakOf (played.together, 0, 4800) > 0.1f);
+    CHECK (largestDifference (played.together, played.added) < 1.0e-6f);
+    CHECK (played.voicesAfter[40] == 2); // 0.22 s: the first's tail with the second
+    CHECK (played.voicesAfter[60] == 1); // 0.33 s: the tail has rung out, at 0.3 s
+    CHECK (played.voicesAfter.back() == 0);
+}
+
+TEST_CASE ("A note-off lets go of its key's held voice only: a tail of the same key rings on, its release not begun again")
+{
+    // C3 let go, a note-off while only its tail sounds, which lets go of nothing, then C3 again, let go while the first's tail
+    // still rings: that note-off lets go of the second note only. Begun again, the first's release would have rung on past
+    // the 200 ms it takes.
+    const auto played =
+        playApart (getDefaults(), 36000, { noteOn (0, 48), noteOff (4800, 48), noteOff (6400, 48), noteOn (8000, 48), noteOff (9600, 48) },
+                   { { noteOn (0, 48), noteOff (4800, 48) }, { noteOn (8000, 48), noteOff (9600, 48) } });
+    CHECK (largestDifference (played.together, played.added) < 1.0e-6f);
+    CHECK (played.voicesAfter[40] == 2); // the two tails
+    CHECK (played.voicesAfter[60] == 1); // 0.33 s: the first's rang out at 0.3 s, the second's rings until 0.4 s
+    CHECK (played.voicesAfter[76] == 0);
+}
+
+TEST_CASE ("A key played again while it is held lets its voice go as if it came up, and the new note takes a voice of its own")
+{
+    // Two notes of C3 that overlap, as two keyboards, or the song and a player on its track, can send them: the first lets go
+    // as the second begins, its release ringing on, and the first note-off lets go of the key, which then holds nothing for
+    // the second. A key never holds two voices, so it never plays twice as loud, as the song's own notes never do (a note
+    // there ends where the same pitch starts again).
+    const auto played = playApart (getDefaults(), 36000, { noteOn (0, 48), noteOn (3200, 48), noteOff (4800, 48), noteOff (8000, 48) },
+                                   { { noteOn (0, 48), noteOff (3200, 48) }, { noteOn (3200, 48), noteOff (4800, 48) } });
+    CHECK (largestDifference (played.together, played.added) < 1.0e-6f);
+    CHECK (played.voicesAfter[14] == 2); // 0.08 s: the first's tail, and the second held
+}
+
+TEST_CASE ("Under the sustain pedal, a key played again lets the voice the pedal holds ring out, and the pedal holds the new one")
+{
+    // The pedal down, C3 played and let go: the pedal holds it. Played again, the voice the pedal held lets go, its release
+    // ringing on, and the new note takes a voice of its own, which the pedal holds in turn until it lifts, as JUCE's
+    // synthesiser and Serum 2 play a key struck again under the pedal. So a key played again and again under the pedal holds
+    // one voice, as a piano's key holds one string, not one for each time it was struck, which would soon take the voices
+    // the pedal holds for the other keys.
+    const auto played = playApart (
+        getDefaults(), 36000,
+        { pedal (0, true), noteOn (0, 48), noteOff (1600, 48), noteOn (4800, 48), noteOff (6400, 48), pedal (9600, false) },
+        { { noteOn (0, 48), noteOff (4800, 48) }, { pedal (0, true), noteOn (4800, 48), noteOff (6400, 48), pedal (9600, false) } });
+    CHECK (largestDifference (played.together, played.added) < 1.0e-6f);
+    CHECK (played.voicesAfter[30] == 2); // 0.17 s: the first's tail, and the second that the pedal holds
+    CHECK (played.voicesAfter[60] == 1); // 0.33 s: the first's tail rang out at 0.3 s; the pedal let go of the second at 0.2 s
+    CHECK (played.voicesAfter[76] == 0);
+}
+
+TEST_CASE ("In mono mode a key played again as it rings out takes the one voice back from where it is, as before")
+{
+    // A sine, released over 200 ms and played again a third of the way through: one voice still, its wave going on where it
+    // was and its level rising from where its release had brought it, without a step (a sine at 131 Hz moves at most 0.02 a
+    // sample, its attack's rise with it; started again, the wave would have jumped by its level, 0.2 here).
+    auto values = getSineValues();
+    values[Synth::voiceMode] = 1.0f;
+    Synth synth;
+    synth.prepare (testRate, testBlockSize);
+    auto most = 0;
+    const auto played = play (synth, values, 36000, { noteOn (0, 48), noteOff (4800, 48), noteOn (8000, 48), noteOff (19200, 48) },
+                              [&] (int) { most = std::max (most, synth.getActiveVoices()); });
+    CHECK (most == 1);
+    REQUIRE (peakOf (played, 7600, 8000) > 0.1f); // its tail, as it is played again
+    CHECK (largestStep (played, 7900, 8300) < 0.05f);
 }
 
 TEST_CASE ("A slide note glides the sounding notes to its pitch evenly over its length, and a portamento note glides in")

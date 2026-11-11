@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DeviceGraph.h"
+#include "ui/components/DisplayTicker.h"
 
 #include <cmath>
 
@@ -51,12 +52,21 @@ void paintFrequencyGrid (juce::Graphics& g, const Palette& p, const FrequencyAxi
             g.setColour (p.text.withAlpha (step == 1 ? GraphTint::grid * 2.0f : GraphTint::grid));
             g.drawVerticalLine (juce::roundToInt (x), area.getY(), area.getBottom());
 
+            // Its number beside it, where all of it fits in the graph: in a narrow one, the last decade's would run past its
+            // edge ("10 k" half drawn).
             if (withNumbers && step == 1 && frequency >= 100.0)
             {
+                const juce::Font font { juce::FontOptions (TextSize::small) };
+                const auto text = formatFrequency (frequency);
+                const auto width = juce::GlyphArrangement::getStringWidth (font, text);
+
+                if (x + 2.0f + width > area.getRight())
+                    continue;
+
                 g.setColour (p.textMuted);
-                g.setFont (juce::FontOptions (TextSize::small));
-                g.drawText (formatFrequency (frequency),
-                            juce::Rectangle<float> (x + 2.0f, area.getBottom() - TextSize::small - 2.0f, 60.0f, TextSize::small),
+                g.setFont (font);
+                g.drawText (text,
+                            juce::Rectangle<float> (x + 2.0f, area.getBottom() - TextSize::small - 2.0f, width + 1.0f, TextSize::small),
                             juce::Justification::centredLeft, false);
             }
         }
@@ -139,9 +149,8 @@ juce::String formatDecibels (float decibels)
 }
 
 //==============================================================================
-SpectrumTrace::SpectrumTrace (int order)
-    : spectrum (order),
-      lefts (8192),
+SpectrumTrace::SpectrumTrace()
+    : lefts (8192),
       rights (8192)
 {
 }
@@ -174,7 +183,7 @@ void SpectrumTrace::pull (devices::SampleTap& tap)
 
 bool SpectrumTrace::update()
 {
-    return spectrum.update (1.5f);
+    return spectrum.update (fallPerSecond / (float) DisplayTicker::ticksPerSecond);
 }
 
 float SpectrumTrace::getLevelAt (double frequency) const
@@ -182,11 +191,20 @@ float SpectrumTrace::getLevelAt (double frequency) const
     return spectrum.getLevelAt (frequency) + tiltPerOctave * (float) std::log2 (frequency / 1000.0);
 }
 
+float SpectrumTrace::getLevelOver (double from, double to) const
+{
+    return spectrum.getLevelOver (from, to) + tiltPerOctave * (float) std::log2 (std::sqrt (from * to) / 1000.0);
+}
+
 void SpectrumTrace::paint (juce::Graphics& g, const FrequencyAxis& frequencies, const LevelAxis& levels, juce::Colour fill,
                            juce::Colour line) const
 {
     const auto& area = frequencies.area;
-    const auto curve = makeCurve (area, [&] (float x) { return levels.yFor (getLevelAt (frequencies.frequencyAt (x))); }, 2.0f);
+    constexpr float step = 2.0f; // pixels between the curve's points, each the loudest of the frequencies around it
+    const auto curve = makeCurve (
+        area, [&] (float x)
+        { return levels.yFor (getLevelOver (frequencies.frequencyAt (x - 0.5f * step), frequencies.frequencyAt (x + 0.5f * step))); },
+        step);
 
     auto filled = curve;
     filled.lineTo (area.getBottomRight());

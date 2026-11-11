@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Places and lengths in the song in beats from its start (a beat is a quarter note in 4/4), as the model's public
-// functions and the UI pass them. They are numbers with names, which the tempo map turns into seconds
-// (model/transport/internal/Tempo.h).
+// Places and lengths in the song in beats from its start, as the model's public functions and the UI pass them: a beat is
+// a quarter note whatever the time signature, as MIDI, DAWproject and every major DAW count them, and a tempo counts them a
+// minute. A time signature only sets how long its bars are and which note its own beats count (TempoValues.h:
+// TimeSignature). They are numbers with names, which the tempo map turns into seconds (model/transport/internal/Tempo.h).
 // Nothing here compares two doubles with ==, which GCC's -Wfloat-equal would refuse: equal means neither is less.
 #pragma once
 

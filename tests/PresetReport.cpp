@@ -2,22 +2,29 @@
 // What each instrument preset that comes with Phazite (resources/presets) sounds like, in numbers, for whoever makes or
 // checks them (docs/presets.md): each played as one note at its kind's pitch, at velocity 100 and again at 50 (for what
 // velocity does), measured for its level, loudness, attack, decay, release, brightness as it goes on, pitch and width; each
-// kit's pads one at a time; and how far and how long each sidechain preset ducks a sound under each kit's kick. It writes a
-// report and WAV files to listen to: the note, and a phrase of its kind of sound (a bass line, a melody, chords, an
-// arpeggio, a beat), and a pad pumping under each kick. ctest and CI skip it; run it from a build in the repository with
+// kit's pads one at a time; how far and how long each sidechain preset ducks a sound under each kit's kick; how much each
+// saturator preset colours a sine; how far each exciter preset lifts each octave of noise at three levels; what each vinyl
+// preset does to the pitch, the band and the sides, and its noise; and each EQ preset's response, band by band. It writes a
+// report and WAV files to listen to: the note, and a phrase of its kind of
+// sound (a bass line, a melody, chords, an arpeggio, a beat), and a pad pumping under each kick. ctest and CI skip it; run
+// it from a build in the repository with
 //   phazite_tests.exe --test-suite=preset-report --no-skip
 // with the environment variable PHAZITE_PRESET_REPORT naming the folder for report.md and the WAV files (else a temporary
 // folder, which it names).
 #include "TestHelpers.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/drums/FactoryDrums.h"
+#include "devices/dsp/Random.h"
 #include "devices/dynamics/Compressor.h"
+#include "devices/eq/Equalizer.h"
 #include "devices/fm/FmSynth.h"
 #include "devices/sampler/FactorySamples.h"
 #include "devices/sampler/SampleAnalysis.h"
 #include "devices/sampler/Sampler.h"
+#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/synth/Synth.h"
+#include "devices/vinyl/Vinyl.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "engine/nodes/LoudnessMeter.h"
@@ -31,6 +38,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
 
@@ -620,6 +628,371 @@ float measureDistortion (const Preset& preset, float peakDecibels)
 
     return toDecibels (std::sqrt (harmonics / energyAt (cycles)));
 }
+
+//==============================================================================
+// The exciter's presets: how far each lifts the octaves around 2, 4, 8 and 16 kHz of pink noise at a level (its RMS, in
+// dBFS), in decibels: what comes out against what went in, in each octave, over 65536 samples after half a second. The
+// louder the noise, the further its top reaches into the exciter's curve, which holds it down and makes harmonics of it
+// instead: so a preset that lifts less as the level rises is one that saturates there.
+constexpr double exciterOctaves[] = { 2000.0, 4000.0, 8000.0, 16000.0 };
+
+std::array<float, std::size (exciterOctaves)> measureLift (const Preset& preset, float rmsDecibels)
+{
+    constexpr int order = 16, size = 1 << order;
+    const auto numSamples = at (0.5) + size;
+    Audio audio (2, numSamples), dry (2, numSamples);
+
+    // Pink noise, the same every time (Paul Kellet's filter of white noise), then leveled.
+    devices::dsp::Random random (1234);
+    float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f;
+    auto energy = 0.0;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const auto white = random.nextBipolar();
+        b0 = 0.99765f * b0 + white * 0.0990460f;
+        b1 = 0.96300f * b1 + white * 0.2965164f;
+        b2 = 0.57000f * b2 + white * 1.0526913f;
+        const auto pink = b0 + b1 + b2 + white * 0.1848f;
+        dry.setSample (0, i, pink);
+        energy += (double) pink * pink;
+    }
+
+    dry.applyGain (0, 0, numSamples, juce::Decibels::decibelsToGain (rmsDecibels) / (float) std::sqrt (energy / numSamples));
+    dry.copyFrom (1, 0, dry, 0, 0, numSamples);
+    audio.makeCopyOf (dry);
+
+    devices::Exciter exciter;
+    exciter.prepare (rate, blockSize);
+
+    for (int done = 0; done < numSamples; done += blockSize)
+    {
+        float* channels[] = { audio.getWritePointer (0, done), audio.getWritePointer (1, done) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = std::min (blockSize, numSamples - done);
+        context.parameters = preset.values;
+        context.isPlaying = true;
+        exciter.process (context);
+    }
+
+    // Each one's power in each octave.
+    const auto octavePowers = [numSamples] (const Audio& sound)
+    {
+        std::vector<float> spectrum ((size_t) size * 2, 0.0f);
+        const auto start = numSamples - size;
+
+        for (int i = 0; i < size; ++i)
+            spectrum[(size_t) i] =
+                sound.getSample (0, start + i) * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * i / size));
+
+        juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (spectrum.data());
+        std::array<double, std::size (exciterOctaves)> powers {};
+
+        for (size_t octave = 0; octave < std::size (exciterOctaves); ++octave)
+        {
+            const auto from = (int) std::lround (exciterOctaves[octave] / std::sqrt (2.0) * size / rate);
+            const auto to = std::min (size / 2, (int) std::lround (exciterOctaves[octave] * std::sqrt (2.0) * size / rate));
+
+            for (int bin = from; bin < to; ++bin)
+                powers[octave] += (double) spectrum[(size_t) bin] * spectrum[(size_t) bin];
+        }
+
+        return powers;
+    };
+
+    const auto in = octavePowers (dry), out = octavePowers (audio);
+    std::array<float, std::size (exciterOctaves)> lifts {};
+
+    for (size_t octave = 0; octave < lifts.size(); ++octave)
+        lifts[octave] = toDecibels (std::sqrt (out[octave] / in[octave]));
+
+    return lifts;
+}
+
+//==============================================================================
+// The vinyl's presets, each measured while the song plays, at 120 BPM: how far a 1 kHz sine's pitch swings over 6 s (from
+// its 1st to its 99th percentile, in cents: its wow and its flutter together); what it does to pink noise in six bands (the
+// third octaves at 63, 125, 1000, 4000, 8000 and 16000 Hz, its noise off); how far it narrows the sides (a 1 kHz sine with
+// its sides out of step); the distortion of a sine at 1 and at 8 kHz at -12 dBFS (the second to the fifth harmonics under
+// 20 kHz, against the tone); and its noise on silence: the hiss's level and the crackles, how many a second and the loudest.
+struct VinylMeasures
+{
+    float swing = 0.0f, side = 0.0f, thd1k = 0.0f, thd8k = 0.0f, hiss = 0.0f, clicks = 0.0f, cracklePeak = 0.0f;
+    std::array<float, 6> bands {};
+};
+
+constexpr double vinylBands[] = { 63.0, 125.0, 1000.0, 4000.0, 8000.0, 16000.0 };
+
+// A preset's values with its noise off, or with one of its noises alone.
+std::vector<float> vinylValues (const Preset& preset, bool hiss, bool crackle)
+{
+    auto values = preset.values;
+
+    if (! hiss)
+        values[devices::Vinyl::hiss] = devices::Vinyl::info.parameters[devices::Vinyl::hiss].minimum;
+
+    if (! crackle)
+        values[devices::Vinyl::crackle] = devices::Vinyl::info.parameters[devices::Vinyl::crackle].minimum;
+
+    return values;
+}
+
+// A sound through the vinyl, the song playing, and how many clicks it made.
+std::pair<Audio, int> playVinyl (const std::vector<float>& values, Audio audio)
+{
+    devices::Vinyl vinyl;
+    vinyl.prepare (rate, blockSize);
+    vinyl.getSurfaceNoise().takeClicks();
+
+    for (int done = 0; done < audio.getNumSamples(); done += blockSize)
+    {
+        float* channels[] = { audio.getWritePointer (0, done), audio.getWritePointer (1, done) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = std::min (blockSize, audio.getNumSamples() - done);
+        context.parameters = values;
+        context.isPlaying = true;
+        context.beat = done * 2.0 / rate;
+        vinyl.process (context);
+    }
+
+    const auto clicks = vinyl.getSurfaceNoise().takeClicks();
+    return { std::move (audio), clicks };
+}
+
+Audio makeSine (double frequency, float amplitude, double seconds, bool sidesApart = false)
+{
+    Audio audio (2, at (seconds));
+
+    for (int i = 0; i < audio.getNumSamples(); ++i)
+    {
+        const auto sample = amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * frequency * i / rate);
+        audio.setSample (0, i, sample);
+        audio.setSample (1, i, sidesApart ? -sample : sample);
+    }
+
+    return audio;
+}
+
+// A tone's level in a stretch, and its harmonics', by the FFT, each summed over 2 % either side, which holds a wow.
+float getHarmonicDistortion (const Audio& audio, double frequency)
+{
+    constexpr int order = 16, size = 1 << order;
+    std::vector<float> spectrum ((size_t) size * 2, 0.0f);
+    const auto start = audio.getNumSamples() - size;
+
+    for (int i = 0; i < size; ++i)
+        spectrum[(size_t) i] =
+            audio.getSample (0, start + i) * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * i / size));
+
+    juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (spectrum.data());
+    const auto energyAround = [&spectrum] (double hertz)
+    {
+        const auto centre = (int) std::lround (hertz * size / rate), width = std::max (3, (int) std::lround (0.02 * hertz * size / rate));
+        auto energy = 0.0;
+
+        for (int bin = std::max (1, centre - width); bin <= std::min (size / 2 - 1, centre + width); ++bin)
+            energy += (double) spectrum[(size_t) bin] * spectrum[(size_t) bin];
+
+        return energy;
+    };
+
+    auto harmonics = 0.0;
+
+    for (int harmonic = 2; harmonic <= 5 && harmonic * frequency < 20000.0; ++harmonic)
+        harmonics += energyAround (harmonic * frequency);
+
+    return toDecibels (std::sqrt (harmonics / energyAround (frequency)));
+}
+
+VinylMeasures measureVinyl (const Preset& preset)
+{
+    VinylMeasures measures;
+    const auto quiet = vinylValues (preset, false, false);
+
+    // The pitch: the sine's phase every millisecond, against a steady one, as cents from how fast it moves.
+    {
+        const auto played = playVinyl (quiet, makeSine (1000.0, 0.25f, 6.5)).first;
+        constexpr int window = 192, step = 48; // four of the tone's cycles, every millisecond
+        std::vector<double> late;
+        auto unwrapped = 0.0, last = 0.0;
+
+        for (int start = at (0.5); start + window < played.getNumSamples(); start += step)
+        {
+            auto s = 0.0, c = 0.0;
+
+            for (int i = start; i < start + window; ++i)
+            {
+                s += played.getSample (0, i) * std::sin (juce::MathConstants<double>::twoPi * 1000.0 * i / rate);
+                c += played.getSample (0, i) * std::cos (juce::MathConstants<double>::twoPi * 1000.0 * i / rate);
+            }
+
+            const auto phase = std::atan2 (c, s);
+            unwrapped = late.empty() ? phase : unwrapped + std::remainder (phase - last, juce::MathConstants<double>::twoPi);
+            last = phase;
+            late.push_back (-unwrapped / juce::MathConstants<double>::twoPi * rate / 1000.0);
+        }
+
+        std::vector<double> cents;
+
+        for (size_t i = 1; i < late.size(); ++i)
+            cents.push_back (1200.0 * std::log2 (1.0 - (late[i] - late[i - 1]) / step));
+
+        std::sort (cents.begin(), cents.end());
+        measures.swing = cents.empty() ? 0.0f : (float) (cents[cents.size() * 99 / 100] - cents[cents.size() / 100]);
+    }
+
+    // The band, on pink noise (Paul Kellet's filter), each third octave's power out against in.
+    {
+        Audio noise (2, at (4.0));
+        devices::dsp::Random random (1234);
+        float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f;
+
+        for (int i = 0; i < noise.getNumSamples(); ++i)
+        {
+            const auto white = random.nextBipolar();
+            b0 = 0.99765f * b0 + white * 0.0990460f;
+            b1 = 0.96300f * b1 + white * 0.2965164f;
+            b2 = 0.57000f * b2 + white * 1.0526913f;
+            const auto pink = 0.1f * (b0 + b1 + b2 + white * 0.1848f);
+            noise.setSample (0, i, pink);
+            noise.setSample (1, i, pink);
+        }
+
+        auto bandless = quiet;
+        bandless[devices::Vinyl::distortion] = 0.0f;
+        const auto played = playVinyl (bandless, noise).first;
+        constexpr int order = 16, size = 1 << order;
+        const auto powers = [&] (const Audio& sound)
+        {
+            std::vector<float> spectrum ((size_t) size * 2, 0.0f);
+            const auto start = sound.getNumSamples() - size;
+
+            for (int i = 0; i < size; ++i)
+                spectrum[(size_t) i] =
+                    sound.getSample (0, start + i) * (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::twoPi * i / size));
+
+            juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (spectrum.data());
+            std::array<double, std::size (vinylBands)> each {};
+
+            for (size_t band = 0; band < each.size(); ++band)
+            {
+                const auto from = (int) std::lround (vinylBands[band] / std::pow (2.0, 1.0 / 6.0) * size / rate);
+                const auto to = std::min (size / 2, (int) std::lround (vinylBands[band] * std::pow (2.0, 1.0 / 6.0) * size / rate));
+
+                for (int bin = from; bin <= to; ++bin)
+                    each[band] += (double) spectrum[(size_t) bin] * spectrum[(size_t) bin];
+            }
+
+            return each;
+        };
+
+        const auto in = powers (noise), out = powers (played);
+
+        for (size_t band = 0; band < measures.bands.size(); ++band)
+            measures.bands[band] = toDecibels (std::sqrt (out[band] / in[band]));
+    }
+
+    // The sides: a 1 kHz sine out of step on the two, and what is left of it.
+    {
+        const auto played = playVinyl (quiet, makeSine (1000.0, 0.25f, 1.5, true)).first;
+        auto side = 0.0;
+
+        for (int i = at (1.0); i < played.getNumSamples(); ++i)
+        {
+            const auto each = 0.5 * (played.getSample (0, i) - played.getSample (1, i));
+            side += each * each;
+        }
+
+        measures.side = toDecibels (std::sqrt (side / (played.getNumSamples() - at (1.0))) / (0.25 / std::sqrt (2.0)));
+    }
+
+    // The groove's distortion.
+    measures.thd1k = getHarmonicDistortion (playVinyl (quiet, makeSine (1000.0, 0.25f, 2.0)).first, 1000.0);
+    measures.thd8k = getHarmonicDistortion (playVinyl (quiet, makeSine (8000.0, 0.25f, 2.0)).first, 8000.0);
+
+    // Its noise on silence: the hiss alone, then the crackle alone.
+    {
+        Audio silence (2, at (3.0));
+        silence.clear();
+        const auto played = playVinyl (vinylValues (preset, true, false), silence).first;
+        auto energy = 0.0;
+
+        for (int channel = 0; channel < 2; ++channel)
+            for (int i = at (0.5); i < played.getNumSamples(); ++i)
+                energy += (double) played.getSample (channel, i) * played.getSample (channel, i);
+
+        measures.hiss = toDecibels (std::sqrt (energy / (2.0 * (played.getNumSamples() - at (0.5)))));
+    }
+
+    {
+        Audio silence (2, at (10.0));
+        silence.clear();
+        const auto [played, clicks] = playVinyl (vinylValues (preset, false, true), silence);
+        measures.clicks = (float) clicks / 10.0f;
+        measures.cracklePeak =
+            toDecibels (std::max (played.getMagnitude (0, 0, played.getNumSamples()), played.getMagnitude (1, 0, played.getNumSamples())));
+    }
+
+    return measures;
+}
+
+//==============================================================================
+// The EQ's presets: what each does to every frequency, its response at the third-octave bands' centres in decibels, from an
+// impulse through it (its first 65536 samples, which every band of Phazite's EQ has settled in), at a quarter of full scale
+// so that nothing in it clips.
+constexpr float responseCentres[] { 31.5f, 63.0f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f };
+
+std::vector<float> measureResponse (const Preset& preset)
+{
+    constexpr int order = 16, size = 1 << order;
+    constexpr float impulse = 0.25f;
+    Audio audio (2, size);
+    audio.clear();
+    audio.setSample (0, 0, impulse);
+    audio.setSample (1, 0, impulse);
+
+    devices::Equalizer equalizer;
+    equalizer.prepare (rate, blockSize);
+
+    for (int done = 0; done < size; done += blockSize)
+    {
+        float* channels[] = { audio.getWritePointer (0, done), audio.getWritePointer (1, done) };
+        devices::ProcessContext context;
+        context.channels = channels;
+        context.numChannels = 2;
+        context.numSamples = std::min (blockSize, size - done);
+        context.parameters = preset.values;
+        context.isPlaying = true;
+        equalizer.process (context);
+    }
+
+    std::vector<float> spectrum ((size_t) size * 2, 0.0f);
+
+    for (int i = 0; i < size; ++i)
+        spectrum[(size_t) i] = audio.getSample (0, i) / impulse;
+
+    juce::dsp::FFT (order).performFrequencyOnlyForwardTransform (spectrum.data());
+    std::vector<float> response;
+
+    for (const auto centre : responseCentres)
+    {
+        // The band's power, averaged over its third of an octave.
+        const auto low = (int) std::floor (centre / std::pow (2.0f, 1.0f / 6.0f) * size / (float) rate);
+        const auto high = std::max (low + 1, (int) std::ceil (centre * std::pow (2.0f, 1.0f / 6.0f) * size / (float) rate));
+        auto power = 0.0;
+
+        for (int bin = low; bin < high; ++bin)
+            power += (double) spectrum[(size_t) bin] * spectrum[(size_t) bin];
+
+        response.push_back (toDecibels ((float) std::sqrt (power / (high - low))));
+    }
+
+    return response;
+}
 } // namespace
 
 TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers and WAV files" * doctest::test_suite ("preset-report")
@@ -855,9 +1228,111 @@ TEST_CASE ("Preset report: what each instrument preset sounds like, in numbers a
                             + decibels (measureDistortion (*effect, -12.0f)) + " | " + decibels (measureDistortion (*effect, -6.0f))
                             + " |");
 
+    // The exciter's presets, each on pink noise at three levels.
+    juce::StringArray exciterLines;
+    exciterLines.add ({});
+    exciterLines.add ("## Exciter presets, what they add");
+    exciterLines.add ({});
+    exciterLines.add ("Each on pink noise at -30, -18 and -6 dBFS (RMS): how far it lifts the octaves around 2, 4, 8 and 16 kHz, in dB. "
+                      "Where the lift falls as the level rises, the band reaches the exciter's curve there, which holds it down and "
+                      "makes harmonics of it.");
+    exciterLines.add ({});
+    exciterLines.add ("| Preset | At -30: 2k / 4k / 8k / 16k | At -18 | At -6 |");
+    exciterLines.add ("|---|---|---|---|");
+
+    for (const auto& file : files)
+    {
+        if (auto effect = readPreset (file, devices::DeviceKind::effect);
+            effect.has_value() && toString (effect->info->typeID) == devices::Exciter::typeID
+            && file.getRelativePathFrom (root).replaceCharacter ('\\', '/').contains (filter))
+        {
+            auto line = "| " + effect->kind + " / " + effect->name;
+
+            for (const auto level : { -30.0f, -18.0f, -6.0f })
+            {
+                juce::StringArray lifts;
+
+                for (const auto lift : measureLift (*effect, level))
+                    lifts.add (decibels (lift));
+
+                line += " | " + lifts.joinIntoString (" / ");
+            }
+
+            exciterLines.add (line + " |");
+        }
+    }
+
+    // The vinyl's presets, each on its test signals.
+    juce::StringArray vinylLines;
+    vinylLines.add ({});
+    vinylLines.add ("## Vinyl presets, what they do");
+    vinylLines.add ({});
+    vinylLines.add ("Each while the song plays: Swing = a 1 kHz sine's pitch from its 1st to its 99th percentile, in cents (its wow and "
+                    "flutter together); the band = pink noise's change in the third octaves at 63 Hz, 125 Hz, 1, 4, 8 and 16 kHz (its "
+                    "noise off), in dB; Side = a 1 kHz sine out of step on the two sides, in dB; THD = the 2nd to 5th harmonics of a "
+                    "sine at -12 dBFS, at 1 and 8 kHz, in dB; Hiss = on silence, RMS dBFS; Crackle = clicks a second, and the "
+                    "loudest's peak in dBFS.");
+    vinylLines.add ({});
+    vinylLines.add ("| Preset | Swing ct | 63 / 125 / 1k / 4k / 8k / 16k | Side | THD 1k / 8k | Hiss | Crackle |");
+    vinylLines.add ("|---|---|---|---|---|---|---|");
+
+    for (const auto& file : files)
+    {
+        if (auto effect = readPreset (file, devices::DeviceKind::effect);
+            effect.has_value() && toString (effect->info->typeID) == devices::Vinyl::typeID
+            && file.getRelativePathFrom (root).replaceCharacter ('\\', '/').contains (filter))
+        {
+            const auto measured = measureVinyl (*effect);
+            juce::StringArray bands;
+
+            for (const auto band : measured.bands)
+                bands.add (decibels (band));
+
+            vinylLines.add ("| " + effect->kind + " / " + effect->name + " | " + juce::String (measured.swing, 1) + " | "
+                            + bands.joinIntoString (" / ") + " | " + decibels (measured.side) + " | " + decibels (measured.thd1k) + " / "
+                            + decibels (measured.thd8k) + " | " + decibels (measured.hiss) + " | " + juce::String (measured.clicks, 1)
+                            + ", " + decibels (measured.cracklePeak) + " |");
+        }
+    }
+
+    // The EQ's presets, each its response.
+    juce::StringArray eqLines;
+    eqLines.add ({});
+    eqLines.add ("## EQ presets, response");
+    eqLines.add ({});
+    eqLines.add ("Each its gain at the centres of the third-octave bands, in dB, from an impulse through it.");
+    eqLines.add ({});
+    juce::String header ("| Preset |"), rule ("|---|");
+
+    for (const auto centre : responseCentres)
+    {
+        const auto whole = centre == std::floor (centre);
+        header << " " << (centre < 1000.0f ? juce::String (centre, whole ? 0 : 1) : juce::String (centre / 1000.0f) + "k") << " |";
+        rule << "---|";
+    }
+
+    eqLines.add (header);
+    eqLines.add (rule);
+
+    for (const auto& file : files)
+        if (auto effect = readPreset (file, devices::DeviceKind::effect);
+            effect.has_value() && toString (effect->info->typeID) == devices::Equalizer::typeID
+            && file.getRelativePathFrom (root).replaceCharacter ('\\', '/').contains (filter))
+        {
+            juce::String line ("| " + effect->kind + " / " + effect->name + " |");
+
+            for (const auto gain : measureResponse (*effect))
+                line << " " << decibels (gain) << " |";
+
+            eqLines.add (line);
+        }
+
     lines.addArray (drumLines);
     lines.addArray (pumpLines);
     lines.addArray (driveLines);
+    lines.addArray (exciterLines);
+    lines.addArray (vinylLines);
+    lines.addArray (eqLines);
     const auto report = folder.getChildFile ("report.md");
     REQUIRE (report.replaceWithText (lines.joinIntoString ("\n") + "\n"));
     MESSAGE ("The preset report is in " << folder.getFullPathName().toStdString());

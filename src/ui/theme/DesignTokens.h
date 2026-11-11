@@ -342,15 +342,15 @@ namespace Shell
 } // namespace Shell
 
 // Each kind of built-in device's colour (ui/devices/DeviceTint.h), so that each has a character of its own and its kind shows at
-// a glance: the dynamics warm, the EQ and the filter cyan, the saturator red, the delay and the reverb blue, the phaser and
-// the flanger green, the stereo expander teal and the vocoder pink; instruments keep the accent. Each is at least 3:1
-// against the surface in every theme, and apart from the modulation colour, which rings their knobs.
+// a glance: the dynamics warm, the EQ and the filter cyan, the saturator, the exciter and the vinyl red, the delay and the
+// reverb blue, the phaser and the flanger green, the stereo expander teal and the vocoder pink; instruments keep the accent.
+// Each is at least 3:1 against the surface in every theme, and apart from the modulation colour, which rings their knobs.
 enum class DeviceFamily
 {
     instrument,
     dynamics, // compressor, limiter, maximizer, multiband
     tone,     // EQ, filter
-    drive,    // saturator
+    drive,    // saturator, exciter, vinyl
     space,    // delay, reverb
     motion,   // phaser, flanger
     stereo,   // stereo expander
@@ -502,6 +502,10 @@ namespace GraphTint
     inline constexpr float grabDistance = 12.0f;
     inline constexpr float fineDragFactor = 0.2f;
     inline constexpr float handleOutline = 1.5f; // a hollow handle's, such as a compressor's threshold ring
+
+    // A handle under the pointer, or dragged, lights up as the EQ's dots do: ringed in the text colour, this far outside it
+    // and this wide; a line, as wide in the text colour.
+    inline constexpr float litGap = 1.0f, litWidth = 2.0f;
 } // namespace GraphTint
 
 // How far a button that needs attention, such as one asking for the instrument a track's notes need, is mixed with the

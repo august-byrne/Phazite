@@ -534,8 +534,8 @@ FilterView::FilterView (const juce::String& title, ParameterHandle c, ParameterH
       playing (std::move (nowPlaying))
 {
     setTitle (title);
-    setDescription ("The filter's response, and where the newest note plays it now. Drag the dot sideways for the cutoff and up "
-                    "or down for the resonance.");
+    setDescription ("The filter's response, and where the newest note plays it now. Drag the dot, or press anywhere to put it "
+                    "there: sideways for the cutoff, up or down for the resonance.");
 }
 
 graph::FrequencyAxis FilterView::getFrequencies() const
@@ -591,8 +591,13 @@ void FilterView::paint (juce::Graphics& g)
     g.setColour (tint);
     g.strokePath (curveAt (cutoff.getValue()), juce::PathStrokeType (GraphTint::curveWidth));
 
-    const auto dot = getDotPosition();
-    g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (dot));
+    // The dot, ringed under the pointer and while dragged.
+    const auto at = getDotPosition();
+    g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::levelDotRadius, 2.0f * GraphTint::levelDotRadius).withCentre (at));
+
+    if (dot.isLit())
+        paintLitRing (g, p, at, GraphTint::levelDotRadius);
+
     graph::paintReadout (g, p, area, graph::formatFrequency (cutoff.getValue()), juce::Justification::topLeft);
 }
 

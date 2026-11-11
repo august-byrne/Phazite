@@ -122,9 +122,9 @@ namespace
         return children;
     }
 
-    int getBeatsPerBar (const Song& song, BeatPosition where)
+    BeatDuration getBarLength (const Song& song, BeatPosition where)
     {
-        return getBars (song).getBeatsPerBar (where);
+        return getBars (song).getBarLength (where);
     }
 
     //==============================================================================
@@ -340,7 +340,7 @@ void putProgression (Song& song, const Progression& progression, BeatRange range
         const auto& chord = progression.chords[i];
         const auto key = getLaneKeyAt (song, beat);
         const auto root = getRootIn (chord.numeral, getKeyForProgression (key, progression.scale));
-        const auto length = BeatDuration::fromBeats (chord.bars * getBeatsPerBar (song, beat));
+        const auto length = getBarLength (song, beat) * chord.bars;
         const auto end = std::min (range.getEnd(), beat + length);
 
         lane.appendChild (makeChordState ({ beat, end }, toNumeral (root, chord.numeral.type, chord.numeral.inversion, key)),

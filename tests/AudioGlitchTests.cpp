@@ -78,8 +78,8 @@ public:
     {
     }
 
-    ~LoopbackCapture() override { stopThread (2000); }
-    void stop() { stopThread (2000); }
+    ~LoopbackCapture() override { stopThread (-1); }
+    void stop() { stopThread (-1); }
 
     bool start()
     {

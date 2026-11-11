@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Sidechains (model/mixer/internal/Sidechain.h): which tracks a device can listen to, and why not the others, picking one as an
-// undo step (a compressor as it was made starting to duck in it), Duck Under, forgetting a deleted source, and the
-// source's sound reaching the device as the song plays.
+// undo step (a compressor as it was made starting to duck in it, a vocoder playing it as its carrier), Duck Under,
+// forgetting a deleted source, the source's sound reaching the device as the song plays, and a multiband's band ducking
+// under it.
+#include "EnginePlayback.h"
 #include "TestClips.h"
 #include "TestDevices.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
+#include "devices/dynamics/Multiband.h"
+#include "devices/vocoder/Vocoder.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 
 using phazite::DeviceID;
 using phazite::TrackID;
@@ -199,48 +206,202 @@ TEST_CASE ("A sidechain's choices name every track but the device's own, in thei
     CHECK (phazite::describeSidechainChoices (model, song.add (song.keys, TestGain::typeID)).empty());
 }
 
-TEST_CASE ("Phazite's compressor, as it was made, starts ducking when its sidechain is first chosen, in the same undo step")
+TEST_CASE ("Phazite's compressor ducks under the key chosen for it, set up to duck if still as it was made, in the same undo step")
 {
+    using phazite::devices::Compressor;
     Song song;
     auto& model = *song.song;
     const auto valueOf = [&model] (DeviceID device, const char* id)
     { return phazite::getValueSetByHand (model, phazite::ParameterRef { device, id }); };
+    const auto duckMode = (float) Compressor::Mode::duck, compressMode = (float) Compressor::Mode::compress;
 
-    // On the bass, from the kick: quick, slow to let go, deep; the key whole, as the kick plays no drum sampler.
+    // On the bass, from the kick: it pumps, from -14 dB, 14 dB down, in 1 ms, held 120 ms from the hit and back in a straight
+    // line over 80 ms; the key whole, as the kick plays no drum sampler; its curve as it was, for when it compresses.
     const auto compressor = song.addCompressor (song.bass);
     model.getUndoManager().clearUndoHistory();
     phazite::setSidechainSource (model, compressor, song.kick);
-    const auto ducking = phazite::devices::curves::makeCompression (-30.0f, 8.0f); // its curve: 8:1 over -30 dB
-    CHECK (valueOf (compressor, "points") == doctest::Approx ((float) ducking.size()));
-    CHECK (valueOf (compressor, "point2X") == doctest::Approx (ducking[1][0]));
-    CHECK (valueOf (compressor, "point3Y") == doctest::Approx (ducking[2][1]));
-    CHECK (valueOf (compressor, "attack") == doctest::Approx (1.0f));
-    CHECK (valueOf (compressor, "release") == doctest::Approx (150.0f));
-    CHECK (valueOf (compressor, "keyHighCut") == doctest::Approx (20000.0f));
+    CHECK (valueOf (compressor, "mode") == doctest::Approx (duckMode));
+
+    for (const auto [id, expected] : { std::pair ("threshold", -14.0f), std::pair ("depth", 14.0f), std::pair ("attack", 1.0f),
+                                       std::pair ("hold", 120.0f), std::pair ("release", 80.0f), std::pair ("releaseCurve", 0.0f),
+                                       std::pair ("keyLowCut", 20.0f), std::pair ("keyHighCut", 20000.0f) })
+    {
+        CAPTURE (id);
+        CHECK (valueOf (compressor, id) == doctest::Approx (expected));
+    }
+
+    CHECK (valueOf (compressor, "point2X") == doctest::Approx (phazite::devices::curves::axisForDecibels (-18.0f)).epsilon (1.0e-5));
     CHECK (model.getUndoManager().getUndoDescription() == juce::String ("Sidechain from Kick"));
 
-    // One step: undo puts back both the source and the settings.
+    // One step: undo puts back the source, the mode and the settings.
     phazite::undo (model);
     CHECK_FALSE (phazite::getSidechainSource (model, compressor).isValid());
-    CHECK (valueOf (compressor, "point2X") == doctest::Approx (phazite::devices::curves::axisForDecibels (-18.0f)).epsilon (1.0e-5));
+    CHECK (valueOf (compressor, "mode") == doctest::Approx (compressMode));
     CHECK (valueOf (compressor, "attack") == doctest::Approx (10.0f));
+    CHECK (valueOf (compressor, "release") == doctest::Approx (120.0f));
 
-    // A compressor already set its own way keeps its settings.
+    // Its Duck tab clicked first, as its editor's key picker is on Duck's page: still set up to duck as the key is chosen.
+    {
+        const phazite::UndoStep step (model, "Change Mode");
+        phazite::setValueSetByHand (model, phazite::ParameterRef { compressor, "mode" }, duckMode);
+    }
+
+    phazite::setSidechainSource (model, compressor, song.kick);
+    CHECK (valueOf (compressor, "attack") == doctest::Approx (1.0f));
+    phazite::undo (model);
+    phazite::undo (model);
+
+    // A compressor already set its own way keeps its settings, and ducks.
     {
         const phazite::UndoStep step (model, "Change Attack");
         phazite::setValueSetByHand (model, phazite::ParameterRef { compressor, "attack" }, 2.0f);
     }
 
     phazite::setSidechainSource (model, compressor, song.kick);
+    CHECK (valueOf (compressor, "mode") == doctest::Approx (duckMode));
     CHECK (valueOf (compressor, "attack") == doctest::Approx (2.0f));
-    CHECK (valueOf (compressor, "point2X") == doctest::Approx (phazite::devices::curves::axisForDecibels (-18.0f)).epsilon (1.0e-5));
+    CHECK (valueOf (compressor, "release") == doctest::Approx (120.0f));
 
-    // A source that plays a drum sampler: only its lows, so that the kick ducks the keys and the hats don't.
+    // Listening to none again, it ducks under its own sound, as it was set.
+    phazite::setSidechainSource (model, compressor, {});
+    CHECK (valueOf (compressor, "mode") == doctest::Approx (duckMode));
+
+    // A source that plays a drum sampler: only its kick's body, from 60 to 150 Hz, so that the kick ducks the keys, its long boom
+    // doesn't hold them down, and the snare, clap and hats don't.
     REQUIRE (
         phazite::setInstrument (model, song.kick, phazite::makeOwnDeviceState (model, phazite::devices::DrumSampler::typeID)).isValid());
     const auto onKeys = song.addCompressor (song.keys);
     phazite::setSidechainSource (model, onKeys, song.kick);
+    CHECK (valueOf (onKeys, "keyLowCut") == doctest::Approx (60.0f));
     CHECK (valueOf (onKeys, "keyHighCut") == doctest::Approx (150.0f));
+}
+
+TEST_CASE ("Phazite's compressor hears its key only while it ducks: compressing, the mixer shows no key, which it keeps")
+{
+    using phazite::devices::Compressor;
+    phazite::test::TestSong song;
+    const auto bass = song.firstTrack;
+    song.rename (bass, "Bass");
+    const auto kick = song.addTrack ("Kick");
+    const auto compressor = phazite::duckUnder (song.context, bass, kick);
+    REQUIRE (compressor.isValid());
+
+    // A context's listener, which the mixer's strips are, told what changed.
+    struct Changes : phazite::ProjectContext::Listener
+    {
+        void projectChanged() override {}
+        void songChanged (const phazite::SongChanges& changes) override { devices = devices || changes.devices; }
+        bool devices = false;
+    } changes;
+
+    song.context.addListener (&changes);
+    const juce::ScopeGuard stopListening { [&song, &changes] { song.context.removeListener (&changes); } };
+    phazite::test::dispatchPendingMessages();
+    changes.devices = false;
+
+    const auto slot = [&song, bass]
+    {
+        const auto effects = phazite::getEffects (song.context, bass);
+        REQUIRE (effects.size() == 1);
+        return effects.front();
+    };
+    const auto linked = [&song]
+    {
+        const auto connections = phazite::getConnections (song.context);
+        return std::any_of (connections.begin(), connections.end(),
+                            [] (const phazite::Connection& c) { return c.kind == phazite::Connection::Kind::sidechain; });
+    };
+
+    // Ducking: its slot names the kick and has its colour, and the mixer links the two.
+    CHECK (slot().sidechain.track == kick);
+    CHECK (linked());
+
+    // Compressing: neither, its key kept; a change the mixer hears of, as one of its devices'.
+    song.setParameter (compressor, "mode", (float) Compressor::Mode::compress);
+    phazite::test::dispatchPendingMessages();
+    CHECK (changes.devices);
+    CHECK_FALSE (slot().sidechain.track.isValid());
+    CHECK (slot().hasSidechain);
+    CHECK_FALSE (linked());
+    CHECK (phazite::getSidechainSource (song.context, compressor) == kick);
+
+    // Ducking again: both, under the same kick.
+    changes.devices = false;
+    song.setParameter (compressor, "mode", (float) Compressor::Mode::duck);
+    phazite::test::dispatchPendingMessages();
+    CHECK (changes.devices);
+    CHECK (slot().sidechain.track == kick);
+    CHECK (linked());
+}
+
+TEST_CASE ("Phazite's vocoder plays the track its sidechain listens to as its carrier, chosen in the same undo step")
+{
+    // The track picked by the vocoder's carrier (its editor's picker) is heard at once, whatever carrier it had: no second step.
+    Song song;
+    auto& model = *song.song;
+    const auto vocoder =
+        phazite::insertDeviceState (model, song.bass, phazite::makeOwnDeviceState (model, phazite::devices::Vocoder::typeID));
+    REQUIRE (vocoder.isValid());
+    const auto carrier = [&model, vocoder]
+    { return juce::roundToInt (phazite::getValueSetByHand (model, phazite::ParameterRef { vocoder, "carrier" })); };
+    REQUIRE (carrier() == (int) phazite::devices::Vocoder::Carrier::buzz);
+    model.getUndoManager().clearUndoHistory();
+
+    phazite::setSidechainSource (model, vocoder, song.keys);
+    CHECK (phazite::getSidechainSource (model, vocoder) == song.keys);
+    CHECK (carrier() == (int) phazite::devices::Vocoder::Carrier::track);
+    CHECK (model.getUndoManager().getUndoDescription() == juce::String ("Sidechain from Keys"));
+
+    // One step: undo puts back the buzz with the source. Listening to none again leaves its carrier as it is.
+    phazite::undo (model);
+    CHECK_FALSE (phazite::getSidechainSource (model, vocoder).isValid());
+    CHECK (carrier() == (int) phazite::devices::Vocoder::Carrier::buzz);
+    phazite::setSidechainSource (model, vocoder, song.keys);
+    phazite::setSidechainSource (model, vocoder, {});
+    CHECK (carrier() == (int) phazite::devices::Vocoder::Carrier::track);
+}
+
+TEST_CASE ("Phazite's multiband, as it was made, starts ducking its lows when its sidechain is first chosen, in the same undo step")
+{
+    using phazite::devices::Multiband;
+    Song song;
+    auto& model = *song.song;
+    const auto valueOf = [&model] (DeviceID device, const char* id)
+    { return phazite::getValueSetByHand (model, phazite::ParameterRef { device, id }); };
+    const auto multiband = phazite::insertDeviceState (model, song.bass, phazite::makeOwnDeviceState (model, Multiband::typeID));
+    REQUIRE (multiband.isValid());
+    model.getUndoManager().clearUndoHistory();
+    phazite::setSidechainSource (model, multiband, song.kick);
+
+    // Its low band hears the key, through the compressor's ducking curve (8:1 over -30 dB), quick to grip; the other bands as
+    // they were, every band at first a limiter at 0 dB, which a kick under full scale never reaches.
+    const auto ducking = phazite::devices::curves::makeCompression (-30.0f, 8.0f);
+    CHECK (valueOf (multiband, "lowKey") == doctest::Approx (1.0f));
+    CHECK (valueOf (multiband, "lowPoints") == doctest::Approx ((float) ducking.size()));
+    CHECK (valueOf (multiband, "lowPoint2X") == doctest::Approx (ducking[1][0]));
+    CHECK (valueOf (multiband, "lowPoint3Y") == doctest::Approx (ducking[2][1]));
+    CHECK (valueOf (multiband, "lowAttack") == doctest::Approx (1.0f));
+    CHECK (valueOf (multiband, "lowRelease2") == doctest::Approx (150.0f));
+    CHECK (valueOf (multiband, "midKey") == doctest::Approx (0.0f));
+    CHECK (valueOf (multiband, "masterKey") == doctest::Approx (0.0f));
+    CHECK (valueOf (multiband, "midPoint2X") == doctest::Approx (0.5f));
+    CHECK (model.getUndoManager().getUndoDescription() == juce::String ("Sidechain from Kick"));
+
+    // One step: undo puts back both the source and the settings.
+    phazite::undo (model);
+    CHECK_FALSE (phazite::getSidechainSource (model, multiband).isValid());
+    CHECK (valueOf (multiband, "lowKey") == doctest::Approx (0.0f));
+    CHECK (valueOf (multiband, "lowAttack") == doctest::Approx (10.0f));
+
+    // A multiband already set its own way keeps its settings.
+    {
+        const phazite::UndoStep step (model, "Change Mid Key");
+        phazite::setValueSetByHand (model, phazite::ParameterRef { multiband, "midKey" }, 1.0f);
+    }
+
+    phazite::setSidechainSource (model, multiband, song.kick);
+    CHECK (valueOf (multiband, "lowKey") == doctest::Approx (0.0f));
+    CHECK (valueOf (multiband, "midKey") == doctest::Approx (1.0f));
 }
 
 TEST_CASE ("Duck Under puts a compressor on a track, ducking under another, as one undo step")
@@ -252,8 +413,10 @@ TEST_CASE ("Duck Under puts a compressor on a track, ducking under another, as o
     REQUIRE (compressor.isValid());
     CHECK (phazite::getDeviceChannel (model, compressor) == song.bass);
     CHECK (phazite::getSidechainSource (model, compressor) == song.kick);
-    CHECK (phazite::getValueSetByHand (model, phazite::ParameterRef { compressor, "point2X" })
-           == doctest::Approx (phazite::devices::curves::axisForDecibels (-30.0f))); // ducking, 8:1 over -30 dB
+    CHECK (phazite::getValueSetByHand (model, phazite::ParameterRef { compressor, "mode" })
+           == doctest::Approx ((float) phazite::devices::Compressor::Mode::duck)); // its Duck mode, as it is set up to duck
+    CHECK (phazite::getValueSetByHand (model, phazite::ParameterRef { compressor, "attack" }) == doctest::Approx (1.0f));
+    CHECK (phazite::hearsSidechain (model, compressor));
     CHECK (model.getUndoManager().getUndoDescription() == juce::String ("Duck Bass Under Kick"));
 
     phazite::undo (model);
@@ -263,4 +426,59 @@ TEST_CASE ("Duck Under puts a compressor on a track, ducking under another, as o
     CHECK_FALSE (phazite::duckUnder (model, song.bass, song.bass).isValid());
     phazite::setSidechainSource (model, song.add (song.keys, TestSidechain::typeID), song.bass);
     CHECK_FALSE (phazite::duckUnder (model, song.bass, song.keys).isValid());
+}
+
+TEST_CASE ("A multiband's band whose Key is on ducks under another track through its sidechain; its other bands don't")
+{
+    using phazite::devices::Multiband;
+    phazite::test::TestSong song;
+    song.setTempo (120.0);
+    const auto bass = song.firstTrack;
+    song.rename (bass, "Bass");
+    const auto kick = song.addTrack ("Kick");
+
+    // The kick, a loud low tone, muted (its sidechain still hears it); the bass, a quiet tone in its multiband's low band.
+    const auto sounds = song.getSoundsFolder();
+    song.addAudioClip (kick, phazite::test::writeSound (sounds.getChildFile ("Kick.wav"), 4.0, 80.0, 0.9f), 0.0);
+    song.addAudioClip (bass, phazite::test::writeSound (sounds.getChildFile ("Bass.wav"), 4.0, 60.0, 0.03f), 0.0);
+    phazite::setTrackMuted (*phazite::findSong (song.context), kick, true);
+    const auto multiband = song.addEffect (bass, Multiband::typeID);
+
+    // Its low and mid bands limit at -12 dB: the bass, at -30 dB, passes them, and a band that hears the kick ducks.
+    for (const auto* band : { "low", "mid" })
+    {
+        const auto prefix = juce::String (band);
+        const auto place = phazite::devices::curves::axisForDecibels (-12.0f);
+        song.setParameter (multiband, prefix + "Point2X", place);
+        song.setParameter (multiband, prefix + "Point2Y", place);
+        song.setParameter (multiband, prefix + "Point3Y", place);
+    }
+
+    phazite::setSidechainSource (song.context, multiband, kick);
+    REQUIRE (phazite::getSidechainSource (song.context, multiband) == kick);
+
+    // What plays over a second, from the song's start, past the multiband's latency and attack: the bass's level.
+    const auto play = [&song]
+    {
+        phazite::test::EnginePlayback playback;
+        phazite::test::EnginePlayback::waitForFiles();
+        song.run ("transport.playStop");
+        playback.play (0.5);
+        const auto played = playback.play (1.0);
+        song.run ("transport.playStop");
+        return juce::Decibels::gainToDecibels (played.getRMSLevel (0, 0, played.getNumSamples()));
+    };
+
+    // The bass as it came: a sine's RMS 3 dB under its peak at -30 dB, from a mono file 3 dB down on each side.
+    const auto alone = play();
+    CHECK (alone == doctest::Approx (-36.5f).epsilon (0.03));
+
+    // The low band's Key on: the bass ducks under the kick, as far as the kick is over -12 dB, about 11 dB.
+    song.setParameter (multiband, "lowKey", 1.0f);
+    CHECK (play() < alone - 8.0f);
+
+    // The mid band's instead: the bass, in the low band, plays as it did.
+    song.setParameter (multiband, "lowKey", 0.0f);
+    song.setParameter (multiband, "midKey", 1.0f);
+    CHECK (play() == doctest::Approx (alone).epsilon (0.02));
 }

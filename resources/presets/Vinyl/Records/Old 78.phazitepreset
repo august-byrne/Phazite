@@ -1,0 +1,22 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Vinyl",
+    "instrument": false,
+    "type": "phaziteVinyl",
+    "parameters": {
+      "wow": 10.0,
+      "wowRate": 1.3,
+      "flutter": 3.0,
+      "lowCut": 250.0,
+      "highCut": 4500.0,
+      "distortion": 0.4,
+      "width": 0.0,
+      "bassMono": 20.0,
+      "hiss": -42.0,
+      "crackle": -16.0,
+      "density": 60.0,
+      "mix": 1.0
+    }
+  }
+}

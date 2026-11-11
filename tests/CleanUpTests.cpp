@@ -15,25 +15,15 @@ namespace
 {
 using namespace phazite::test;
 
-void waitForVersions (phazite::ProjectContext& context)
-{
-    REQUIRE (dispatchMessagesUntil (
-        [&context]
-        {
-            const auto* history = phazite::getVersionHistory (context);
-            return history == nullptr || ! history->isBusy();
-        }));
-}
-
 void keepVersion (phazite::ProjectContext& context, const juce::String& name)
 {
-    waitForVersions (context);
+    REQUIRE (waitForVersionHistory (context));
     phazite::setVersionDraft (context, name, {});
     std::optional<juce::Result> result;
     REQUIRE (phazite::saveVersion (context, [&result] (juce::Result r) { result = r; }));
-    REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }));
+    REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }, versionHistoryTimeout));
     REQUIRE (result->wasOk());
-    waitForVersions (context);
+    REQUIRE (waitForVersionHistory (context));
 }
 
 juce::String findBranch (const phazite::ProjectContext& context, const juce::String& name)

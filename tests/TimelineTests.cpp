@@ -51,17 +51,24 @@ TEST_CASE ("The song's bars follow its time signatures, each change starting a b
     CHECK (plain.getBarStart (3).inBeats() == doctest::Approx (12.0));
     CHECK (plain.getBarsAt (at (10.0)) == doctest::Approx (2.5));
 
-    // Two bars of 4/4, then 3/4 from beat 8; and 6/8 from beat 13, a beat into the second bar of 3/4, which ends there.
+    // Two bars of 4/4, then 3/4 from beat 8; and 6/8 from beat 13, a beat into the second bar of 3/4, which ends there: its
+    // bars three quarter notes, its beats eighths.
     const phazite::Bars changing ({ { at (0.0), { 4, 4 } }, { at (8.0), { 3, 4 } }, { at (13.0), { 6, 8 } } });
     CHECK (changing.getBarStart (2).inBeats() == doctest::Approx (8.0));
     CHECK (changing.getBarStart (3).inBeats() == doctest::Approx (11.0));
     CHECK (changing.getBarStart (4).inBeats() == doctest::Approx (13.0));
-    CHECK (changing.getBarStart (5).inBeats() == doctest::Approx (19.0));
+    CHECK (changing.getBarStart (5).inBeats() == doctest::Approx (16.0));
+    CHECK (changing.getBarStart (6).inBeats() == doctest::Approx (19.0));
     CHECK (changing.getBarAt (at (10.9)) == 2);
     CHECK (changing.getBarAt (at (12.5)) == 3);
     CHECK (changing.getBarAt (at (13.0)) == 4);
-    CHECK (changing.getBeatsPerBar (at (9.0)) == 3);
-    CHECK (changing.getBeatsPerBar (at (20.0)) == 6);
+    CHECK (changing.getBarAt (at (16.0)) == 5);
+    CHECK (changing.getBarLength (at (6.0)).inBeats() == doctest::Approx (4.0));
+    CHECK (changing.getBarLength (at (9.0)).inBeats() == doctest::Approx (3.0));
+    CHECK (changing.getBeatLength (at (9.0)).inBeats() == doctest::Approx (1.0));
+    CHECK (changing.getBarLength (at (20.0)).inBeats() == doctest::Approx (3.0));
+    CHECK (changing.getBeatLength (at (20.0)).inBeats() == doctest::Approx (0.5));
+    CHECK (changing.getBarsAt (at (17.5)) == doctest::Approx (5.5));
 
     for (int bar = -2; bar < 8; ++bar)
         CHECK (changing.getBarAt (changing.getBarStart (bar)) == bar);
@@ -171,6 +178,54 @@ TEST_CASE ("Grid lines are bars, beats and the steps between them")
     // In 3/4 after two bars of 4/4: bars of three beats.
     const phazite::Bars changing ({ { at (0.0), { 4, 4 } }, { at (8.0), { 3, 4 } } });
     checkLines (getGridLines (changing, 10, { at (0.0), at (14.0) }), { { 0, bar }, { 4, bar }, { 8, bar }, { 11, bar }, { 14, bar } });
+}
+
+TEST_CASE ("In 6/8 and 7/8 a bar is three and three and a half quarter notes, its beat an eighth; in 2/2 four, its beat a half")
+{
+    const auto bar = GridLineType::bar, beat = GridLineType::beat, step = GridLineType::subdivision;
+
+    // 6/8: a bar line every three quarter notes, a beat's line every eighth, half a beat a sixteenth.
+    const phazite::Bars sixEight ({ { at (0.0), { 6, 8 } } });
+    CHECK (phazite::TimeSignature { 6, 8 }.getBarLength().inBeats() == doctest::Approx (3.0));
+    CHECK (phazite::TimeSignature { 6, 8 }.getBeatLength().inBeats() == doctest::Approx (0.5));
+    CHECK (phazite::TimeSignature { 7, 8 }.getBarLength().inBeats() == doctest::Approx (3.5));
+    CHECK (phazite::TimeSignature { 2, 2 }.getBeatLength().inBeats() == doctest::Approx (2.0));
+    CHECK (sixEight.getBarLength (at (1.0)).inBeats() == doctest::Approx (3.0));
+    CHECK (sixEight.getBeatLength (at (1.0)).inBeats() == doctest::Approx (0.5));
+    CHECK (sixEight.getBarStart (1).inBeats() == doctest::Approx (3.0));
+    CHECK (sixEight.getBarStart (3).inBeats() == doctest::Approx (9.0));
+    CHECK (sixEight.getBarAt (at (2.9)) == 0);
+    CHECK (sixEight.getBarAt (at (3.0)) == 1);
+    CHECK (sixEight.getBarsAt (at (4.5)) == doctest::Approx (1.5));
+    checkLines (getGridLines (sixEight, 10, { at (0.0), at (9.0) }), { { 0, bar }, { 3, bar }, { 6, bar }, { 9, bar } });
+    checkLines (getGridLines (sixEight, 9, { at (0.0), at (3.0) }),
+                { { 0, bar }, { 0.5, beat }, { 1, beat }, { 1.5, beat }, { 2, beat }, { 2.5, beat }, { 3, bar } });
+    checkLines (getGridLines (sixEight, 8, { at (0.0), at (1.0) }),
+                { { 0, bar }, { 0.25, step }, { 0.5, beat }, { 0.75, step }, { 1, beat } });
+    CHECK (phazite::getStepInBeats ({ 10 }, sixEight, at (0.0)) == doctest::Approx (3.0));
+    CHECK (phazite::getStepInBeats ({ 9 }, sixEight, at (0.0)) == doctest::Approx (0.5));
+    CHECK (phazite::getStepInBeats ({ 7 }, sixEight, at (0.0)) == doctest::Approx (0.125)); // a quarter of a beat: a 32nd
+    CHECK (phazite::snapToGrid (at (1.3), { 9 }, sixEight).inBeats() == doctest::Approx (1.5));
+    CHECK (phazite::snapToGrid (at (4.4), { 10 }, sixEight).inBeats() == doctest::Approx (3.0));
+    CHECK (phazite::snapToGrid (at (21.0), { 11 }, sixEight).inBeats() == doctest::Approx (24.0)); // every two bars from the start
+
+    // 7/8: seven eighths, three and a half quarter notes, a bar.
+    const phazite::Bars sevenEight ({ { at (0.0), { 7, 8 } } });
+    checkLines (getGridLines (sevenEight, 10, { at (0.0), at (7.0) }), { { 0, bar }, { 3.5, bar }, { 7, bar } });
+    CHECK (getGridLines (sevenEight, 9, { at (0.0), at (3.4) }).size() == 7); // the bar's line and six more beats
+    CHECK (sevenEight.getBarAt (at (3.4)) == 0);
+    CHECK (phazite::getStepInBeats ({ 10 }, sevenEight, at (0.0)) == doctest::Approx (3.5));
+
+    // 2/2: two half notes a bar, four quarter notes; half a beat a quarter note.
+    const phazite::Bars cut ({ { at (0.0), { 2, 2 } } });
+    checkLines (getGridLines (cut, 9, { at (0.0), at (8.0) }), { { 0, bar }, { 2, beat }, { 4, bar }, { 6, beat }, { 8, bar } });
+    checkLines (getGridLines (cut, 8, { at (0.0), at (2.0) }), { { 0, bar }, { 1, step }, { 2, beat } });
+    CHECK (phazite::getStepInBeats ({ 9 }, cut, at (0.0)) == doctest::Approx (2.0));
+
+    // The zoom is in pixels a quarter note: at 48, 6/8's eighths are 24 pixels apart, far enough to show; at 24 they would
+    // be 12, too close, and the grid is its bars, 72 apart.
+    CHECK (phazite::getAdaptiveGridStep (sixEight, at (0.0), 48.0, false, 20.0).level == 9);
+    CHECK (phazite::getAdaptiveGridStep (sixEight, at (0.0), 24.0, false, 20.0).level == 10);
 }
 
 TEST_CASE ("Grid settings are kept in the project")

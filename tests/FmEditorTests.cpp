@@ -3,8 +3,9 @@
 // picture, a click on which shows all eight, a click on one of which plays it as one undo step and closes them, with the
 // arrows beside its name and the arrow keys stepping through them; every operator's column saying what it does in the
 // algorithm; the tabs showing one group of every operator's controls at a time; a fixed operator's frequency in place of its
-// ratio; an operator switched off shown faint; a strip dragged as one undo step; the operator under the pointer lit; and how
-// it fits the default dock.
+// ratio; an operator switched off shown faint; a strip dragged as one undo step; each operator's Phase in its Tone group, in
+// degrees, faint while the phases run free; the operator under the pointer lit; the filter's envelope and velocity, as the
+// synth's editor shows its own; and how it fits the default dock.
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -17,6 +18,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/FmEditor.h"
+#include "ui/devices/SynthParts.h"
 
 namespace
 {
@@ -180,7 +182,7 @@ TEST_CASE ("The FM synth's tabs show one group of every operator's controls at a
     tone.click (editor.getGroupTab (Group::tone).getLocalBounds().getCentre());
     CHECK (editor.getShownGroup() == Group::tone);
 
-    for (const auto* id : { "op1Wave", "op4Wave", "op1Feedback", "op4Feedback" })
+    for (const auto* id : { "op1Wave", "op4Wave", "op1Feedback", "op4Feedback", "op1Phase", "op4Phase" })
         CHECK (showing (id));
 
     CHECK_FALSE (showing ("op1Attack"));
@@ -256,6 +258,144 @@ TEST_CASE ("Dragging an FM operator's strip changes it as one undo step; switche
     CHECK (level.getParentComponent()->getAlpha() < 1.0f);
     CHECK (editor.findControl ("op2Attack")->getParentComponent()->getParentComponent()->getAlpha() < 1.0f);
     CHECK (editor.findControl ("op1Level")->getParentComponent()->getAlpha() == 1.0f);
+}
+
+TEST_CASE ("Each FM operator's Phase is in its Tone group, in degrees, dragged as one undo step, and faint while the phases run free")
+{
+    Screen screen;
+    screen.dock();
+    auto& editor = *screen.editor;
+    editor.showGroup (Group::tone);
+
+    // Under its wave and its feedback, inside its group, for each of the four.
+    for (const auto* id : { "op1Phase", "op2Phase", "op3Phase", "op4Phase" })
+    {
+        CAPTURE (id);
+        auto* strip = editor.findControl (id);
+        REQUIRE (strip != nullptr);
+        CHECK (strip->isShowing());
+        phazite::test::checkChildrenApart (*strip->getParentComponent());
+        auto* tip = dynamic_cast<juce::SettableTooltipClient*> (strip);
+        REQUIRE (tip != nullptr);
+        CHECK (tip->getTooltip().contains ("Reset"));
+    }
+
+    // Its angle as it reads, and a drag up for more of a turn, one undo step.
+    auto* phase = dynamic_cast<juce::Slider*> (editor.findControl ("op3Phase"));
+    REQUIRE (phase != nullptr);
+    CHECK (screen.getValue ("op3Phase") == 0.0f);
+    screen.setValue ("op3Phase", 180.0f);
+    editor.refresh();
+    CHECK (phase->getTextFromValue (phase->getValue()) == juce::String::fromUTF8 ("180\xc2\xb0"));
+
+    phazite::test::Mouse mouse (*phase);
+    const auto middle = phase->getLocalBounds().getCentre();
+    mouse.press (middle);
+    mouse.dragTo (middle.translated (0, -20));
+    mouse.dragTo (middle.translated (0, -40));
+    mouse.release();
+    CHECK (screen.getValue ("op3Phase") > 180.0f);
+    CHECK (screen.getValue ("op3Phase") <= 360.0f);
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Op 3 Phase"));
+
+    // While the phases run free it means nothing, and shows faint; the wave and the feedback beside it as they were.
+    CHECK (phase->getAlpha() == 1.0f);
+    screen.setValue ("phase", (float) FmSynth::Phase::free);
+    editor.refresh();
+    CHECK (phase->getAlpha() < 1.0f);
+    CHECK (editor.findControl ("op3Feedback")->getAlpha() == 1.0f);
+    screen.setValue ("phase", (float) FmSynth::Phase::reset);
+    editor.refresh();
+    CHECK (phase->getAlpha() == 1.0f);
+}
+
+TEST_CASE ("The FM synth's filter has its envelope and velocity as the synth's has: the envelope a part of its own, faint while the "
+           "filter is off, its picture showing a note's as it plays")
+{
+    Screen screen;
+    screen.dock();
+    auto& editor = *screen.editor;
+    auto& layout = editor.getLayout();
+    REQUIRE (layout.usesPages());
+
+    // The page that shows a control, every page whole.
+    const auto pageOf = [&editor, &layout] (const char* id)
+    {
+        for (int page = 0; page < layout.getNumPages(); ++page)
+        {
+            layout.showPage (page);
+            phazite::test::checkChildrenApart (editor);
+
+            if (editor.findControl (id)->isShowing())
+                return page;
+        }
+
+        return -1;
+    };
+
+    const auto inside = [&editor] (const char* id)
+    {
+        auto* control = editor.findControl (id);
+        return control->isShowing() && editor.getLocalBounds().contains (editor.getLocalArea (control, control->getLocalBounds()));
+    };
+
+    // The filter's own, with how far its envelope and velocity move the cutoff.
+    REQUIRE (pageOf ("cutoff") > 0);
+
+    for (const auto* id : { "filterType", "cutoff", "resonance", "keyTracking", "filterSlope", "filterEnvelope", "filterVelocity" })
+    {
+        CAPTURE (id);
+        CHECK (inside (id));
+    }
+
+    // Its envelope's times, sustain and bends, under its picture.
+    REQUIRE (pageOf ("filterAttack") > 0);
+
+    for (const auto* id :
+         { "filterAttack", "filterDecay", "filterSustain", "filterRelease", "filterAttackCurve", "filterDecayCurve", "filterReleaseCurve" })
+    {
+        CAPTURE (id);
+        CHECK (inside (id));
+    }
+
+    phazite::ui::EnvelopeView* picture = nullptr;
+
+    for (auto* view : phazite::test::findAll<phazite::ui::EnvelopeView> (editor))
+        if (view->getTitle() == "Filter envelope")
+            picture = view;
+
+    REQUIRE (picture != nullptr);
+    CHECK (picture->isShowing());
+
+    // Faint while the filter is off, as a new FM synth's is, with nothing for it to move.
+    CHECK (screen.getValue ("filterOn") == 0.0f);
+    CHECK (picture->getParentComponent()->getAlpha() < 1.0f);
+    screen.setValue ("filterOn", 1.0f);
+    editor.refresh();
+    CHECK (picture->getParentComponent()->getAlpha() == 1.0f);
+
+    // A note held: the picture shows how far its envelope has got.
+    auto* synth = phazite::makeDeviceHandle (screen.getSong(), screen.synth).getProcessor<FmSynth>();
+    REQUIRE (synth != nullptr);
+    synth->prepare (48000.0, 4800);
+    std::vector<float> values;
+
+    for (const auto& parameter : FmSynth::info.parameters)
+        values.push_back (parameter.defaultValue);
+
+    juce::AudioBuffer<float> buffer (2, 4800);
+    buffer.clear();
+    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+    const phazite::devices::NoteEvent note { .type = phazite::devices::NoteEvent::Type::noteOn, .sample = 0, .number = 60, .value = 1.0f };
+    phazite::devices::ProcessContext block;
+    block.channels = channels;
+    block.numChannels = 2;
+    block.numSamples = buffer.getNumSamples();
+    block.parameters = values;
+    block.events = { &note, 1 };
+    synth->process (block);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (picture->getShownLevel() > 0.1f);
 }
 
 TEST_CASE ("The FM operator under the pointer is lit in the algorithm's picture")

@@ -12,10 +12,26 @@ Recording::Input::Input (std::vector<int> inputChannels, int capacity)
 
 void Recording::Input::write (const float* const* inputs, int numInputs, int offset, int numSamples) noexcept
 {
-    if (fifo.getFreeSpace() < numSamples)
+    // Lost without room for it, or while the gap before it can't be noted yet: what comes after a gap waits for it.
+    if (fifo.getFreeSpace() < numSamples || (lost.length > 0 && gapFifo.getFreeSpace() < 1))
     {
-        overflowed.store (true, std::memory_order_relaxed);
+        if (lost.length == 0)
+            lost.start = framesWritten;
+
+        lost.length += numSamples;
+        framesWritten += numSamples;
         return;
+    }
+
+    // The gap before it, handed on first.
+    if (lost.length > 0)
+    {
+        {
+            const auto scope = gapFifo.write (1);
+            gaps[(size_t) scope.startIndex1] = lost;
+        }
+
+        lost = {};
     }
 
     const auto scope = fifo.write (numSamples);
@@ -39,6 +55,15 @@ void Recording::Input::write (const float* const* inputs, int numInputs, int off
         part (scope.startIndex1, scope.blockSize1, 0);
         part (scope.startIndex2, scope.blockSize2, scope.blockSize1);
     }
+
+    framesWritten += numSamples;
+}
+
+std::optional<Recording::Input::Gap> Recording::Input::getNextGap() const noexcept
+{
+    int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+    gapFifo.prepareToRead (1, start1, size1, start2, size2);
+    return size1 > 0 ? std::optional (gaps[(size_t) start1]) : std::nullopt;
 }
 
 //==============================================================================

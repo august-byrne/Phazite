@@ -143,8 +143,24 @@ namespace
         return notes;
     }
 
+    // The last bar line at or before a beat, and the first at or after it, as the song's time signatures lay its bars out,
+    // in beats.
+    double getBarStartAt (const Bars& bars, double beat)
+    {
+        const auto bar = bars.getBarAt (BeatPosition::fromBeats (beat));
+        const auto start = bars.getBarStart (bar).inBeats();
+        return start <= beat ? start : bars.getBarStart (bar - 1).inBeats();
+    }
+
+    double getBarLineFrom (const Bars& bars, double beat)
+    {
+        const auto bar = bars.getBarAt (BeatPosition::fromBeats (beat));
+        const auto start = bars.getBarStart (bar).inBeats();
+        return start >= beat ? start : bars.getBarStart (bar + 1).inBeats();
+    }
+
     // The first bar line from one, in beats, after which a clip of some beats would overlap none of the track's clips.
-    double findRoom (const Song& song, TrackID track, double bar, double length, double beatsPerBar)
+    double findRoom (const Song& song, TrackID track, double bar, double length, const Bars& bars)
     {
         for (bool moved = true; moved;)
         {
@@ -157,7 +173,7 @@ namespace
 
                 if (range.getStart().inBeats() < bar + length && end > bar)
                 {
-                    bar = std::ceil (end / beatsPerBar - 1.0e-9) * beatsPerBar;
+                    bar = getBarLineFrom (bars, end);
                     moved = true;
                 }
             }
@@ -217,20 +233,21 @@ ClipID capture (Song& song, Selection* selection)
     }
 
     // Whole bars, from the bar the first note is in to the bar the last one ends in.
-    const auto beatsPerBar = (double) getTimeSignature (song).numerator;
-    auto clipStart = std::floor (beats.front().first / beatsPerBar) * beatsPerBar;
+    const auto bars = getBars (song);
+    auto clipStart = getBarStartAt (bars, beats.front().first);
     auto lastEnd = clipStart;
 
     for (const auto& [start, end] : beats)
         lastEnd = std::max (lastEnd, end);
 
-    const auto length = std::max (beatsPerBar, std::ceil ((lastEnd - clipStart) / beatsPerBar - 1.0e-9) * beatsPerBar);
+    const auto length =
+        std::max (bars.getBarLength (BeatPosition::fromBeats (clipStart)).inBeats(), getBarLineFrom (bars, lastEnd - 1.0e-9) - clipStart);
 
     // While stopped: at the bar the play start is in, or the first after the track's clips with room for it.
     if (! playing)
     {
-        const auto playStartBar = std::floor (getPlayStartBeat (song).inBeats() / beatsPerBar) * beatsPerBar;
-        const auto bar = findRoom (song, track, playStartBar, length, beatsPerBar);
+        const auto playStartBar = getBarStartAt (bars, getPlayStartBeat (song).inBeats());
+        const auto bar = findRoom (song, track, playStartBar, length, bars);
 
         for (auto& [start, end] : beats)
         {

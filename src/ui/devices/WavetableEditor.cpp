@@ -46,7 +46,8 @@ public:
           position (std::move (positionHandle))
     {
         setTitle (getOscillatorName (osc) + " Wavetable");
-        setTooltip ("Drag across it to move through the table; drop a sound on it to make that the table");
+        setTooltip ("Drag right or up to move through the table, left or down to go back; drop a sound on it to make that the table");
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
     }
 
     void setTable (std::shared_ptr<const devices::Wavetable> newTable, const juce::String& name)
@@ -96,16 +97,24 @@ public:
         for (auto frame = frames.rbegin(); frame != frames.rend(); ++frame)
             g.strokePath (*frame, juce::PathStrokeType (WavetableTint::lineWidth));
 
-        // The one it plays.
+        // The one it plays, which a drag moves: ringed in the text colour under the pointer and while dragged.
         if (table != nullptr)
         {
             const auto place = std::clamp (played, 0.0f, 1.0f) * (float) (table->getNumFrames() - 1);
             const auto first = std::min ((int) place, table->getNumFrames() - 1);
             const auto second = std::min (first + 1, table->getNumFrames() - 1);
+            const auto wave = makeWave (table->getFrameForDrawing (first), table->getFrameForDrawing (second), place - (float) first,
+                                        getFrameBox (std::clamp (played, 0.0f, 1.0f)));
+
+            if (hovered || position.isInGesture())
+            {
+                g.setColour (palette.text.withAlpha (alpha));
+                g.strokePath (wave, juce::PathStrokeType (WavetableTint::playedWidth + 2.0f * GraphTint::litGap,
+                                                          juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+
             g.setColour (getDeviceTint (*this).withAlpha (alpha));
-            g.strokePath (makeWave (table->getFrameForDrawing (first), table->getFrameForDrawing (second), place - (float) first,
-                                    getFrameBox (std::clamp (played, 0.0f, 1.0f))),
-                          juce::PathStrokeType (WavetableTint::playedWidth));
+            g.strokePath (wave, juce::PathStrokeType (WavetableTint::playedWidth));
         }
     }
 
@@ -125,6 +134,11 @@ public:
     }
 
     void mouseUp (const juce::MouseEvent&) override { position.endGesture(); }
+
+    // Under the pointer, what a drag moves lights up: the frame it plays.
+    void mouseEnter (const juce::MouseEvent&) override { setHovered (true); }
+    void mouseMove (const juce::MouseEvent&) override { setHovered (true); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered (false); }
 
     // From the browser: a sound file.
     bool isInterestedInDragSource (const SourceDetails& details) override { return getDraggedFile (details.description).has_value(); }
@@ -157,12 +171,21 @@ private:
     std::shared_ptr<const devices::Wavetable> table;
     std::vector<juce::Path> frames; // those drawn, from the front
     float played = 0.0f, dragStart = 0.0f;
-    bool on = true, dropping = false;
+    bool on = true, dropping = false, hovered = false;
 
     void setDropping (bool now)
     {
         dropping = now;
         repaint();
+    }
+
+    void setHovered (bool isHovered)
+    {
+        if (isHovered != hovered)
+        {
+            hovered = isHovered;
+            repaint();
+        }
     }
 
     // Where a frame is drawn: the first at the front, at the bottom left, and the last at the back, at the top right.
@@ -383,8 +406,12 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
 
     const auto subAndNoise = makeControlsPart ("Sub and Noise", { "subLevel", "subOctave", "subShape", "noiseLevel" }, 4,
                                                ParameterControls::Size::compact, { "Sub", "Octave", "Shape", "Noise" });
-    const auto unison = makeControlsPart ("Unison", { "unisonVoices", "unisonDetune", "unisonSpread", "unisonPosition" }, 4,
-                                          ParameterControls::Size::compact, { "Voices", "Detune", "Spread", "Position" });
+
+    // The unison: how many copies, how far apart in pitch and across the stereo field; then where they stack, how far each
+    // wanders, and how far apart in the table: the two lists one under the other.
+    const auto unison =
+        makeControlsPart ("Unison", { "unisonVoices", "unisonDetune", "unisonSpread", "unisonStack", "unisonDrift", "unisonPosition" }, 3,
+                          ParameterControls::Size::compact, { "Voices", "Detune", "Spread", "Stack", "Drift", "Position" });
 
     // The filter: its response, then its controls.
     auto all = std::make_shared<std::vector<ParameterHandle>>();
@@ -468,15 +495,15 @@ WavetableEditor::WavetableEditor (const DeviceHandle& handle)
                 addControl (getParameterID (WavetableSynth::getModParameter (slot, field)), *control);
 
     modulation.push_back ({ "Matrix", &matrix, Matrix::getPreferredWidth(), Matrix::getPreferredHeight(), Matrix::getPreferredHeight() });
-    modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "bendRange", "velocity", "level" }, 3,
+    modulation.push_back (makeControlsPart ("Voice", { "voiceMode", "glide", "bendRange", "velocity", "level" }, 5,
                                             ParameterControls::Size::compact, { "Mode", "Glide", "Bend", "Velocity", "Level" }));
 
     // A part to a column, as tall as the dock is short, so that only the list has tabs: in the dock, two side by side on each
-    // page: the oscillators; the filter and the amp's envelope; the sub, noise and unison, and how it plays; then the rest of
-    // the modulation, the list down its side.
+    // page: the oscillators; the filter and the amp's envelope; the sub and noise over how it plays, and the unison; then the
+    // rest of the modulation, the list down its side.
     const auto amp = modulation.front(), voice = modulation.back();
     const std::vector<DeviceLayout::Part> rest (modulation.begin() + 1, modulation.end() - 1);
-    setParts ({ { oscillatorParts[0] }, { oscillatorParts[1] }, { filter }, { amp }, { subAndNoise, unison }, { voice }, rest }, { 6 });
+    setParts ({ { oscillatorParts[0] }, { oscillatorParts[1] }, { filter }, { amp }, { subAndNoise, voice }, { unison }, rest }, { 6 });
     getLayout().setColumnName (6, "Modulation");
     refresh();
 }

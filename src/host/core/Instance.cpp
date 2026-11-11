@@ -3,7 +3,9 @@
 #include "devices/core/AudioThreads.h"
 #include "sandbox/core/Vst3State.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 
 namespace phazite::host
 {
@@ -50,18 +52,27 @@ namespace
     }
 } // namespace
 
-// The song's place for the plug-in, set for each piece it plays (on the thread that plays it).
+// The song's place for the plug-in, set for each piece it plays (on the thread that plays it): so far on from the block's
+// start while the song plays, where the playhead is in every piece while it is stopped; and the bar it is in, the block's
+// or one of the bars after it, each as long.
 class Instance::PlayHead final : public juce::AudioPlayHead
 {
 public:
     void set (const sandbox::BlockInfo& info, double rate, int offset) noexcept
     {
+        const auto moved = info.isPlaying != 0 ? offset : 0;
+        const auto ppq = info.beat + moved * info.tempo / (60.0 * rate);
+        const auto barLength = info.barLength > 0.0 ? info.barLength : 4.0;
+        const auto barsOn = moved > 0 ? std::max (0.0, std::floor ((ppq - info.barStart) / barLength + 1.0e-9)) : 0.0;
+
         position = {};
         position.setBpm (info.tempo);
         position.setTimeSignature (juce::AudioPlayHead::TimeSignature { info.timeSignatureNumerator, info.timeSignatureDenominator });
-        position.setTimeInSamples (info.sample + offset);
-        position.setTimeInSeconds ((double) (info.sample + offset) / rate);
-        position.setPpqPosition (info.beat + offset * info.tempo / (60.0 * rate));
+        position.setTimeInSamples (info.sample + moved);
+        position.setTimeInSeconds ((double) (info.sample + moved) / rate);
+        position.setPpqPosition (ppq);
+        position.setPpqPositionOfLastBarStart (info.barStart + barsOn * barLength);
+        position.setBarCount (info.barCount + (std::int64_t) barsOn);
         position.setIsPlaying (info.isPlaying != 0);
     }
 
@@ -159,8 +170,11 @@ void Instance::start (std::unique_ptr<sandbox::BlockChannel> blockChannel, doubl
 
 void Instance::stop()
 {
+    // Waited for however long the plug-in takes over its block, never ended by force, which could leave the plug-in's
+    // locks held: a plug-in that hangs keeps the helper's message thread from answering, and Phazite ends the helper
+    // (sandbox/client/Helper.h).
     signalThreadShouldExit();
-    stopThread (2000);
+    stopThread (-1);
     plugin->releaseResources();
 }
 

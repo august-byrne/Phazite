@@ -210,8 +210,8 @@ TEST_CASE ("The song keeps the loop, where playback starts and the metronome on 
     CHECK (phazite::isMetronomeOn (state));
     CHECK_FALSE (state.getUndoManager().canUndo());
 
-    // They keep their beats when the tempo changes, when the change is undone, and when the time signature changes (a beat
-    // is an eighth note in 6/8: a quarter of a second at 120 BPM).
+    // They keep their beats when the tempo changes, when the change is undone, and when the time signature changes, which
+    // leaves their times too (a beat is a quarter note in 6/8 too: half a second at 120 BPM).
     phazite::setTempo (state, 60.0);
     CHECK (song.getLoop() == "4.000-12.000");
     CHECK (song.getPlayStartSeconds() == doctest::Approx (6.0));
@@ -219,8 +219,8 @@ TEST_CASE ("The song keeps the loop, where playback starts and the metronome on 
     CHECK (song.getLoop() == "2.000-6.000");
     CHECK (song.getPlayStartSeconds() == doctest::Approx (3.0));
     phazite::setTimeSignature (state, { 6, 8 });
-    CHECK (song.getLoop() == "1.000-3.000");
-    CHECK (song.getPlayStartSeconds() == doctest::Approx (1.5));
+    CHECK (song.getLoop() == "2.000-6.000");
+    CHECK (song.getPlayStartSeconds() == doctest::Approx (3.0));
     CHECK (phazite::isLoopOn (state));
     CHECK (phazite::isMetronomeOn (state));
 }

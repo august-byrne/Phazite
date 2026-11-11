@@ -45,6 +45,12 @@ struct BlockInfo
     double tempo = 120.0;
     double beat = 0.0;       // where the song is at the block's start, in quarter notes
     std::int64_t sample = 0; // and in samples
+
+    // The bar the song is in at the block's start: where it starts, in quarter notes; which it is, from 0 at the song's start;
+    // and how long it is, in quarter notes, for the pieces of the block in the bars after it.
+    double barStart = 0.0;
+    std::int64_t barCount = 0;
+    double barLength = 4.0;
 };
 
 class BlockChannel

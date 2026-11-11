@@ -134,39 +134,10 @@ void purgeClipRenders (const Song& song)
 }
 
 //==============================================================================
-class ClipRenders::Job : public juce::ThreadPoolJob
-{
-public:
-    Job (ClipRenders& o, Recipe r, juce::File file, std::shared_ptr<Render> shared)
-        : juce::ThreadPoolJob ("Clip render"),
-          owner (o),
-          recipe (std::move (r)),
-          render (std::move (file)),
-          made (std::move (shared))
-    {
-    }
-
-    JobStatus runJob() override
-    {
-        renderClipAudio (recipe.source, recipe.settings, render, [this] { return shouldExit() || made->stopped.load(); }, &made->written);
-        owner.jobFinished (render);
-        return jobHasFinished;
-    }
-
-private:
-    ClipRenders& owner;
-    const Recipe recipe;
-    const juce::File render;
-    const std::shared_ptr<Render> made;
-};
-
 ClipRenders::ClipRenders (const Song& s)
     : song (s),
       state (s.getState()),
-      pool (juce::ThreadPoolOptions {}
-                .withThreadName ("Phazite clip renders")
-                .withNumberOfThreads (2)
-                .withDesiredThreadPriority (juce::Thread::Priority::low))
+      jobs ("Phazite clip renders", 2, juce::Thread::Priority::low)
 {
     state.addListener (this);
     update();
@@ -176,7 +147,7 @@ ClipRenders::~ClipRenders()
 {
     state.removeListener (this);
     stopTimer();
-    pool.removeAllJobs (true, 10000); // each stops between blocks
+    jobs.removeAll (true); // each stops between blocks, and is waited for
     cancelPendingUpdate();
 }
 
@@ -243,7 +214,13 @@ void ClipRenders::update()
             std::max<juce::int64> (1, stretch::getStretchedLength (getAudioFileInfo (recipe.source).lengthInSamples, recipe.settings));
         framesAll += made->length;
         running[render] = made;
-        pool.addJob (new Job (*this, recipe, render, std::move (made)), true);
+        jobs.add (
+            [this, toMake = recipe, file = render, shared = std::move (made)] (const BackgroundJobs::ShouldStop& shouldStop)
+            {
+                renderClipAudio (
+                    toMake.source, toMake.settings, file, [&] { return shouldStop() || shared->stopped.load(); }, &shared->written);
+                jobFinished (file);
+            });
     }
 }
 

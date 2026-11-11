@@ -2,6 +2,7 @@
 #include "internal/SandboxedProcessor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace phazite
@@ -233,9 +234,16 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
             channel.getChanges()[block.numChanges++] = { change.parameter, change.sample, change.value };
     }
 
+    // Where the song is, as a plug-in's playhead has it: in quarter notes (its ppqPosition) and in samples, the time
+    // signature there, and the bar it is in: where it starts and which it is.
     block.tempo = context.tempo;
     block.beat = context.beat;
-    block.sample = (std::int64_t) (context.beat * 60.0 / std::max (1.0, context.tempo) * rate);
+    block.sample = context.songSample;
+    block.timeSignatureNumerator = context.timeSignatureNumerator;
+    block.timeSignatureDenominator = context.timeSignatureDenominator;
+    block.barStart = context.barStart;
+    block.barCount = (std::int64_t) std::floor (context.bars);
+    block.barLength = context.barLength;
     block.isPlaying = context.isPlaying ? 1 : 0;
     block.isRendering = context.isRendering ? 1 : 0;
     block.reset = resetWanted ? 1 : 0;

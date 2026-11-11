@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumSamplerEditor.h"
+#include "GraphDot.h"
 #include "model/notes/NoteValues.h"
 #include "ui/input/LibraryDrag.h"
 #include "ui/theme/Icons.h"
@@ -44,6 +45,31 @@ namespace
     juce::String getGeneralMidiDrum (int pad)
     {
         return pad >= 35 && pad <= 81 ? getDrumName (pad) : juce::String();
+    }
+
+    // The lowest of the sixteen pads shown from a pad's row: a multiple of four, as high as the highest sixteen.
+    int getFirstShown (int pad)
+    {
+        return juce::jlimit (0, DrumSampler::numPads - shownPads, pad - ((pad % columns) + columns) % columns);
+    }
+
+    const juce::String soundHint ("The pad's sound as it plays, with its envelope over it. Drag sideways to move the start, the "
+                                  "attack's end, the hold's end or the decay's end, whichever is nearest the pointer.");
+
+    // What the hint bar says of the handle a press on the pad's sound takes.
+    juce::String describeHandle (Field field)
+    {
+        // Not a switch: a pad has many fields besides these, which GCC's -Wswitch-enum would want named.
+        if (field == Field::start)
+            return "Drag sideways to move where the sound starts.";
+
+        if (field == Field::attack)
+            return "Drag sideways to move the attack's end: how long the sound takes to rise.";
+
+        if (field == Field::hold)
+            return "Drag sideways to move the hold's end: how long it stays at its loudest. Dragged to the end, the whole sound plays.";
+
+        return "Drag sideways to move the decay's end: how long the sound takes to fade away.";
     }
 } // namespace
 
@@ -186,7 +212,8 @@ private:
 
 //==============================================================================
 // Every pad, four across, the lowest at the bottom: those that play a sound filled, lit as they play, the selected one
-// outlined, the sixteen shown framed. A click or a drag shows the rows around the pointer, the arrow keys a row more.
+// outlined, the sixteen shown framed. A click or a drag shows the rows around the pointer, which a lit frame shows first, and
+// the arrow keys a row more.
 class DrumSamplerEditor::PadMap : public juce::Component,
                                   public juce::SettableTooltipClient
 {
@@ -198,6 +225,7 @@ public:
         setDescription ("Every pad, the lowest at the bottom: those that play a sound filled. Click or drag to show others.");
         setTooltip ("Every pad, the lowest at the bottom, those that play a sound filled: click or drag to show others");
         setWantsKeyboardFocus (true);
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
     }
 
     // Which pads play a sound, and how hard each was hit since the last look.
@@ -244,13 +272,21 @@ public:
         g.setColour (p.accent);
         g.drawRect (getCell (editor.selectedPad), 1.0f);
 
-        const auto shown = getCell (editor.firstShown).getUnion (getCell (editor.firstShown + shownPads - 1));
         g.setColour (hasKeyboardFocus (false) ? p.focus : p.text);
-        g.drawRect (shown.expanded (0.5f), 1.0f);
+        g.drawRect (getFrame (editor.firstShown).expanded (0.5f), 1.0f);
+
+        // Under the pointer, the sixteen a click shows, lit.
+        if (hovered >= 0)
+        {
+            g.setColour (p.text);
+            g.drawRect (getFrame (hovered).expanded (GraphTint::litGap), GraphTint::litWidth);
+        }
     }
 
     void mouseDown (const juce::MouseEvent& e) override { showAround (e.position.y); }
     void mouseDrag (const juce::MouseEvent& e) override { showAround (e.position.y); }
+    void mouseMove (const juce::MouseEvent& e) override { setHovered (getFirstShownAt (e.position.y)); }
+    void mouseExit (const juce::MouseEvent&) override { setHovered (-1); }
 
     bool keyPressed (const juce::KeyPress& key) override
     {
@@ -274,13 +310,31 @@ private:
     DrumSamplerEditor& editor;
     std::array<bool, DrumSampler::numPads> filled {};
     std::array<float, DrumSampler::numPads> lights {};
+    int hovered = -1; // the lowest of the sixteen a click under the pointer shows
 
-    // The four rows around the one under the pointer: it and the one under it, and two over it.
-    void showAround (float y)
+    juce::Rectangle<float> getFrame (int first) const { return getCell (first).getUnion (getCell (first + shownPads - 1)); }
+
+    // The four rows around the one at a height: it and the one under it, and two over it; by the lowest of their pads.
+    int getFirstShownAt (float y) const
     {
         const auto area = getLocalBounds().toFloat().reduced (1.0f);
         const auto row = (int) std::floor ((area.getBottom() - y) / (area.getHeight() / (float) rows));
-        editor.showPadsFrom ((row - 1) * columns);
+        return getFirstShown ((row - 1) * columns);
+    }
+
+    void showAround (float y)
+    {
+        setHovered (getFirstShownAt (y));
+        editor.showPadsFrom (getFirstShownAt (y));
+    }
+
+    void setHovered (int first)
+    {
+        if (first != hovered)
+        {
+            hovered = first;
+            repaint();
+        }
     }
 };
 
@@ -399,7 +453,8 @@ private:
 //==============================================================================
 // The selected pad's sound as it plays (reversed, from its end), with its envelope over it: the part it plays, as loud as
 // the envelope lets it, solid, the rest faint; the start a line, the attack's end and the hold's end handles at the top
-// and the decay's at the bottom, each dragged sideways as one undo step; and where it is as it plays.
+// and the decay's at the bottom, each dragged sideways as one undo step, a press anywhere taking the nearest, which lights
+// up under the pointer; and where it is as it plays.
 class DrumSamplerEditor::Waveform : public juce::Component
 {
 public:
@@ -407,8 +462,7 @@ public:
         : editor (e)
     {
         setTitle ("Sound");
-        setDescription ("The pad's sound as it plays, with its envelope over it. Drag the start, the attack's end, the hold's end "
-                        "or the decay's end sideways.");
+        setDescription (soundHint);
     }
 
     // The pad shown, its sound and its values: drawn again when one of them changes.
@@ -546,13 +600,19 @@ public:
         g.strokePath (envelope, juce::PathStrokeType (1.5f));
         g.drawLine (startX, top, startX, bottom, 1.5f);
 
-        for (const auto field : handleFields)
+        // The handles, the one a press takes (under the pointer, or dragged) ringed.
+        const auto lit = dragged >= 0 ? dragged : hovered;
+
+        for (size_t i = 0; i < handleFields.size(); ++i)
         {
-            if (field == Field::decay && isWhole())
+            if (handleFields[i] == Field::decay && isWhole())
                 continue;
 
-            g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::handleRadius, 2.0f * GraphTint::handleRadius)
-                               .withCentre (getHandlePoint (field)));
+            const auto at = getHandlePoint (handleFields[i]);
+            g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::handleRadius, 2.0f * GraphTint::handleRadius).withCentre (at));
+
+            if ((int) i == lit)
+                paintLitRing (g, p, at, GraphTint::handleRadius);
         }
 
         // Where it is, as it plays.
@@ -567,14 +627,14 @@ public:
         g.drawText (juce::String (getLength(), 2) + " s", area.reduced ((float) Space::xs), juce::Justification::bottomRight, false);
     }
 
-    // The handle nearest the press, which the drag moves; of two in one place, the later (the hold's over the attack's).
-    void mouseDown (const juce::MouseEvent& e) override
+    // The handle a press takes, by its place in handleFields: the nearest, wherever the press is; of two in one place, the
+    // later (the hold's over the attack's). None without a sound.
+    int findTarget (juce::Point<float> position) const
     {
-        dragged = -1;
-
         if (shownSound == nullptr)
-            return;
+            return -1;
 
+        auto found = -1;
         auto nearest = std::numeric_limits<float>::max();
 
         for (size_t i = 0; i < handleFields.size(); ++i)
@@ -582,12 +642,24 @@ public:
             if (handleFields[i] == Field::decay && isWhole())
                 continue;
 
-            if (const auto distance = e.position.getDistanceFrom (getHandlePoint (handleFields[i])); distance <= nearest)
+            if (const auto distance = position.getDistanceFrom (getHandlePoint (handleFields[i])); distance <= nearest)
             {
                 nearest = distance;
-                dragged = (int) i;
+                found = (int) i;
             }
         }
+
+        return found;
+    }
+
+    // The pointer says the handle a press takes moves sideways, and that handle lights up.
+    void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
+    void mouseExit (const juce::MouseEvent&) override { hover (-1); }
+
+    // The drag moves the handle the press takes.
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        dragged = findTarget (e.position);
 
         if (dragged >= 0)
         {
@@ -633,12 +705,13 @@ public:
         show (shownPad); // its handles where it is now, for the next press too
     }
 
-    void mouseUp (const juce::MouseEvent&) override
+    void mouseUp (const juce::MouseEvent& e) override
     {
         if (dragged >= 0)
             handles[(size_t) dragged].endGesture();
 
         dragged = -1;
+        hover (getLocalBounds().toFloat().contains (e.position) ? findTarget (e.position) : -1);
     }
 
 private:
@@ -652,9 +725,21 @@ private:
     std::array<ParameterHandle, handleFields.size()> handles;
     std::array<ParameterHandle, DrumSampler::fieldsPerPad> others; // by field: reverse, tune and fine
     std::array<float, handleFields.size() + 2> drawn {};
-    int dragged = -1; // the handle dragged, by its place in handleFields
+    int dragged = -1, hovered = -1; // the handle dragged, and the one a press under the pointer takes, by their places in handleFields
 
     juce::Rectangle<float> getArea() const { return getLocalBounds().toFloat().reduced (2.0f); }
+
+    void hover (int handle)
+    {
+        setMouseCursor (handle >= 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+        setDescription (handle >= 0 ? describeHandle (handleFields[(size_t) handle]) : soundHint);
+
+        if (handle != hovered)
+        {
+            hovered = handle;
+            repaint();
+        }
+    }
 
     float getValue (Field field) const
     {
@@ -1176,7 +1261,7 @@ void DrumSamplerEditor::selectPad (int pad)
 
 void DrumSamplerEditor::showPadsFrom (int pad)
 {
-    const auto first = juce::jlimit (0, DrumSampler::numPads - shownPads, pad - ((pad % columns) + columns) % columns);
+    const auto first = getFirstShown (pad);
 
     if (first == firstShown && padsPart->find (first) != nullptr)
         return;

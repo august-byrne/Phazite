@@ -1,59 +1,84 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The multiband's editor (devices/dynamics/Multiband.h), with Maximus's parts and interactions (the owner, 2026-11-01: "the
 // same layout, the same abilities ... all of the drag points should be the same (same interactions)"; its colours and
-// drawing are Phazite's), laid out to fit the dock without scrolling (the owner, 2026-11-06):
+// drawing are Phazite's), on one page in the default dock, with no pages to turn (the owner, 2026-11-10: "the multiband
+// compressor can't be separating the knobs for the frequency bands/graph from the graph by putting it on a separate tab.
+// you must figure out how to put everything on one page"). Two parts, side by side:
 //
-// - The band tabs (Low, Mid, High, Master) with the selected band's Solo, which lead every page in the dock.
-// - The selected band's compression curve, in the band's colour, as Maximus's envelope editor draws and edits it
-//   (DynamicsCurve.h, which the compressor's editor shares): level in across against level out up, lit up to the level the
-//   band's compressor hears; under it, its menu, Freeze and Snap.
-// - The band's mode (On, Comp Off, Muted, Off) and stereo separation; its pre and post gains, its saturation and ceiling.
-// - The analysis display: Monitor, the last seconds of the selected band (what comes in, what goes out, what its compressor
-//   hears, its gain and its pre and post levels, each shown as its Traces menu says, every band's gain too), scrolling at the
-//   speed set, paused by a click; or Bands, the three bands across the spectrum in their colours, as high as their pre gains,
-//   the spectrum of what it plays over them: drag a band's edge for its crossover, a band up or down for its pre gain. A
-//   crossover or pre gain changed while Monitor shows brings Bands up for a moment.
-// - The band's attack, release, sustain and second release, its curve boxes and peak or RMS.
-// - The crossovers with their slopes; LMH Delay and LMH Mix, the low cut and the mid band driving the master.
+// - Bands: the three bands across the spectrum, each as high as its level (its Post), in its colour, the spectrum of what
+//   the multiband plays over them, the crossovers' slopes (12 or 24 dB) in its top corners: drag a crossover or the low
+//   cut's edge left or right, a band up or down for its level; click a band to show its curve and controls. Under the graph,
+//   always with it, its knobs: the low cut, the crossovers and LMH Delay; the Low, Mid and High levels and LMH Mix. A level
+//   dragged in the graph and its knob are the same parameter.
+// - Band: the band tabs (Low, Mid, High, Master), one band at a time; the band's curve, as Maximus's envelope editor draws
+//   and edits it (DynamicsCurve.h, the compressor's too), lit up to the level its compressor hears, its menu over it; its
+//   mode; its Solo and Key (the master's Key and Mid Drives); and its knobs: Pre, Stereo, Sat and Ceiling; Attack, Release,
+//   Sustain and Release 2; the curve boxes, Peak or RMS, and the master's Post. Beside them where the part is wide enough,
+//   Monitor (the band's last seconds, what it hears among them: the key, in its track's colour and named, while its Key is
+//   on), else in their place while its switch is on; and the Sidechain part (the key's picker, its cuts and Listen), else
+//   in the band's place by the Sidechain tab.
 //
-// In a window of its own, or a tall dock, the curve, the band's controls and the display across, the rest under them, as
-// Maximus lays them out; in the dock, as many parts on each page as fit beside the band tabs. Which band shows, the
-// display's view and its traces, Freeze and Snap are the editor's for the session, not the project's.
+// Everything under the pointer that a drag moves says so: the pointer shows which way it moves, it lights up, and its
+// tooltip, which the hint bar shows, says what it does (the owner, 2026-11-10). Which band shows, Monitor's switch and
+// traces, the Sidechain tab, Freeze, Snap and Listen are the editor's for the session, not the project's.
 #pragma once
 
 #include "DeviceEditorBase.h"
 #include "DynamicsCurve.h"
+#include "model/base/IDs.h"
+#include "model/mixer/SidechainChoice.h"
 
 #include <array>
-#include <optional>
 #include <vector>
+
+namespace phazite
+{
+class ProjectContext;
+}
 
 namespace phazite::ui
 {
+class SidechainButton;
+
 class MultibandEditor : public DeviceEditorBase,
                         private DisplayTicker::Display
 {
 public:
-    explicit MultibandEditor (const DeviceHandle&);
+    // With the open project's context and the device's ID, its Sidechain part has the key's picker (SidechainMenus.h);
+    // without them, it hasn't.
+    explicit MultibandEditor (const DeviceHandle&, ProjectContext* = nullptr, DeviceID = {});
     ~MultibandEditor() override;
 
-    // The band whose curve and controls show (Multiband::Band), as its tab picks it.
+    // The band whose curve and controls show (Multiband::Band), as its tab picks it, or a click on it in the bands' graph.
     int getSelectedBand() const noexcept { return selectedBand; }
     void selectBand (int band);
     juce::Button& getBandButton (int band);
 
-    // The selected band's curve, and the analysis display.
+    // The selected band's curve.
     DynamicsCurve& getCurve() const noexcept;
-    juce::Component& getDisplay() const noexcept;
 
-    // The display's views: Bands (true) or Monitor; and where Bands draws a frequency and a band's pre gain, in its own
-    // coordinates.
-    bool isShowingBands() const;
-    void showBands (bool);
+    // The bands' graph; and where it draws a frequency and a band's level, in its own coordinates.
+    juce::Component& getBandsGraph() const noexcept;
     float getBandsX (double frequency) const;
     float getBandsY (float decibels) const;
 
-    // Takes the meters into the display, shows the selected band's controls and repaints what moved; the ticker does it.
+    // Monitor, and its switch, which shows it in place of the band's controls where it can't show beside them (then
+    // hidden); whether it shows. And the track it names while the selected band hears the key through it.
+    juce::Component& getMonitor() const noexcept;
+    juce::Button& getMonitorButton();
+    bool isMonitorShowing() const;
+    juce::String getMonitorKeyName() const;
+
+    // The Sidechain part, and its tab, which shows it in place of the band where it can't show beside it (then hidden);
+    // whether it shows. Its key's picker (nullptr without a context) and Listen.
+    juce::Component& getSidechainPart() const noexcept;
+    juce::Button& getSidechainTab();
+    bool isSidechainShowing() const;
+    SidechainButton* getSidechainButton() const noexcept;
+    juce::Button& getListenButton();
+
+    // Takes the meters into Monitor and the spectrum into the bands' graph, shows the key's track, keeps the key playing while
+    // Listen is on and shows, and repaints what moved; the ticker does it.
     void refresh();
 
     // The menu of the traces Monitor shows, each ticked while it shows; an item switches it.
@@ -61,24 +86,26 @@ public:
 
 private:
     class Analysis;
-    class BandPart;
+    class MonitorPart;
+    class BandsGraph;
     class BandsPart;
-    class CurvePart;
-    class DisplayPart;
+    class SidechainPart;
+    class BandPanel;
 
     int selectedBand = 3;                    // the master at first, as Maximus opens on it
     std::vector<ParameterHandle> parameters; // every parameter, in the multiband's order, for the curves and the bands
     std::vector<float> values;
     std::array<float, 4> shownHeard { -120.0f, -120.0f, -120.0f, -120.0f }; // what each band's compressor hears, in decibels
-    DrawnNumbers drawnCurve;
+    DrawnNumbers drawnValues;
+    SidechainChoice shownSource; // the track the key comes from, as shown
+
     DynamicsCurve* curve = nullptr;
     Analysis* analysis = nullptr;
-    BandsPart* bandTabs = nullptr;
-    DisplayPart* display = nullptr;
-    std::vector<BandPart*> bandParts; // those that show the selected band's controls
+    BandsGraph* bandsGraph = nullptr;
+    SidechainPart* sidechain = nullptr;
+    BandPanel* bandPanel = nullptr;
 
-    void showBandControls();
-
+    juce::String describeListeners() const; // which bands hear the key
     void tick() override { refresh(); }
 };
 } // namespace phazite::ui

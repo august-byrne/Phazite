@@ -2,6 +2,7 @@
 #include "DelayEditor.h"
 #include "DeviceGraph.h"
 #include "DeviceTint.h"
+#include "GraphDot.h"
 #include "devices/delay/Delay.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -16,6 +17,26 @@ namespace
     constexpr int numEchoes = 8;                                    // the echoes shown after the sound coming in
     constexpr float litFall = 0.85f;                                // of a hit's light, kept per refresh
     constexpr int historyTicks = 4 * DisplayTicker::ticksPerSecond; // what came in, for the echoes' light
+    constexpr int firstEcho = -1, nothing = -2;                     // what a press takes, besides the band's ends (by their parameters)
+
+    const juce::String about ("The sound coming in, then its echoes, fading as the feedback takes them down. Drag to put the first "
+                              "echo under the pointer: sideways for the time, up or down for the feedback. Under them, the band the "
+                              "echoes keep: drag its ends.");
+
+    // What the hint bar says of what a press takes.
+    juce::String describe (int target)
+    {
+        if (target == firstEcho)
+            return "Press or drag to put the first echo under the pointer: sideways for the time, up or down for the feedback.";
+
+        if (target == Delay::lowCut)
+            return "Drag sideways to move the band's low end, the low cut: the echoes keep nothing below it.";
+
+        if (target == Delay::highCut)
+            return "Drag sideways to move the band's high end, the high cut: the echoes keep nothing above it.";
+
+        return about;
+    }
 
     const devices::ParameterInfo& getInfo (int index)
     {
@@ -42,9 +63,7 @@ public:
           history (historyTicks, 0.0f)
     {
         setTitle ("Echoes");
-        setDescription ("The sound coming in, then its echoes, fading as the feedback takes them down. Drag to put the first echo "
-                        "under the pointer: sideways for the time, up or down for the feedback. Under them, the band the echoes "
-                        "keep: drag its ends.");
+        setDescription (about);
 
         for (const auto& parameter : Delay::info.parameters)
             parameters.push_back (device.getParameter (parameter.id));
@@ -88,8 +107,8 @@ public:
         highCutKnob->setBounds (strip.removeFromRight (compactKnobSize));
     }
 
-    // The time shown, in seconds, at the tempo the delay last played at.
-    double getSeconds() const { return Delay::getDelaySeconds (getValues(), getTempo()); }
+    // The time shown, in seconds, at the tempo the delay last played at, in the song's bar there.
+    double getSeconds() const { return Delay::getDelaySeconds (getValues(), getTempo(), getBarLength()); }
 
     // Echo n's place (0 is the sound coming in), its bar's foot on the middle line, or on the bottom when echoes don't bounce.
     juce::Point<float> getEchoPosition (int n) const
@@ -110,13 +129,12 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        draggingBand = getBandArea().toFloat().contains (e.position);
+        const auto target = findTarget (e.position);
+        draggingBand = target != firstEcho;
 
         if (draggingBand)
         {
-            const auto axis = getBandAxis();
-            const auto lowX = axis.xFor (parameters[Delay::lowCut].getValue()), highX = axis.xFor (parameters[Delay::highCut].getValue());
-            draggedCut = std::abs (e.position.x - lowX) <= std::abs (e.position.x - highX) ? Delay::lowCut : Delay::highCut;
+            draggedCut = target;
             parameters[(size_t) draggedCut].beginGesture();
         }
         else
@@ -145,7 +163,7 @@ public:
         repaint();
     }
 
-    void mouseUp (const juce::MouseEvent&) override
+    void mouseUp (const juce::MouseEvent& e) override
     {
         if (draggingBand)
         {
@@ -156,7 +174,14 @@ public:
             parameters[Delay::feedback].endGesture();
             parameters[(size_t) timeParameter()].endGesture();
         }
+
+        hover (getLocalBounds().toFloat().contains (e.position) ? findTarget (e.position) : nothing);
     }
+
+    // Over the echoes, the crosshair, and the first echo lit, which a press puts under the pointer; over the band, the pointer
+    // that moves sideways, and its nearer end lit, which a press takes.
+    void mouseMove (const juce::MouseEvent& e) override { hover (findTarget (e.position)); }
+    void mouseExit (const juce::MouseEvent&) override { hover (nothing); }
 
 private:
     DeviceHandle device;
@@ -168,6 +193,32 @@ private:
     DrawnNumbers drawn;
     bool draggingBand = false;
     int draggedCut = Delay::lowCut;
+    int hovered = nothing; // what a press under the pointer takes, lit: the first echo or one of the band's ends
+
+    // In the band, its nearer end, by its parameter; elsewhere, the first echo.
+    int findTarget (juce::Point<float> position) const
+    {
+        if (! getBandArea().toFloat().contains (position))
+            return firstEcho;
+
+        const auto axis = getBandAxis();
+        const auto lowX = axis.xFor (parameters[Delay::lowCut].getValue()), highX = axis.xFor (parameters[Delay::highCut].getValue());
+        return std::abs (position.x - lowX) <= std::abs (position.x - highX) ? Delay::lowCut : Delay::highCut;
+    }
+
+    void hover (int target)
+    {
+        setMouseCursor (target == firstEcho ? juce::MouseCursor::CrosshairCursor
+                        : target == nothing ? juce::MouseCursor::NormalCursor
+                                            : juce::MouseCursor::LeftRightResizeCursor);
+        setDescription (describe (target));
+
+        if (target != hovered)
+        {
+            hovered = target;
+            repaint();
+        }
+    }
 
     std::vector<float> getValues() const
     {
@@ -183,6 +234,12 @@ private:
     {
         auto* delay = device.getProcessor<Delay>();
         return delay != nullptr ? std::max (1.0f, delay->getShownTempo().get()) : 120.0;
+    }
+
+    double getBarLength() const
+    {
+        auto* delay = device.getProcessor<Delay>();
+        return delay != nullptr ? std::max (0.25f, delay->getShownBarLength().get()) : 4.0;
     }
 
     bool isSynced() const { return parameters[Delay::sync].getValue() > 0.5f; }
@@ -209,7 +266,7 @@ private:
                 auto values = getValues();
                 values[Delay::time] = (float) i;
 
-                if (const auto distance = std::abs (std::log (Delay::getDelaySeconds (values, getTempo()) / seconds));
+                if (const auto distance = std::abs (std::log (Delay::getDelaySeconds (values, getTempo(), getBarLength()) / seconds));
                     distance < bestDistance)
                 {
                     bestDistance = distance;
@@ -301,6 +358,10 @@ private:
                 g.setColour (colour.withAlpha (std::min (1.0f, light)));
                 g.fillRoundedRectangle (bar, 2.0f);
             }
+
+            // Ringed while a press would put it under the pointer.
+            if (n == 1 && hovered == firstEcho)
+                paintLitRing (g, p, bar, 2.0f);
         }
 
         // The time, in note values or milliseconds, and the feedback.
@@ -330,10 +391,18 @@ private:
         const auto kept = area.withX (lowX).withRight (std::max (lowX + 1.0f, highX)).reduced (0.0f, 6.0f);
         g.setColour (tint.withAlpha (GraphTint::partCurve));
         g.fillRoundedRectangle (kept, 3.0f);
-        g.setColour (tint);
 
-        for (const auto x : { lowX, highX })
-            g.fillRoundedRectangle (juce::Rectangle<float> (4.0f, area.getHeight() - 8.0f).withCentre ({ x, area.getCentreY() }), 2.0f);
+        // Its ends, the one a press takes ringed.
+        for (const auto cut : { (int) Delay::lowCut, (int) Delay::highCut })
+        {
+            const auto x = cut == Delay::lowCut ? lowX : highX;
+            const auto end = juce::Rectangle<float> (4.0f, area.getHeight() - 8.0f).withCentre ({ x, area.getCentreY() });
+            g.setColour (tint);
+            g.fillRoundedRectangle (end, 2.0f);
+
+            if (cut == hovered)
+                paintLitRing (g, p, end, 2.0f);
+        }
 
         graph::paintReadout (g, p, area,
                              graph::formatFrequency (parameters[Delay::lowCut].getValue()) + " to "

@@ -2,8 +2,8 @@
 // What the editors of Phazite's own devices share (docs/design.md, section 9): their parts in a DeviceLayout (columns of
 // titled parts that stack, or show one at a time under tabs, so that the editor is as wide at any height), the controls of
 // their parameters (ParameterControls), found by ID, and the device's colour (DeviceTint), which their knobs and graphs
-// take. A device's mix, its switch and its sidechain are its row's in the Devices view's column, not its editor's: a window
-// of its own shows the editor, and the row keeps them.
+// take. A device's mix and its switch are its row's in the Devices view's column, not its editor's: a window of its own shows
+// the editor, and the row keeps them. What its sidechain listens to is its editor's to choose (SidechainMenus.h).
 #pragma once
 
 #include "DeviceEditors.h"
@@ -32,7 +32,12 @@ public:
     // A parameter's control (a Knob, a juce::ComboBox or a juce::ToggleButton), or nullptr.
     juce::Component* findControl (std::string_view parameterID) const;
 
-    DeviceLayout& getLayout() const noexcept { return *layout; }
+    // How its parts are laid out: its mode's, for a device with modes (setModes()).
+    DeviceLayout& getLayout() const noexcept { return *layouts[(size_t) shownMode]; }
+
+    // For a device with modes: its modes' tabs along its top (nullptr for one without), and the mode whose parts show.
+    ChoiceTabs* getModeTabs() const noexcept { return modeTabs; }
+    int getShownMode() const noexcept { return shownMode; }
 
     int getMinimumHeight() const override;
     int getWidthForHeight (int) const override;
@@ -91,10 +96,28 @@ protected:
     // maximumWindowWidth wide.
     void setParts (std::vector<DeviceLayout::Column>, std::vector<int> sideTabColumns = {});
 
+    // For a device with modes that each show parts of their own (the compressor's Compress and Duck), in place of setParts():
+    // each mode's parts, in the order of the choice parameter that picks the mode, under a row of tabs along the top, one a
+    // mode (ChoiceTabs, with each mode's tooltip), the mode's parts showing. A click on a tab sets the mode, as one undo step,
+    // and shows its parts; the mode set elsewhere (an undo, automation) shows them as the ticker refreshes the tabs. A part
+    // may be in several modes (a graph they share). The editor is as wide and as tall as its widest and tallest mode, so that
+    // it keeps its size from mode to mode.
+    void setModes (std::string_view modeParameterID, std::vector<std::vector<DeviceLayout::Column>> modes,
+                   const std::vector<juce::String>& tooltips = {});
+
+    // Called as a mode's parts show, after they are laid out (and once as setModes() shows the first).
+    virtual void modeShown (int) {}
+
 private:
-    std::unique_ptr<DeviceLayout> layout;
+    std::vector<std::unique_ptr<DeviceLayout>> layouts; // one, or one for each mode
     std::vector<std::unique_ptr<juce::Component>> keptComponents;
     std::vector<ParameterControls*> controls;
     std::vector<std::pair<std::string_view, juce::Component*>> ownControls;
+    ChoiceTabs* modeTabs = nullptr;
+    int shownMode = 0;
+
+    void showMode (int);
+    juce::Rectangle<int> getPartsArea() const; // inside its margins, under the modes' tabs
+    int getTabsHeight() const noexcept;
 };
 } // namespace phazite::ui

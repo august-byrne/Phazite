@@ -61,7 +61,9 @@ StretchedLoop::StretchedLoop (const juce::File& file, double timeRatio, double r
 
 StretchedLoop::~StretchedLoop()
 {
-    stopThread (10000);
+    // The render looks at threadShouldExit() between blocks: never ended by force, which can leave a lock it held held
+    // for ever.
+    stopThread (-1);
 }
 
 bool StretchedLoop::isComplete() const noexcept

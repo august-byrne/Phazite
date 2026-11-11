@@ -125,6 +125,8 @@ target_sources(phazite_core PRIVATE
     src/devices/dsp/Saturation.h
     src/devices/dsp/SincReader.cpp
     src/devices/dsp/SincReader.h
+    src/devices/dsp/SpectralLoop.cpp
+    src/devices/dsp/SpectralLoop.h
     src/devices/dsp/SyncedLfo.h
     src/devices/dynamics/Compressor.cpp
     src/devices/dynamics/Compressor.h
@@ -152,6 +154,7 @@ target_sources(phazite_core PRIVATE
     src/devices/motion/Flanger.h
     src/devices/motion/Phaser.cpp
     src/devices/motion/Phaser.h
+    src/devices/motion/SafeBass.h
     src/devices/reverb/Reverb.cpp
     src/devices/reverb/Reverb.h
     src/devices/sampler/FactorySamples.cpp
@@ -160,6 +163,8 @@ target_sources(phazite_core PRIVATE
     src/devices/sampler/SampleAnalysis.h
     src/devices/sampler/Sampler.cpp
     src/devices/sampler/Sampler.h
+    src/devices/saturation/Exciter.cpp
+    src/devices/saturation/Exciter.h
     src/devices/saturation/Saturator.cpp
     src/devices/saturation/Saturator.h
     src/devices/stereo/StereoExpander.cpp
@@ -169,6 +174,10 @@ target_sources(phazite_core PRIVATE
     src/devices/stretch/Stretch.h
     src/devices/synth/Synth.cpp
     src/devices/synth/Synth.h
+    src/devices/vinyl/SurfaceNoise.cpp
+    src/devices/vinyl/SurfaceNoise.h
+    src/devices/vinyl/Vinyl.cpp
+    src/devices/vinyl/Vinyl.h
     src/devices/vocoder/Vocoder.cpp
     src/devices/vocoder/Vocoder.h
     src/devices/wavetable/FactoryWavetables.cpp
@@ -272,6 +281,8 @@ target_sources(phazite_core PRIVATE
     src/model/automation/AutomationValues.cpp
     src/model/automation/AutomationValues.h
     src/model/automation/internal/Automation.h
+    src/model/base/BackgroundJobs.cpp
+    src/model/base/BackgroundJobs.h
     src/model/base/Beats.h
     src/model/base/IDs.h
     src/model/base/Selection.cpp
@@ -729,12 +740,16 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/DynamicsCurve.h
     src/ui/devices/EqEditor.cpp
     src/ui/devices/EqEditor.h
+    src/ui/devices/ExciterEditor.cpp
+    src/ui/devices/ExciterEditor.h
     src/ui/devices/FilterEditor.cpp
     src/ui/devices/FilterEditor.h
     src/ui/devices/FlangerEditor.cpp
     src/ui/devices/FlangerEditor.h
     src/ui/devices/FmEditor.cpp
     src/ui/devices/FmEditor.h
+    src/ui/devices/GraphDot.cpp
+    src/ui/devices/GraphDot.h
     src/ui/devices/LevelHistoryView.cpp
     src/ui/devices/LevelHistoryView.h
     src/ui/devices/LimiterEditor.cpp
@@ -763,6 +778,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/devices/SynthEditor.h
     src/ui/devices/SynthParts.cpp
     src/ui/devices/SynthParts.h
+    src/ui/devices/VinylEditor.cpp
+    src/ui/devices/VinylEditor.h
     src/ui/devices/VocoderEditor.cpp
     src/ui/devices/VocoderEditor.h
     src/ui/devices/WavetableEditor.cpp
@@ -1101,6 +1118,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/AutomationFollowsClipsTests.cpp
         tests/AutomationLaneTests.cpp
         tests/AutomationModelTests.cpp
+        tests/BackgroundJobsTests.cpp
         tests/BeatsTests.cpp
         tests/Benchmarks.cpp
         tests/BrowserFilterTests.cpp
@@ -1110,6 +1128,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/CleanUpTests.cpp
         tests/ChordModelTests.cpp
         tests/ChordValueTests.cpp
+        tests/ChorusTests.cpp
         tests/ClipboardTests.cpp
         tests/ClipTests.cpp
         tests/ClipWaveformTests.cpp
@@ -1129,9 +1148,11 @@ if(PHAZITE_BUILD_TESTS)
         tests/DeviceInfoTests.cpp
         tests/DeviceStatesTests.cpp
         tests/DevicesViewTests.cpp
+        tests/DragPointerTests.cpp
         tests/DrumRowTests.cpp
         tests/DrumSamplerEditorTests.cpp
         tests/DrumSamplerTests.cpp
+        tests/DrumSynthesisTests.cpp
         tests/DspTests.cpp
         tests/EnginePlayback.h
         tests/EnginePlaybackTests.cpp
@@ -1141,6 +1162,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/EqEditorTests.cpp
         tests/EqualizerTests.cpp
         tests/ExampleSongTests.cpp
+        tests/ExciterTests.cpp
         tests/ExportTests.cpp
         tests/FactoryPresetTests.cpp
         tests/FmEditorTests.cpp
@@ -1174,6 +1196,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/MixerTests.cpp
         tests/MixerViewTests.cpp
         tests/MotionEffectTests.cpp
+        tests/MotionTestHelpers.h
         tests/MultibandEditorTests.cpp
         tests/MultibandTests.cpp
         tests/NewProjectTests.cpp
@@ -1224,6 +1247,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SoundKeyTests.cpp
         tests/SoundPackTestHelpers.h
         tests/SoundPackTests.cpp
+        tests/SpectralLoopTests.cpp
         tests/StartupSoundTests.cpp
         tests/StatusBarTests.cpp
         tests/StereoExpanderTests.cpp
@@ -1263,6 +1287,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsHearingTests.cpp
         tests/VersionsMergeTests.cpp
         tests/VersionsTests.cpp
+        tests/VinylTests.cpp
         tests/VocoderTests.cpp
         tests/Vst3StateTests.cpp
         tests/WarpTests.cpp

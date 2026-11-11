@@ -5,14 +5,15 @@
 // first) or in hertz, as a triangle or a sine, the right side a part of a cycle ahead (Stereo). Feedback rings the comb
 // (metallic), or with its sign turned hollows it, with its notches as deep at any feedback; its sign glides through nothing,
 // so that a turn across it doesn't click. Its level stays about the same at any feedback. Safe Bass leaves what is below a
-// frequency as it was. No latency; no through-zero flanging, which would need it.
+// frequency as it was, the comb hearing only what is above it, 24 dB an octave down below it (SafeBass.h). No latency; no
+// through-zero flanging, which would need it.
 #pragma once
 
+#include "SafeBass.h"
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/LiveValue.h"
 #include "devices/core/Processor.h"
 #include "devices/dsp/CombFilter.h"
-#include "devices/dsp/Filters.h"
 #include "devices/dsp/SyncedLfo.h"
 
 #include <array>
@@ -69,7 +70,7 @@ private:
     float sign = 1.0f;     // the feedback's sign, gliding through 0 when it turns
     dsp::SyncedLfo lfo;
     std::array<dsp::CombFilter, 2> combs;
-    std::array<dsp::Filter, 2> lowParts {}; // Safe Bass's: what is kept as it was
+    SafeBass bassSplit;
     std::atomic<double> tailSeconds { 0.05 };
     std::array<LiveValue, 2> delays;
     LiveValue shownPhase;

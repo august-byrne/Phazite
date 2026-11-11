@@ -38,6 +38,12 @@ namespace
         return isTrack (song, id) && ! isFolder (song, id);
     }
 
+    // A track or a bus: what has effects of its own, which a plain folder hasn't.
+    bool hasEffects (const Song& song, TrackID id)
+    {
+        return hasSound (song, id) || isBus (song, id);
+    }
+
     bool contains (const std::vector<TrackID>& tracks, TrackID track)
     {
         return std::find (tracks.begin(), tracks.end(), track) != tracks.end();
@@ -144,7 +150,7 @@ DeviceSlot makeDeviceSlot (const ProjectContext& context, DeviceID id)
              .frozen = isFrozenDevice (*song, id),
              .crashed = hasCrashed (*song, id),
              .hasSidechain = hasSidechain (*song, id),
-             .sidechain = describeSidechainSource (*song, id) };
+             .sidechain = hearsSidechain (*song, id) ? describeSidechainSource (*song, id) : SidechainChoice() };
 }
 
 //==============================================================================
@@ -699,13 +705,13 @@ void setSidechainSource (ProjectContext& context, DeviceID id, TrackID source)
 std::vector<SidechainChoice> getDuckUnderChoices (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
-    return song != nullptr && hasSound (*song, id) ? describeTracksToListenTo (*song, id) : std::vector<SidechainChoice>();
+    return song != nullptr && hasEffects (*song, id) ? describeTracksToListenTo (*song, id) : std::vector<SidechainChoice>();
 }
 
 DeviceID duckUnder (ProjectContext& context, TrackID ducked, TrackID key)
 {
     auto* song = findSong (context);
-    return song != nullptr && hasSound (*song, ducked) && hasSound (*song, key) ? duckUnder (*song, ducked, key) : DeviceID();
+    return song != nullptr && hasEffects (*song, ducked) && hasSound (*song, key) ? duckUnder (*song, ducked, key) : DeviceID();
 }
 
 //==============================================================================
@@ -759,8 +765,8 @@ std::vector<Connection> getConnections (const ProjectContext& context)
                 connections.push_back ({ Connection::Kind::send, track, target, send });
 
         for (const auto device : getDevices (*song, track))
-            if (const auto source = getSidechainSource (*song, device); source.isValid())
-                connections.push_back ({ Connection::Kind::sidechain, source, track, device });
+            if (hearsSidechain (*song, device))
+                connections.push_back ({ Connection::Kind::sidechain, getSidechainSource (*song, device), track, device });
     }
 
     return connections;

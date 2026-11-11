@@ -39,7 +39,7 @@ struct Plan
 
     std::optional<BeatRange> loop;
 
-    // Whether the metronome clicks on each beat while the song plays.
+    // Whether the metronome clicks on each of the time signature's beats while the song plays.
     bool metronome = false;
 
     // A strip whose sound another adds up: after its fader, or before it (a send before the fader); at a send's level (or

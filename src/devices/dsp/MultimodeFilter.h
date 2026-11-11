@@ -62,6 +62,11 @@ inline double getResonanceQ (float resonance) noexcept
     return 0.70710678 * std::pow (2.0, 4.5 * (double) std::clamp (resonance, 0.0f, 1.0f));
 }
 
+// How far a softer note closes a synth's filter, in semitones, with its Filter Velocity at full: four octaves at velocity 0,
+// nothing at full velocity, the same in every synth that has one (the cutoff moves by this, times the Filter Velocity,
+// times how far the velocity is under 1).
+inline constexpr float filterVelocityRange = 48.0f;
+
 struct FilterSettings
 {
     FilterMode mode = FilterMode::lowPass;

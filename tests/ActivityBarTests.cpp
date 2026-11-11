@@ -3,6 +3,7 @@
 // (docs/versions.md: What the user sees), in the whole window as the app builds it.
 #include "AppScreen.h"
 #include "TestClips.h"
+#include "TestSong.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
@@ -50,15 +51,7 @@ struct Screen : public phazite::test::AppScreen
         phazite::test::dispatchPendingMessages();
     }
 
-    void waitForVersions()
-    {
-        REQUIRE (phazite::test::dispatchMessagesUntil (
-            [this]
-            {
-                const auto* history = phazite::getVersionHistory (session.getContext());
-                return history == nullptr || ! history->isBusy();
-            }));
-    }
+    void waitForVersions() { REQUIRE (phazite::test::waitForVersionHistory (session.getContext())); }
 
     bool leftShows (LeftView view) { return shell.getPanel (Panel::left).isShowing() && shell.getPanelLayout().leftView == view; }
 

@@ -45,7 +45,9 @@ public:
         startThread (juce::Thread::Priority::low);
     }
 
-    ~Watch() override { stopThread (2000); }
+    // Waited for, never ended by force, which can leave a lock it held held for ever: the pipe is closed first, which
+    // wakes a heartbeat it may be sending (closePipe()).
+    ~Watch() override { stopThread (-1); }
 
 private:
     Helper& owner;
@@ -56,13 +58,21 @@ private:
 
         while (! threadShouldExit())
         {
+            // Gone: what waits on the pipe is woken too, as a write to a helper that never connected would wait for ever.
             if (! owner.process.isRunning())
             {
                 owner.helperLost();
+                owner.closePipe();
                 return;
             }
 
-            if (owner.running && looksHung (beatSent))
+            // Starting, and not answered in time: it may never have connected to the pipe, which a write waits for. Ended,
+            // its loss wakes the write.
+            if (const auto deadline = owner.startDeadline.load(); deadline > 0.0 && juce::Time::getMillisecondCounterHiRes() > deadline)
+            {
+                owner.kill();
+            }
+            else if (owner.running && looksHung (beatSent))
             {
                 owner.endedForHanging = true;
                 owner.kill(); // which the next look tells of
@@ -124,13 +134,25 @@ Helper::~Helper()
 
     running = false;
     lost = true; // no loss told as it goes
-    watch = nullptr;
     stopWaiting();
 
     if (process.isRunning() && ! process.waitForProcessToFinish (quitMilliseconds))
         process.kill();
 
+    closePipe();
+    watch = nullptr;
     pipe = nullptr;
+}
+
+void Helper::closePipe()
+{
+    // What waits on the pipe woken (a read, or a write that waits for the helper to connect, as JUCE's pipe does for one
+    // that never connected or has gone), and its thread ended; what is sent after it goes nowhere. The watching thread
+    // and the helper's owner may both close it, one after the other.
+    const juce::ScopedLock held (pipeLock);
+
+    if (pipe != nullptr)
+        pipe->disconnect();
 }
 
 bool Helper::start (int timeoutMilliseconds)
@@ -148,23 +170,35 @@ bool Helper::start (int timeoutMilliseconds)
     if (! process.start (juce::StringArray { program.getFullPathName(), juce::String ("--") + helperProcessID + ":" + pipeName }, 0))
         return false;
 
+    // Until it has answered, a loss isn't told (a start that fails says so itself), and the watching thread ends a helper
+    // that doesn't answer in time: one that never connects to the pipe would keep the hello's write waiting for ever.
     running = true;
+    lost = true;
+    startDeadline = juce::Time::getMillisecondCounterHiRes() + timeoutMilliseconds;
     watch = std::make_unique<Watch> (*this);
     auto hello = makeRequest (MessageType::hello);
     hello.add (protocolVersion);
     const auto answer = request (hello, timeoutMilliseconds);
+    startDeadline = 0.0;
 
     if (answer.has_value())
     {
         MessageReader reader (*answer);
 
         if (reader.readInt() == protocolVersion)
-            return true;
+        {
+            lost = false; // from now on a loss is told
+
+            if (running)
+                return true;
+        }
     }
 
     running = false;
-    watch = nullptr;
+    lost = true;
     process.kill();
+    closePipe();
+    watch = nullptr;
     return false;
 }
 

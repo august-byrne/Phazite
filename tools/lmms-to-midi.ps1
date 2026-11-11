@@ -7,7 +7,9 @@
 .DESCRIPTION
     Takes the notes only: no sounds, samples, presets or effects. Each instrument track named in -Parts
     becomes a MIDI track of that name, at the pitch it sounds at in LMMS (its key, moved by the track's
-    base note and, for a TripleOscillator, by its loudest oscillator's coarse tuning). The beat/bassline
+    base note, the project's master pitch and, for a TripleOscillator, by its loudest oscillator's coarse
+    tuning; an instrument LMMS plays through MIDI, such as ZynAddSubFX, sounds an octave under LMMS's own
+    instruments at the same key, and is written there). The beat/bassline
     editor's sample tracks become one "Drums" track of General MIDI's drum notes, each named by its
     sample's file name (kick, snare, clap, hat...) or by -DrumNotes, each pattern repeated where the song
     places it; a track that only drives a controller (a muted peak controller) is left out. Muted tracks
@@ -17,10 +19,12 @@
     For example, from the repository root:
 
         powershell -NoProfile -ExecutionPolicy Bypass -File tools\lmms-to-midi.ps1 -Project Exodus.mmpz `
-            -Out resources\songs\Exodus.mid -Parts "0=Bass;1=Sub;3=Arp;2=Arp Pad" -Bars 120 -Tempo 111 `
-            -Title "Exodus" -Credit "Exodus by XCALIBUR, CC BY 4.0"
+            -Out resources\songs\Exodus.mid -Parts "0=Bass;1=Sub;3=Arp" -Bars 120 -Tempo 111 -Title "Exodus" `
+            -Credit "Exodus by XCALIBUR (https://lmms.io/lsp/?action=show&file=12900), CC BY 4.0: its notes, from its LMMS project"
 
-    Without -Parts it lists the project's instrument tracks by their numbers, to choose from.
+    (Exodus's tracks 2, 4 and 5 play track 3's line again, the same, an octave down and two octaves up, so
+    its file holds that line once.) Without -Parts it lists the project's instrument tracks by their
+    numbers, to choose from.
 #>
 param(
     [Parameter(Mandatory = $true)] [string] $Project,
@@ -99,11 +103,19 @@ public static class LmmsToMidi
         return string.Format("'{0}' {1}, {2} notes", Attr(track, "name"), instrument == null ? "?" : Attr(instrument, "name"), notes);
     }
 
-    // How far a track's keys are from the MIDI notes they sound as.
-    static int PitchShift(XmlNode track)
+    // The instruments LMMS plays through MIDI events rather than by frequency (its "MIDI-based" ones).
+    static readonly string[] MidiBased = { "zynaddsubfx", "vestige", "opl2", "opulenz" };
+
+    // How far a track's keys are from the MIDI notes they sound as. LMMS's own instruments play key 57 at 440 Hz
+    // (MIDI note 69) when the track's base note is 57. A MIDI-based instrument is handed the key itself as its MIDI
+    // note (InstrumentTrack::masterKey), so it sounds an octave lower: Exodus's two ZynAddSubFX layers, measured in
+    // LMMS 1.2.2's renders.
+    static int PitchShift(XmlNode track, int masterPitch)
     {
         var instrumentTrack = track.SelectSingleNode("instrumenttrack");
-        int shift = 12 + 57 - Int(instrumentTrack, "basenote", 57);
+        var instrument = instrumentTrack.SelectSingleNode("instrument");
+        bool midiBased = instrument != null && MidiBased.Contains(Attr(instrument, "name").ToLowerInvariant());
+        int shift = (midiBased ? 0 : 12) + 57 - Int(instrumentTrack, "basenote", 57) + masterPitch;
         var oscillators = instrumentTrack.SelectSingleNode("instrument/tripleoscillator");
         if (oscillators != null)
         {
@@ -132,7 +144,8 @@ public static class LmmsToMidi
         var notes = new List<Note>();
         if (Attr(track, "muted") == "1")
             return notes;
-        int shift = PitchShift(track);
+        var head = track.OwnerDocument.SelectSingleNode("/lmms-project/head");
+        int shift = PitchShift(track, head == null ? 0 : Int(head, "masterpitch"));
         foreach (var clip in Clips(track))
         {
             if (Attr(clip, "muted") == "1")

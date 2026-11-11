@@ -7,7 +7,8 @@
 // at any block size (a device that takes its blocks whole, a plug-in in its helper, gets a block in one call, with its
 // moved parameters' values on those points as changes at their samples, and an instrument of them may be handed it
 // early, to play beside the others: start()); it applies an effect's mix, with what came in delayed as much as the
-// effect delays its sound; it plays a mono channel in stereo; and it sleeps on silence (docs/performance-audit.md, A1).
+// effect delays its sound and turned as the effect turns its phase (devices::ProcessContext::dry); it plays a mono
+// channel in stereo; and it sleeps on silence (docs/performance-audit.md, A1).
 #pragma once
 
 #include "devices/core/DeviceInfo.h"
@@ -104,11 +105,17 @@ public:
         std::span<const float> values;        // each parameter's value as the block starts (a modulated one's without modulation)
         std::span<devices::NoteEvent> events; // in time order, each at its sample from the block's start: changed as it plays
         Modulation* modulation = nullptr;     // what modulates its parameters, its sources set for this block; or none
-        double tempo = 120.0;                 // beats per minute at the block's start
-        double beat = 0.0;                    // where the song is at the block's start, in beats
         bool isPlaying = false;               // whether the song plays
         bool isRendering = false;             // a render, which never sleeps: it plays everything as the song has it
         bool hasSidechain = false;            // the buffer's third and fourth channels hold the sidechain's sound
+
+        // Where the song is at the block's start: its tempo there, in beats (quarter notes) a minute; its place, in beats from
+        // its start, in bars and in samples; and its time signature there, with how long its bar is and where the bar the
+        // song is in starts, in beats (devices::ProcessContext's).
+        double tempo = 120.0, beat = 0.0, bars = 0.0;
+        std::int64_t songSample = 0;
+        int timeSignatureNumerator = 4, timeSignatureDenominator = 4;
+        double barLength = 4.0, barStart = 0.0;
 
         // Whether a value set by hand may have changed since the last block (the device's node knows; true where it isn't known).
         bool valuesChanged = true;
@@ -125,7 +132,7 @@ public:
         std::span<const Automated> automation;
         double automationBeat = 0.0;
         std::int64_t sample = 0;
-        double beatsPerSample = 0.0; // how far the song moves in a sample: 0 while it is stopped
+        double beatsPerSample = 0.0, barsPerSample = 0.0; // how far the song moves in a sample, in each: 0 while it is stopped
     };
 
     // Plays a block: numSamples of the buffer from startSample, in place, on its first two channels (or its first alone,
@@ -204,7 +211,8 @@ private:
     int latencySamples = 0;
     double sampleRate = 44100.0;
 
-    // An effect's mix (DeviceInfo.h, mixParameterID): what came in, delayed as much as the effect delays its sound.
+    // An effect's mix (DeviceInfo.h, mixParameterID): what came in, turned as the effect turns its phase, then delayed as
+    // much as the effect delays its sound.
     int mixIndex = -1;
     float appliedMix = 1.0f; // where the last stretch's ramp ended
     juce::AudioBuffer<float> dry;

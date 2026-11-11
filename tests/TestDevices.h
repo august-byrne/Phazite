@@ -51,6 +51,7 @@ struct TestGain final : devices::Processor
 
         lastValues.assign (block.parameters.begin(), block.parameters.end());
         lastNumChannels = block.numChannels;
+        beats[(size_t) processed % beats.size()] = block.beat;
         ++processed;
     }
 
@@ -60,7 +61,8 @@ struct TestGain final : devices::Processor
     bool prepared = false;
     std::vector<float> lastValues;
     int lastNumChannels = 0;
-    int processed = 0; // stretches
+    int processed = 0;               // stretches
+    std::array<double, 64> beats {}; // where the song was as each stretch began, the last 64 (by processed, round)
 };
 
 inline constexpr devices::ParameterInfo testToneParameters[] = {

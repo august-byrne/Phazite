@@ -4,10 +4,12 @@
 // now, and under it a strip of the LFO, one cycle of its sweep with a dot for each side's copy (the right a part of a cycle
 // ahead) and its rate, as Ableton's Phaser-Flanger shows its LFO, so that the sweep moves with the sound and a knob's turn
 // shows at once.
-// The device's own picture draws its response and its handles; a strip between the two may show more of it.
+// The device's own picture draws its response and its dot, which a drag moves both ways and a press anywhere puts under the
+// pointer (GraphDot: the grabbing hand over it, the crosshair elsewhere); a strip between the two may show more of it.
 #pragma once
 
 #include "DeviceGraph.h"
+#include "GraphDot.h"
 #include "devices/core/DeviceInfo.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/DisplayTicker.h"
@@ -35,12 +37,15 @@ public:
     // at, and the shape and stereo offset set now, so that a turn of those shows even while nothing plays.
     float getLfoValue (int channel) const;
 
-    // How many copies each side sweeps, a dot each on the LFO's strip (the chorus's Ensemble has three; one at first); where
+    // How many copies each side sweeps, a dot each on the LFO's strip (the chorus has up to eight; one at first); where
     // a side's copy is in the LFO's cycle now (whole cycles in or not: the right side a part of a cycle ahead); and the
     // sweep at a point in its cycle, from -1 to 1 (the LFO's shape at first).
     virtual int getNumVoices() const { return 1; }
     virtual double getVoicePhase (int channel, int voice) const;
     virtual float getSweepValue (double phase) const;
+
+    // Where the device's dot is drawn, in the picture's own coordinates.
+    virtual juce::Point<float> getDotPosition() const = 0;
 
     void paint (juce::Graphics&) override;
 
@@ -50,6 +55,9 @@ protected:
     DeviceHandle device;
     std::vector<ParameterHandle> parameters; // every parameter, in the device's order
     std::vector<float> values;               // their values now, for its response
+
+    // The dot, which paintResponse() draws.
+    GraphDot dot { *this, [this] { return getDotPosition(); } };
 
     double getSampleRate() const;
     void readValues();

@@ -26,10 +26,12 @@
 #include "devices/motion/Phaser.h"
 #include "devices/reverb/Reverb.h"
 #include "devices/sampler/Sampler.h"
+#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/stretch/Stretch.h"
 #include "devices/synth/Synth.h"
+#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "devices/wavetable/WavetableSynth.h"
 #include "engine/audio/AudioRegion.h"
@@ -99,6 +101,7 @@ struct DeviceCase
     int notes = 0;                                    // for an instrument: held from the start; drums hit again every 12 blocks
     std::function<void (std::vector<float>&)> set {}; // changes to the defaults
     bool silentInput = false;                         // for an effect: silence instead of noise
+    bool playing = false;                             // whether the song plays (the vinyl's noise only plays then)
 };
 
 template <typename Device>
@@ -169,7 +172,10 @@ double percentOfCore (const DeviceCase& c)
                                             .numChannels = 2,
                                             .numSamples = benchBlock,
                                             .events = hit ? std::span<const dev::NoteEvent> (notes) : std::span<const dev::NoteEvent>(),
-                                            .parameters = values };
+                                            .parameters = values,
+                                            .beat = b * benchBlock * 2.0 / benchRate,
+                                            .bars = b * benchBlock * 2.0 / benchRate / 4.0, // in 4/4
+                                            .isPlaying = c.playing };
         processor->process (context);
     }
 
@@ -250,6 +256,13 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Wavetable, 8 notes", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 8 },
         { "Wavetable, 8 notes, full unison", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 8, [&] (std::vector<float>& v)
           { v[dev::WavetableSynth::unisonVoices] = maxOf (dev::WavetableSynth::info, dev::WavetableSynth::unisonVoices); } },
+        { "Wavetable, 8 notes, full unison, stacked and drifting", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 8,
+          [&] (std::vector<float>& v)
+          {
+              v[dev::WavetableSynth::unisonVoices] = maxOf (dev::WavetableSynth::info, dev::WavetableSynth::unisonVoices);
+              v[dev::WavetableSynth::unisonStack] = (float) dev::WavetableSynth::Stack::twoOctaves;
+              v[dev::WavetableSynth::unisonDrift] = 25.0f;
+          } },
         { "Wavetable, idle", maker<dev::WavetableSynth>(), &dev::WavetableSynth::info, 0 },
         { "Drum Sampler, 4 pads every 16th", maker<dev::DrumSampler>(), &dev::DrumSampler::info, 4 },
         { "Drum Sampler, idle", maker<dev::DrumSampler>(), &dev::DrumSampler::info, 0 },
@@ -299,14 +312,42 @@ TEST_CASE ("Benchmark: each device's CPU, latency and time to sound" * doctest::
         { "Multiband", maker<dev::Multiband>(), &dev::Multiband::info },
         { "Limiter", maker<dev::Limiter>(), &dev::Limiter::info },
         { "Saturator", maker<dev::Saturator>(), &dev::Saturator::info },
+        { "Exciter", maker<dev::Exciter>(), &dev::Exciter::info },
+        { "Exciter, its band from 1 kHz", maker<dev::Exciter>(), &dev::Exciter::info, 0,
+          [] (std::vector<float>& v) { v[dev::Exciter::frequency] = 1000.0f; } },
+        { "Vinyl", maker<dev::Vinyl>(), &dev::Vinyl::info },
+        { "Vinyl, playing, everything on", maker<dev::Vinyl>(), &dev::Vinyl::info, 0,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Vinyl::wow] = 20.0f;
+              v[dev::Vinyl::flutter] = 8.0f;
+              v[dev::Vinyl::distortion] = 0.8f;
+              v[dev::Vinyl::crackle] = -18.0f;
+              v[dev::Vinyl::density] = 300.0f;
+          },
+          false, true },
+        { "Vinyl, silence in, stopped", maker<dev::Vinyl>(), &dev::Vinyl::info, 0, {}, true },
         { "Delay", maker<dev::Delay>(), &dev::Delay::info },
         { "Reverb", maker<dev::Reverb>(), &dev::Reverb::info },
+        { "Reverb, plate", maker<dev::Reverb>(), &dev::Reverb::info, 0,
+          [] (std::vector<float>& v) { v[dev::Reverb::mode] = (float) dev::Reverb::plate; } },
         { "Stereo Expander, spreading", maker<dev::StereoExpander>(), &dev::StereoExpander::info, 0,
           [] (std::vector<float>& v) { v[dev::StereoExpander::spread] = 1.0f; } },
         { "Phaser, six notches", maker<dev::Phaser>(), &dev::Phaser::info, 0,
           [] (std::vector<float>& v) { v[dev::Phaser::notches] = 5.0f; } },
         { "Flanger", maker<dev::Flanger>(), &dev::Flanger::info },
-        { "Chorus, Ensemble", maker<dev::Chorus>(), &dev::Chorus::info, 0, [] (std::vector<float>& v) { v[dev::Chorus::mode] = 1.0f; } },
+        { "Chorus, three voices with shimmer", maker<dev::Chorus>(), &dev::Chorus::info, 0,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Chorus::voices] = 2.0f;
+              v[dev::Chorus::shimmer] = 1.0f;
+          } },
+        { "Chorus, eight voices spread", maker<dev::Chorus>(), &dev::Chorus::info, 0,
+          [] (std::vector<float>& v)
+          {
+              v[dev::Chorus::voices] = 7.0f;
+              v[dev::Chorus::spread] = 0.6f;
+          } },
         { "Vocoder, 40 bands", maker<dev::Vocoder>(), &dev::Vocoder::info, 0,
           [] (std::vector<float>& v) { v[dev::Vocoder::bands] = 5.0f; } },
         { "Reverb, silence in", maker<dev::Reverb>(), &dev::Reverb::info, 0, {}, true },

@@ -1,0 +1,16 @@
+{
+  "kind": "device",
+  "device": {
+    "name": "Exciter",
+    "instrument": false,
+    "type": "phaziteExciter",
+    "parameters": {
+      "frequency": 5000.0,
+      "drive": 14.0,
+      "colour": 0.5,
+      "amount": 0.4,
+      "highCut": 20000.0,
+      "mix": 1.0
+    }
+  }
+}

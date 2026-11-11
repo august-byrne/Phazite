@@ -90,6 +90,28 @@ TEST_CASE ("The session opens and saves a project")
     }
 }
 
+TEST_CASE ("A problem with the open song that the model can't show itself shows as an error")
+{
+    // Such as sound lost from a take, which the song's playback session reports as the take is finished
+    // (model/transport/internal/Take.h), through the project context.
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto file = createClosedProject (temp.folder, "Song");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    juce::StringArray errors;
+    session.onError = [&errors] (const juce::String& title, const juce::String& message) { errors.add (title + ": " + message); };
+    session.openProject (file);
+
+    auto* playback = getSession (session.getContext());
+    REQUIRE (playback != nullptr);
+    REQUIRE (playback->onProblem != nullptr);
+    playback->onProblem ("Part of the recording was lost", "Vocals at bar 4 (2.0 s).");
+    CHECK (errors == juce::StringArray { "Part of the recording was lost: Vocals at bar 4 (2.0 s)." });
+}
+
 TEST_CASE ("The first start makes an empty, untitled project, which its first save names and places")
 {
     auto& engine = phazite::test::getEngineContext();
@@ -141,12 +163,14 @@ TEST_CASE ("An example song opens as a new untitled project, with the computer k
     for (const auto& row : phazite::getPlaylistRows (context))
         names.add (row.name);
 
-    CHECK (names.joinIntoString (", ") == "Drums, Bass, Arp");
+    // Its folder of drums, each a track of its own, and its two buses with their parts.
+    CHECK (names.joinIntoString (", ")
+           == "Drums, Kick, Snare, Clap, Open Hat, Perc, Bass + Sparkle, Rolling Bass, Sub, Sparkle, Arp, Square, Wide Saw, Supersaw");
 
-    // The computer keyboard plays the arpeggio's sound: its track is selected, and live MIDI follows the selection.
+    // The computer keyboard plays the arpeggio's lead layer: its track is selected, and live MIDI follows the selection.
     const auto selected = context.getSongSelection().getTracks();
     REQUIRE (selected.size() == 1);
-    CHECK (phazite::getTrackRow (context, selected.front())->name == "Arp");
+    CHECK (phazite::getTrackRow (context, selected.front())->name == "Square");
 
     // The song is what the project starts with: no unsaved changes, nothing to undo.
     phazite::test::settle();
@@ -543,10 +567,11 @@ TEST_CASE ("A first save and Save As wait for the versions being written, which 
 
     // Saved as soon as its versions are read, which is when its initial commit starts on its way to the disk.
     REQUIRE (session.createProject ({}).wasOk());
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isReadingVersions (context); },
+                                                   phazite::test::versionHistoryTimeout));
     REQUIRE (registry.invoke ("project.save"));
     CHECK (errors.isEmpty());
-    REQUIRE (phazite::test::dispatchMessagesUntil (settled));
+    REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
     CHECK (names() == juce::StringArray ("Initial commit"));
 
     // A copy saved as a version is being written: the copy has it, and goes on in its own folder.
@@ -556,14 +581,14 @@ TEST_CASE ("A first save and Save As wait for the versions being written, which 
     REQUIRE (registry.invoke ("project.saveAs"));
     CHECK (errors.isEmpty());
     REQUIRE (session.getProject()->getFile() == projects.getChildFile ("Beat copy").getChildFile ("Beat copy.phazite"));
-    REQUIRE (phazite::test::dispatchMessagesUntil (settled));
+    REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
     CHECK (names() == juce::StringArray ("Sketch", "Initial commit"));
 
     // The first has both, as written there, when it opens again.
     const auto first = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
     session.openProject (first);
     REQUIRE (session.getProject()->getFile() == first);
-    REQUIRE (phazite::test::dispatchMessagesUntil (settled));
+    REQUIRE (phazite::test::dispatchMessagesUntil (settled, phazite::test::versionHistoryTimeout));
     CHECK (names() == juce::StringArray ("Sketch", "Initial commit"));
     CHECK (errors.isEmpty());
 }

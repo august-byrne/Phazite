@@ -2,7 +2,7 @@
 // The sampler's editor (src/ui/devices/SamplerEditor.h), driven as the user would: its sound named and drawn, a control for
 // every parameter, the sound menu, a sound dropped on the drawing, its markers dragged as one undo step each (snapping to a
 // zero crossing), the controls of the mode it plays in, slices added under the drawing and taken away by a double-click,
-// and how it fits the default dock.
+// how it fits the default dock, and where it shows Start Random, Key Time and the filter's Velocity.
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -95,6 +95,28 @@ TEST_CASE ("The sampler's sound menu lists its factory sounds by kit, and puts t
     screen.settle();
     CHECK (editor.getSoundButton().getButtonText() == juce::String ("808 Kick"));
     CHECK (screen.describeUndo() == juce::String ("Undo Put 808 Kick on the Sampler"));
+
+    // The sounds made to play across the keys are in the menu itself, the bass first; the kits' under their kits' names,
+    // the default kit's first.
+    menu = editor.getSoundMenu();
+    const auto* wide = phazite::test::findMenuItem (menu, { "Wide Saw" });
+    REQUIRE (wide != nullptr);
+    CHECK_FALSE (wide->isTicked);
+    CHECK (phazite::test::findMenuItem (menu, { "Default Kit", "Kick" }) != nullptr);
+    CHECK (phazite::test::findMenuItem (menu, { "Default Kit", "Wide Saw" }) == nullptr);
+
+    // Chosen, it plays looped, the whole of it: it is one seamless loop.
+    REQUIRE (phazite::test::runMenuItem (menu, { "Wide Saw" }));
+    screen.settle();
+    CHECK (editor.getSoundButton().getButtonText() == juce::String ("Wide Saw"));
+    CHECK (screen.describeUndo() == juce::String ("Undo Put Wide Saw on the Sampler"));
+    CHECK (screen.getValue ("loopOn") == 1.0f);
+    CHECK (screen.getValue ("loopStart") == 0.0f);
+    CHECK (screen.getValue ("loopEnd") == 1.0f);
+    CHECK (editor.getMarkerX (Sampler::loopStart) < editor.getMarkerX (Sampler::loopEnd) - 300.0f); // the band across the drawing
+    menu = editor.getSoundMenu();
+    REQUIRE (phazite::test::findMenuItem (menu, { "Wide Saw" }) != nullptr);
+    CHECK (phazite::test::findMenuItem (menu, { "Wide Saw" })->isTicked);
 }
 
 TEST_CASE ("A sound dropped on the sampler's drawing is put on it, as one undo step")
@@ -193,4 +215,94 @@ TEST_CASE ("The sampler's editor fits the default dock: the sound alone on its f
     editor.getLayout().showPage (1);
     CHECK_FALSE (editor.getSampleView().isShowing());
     CHECK (editor.findControl ("transpose")->isShowing());
+
+    // Every page's controls apart, in the dock and in a window of its own.
+    for (int page = 0; page < editor.getLayout().getNumPages(); ++page)
+    {
+        CAPTURE (page);
+        editor.getLayout().showPage (page);
+        phazite::test::checkChildrenApart (editor);
+    }
+}
+
+TEST_CASE ("The sampler's editor shows Start Random beside Start, Key Time with the amp envelope and Velocity with the filter")
+{
+    Screen screen;
+    auto& editor = *screen.editor;
+    const auto showing = [&editor] (const char* id)
+    {
+        const auto* control = editor.findControl (id);
+        REQUIRE (control != nullptr);
+        return control->isShowing();
+    };
+
+    // In a window of its own, every part at once: Start Random in the row under the drawing, right of Start, in Classic and
+    // in One-Shot, whose notes it moves, and not in Slice mode, where a slice starts where it is cut.
+    const auto& classic = editor.getModeControls ((int) Sampler::Mode::classic);
+    CHECK (classic.isShowing());
+    const auto* start =
+        dynamic_cast<phazite::ui::ParameterControls&> (editor.getModeControls ((int) Sampler::Mode::classic)).findControl ("start");
+    const auto* random =
+        dynamic_cast<phazite::ui::ParameterControls&> (editor.getModeControls ((int) Sampler::Mode::classic)).findControl ("startRandom");
+    const auto* end =
+        dynamic_cast<phazite::ui::ParameterControls&> (editor.getModeControls ((int) Sampler::Mode::classic)).findControl ("end");
+    REQUIRE (start != nullptr);
+    REQUIRE (random != nullptr);
+    REQUIRE (end != nullptr);
+    CHECK (random->isShowing());
+    CHECK (random->getTitle() == juce::String ("Start Random"));
+    CHECK (start->getX() < random->getX());
+    CHECK (random->getX() < end->getX());
+    CHECK (random->getY() == start->getY());
+
+    screen.song.setParameter (screen.sampler, "mode", (float) Sampler::Mode::oneShot);
+    screen.settle();
+    auto& oneShot = dynamic_cast<phazite::ui::ParameterControls&> (editor.getModeControls ((int) Sampler::Mode::oneShot));
+    REQUIRE (oneShot.findControl ("startRandom") != nullptr);
+    CHECK (oneShot.findControl ("startRandom")->isShowing());
+
+    screen.song.setParameter (screen.sampler, "mode", (float) Sampler::Mode::slice);
+    screen.settle();
+    auto& slice = dynamic_cast<phazite::ui::ParameterControls&> (editor.getModeControls ((int) Sampler::Mode::slice));
+    CHECK (slice.isShowing());
+    CHECK (slice.findControl ("startRandom") == nullptr);
+
+    screen.song.setParameter (screen.sampler, "mode", (float) Sampler::Mode::classic);
+    screen.settle();
+
+    // Key Time under the amp envelope, with its times; the filter's Velocity with its cutoff. Each turns its parameter as
+    // one undo step.
+    CHECK (showing ("keyTime"));
+    CHECK (showing ("filterVelocity"));
+    CHECK (editor.findControl ("keyTime")->getParentComponent() == editor.findControl ("attack")->getParentComponent());
+    CHECK (editor.findControl ("filterVelocity")->getParentComponent() == editor.findControl ("cutoff")->getParentComponent());
+    CHECK (editor.findControl ("keyTime")->getTitle() == juce::String ("Key Time"));
+    CHECK (editor.findControl ("filterVelocity")->getTitle() == juce::String ("Filter Velocity"));
+
+    auto* keyTime = dynamic_cast<phazite::ui::Knob*> (editor.findControl ("keyTime"));
+    REQUIRE (keyTime != nullptr);
+    CHECK (keyTime->getValue() == 0.0);
+    keyTime->setValue (1.0, juce::sendNotificationSync);
+    CHECK (screen.getValue ("keyTime") == 1.0f);
+    CHECK (screen.describeUndo() == juce::String ("Undo Change Key Time"));
+
+    // In the default dock, each on the page of its part.
+    constexpr int dockWidth = 552, dockHeight = 268;
+    editor.setSize (dockWidth, dockHeight);
+    REQUIRE (editor.getLayout().usesPages());
+    auto pagesWithKeyTime = 0, pagesWithVelocity = 0;
+
+    for (int page = 0; page < editor.getLayout().getNumPages(); ++page)
+    {
+        CAPTURE (page);
+        editor.getLayout().showPage (page);
+        pagesWithKeyTime += showing ("keyTime") ? 1 : 0;
+        pagesWithVelocity += showing ("filterVelocity") ? 1 : 0;
+        CHECK (showing ("keyTime") == showing ("attack"));
+        CHECK (showing ("filterVelocity") == showing ("cutoff"));
+        CHECK (showing ("startRandom") == editor.getSampleView().isShowing());
+    }
+
+    CHECK (pagesWithKeyTime == 1);
+    CHECK (pagesWithVelocity == 1);
 }

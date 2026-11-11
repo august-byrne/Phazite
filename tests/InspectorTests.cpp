@@ -16,6 +16,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/TempoModel.h"
+#include "model/transport/TransportModel.h"
 #include "ui/components/Controls.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/mixer/Inspector.h"
@@ -295,6 +296,47 @@ TEST_CASE ("Selected clips' starts, lengths, gain and pitch change together, and
     CHECK (valueOf (0) == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
     CHECK (valueOf (1) == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
     CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Set Automation Value"));
+}
+
+TEST_CASE ("In 6/8 a clip's place and length read in bars and eighths, and are typed so")
+{
+    Screen screen;
+    phazite::setTimeSignature (screen.context, { 6, 8 });
+
+    // A bar-long MIDI clip at the second bar: three quarter notes in, three long.
+    const auto clip = phazite::addMidiClipAt (screen.context, screen.track (0), BeatPosition::fromBeats (3.0));
+    REQUIRE (clip.isValid());
+    const auto rangeOf = [&screen, clip] { return phazite::getClip (screen.context, clip)->range; };
+    CHECK (rangeOf().getLength().inBeats() == doctest::Approx (3.0));
+    screen.context.getSongSelection().selectOnly (clip);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.inspector.getShown() == juce::String ("Clip"));
+    CHECK (screen.shows ("Bar 2"));
+    CHECK (screen.shows ("1 bar"));
+
+    // Bar 2, beat 4: its fourth eighth, a quarter note and a half into it.
+    type (findField (screen, "Starts"), "2.4");
+    CHECK (rangeOf().getStart().inBeats() == doctest::Approx (4.5));
+    CHECK (screen.shows ("Bar 2, beat 4"));
+
+    // A bar and two eighths: four quarter notes; a quarter note, as a note value: two eighths; three beats: three eighths.
+    type (findField (screen, "Length"), "1 bar, 2 beats");
+    CHECK (rangeOf().getLength().inBeats() == doctest::Approx (4.0));
+    CHECK (screen.shows ("1 bar, 2 beats"));
+    type (findField (screen, "Length"), "1/4");
+    CHECK (rangeOf().getLength().inBeats() == doctest::Approx (1.0));
+    CHECK (screen.shows ("2 beats"));
+    type (findField (screen, "Length"), "3");
+    CHECK (rangeOf().getLength().inBeats() == doctest::Approx (1.5));
+    CHECK (screen.shows ("3 beats"));
+
+    // Stepped by an eighth, the time signature's beat, as their text counts: to bar 2, beat 5, and an eighth shorter.
+    step (findField (screen, "Starts"), true);
+    CHECK (rangeOf().getStart().inBeats() == doctest::Approx (5.0));
+    CHECK (screen.shows ("Bar 2, beat 5"));
+    step (findField (screen, "Length"), false);
+    CHECK (rangeOf().getLength().inBeats() == doctest::Approx (1.0));
+    CHECK (screen.shows ("2 beats"));
 }
 
 TEST_CASE ("The inspector fills its panel, and scrolls up and down when the panel is shorter than what it shows")

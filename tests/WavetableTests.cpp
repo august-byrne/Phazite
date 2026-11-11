@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Phazite's wavetable synth (src/devices/wavetable/): its tables, kept band-limited at every pitch and read from sounds
 // as Serum writes them, its factory tables, and the synth itself: its pitch, its position moving through the table (by
-// hand and by an envelope for each note), its warps, unison, filter, combs and voices, that it doesn't alias, that it
-// lets go of the tables it no longer plays, and that it plays the same every time.
+// hand and by an envelope for each note), its warps, unison (with its stack and its drift), filter, combs and voices (a key
+// played again, as it rings out, while it is held or under the pedal, each note on a voice of its own), that it doesn't
+// alias, that it lets go of the tables it no longer plays, and that it plays the same every time.
 #include "TestHelpers.h"
 #include "devices/wavetable/FactoryWavetables.h"
 #include "devices/wavetable/Wavetable.h"
@@ -60,6 +61,7 @@ NoteEvent noteOff (int sample, int note)
 struct Played
 {
     std::vector<float> left, right;
+    std::vector<int> voicesAfter; // sounding after each block
 };
 
 // Plays the synth in blocks (of testBlockSize samples unless given), with events at their samples from the start. The song
@@ -95,6 +97,7 @@ Played play (WavetableSynth& synth, const std::vector<float>& values, int numSam
         block.events = inBlock;
         block.isPlaying = done < playingUntil;
         synth.process (block);
+        played.voicesAfter.push_back (synth.getActiveVoices());
 
         for (int i = 0; i < length; ++i)
         {
@@ -183,6 +186,68 @@ Wavetable::Harmonics makeSaw()
         harmonics[(size_t) h - 1] = { 0.0f, -1.0f / (float) h };
 
     return harmonics;
+}
+
+float peakOf (const std::vector<float>& sound, size_t from, size_t to)
+{
+    auto peak = 0.0f;
+
+    for (auto i = from; i < to && i < sound.size(); ++i)
+        peak = std::max (peak, std::abs (sound[i]));
+
+    return peak;
+}
+
+// The largest step from one sample to the next.
+float largestStep (const std::vector<float>& sound, size_t from, size_t to)
+{
+    auto largest = 0.0f;
+
+    for (auto i = std::max<size_t> (from, 1); i < to && i < sound.size(); ++i)
+        largest = std::max (largest, std::abs (sound[i] - sound[i - 1]));
+
+    return largest;
+}
+
+// The largest difference between two sounds, on either side.
+float largestDifference (const Played& a, const Played& b)
+{
+    auto largest = 0.0f;
+
+    for (size_t i = 0; i < a.left.size() && i < b.left.size(); ++i)
+        largest = std::max ({ largest, std::abs (a.left[i] - b.left[i]), std::abs (a.right[i] - b.right[i]) });
+
+    return largest;
+}
+
+NoteEvent pedal (int sample, bool down)
+{
+    return { NoteEvent::Type::controller, sample, 64, down ? 1.0f : 0.0f };
+}
+
+// What a new synth plays of some events, and what new synths play of each group of them alone, added: a key played again
+// plays each of its notes as it would alone, what rings out of the one before untouched and the new one from its start, as
+// a note on a voice of its own does.
+std::pair<Played, Played> playApart (const std::vector<float>& values, int numSamples, const std::vector<NoteEvent>& together,
+                                     const std::vector<std::vector<NoteEvent>>& groups)
+{
+    auto played = play (*makeSynth(), values, numSamples, together);
+    Played added;
+    added.left.assign (played.left.size(), 0.0f);
+    added.right.assign (played.right.size(), 0.0f);
+
+    for (const auto& group : groups)
+    {
+        const auto part = play (*makeSynth(), values, numSamples, group);
+
+        for (size_t i = 0; i < part.left.size(); ++i)
+        {
+            added.left[i] += part.left[i];
+            added.right[i] += part.right[i];
+        }
+    }
+
+    return { std::move (played), std::move (added) };
 }
 } // namespace
 
@@ -496,6 +561,370 @@ TEST_CASE ("The wavetable synth's unison spreads its voices across the stereo fi
     CHECK (measureLevelAt (moved.left, 4800, 9600, sixtieth) > 1.0e-3);
 }
 
+namespace
+{
+// A steady tone's pitch in each stretch of `window` samples from `from`, in cents against a frequency: from its rising zero
+// crossings, placed between the samples.
+std::vector<double> measureCents (const std::vector<float>& sound, size_t from, size_t window, double reference, double rate = testRate)
+{
+    std::vector<double> cents;
+
+    for (auto start = from; start + window <= sound.size(); start += window)
+    {
+        auto first = 0.0, last = 0.0;
+        auto crossings = 0;
+
+        for (auto i = start + 1; i < start + window; ++i)
+        {
+            if (sound[i - 1] < 0.0f && sound[i] >= 0.0f)
+            {
+                const auto place = (double) (i - 1) + (double) sound[i - 1] / ((double) sound[i - 1] - (double) sound[i]);
+
+                if (crossings == 0)
+                    first = place;
+
+                last = place;
+                ++crossings;
+            }
+        }
+
+        cents.push_back (crossings > 1 ? 1200.0 * std::log2 ((crossings - 1) * rate / (last - first) / reference) : 0.0);
+    }
+
+    return cents;
+}
+
+double getLargest (const std::vector<double>& values)
+{
+    auto largest = 0.0;
+
+    for (const auto value : values)
+        largest = std::max (largest, std::abs (value));
+
+    return largest;
+}
+
+double getRange (const std::vector<double>& values)
+{
+    const auto [lowest, highest] = std::minmax_element (values.begin(), values.end());
+    return values.empty() ? 0.0 : *highest - *lowest;
+}
+
+// The table's sine, with unison copies in the middle, none detuned.
+std::vector<float> getStackValues (WavetableSynth::Stack stack, int copies)
+{
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::unisonVoices] = (float) (copies - 1);
+    values[WavetableSynth::unisonDetune] = 0.0f;
+    values[WavetableSynth::unisonSpread] = 0.0f;
+    values[WavetableSynth::unisonStack] = (float) stack;
+    return values;
+}
+} // namespace
+
+TEST_CASE ("The wavetable synth's unison stack puts every second or third copy above the note, each as loud")
+{
+    using Stack = WavetableSynth::Stack;
+    CHECK (juce::exactlyEqual (WavetableSynth::info.parameters[WavetableSynth::unisonStack].defaultValue, 0.0f));
+    CHECK (devices::findParameter (WavetableSynth::info, "unisonStack") == WavetableSynth::unisonStack);
+    const auto f0 = noteFrequency (57);
+
+    // One copy plays the note whatever the stack: the table's sine, at its own level, with nothing above it.
+    const auto off = play (*makeSynth(), getStackValues (Stack::off, 1), 19200, { noteOn (0, 57) });
+    const auto alone = play (*makeSynth(), getStackValues (Stack::twoOctaves, 1), 19200, { noteOn (0, 57) });
+    const auto sine = measureLevelAt (off.left, 4800, 19200, f0);
+    REQUIRE (sine > 0.5);
+    CHECK (measureLevelAt (off.left, 4800, 19200, 2.0 * f0) < 0.002);
+    CHECK (alone.left == off.left);
+
+    struct Expected
+    {
+        Stack stack;
+        int copies;
+        std::vector<int> semitones;
+    };
+
+    // As many copies as the stack has steps: one on each, in the stack's order.
+    for (const auto& expected : { Expected { Stack::octave, 2, { 0, 12 } }, Expected { Stack::twoOctaves, 3, { 0, 12, 24 } },
+                                  Expected { Stack::fifth, 2, { 0, 7 } }, Expected { Stack::powerChord, 3, { 0, 7, 12 } } })
+    {
+        INFO ("stack " << (int) expected.stack);
+        const auto steps = WavetableSynth::getStackSteps (expected.stack);
+        REQUIRE (steps.size() == expected.semitones.size());
+        const auto played = play (*makeSynth(), getStackValues (expected.stack, expected.copies), 19200, { noteOn (0, 57) });
+
+        for (size_t step = 0; step < steps.size(); ++step)
+        {
+            CHECK (juce::exactlyEqual (steps[step], (float) expected.semitones[step]));
+            CHECK (measureLevelAt (played.left, 4800, 19200, f0 * std::pow (2.0, expected.semitones[step] / 12.0))
+                   == doctest::Approx (sine / std::sqrt ((double) expected.copies)).epsilon (0.03));
+        }
+
+        // The sine itself has nothing up there.
+        CHECK (measureLevelAt (played.left, 4800, 19200, 3.0 * f0) < 0.002);
+        CHECK (played.left == played.right);
+    }
+
+    // Eight copies 20 cents apart take the stack's steps in turn: the first, fourth and seventh on the note, the second, fifth
+    // and eighth an octave up, the third and sixth two octaves up.
+    auto values = getStackValues (Stack::twoOctaves, 8);
+    values[WavetableSynth::unisonDetune] = 70.0f;
+    const auto eight = play (*makeSynth(), values, 96000, { noteOn (0, 69) });
+    const auto levelAt = [&eight] (int copy, int octaves)
+    {
+        const auto cents = -70.0 + 20.0 * copy + 1200.0 * octaves;
+        return measureLevelAt (eight.left, 24000, 96000, 440.0 * std::pow (2.0, cents / 1200.0));
+    };
+
+    for (int copy = 0; copy < 8; ++copy)
+    {
+        INFO ("copy " << copy);
+
+        for (int octaves = 0; octaves < 3; ++octaves)
+        {
+            if (copy % 3 == octaves)
+                CHECK (levelAt (copy, octaves) == doctest::Approx (sine / std::sqrt (8.0)).epsilon (0.05));
+            else
+                CHECK (levelAt (copy, octaves) < 0.02);
+        }
+    }
+}
+
+TEST_CASE ("A stacked unison's copies on the note keep the harmonics those above it can't play, and none aliases")
+{
+    // Basic Shapes' saw at C6, a copy on the note, one an octave up and one two octaves up, which has room for five harmonics
+    // only: the copy on the note still plays its eleventh, as loud as without the stack.
+    auto values = getPlainValues (2.0f / 3.0f);
+    const auto f0 = noteFrequency (84);
+    const auto single = play (*makeSynth(), values, 19200, { noteOn (0, 84) });
+    values[WavetableSynth::unisonVoices] = 2.0f; // three
+    values[WavetableSynth::unisonDetune] = 0.0f;
+    values[WavetableSynth::unisonSpread] = 0.0f;
+    values[WavetableSynth::unisonStack] = (float) WavetableSynth::Stack::twoOctaves;
+    const auto stacked = play (*makeSynth(), values, 19200, { noteOn (0, 84) });
+
+    const auto eleventh = measureLevelAt (single.left, 4800, 19200, 11.0 * f0);
+    REQUIRE (eleventh > 0.02);
+    CHECK (measureLevelAt (stacked.left, 4800, 19200, 11.0 * f0) == doctest::Approx (eleventh / std::sqrt (3.0)).epsilon (0.05));
+
+    // Every copy's harmonics are the note's: between them, below 20 kHz, nothing (-80 dB).
+    const auto fundamental = measureLevelAt (stacked.left, 4800, 19200, f0);
+    REQUIRE (fundamental > 0.1);
+
+    for (auto frequency = 0.5 * f0; frequency < 20000.0; frequency += f0)
+        CHECK (measureLevelAt (stacked.left, 4800, 19200, frequency) < 1.0e-4 * fundamental);
+
+    // At the top of the keyboard, eight copies of both oscillators stacked and drifting as far as they go stay in bounds.
+    values = getDefaults();
+    values[WavetableSynth::osc2On] = 1.0f;
+    values[WavetableSynth::osc2Pitch] = 36.0f;
+    values[WavetableSynth::unisonVoices] = 7.0f;
+    values[WavetableSynth::unisonDetune] = 100.0f;
+    values[WavetableSynth::unisonStack] = (float) WavetableSynth::Stack::twoOctaves;
+    values[WavetableSynth::unisonDrift] = 50.0f;
+    const auto extreme = play (*makeSynth(), values, 24000, { noteOn (0, 127), noteOn (0, 0), noteOn (4800, 60) });
+
+    for (const auto sample : extreme.left)
+    {
+        REQUIRE (std::isfinite (sample));
+        REQUIRE (std::abs (sample) < 4.0f);
+    }
+}
+
+TEST_CASE ("The wavetable synth's unison drift lets each copy's pitch wander on its own, no further than its cents")
+{
+    CHECK (juce::exactlyEqual (WavetableSynth::info.parameters[WavetableSynth::unisonDrift].defaultValue, 0.0f));
+    constexpr size_t window = 4800; // 100 ms
+
+    // One copy of the table's sine: without drift it stays on the note.
+    auto values = getPlainValues (0.0f);
+    const auto steady = measureCents (play (*makeSynth(), values, 96000, { noteOn (0, 69) }).left, window, window, 440.0);
+    CHECK (getLargest (steady) < 0.2);
+
+    // Drifting up to 30 cents, it wanders around the note, never further, and doesn't settle.
+    values[WavetableSynth::unisonDrift] = 30.0f;
+    const auto drifting = play (*makeSynth(), values, 480000, { noteOn (0, 69) });
+    const auto wander = measureCents (drifting.left, window, window, 440.0);
+    CHECK (getLargest (wander) <= 30.0);
+    CHECK (getRange (wander) > 20.0);
+
+    for (size_t start = 0; start + 20 <= wander.size(); start += 20)
+        CHECK (getRange ({ wander.begin() + (std::ptrdiff_t) start, wander.begin() + (std::ptrdiff_t) start + 20 }) > 1.0); // each 2 s
+
+    // Half as far at half the amount.
+    values[WavetableSynth::unisonDrift] = 15.0f;
+    const auto half = measureCents (play (*makeSynth(), values, 480000, { noteOn (0, 69) }).left, window, window, 440.0);
+
+    for (size_t i = 0; i < wander.size(); ++i)
+        CHECK (half[i] == doctest::Approx (0.5 * wander[i]).epsilon (0.02).scale (1.0));
+
+    // Two copies, one on each side: each on its own way, at its own pace.
+    values[WavetableSynth::unisonDrift] = 30.0f;
+    values[WavetableSynth::unisonVoices] = 1.0f;
+    values[WavetableSynth::unisonDetune] = 0.0f;
+    values[WavetableSynth::unisonSpread] = 1.0f;
+    const auto two = play (*makeSynth(), values, 480000, { noteOn (0, 69) });
+    const auto leftWander = measureCents (two.left, window, window, 440.0), rightWander = measureCents (two.right, window, window, 440.0);
+    CHECK (getLargest (leftWander) <= 30.0);
+    CHECK (getLargest (rightWander) <= 30.0);
+    auto apart = 0.0;
+
+    for (size_t i = 0; i < leftWander.size(); ++i)
+        apart = std::max (apart, std::abs (leftWander[i] - rightWander[i]));
+
+    CHECK (apart > 15.0);
+
+    // Both oscillators' copies wander apart too: two sines on one note, which without drift would hold their level, beat.
+    values = getPlainValues (0.0f);
+    values[WavetableSynth::osc2On] = 1.0f;
+    values[WavetableSynth::osc2Position] = 0.0f;
+    values[WavetableSynth::osc2Level] = 1.0f;
+    const auto level = [] (const std::vector<float>& sound)
+    {
+        std::vector<double> levels;
+
+        for (size_t start = 4800; start + 2400 <= sound.size(); start += 2400)
+        {
+            auto sum = 0.0;
+
+            for (auto i = start; i < start + 2400; ++i)
+                sum += (double) sound[i] * sound[i];
+
+            levels.push_back (std::sqrt (sum / 2400.0));
+        }
+
+        return levels;
+    };
+
+    const auto together = level (play (*makeSynth(), values, 240000, { noteOn (0, 69) }).left);
+    values[WavetableSynth::unisonDrift] = 30.0f;
+    const auto beating = level (play (*makeSynth(), values, 240000, { noteOn (0, 69) }).left);
+    CHECK (getRange (together) < 0.01);
+    CHECK (getRange (beating) > 0.5);
+
+    // Each note from somewhere of its own: the same key six times, each once the last has rung out, starts in six places.
+    values = getPlainValues (0.0f);
+    values[WavetableSynth::unisonDrift] = 30.0f;
+    values[WavetableSynth::env1Release] = 20.0f;
+    std::vector<NoteEvent> repeats;
+
+    for (int i = 0; i < 6; ++i)
+    {
+        repeats.push_back (noteOn (i * 24000, 69));
+        repeats.push_back (noteOff (i * 24000 + 12000, 69));
+    }
+
+    const auto repeated = play (*makeSynth(), values, 6 * 24000, repeats).left;
+    std::vector<double> starts;
+
+    for (int i = 0; i < 6; ++i)
+    {
+        // Over its first 50 ms, from when its attack is through.
+        const auto from = repeated.begin() + i * 24000 + 240;
+        const auto start = measureCents ({ from, from + 2400 }, 0, 2400, 440.0);
+        REQUIRE (start.size() == 1);
+        starts.push_back (start[0]);
+    }
+
+    std::sort (starts.begin(), starts.end());
+    CHECK (starts.back() - starts.front() > 10.0);
+
+    for (size_t i = 1; i < starts.size(); ++i)
+        CHECK (starts[i] - starts[i - 1] > 0.05);
+
+    // And the same every time.
+    values = getDefaults();
+    values[WavetableSynth::osc2On] = 1.0f;
+    values[WavetableSynth::unisonVoices] = 7.0f;
+    values[WavetableSynth::unisonStack] = (float) WavetableSynth::Stack::twoOctaves;
+    values[WavetableSynth::unisonDrift] = 25.0f;
+    const std::vector<NoteEvent> notes { noteOn (0, 48), noteOn (3000, 55), noteOff (9000, 48), noteOn (12000, 60), noteOn (15000, 55) };
+    const auto once = play (*makeSynth(), values, 24000, notes);
+    const auto again = play (*makeSynth(), values, 24000, notes);
+    CHECK (once.left == again.left);
+    CHECK (once.right == again.right);
+}
+
+TEST_CASE ("The wavetable synth's unison drift keeps its time at any sample rate, and however blocks split the samples")
+{
+    // One copy of the table's sine wandering up to 30 cents, over four seconds: where it is each 100 ms, at 48 kHz.
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::unisonDrift] = 30.0f;
+
+    const auto wanderAt = [&values] (double rate)
+    {
+        WavetableSynth synth;
+        synth.prepare (rate, testBlockSize);
+        const auto played = play (synth, values, (int) std::lround (4.0 * rate), { noteOn (0, 69) });
+        const auto window = (size_t) std::lround (0.1 * rate);
+        return measureCents (played.left, window, window, 440.0, rate);
+    };
+
+    const auto reference = wanderAt (48000.0);
+    REQUIRE (getRange (reference) > 10.0);
+
+    // The same way at the other rates: its places and its pace are set in seconds.
+    for (const auto rate : { 44100.0, 96000.0, 192000.0 })
+    {
+        INFO ("rate " << rate);
+        const auto wander = wanderAt (rate);
+        REQUIRE (wander.size() == reference.size());
+        CHECK (getLargest (wander) <= 30.0);
+
+        for (size_t i = 0; i < wander.size(); ++i)
+            CHECK (std::abs (wander[i] - reference[i]) < 2.0);
+    }
+
+    // A stacked, drifting unison of both oscillators, a note held and another that comes and goes: in the usual blocks and in
+    // blocks of 37 samples, the same.
+    values = getPlainValues (2.0f / 3.0f);
+    values[WavetableSynth::osc2On] = 1.0f;
+    values[WavetableSynth::osc2Fine] = 7.0f;
+    values[WavetableSynth::unisonVoices] = 5.0f;
+    values[WavetableSynth::unisonStack] = (float) WavetableSynth::Stack::powerChord;
+    values[WavetableSynth::unisonDrift] = 20.0f;
+    const std::vector<NoteEvent> events { noteOn (0, 60), noteOn (1000, 67), noteOff (5003, 67) };
+    const auto steady = play (*makeSynth(), values, 24000, events);
+    const auto split = play (*makeSynth(), values, 24000, events, 37);
+    auto largest = 0.0f, loudest = 0.0f;
+
+    for (size_t i = 0; i < steady.left.size(); ++i)
+    {
+        largest = std::max ({ largest, std::abs (steady.left[i] - split.left[i]), std::abs (steady.right[i] - split.right[i]) });
+        loudest = std::max (loudest, std::abs (steady.left[i]));
+    }
+
+    CHECK (loudest > 0.1f);
+    CHECK (largest < 1.0e-4f);
+}
+
+TEST_CASE ("A stack chosen and a drift turned up while a note sounds leave no step in its wave")
+{
+    // Two copies of the table's sine, held: stacked an octave from one block to the next, the copy that moves up goes on from
+    // where its wave was; and drifting from the next, both do.
+    auto synth = makeSynth();
+    auto values = getStackValues (WavetableSynth::Stack::off, 2);
+    auto sound = play (*synth, values, 9600, { noteOn (0, 57) }).left;
+    values[WavetableSynth::unisonStack] = (float) WavetableSynth::Stack::octave;
+    const auto stacked = play (*synth, values, 9600, {}).left;
+    values[WavetableSynth::unisonDrift] = 50.0f;
+    const auto drifting = play (*synth, values, 9600, {}).left;
+    sound.insert (sound.end(), stacked.begin(), stacked.end());
+    sound.insert (sound.end(), drifting.begin(), drifting.end());
+
+    // The copy that moved plays an octave up, as loud as the one that stayed.
+    const auto f0 = noteFrequency (57);
+    const auto level = measureLevelAt (sound, 14400, 19200, 2.0 * f0);
+    CHECK (level > 0.3);
+    CHECK (measureLevelAt (sound, 14400, 19200, f0) == doctest::Approx (level).epsilon (0.03));
+
+    // The steepest two sines an octave apart, each at that level, get from one sample to the next.
+    const auto steepest = (float) (level * twoPi * 3.0 * f0 / testRate);
+
+    for (size_t i = 4800; i < sound.size(); ++i)
+        REQUIRE (std::abs (sound[i] - sound[i - 1]) < 1.1f * steepest);
+}
+
 TEST_CASE ("The wavetable synth's filter darkens its saw, and the default patch opens it with each note")
 {
     const auto tenthOf = [] (const std::vector<float>& values)
@@ -657,6 +1086,78 @@ TEST_CASE ("The wavetable synth plays 16 voices, glides in mono mode, and plays 
     const auto again = play (*second, values, 24000, notes);
     CHECK (once.left == again.left);
     CHECK (once.right == again.right);
+}
+
+TEST_CASE ("A key played again on the wavetable synth as it rings out takes a voice of its own: its tail rings on, the new note starts "
+           "afresh")
+{
+    // A new wavetable synth's saw through its filter, which its second envelope opens for each note: C3 let go, then played
+    // again a third of the way through its 200 ms release. It plays each note as it does alone, added, on both sides: the
+    // first's tail as it would have rung out, the second from the start of its wave and of its envelopes, as a note on a
+    // voice of its own. Its voice taken back, the second would have gone on with the first's wave and envelopes.
+    const auto [played, added] =
+        playApart (getDefaults(), 36000, { noteOn (0, 48), noteOff (4800, 48), noteOn (8000, 48), noteOff (19200, 48) },
+                   { { noteOn (0, 48), noteOff (4800, 48) }, { noteOn (8000, 48), noteOff (19200, 48) } });
+    REQUIRE (peakOf (played.left, 0, 4800) > 0.1f);
+    CHECK (largestDifference (played, added) < 1.0e-6f);
+    CHECK (played.voicesAfter[40] == 2); // 0.22 s: the first's tail with the second
+    CHECK (played.voicesAfter[60] == 1); // 0.33 s: the tail has rung out, at 0.3 s
+    CHECK (played.voicesAfter.back() == 0);
+}
+
+TEST_CASE ("A note-off lets go of its key's held voice only on the wavetable synth: a tail of the same key rings on, its release not "
+           "begun again")
+{
+    // C3 let go, a note-off while only its tail sounds, which lets go of nothing, then C3 again, let go while the first's tail
+    // still rings: that note-off lets go of the second note only. Begun again, the first's release would have rung on past
+    // the 200 ms it takes.
+    const auto [played, added] =
+        playApart (getDefaults(), 36000, { noteOn (0, 48), noteOff (4800, 48), noteOff (6400, 48), noteOn (8000, 48), noteOff (9600, 48) },
+                   { { noteOn (0, 48), noteOff (4800, 48) }, { noteOn (8000, 48), noteOff (9600, 48) } });
+    CHECK (largestDifference (played, added) < 1.0e-6f);
+    CHECK (played.voicesAfter[40] == 2); // the two tails
+    CHECK (played.voicesAfter[60] == 1); // 0.33 s: the first's rang out at 0.3 s, the second's rings until 0.4 s
+    CHECK (played.voicesAfter[76] == 0);
+}
+
+TEST_CASE ("A key played again on the wavetable synth while it is held lets its voice go as if it came up; the new note takes a voice "
+           "of its own")
+{
+    // Two notes of C3 that overlap: the first lets go as the second begins, its release ringing on, and the first note-off
+    // lets go of the key, which then holds nothing for the second. A key never holds two voices.
+    const auto [played, added] =
+        playApart (getDefaults(), 36000, { noteOn (0, 48), noteOn (3200, 48), noteOff (4800, 48), noteOff (8000, 48) },
+                   { { noteOn (0, 48), noteOff (3200, 48) }, { noteOn (3200, 48), noteOff (4800, 48) } });
+    CHECK (largestDifference (played, added) < 1.0e-6f);
+    CHECK (played.voicesAfter[14] == 2); // 0.08 s: the first's tail, and the second held
+}
+
+TEST_CASE ("Under the sustain pedal, a key played again on the wavetable synth lets the voice the pedal holds ring out, and the pedal "
+           "holds the new one")
+{
+    // The pedal down, C3 played and let go: the pedal holds it. Played again, the voice the pedal held lets go, its release
+    // ringing on, and the new note takes a voice of its own, which the pedal holds until it lifts: one voice held for the key.
+    const auto [played, added] = playApart (
+        getDefaults(), 36000,
+        { pedal (0, true), noteOn (0, 48), noteOff (1600, 48), noteOn (4800, 48), noteOff (6400, 48), pedal (9600, false) },
+        { { noteOn (0, 48), noteOff (4800, 48) }, { pedal (0, true), noteOn (4800, 48), noteOff (6400, 48), pedal (9600, false) } });
+    CHECK (largestDifference (played, added) < 1.0e-6f);
+    CHECK (played.voicesAfter[30] == 2); // 0.17 s: the first's tail, and the second that the pedal holds
+    CHECK (played.voicesAfter[60] == 1); // 0.33 s: the first's tail rang out at 0.3 s; the pedal let go of the second at 0.2 s
+    CHECK (played.voicesAfter[76] == 0);
+}
+
+TEST_CASE ("In mono mode a key played again on the wavetable synth as it rings out takes the one voice back from where it is, as before")
+{
+    // The table's sine, released over 200 ms and played again a third of the way through: one voice still, its wave going on
+    // where it was and its level rising from where its release had brought it, without a step (a sine at 131 Hz moves at
+    // most 0.02 a sample, its attack's rise with it; started again, the wave would have jumped by its level, 0.2 here).
+    auto values = getPlainValues (0.0f);
+    values[WavetableSynth::voiceMode] = 1.0f;
+    const auto played = play (*makeSynth(), values, 36000, { noteOn (0, 48), noteOff (4800, 48), noteOn (8000, 48), noteOff (19200, 48) });
+    CHECK (*std::max_element (played.voicesAfter.begin(), played.voicesAfter.end()) == 1);
+    REQUIRE (peakOf (played.left, 7600, 8000) > 0.1f); // its tail, as it is played again
+    CHECK (largestStep (played.left, 7900, 8300) < 0.05f);
 }
 
 TEST_CASE ("The wavetable synth's modulation keeps its time, however blocks and notes split the samples")

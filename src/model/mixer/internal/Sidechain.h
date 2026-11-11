@@ -32,6 +32,13 @@ std::vector<TrackID> getSidechainSources (const Song&, DeviceID);
 TrackID getSidechainSource (const Song&, DeviceID);
 SidechainChoice describeSidechainSource (const Song&, DeviceID);
 
+// Whether a device hears the track its sidechain listens to now, as the mixer shows it (a stripe of the track's colour, a
+// link to its channel): one that has a source does, but Phazite's compressor only while it ducks (its Duck mode); while it
+// compresses, it hears its own sound, its key kept for when it ducks again. And whether a change of a device's value set by
+// hand (a property of its VALUES) turns that on or off, as the compressor's mode does.
+bool hearsSidechain (const Song&, DeviceID);
+bool switchesSidechain (const juce::ValueTree& values, const juce::Identifier& property);
+
 // Every track with sound of its own but one, in the song's order, with its colour, and why a device on that one couldn't
 // listen to it: its sound comes from that track, which would make a loop (getSidechainSources()). With none, every
 // track, as a device on the master hears them. describeSidechainChoices() gives them for a device's sidechain, if it has
@@ -40,13 +47,16 @@ std::vector<SidechainChoice> describeTracksToListenTo (const Song&, TrackID list
 std::vector<SidechainChoice> describeSidechainChoices (const Song&, DeviceID);
 
 // Makes a device's sidechain listen to a track, one of getSidechainSources(), or with none to the sound passing through
-// it, as one undo step. Phazite's compressor, still as it was made, starts ducking then, in the same step: quick to clamp
-// down (1 ms), slow to let go (150 ms), deep (8:1 from -30 dB); and hearing only below 150 Hz when the source plays a drum
-// sampler, so that a kick ducks it and the snare and hats don't.
+// it, as one undo step. Phazite's compressor ducks under the track chosen, in the same step (its Duck mode), and, still as
+// it was made but for its mode, is set up to pump under a kick then: from -14 dB, 14 dB down, in 1 ms, held 120 ms from the
+// hit and while the key stays over -14 dB, and back in a straight line over 80 ms; hearing only 60 to 150 Hz when the source
+// plays a drum sampler, its kick's body, so that a long kick's boom doesn't hold it down through the beat and the snare,
+// clap and hats don't move it. Phazite's multiband, still as it was made, ducks its lows under it. Phazite's vocoder plays
+// the track as its carrier (Track).
 void setSidechainSource (Song&, DeviceID, TrackID source);
 
-// Puts Phazite's compressor after a track's effects, ducking under another track (setSidechainSource()), as one undo step
-// ("Duck Bass Under Kick"). Returns the compressor, or none when the key would make a loop.
+// Puts Phazite's compressor after a track's effects, ducking under another track (setSidechainSource(): its Duck mode), as
+// one undo step ("Duck Bass Under Kick"). Returns the compressor, or none when the key would make a loop.
 DeviceID duckUnder (Song&, TrackID ducked, TrackID key);
 
 // Points the sidechains that listen to these tracks, or to tracks inside them, back at the sound passing through each

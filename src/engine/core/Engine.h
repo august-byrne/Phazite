@@ -183,13 +183,13 @@ private:
     // The audio thread's transport: where the playhead is, in samples from the song's start, and in beats (to stay on its
     // beat when a plan with another tempo comes); and the plan it last played.
     // Whether every track's notes stop (playback stopped or jumped) and those sounding where it plays from start, at the
-    // next stretch played. A count-in, while it lasts: its length and what is left of it in samples, the song's beat it
-    // starts on, the first beat of the bar the playhead is in, and the beats of a bar and samples of a beat there.
+    // next stretch played. A count-in, while it lasts: its length and what is left of it in samples; the song's beat it
+    // starts on, a bar before the playhead, the first beat of the bar the playhead is in, and the time signature's bar and
+    // its beat there, in beats (quarter notes); and the samples of a beat there.
     struct CountIn
     {
         std::int64_t length = 0, left = 0;
-        double firstBeat = 0.0, barStart = 0.0;
-        int beatsPerBar = 4;
+        double firstBeat = 0.0, barStart = 0.0, barLength = 4.0, beatLength = 1.0;
         double samplesPerBeat = 1.0;
     };
 
@@ -229,7 +229,9 @@ private:
         const Plan* plan = nullptr;
         int offset = 0, numSamples = 0;
         double beat = 0.0, tempo = 120.0, beatsPerSample = 0.0;
-        std::int64_t gridSample = 0;
+        double bars = 0.0, barsPerSample = 0.0, barStart = 0.0;
+        std::int64_t songSample = 0, gridSample = 0;
+        TempoMap::TimeSignature timeSignature;
         std::uint64_t pass = 0;
         bool startsEarly = false, flush = false;
     };

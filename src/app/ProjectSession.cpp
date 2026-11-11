@@ -41,6 +41,9 @@ ProjectSession::ProjectSession (EngineContext& engine, RecentProjects& recentPro
 {
     engineContext.addChangeListener (this);
     getSelection().addChangeListener (this);
+
+    // What went wrong with the open song that the model can't show itself (sound lost from a take), as an error.
+    setProblemReporter (context, [this] (const juce::String& title, const juce::String& message) { showError (title, message); });
 }
 
 ProjectSession::~ProjectSession()

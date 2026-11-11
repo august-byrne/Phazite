@@ -642,7 +642,7 @@ ClipID insertMidiClip (Song& song, TrackID track, BeatRange range, Selection* se
 
 ClipID insertBarLongMidiClip (Song& song, TrackID track, BeatPosition start, Selection* selection)
 {
-    const auto bar = BeatDuration::fromBeats (getBars (song).getBeatsPerBar (start));
+    const auto bar = getBars (song).getBarLength (start);
     return insertMidiClip (song, track, { start, start + bar }, selection);
 }
 

@@ -45,6 +45,7 @@ juce::String getParameterDeviceName (const Song&, const ParameterRef&);
 std::vector<AutomationPoint> getPoints (const Song&, const ParameterRef&);
 bool hasPoints (const Song&, const ParameterRef&);
 std::vector<float> getValues (const Song&, const ParameterRef&, BeatRange, int numValues); // getAutomationValues()
+std::vector<float> getValues (const Song&, const ParameterRef&, const std::vector<BeatPosition>&);
 int addPoint (Song&, const ParameterRef&, AutomationPoint);
 BeatDuration movePoints (Song&, const ParameterRef&, const std::vector<int>& indices, BeatDuration, float valueChange);
 void setCurve (Song&, const ParameterRef&, int index, float curve);

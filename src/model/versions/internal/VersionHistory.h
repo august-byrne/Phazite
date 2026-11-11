@@ -9,6 +9,7 @@
 #include "SongDiff.h"
 #include "SongMerge.h"
 #include "VersionStore.h"
+#include "model/base/BackgroundJobs.h"
 #include "model/base/Song.h"
 
 #include <juce_events/juce_events.h>
@@ -259,7 +260,7 @@ private:
     std::function<void()> onChange;
     juce::File folder; // the store's
     std::shared_ptr<VersionStore> store;
-    juce::ThreadPool thread;
+    BackgroundJobs thread;               // one at a time
     int pendingJobs = 0, generation = 0; // generation: which store what comes back from the thread was read from
     bool hasRead = false, saving = false, checking = false;
     std::optional<Check> lastCheck;

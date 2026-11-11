@@ -3,7 +3,9 @@
 // that turns, a list for one that picks a choice, a switch for one that is on or off, in a grid of a given number of
 // columns, in the order given. Knobs are compact (compactKnobSize), or large for a device's main controls. A name that
 // starts with the part's title drops it ("Filter Cutoff" is "Cutoff" under "Filter"); the control's title, which screen
-// readers read, keeps the whole name. The DisplayTicker shows changes made elsewhere (automation, undo).
+// readers read, keeps the whole name. The DisplayTicker shows changes made elsewhere (automation, undo). Given more width
+// than its grid, its columns spread; given less (a dense editor's, the multiband's), they narrow alike, each at least as
+// wide as its knob, names and values squeezed to fit.
 #pragma once
 
 #include "model/devices/DeviceHandle.h"
@@ -12,6 +14,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <functional>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -88,9 +91,9 @@ private:
 };
 
 //==============================================================================
-// A choice's options as buttons, side by side or one above another (a switch's positions), the one chosen lit: a click picks
-// one, as one undo step, as a compressor's characters and a multiband's band modes are picked. The DisplayTicker shows
-// changes made elsewhere (automation, undo).
+// A choice's options as buttons, side by side, one above another (a switch's positions) or two to a row, the one chosen lit:
+// a click picks one, as one undo step, as a compressor's characters and a multiband's band modes are picked. The
+// DisplayTicker shows changes made elsewhere (automation, undo).
 class ChoiceButtons : public juce::Component,
                       private DisplayTicker::Display
 {
@@ -98,12 +101,14 @@ public:
     enum class Direction
     {
         across,
-        down
+        down,
+        twoAcross // in rows of two, the first two over the next two
     };
 
-    // Each option's tooltip, in the choice's order, when given.
+    // Each option's tooltip, in the choice's order, when given; and the text each button shows, where shorter than its
+    // choice's name (a slope's "24" for "24 dB"), which the buttons' titles keep.
     ChoiceButtons (const DeviceHandle&, std::string_view parameterID, Direction = Direction::across,
-                   const std::vector<juce::String>& tooltips = {});
+                   const std::vector<juce::String>& tooltips = {}, const std::vector<juce::String>& shownTexts = {});
     ~ChoiceButtons() override;
 
     juce::Button& getButton (int index) { return *buttons[index]; }
@@ -122,6 +127,42 @@ private:
     ParameterHandle parameter;
     const Direction direction;
     juce::OwnedArray<juce::TextButton> buttons;
+
+    void tick() override { refresh(); }
+};
+
+//==============================================================================
+// A choice's options as tabs along the top of an editor, the one chosen in front, as pills like the dock's tabs: a device's
+// modes, each showing parts of its own (DeviceEditorBase::setModes(); the compressor's Compress and Duck, as Fruity Limiter's
+// tabs switch its own). A click picks one, as one undo step; onChange then says which, as it does for a change made elsewhere
+// (an undo, automation), which the DisplayTicker brings in. Each tab is titled with the choice's name and its option's.
+class ChoiceTabs : public juce::Component,
+                   private DisplayTicker::Display
+{
+public:
+    ChoiceTabs (const DeviceHandle&, std::string_view parameterID, const std::vector<juce::String>& tooltips = {});
+    ~ChoiceTabs() override;
+
+    juce::Button& getTab (int index) { return *tabs[index]; }
+    int getNumTabs() const noexcept { return tabs.size(); }
+
+    // The option chosen, as it last showed it.
+    int getChosen() const noexcept { return chosen; }
+
+    // Called with the option chosen as it changes: by a click, or by a change made elsewhere at the ticker's next refresh.
+    std::function<void (int)> onChange;
+
+    static constexpr int height = 24; // as the dock's tabs' pills are tall
+
+    // Its tab in front: the option chosen now. The ticker does it.
+    void refresh();
+
+    void resized() override;
+
+private:
+    ParameterHandle parameter;
+    juce::OwnedArray<juce::Button> tabs;
+    int chosen = -1;
 
     void tick() override { refresh(); }
 };

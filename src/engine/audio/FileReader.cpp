@@ -13,9 +13,11 @@ FileReader::FileReader()
 
 FileReader::~FileReader()
 {
+    // Woken, and waited for however long the chunk it reads takes: never ended by force, which can leave a lock it held
+    // held for ever.
     signalThreadShouldExit();
     added.signal();
-    stopThread (5000);
+    stopThread (-1);
 }
 
 void FileReader::add (const std::shared_ptr<AudioFile>& file)

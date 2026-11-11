@@ -8,8 +8,10 @@
 // feeds back as it opens) nor an undo step. A track's input, and whether it is heard while armed, always or never, are
 // saved, each change one named undo step. Record (internal/Recording.h) records the armed tracks with what is played on
 // MIDI, all as one undo step. With Punch on, only what falls in the looped range is kept, in place of what was there;
-// recording round a looped range makes takes of one clip, the newest whole one playing. While it records, what has come in
-// shows where it will go, growing on each track as it records (getRecordingsInProgress()), as Ableton Live draws it.
+// recording round a looped range makes a take of one clip of every time round, a partial first one too, the newest whole one
+// playing, and what was played before the range, if it started before it, a clip of its own. While it records, what has
+// come in shows where it will go, growing on each track as it records (getRecordingsInProgress()), as Ableton Live draws
+// it. Sound lost while the drive didn't keep up is silence in the take, which stays in time, and Phazite says where.
 #pragma once
 
 #include "RecordingValues.h"

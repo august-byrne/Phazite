@@ -40,12 +40,7 @@ TestSong::TestSong (Start start)
     save = [this] (std::function<void (bool)> then) { then (project->save().wasOk()); };
 
     // Its history read, and its initial commit made, as a project's are as it starts.
-    REQUIRE (dispatchMessagesUntil (
-        [this]
-        {
-            const auto* history = getVersionHistory (context);
-            return history == nullptr || (! history->isReading() && ! history->isBusy());
-        }));
+    REQUIRE (waitForVersionHistory (context));
 
     const auto tracks = getAllPlaylistTracks (context);
     REQUIRE (! tracks.empty());
@@ -55,7 +50,22 @@ TestSong::TestSong (Start start)
 TestSong::~TestSong()
 {
     renders.render = nullptr; // a freeze or a bounce still running, which needs the project
+}
+
+TestSong::SongDetacher::~SongDetacher()
+{
     setSong (context, nullptr);
+}
+
+bool waitForVersionHistory (ProjectContext& context)
+{
+    return dispatchMessagesUntil (
+        [&context]
+        {
+            const auto* history = getVersionHistory (context);
+            return history == nullptr || (! history->isReading() && ! history->isBusy());
+        },
+        versionHistoryTimeout);
 }
 
 Project& TestSong::getProject() const

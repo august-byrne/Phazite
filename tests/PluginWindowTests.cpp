@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A plug-in's window's menu (src/app/PluginWindow.h; roadmap step 2.12): Save Preset..., Load Preset with the presets saved
 // for the plug-in, and Send All Keys to the Plug-in, which the settings keep for the plug-in in every project. Its "done
-// when": plug-in states save as presets, and a name can be typed into a plug-in that draws its own text fields.
+// when": plug-in states save as presets, and a name can be typed into a plug-in that draws its own text fields. And beside the
+// menu, a plug-in's sidechain's key, picked there.
+#include "SandboxedPlugins.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
@@ -15,9 +17,12 @@
 #include "model/project/internal/ProjectContext.h"
 #include "services/Library.h"
 #include "services/Settings.h"
+#include "ui/devices/SidechainMenus.h"
+#include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/input/PluginKeys.h"
+#include "ui/mixer/DevicesView.h"
 
 namespace
 {
@@ -161,4 +166,94 @@ TEST_CASE ("A plug-in window's Send All Keys to the Plug-in is kept for the plug
     CHECK_FALSE (item (menu, { "Save Preset..." }).isEnabled);
     CHECK_FALSE (item (menu, { "Load Preset" }).isEnabled);
     CHECK_FALSE (item (menu, { "Send All Keys to the Plug-in" }).isEnabled);
+}
+
+TEST_CASE ("A plug-in with a sidechain has its key in its window's header, by the Plug-in menu: a track chosen there is one undo step")
+{
+    // What a plug-in's sidechain listens to is chosen inside the plug-in, as Logic's and Cubase's plug-in windows have it, not in
+    // the Devices view's list (the owner, 2026-11-10); and on its panel there, as Phazite's own devices' editors have it (below).
+    phazite::test::SandboxedPlugins sandboxed;
+    phazite::test::TestSong song;
+    const auto tone = song.addTrack ("Tone");
+    const auto listening = song.addTrack ("Listens");
+    const auto effect = song.addEffect (listening, "PhaziteTestSidechain"); // plays its sidechain in place of its sound
+    REQUIRE (phazite::hasSidechain (song.context, effect));
+    auto& model = *phazite::findSong (song.context);
+    model.getUndoManager().clearUndoHistory();
+
+    juce::Component editor;
+    phazite::test::TestWindow window { editor, 400, 300 }; // the plug-in's window
+    const auto menu = phazite::createPluginMenu (song.context, effect, window);
+    phazite::PluginWindowHeader header (song.context, effect, *menu);
+    phazite::test::TestWindow headerWindow { header, 400, 24 };
+
+    // At the header's right end, after the menu: the key, none at first.
+    auto* picker = dynamic_cast<phazite::ui::SidechainButton*> (header.getKeyPicker());
+    REQUIRE (picker != nullptr);
+    CHECK (picker->isShowing());
+    CHECK (picker->getTitle() == juce::String ("Key"));
+    CHECK (picker->getButtonText() == juce::String ("None"));
+    auto* bar = phazite::test::findAll<juce::MenuBarComponent> (header).getFirst();
+    REQUIRE (bar != nullptr);
+    CHECK (bar->getRight() <= picker->getX());
+    phazite::test::checkChildrenApart (header);
+
+    // The tone's track: it listens, one undo step.
+    REQUIRE (phazite::test::runMenuItem (picker->getMenu(), { "Tone" }));
+    CHECK (phazite::getSidechainSource (song.context, effect) == tone);
+    CHECK (phazite::describeUndo (&model) == juce::String ("Undo Sidechain from Tone"));
+    CHECK (picker->getButtonText() == juce::String ("Tone"));
+
+    // Undone: none again, as the window looks.
+    phazite::undo (model);
+    header.refresh();
+    CHECK (picker->getButtonText() == juce::String ("None"));
+
+    // A plug-in without a sidechain has its menu alone.
+    const auto plain = song.addEffect (tone, "PhaziteTestEffect");
+    REQUIRE_FALSE (phazite::hasSidechain (song.context, plain));
+    const auto plainMenu = phazite::createPluginMenu (song.context, plain, window);
+    phazite::PluginWindowHeader plainHeader (song.context, plain, *plainMenu);
+    CHECK (plainHeader.getKeyPicker() == nullptr);
+}
+
+TEST_CASE ("A plug-in with a sidechain has its key on its panel in the Devices view too, so that one without a window has it")
+{
+    // Known bug 14 until 2026-11-11: a plug-in's key was picked in its window's header alone, which a plug-in without an editor
+    // of its own never opens. Its panel beside the Devices view's column, its key knobs, has it above them, as Phazite's own
+    // devices' editors there have theirs.
+    phazite::test::SandboxedPlugins sandboxed;
+    phazite::test::TestSong song;
+    const auto tone = song.addTrack ("Tone");
+    const auto listening = song.addTrack ("Listens");
+    const auto effect = song.addEffect (listening, "PhaziteTestSidechain");
+    REQUIRE (phazite::hasSidechain (song.context, effect));
+
+    phazite::ui::CommandBridge commands { song.commands };
+    phazite::ui::DevicesView view { commands, song.context };
+    phazite::test::TestWindow window { view, 1200, 380 };
+    const auto showingPicker = [&view]() -> phazite::ui::SidechainButton*
+    {
+        for (auto* each : phazite::test::findAll<phazite::ui::SidechainButton> (view))
+            if (each->isShowing())
+                return each;
+
+        return nullptr;
+    };
+
+    view.showDevice (effect);
+    phazite::test::dispatchPendingMessages();
+    auto* picker = showingPicker();
+    REQUIRE (picker != nullptr);
+    CHECK (picker->getTitle() == juce::String ("Key"));
+    CHECK (picker->getButtonText() == juce::String ("None"));
+
+    REQUIRE (phazite::test::runMenuItem (picker->getMenu(), { "Tone" }));
+    CHECK (phazite::getSidechainSource (song.context, effect) == tone);
+
+    // A plug-in that can't listen to another track has its key knobs alone.
+    const auto plain = song.addEffect (tone, "PhaziteTestEffect");
+    view.showDevice (plain);
+    phazite::test::dispatchPendingMessages();
+    CHECK (showingPicker() == nullptr);
 }

@@ -271,8 +271,12 @@ void ParameterControls::resized()
     for (size_t i = 0; i < controls.size(); ++i)
         widths[i % (size_t) columns] = std::max (widths[i % (size_t) columns], getWidthOf (*controls[i]));
 
-    // Spread across the width given, if wider than the grid.
+    // Spread across the width given, if wider than the grid; narrowed alike, if narrower, each column at least a knob wide.
     const auto spare = std::max (0, getWidth() - preferredWidth) / std::max (1, columns);
+
+    if (getWidth() < preferredWidth)
+        for (auto& width : widths)
+            width = std::max (knob, width * getWidth() / std::max (1, preferredWidth));
 
     for (size_t i = 0; i < controls.size(); ++i)
     {
@@ -324,7 +328,7 @@ int ParameterSwitch::getPreferredWidth()
 
 //==============================================================================
 ChoiceButtons::ChoiceButtons (const DeviceHandle& device, std::string_view parameterID, Direction d,
-                              const std::vector<juce::String>& tooltips)
+                              const std::vector<juce::String>& tooltips, const std::vector<juce::String>& shownTexts)
     : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
       parameter (device.getParameter (parameterID)),
       direction (d)
@@ -339,15 +343,26 @@ ChoiceButtons::ChoiceButtons (const DeviceHandle& device, std::string_view param
 
     for (int i = 0; i < count; ++i)
     {
-        auto& button = *buttons.add (std::make_unique<juce::TextButton> (toString (info->choices[(size_t) i])));
-        button.setTitle (toString (info->name) + ": " + button.getButtonText());
+        const auto choice = toString (info->choices[(size_t) i]);
+        const auto shown = juce::isPositiveAndBelow (i, (int) shownTexts.size()) ? shownTexts[(size_t) i] : choice;
+        auto& button = *buttons.add (std::make_unique<juce::TextButton> (shown));
+        button.setTitle (toString (info->name) + ": " + choice);
 
         if (juce::isPositiveAndBelow (i, (int) tooltips.size()))
             button.setTooltip (tooltips[(size_t) i]);
 
-        const auto before = direction == Direction::across ? juce::Button::ConnectedOnLeft : juce::Button::ConnectedOnTop;
-        const auto after = direction == Direction::across ? juce::Button::ConnectedOnRight : juce::Button::ConnectedOnBottom;
-        button.setConnectedEdges ((i > 0 ? before : 0) | (i + 1 < count ? after : 0));
+        // Joined to the buttons beside it: in rows of two, to the other in its row.
+        if (direction == Direction::twoAcross)
+        {
+            const auto first = i % 2 == 0;
+            button.setConnectedEdges (first ? (i + 1 < count ? juce::Button::ConnectedOnRight : 0) : juce::Button::ConnectedOnLeft);
+        }
+        else
+        {
+            const auto before = direction == Direction::across ? juce::Button::ConnectedOnLeft : juce::Button::ConnectedOnTop;
+            const auto after = direction == Direction::across ? juce::Button::ConnectedOnRight : juce::Button::ConnectedOnBottom;
+            button.setConnectedEdges ((i > 0 ? before : 0) | (i + 1 < count ? after : 0));
+        }
         button.onClick = [this, i]
         {
             if (juce::roundToInt (parameter.getValue() - parameter.getRange().start) != i)
@@ -370,12 +385,16 @@ int ChoiceButtons::getPreferredWidth() const
     for (auto* button : buttons)
         widest = std::max (widest, button->getBestWidthForHeight (controlHeight));
 
-    return direction == Direction::across ? widest * buttons.size() : widest;
+    return direction == Direction::across      ? widest * buttons.size()
+           : direction == Direction::twoAcross ? widest * std::min (2, buttons.size())
+                                               : widest;
 }
 
 int ChoiceButtons::getPreferredHeight() const
 {
-    return direction == Direction::across ? controlHeight : controlHeight * buttons.size();
+    return direction == Direction::across      ? controlHeight
+           : direction == Direction::twoAcross ? controlHeight * ((buttons.size() + 1) / 2)
+                                               : controlHeight * buttons.size();
 }
 
 void ChoiceButtons::refresh()
@@ -392,6 +411,25 @@ void ChoiceButtons::resized()
         return;
 
     auto area = getLocalBounds();
+
+    // In rows of two: the rows sharing the height, the two in a row its width, the second taking what the first leaves.
+    if (direction == Direction::twoAcross)
+    {
+        const auto rows = (buttons.size() + 1) / 2;
+
+        for (int row = 0; row < rows; ++row)
+        {
+            auto line = row + 1 < rows ? area.removeFromTop (area.getHeight() / (rows - row)) : area;
+            auto* first = buttons[row * 2];
+            auto* second = row * 2 + 1 < buttons.size() ? buttons[row * 2 + 1] : nullptr;
+            first->setBounds (second != nullptr ? line.removeFromLeft (line.getWidth() / 2) : line);
+
+            if (second != nullptr)
+                second->setBounds (line);
+        }
+
+        return;
+    }
 
     // Shared evenly, the last taking what is left; across, at most controlHeight tall, in the middle.
     if (direction == Direction::across)
@@ -410,6 +448,116 @@ void ChoiceButtons::resized()
             button->setBounds (area.removeFromLeft (step));
         else
             button->setBounds (area.removeFromTop (step));
+    }
+}
+
+//==============================================================================
+namespace
+{
+    // A tab, as the dock's are drawn (LookAndFeel::drawTabButton()): a pill behind the one in front and under the pointer, its
+    // name brighter.
+    class TabPill : public juce::Button
+    {
+    public:
+        explicit TabPill (const juce::String& name)
+            : juce::Button (name)
+        {
+        }
+
+        int getIdealWidth() const
+        {
+            return juce::roundToInt (juce::GlyphArrangement::getStringWidth (getFont(), getButtonText())) + 2 * TabTint::textInset;
+        }
+
+        void paintButton (juce::Graphics& g, bool isMouseOver, bool isMouseDown) override
+        {
+            const auto& p = getPalette (*this);
+            const auto front = getToggleState();
+            const auto area = getLocalBounds().toFloat();
+            const auto pill = area.withSizeKeepingCentre (area.getWidth(), std::min (TabTint::pillHeight, area.getHeight()));
+
+            if (front || isMouseOver || isMouseDown)
+            {
+                g.setColour (front ? p.selectedInactive : p.hover);
+                g.fillRoundedRectangle (pill, cornerRadius);
+            }
+
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (p.focus);
+                g.drawRoundedRectangle (pill.reduced (0.5f), cornerRadius, 1.0f);
+            }
+
+            g.setColour (front ? p.textBright : isMouseOver ? p.text : p.textMuted);
+            g.setFont (getFont());
+            g.drawText (getButtonText(), pill, juce::Justification::centred, false);
+        }
+
+    private:
+        static juce::Font getFont() { return juce::Font (juce::FontOptions (TextSize::body)); }
+    };
+} // namespace
+
+ChoiceTabs::ChoiceTabs (const DeviceHandle& device, std::string_view parameterID, const std::vector<juce::String>& tooltips)
+    : DisplayTicker::Display (static_cast<juce::Component&> (*this)),
+      parameter (device.getParameter (parameterID))
+{
+    const auto info = parameter.getInfo();
+
+    if (! info.has_value())
+        return;
+
+    setTitle (toString (info->name));
+
+    for (int i = 0; i < (int) info->choices.size(); ++i)
+    {
+        const auto choice = toString (info->choices[(size_t) i]);
+        auto& tab = *tabs.add (std::make_unique<TabPill> (choice));
+        tab.setTitle (toString (info->name) + ": " + choice);
+
+        if (juce::isPositiveAndBelow (i, (int) tooltips.size()))
+            tab.setTooltip (tooltips[(size_t) i]);
+
+        tab.onClick = [this, i]
+        {
+            if (juce::roundToInt (parameter.getValue() - parameter.getRange().start) != i)
+                parameter.setValue (parameter.getRange().start + (float) i);
+
+            refresh();
+        };
+        addAndMakeVisible (tab);
+    }
+
+    refresh();
+}
+
+ChoiceTabs::~ChoiceTabs() = default;
+
+void ChoiceTabs::refresh()
+{
+    const auto now = juce::jlimit (0, std::max (0, tabs.size() - 1), juce::roundToInt (parameter.getValue() - parameter.getRange().start));
+
+    for (int i = 0; i < tabs.size(); ++i)
+        tabs[i]->setToggleState (i == now, juce::dontSendNotification);
+
+    if (now == chosen)
+        return;
+
+    chosen = now;
+
+    if (onChange)
+        onChange (chosen);
+}
+
+void ChoiceTabs::resized()
+{
+    // Each as wide as its name wants, from the left, in a row.
+    auto area = getLocalBounds();
+
+    for (auto* tab : tabs)
+    {
+        tab->setBounds (area.removeFromLeft (std::min (static_cast<TabPill*> (tab)->getIdealWidth(), area.getWidth())));
+        area.removeFromLeft (Space::xs);
     }
 }
 } // namespace phazite::ui

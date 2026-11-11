@@ -47,7 +47,6 @@ namespace
 
     constexpr double leastLoss = 0.02;        // what the loop loses each time round at full feedback: 2 %
     constexpr double signGlideSeconds = 0.01; // the feedback's sign, turning from one side to the other
-    constexpr float lowestBass = 20.0f;       // Safe Bass's lowest: off
     constexpr double longestMilliseconds = 15.0;
 
     // The comb, as the comb filter's makeComb() (devices/dsp/CombFilter.h) makes it, with the copy lagging so many
@@ -64,16 +63,6 @@ namespace
         c.output = (float) (0.5 * std::pow (loss, -0.25));
         c.sign = sign;
         return c;
-    }
-
-    bool keepsBass (std::span<const float> values)
-    {
-        return values[Flanger::safeBass] > lowestBass + 0.5f;
-    }
-
-    dsp::FilterCoefficients makeBassFilter (std::span<const float> values, double sampleRate)
-    {
-        return dsp::makeFilter (dsp::FilterShape::lowPass, values[Flanger::safeBass], sampleRate, 0.70710678);
     }
 } // namespace
 
@@ -92,11 +81,12 @@ double Flanger::getMagnitude (std::span<const float> values, double milliseconds
     const auto z = std::polar (1.0, -juce::MathConstants<double>::twoPi * frequency * (double) c.delay / rate);
     auto response = (double) c.output * (double) c.input * (1.0 + (double) c.sign * z) / (1.0 - (double) c.feedback * z);
 
-    // Safe Bass: below it, the sound as it was (summed back, as process() does).
-    if (keepsBass (values))
+    // Safe Bass: the comb hears the band above it, and the band below goes around it, added back after it, as process()
+    // plays them (SafeBass.h).
+    if (SafeBass::isOn (values[safeBass]))
     {
-        const auto low = dsp::getResponse (makeBassFilter (values, rate), frequency, rate);
-        response = low + (1.0 - low) * response;
+        const auto bands = dsp::Crossover::getResponses (values[safeBass], frequency, rate);
+        response = bands.low + bands.high * response;
     }
 
     return std::abs (response);
@@ -107,6 +97,7 @@ void Flanger::prepare (double newSampleRate, int)
     sampleRate = newSampleRate;
     signStep = (float) std::min (2.0, 2.0 * controlStep / (signGlideSeconds * sampleRate));
     lfo.prepare (sampleRate);
+    bassSplit.prepare (sampleRate);
 
     for (auto& comb : combs)
         comb.prepare ((int) std::ceil (longestMilliseconds * 0.001 * sampleRate) + 4);
@@ -119,9 +110,7 @@ void Flanger::reset()
     for (auto& comb : combs)
         comb.reset();
 
-    for (auto& low : lowParts)
-        low.reset();
-
+    bassSplit.reset();
     lfo.reset();
     sign = 1.0f;
 }
@@ -138,19 +127,20 @@ void Flanger::process (const ProcessContext& block)
     const auto lfoShape = values[shape] > 0.5f ? dsp::SyncedLfo::Shape::triangle : dsp::SyncedLfo::Shape::sine;
     const auto offset = 0.5 * (double) values[stereo]; // up to half a cycle, the sides opposite
     const auto targetSign = values[feedback] < 0.0f ? -1.0f : 1.0f;
-    const auto bassKept = keepsBass (values);
-    const auto bassFilter = makeBassFilter (values, sampleRate);
+    bassSplit.startBlock (values[safeBass]);
 
     // How long it rings, at its longest delay.
     tailSeconds.store (dsp::getRingSeconds (makeComb (values, values[delay], targetSign, sampleRate), sampleRate) + 0.01,
                        std::memory_order_relaxed);
 
-    lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteValueBeats (values[division]), block.tempo, block.isPlaying, block.beat);
+    lfo.startBlock (values[sync] > 0.5f, values[rate], dsp::getNoteLength (values[division]), block.tempo, block.barLength, block.isPlaying,
+                    block.beat, block.bars);
 
     for (int start = 0; start < block.numSamples; start += controlStep)
     {
         const auto length = std::min (controlStep, block.numSamples - start);
         sign += std::clamp (targetSign - sign, -signStep, signStep);
+        const auto splitting = bassSplit.startStretch (length);
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
@@ -162,13 +152,26 @@ void Flanger::process (const ProcessContext& block)
                 delays[(size_t) channel].set ((float) milliseconds);
 
             auto* samples = block.channels[channel] + start;
+            auto* dry = block.dry != nullptr ? block.dry[channel] + start : nullptr;
 
             for (int i = 0; i < length; ++i)
             {
-                // Safe Bass: what is below it goes around the comb, and back in after it.
+                // Safe Bass: the band below it goes around the comb, and back in after it; the sound the runner mixes in
+                // is split and added up again, to stay in phase with the two (SafeBass.h).
                 const auto x = samples[i];
-                const auto low = bassKept ? lowParts[(size_t) channel].process (x, bassFilter) : 0.0f;
-                samples[i] = low + comb.process (x - low);
+                auto in = x, around = 0.0f;
+
+                if (splitting)
+                {
+                    const auto parts = bassSplit.split (channel, x, i);
+                    in = parts.through;
+                    around = parts.around;
+
+                    if (dry != nullptr)
+                        dry[i] = parts.dry;
+                }
+
+                samples[i] = around + comb.process (in);
             }
         }
 

@@ -30,7 +30,7 @@ struct SoundPack::Job : public juce::Thread
     ~Job() override
     {
         cancel();
-        stopThread (20000);
+        stopThread (-1); // its read cancelled: never ended by force, which can leave a lock it held held for ever
     }
 
     void cancel()

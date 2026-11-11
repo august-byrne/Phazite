@@ -39,11 +39,13 @@ namespace
     constexpr int titleHeight = 32;
     constexpr int tipLines = 3; // a section's tip, wrapped
 
-    // "Bar 5", or "Bar 5, beat 3" for a place after a bar's first beat; bars count from 1, as the time line's do.
+    // "Bar 5", or "Bar 5, beat 3" for a place after a bar's first beat, its beats its time signature's (eighths in 6/8); bars
+    // count from 1, as the time line's do.
     juce::String describePlace (const ProjectContext& context, BeatPosition place)
     {
         const auto bar = getBarAt (context, place); // from 0
-        const auto intoBar = (place - getBarStart (context, bar)).inBeats();
+        const auto barStart = getBarStart (context, bar);
+        const auto intoBar = (place - barStart) / getBeatLength (context, barStart); // in its beats
 
         if (intoBar < 0.001)
             return "Bar " + juce::String (bar + 1);
@@ -52,13 +54,13 @@ namespace
                + juce::String (1.0 + intoBar, 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
     }
 
-    // "2 bars", "1 bar, 2 beats" or "3 beats", in the time signature where it starts.
+    // "2 bars", "1 bar, 2 beats" or "3 beats", in the time signature where it starts: its bars and its beats.
     juce::String describeLength (const ProjectContext& context, BeatRange range)
     {
-        const auto beats = range.getLength().inBeats();
-        const auto perBar = std::max (1, getBeatsPerBar (context, range.getStart()));
-        const auto bars = (int) std::floor (beats / perBar + 0.0001);
-        const auto rest = std::max (0.0, beats - bars * perBar);
+        const auto length = range.getLength();
+        const auto bar = getBarLength (context, range.getStart());
+        const auto bars = (int) std::floor (length / bar + 0.0001);
+        const auto rest = std::max (0.0, (length - bar * (double) bars) / getBeatLength (context, range.getStart()));
         const auto restText = rest < 0.001 ? juce::String() : juce::String (rest, 2).trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
         const auto barsText = bars == 1 ? juce::String ("1 bar") : juce::String (bars) + " bars";
 
@@ -195,11 +197,12 @@ namespace
 
         const auto bar = std::max (1, numbers[0].getIntValue());
         const auto beat = numbers.size() > 1 ? std::max (1.0, numbers[1].getDoubleValue()) : 1.0;
-        return getBarStart (context, bar - 1) + BeatDuration::fromBeats (beat - 1.0);
+        const auto barStart = getBarStart (context, bar - 1);
+        return barStart + getBeatLength (context, barStart) * (beat - 1.0);
     }
 
     // A length typed as describeLength() writes it ("1 bar, 2 beats", "3 beats"), as a note value ("1/16", of a whole note
-    // of four beats), or in beats alone ("0.5"), in the time signature at a place.
+    // of four quarter notes, whatever the time signature), or in beats alone ("0.5"), in the time signature at a place.
     std::optional<BeatDuration> parseLength (const ProjectContext& context, const juce::String& text, BeatPosition at)
     {
         const auto lower = text.toLowerCase();
@@ -216,11 +219,13 @@ namespace
         if (numbers.isEmpty())
             return {};
 
+        const auto beat = getBeatLength (context, at);
+
         if (! lower.contains ("bar"))
-            return BeatDuration::fromBeats (numbers[0].getDoubleValue());
+            return beat * numbers[0].getDoubleValue();
 
         const auto beats = numbers.size() > 1 ? numbers[1].getDoubleValue() : 0.0;
-        return BeatDuration::fromBeats (numbers[0].getDoubleValue() * std::max (1, getBeatsPerBar (context, at)) + beats);
+        return getBarLength (context, at) * numbers[0].getDoubleValue() + beat * beats;
     }
 
     // A note's name, with middle C as C4 (the keys' and the top bar's), and one typed so ("F#3", "Bb2") or as its number.
@@ -935,7 +940,10 @@ namespace
                 }
             }
 
+            // Stepped by the time signature's beat where the earliest starts, as their text counts (an eighth in 6/8).
             start = BeatPosition::fromBeats (*std::min_element (starts.begin(), starts.end()));
+            startField.setStep (getBeatLength (context, start).inBeats());
+            lengthField.setStep (getBeatLength (context, start).inBeats());
             showRange (startField, starts);
             showRange (lengthField, lengths);
             showRange (gainField, gains);

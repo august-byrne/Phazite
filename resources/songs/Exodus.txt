@@ -11,11 +11,12 @@ shared, on 18 March 2018.
 
 What Phazite changed: it took the notes alone (resources/songs/Exodus.mid,
 written from the project by tools/lmms-to-midi.ps1) and plays them as the
-recording does: without the project's bars 24 to 32, a fourth higher and with
-the recording's tempo. Its bass holds each chord's root, where the original
-plays the fifth over a sub, and its arpeggio's three layers are one sound. It
-plays them on its own instruments and effects, with its own mix. None of the
-original's sounds or samples are in Phazite.
+recording does: without the project's bars 24 to 32, its pitched parts a
+fourth higher, with the recording's tempo and with the drums in the intro. It
+plays them on its own instruments and effects, on presets made after the
+original's sounds and mixed as the original is, with synthesized drums in
+place of its drum samples. None of the original's sounds or samples are in
+Phazite.
 
 The work is offered as-is, without warranties of any kind (sections 5 and 6
 of the license below).

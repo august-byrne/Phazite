@@ -140,14 +140,14 @@ void SweepPicture::paintLfo (juce::Graphics& g, const Palette& p, juce::Colour t
         {
             auto at = getVoicePhase (channel, voice);
             at -= std::floor (at);
-            const auto dot = juce::Rectangle<float> (2.0f * lfoDotRadius, 2.0f * lfoDotRadius)
-                                 .withCentre ({ curveArea.getX() + (float) at * curveArea.getWidth(), yFor (getSweepValue (at)) });
+            const auto copy = juce::Rectangle<float> (2.0f * lfoDotRadius, 2.0f * lfoDotRadius)
+                                  .withCentre ({ curveArea.getX() + (float) at * curveArea.getWidth(), yFor (getSweepValue (at)) });
             g.setColour (tint);
 
             if (channel == 0)
-                g.fillEllipse (dot);
+                g.fillEllipse (copy);
             else
-                g.drawEllipse (dot, 1.5f);
+                g.drawEllipse (copy, 1.5f);
         }
     }
 

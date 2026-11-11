@@ -5,8 +5,11 @@
 #include "TestDevices.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
+#include "devices/delay/Delay.h"
+#include "devices/dsp/NoteValues.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/filter/FilterEffect.h"
+#include "devices/motion/Chorus.h"
 #include "devices/synth/Synth.h"
 #include "engine/transport/Click.h"
 #include "model/arrangement/TimelineModel.h"
@@ -14,7 +17,10 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/AutomationModel.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/DeviceHandle.h"
+#include "model/devices/internal/DeviceHandle.h"
 #include "model/mixer/ContainerModel.h"
 #include "model/mixer/LevelSource.h"
 #include "model/mixer/MixerModel.h"
@@ -28,6 +34,8 @@
 
 #include <cmath>
 #include <cstring>
+#include <map>
+#include <string>
 
 using phazite::test::EnginePlayback;
 using phazite::test::TestSong;
@@ -525,6 +533,142 @@ TEST_CASE ("Phazite's engine plays a track's LFO on its volume, which the LFO's 
     CHECK (volume.getValue() == doctest::Approx (std::max (0.0f, before - 0.5f)).epsilon (0.01));
 }
 
+TEST_CASE ("In 6/8 an LFO a bar a cycle goes round once a bar, free or with the transport, and a 1/4 one each quarter note")
+{
+    // At 120 BPM a bar of 6/8 is three quarter notes, a second and a half. Saws, each read where it is at moments on the
+    // control points: a cycle apart they are where they were, half a cycle apart elsewhere.
+    TestSong song;
+    song.setTempo (120.0);
+    song.setTimeSignature (6, 8);
+    const auto track = song.firstTrack;
+    song.addMidiClip (track, 0.0, 24.0); // eight bars: playback stops at the song's end
+
+    const auto addSaw = [&song, track] (float sync, float rateType)
+    {
+        const auto lfo = song.addModulator (track, phazite::ModulatorType::lfo);
+        song.setModulatorParameter (lfo, "wave", 2.0f); // a saw, up
+        song.setModulatorParameter (lfo, "syncType", sync);
+        song.setModulatorParameter (lfo, "rateType", rateType);
+        song.modulate (lfo, song.getPanParameter (track), 0.1f);
+        return lfo;
+    };
+
+    const auto freeBar = addSaw (0.0f, 3.0f);      // free, a bar a cycle
+    const auto transportBar = addSaw (1.0f, 3.0f); // with the transport, a bar a cycle
+    const auto quarter = addSaw (1.0f, 8.0f);      // with the transport, a quarter note a cycle
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+
+    // Each saw's value at moments on the control points (a multiple of 32 samples): 0.3 and 1.8 s a bar apart, 0.75 and
+    // 2.25 s too, half a bar after them; 0.55 and 1.05 s a quarter note apart, half a quarter note after 0.3 s.
+    struct Values
+    {
+        float freeBar, transportBar, quarter;
+    };
+
+    std::map<int, Values> at; // by milliseconds
+    auto played = 0.0;
+
+    for (const auto milliseconds : { 300, 550, 750, 1050, 1800, 2250 })
+    {
+        const auto seconds = milliseconds / 1000.0;
+        playback.play (seconds - played);
+        played = seconds;
+        at[milliseconds] = { phazite::getModulatorValue (song.context, freeBar), phazite::getModulatorValue (song.context, transportBar),
+                             phazite::getModulatorValue (song.context, quarter) };
+    }
+
+    for (const auto& [lfo, valueOf] : { std::pair (std::string ("free, a bar"), &Values::freeBar),
+                                        std::pair (std::string ("with the transport, a bar"), &Values::transportBar) })
+    {
+        CAPTURE (lfo);
+        CHECK (at[300].*valueOf == doctest::Approx (at[1800].*valueOf).epsilon (0.001));
+        CHECK (at[750].*valueOf == doctest::Approx (at[2250].*valueOf).epsilon (0.001));
+        CHECK (std::abs (at[300].*valueOf - at[750].*valueOf) > 0.2f);
+    }
+
+    CHECK (at[550].quarter == doctest::Approx (at[1050].quarter).epsilon (0.001));
+    CHECK (at[300].quarter == doctest::Approx (at[1800].quarter).epsilon (0.001));
+    CHECK (std::abs (at[300].quarter - at[550].quarter) > 0.2f);
+}
+
+TEST_CASE ("In 6/8 the chorus's LFO in time with the song keeps to where the song is in quarter notes, block after block")
+{
+    // A cycle a quarter note (half a second at 120 BPM), on a tone so that the chorus plays rather than sleeps: after each
+    // block, its LFO as far round as the song is, with nothing to put right (until 2026-11-10 the song's beats in 6/8 were
+    // eighths, which the LFO, counting quarter notes, chased every block).
+    TestSong song;
+    song.setTempo (120.0);
+    song.setTimeSignature (6, 8);
+    const auto track = song.firstTrack;
+    song.addAudioClip (track, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 4.0, 440.0, 0.25f), 0.0);
+    const auto chorusID = song.addEffect (track, phazite::devices::Chorus::typeID);
+    song.setParameter (chorusID, "sync", 1.0f);
+    song.setParameter (chorusID, "division", phazite::devices::dsp::quarterNoteValue);
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+    playback.play (0.1);
+
+    auto* chorus = phazite::makeDeviceHandle (*phazite::findSong (song.context), chorusID).getProcessor<phazite::devices::Chorus>();
+    REQUIRE (chorus != nullptr);
+    auto played = (int) std::lround (0.1 * EnginePlayback::sampleRate);
+
+    for (int block = 0; block < 100; ++block)
+    {
+        playback.play (EnginePlayback::blockSize / EnginePlayback::sampleRate);
+        played += EnginePlayback::blockSize;
+        const auto expected = std::fmod (played / 24000.0, 1.0);
+        auto off = (double) chorus->getPhase().get() - expected;
+        off -= std::round (off);
+        CAPTURE (block);
+        REQUIRE (std::abs (off) < 1.0e-4);
+    }
+}
+
+TEST_CASE ("A chorus's LFO a bar a cycle follows the song's bars: three quarter notes in 6/8, then four after a change to 4/4")
+{
+    // In time with the song, a bar a cycle (its Division at first), on a tone so that the chorus plays rather than sleeps:
+    // two bars of 6/8, three quarter notes (a second and a half at 120 BPM) each, then 4/4 from the sixth quarter note, as
+    // the song's tempo map can hold it. After each block its LFO is as far round as the song is through its bar.
+    TestSong song;
+    song.setTempo (120.0);
+    song.setTimeSignature (6, 8);
+    namespace schema = phazite::schema;
+    auto tempoMap = phazite::findSong (song.context)->getState().getChildWithName (schema::TEMPOMAP);
+    tempoMap.appendChild (
+        juce::ValueTree (schema::TIMESIGNATURE, { { schema::mapBeat, 6.0 }, { schema::numerator, 4 }, { schema::denominator, 4 } }),
+        nullptr);
+    const auto track = song.firstTrack;
+    song.addAudioClip (track, phazite::test::writeSound (song.getSoundsFolder().getChildFile ("Tone.wav"), 8.0, 440.0, 0.25f), 0.0);
+    const auto chorusID = song.addEffect (track, phazite::devices::Chorus::typeID);
+    song.setParameter (chorusID, "sync", 1.0f);
+    song.setParameter (chorusID, "division", phazite::devices::dsp::barNoteValue);
+    EnginePlayback playback;
+    song.run ("transport.playStop");
+    playback.play (0.1);
+
+    auto* chorus = phazite::makeDeviceHandle (*phazite::findSong (song.context), chorusID).getProcessor<phazite::devices::Chorus>();
+    REQUIRE (chorus != nullptr);
+    auto played = (int) std::lround (0.1 * EnginePlayback::sampleRate);
+
+    while (played < 6.5 * EnginePlayback::sampleRate)
+    {
+        playback.play (EnginePlayback::blockSize / EnginePlayback::sampleRate);
+        played += EnginePlayback::blockSize;
+        const auto beat = played / 24000.0;
+        const auto bars = beat < 6.0 ? beat / 3.0 : 2.0 + (beat - 6.0) / 4.0;
+
+        // Where the time signature changes in a block, the LFO glides onto the new bar's place over 10 ms.
+        if (std::abs (beat - 6.0) < 0.1)
+            continue;
+
+        auto off = (double) chorus->getPhase().get() - (bars - std::floor (bars));
+        off -= std::round (off);
+        CAPTURE (beat);
+        REQUIRE (std::abs (off) < 1.0e-4);
+    }
+}
+
 namespace
 {
 // The song as Phazite's engine renders it from its start, and the level of a side of it over a stretch, in dBFS.
@@ -644,8 +788,8 @@ TEST_CASE ("Phazite's engine plays a plug-in from its instance in its helper, as
 
 TEST_CASE ("Phazite's engine renders the Exodus example the same to the last bit on one thread or four")
 {
-    // Its intro: the arpeggio's three layers, the sub, the returns and the master's filters in automation lanes, with the
-    // compressors that duck five tracks under the drums, which have yet to come in.
+    // Its intro: the drums, with four pads on tracks of their own, the rolling bass, the sub and the arpeggio's four layers
+    // on two buses, whose compressors duck them under a muted track, and the master's filters in automation lanes.
     TestSong song (TestSong::Start::exodus);
     phazite::test::dispatchPendingMessages();
     auto& state = *phazite::findSong (song.context);
@@ -661,4 +805,25 @@ TEST_CASE ("Phazite's engine renders the Exodus example the same to the last bit
                       == 0;
 
     CHECK (same);
+}
+
+TEST_CASE ("In 6/8 the delay's 1 bar echoes a bar of the song's later: three quarter notes, a second and a half at 120 BPM")
+{
+    // A click at the song's start through a delay of a bar, its echo alone, once: silence, then the echo a bar on.
+    TestSong song;
+    song.setTempo (120.0);
+    song.setTimeSignature (6, 8);
+    const auto track = song.firstTrack;
+    song.addAudioClip (track, phazite::test::writeClicks (song.getSoundsFolder(), 1, 120.0), 0.0);
+    song.addMidiClip (song.addTrack ("Long"), 0.0, 12.0); // the song goes on past the echo
+    const auto delay = song.addEffect (track, phazite::devices::Delay::typeID);
+    song.setParameter (delay, "time", 13.0f); // 1 bar
+    song.setParameter (delay, "feedback", 0.0f);
+    song.setParameter (delay, "mix", 1.0f);
+
+    // After the click (whose first block the effect's mix ramps into from where it was made), silence until the echo.
+    const auto audio = renderOwn (song, 2.5);
+    const auto echo = findFirstSound (audio, 4800);
+    CHECK (echo >= 72000 - 4);
+    CHECK (echo <= 72000 + 48);
 }

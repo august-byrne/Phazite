@@ -296,6 +296,13 @@ juce::String formatParameterValue (const devices::ParameterInfo& parameter, floa
             return withSign (tenths / 10.0, tenths % 10 == 0 ? 0 : 1) + " ct";
         }
 
+        case Unit::degrees:
+        {
+            // To a tenth of a degree, a whole one without decimals.
+            const auto tenths = juce::roundToInt (value * 10.0f);
+            return juce::String (tenths / 10.0, tenths % 10 == 0 ? 0 : 1) + juce::String::fromUTF8 ("\xc2\xb0");
+        }
+
         case Unit::note:
             return formatNote (value);
 
@@ -428,6 +435,15 @@ std::optional<float> parseParameterValue (const devices::ParameterInfo& paramete
 
         case Unit::cents:
             removeEnding (t, { "cents", "cent", "ct" });
+            value = parseNumber (t);
+            break;
+
+        case Unit::degrees:
+            if (t.endsWithChar ((juce::juce_wchar) 0xb0)) // the degree sign
+                t = t.dropLastCharacters (1).trim();
+            else
+                removeEnding (t, { "degrees", "degree", "deg" });
+
             value = parseNumber (t);
             break;
 

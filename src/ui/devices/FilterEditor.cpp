@@ -2,6 +2,7 @@
 #include "FilterEditor.h"
 #include "DeviceGraph.h"
 #include "DeviceTint.h"
+#include "GraphDot.h"
 #include "devices/filter/FilterEffect.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -32,8 +33,8 @@ public:
           drive (device.getParameter (getInfo (FilterEffect::drive).id))
     {
         setTitle ("Filter response");
-        setDescription ("How the filter shapes the sound, over the spectrum of what it plays. Drag the dot sideways to move the "
-                        "cutoff and up or down for the resonance; the wheel turns the drive.");
+        setDescription ("How the filter shapes the sound, over the spectrum of what it plays. Drag the dot, or press anywhere to "
+                        "put it there: sideways for the cutoff, up or down for the resonance. The wheel turns the drive.");
 
         for (const auto& parameter : FilterEffect::info.parameters)
         {
@@ -91,11 +92,7 @@ public:
         g.strokePath (curve, juce::PathStrokeType (GraphTint::curveWidth));
 
         // The dot: the cutoff, as high as the resonance.
-        const auto dot = getDotPosition();
-        g.setColour (tint);
-        g.fillEllipse (juce::Rectangle<float> (2.0f * GraphTint::dotRadius, 2.0f * GraphTint::dotRadius).withCentre (dot));
-        g.setColour (p.text);
-        g.drawEllipse (juce::Rectangle<float> (2.0f * GraphTint::dotRadius, 2.0f * GraphTint::dotRadius).withCentre (dot), 1.5f);
+        dot.paint (g, p, tint);
 
         const auto type =
             juce::String (getInfo (FilterEffect::filterType).choices[(size_t) juce::roundToInt (values[FilterEffect::filterType])].data());
@@ -138,6 +135,7 @@ private:
     graph::SpectrumTrace input, output;
     graph::WheelGesture wheelGesture; // after the handles it turns
     DrawnNumbers drawn;
+    GraphDot dot { *this, [this] { return getDotPosition(); } };
 
     double getSampleRate() const
     {

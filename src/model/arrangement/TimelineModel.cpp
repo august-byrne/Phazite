@@ -22,9 +22,14 @@ namespace
 } // namespace
 
 //==============================================================================
-int getBeatsPerBar (const ProjectContext& context, BeatPosition where)
+BeatDuration getBarLength (const ProjectContext& context, BeatPosition where)
 {
-    return getBars (context).getBeatsPerBar (where);
+    return getBars (context).getBarLength (where);
+}
+
+BeatDuration getBeatLength (const ProjectContext& context, BeatPosition where)
+{
+    return getBars (context).getBeatLength (where);
 }
 
 int getBarAt (const ProjectContext& context, BeatPosition where)

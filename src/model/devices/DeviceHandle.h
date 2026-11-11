@@ -35,6 +35,21 @@ public:
     // The track its sidechain listens to, or none.
     SidechainChoice getSidechainSource() const;
 
+    // Where the song it is in plays now, for a display that keeps time with it, as a compressor's history does
+    // (ui/devices/LevelHistoryView.h): the playhead's beat, in quarter notes from the song's start, and whether the song
+    // plays; and there, the tempo in quarter notes a minute, and the start and length of the bar the playhead is in and its
+    // time signature's beat (an eighth in 6/8), in quarter notes (model/arrangement/TimelineModel.h). A new song's start, in
+    // 4/4 at 120, stopped, once the device is gone.
+    struct SongTime
+    {
+        double beat = 0.0;
+        bool playing = false;
+        double bpm = 120.0;
+        double barStart = 0.0, barLength = 4.0, beatLength = 1.0;
+    };
+
+    SongTime getSongTime() const;
+
     // The drum sampler's pads by their notes, and their layers (model/devices/internal/DrumKit.h): what each plays, whether it
     // plays a file or the pad nothing, and putting a sound file on one, or taking it off, as undo steps. setPadSound() returns
     // false for a file that isn't a sound.

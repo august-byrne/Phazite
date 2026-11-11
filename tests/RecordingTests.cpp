@@ -253,6 +253,153 @@ TEST_CASE ("The song's own loop doesn't loop a take, and a looped range folds wh
     }
 }
 
+TEST_CASE ("Recorded from before a looped range, the notes played before it go into a clip of their own, where they were played")
+{
+    // Known bug 10 until 2026-11-10: they went into the range's clip, all on its first beat without Overdub. Here beats 4 to
+    // 8 (2 to 4 seconds) are looped, and recording starts at the song's start.
+    const auto start = [] (EngineTake& take, bool overdub)
+    {
+        phazite::setOverdubOn (phazite::getAudioIO (phazite::test::getEngineContext()), overdub);
+        phazite::loopBeatRange (*phazite::findSong (take.song.context), 4.0, 8.0);
+        take.song.run ("transport.record");
+        REQUIRE (take.isRecording());
+    };
+
+    const juce::ScopeGuard overdubOn { [] { phazite::setOverdubOn (phazite::getAudioIO (phazite::test::getEngineContext()), true); } };
+
+    SUBCASE ("Stopped in the range before going round: one clip of what was played, its notes where they were played")
+    {
+        EngineTake take;
+        start (take, true);
+        take.playNote (60, 0.5, 0.25);  // at beat 1
+        take.playNote (62, 1.75, 0.25); // at 2.5 seconds: beat 5
+        take.playback.play (0.25);      // to beat 6
+        take.song.run ("transport.record");
+
+        const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (6.0).epsilon (withinABlock));
+        const auto notes = take.getNotes();
+        REQUIRE (notes.size() == 2);
+        CHECK (notes[0].start.inBeats() == doctest::Approx (1.0).epsilon (withinABlock));
+        CHECK (notes[1].start.inBeats() == doctest::Approx (5.0).epsilon (withinABlock));
+    }
+
+    SUBCASE ("Stopped before the range: one clip of what was played")
+    {
+        EngineTake take;
+        start (take, false);
+        take.playNote (60, 0.5, 0.25); // at beat 1
+        take.playback.play (0.75);     // to beat 3
+        take.song.run ("transport.record");
+
+        const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (3.0).epsilon (withinABlock));
+        const auto notes = take.getNotes();
+        REQUIRE (notes.size() == 1);
+        CHECK (notes[0].start.inBeats() == doctest::Approx (1.0).epsilon (withinABlock));
+    }
+
+    // Round once and part of the second time round.
+    const auto roundOnce = [&start] (bool overdub)
+    {
+        EngineTake take;
+        start (take, overdub);
+        take.playNote (60, 0.5, 0.25);  // at beat 1
+        take.playNote (62, 1.75, 0.25); // at 2.5 seconds: beat 5
+        take.playNote (64, 2.0, 0.25);  // at 4.75 seconds: beat 9.5, beat 5.5 the second time round
+        take.playback.play (0.25);      // to beat 10.5
+        take.song.run ("transport.record");
+
+        const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+        REQUIRE (clips.size() == 2);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[1].range.getEnd().inBeats() == doctest::Approx (8.0));
+
+        const auto notes = take.getNotes();
+        REQUIRE (notes.size() == 3);
+        CHECK (notes[0].pitch == 60);
+        CHECK (notes[0].clip == clips[0].id);
+        CHECK (notes[0].start.inBeats() == doctest::Approx (1.0).epsilon (withinABlock));
+        CHECK (notes[1].pitch == 62);
+        CHECK (notes[1].clip == clips[1].id);
+        CHECK (notes[1].start.inBeats() == doctest::Approx (5.0).epsilon (withinABlock));
+        CHECK (notes[2].pitch == 64);
+        CHECK (notes[2].clip == clips[1].id);
+        CHECK (notes[2].start.inBeats() == doctest::Approx (5.5).epsilon (withinABlock));
+    };
+
+    SUBCASE ("Round once, with Overdub: the notes before the range in a clip of their own, the rest folded into the range's clip")
+    {
+        roundOnce (true);
+    }
+
+    SUBCASE ("Round once, without Overdub: the same, in place of what was there")
+    {
+        roundOnce (false);
+    }
+
+    SUBCASE ("Recorded from within the range, as before: every time round's notes in the range's clip")
+    {
+        EngineTake take;
+        phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (5.0));
+        start (take, true);
+        take.playNote (60, 0.5, 0.25);  // at beat 6
+        take.playNote (62, 1.25, 0.25); // at 4.5 seconds: beat 9, beat 5 the second time round
+        take.playback.play (0.25);
+        take.song.run ("transport.record");
+
+        const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+        REQUIRE (clips.size() == 1);
+        CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (4.0));
+        CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (8.0));
+        const auto notes = take.getNotes();
+        REQUIRE (notes.size() == 2);
+        CHECK (notes[0].pitch == 62);
+        CHECK (notes[0].start.inBeats() == doctest::Approx (5.0).epsilon (withinABlock));
+        CHECK (notes[1].pitch == 60);
+        CHECK (notes[1].start.inBeats() == doctest::Approx (6.0).epsilon (withinABlock));
+    }
+}
+
+TEST_CASE ("While recording from before a looped range, the notes before it show apart from the range's once recording has gone round")
+{
+    EngineTake take;
+    phazite::loopBeatRange (*phazite::findSong (take.song.context), 4.0, 8.0);
+    take.song.run ("transport.record");
+    take.playNote (60, 0.5, 0.25); // at beat 1
+
+    // The first time round: from where recording started, as it will be if it stops before going round.
+    auto recordings = phazite::getRecordingsInProgress (take.song.context);
+    REQUIRE (recordings.size() == 1);
+    CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (1.5).epsilon (withinABlock));
+    REQUIRE (recordings[0].notes.size() == 1);
+    CHECK (recordings[0].notes[0].start == doctest::Approx (1.0).epsilon (withinABlock));
+
+    // Round once: the note before the range over the part before it, and the one played since folded into the range.
+    take.playNote (62, 3.75, 0.25); // at 4.5 seconds: beat 9, beat 5 the second time round
+    recordings = phazite::getRecordingsInProgress (take.song.context);
+    REQUIRE (recordings.size() == 2);
+    std::sort (recordings.begin(), recordings.end(), [] (const auto& a, const auto& b) { return a.range.getStart() < b.range.getStart(); });
+    CHECK (recordings[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (recordings[0].range.getEnd().inBeats() == doctest::Approx (4.0));
+    CHECK (recordings[0].take == 1);
+    REQUIRE (recordings[0].notes.size() == 1);
+    CHECK (recordings[0].notes[0].start == doctest::Approx (1.0).epsilon (withinABlock));
+    CHECK (recordings[1].range.getStart().inBeats() == doctest::Approx (4.0));
+    CHECK (recordings[1].range.getEnd().inBeats() == doctest::Approx (8.0));
+    CHECK (recordings[1].take == 2);
+    REQUIRE (recordings[1].notes.size() == 1);
+    CHECK (recordings[1].notes[0].start == doctest::Approx (1.0).epsilon (withinABlock)); // beat 5, from the range's start
+    take.song.run ("transport.record");
+}
+
 TEST_CASE ("Punched in, a take keeps only the notes played in the looped range")
 {
     EngineTake take;

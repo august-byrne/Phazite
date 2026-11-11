@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The EQ's editor (roadmap step 1.6, devices/eq/Equalizer.h): its curve over an analyzer of what it plays (and, fainter, what
-// comes in), with a dot for each band to drag (frequency and gain, as one undo step; the wheel changes Q; a double-click turns
-// the band on or off; a right-click picks its shape), and beside it the selected band's controls and the output's, which work
+// comes in; DeviceGraph.h's SpectrumTrace, which shows short sounds too), with a dot for each band to drag (frequency and
+// gain, as one undo step; the wheel changes Q; a double-click turns the band on or off; a right-click picks its shape),
+// which the pointer over it shows can be grabbed, and beside it the selected band's controls and the output's, which work
 // from the keyboard too. Its mix is its row's in the Devices view.
 #pragma once
 
 #include "DeviceEditors.h"
 #include "DeviceGraph.h"
-#include "devices/core/Spectrum.h"
 #include "model/devices/DeviceHandle.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
@@ -70,10 +70,8 @@ private:
     ParameterAttachment frequencyAttachment { frequencyKnob }, gainAttachment { gainKnob }, qAttachment { qKnob },
         outputAttachment { outputKnob };
 
-    devices::Spectrum spectrum;
-    graph::SpectrumTrace input; // what comes in
-    std::vector<float> pulled;
-    DrawnNumbers drawnGraph; // what its graph shows
+    graph::SpectrumTrace input, output; // what comes in, and what it plays
+    DrawnNumbers drawnGraph;            // what its graph shows
 
     void tick() override { refresh(); }
     juce::Label& addLabel (const juce::String&);

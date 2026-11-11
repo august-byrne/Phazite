@@ -29,13 +29,14 @@ TEST_CASE ("The time line's bars follow the time signature, and the grid snaps i
     phazite::ProjectContext context { phazite::test::getEngineContext() };
 
     // With no project open, a new song's 4/4.
-    CHECK (phazite::getBeatsPerBar (context, beat (0.0)) == 4);
+    CHECK (phazite::getBarLength (context, beat (0.0)).inBeats() == doctest::Approx (4.0));
+    CHECK (phazite::getBeatLength (context, beat (0.0)).inBeats() == doctest::Approx (1.0));
     CHECK (phazite::getBarStart (context, 2).inBeats() == doctest::Approx (8.0));
     CHECK (phazite::snapToGrid (context, beat (2.7), { 9, false }).inBeats() == doctest::Approx (2.7)); // nothing to snap to
 
     setSong (context, song.get());
     phazite::setTimeSignature (*song, { 3, 4 });
-    CHECK (phazite::getBeatsPerBar (context, beat (0.0)) == 3);
+    CHECK (phazite::getBarLength (context, beat (0.0)).inBeats() == doctest::Approx (3.0));
     CHECK (phazite::getBarAt (context, beat (7.0)) == 2);
     CHECK (phazite::getBarStart (context, 2).inBeats() == doctest::Approx (6.0));
 

@@ -161,15 +161,19 @@ TEST_CASE ("The devices of step 2.10 describe themselves, with type and paramete
 TEST_CASE ("The delay: echoes on the beat at the song's tempo, fewer each time, and bouncing in ping-pong")
 {
     auto values = getDefaults (devices::Delay::info);
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0) == doctest::Approx (0.375)); // a dotted eighth
-    set (values, devices::Delay::info, "time", 8.0f);                                   // a quarter
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0) == doctest::Approx (0.5));
-    CHECK (devices::Delay::getDelaySeconds (values, 90.0) == doctest::Approx (60.0 / 90.0));
-    set (values, devices::Delay::info, "time", 13.0f); // a bar, at 30 BPM 8 seconds: the most is 5
-    CHECK (devices::Delay::getDelaySeconds (values, 30.0) == doctest::Approx (devices::Delay::maximumSeconds));
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 4.0) == doctest::Approx (0.375)); // a dotted eighth
+    set (values, devices::Delay::info, "time", 8.0f);                                        // a quarter
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 4.0) == doctest::Approx (0.5));
+    CHECK (devices::Delay::getDelaySeconds (values, 90.0, 4.0) == doctest::Approx (60.0 / 90.0));
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 3.0) == doctest::Approx (0.5)); // a note value in any time signature
+    set (values, devices::Delay::info, "time",
+         13.0f); // a bar, the song's: three quarter notes in 6/8; at 30 BPM in 4/4, 8 s, but at most 5
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 3.0) == doctest::Approx (1.5));
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 4.0) == doctest::Approx (2.0));
+    CHECK (devices::Delay::getDelaySeconds (values, 30.0, 4.0) == doctest::Approx (devices::Delay::maximumSeconds));
     set (values, devices::Delay::info, "sync", 0.0f);
     set (values, devices::Delay::info, "milliseconds", 250.0f);
-    CHECK (devices::Delay::getDelaySeconds (values, 120.0) == doctest::Approx (0.25));
+    CHECK (devices::Delay::getDelaySeconds (values, 120.0, 4.0) == doctest::Approx (0.25));
 
     // An impulse with a quarter-note echo at 120 BPM: the first echo half a second later, the second smaller.
     values = getDefaults (devices::Delay::info);

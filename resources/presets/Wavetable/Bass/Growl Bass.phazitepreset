@@ -27,6 +27,8 @@
       "unisonDetune": 12.0,
       "unisonSpread": 0.5,
       "unisonPosition": 0.1,
+      "unisonStack": "Off",
+      "unisonDrift": 0.0,
       "filterOn": 1,
       "filterType": "Low Pass",
       "cutoff": 906.0,

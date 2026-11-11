@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Filter's, the saturator's, the delay's, the stereo expander's, the phaser's, the flanger's, the chorus's and the
-// vocoder's editors (src/ui/devices/): a control for each parameter but the mix (the header's), what their pictures show,
-// and the drags on them, each one undo step.
+// The Filter's, the saturator's, the exciter's, the vinyl's, the delay's, the stereo expander's, the phaser's, the flanger's,
+// the chorus's and the vocoder's editors (src/ui/devices/): a control for each parameter but the mix (the header's), what their
+// pictures show, and the drags on them, each one undo step.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
@@ -11,9 +11,11 @@
 #include "devices/motion/Chorus.h"
 #include "devices/motion/Flanger.h"
 #include "devices/motion/Phaser.h"
+#include "devices/saturation/Exciter.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "devices/vinyl/Vinyl.h"
 #include "devices/vocoder/Vocoder.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -22,6 +24,7 @@
 #include "model/devices/internal/DeviceHandle.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/mixer/internal/Sidechain.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
@@ -30,11 +33,14 @@
 #include "ui/devices/DelayEditor.h"
 #include "ui/devices/DeviceEditors.h"
 #include "ui/devices/DeviceWindowContent.h"
+#include "ui/devices/ExciterEditor.h"
 #include "ui/devices/FilterEditor.h"
 #include "ui/devices/FlangerEditor.h"
 #include "ui/devices/PhaserEditor.h"
 #include "ui/devices/SaturatorEditor.h"
+#include "ui/devices/SidechainMenus.h"
 #include "ui/devices/StereoExpanderEditor.h"
+#include "ui/devices/VinylEditor.h"
 #include "ui/devices/VocoderEditor.h"
 
 namespace
@@ -139,6 +145,154 @@ TEST_CASE ("The saturator's editor picks its shape with buttons drawn as their c
     curveMouse.release();
     CHECK (song.valueOf ("drive") > 6.5f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Drive"));
+}
+
+TEST_CASE ("The exciter's editor drags its dot for the frequency and the amount, meters the band's reach, and listens to what is added")
+{
+    using phazite::devices::Exciter;
+    Song song (Exciter::typeID);
+    const auto device = song.getDevice();
+    CHECK (dynamic_cast<phazite::ui::ExciterEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
+
+    phazite::ui::ExciterEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    checkEveryParameterButMixHasAControl (editor, Exciter::info);
+    phazite::test::checkChildrenApart (editor);
+
+    // The dot is at the frequency, as high as the top's lift. Dragged left and up: a lower frequency and more of the band
+    // added, one step named after the frequency.
+    auto& graph = editor.getGraph();
+    CHECK (graph.getTitle() == juce::String ("Excited band"));
+    phazite::test::Mouse mouse (graph);
+    const auto dot = editor.getDotPosition().roundToInt();
+    CHECK (graph.getLocalBounds().contains (dot));
+    mouse.press (dot);
+    mouse.dragTo (dot - juce::Point<int> (20, 0));
+    mouse.dragTo (dot - juce::Point<int> (40, 30));
+    mouse.release();
+    CHECK (song.valueOf ("frequency") < 4000.0f);
+    CHECK (song.valueOf ("frequency") > 1000.0f);
+    CHECK (song.valueOf ("amount") > 0.6f);
+    CHECK (song.describeUndo() == juce::String ("Undo Change Frequency"));
+    CHECK (editor.getDotPosition().x == doctest::Approx ((float) dot.x - 40.0f).epsilon (0.02));
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("frequency") == doctest::Approx (5000.0f));
+    CHECK (song.valueOf ("amount") == doctest::Approx (0.35f));
+
+    // The wheel turns the drive.
+    mouse.pause();
+    mouse.wheel (graph.getLocalBounds().getCentre(), 0.5f);
+    CHECK (song.valueOf ("drive") > 18.5f);
+
+    // The meter: how far the driven band reached into the curve, against where it bends, up at once and falling back.
+    auto* exciter = device.getProcessor<Exciter>();
+    REQUIRE (exciter != nullptr);
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    ticker.tickNow();
+    CHECK (editor.getShownReach() < -20.0f);
+    exciter->getReach().raise (2.0f);
+    ticker.tickNow();
+    CHECK (editor.getShownReach() == doctest::Approx (6.02f).epsilon (0.01));
+    ticker.tickNow();
+    CHECK (editor.getShownReach() < 6.0f);
+    CHECK (editor.getShownReach() > 4.0f);
+
+    // Its displays listen to what goes in and out, and to what is added.
+    REQUIRE (device.getScope() != nullptr);
+    CHECK (device.getScope()->isListening());
+    CHECK (exciter->getAddedTap().isListening());
+
+    // Listen: only while it is on does the exciter play what it adds alone.
+    auto& listen = editor.getListenButton();
+    CHECK (listen.getTitle() == juce::String ("Listen"));
+    CHECK_FALSE (exciter->isPlayingAdded());
+    phazite::test::Mouse listenMouse (listen);
+    listenMouse.click (listen.getLocalBounds().getCentre());
+    CHECK (listen.getToggleState());
+    ticker.tickNow();
+    CHECK (exciter->isPlayingAdded());
+}
+
+TEST_CASE ("The vinyl's editor turns its record as it plays, draws its pitch and its crackles, and drags for the wow and the band")
+{
+    using phazite::devices::Vinyl;
+    Song song (Vinyl::typeID);
+    const auto device = song.getDevice();
+    CHECK (dynamic_cast<phazite::ui::VinylEditor*> (phazite::ui::createDeviceEditor (device).get()) != nullptr);
+
+    phazite::ui::VinylEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    checkEveryParameterButMixHasAControl (editor, Vinyl::info);
+    phazite::test::checkChildrenApart (editor);
+    phazite::test::checkChildrenApart (editor.getRecord());
+
+    // A drag up the record: more wow, one step named after it.
+    auto& record = editor.getRecord();
+    CHECK (record.getTitle() == juce::String ("Record"));
+    phazite::test::Mouse mouse (record);
+    const auto centre = editor.getRecordCentre().roundToInt();
+    CHECK (record.getLocalBounds().contains (centre));
+    mouse.press (centre);
+    mouse.dragTo (centre - juce::Point<int> (0, 10));
+    mouse.dragTo (centre - juce::Point<int> (0, 40));
+    mouse.release();
+    CHECK (song.valueOf ("wow") > 8.0f);
+    CHECK (song.describeUndo() == juce::String ("Undo Change Wow"));
+    phazite::undo (*song.song);
+    CHECK (song.valueOf ("wow") == doctest::Approx (4.0f));
+
+    // The wheel turns the record faster.
+    mouse.pause();
+    mouse.wheel (centre, 0.5f);
+    CHECK (song.valueOf ("wowRate") > 0.56f);
+
+    // The band's high end dragged left: a lower high cut, the low cut as it was.
+    mouse.pause();
+    const auto band = editor.getBandArea();
+    const auto highEnd = juce::Point<int> (band.getRight() - 4, band.getCentreY());
+    mouse.press (highEnd);
+    mouse.dragTo (highEnd - juce::Point<int> (20, 0));
+    mouse.dragTo (highEnd - juce::Point<int> (band.getWidth() / 3, 0));
+    mouse.release();
+    CHECK (song.valueOf ("highCut") < 8000.0f);
+    CHECK (song.valueOf ("lowCut") == doctest::Approx (30.0f));
+    CHECK (song.describeUndo() == juce::String ("Undo Change High Cut"));
+
+    // As it plays, crackling densely: the record turns, its pitch's history fills, and a speck comes where it crackled.
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    ticker.tickNow(); // the editor listens
+    auto* vinyl = device.getProcessor<Vinyl>();
+    REQUIRE (vinyl != nullptr);
+    CHECK (vinyl->getPitchTap().isListening());
+    vinyl->prepare (48000.0, 480);
+    std::vector<float> values;
+
+    for (const auto& parameter : Vinyl::info.parameters)
+        values.push_back (song.valueOf (parameter.id.data())); // the IDs are literals
+
+    values[Vinyl::wow] = 20.0f;
+    values[Vinyl::crackle] = -12.0f;
+    values[Vinyl::density] = 200.0f;
+    juce::AudioBuffer<float> buffer (2, 480);
+
+    for (int block = 0; block < 50; ++block)
+    {
+        buffer.clear();
+        phazite::devices::ProcessContext context;
+        context.channels = buffer.getArrayOfWritePointers();
+        context.numChannels = 2;
+        context.numSamples = buffer.getNumSamples();
+        context.parameters = values;
+        context.isPlaying = true;
+        context.beat = block * 480 * 2.0 / 48000.0;
+        vinyl->process (context);
+    }
+
+    ticker.tickNow();
+    CHECK (editor.getShownTurn() == doctest::Approx (0.5 * values[Vinyl::wowRate]).epsilon (0.02)); // half a second's turn
+    CHECK (std::abs (editor.getShownPitch()) <= 26.0f);
+    CHECK (editor.getNumReadings() >= 40);
+    CHECK (editor.getNumSpecks() > 0);
 }
 
 TEST_CASE ("The delay's editor drags its first echo for the time and feedback, and its band's ends for the cuts")
@@ -284,7 +438,7 @@ TEST_CASE ("The flanger's editor shows how far each side's copy lags, and its do
     CHECK (song.valueOf ("feedback") == doctest::Approx (-1.0f));
 }
 
-TEST_CASE ("The chorus's editor shows how far each copy lags, three a side in Ensemble, and its dot drags the delay and depth")
+TEST_CASE ("The chorus's editor shows how far each copy lags, three a side as an ensemble, and its dot drags the delay and depth")
 {
     using phazite::devices::Chorus;
     Song song (Chorus::typeID);
@@ -303,19 +457,26 @@ TEST_CASE ("The chorus's editor shows how far each copy lags, three a side in En
     CHECK (editor.getShownDelay (0, 0) == doctest::Approx (1.75).epsilon (0.001));
     CHECK (editor.getShownDelay (1, 0) == doctest::Approx (5.25).epsilon (0.001));
 
-    // In Ensemble, three copies a side, each a third of a cycle after the one before, with the fast sine on it.
-    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "mode" }, 1.0f);
+    // As the string machines' ensemble, three copies a side, each a third of a cycle after the one before, with the fast
+    // sine on it.
+    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "voices" }, 2.0f);
+    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "shimmer" }, 1.0f);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-    CHECK (editor.getShownVoices() == Chorus::mostVoices);
+    CHECK (editor.getShownVoices() == 3);
     std::vector<float> values;
 
     for (const auto& parameter : Chorus::info.parameters)
         values.push_back (parameter.defaultValue);
 
-    values[Chorus::mode] = 1.0f;
+    values[Chorus::voices] = 2.0f;
+    values[Chorus::shimmer] = 1.0f;
 
-    for (int voice = 0; voice < Chorus::mostVoices; ++voice)
-        CHECK (editor.getShownDelay (0, voice) == doctest::Approx (Chorus::getVoiceDelay (values, voice / 3.0)).epsilon (0.001));
+    for (int voice = 0; voice < 3; ++voice)
+        CHECK (editor.getShownDelay (0, voice) == doctest::Approx (Chorus::getVoiceDelay (values, voice / 3.0, voice)).epsilon (0.001));
+
+    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "voices" }, 0.0f);
+    phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "shimmer" }, 0.0f);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
 
     // The dot at the delay's frequency (286 Hz, for 3.5 ms) dragged right and up: a shorter delay, more depth, one step.
     auto& picture = editor.getPicture();
@@ -335,6 +496,99 @@ TEST_CASE ("The chorus's editor shows how far each copy lags, three a side in En
     CHECK (song.valueOf ("rate") > 0.5f);
 }
 
+TEST_CASE ("The chorus's editor shows each voice in its part of the sweep, and Phase and Spread faint while it has one voice")
+{
+    using phazite::devices::Chorus;
+    Song song (Chorus::typeID);
+    const auto device = song.getDevice();
+    phazite::ui::ChorusEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    auto& ticker = *juce::SharedResourcePointer<phazite::ui::DisplayTicker>();
+    const auto set = [&song] (const char* id, float value)
+    { phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, id }, value); };
+
+    // A control for each of the voices' parameters, each with its title: the count a list, the others knobs.
+    for (const auto& [id, title] : { std::pair<const char*, const char*> { "voices", "Voices" },
+                                     { "voicePhase", "Voice Phase" },
+                                     { "spread", "Spread" },
+                                     { "shimmer", "Shimmer" } })
+    {
+        CAPTURE (id);
+        auto* control = editor.findControl (id);
+        REQUIRE (control != nullptr);
+        CHECK (control->isShowing());
+        CHECK (control->getTitle() == juce::String (title));
+    }
+
+    CHECK (dynamic_cast<juce::ComboBox*> (editor.findControl ("voices")) != nullptr);
+    CHECK (dynamic_cast<juce::Slider*> (editor.findControl ("spread")) != nullptr);
+
+    // One voice a side has no other to keep a phase from or to share the sweep with: those two faint, the others not.
+    ticker.tickNow();
+    CHECK (editor.findControl ("voicePhase")->getAlpha() < 0.9f);
+    CHECK (editor.findControl ("spread")->getAlpha() < 0.9f);
+    CHECK (editor.findControl ("shimmer")->getAlpha() == doctest::Approx (1.0f));
+    CHECK (editor.findControl ("voices")->getAlpha() == doctest::Approx (1.0f));
+
+    // Four voices a side: Phase and Spread lit, four copies shown each side, all on one line while they share the sweep.
+    set ("voices", 3.0f);
+    ticker.tickNow();
+    CHECK (editor.findControl ("voicePhase")->getAlpha() == doctest::Approx (1.0f));
+    CHECK (editor.findControl ("spread")->getAlpha() == doctest::Approx (1.0f));
+    CHECK (editor.getShownVoices() == 4);
+    CHECK (editor.getHeadPosition (0, 0).y == doctest::Approx (editor.getHeadPosition (0, 3).y));
+
+    // Spread gives each its part of the sweep: each copy shown within its own part, the later copies' longer, each on a line
+    // of its own under the one before, all within the picture.
+    set ("spread", 0.62f);
+    set ("delay", 8.2f);
+    set ("depth", 0.61f);
+    ticker.tickNow();
+    std::vector<float> values;
+
+    for (const auto& parameter : Chorus::info.parameters)
+        values.push_back (song.valueOf (std::string (parameter.id).c_str()));
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        for (int voice = 0; voice < 4; ++voice)
+        {
+            CAPTURE (channel);
+            CAPTURE (voice);
+            const auto reach = Chorus::getVoiceReach (values, voice);
+            CHECK (editor.getShownDelay (channel, voice) >= reach.shortest - 0.001);
+            CHECK (editor.getShownDelay (channel, voice) <= reach.longest + 0.001);
+            CHECK (editor.getPicture().getLocalBounds().toFloat().contains (editor.getHeadPosition (channel, voice)));
+
+            if (voice > 0)
+            {
+                CHECK (editor.getHeadPosition (channel, voice).y > editor.getHeadPosition (channel, voice - 1).y + 1.0f);
+                CHECK (Chorus::getVoiceReach (values, voice).shortest > Chorus::getVoiceReach (values, voice - 1).shortest);
+            }
+        }
+    }
+
+    // Eight a side, the most: all shown, still within the picture; and the editor is as wide as with one, so that it fits
+    // the dock the same.
+    const auto width = editor.getWidth();
+    set ("voices", 7.0f);
+    ticker.tickNow();
+    CHECK (editor.getShownVoices() == Chorus::mostVoices);
+
+    for (int voice = 0; voice < Chorus::mostVoices; ++voice)
+        CHECK (editor.getPicture().getLocalBounds().toFloat().contains (editor.getHeadPosition (1, voice)));
+
+    CHECK (editor.getWidth() == width);
+    phazite::test::checkChildrenApart (editor);
+
+    // The picture repaints when a voice's control turns, without sound.
+    phazite::test::dispatchPendingMessages();
+    window.takeRepaintedArea();
+    set ("voicePhase", 0.3f);
+    ticker.tickNow();
+    CHECK_FALSE (window.takeRepaintedArea().isEmpty());
+}
+
 TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its bands moves the formant as one undo step")
 {
     Song song (phazite::devices::Vocoder::typeID);
@@ -351,19 +605,71 @@ TEST_CASE ("The vocoder's editor says what its carrier is, and a drag across its
     CHECK (editor.getCarrierText() == juce::String ("Buzz C3"));
     phazite::setValueSetByHand (*song.song, phazite::ParameterRef { song.device, "carrier" }, 3.0f);
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
-    CHECK (editor.getCarrierText() == juce::String ("Track: pick one with Sidechain, above"));
+    CHECK (editor.getCarrierText() == juce::String ("Track: pick one by the carrier"));
 
-    // From the fifth band's column to the seventh's: the carrier's bands up by as far (10.6 semitones), one step.
+    // Over the bands, a drag shows itself (the owner, 2026-11-10: "it should be obvious that you are able to do this
+    // gesture"): a left-and-right arrow, the lines from the marks to the columns lit, and the hint bar saying what it does.
     auto& bands = editor.getBands();
     phazite::test::Mouse mouse (bands);
     const auto from = editor.getColumnPosition (4).roundToInt() - juce::Point<int> (0, 20);
     const auto to = editor.getColumnPosition (6).roundToInt() - juce::Point<int> (0, 20);
+    CHECK_FALSE (editor.isBandsLit());
+    mouse.moveTo (from);
+    CHECK (editor.isBandsLit());
+    CHECK (bands.getMouseCursor() == juce::MouseCursor::LeftRightResizeCursor);
+    auto* tip = dynamic_cast<juce::TooltipClient*> (&bands);
+    REQUIRE (tip != nullptr);
+    CHECK (tip->getTooltip().contains ("Drag sideways"));
+
+    // From the fifth band's column to the seventh's: the carrier's bands up by as far (10.6 semitones), one step.
     mouse.press (from);
     mouse.dragTo (from + juce::Point<int> (10, 0));
     mouse.dragTo (to);
     mouse.release();
     CHECK (std::abs (song.valueOf ("formant") - 12.0f * std::log2 (std::pow (100.0f, 2.0f / 15.0f))) < 0.8f);
     CHECK (song.describeUndo() == juce::String ("Undo Change Formant"));
+}
+
+TEST_CASE ("The vocoder's carrier track is picked beside its carrier: the track chosen plays as its carrier, as one undo step")
+{
+    // Given the project, as the Devices view and its window show it, the vocoder picks the track that carries beside the
+    // carrier's controls, the one place to choose what its sidechain listens to.
+    Song song (phazite::devices::Vocoder::typeID);
+    const auto tracks = phazite::ensureTracks (*song.song, 2);
+    phazite::setTrackName (*song.song, tracks[1], "Synth");
+    song.song->getUndoManager().clearUndoHistory();
+    auto shown = phazite::ui::createDeviceEditor (song.context, song.device);
+    auto* editor = dynamic_cast<phazite::ui::VocoderEditor*> (shown.get());
+    REQUIRE (editor != nullptr);
+    phazite::test::TestWindow window (*editor, editor->getWidth(), editor->getHeight());
+    phazite::test::checkChildrenApart (*editor);
+
+    // Level with the carrier's list, None at first.
+    auto* picker = editor->getTrackPicker();
+    REQUIRE (picker != nullptr);
+    CHECK (picker->isShowing());
+    CHECK (picker->getTitle() == juce::String ("Carrier track"));
+    CHECK (picker->getButtonText() == juce::String ("None"));
+    auto* list = editor->findControl ("carrier");
+    REQUIRE (list != nullptr);
+    CHECK (std::abs (picker->getScreenBounds().getCentreY() - list->getScreenBounds().getCentreY()) <= 1);
+    CHECK (picker->getScreenX() >= list->getScreenBounds().getRight());
+
+    // The synth: the vocoder listens to it, and plays it, all one step.
+    REQUIRE (phazite::test::runMenuItem (picker->getMenu(), { "Synth" }));
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getSidechainSource (*song.song, song.device) == tracks[1]);
+    CHECK (juce::roundToInt (song.valueOf ("carrier")) == (int) phazite::devices::Vocoder::Carrier::track);
+    CHECK (song.describeUndo() == juce::String ("Undo Sidechain from Synth"));
+    CHECK (picker->getButtonText() == juce::String ("Synth"));
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (editor->getCarrierText() == juce::String ("Track: Synth"));
+
+    // Undone: the buzz again, and the picker says None once the editor looks.
+    phazite::undo (*song.song);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (picker->getButtonText() == juce::String ("None"));
+    CHECK (editor->getCarrierText() == juce::String ("Buzz C3"));
 }
 
 TEST_CASE ("A built-in device's editor in a window of its own wraps its parts to the window's width, and scrolls")

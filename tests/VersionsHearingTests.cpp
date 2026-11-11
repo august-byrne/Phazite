@@ -35,25 +35,15 @@ bool hasBounceOf (const phazite::ProjectContext& context, const juce::String& id
     return false;
 }
 
-void waitForVersions (phazite::ProjectContext& context)
-{
-    REQUIRE (dispatchMessagesUntil (
-        [&context]
-        {
-            const auto* history = phazite::getVersionHistory (context);
-            return history == nullptr || ! history->isBusy();
-        }));
-}
-
 juce::String keepVersion (phazite::ProjectContext& context, const juce::String& name)
 {
-    waitForVersions (context);
+    REQUIRE (waitForVersionHistory (context));
     phazite::setVersionDraft (context, name, {});
     std::optional<juce::Result> result;
     REQUIRE (phazite::saveVersion (context, [&result] (juce::Result r) { result = r; }));
-    REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }));
+    REQUIRE (dispatchMessagesUntil ([&result] { return result.has_value(); }, versionHistoryTimeout));
     REQUIRE (result->wasOk());
-    waitForVersions (context);
+    REQUIRE (waitForVersionHistory (context));
     return phazite::getLastVersion (context)->id;
 }
 
@@ -65,7 +55,7 @@ void bounce (TestSong& s, const juce::String& version)
     INFO (s.renders.finished.joinIntoString ("\n").toStdString());
     REQUIRE (s.renders.finished[s.renders.finished.size() - 1].endsWith (": ok"));
     s.renders.finished.clear();
-    waitForVersions (s.context);
+    REQUIRE (waitForVersionHistory (s.context));
 }
 
 // A hit at the start of each beat at 120 BPM, a burst of 64 samples, for so many seconds: a file at 44.1 kHz whose name
@@ -335,7 +325,7 @@ TEST_CASE ("Save Version with a bounce bounces the version it saves, in the host
     phazite::CommandRegistry commands;
     phazite::addVersionCommands (
         commands, s.context, [&s] (std::function<void (bool)> then) { then (s.getProject().save().wasOk()); }, s.renders);
-    waitForVersions (s.context);
+    REQUIRE (waitForVersionHistory (s.context));
 
     phazite::setBounceWithVersion (s.context, true);
     phazite::setVersionDraft (s.context, "Take one", {});

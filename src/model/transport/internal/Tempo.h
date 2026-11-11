@@ -66,8 +66,10 @@ void setTempoAt (Song&, BeatPosition, double bpm);
 // Whether the song has more than one tempo, which shows the tempo lane.
 bool hasTempoChanges (const Song&);
 
-// The tempo at evenly spaced beats over a range, from its start to its end (at least two), as the engine plays it.
+// The tempo at evenly spaced beats over a range, from its start to its end (at least two), or at each of some beats, as
+// the engine plays it.
 std::vector<double> getTempoValues (const Song&, BeatRange, int count);
+std::vector<double> getTempoValues (const Song&, const std::vector<BeatPosition>&);
 
 // A tempo from a beat, "Add Tempo Change": on the tempo's line there, so that nothing changes until it moves, unless a bpm
 // is given; its line to the next goes as the one it was on did (a step, unless it was on a ramp). A tempo already at that

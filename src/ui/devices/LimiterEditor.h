@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The limiter's editor (devices/dynamics/Limiter.h): the last seconds of what it plays, as FabFilter's limiter shows them,
-// what comes in (after its gain), what goes out and how far it turns the sound down, red icicles under its ceiling, which is
-// a line to drag up or down; meters of the three beside them; then its Gain, large, its Ceiling and its Release.
+// The limiter's editor (devices/dynamics/Limiter.h): the last two bars of what it plays, as FabFilter's limiter shows them
+// (LevelHistoryView.h, with the song's beats and bars), what comes in (after its gain), what goes out and how far it turns
+// the sound down, red icicles under its ceiling, which is a line to drag up or down; meters of the three beside them; then
+// its Gain, large, its Ceiling and its Release.
 #pragma once
 
 #include "DeviceEditorBase.h"
@@ -17,8 +18,9 @@ class LimiterDisplay : public juce::Component
 public:
     explicit LimiterDisplay (ParameterHandle ceiling);
 
-    // A tick's readings, in decibels (the reduction 0 or more).
-    void show (float input, float reduction, float output);
+    // A tick's readings, in decibels (the reduction 0 or more), taken at a moment with where the song was then
+    // (LevelHistoryView::push()).
+    void show (double milliseconds, const LevelHistoryView::SongTime&, float input, float reduction, float output);
 
     LevelHistoryView& getHistory() noexcept { return history; }
     const ValueMeter& getInputMeter() const noexcept { return inputMeter; }

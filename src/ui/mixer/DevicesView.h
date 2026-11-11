@@ -6,10 +6,10 @@
 // they took the whole width as a header), or a button that chooses one; on the Effects page, the effects one under
 // another, as FL Studio's mixer stacks its slots, scrolled up and down when they are many (the owner, 2026-11-06: in a row,
 // the more there were, the less room each had): each an on/off switch, its name (click to show it, right-click for its
-// menu, drag to move it) and its mix; the one that shows, its Presets, its window's button and its sidechain under them;
-// with a button after them that adds an effect. A container is one of them, alone, as is an instrument container on the
-// Instrument page (the owner, 2026-11-09: its chains and their devices under it made the column "very busy and
-// cluttered"). Beside the column, the whole rest of the dock: the device that shows, whole (one of Phazite's own's editor;
+// menu, drag to move it) and its mix; the one that shows, its Presets and its window's button under them (what a device's
+// sidechain listens to is chosen inside it: ui/devices/SidechainMenus.h); with a button after them that adds an effect. A
+// container is one of them, alone, as is an instrument container on the Instrument page (the owner, 2026-11-09: its chains
+// and their devices under it made the column "very busy and cluttered"). Beside the column, the whole rest of the dock: the device that shows, whole (one of Phazite's own's editor;
 // a plug-in's key knobs, its own controls being in its window), its editor's graphs narrowing, then its parts in pages
 // where the dock is narrower, so that it shows without scrolling. A container shows its macros there, beside its chains
 // side by side, each with its devices (ContainerEditor.h); a device of it clicked there shows beside the macros in their
