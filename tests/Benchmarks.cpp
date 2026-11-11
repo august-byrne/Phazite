@@ -52,6 +52,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
+#include "ui/components/Controls.h"
 #include "ui/pianoroll/PianoRoll.h"
 #include "ui/playlist/ClipComponent.h"
 #include "ui/playlist/Playlist.h"
@@ -1080,7 +1081,7 @@ TEST_CASE ("Benchmark: scrolling and zooming a big song" * doctest::test_suite (
 
     phazite::test::Mouse mouse (*playlist);
     const auto centre = playlist->getLocalBounds().getCentre(); // over the tracks' lanes
-    constexpr float notch = 60.0f / 256.0f;                     // a mouse wheel's notch, as JUCE reports it on Windows
+    constexpr auto notch = (float) phazite::ui::wheelNotch;     // a mouse wheel's notch, as JUCE reports it
     const auto ctrl = juce::ModifierKeys::ctrlModifier, shift = juce::ModifierKeys::shiftModifier;
 
     auto x = 0;

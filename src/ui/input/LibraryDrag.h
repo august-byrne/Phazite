@@ -15,7 +15,8 @@ std::optional<DeviceType> getDraggedDevice (const juce::var& description);
 std::optional<juce::File> getDraggedPreset (const juce::var& description); // a dragged file that is a preset
 juce::String getDraggedKey (const juce::var& description);                 // the item's key (LibraryItem::getKey()), or empty
 
-// Whatever put a dropped item into the song marks its description, so that the browser can note the item as used.
+// Whatever put a dropped item into the song marks its description, so that the browser can note the item as used: JUCE
+// tells the browser that its drag ended, not whether it was dropped. JUCE workaround W24 (docs/juce-workarounds.md).
 void markPlaced (const juce::var& description);
 bool wasPlaced (const juce::var& description);
 

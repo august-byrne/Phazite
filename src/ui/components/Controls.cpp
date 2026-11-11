@@ -197,7 +197,7 @@ ValueSlider::ValueSlider (SliderStyle style, const juce::String& title, double d
     setWantsKeyboardFocus (true);
 
     // The value pops up as the control is dragged or hovered, on the monitor it is on: JUCE has nowhere to put it on a
-    // computer without one (a test machine's), so there it doesn't pop up.
+    // computer without one (a test machine's), so there it doesn't pop up. JUCE workaround W18 (docs/juce-workarounds.md).
     const auto hasMonitor = ! juce::Desktop::getInstance().getDisplays().displays.isEmpty();
     setPopupDisplayEnabled (hasMonitor, hasMonitor, nullptr);
     setDoubleClickReturnValue (true, defaultValue);

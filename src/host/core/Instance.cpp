@@ -145,7 +145,8 @@ sandbox::PluginInfo Instance::describe() const
         info.parameters.push_back (described);
     }
 
-    // Its programs, but the one every plug-in has that has none of its own (JUCE counts one).
+    // Its programs, but not the one nameless program that a plug-in without programs of its own may report (JUCE's
+    // AudioProcessor counts at least one; a VST3 without a program list reports none).
     if (const auto numPrograms = plugin->getNumPrograms(); numPrograms > 1 || plugin->getProgramName (0).isNotEmpty())
         for (int i = 0; i < std::min (numPrograms, maximumPrograms); ++i)
             info.programs.push_back (plugin->getProgramName (i));
@@ -429,7 +430,7 @@ void Instance::audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails
     // Its settings changed: as it says itself (a VST3's setDirty()), or another program. JUCE's VST3 host says the program
     // changed, with new parameter info, at every restartComponent() a VST3 makes, for its latency or its parameters' names
     // too, which many make as they sit there: that alone changes nothing (the values it changes come as theirs), and counting
-    // it made an idle project's plug-ins an unsaved change.
+    // it made an idle project's plug-ins an unsaved change. JUCE workaround W3 (docs/juce-workarounds.md).
     if (details.nonParameterStateChanged || (details.programChanged && ! details.parameterInfoChanged))
         stateChanged = true;
 }

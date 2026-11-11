@@ -219,7 +219,8 @@ void ClipComponent::paint (juce::Graphics& g)
     // A frozen track's clips are frosted: its file plays, not them. The stripes inside its outline: clipped to its rectangle,
     // which the renderer rounds out to whole pixels while the clip is a part of one off them (scrolling continuously), they
     // reached into the line between it and a clip right after it, more at one frame than the next. Only those across what is
-    // being painted: a clip too long to keep as a picture is painted again at each frame.
+    // being painted: a clip too long to keep as a picture is painted again at each frame. JUCE workaround W12
+    // (docs/juce-workarounds.md).
     if (frozen)
     {
         juce::Path outline;

@@ -8,7 +8,9 @@
 // message thread hasn't answered the heartbeat it sends each second for a while, but while a request waits for its own
 // answer (a plug-in loading, its state); or when an audio thread of its has kept a block too long, which the engine tells
 // it without waiting (reportHung()). The pipe's thread delivers the answers and the notices, the watching thread the
-// loss; requests may come from any other.
+// loss; requests may come from any other. JUCE workaround W5 (docs/juce-workarounds.md), for the crashes. Built from JUCE's
+// ChildProcess and InterprocessConnection rather than its ChildProcessCoordinator, which can't end a helper that hangs:
+// JUCE workaround W28 (docs/juce-workarounds.md).
 #pragma once
 
 #include "sandbox/core/Messages.h"

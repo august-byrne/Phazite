@@ -95,7 +95,7 @@ void checkChildrenApart (juce::Component&);
 // or scales by its display: a drag's image let go, which a test mouse's release fades out through a copy that JUCE's
 // animator scales (with no display it read nothing and crashed, 2026-11-01), or a menu. Only then: otherwise the machine
 // is one without a screen, as it is (Desktop::isHeadless()), to what asks, such as code that turns the screen saver off,
-// which without a screen crashes.
+// which without a screen crashes. JUCE workaround T3 (docs/juce-workarounds.md).
 class ScopedDisplay
 {
 public:

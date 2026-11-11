@@ -86,6 +86,6 @@ private:
 
 // Gives a plug-in a state as Phazite keeps it: a VST3's preset file as the same streams in JUCE's wrapper (which sets its
 // parameters' values again too, as a preset file set through JUCE's VST3 client doesn't), anything else as it is. On the
-// message thread, not while a block plays.
+// message thread, not while a block plays. JUCE workaround W4 (docs/juce-workarounds.md).
 void setPluginState (juce::AudioPluginInstance&, const juce::MemoryBlock&);
 } // namespace phazite::host

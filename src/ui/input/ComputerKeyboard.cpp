@@ -23,6 +23,7 @@ namespace
     // key as it is now (GetAsyncKeyState() on Windows): a quick tap is over by then if the UI thread was busy until after
     // it, and played no note (docs/performance-audit.md, U6). GetKeyState() keeps step with the messages instead, so the
     // tap plays its note late rather than never. Elsewhere JUCE keeps the keys' state from the messages itself.
+    // JUCE workaround W23 (docs/juce-workarounds.md).
     bool wasKeyDown (int keyCode)
     {
 #if JUCE_WINDOWS

@@ -446,7 +446,9 @@ struct Browser::RootNode : public Node
     juce::String getText() const override { return {}; }
     bool mightContainSubItems() override { return true; }
     juce::String getUniqueName() const override { return "root"; }
-    void itemOpennessChanged (bool) override {} // its rows are set from outside, and stay
+    // Its rows are set from outside, and stay, also as layOutTreeNow() gives the tree its root again (which closes and
+    // opens it). JUCE workaround W19 (docs/juce-workarounds.md).
+    void itemOpennessChanged (bool) override {}
 };
 
 //==============================================================================
@@ -713,7 +715,9 @@ Browser::Browser (Library& l, Previewer& p, SoundPack& pack, Settings& s, const 
     tree->setDefaultOpenness (false);
     tree->setMultiSelectEnabled (false);
     tree->setColour (juce::TreeView::selectedItemBackgroundColourId, juce::Colours::transparentBlack); // the rows paint it
-    tree->getViewport()->setWantsKeyboardFocus (false); // the tree takes the keys itself: one stop for Tab, not two
+    // The tree takes the keys itself: one stop for Tab, not two, as JUCE's tree and its viewport would each take the keys.
+    // JUCE workaround W20 (docs/juce-workarounds.md).
+    tree->getViewport()->setWantsKeyboardFocus (false);
 
     previewButton.setClickingTogglesState (true);
     previewButton.setToggleState (isPreviewOn(), juce::dontSendNotification);
@@ -1496,7 +1500,8 @@ void Browser::endSwap()
 void Browser::layOutTreeNow()
 {
     // JUCE's tree lays its rows out on the next message after they change, and a scroll before then goes by where they were,
-    // or is lost while the old rows fit in view: given its root again, it lays them out at once.
+    // or is lost while the old rows fit in view: given its root again, it lays them out at once. JUCE workaround W19
+    // (docs/juce-workarounds.md).
     if (auto* root = tree->getRootItem())
     {
         tree->setRootItem (nullptr);

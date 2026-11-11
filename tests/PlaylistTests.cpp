@@ -24,6 +24,7 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
+#include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
 #include "ui/components/TrackSwitch.h"
 #include "ui/input/KeyDispatcher.h"
@@ -337,7 +338,7 @@ TEST_CASE ("A notch of the mouse wheel zooms or scrolls the playlist once")
     // The playlist used to hear about the wheel twice, and zoomed or scrolled two steps for one.
     PlaylistScreen screen;
     phazite::test::Mouse mouse (*screen.lanes);
-    const auto notch = 60.0f / 256.0f; // as JUCE reports one on Windows
+    const auto notch = (float) phazite::ui::wheelNotch; // as JUCE reports one
 
     const auto before = screen.playlist.getView().pixelsPerBeat;
     mouse.wheel (screen.at (8.0, 0), notch, juce::ModifierKeys::ctrlModifier);
@@ -1047,7 +1048,7 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
     const auto middle = screen.lanes->getLocalBounds().getCentre();
 
     for (int notch = 0; notch < 60; ++notch)
-        mouse.wheel (middle, -60.0f / 256.0f);
+        mouse.wheel (middle, -(float) phazite::ui::wheelNotch);
 
     checkOnlyInView (100);
     CHECK (componentOf (first) == nullptr);
@@ -1060,7 +1061,7 @@ TEST_CASE ("Only the clips in view have components, which come and go as the pla
     // into view before the second in their layer, as the playlist lists them (where clips crossfade, the later shows over
     // the earlier), and stays there. A click in the lower half of the row finds the second.
     for (int notch = 0; notch < 60; ++notch)
-        mouse.wheel (middle, 60.0f / 256.0f);
+        mouse.wheel (middle, (float) phazite::ui::wheelNotch);
 
     screen.playlist.setViewStart (phazite::BeatPosition::fromBeats (2.5));
     CHECK (componentOf (first) == nullptr);

@@ -8,7 +8,7 @@
 //
 // A press in a menu or a call-out over the field (its own menu's Cut, Copy and Paste) is the field's, and one outside the
 // dialog a field is in changes nothing, as the dialog ignores it. A field whose window went behind another app's keeps its
-// selection: the keys come back to it with the window.
+// selection: the keys come back to it with the window. JUCE workaround W21 (docs/juce-workarounds.md).
 #pragma once
 
 #include <juce_gui_basics/juce_gui_basics.h>

@@ -103,7 +103,8 @@ Filename: "{app}\Phazite.exe"; Flags: nowait runasoriginaluser; Check: IsUpdateF
 
 [Code]
 const
-  // Phazite holds this mutex while it runs (src/app/Main.cpp): in the session's namespace, or the global one.
+  // Phazite holds this mutex while it runs (src/app/Main.cpp): in the session's namespace, or the global one, as JUCE
+  // names it. JUCE workaround W10 (docs/juce-workarounds.md).
   RunningMutexes = 'PhaziteRunning,Global\PhaziteRunning';
 
 // Started by Phazite's update check, as Phazite closes (/relaunch=1: src/services/Updates.cpp).

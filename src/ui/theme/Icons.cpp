@@ -159,8 +159,8 @@ namespace
 
 std::unique_ptr<juce::Drawable> createIcon (Icon icon, bool filled)
 {
-    // Lucide draws in "currentColor": read as black, the colour that the icons' tints replace.
-    auto text = getResourceText (getFileName (icon)).replace ("currentColor", "#000000");
+    // Lucide draws in "currentColor", which JUCE reads as black: the colour that the icons' tints replace.
+    auto text = getResourceText (getFileName (icon));
 
     if (text.isEmpty())
         return {};

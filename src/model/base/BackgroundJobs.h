@@ -6,6 +6,7 @@
 // by a thread still starting, left every thread started after it waiting for ever, and the process hung (tools/
 // check-architecture.sh counts such calls: thread-kills). Here a job is asked to stop and waited for, however long it
 // takes; a job that may take long looks at whether it should stop between its steps.
+// JUCE workaround W1 (docs/juce-workarounds.md).
 #pragma once
 
 #include <juce_core/juce_core.h>

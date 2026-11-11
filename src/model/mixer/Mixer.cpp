@@ -71,7 +71,7 @@ namespace
     }
 
     // Sets a property without an undo step, only if its value is another (as a store of a plug-in's state does:
-    // model/plugins/internal/PluginInstances.h).
+    // model/plugins/internal/PluginInstances.h). JUCE workaround W8 (docs/juce-workarounds.md).
     void store (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value)
     {
         if (const auto* stored = state.getPropertyPointer (property); stored == nullptr || *stored != value)

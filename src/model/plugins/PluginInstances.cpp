@@ -18,7 +18,8 @@ namespace
     constexpr int openBlockSize = 512; // what a new instance is opened for, before the engine prepares it
 
     // Sets a property as ValueTree::setProperty() does with an undo manager, which leaves a value that is the same as JUCE
-    // compares values alone (a number read from a file is text), but without one.
+    // compares values alone (a number read from a file is text), but without one. JUCE workaround W8
+    // (docs/juce-workarounds.md).
     void storeProperty (juce::ValueTree& state, const juce::Identifier& property, const juce::var& value)
     {
         if (const auto* stored = state.getPropertyPointer (property); stored == nullptr || *stored != value)

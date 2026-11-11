@@ -69,7 +69,8 @@ namespace
         {
         }
 
-        // Before JUCE's list waits for its scanning thread to finish.
+        // Before JUCE's list waits for its scanning thread to finish: for up to a minute, and then its thread pool ends a
+        // thread that hasn't stopped within half a second by force. JUCE workaround W1 (docs/juce-workarounds.md).
         ~PluginList() override
         {
             if (isScanning())

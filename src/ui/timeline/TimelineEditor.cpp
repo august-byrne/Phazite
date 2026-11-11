@@ -3,6 +3,7 @@
 #include "TimelineGesture.h"
 #include "model/transport/RecordingModel.h"
 #include "model/transport/TransportModel.h"
+#include "ui/components/Controls.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
@@ -10,7 +11,6 @@ namespace phazite::ui
 {
 namespace
 {
-    constexpr double wheelNotch = 60.0 / 256.0; // one notch of a mouse wheel, as JUCE reports it on Windows
     constexpr double zoomPerNotch = 1.25;
     constexpr double scrollPerNotch = 48.0; // pixels
     constexpr double zoomStep = 1.5;        // for the zoom commands

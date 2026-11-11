@@ -10,6 +10,7 @@
 namespace phazite
 {
 // JUCE's name for Windows' shared mode with small buffers (IAudioClient3), which Windows 10 and later offer.
+// JUCE workaround W9 (docs/juce-workarounds.md).
 inline constexpr const char* lowLatencyDeviceType = "Windows Audio (Low Latency Mode)";
 
 // Whether an output plays through Bluetooth, whose own delay (about 150 to 250 ms) no driver reports. On Windows, the

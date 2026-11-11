@@ -33,7 +33,8 @@ juce::String readVst3ClassID (const juce::MemoryBlock&);
 
 // JUCE's binary block of a VST3's state (AudioProcessor::copyXmlToBinary()): a magic number and the text's size, then the
 // XML element VST3PluginState, holding IComponent and IEditController, each in JUCE's own base 64, then a zero byte. It
-// doesn't hold the class ID, which the plug-in gives. Nothing for what isn't one.
+// doesn't hold the class ID, which the plug-in gives. Nothing for what isn't one. JUCE workaround W4
+// (docs/juce-workarounds.md): a format of JUCE's own, which it doesn't promise to keep.
 std::optional<Vst3State> readJuceVst3State (const juce::MemoryBlock&, const juce::String& classID);
 juce::MemoryBlock writeJuceVst3State (const Vst3State&);
 } // namespace phazite::sandbox

@@ -162,7 +162,8 @@ private:
     // Declaration order matters: members are destroyed in reverse order, so even if shutdown() is
     // never called, the window goes first and the engine context last.
 #if JUCE_WINDOWS
-    juce::InterProcessLock runningLock { "PhaziteRunning" }; // the named mutex the installer looks for, held from initialise() on
+    // The named mutex the installer looks for, held from initialise() on. JUCE workaround W10 (docs/juce-workarounds.md).
+    juce::InterProcessLock runningLock { "PhaziteRunning" };
 #endif
     std::unique_ptr<juce::FileLogger> logger;
     std::unique_ptr<EngineContext> engineContext;

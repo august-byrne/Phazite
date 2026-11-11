@@ -34,6 +34,7 @@ endfunction()
 # folder on every configure, even after `cmake --preset <name> --fresh`. After a compiler update it would
 # keep using the old (deleted) compiler, so delete the folder whenever the compiler, the toolchain file or
 # the source location changes. The stamp file sits outside CMakeFiles/, so --fresh keeps it.
+# JUCE workaround B3 (docs/juce-workarounds.md).
 function(phazite_reset_stale_juceaide tools_dir)
     set(_key "${CMAKE_CXX_COMPILER}|${CMAKE_TOOLCHAIN_FILE}|${CMAKE_SOURCE_DIR}")
     set(_stamp "${CMAKE_BINARY_DIR}/juceaide-tree.stamp")

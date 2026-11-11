@@ -3,7 +3,7 @@
 
 // juce_events' own function, declared the same way in juce_MessageManager.cpp, whose dispatch loops call it
 // (on Windows and Linux; macOS will need another way): delivers the next message on the system queue, or
-// returns false if there is none and returnIfNoPendingMessages is set.
+// returns false if there is none and returnIfNoPendingMessages is set. JUCE workaround T1 (docs/juce-workarounds.md).
 namespace juce::detail
 {
 bool dispatchNextMessageOnSystemQueue (bool returnIfNoPendingMessages);
@@ -145,7 +145,7 @@ bool runMenuItem (const juce::PopupMenu& menu, const std::vector<juce::String>& 
 namespace
 {
     // A window without a native one behind it: it is always showing and focused, and paints nothing itself. It keeps
-    // what it was asked to repaint, for TestWindow::takeRepaintedArea().
+    // what it was asked to repaint, for TestWindow::takeRepaintedArea(). JUCE workaround T2 (docs/juce-workarounds.md).
     class HeadlessPeer final : public juce::ComponentPeer
     {
     public:
@@ -317,7 +317,7 @@ void Mouse::send (juce::Point<int> where, juce::ModifierKeys mods)
 
     // A drag's auto-repeat (juce::Desktop::beginDragAutoRepeat(), which the editors start so that they go on scrolling while
     // the mouse rests past an edge) repeats it at the real pointer's position, wherever that is on the screen, while a test
-    // waits with the button down. Tests move the mouse themselves.
+    // waits with the button down. Tests move the mouse themselves. JUCE workaround T4 (docs/juce-workarounds.md).
     juce::Desktop::getInstance().beginDragAutoRepeat (0);
 }
 
@@ -413,7 +413,8 @@ namespace phazite::test
 {
 namespace
 {
-    constexpr UINT jucesWakeUp = WM_USER + 123; // InternalMessageQueue::customMessageID, juce_Messaging_windows.cpp
+    // InternalMessageQueue::customMessageID, juce_Messaging_windows.cpp. JUCE workaround T1 (docs/juce-workarounds.md).
+    constexpr UINT jucesWakeUp = WM_USER + 123;
 } // namespace
 
 std::jthread queueWithoutWakeUp (int delayMilliseconds)

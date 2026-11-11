@@ -108,6 +108,7 @@ TestAudioDevice* TestAudioDeviceType::open (juce::AudioDeviceManager& devices, d
                                             int inputDelay)
 {
     // The type once for each device manager, added before JUCE makes its own (which would look for the computer's devices).
+    // JUCE workaround T6 (docs/juce-workarounds.md).
     static std::set<const juce::AudioDeviceManager*> withType;
 
     if (withType.insert (&devices).second)

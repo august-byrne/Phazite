@@ -201,14 +201,14 @@ namespace
 
     //==============================================================================
     // What a device's window does, a plug-in's or one of Phazite's own devices': it opens where it was last (kept as view
-    // state in the song: model/mixer/internal/Mixer.h), on a screen that is there; it stays above the main window while
-    // Phazite is in front; and it closes through its owner, as its close button is pressed and as what it shows goes.
+    // state in the song: model/mixer/internal/Mixer.h), on a screen that is there; it floats over the main window; and it
+    // closes through its owner, as its close button is pressed and as what it shows goes.
     class DeviceWindowFrame : public juce::DocumentWindow,
                               private juce::Timer
     {
     public:
         DeviceWindowFrame (DeviceWindows& windows, Song& s, DeviceID d)
-            : juce::DocumentWindow ({}, {}, juce::DocumentWindow::closeButton),
+            : juce::DocumentWindow ({}, {}, juce::DocumentWindow::closeButton, false), // on the desktop once placed
               owner (windows),
               song (&s),
               id (d)
@@ -227,12 +227,15 @@ namespace
         // Whether it has something to show (an editor).
         virtual bool hasEditor() const = 0;
 
-        // Shows it there, on a screen that is there; then its moves are kept, and it stays above the main window.
-        void place (juce::Point<int> topLeft)
+        // Puts it on the desktop there, on a screen that is there, floating over a window (the main window, if there is one):
+        // above it but not above other apps, minimised and moved with it, and off the taskbar (JUCE's associated component).
+        // Then its moves are kept.
+        void place (juce::Component* over, juce::Point<int> topLeft)
         {
             setBounds (onScreen (getBounds().withPosition (topLeft)));
+            setAssociatedComponent (over);
+            addToDesktop();
             placed = keepMoves = true;
-            keepOnTop();
             startTimerHz (checksPerSecond);
         }
 
@@ -282,12 +285,6 @@ namespace
                 juce::jlimit (area.getY(), std::max (area.getY(), area.getBottom() - bounds.getHeight()), bounds.getY()));
         }
 
-        void keepOnTop()
-        {
-            if (const auto inFront = juce::Process::isForegroundProcess(); inFront != isAlwaysOnTop())
-                setAlwaysOnTop (inFront);
-        }
-
         void timerCallback() override
         {
             // A device the song no longer has (deleted, its track deleted, or the step that made it undone), or whose track
@@ -295,12 +292,7 @@ namespace
             auto* shown = song.get();
 
             if (shown == nullptr || ! findDeviceState (*shown, id).isValid() || isFrozenDevice (*shown, id) || ! refresh (*shown))
-            {
                 owner.close (id);
-                return;
-            }
-
-            keepOnTop();
         }
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeviceWindowFrame)
@@ -536,7 +528,7 @@ void DeviceWindows::show (DeviceID id)
         return; // a plug-in that didn't load, or makes no editor
 
     const auto kept = getWindowPosition (*song, id);
-    window->place (kept.has_value() ? *kept : choosePosition (*window));
+    window->place (openOver, kept.has_value() ? *kept : choosePosition (*window));
     window->setVisible (true);
     window->toFront (false);
     windows[id] = std::move (window);

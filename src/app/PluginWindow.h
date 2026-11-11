@@ -2,14 +2,15 @@
 // Devices' windows (docs/design.md, section 9): a plug-in's own window, with the plug-in's editor (SandboxedEditor.h); and,
 // when the user wants one (roadmap step 2.17), one of Phazite's own devices' editors out of the Devices view
 // (ui/mixer/DevicesView.h), named after it and its channel ("EQ - Bass"), which can be made larger or smaller; containers
-// show in the Devices view only. The windows stay above the main window and open where they were last, which the project
-// keeps as view state. Play and stop, and the computer keyboard, work in a plug-in's (ui/input/PluginKeys.h), and every
-// shortcut in one of Phazite's own, as in the main window. A plug-in's has a menu bar with one menu, Plug-in (roadmap step
-// 2.12): Save Preset..., Load Preset (the presets saved for the plug-in) and Send All Keys to the Plug-in; and at its right
-// end, for a plug-in with a sidechain, what the sidechain listens to, its key, picked there (ui/devices/SidechainMenus.h),
-// as Logic's and Cubase's plug-in windows have theirs: the one place to choose it, inside the plug-in, beside its own
-// controls. They are the app's: the model asks for them by the devices' IDs (model/mixer/MixerModel.h: showDeviceWindow()),
-// through the project context's DeviceWindowHost, which DeviceWindows is.
+// show in the Devices view only. The windows float over the main window (above it but not above other apps, minimised and
+// moved with it) and open where they were last, which the project keeps as view state. Play and stop, and the computer
+// keyboard, work in a plug-in's (ui/input/PluginKeys.h), and every shortcut in one of Phazite's own, as in the main window.
+// A plug-in's has a menu bar with one menu, Plug-in (roadmap step 2.12): Save Preset..., Load Preset (the presets saved for
+// the plug-in) and Send All Keys to the Plug-in; and at its right end, for a plug-in with a sidechain, what the sidechain
+// listens to, its key, picked there (ui/devices/SidechainMenus.h), as Logic's and Cubase's plug-in windows have theirs: the
+// one place to choose it, inside the plug-in, beside its own controls. They are the app's: the model asks for them by the
+// devices' IDs (model/mixer/MixerModel.h: showDeviceWindow()), through the project context's DeviceWindowHost, which
+// DeviceWindows is.
 #pragma once
 
 #include "model/base/IDs.h"

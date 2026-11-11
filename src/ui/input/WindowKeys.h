@@ -14,7 +14,7 @@ class WindowKeys
 public:
     // Adds the shortcuts and then the computer keyboard as the window's key listeners. JUCE asks the listener added last
     // first (ComponentPeer::handleKeyPress), so the computer keyboard gets its letters before the shortcuts do; it leaves
-    // alone keys pressed with Shift, Ctrl, Alt or Cmd.
+    // alone keys pressed with Shift, Ctrl, Alt or Cmd. JUCE workaround W25 (docs/juce-workarounds.md).
     WindowKeys (juce::Component& window, KeyDispatcher& shortcuts, ComputerKeyboard&);
     ~WindowKeys(); // removes them, the computer keyboard first, from the window if it is still there
 

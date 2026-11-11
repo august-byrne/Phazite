@@ -55,7 +55,7 @@ endif()
 # JUCE builds its "juceaide" helper during configure with a second, nested CMake run that is not given
 # our toolchain file. CMake reads the CMAKE_TOOLCHAIN_FILE environment variable when it creates a new
 # build folder, so exporting it lets that nested run find MSVC too. CMakePresets.json sets the same
-# variable; this also covers configures that don't go through the presets.
+# variable; this also covers configures that don't go through the presets. JUCE workaround B3 (docs/juce-workarounds.md).
 if(CMAKE_HOST_WIN32 AND CMAKE_TOOLCHAIN_FILE AND IS_ABSOLUTE "${CMAKE_TOOLCHAIN_FILE}")
     set(ENV{CMAKE_TOOLCHAIN_FILE} "${CMAKE_TOOLCHAIN_FILE}")
 endif()
@@ -618,6 +618,7 @@ target_include_directories(phazite_core SYSTEM PRIVATE external/r8brain-free-src
 # reference to a temporary (-Wdangling-reference, in -Wall): getButtons() returns a Span by value, but the button is in the
 # options' own list, which outlives the line. Nothing dangles and JUCE's code is read-only here, so the warning is off for
 # the one unit of JUCE's that includes that file, as JUCE's own hb.hh turns it off for HarfBuzz.
+# JUCE workaround B1 (docs/juce-workarounds.md).
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     set_source_files_properties(external/JUCE/modules/juce_gui_basics/juce_gui_basics_2.cpp
         PROPERTIES COMPILE_OPTIONS "-Wno-dangling-reference")
@@ -658,7 +659,7 @@ target_link_libraries(phazite_core
 
 # JUCE's recommended config flags add /MP, which MSVC refuses alongside the /showIncludes flag that
 # Ninja relies on (warning D9030 for every file). CMake's own MSVC defaults already provide the same
-# /Od, /O2 and /EHsc, so these flags are only used with GCC and Clang.
+# /Od, /O2 and /EHsc, so these flags are only used with GCC and Clang. JUCE workaround B2 (docs/juce-workarounds.md).
 if(NOT MSVC)
     target_link_libraries(phazite_core PUBLIC juce::juce_recommended_config_flags)
 endif()
@@ -1052,7 +1053,8 @@ if(WIN32)
 
     set(_phazite_installer_name "Phazite-${PROJECT_VERSION}-Setup")
     set(_phazite_installer_folder "${CMAKE_BINARY_DIR}/installer")
-    get_target_property(_phazite_generated Phazite JUCE_GENERATED_SOURCES_DIRECTORY) # where juceaide put the app's icon.ico
+    # Where juceaide put the app's icon.ico. JUCE workaround B4 (docs/juce-workarounds.md).
+    get_target_property(_phazite_generated Phazite JUCE_GENERATED_SOURCES_DIRECTORY)
 
     if(PHAZITE_ISCC)
         add_custom_target(installer

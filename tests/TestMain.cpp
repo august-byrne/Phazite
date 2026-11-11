@@ -28,6 +28,7 @@ juce::File systemTemporaryFolder;
 
 // Makes a folder of this program's own in the system's temporary folder and makes it the temporary folder for the rest
 // of the run. JUCE asks the environment for it each time: Windows' GetTempPath() reads TMP, then TEMP; elsewhere, TMPDIR.
+// JUCE workaround T5 (docs/juce-workarounds.md).
 juce::File useTemporaryFolderOfOwn()
 {
     systemTemporaryFolder = juce::File::getSpecialLocation (juce::File::tempDirectory);

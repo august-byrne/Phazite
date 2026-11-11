@@ -4,11 +4,9 @@
 // Command::overPlugins) and, while it plays notes, the computer keyboard's. The plug-in gets every other key.
 //
 // A plug-in window's editor takes every key that reaches it through JUCE, so these listen on each component in the
-// window, which hear a key before the component does. A plug-in's own native window gets its keys before JUCE sees
-// them at all, so on Windows a message hook on the message thread catches these keys on their way to it. The hook is
-// made with the app, before any plug-in's window: Windows calls the hook installed last first, so a plug-in built with
-// JUCE, whose own hook offers each key to its focused control (a preset name being typed, say) and passes on the keys
-// that control doesn't use, gets them first. A key typed into a native text field goes to the plug-in too.
+// window, which hear a key before the component does. A plug-in's own window is its helper's, in another process, whose
+// keys never reach Phazite's: the helper catches these keys on their way to it and hands them back (host/core/Editor.h,
+// app/SandboxedEditor.h), unless a text field of the plug-in's has the keys.
 //
 // A plug-in that draws its own text fields, which none of this can see, gets every key while its window's "Send All
 // Keys to the Plug-in" switch is on (docs/design.md, section 9; roadmap step 2.12): then play, stop and the computer
@@ -58,8 +56,6 @@ public:
     bool keyStateChanged (bool isKeyDown, juce::Component*) override;
 
 private:
-    struct NativeHook;
-
     struct Watched
     {
         juce::Component::SafePointer<juce::Component> window {};
@@ -76,9 +72,7 @@ private:
     ComputerKeyboard& computerKeyboard;
     std::vector<Watched> windows;
     std::vector<OwnWindow> ownWindows;
-    std::unique_ptr<NativeHook> nativeHook; // Windows only
 
-    const Watched* findWindow (void* nativeHandle) const;      // the watched one a native window is in
     const Watched* findWatched (const juce::Component*) const; // the watched one a component is in
     WindowKeys* findOwnWindow (const juce::Component&) const;
     void removeFrom (juce::Component&);

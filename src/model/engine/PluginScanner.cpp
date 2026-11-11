@@ -132,7 +132,8 @@ namespace
         }
 
         // A plug-in described as it was before keeps the time it was described then, rather than
-        // looking just updated (some formats describe every plug-in again at each scan).
+        // looking just updated (JUCE's formats describe every plug-in again at each scan, stamped with the time then).
+        // JUCE workaround W6 (docs/juce-workarounds.md).
         void keepUpdateTimesOfUnchanged (juce::OwnedArray<juce::PluginDescription>& found) const
         {
             for (const auto& known : host.getKnownPlugins().getTypes())

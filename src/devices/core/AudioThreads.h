@@ -4,7 +4,7 @@
 // Windows, the highest priority, and MMCSS's "Pro Audio" task joined from the thread itself, as JUCE's WASAPI thread
 // does (JUCE's real-time threads put the whole process in the real-time priority class there, or the high one without
 // an administrator's rights, every thread of the app above other programs'); elsewhere JUCE's real-time threads, or the
-// highest priority where the system allows no real-time threads.
+// highest priority where the system allows no real-time threads. JUCE workaround W2 (docs/juce-workarounds.md).
 #pragma once
 
 #include <juce_core/juce_core.h>

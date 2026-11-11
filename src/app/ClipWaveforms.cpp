@@ -30,6 +30,7 @@ namespace
 
         // Its thread stopped first, however long the slice of a file it reads takes: JUCE's own stop, as the cache goes,
         // ends a thread that hasn't stopped within 2 s by force, which can leave a lock it held held for ever.
+        // JUCE workaround W1 (docs/juce-workarounds.md).
         ~Levels() { cache.getTimeSliceThread().stopThread (-1); }
     };
 
@@ -146,6 +147,7 @@ namespace
         // of their edges falls, where a part of a pixel moves them: as the playlist glides the song under the playhead, a clip
         // it paints afresh at each frame (one that the view's edge cuts) blinked fainter about one frame in four (the owner,
         // 2026-11-09). JUCE's software renderer draws the mask the same every time, and moving it moves it whole.
+        // JUCE workaround W13 (docs/juce-workarounds.md).
         void draw (const juce::ValueTree& clipState, juce::Graphics& g, juce::Rectangle<int> area,
                    const std::function<BeatPosition (int)>& beatAt)
         {

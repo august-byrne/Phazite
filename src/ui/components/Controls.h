@@ -154,9 +154,14 @@ private:
     const Fader& fader;
 };
 
-// One notch of a mouse wheel, as JUCE reports it on Windows (juce::MouseWheelDetails), which a trackpad's smaller movements
-// add up to: what scrolls a step.
+// One notch of a mouse wheel, as JUCE reports it (juce::MouseWheelDetails), which a trackpad's smaller movements add up to:
+// what scrolls a step. JUCE has no unit for a notch: it reports one as 60/256 on Windows and 50/256 on Linux, where taken
+// for Windows' a notch scrolled, zoomed and stepped five sixths as far. JUCE workaround W22 (docs/juce-workarounds.md).
+#if JUCE_LINUX
+inline constexpr double wheelNotch = 50.0 / 256.0;
+#else
 inline constexpr double wheelNotch = 60.0 / 256.0;
+#endif
 
 // A number that is dragged up and down, scrolled, stepped with the arrow keys, or clicked and typed, such as the top
 // bar's tempo: its text is its face. Dragging (a fifth as far with Shift), the wheel and the keys move it in steps;

@@ -20,7 +20,8 @@ namespace
     }
 
     // Whether the pointer is over a component or what it holds, as the mouse's events last found it. (Component::isMouseOver()
-    // asks also where the system's pointer is now, which the tests' events don't move.)
+    // asks also where the system's pointer is now, which the tests' events don't move.) JUCE workaround W26
+    // (docs/juce-workarounds.md).
     bool isUnderPointer (const juce::Component& component)
     {
         for (const auto& source : juce::Desktop::getInstance().getMouseSources())

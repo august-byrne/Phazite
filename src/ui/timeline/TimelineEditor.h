@@ -74,7 +74,7 @@ private:
 // The window a part of an editor that draws the time line shows through (TimelineEditor::addTimelinePart()): on whole pixels,
 // untransformed, where the part shows, and clipping it there. The part fills it from its left and is wider by as much as
 // scrolling continuously moves it left (TimelineEditor::getSubPixel(), less than the view's step, a pixel at 100 %), so that
-// it still covers all of it.
+// it still covers all of it. JUCE workaround W11 (docs/juce-workarounds.md).
 class TimelinePartWindow : public juce::Component,
                            private juce::ComponentListener
 {
@@ -151,7 +151,7 @@ public:
     // song plays where the editor shows, the playhead moves to the beat heard then (getHeardPlayheadBeat()) and the frame is
     // logged (FrameLog.h); once it stops, the playhead goes where playback went back to, and the log is written. The
     // display's own frames call it from the moment a project shows (a juce::VBlankAttachment); tests call it with times of
-    // their own.
+    // their own. JUCE workaround W27 (docs/juce-workarounds.md), for the frames' clock.
     void showFrame (double seconds);
 
     // Where the playhead's line is drawn, in pixels from the time line's left: between pixels, so that it moves evenly, but on

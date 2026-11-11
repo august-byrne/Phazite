@@ -66,6 +66,7 @@ SoundView::~SoundView()
 
     // The cache's thread stopped first, however long the slice of a file it reads takes: JUCE's own stop, as the cache goes,
     // ends a thread that hasn't stopped within 2 s by force, which can leave a lock it held held for ever.
+    // JUCE workaround W1 (docs/juce-workarounds.md).
     cache.getTimeSliceThread().stopThread (-1);
 }
 

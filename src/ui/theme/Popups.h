@@ -33,7 +33,8 @@ juce::Image paintBehind (const juce::Component& front, juce::Rectangle<int> area
 juce::Image shrink (const juce::Image&, int factor);
 
 // An ARGB image blurred in place, as a Gaussian of this standard deviation in its pixels blurs it: three box blurs each
-// way, as browsers blur, the pixels at its edges repeated beyond them.
+// way, as browsers blur, the pixels at its edges repeated beyond them. Phazite's own, as JUCE's blur blurs as far as
+// another on each renderer (docs/vscode-look.md). JUCE workaround W14 (docs/juce-workarounds.md).
 void blur (juce::Image&, float standardDeviation);
 
 // The frosted glass behind a popup inside a window: a component in the popup's parent, just behind it, that shows what was
@@ -93,6 +94,7 @@ private:
 
 // The keys of a menu inside a window: the menu's own, and no others. JUCE gives a key that a menu doesn't use to the
 // menu's parent, the window, whose shortcuts and computer keyboard would take it; a menu on the desktop has no parent.
+// JUCE workaround W16 (docs/juce-workarounds.md).
 void keepKeysInMenu (juce::Component& menuWindow);
 
 // Phazite's tooltips, as VS Code's hovers. There are two windows of tips. One is inside the main window, on frosted glass,
@@ -110,6 +112,8 @@ private:
     const bool inside;
     juce::String tip; // what getTipFor() said last, which is what JUCE shows
 
+    // Drawn here, on frosted glass inside the main window: JUCE keeps the tip's text to itself, and its look's drawTooltip()
+    // isn't told which window it draws. JUCE workaround W17 (docs/juce-workarounds.md).
     void paint (juce::Graphics&) override;
 
     JUCE_DECLARE_NON_COPYABLE (Tooltips)
