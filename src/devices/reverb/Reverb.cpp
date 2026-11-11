@@ -561,7 +561,7 @@ void Reverb::processRoom (const ProcessContext& block, int numChannels)
 
     // How far the allpass filters smear what comes in: the Diffusion, gliding to where it was turned over the block.
     const auto diffusionFrom = shownDiffusion, diffusionTo = values[diffusion];
-    const auto diffusionMoves = diffusionFrom != diffusionTo;
+    const auto diffusionMoves = ! juce::exactlyEqual (diffusionFrom, diffusionTo);
     shownDiffusion = diffusionTo;
     const auto setDiffusion = [this] (float amount)
     {
@@ -667,7 +667,7 @@ void Reverb::playPlate (const ProcessContext& block, int numChannels, const Plat
     {
         const auto along = (float) (i + 1) / (float) block.numSamples;
         const auto gain = from.gain + (to.gain - from.gain) * along;
-        const auto damping = from.damping + (to.damping - from.damping) * along;
+        const auto dampingNow = from.damping + (to.damping - from.damping) * along;
         const std::array inputGain { from.input1 + (to.input1 - from.input1) * along, from.input2 + (to.input2 - from.input2) * along };
         const auto tank1 = from.tank1 + (to.tank1 - from.tank1) * along;
         const auto tank2 = from.tank2 + (to.tank2 - from.tank2) * along;
@@ -719,7 +719,7 @@ void Reverb::playPlate (const ProcessContext& block, int numChannels, const Plat
             const auto delayed = back (parts[1], getLengthOfTankPart (half, 1));
             parts[1].push (swayed - tank1 * fed);
             auto& smooth = tankDamped[(size_t) half];
-            smooth += (delayed - smooth) * damping;
+            smooth += (delayed - smooth) * dampingNow;
 
             // An allpass filter, and a delay, whose end the other half takes.
             const auto held = back (parts[2], getLengthOfTankPart (half, 2));
@@ -753,7 +753,8 @@ void Reverb::processPlate (const ProcessContext& block, int numChannels)
 {
     const auto& values = block.parameters;
 
-    if (values[size] != plateSettingFor[0] || values[decay] != plateSettingFor[1] || values[diffusion] != plateSettingFor[2])
+    if (! juce::exactlyEqual (values[size], plateSettingFor[0]) || ! juce::exactlyEqual (values[decay], plateSettingFor[1])
+        || ! juce::exactlyEqual (values[diffusion], plateSettingFor[2]))
     {
         plateSetting = getPlateSetting (values);
         plateSettingFor = { values[size], values[decay], values[diffusion] };
@@ -794,7 +795,7 @@ void Reverb::processPlate (const ProcessContext& block, int numChannels)
 
         aim = std::abs (place - aim) < settledLength ? place : aim + (place - aim) * share;
 
-        if (aim == place && std::abs (place - shown) < settledLength)
+        if (juce::exactlyEqual (aim, place) && std::abs (place - shown) < settledLength)
         {
             shown = place;
         }

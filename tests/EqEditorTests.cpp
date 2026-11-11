@@ -203,11 +203,20 @@ TEST_CASE ("The pointer over an EQ band's dot shows it can be grabbed, and the d
     mouse.moveTo ({ 2, 2 });
     CHECK (graph.getMouseCursor() == juce::MouseCursor (juce::MouseCursor::NormalCursor));
 
-    // Over band 4's dot: the hand, and a ring a pixel further out than the dot's own.
+    // Over band 4's dot: the hand, and a ring a pixel further out than the dot's own, which lights pixels around the dot that
+    // were the graph's (counted around it: one pixel may be the curve's line, which crosses a flat band's dot).
     const auto dot = editor.getDotPosition (3).roundToInt();
-    const auto ring = dot + juce::Point<int> (juce::roundToInt (phazite::ui::GraphTint::dotRadius) + 1, 0);
+    const auto reach = juce::roundToInt (phazite::ui::GraphTint::dotRadius) + 4;
     const auto before = graph.createComponentSnapshot (graph.getLocalBounds());
     mouse.moveTo (dot);
     CHECK (graph.getMouseCursor() == juce::MouseCursor (juce::MouseCursor::DraggingHandCursor));
-    CHECK (graph.createComponentSnapshot (graph.getLocalBounds()).getPixelAt (ring.x, ring.y) != before.getPixelAt (ring.x, ring.y));
+    const auto after = graph.createComponentSnapshot (graph.getLocalBounds());
+    auto lit = 0;
+
+    for (auto y = dot.y - reach; y <= dot.y + reach; ++y)
+        for (auto x = dot.x - reach; x <= dot.x + reach; ++x)
+            if (after.getPixelAt (x, y) != before.getPixelAt (x, y))
+                ++lit;
+
+    CHECK (lit > 8);
 }

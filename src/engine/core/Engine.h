@@ -231,7 +231,7 @@ private:
         double beat = 0.0, tempo = 120.0, beatsPerSample = 0.0;
         double bars = 0.0, barsPerSample = 0.0, barStart = 0.0;
         std::int64_t songSample = 0, gridSample = 0;
-        TempoMap::TimeSignature timeSignature;
+        TempoMap::TimeSignature timeSignature {};
         std::uint64_t pass = 0;
         bool startsEarly = false, flush = false;
     };

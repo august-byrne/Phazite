@@ -424,7 +424,7 @@ void Compressor::duck (const ProcessContext& block)
     const auto holdSamples = (int) std::min ((double) mostSinceHit, std::max (0.0, (double) values[hold] * 0.001 * sampleRate));
     const auto releaseStep = 1.0 / std::max (1.0, (double) values[release] * 0.001 * sampleRate);
     const auto curve = (double) juce::jlimit (-1.0f, 1.0f, values[releaseCurve]);
-    const auto threshold = values[Compressor::threshold];
+    const auto thresholdDecibels = values[Compressor::threshold];
 
     // Compress's drive starts again from where the sound is when it compresses again.
     wasDriven = false;
@@ -467,8 +467,8 @@ void Compressor::duck (const ProcessContext& block)
 
         // How far it wants the sound down: the whole depth 6 dB over the threshold, a share of it less far over. A hit is
         // the key rising over the threshold.
-        const auto over = keyDecibels > threshold;
-        const auto wanted = over ? mostDucked * std::min (1.0f, (keyDecibels - threshold) / duckKnee) : 0.0f;
+        const auto over = keyDecibels > thresholdDecibels;
+        const auto wanted = over ? mostDucked * std::min (1.0f, (keyDecibels - thresholdDecibels) / duckKnee) : 0.0f;
 
         if (over && ! wasOver)
         {
