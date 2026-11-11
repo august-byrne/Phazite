@@ -135,23 +135,33 @@ void Playlist::layOutRecordings()
         }
 
         auto recorded = shown.recording.range;
+        const auto grows = ! shown.recording.beforeLoop && playheadBeat > recorded.getStart() && playheadBeat < recorded.getEnd() + reach;
 
-        if (! shown.recording.beforeLoop && playheadBeat > recorded.getStart() && playheadBeat < recorded.getEnd() + reach)
+        if (grows)
             recorded = BeatRange (recorded.getStart(), playheadBeat);
 
-        if (recorded != clip.getInfo().range)
+        // Its end where the playhead's line is, between pixels, while it grows with it (ClipComponent::showRecordingEnd());
+        // otherwise in its beat's column, as a clip's.
+        const auto left = timeline.beatToColumn (recorded.getStart());
+        const auto end = grows ? timeline.beatToX (recorded.getEnd()) : (double) timeline.beatToColumn (recorded.getEnd());
+        const auto right = std::max (left + 2, (int) std::ceil (end));
+
+        // What it shows, over the beats of its columns, which stay the same as it grows by parts of a pixel: an input's
+        // levels under each column, as the song's pixels hold them, and the notes' places. Over the beats it had recorded,
+        // each column held a little more of the song at each frame, and the waveform's peaks went from one column to the next.
+        if (const BeatRange columns (timeline.xToBeat (left), timeline.xToBeat (right)); columns != clip.getInfo().range)
         {
             auto info = clip.getInfo();
-            info.range = recorded;
+            info.range = columns;
             clip.showClip (info);
         }
+
+        clip.showRecordingEnd (grows ? std::optional<float> ((float) (end - left)) : std::nullopt);
 
         // Over the clips already there, all of the row's height, as a clip that overlaps none has it.
         const auto& r = rows[(size_t) row];
         auto& layer = r.track.pinned ? pinnedClips : scrollingClips;
-        const auto left = timeline.beatToColumn (recorded.getStart());
-        const auto right = timeline.beatToColumn (recorded.getEnd());
-        const juce::Rectangle<int> bounds (left, getRowTop (r), std::max (2, right - left), std::max (1, r.height - 1));
+        const juce::Rectangle<int> bounds (left, getRowTop (r), right - left, std::max (1, r.height - 1));
 
         if (clip.getParentComponent() != &layer)
             layer.addAndMakeVisible (clip);

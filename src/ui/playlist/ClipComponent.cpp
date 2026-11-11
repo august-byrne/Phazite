@@ -2,6 +2,7 @@
 #include "ClipComponent.h"
 #include "ui/theme/Icons.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/timeline/TimelineEditor.h"
 
 #include <cmath>
 #include <utility>
@@ -73,6 +74,15 @@ void ClipComponent::showNotes (std::vector<NoteShape> shown)
 {
     notes = std::move (shown);
     repaint();
+}
+
+void ClipComponent::showRecordingEnd (std::optional<float> end)
+{
+    if (end != recordingEnd)
+    {
+        recordingEnd = end;
+        repaint();
+    }
 }
 
 void ClipComponent::showLook (juce::Colour newColour, bool isSelected, bool isFrozen, bool isTrackSilent)
@@ -157,9 +167,14 @@ void ClipComponent::paint (juce::Graphics& g)
 {
     const auto& p = getPalette (*this);
     const auto shape = getShape();
-    const auto body = shape.toFloat().reduced (0.5f);
+    auto body = shape.toFloat().reduced (0.5f);
     const auto fill = getFill();
     const auto ink = getInk();
+
+    // A recording growing with the playhead ends at its line (showRecordingEnd()), as a clip ends a pixel and a half short of
+    // its end's column.
+    if (recordingEnd.has_value())
+        body.setRight (juce::jlimit (body.getX() + 1.0f, std::max (body.getX() + 1.0f, body.getRight()), *recordingEnd - 1.5f));
 
     // A clip that doesn't play, muted or on a track that isn't heard, all of it faint, as a folder's row and the overview draw a
     // muted one; a selected one's outline stays as it is.
@@ -201,19 +216,32 @@ void ClipComponent::paint (juce::Graphics& g)
         paintNotes (g, content, ink.withAlpha (0.8f));
     }
 
-    // A frozen track's clips are frosted: its file plays, not them.
+    // A frozen track's clips are frosted: its file plays, not them. The stripes inside its outline: clipped to its rectangle,
+    // which the renderer rounds out to whole pixels while the clip is a part of one off them (scrolling continuously), they
+    // reached into the line between it and a clip right after it, more at one frame than the next. Only those across what is
+    // being painted: a clip too long to keep as a picture is painted again at each frame.
     if (frozen)
     {
-        g.saveState();
-        g.reduceClipRegion (shape);
+        juce::Path outline;
+        outline.addRoundedRectangle (body, corner);
+        const juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (outline);
         g.setColour (p.frozen.withAlpha (FrozenTint::frost));
-        g.fillRoundedRectangle (body, corner);
+        g.fillPath (outline);
         g.setColour (p.frozen.withAlpha (FrozenTint::stripes));
 
-        for (auto x = -body.getHeight(); x < body.getWidth(); x += FrozenTint::stripeSpacing)
-            g.drawLine (x, body.getBottom(), x + body.getHeight(), body.getY(), FrozenTint::stripeWidth);
+        const auto painted = g.getClipBounds().toFloat();
+        const auto height = body.getHeight();
 
-        g.restoreState();
+        for (auto stripe = std::max (0, (int) std::floor (painted.getX() / FrozenTint::stripeSpacing));; ++stripe)
+        {
+            const auto x = -height + (float) stripe * FrozenTint::stripeSpacing;
+
+            if (x >= body.getWidth() || x > painted.getRight())
+                break;
+
+            g.drawLine (x, body.getBottom(), x + height, body.getY(), FrozenTint::stripeWidth);
+        }
     }
 
     paintTags (g, shape);
@@ -253,24 +281,26 @@ void ClipComponent::paintTags (juce::Graphics& g, juce::Rectangle<int> shape)
         return;
 
     // In the part of it in view, so that they stay in view as it scrolls past the playlist's edges, as FL Studio keeps a clip's
-    // label on screen.
-    auto area = shape;
+    // label on screen: across, the time line's window, on the screen's whole pixels, which scrolling continuously moves the clip
+    // under by parts of one (getShownTimeline()), so that the tags stay put there rather than going back and forth by up to a
+    // pixel at every frame; down, its layer, under the pinned tracks' band.
+    auto area = shape.toFloat().getIntersection (getShownTimeline (*this));
 
     if (const auto* parent = getParentComponent())
-        area = area.getIntersection (getLocalArea (parent, parent->getLocalBounds()));
+        area = area.getIntersection (getLocalArea (parent, parent->getLocalBounds()).toFloat());
 
-    area = area.reduced (ClipLabelTint::margin).withHeight (ClipLabelTint::height);
+    area = area.reduced ((float) ClipLabelTint::margin).withHeight ((float) ClipLabelTint::height);
 
-    if (area.getWidth() < ClipLabelTint::height)
+    if (area.getWidth() < (float) ClipLabelTint::height)
         return;
 
     // Each tag in the clip's colour, opaque, so that what it holds doesn't show through what the tag says.
     const auto tag = getFill();
     const auto ink = getInkFor (tag);
-    const auto fillTag = [&g, tag] (juce::Rectangle<int> box)
+    const auto fillTag = [&g, tag] (juce::Rectangle<float> box)
     {
         g.setColour (tag);
-        g.fillRoundedRectangle (box.toFloat(), ClipLabelTint::corner);
+        g.fillRoundedRectangle (box, ClipLabelTint::corner);
     };
 
     // At the right, its marks: an alias's link, and the metronome of a sample that stretches with the tempo.
@@ -283,38 +313,39 @@ void ClipComponent::paintTags (juce::Graphics& g, juce::Rectangle<int> shape)
         marks.push_back (getMark (tempoMark, tempoMarkColour, Icon::metronome, ink));
 
     std::erase (marks, nullptr);
-    const auto marksWidth = (int) marks.size() * (ClipLabelTint::iconSize + ClipLabelTint::iconGap) + ClipLabelTint::iconGap;
+    const auto iconSize = (float) ClipLabelTint::iconSize, iconGap = (float) ClipLabelTint::iconGap;
+    const auto marksWidth = (float) marks.size() * (iconSize + iconGap) + iconGap;
 
     if (! marks.empty() && marksWidth <= area.getWidth())
     {
         auto box = area.removeFromRight (marksWidth);
         fillTag (box);
-        box.removeFromLeft (ClipLabelTint::iconGap);
+        box.removeFromLeft (iconGap);
 
         for (auto* mark : marks)
         {
-            const auto slot = box.removeFromLeft (ClipLabelTint::iconSize);
-            mark->drawWithin (g, slot.withSizeKeepingCentre (ClipLabelTint::iconSize, ClipLabelTint::iconSize).toFloat(),
-                              juce::RectanglePlacement::centred, 1.0f);
-            box.removeFromLeft (ClipLabelTint::iconGap);
+            const auto slot = box.removeFromLeft (iconSize);
+            mark->drawWithin (g, slot.withSizeKeepingCentre (iconSize, iconSize), juce::RectanglePlacement::centred, 1.0f);
+            box.removeFromLeft (iconGap);
         }
 
-        area.removeFromRight (ClipLabelTint::iconGap);
+        area.removeFromRight (iconGap);
     }
 
     // At the left, its name, as wide as it is or as there is room for, where there is room for a few letters.
     if (const auto label = getLabel(); label.isNotEmpty())
     {
         const juce::Font font { juce::FontOptions (TextSize::small) };
-        const auto width = (int) std::ceil (juce::GlyphArrangement::getStringWidth (font, label)) + 2 * ClipLabelTint::inset;
+        const auto inset = (float) ClipLabelTint::inset;
+        const auto width = std::ceil (juce::GlyphArrangement::getStringWidth (font, label)) + 2.0f * inset;
         const auto box = area.withWidth (std::min (area.getWidth(), width));
 
-        if (box.getWidth() >= 2 * ClipLabelTint::inset + ClipLabelTint::height)
+        if (box.getWidth() >= 2.0f * inset + (float) ClipLabelTint::height)
         {
             fillTag (box);
             g.setColour (ink);
             g.setFont (font);
-            g.drawText (label, box.reduced (ClipLabelTint::inset, 0), juce::Justification::centredLeft, true);
+            g.drawText (label, box.reduced (inset, 0.0f), juce::Justification::centredLeft, true);
         }
     }
 }

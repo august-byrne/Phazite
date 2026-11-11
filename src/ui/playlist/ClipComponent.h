@@ -59,6 +59,11 @@ public:
     void showNotes (std::vector<NoteShape>);
     bool isRecording() const noexcept { return recordingTake > 0; }
 
+    // While a recording grows with the playhead, where its end is drawn, from its left: between pixels, at the playhead's
+    // line, so that it stays there while the song glides under the line by parts of a pixel; in a column of its own, it went
+    // from the line to a pixel short of it and back at every frame. Nothing: at its bounds' end, as a clip's is.
+    void showRecordingEnd (std::optional<float>);
+
     void paint (juce::Graphics&) override;
 
 private:
@@ -68,9 +73,10 @@ private:
     std::vector<NoteShape> notes; // a MIDI clip's
     juce::Colour colour;
     bool selected = false, frozen = false, trackSilent = false;
-    int recordingTake = 0;            // while it shows a recording: the take it is on, from 1
-    std::optional<double> rendering;  // to a hundredth
-    ClipWaveform* waveform = nullptr; // an audio clip's, the playlist's
+    int recordingTake = 0;             // while it shows a recording: the take it is on, from 1
+    std::optional<float> recordingEnd; // showRecordingEnd()
+    std::optional<double> rendering;   // to a hundredth
+    ClipWaveform* waveform = nullptr;  // an audio clip's, the playlist's
 
     // The marks at its top right, once drawn, and the color each drawing is in now: an alias's link, and the metronome of a
     // sample that follows the tempo.

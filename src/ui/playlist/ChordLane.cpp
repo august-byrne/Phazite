@@ -260,7 +260,7 @@ void ChordLane::mouseDrag (const juce::MouseEvent& e)
         return;
 
     drag->dragging = true;
-    editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
+    editor.autoScroll (e, getShownTimeline (*this).toNearestInt(), TimelineEditor::ScrollDirections::sideways);
     drag->target =
         std::max (drag->chordStart + BeatDuration::fromBeats (0.25), editor.snap (editor.getView().xToBeat (e.position.x), e.mods));
     repaint();

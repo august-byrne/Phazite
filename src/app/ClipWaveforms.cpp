@@ -6,6 +6,7 @@
 #include "model/engine/AudioFiles.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
 
 #include <juce_audio_utils/juce_audio_utils.h>
 
@@ -169,17 +170,28 @@ namespace
             g.drawImageTransformed (mask.image, placed, true);
         }
 
-        // The stretches of an area that the file plays straight, between two of the clip's warp markers (without markers, all
-        // of it at once), each over the part of it that the file has audio for.
+        // The stretches of an area that the file plays straight, each over the part of it that the file has audio for: between
+        // two of the clip's warp markers (without markers, all of it at once); and for a clip that plays the song's seconds
+        // rather than its beats (one that doesn't follow the tempo's changes), between two of the song's tempo changes, and a
+        // few pixels at a time where the tempo ramps, as seconds go evenly along beats only where the tempo holds. Spread over
+        // the clip as if the tempo held, its sound was drawn away from where it plays (known bug 16 until 2026-11-11).
         std::vector<Stretch> findStretches (const Song& song, juce::Rectangle<int> area,
                                             const std::function<BeatPosition (int)>& beatAt) const
         {
             const auto left = beatAt (area.getX()).inBeats(), right = beatAt (area.getRight()).inBeats();
+            const auto xAt = [&area, left, right] (double beat)
+            { return area.getX() + juce::roundToInt ((beat - left) / (right - left) * area.getWidth()); };
             std::vector<int> edges { area.getX() };
 
-            for (const auto& marker : getWarpMarkers (song, clipID))
-                if (const auto beat = marker.beat.inBeats(); right > left && beat > left && beat < right)
-                    edges.push_back (area.getX() + juce::roundToInt ((beat - left) / (right - left) * area.getWidth()));
+            if (right > left)
+            {
+                for (const auto& marker : getWarpMarkers (song, clipID))
+                    if (const auto beat = marker.beat.inBeats(); beat > left && beat < right)
+                        edges.push_back (xAt (beat));
+
+                if (const auto clipState = findClip(); clipState.isValid() && ! followsTempoChanges (song, clipState))
+                    addTempoEdges (getTempoChanges (song), left, right, xAt, edges);
+            }
 
             edges.push_back (area.getRight());
             std::sort (edges.begin(), edges.end());
@@ -191,6 +203,31 @@ namespace
                         stretches.push_back (*stretch);
 
             return stretches;
+        }
+
+        // Where the song's tempo changes between two beats, and every few pixels where it ramps or bends to the next tempo
+        // (rather than holding, then stepping, or jumping at once): counted from the area's own coordinates' 0 (the clip's
+        // left in the playlist), so that they stay put as the part of the clip in view changes.
+        static void addTempoEdges (const std::vector<TempoChange>& changes, double left, double right,
+                                   const std::function<int (double)>& xAt, std::vector<int>& edges)
+        {
+            constexpr int rampStep = 8; // pixels
+
+            for (size_t i = 0; i < changes.size(); ++i)
+            {
+                const auto beat = changes[i].beat.inBeats();
+
+                if (beat > left && beat < right)
+                    edges.push_back (xAt (beat));
+
+                if (const auto curve = changes[i].curve; i + 1 < changes.size() && curve > -1.0f && curve < 1.0f)
+                {
+                    const auto from = xAt (std::max (beat, left)), to = xAt (std::min (changes[i + 1].beat.inBeats(), right));
+
+                    for (auto x = (int) std::floor ((double) from / rampStep + 1.0) * rampStep; x < to; x += rampStep)
+                        edges.push_back (x);
+                }
+            }
         }
 
         // A stretch the file plays straight, over the part of an area that it has audio for: nothing if it has none there.

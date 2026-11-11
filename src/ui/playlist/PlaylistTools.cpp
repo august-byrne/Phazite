@@ -527,7 +527,8 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
     // Past an edge, the lanes scroll along, and the drag goes on from what is under the pointer then. Rows are
     // found where the pointer is, or at the edge it is past.
     if (const auto directions = gesture->getAutoScrollDirections())
-        autoScroll (e.getPosition(), lanes->getLocalBounds().withTrimmedTop (pinnedHeight), *directions);
+        if (autoScroll (e, getTimelineArea().withZeroOrigin().withTrimmedTop (pinnedHeight), *directions))
+            clipsBehind = true; // until the change below reaches the playlist (frameComing())
 
     const auto beat = getView().xToBeat (e.position.x);
     const auto rowAtPointer = getRowAt (juce::jlimit (0, lanes->getHeight() - 1, e.y));

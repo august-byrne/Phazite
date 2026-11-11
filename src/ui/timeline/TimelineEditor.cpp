@@ -42,6 +42,17 @@ namespace
         return position - BeatPosition();
     }
 
+    // The fewest of an editor's pixels that make a whole number of the screen's at a scale (TimelineEditor::getViewStep()):
+    // 1 at 100 % and 200 %, 2 at 150 %, 4 at 125 % and 175 %; 1 at a scale that no few pixels fit.
+    int getWholeStep (double scale)
+    {
+        for (int step = 1; step <= 8; ++step)
+            if (const auto screenPixels = scale * step; std::abs (screenPixels - std::round (screenPixels)) < 1.0e-3)
+                return step;
+
+        return 1;
+    }
+
     bool isNear (std::optional<BeatRange> a, std::optional<BeatRange> b)
     {
         if (! a.has_value() || ! b.has_value())
@@ -117,6 +128,57 @@ namespace
 } // namespace
 
 //==============================================================================
+TimelinePartWindow::TimelinePartWindow (juce::Component& shown)
+    : part (&shown)
+{
+    // The part takes the clicks, through its own transform; the window only clips it.
+    setInterceptsMouseClicks (false, true);
+    addAndMakeVisible (shown);
+    shown.addComponentListener (this);
+    componentVisibilityChanged (shown);
+}
+
+TimelinePartWindow::~TimelinePartWindow()
+{
+    if (part != nullptr)
+        part->removeComponentListener (this);
+}
+
+void TimelinePartWindow::setOverhang (int pixels)
+{
+    if (pixels != overhang)
+    {
+        overhang = pixels;
+        resized();
+    }
+}
+
+void TimelinePartWindow::resized()
+{
+    if (part != nullptr)
+        part->setBounds (0, 0, getWidth() + overhang, getHeight());
+}
+
+void TimelinePartWindow::componentVisibilityChanged (juce::Component& shown)
+{
+    setOpaque (shown.isVisible() && shown.isOpaque());
+}
+
+void TimelinePartWindow::componentBeingDeleted (juce::Component&)
+{
+    setOpaque (false);
+}
+
+juce::Rectangle<float> getShownTimeline (const juce::Component& component)
+{
+    for (auto* parent = component.getParentComponent(); parent != nullptr; parent = parent->getParentComponent())
+        if (auto* window = dynamic_cast<TimelinePartWindow*> (parent))
+            return component.getLocalArea (window, window->getLocalBounds().toFloat());
+
+    return component.getLocalBounds().toFloat();
+}
+
+//==============================================================================
 TimelineRuler::TimelineRuler (TimelineEditor& e)
     : editor (e)
 {
@@ -157,7 +219,8 @@ void TimelineRuler::paint (juce::Graphics& g)
 
     if (const auto loop = getLoop (context); loop.has_value() && ! loop->isEmpty())
     {
-        const auto loopStart = (float) view.beatToX (loop->getStart()), loopEnd = (float) view.beatToX (loop->getEnd());
+        // Its edges in the columns where the grid draws their beats (TimelineView::beatToColumn()).
+        const auto loopStart = (float) view.beatToColumn (loop->getStart()), loopEnd = (float) view.beatToColumn (loop->getEnd());
         const juce::Rectangle<float> area (loopStart, 0.0f, loopEnd - loopStart, (float) getHeight() - 1.0f);
         // Red while Record punches into it, as Logic Pro's autopunch range is.
         const auto colour = isPunchOn (context) && canPunch (context) ? p.danger : p.loop;
@@ -167,8 +230,10 @@ void TimelineRuler::paint (juce::Graphics& g)
         g.fillRect (area.withHeight ((float) LoopTint::laneHeight));
     }
 
-    // Bar numbers, as far apart as they need to be to read: every bar, or every 2nd, 4th, ...
-    const auto barWidth = view.pixelsPerBeat * getBarLength (context, visible.getStart()).inBeats();
+    // Bar numbers, as far apart as they need to be to read: every bar, or every 2nd, 4th, ... As the ticks', chosen where the
+    // view starts, whatever part of the ruler is being painted (paintGridLines() says why).
+    const auto viewStart = view.start - origin;
+    const auto barWidth = view.pixelsPerBeat * getBarLength (context, viewStart).inBeats();
     auto every = 1;
 
     while (every * barWidth < RulerTint::numberSpacing && every < (1 << 20))
@@ -177,7 +242,7 @@ void TimelineRuler::paint (juce::Graphics& g)
     // Short ticks up from the foot for the other bars and the beats, where they are far enough apart, and nothing finer: the
     // grid under the ruler shows that. A numbered bar's tick comes with its number.
     const auto foot = getHeight() - 1;
-    const auto tickStep = getAdaptiveGridStep (context, visible.getStart(), view.pixelsPerBeat, false, RulerTint::tickSpacing);
+    const auto tickStep = getAdaptiveGridStep (context, viewStart, view.pixelsPerBeat, false, RulerTint::tickSpacing);
 
     forEachGridLine (context, tickStep, visible,
                      [&] (BeatPosition beat, GridLineType type)
@@ -320,9 +385,12 @@ void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
     if (e.mods.isPopupMenu())
         return;
 
+    // Past an edge of what shows of the ruler (its window, a pixel narrower), the time line scrolls along.
+    const auto shown = getShownTimeline (*this).toNearestInt();
+
     if (draggingPlayhead)
     {
-        editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
+        editor.autoScroll (e, shown, TimelineEditor::ScrollDirections::sideways);
         movePlayhead (e);
         return;
     }
@@ -330,7 +398,7 @@ void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
     if (loopDrag == LoopDrag::none)
         return;
 
-    editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
+    editor.autoScroll (e, shown, TimelineEditor::ScrollDirections::sideways);
 
     if (! loopDragged && ! TimelineGesture::isPastDragThreshold (e))
         return;
@@ -482,9 +550,10 @@ struct TimelineEditor::UseListener : public juce::MouseListener
     {
     }
 
-    void mouseDown (const juce::MouseEvent&) override
+    void mouseDown (const juce::MouseEvent& e) override
     {
         editor.mouseIsDown = true;
+        editor.holdsTimeline = editor.isInTimelinePart (e.eventComponent);
         editor.usedWhileKeyDown = editor.toolBeforeKey.has_value();
 
         if (editor.onUsed != nullptr)
@@ -494,6 +563,7 @@ struct TimelineEditor::UseListener : public juce::MouseListener
     void mouseUp (const juce::MouseEvent&) override
     {
         editor.mouseIsDown = false;
+        editor.holdsTimeline = false;
 
         if (const auto back = editor.toolAfterDrag)
         {
@@ -541,8 +611,11 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, 
         scrollBar->setAutoHide (scrollBar == &verticalScrollBar);
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &snapButton, &gridButton, &ruler, &horizontalScrollBar, &verticalScrollBar,
-                                                             playhead.get() })
+    addAndMakeVisible (snapButton);
+    addAndMakeVisible (gridButton);
+    addTimelinePart (ruler);
+
+    for (auto* c : std::initializer_list<juce::Component*> { &horizontalScrollBar, &verticalScrollBar, playhead.get() })
         addAndMakeVisible (c);
 
     verticalScrollBar.addComponentListener (this);
@@ -560,6 +633,61 @@ TimelineEditor::~TimelineEditor()
     verticalScrollBar.removeComponentListener (this);
     horizontalScrollBar.removeListener (this);
     verticalScrollBar.removeListener (this);
+}
+
+void TimelineEditor::addTimelinePart (juce::Component& part)
+{
+    jassert (findPartWindow (part) == nullptr);
+    auto& window = *partWindows.emplace_back (std::make_unique<TimelinePartWindow> (part));
+    addAndMakeVisible (window);
+}
+
+void TimelineEditor::placeTimelinePart (juce::Component& part, juce::Rectangle<int> area)
+{
+    if (auto* window = findPartWindow (part))
+        window->setBounds (area);
+}
+
+juce::Rectangle<int> TimelineEditor::getTimelinePartArea (const juce::Component& part) const
+{
+    const auto* window = findPartWindow (part);
+    return window != nullptr ? window->getBounds() : juce::Rectangle<int>();
+}
+
+TimelinePartWindow* TimelineEditor::findPartWindow (const juce::Component& part) const
+{
+    for (const auto& window : partWindows)
+        if (window->getPart() == &part)
+            return window.get();
+
+    return nullptr;
+}
+
+void TimelineEditor::updateViewStep()
+{
+    // The screen's pixels for each of the editor's: the display's scale (on Windows, its monitor's), Phazite's own over it,
+    // and any transform the editor is in.
+    const auto* peer = getPeer();
+    const auto scale = (peer != nullptr ? peer->getPlatformScaleFactor() : 1.0)
+                       * (double) juce::Component::getApproximateScaleFactorForComponent (this)
+                       * (double) juce::Desktop::getInstance().getGlobalScaleFactor();
+
+    if (const auto step = getWholeStep (scale); step != viewStep)
+    {
+        viewStep = step;
+
+        for (const auto& window : partWindows)
+            window->setOverhang (step);
+    }
+}
+
+bool TimelineEditor::isInTimelinePart (const juce::Component* component) const
+{
+    for (const auto& window : partWindows)
+        if (component != nullptr && (component == window.get() || window->isParentOf (component)))
+            return true;
+
+    return false;
 }
 
 void TimelineEditor::componentVisibilityChanged (juce::Component& component)
@@ -617,14 +745,27 @@ void TimelineEditor::showProject()
 //==============================================================================
 void TimelineEditor::setViewStart (BeatPosition start)
 {
-    // From the time origin, and no later than a view goes, however it is scrolled; on whole pixels, which only following the
-    // playhead continuously moves by a part of one, after this (followPlayhead()).
+    // From the time origin, and no later than a view goes, however it is scrolled; on a whole step of the song's pixels
+    // (getViewStep()), which only following the playhead continuously moves the time line's parts by a part of, after this
+    // (followPlayhead()).
+    updateViewStep();
     setSubPixel (0.0f);
-    view.start = std::clamp (start, timeOrigin, std::max (timeOrigin, BeatPosition::fromBeats (TimelineView::latestStart)));
+    const auto earliest = getEarliestStart();
+    const auto latest = std::max (earliest, BeatPosition::fromBeats (TimelineView::latestStart));
+    const auto steps = std::round (std::clamp (start, earliest, latest).inBeats() * view.pixelsPerBeat / viewStep);
+    view.start = std::clamp (BeatPosition::fromBeats (steps * viewStep / view.pixelsPerBeat), earliest, latest);
     ruler.repaint();
     timelineChanged();
     updatePlayhead();
     updateScrollBar();
+}
+
+BeatPosition TimelineEditor::getEarliestStart() const
+{
+    // The whole step nearest the origin, which puts the origin's line in the view's first column (TimelineView::beatToColumn())
+    // at 100 %, or within half a step of it.
+    const auto steps = std::round (timeOrigin.inBeats() * view.pixelsPerBeat / viewStep);
+    return BeatPosition::fromBeats (steps * viewStep / view.pixelsPerBeat);
 }
 
 void TimelineEditor::setTimeOrigin (BeatPosition newOrigin)
@@ -736,13 +877,14 @@ void TimelineEditor::updatePlayhead()
     }
 
     // At the song's position (while it plays, the beat heard at the frame shown), or where a linked clip's playing shows in
-    // this editor's notes. Between pixels, so that it glides at any zoom, but on the whole pixel the view scrolls under it by
-    // whole pixels, while it does.
+    // this editor's notes, where the time line's parts draw it: the part of a pixel they are moved left by, left of the view's
+    // place for it. Between pixels, so that it glides at any zoom, but on the whole pixel the view scrolls under it, while it
+    // does, which takes the song there.
     const auto area = getTimelineArea();
     const auto songBeat = getShownPlayheadBeat().inBeats();
     const auto linkedBeat = getLinkedPlayheadBeat (songBeat);
-    const auto x = (linkedBeat.value_or (songBeat) - view.start.inBeats()) * view.pixelsPerBeat;
-    playheadX = holdsPlayhead && ! linkedBeat.has_value() ? std::round (x) : x;
+    const auto x = (linkedBeat.value_or (songBeat) - view.start.inBeats()) * view.pixelsPerBeat - subPixel;
+    playheadX = holdsPlayhead ? std::round (x) : x;
     const auto isInView = playheadX >= -1.0 && playheadX <= area.getWidth() + 1.0;
     playhead->setLinked (linkedBeat.has_value());
     playhead->setVisible (isInView);
@@ -751,7 +893,7 @@ void TimelineEditor::updatePlayhead()
     if (isInView)
     {
         const auto left = std::floor (playheadX);
-        const auto top = ruler.getBottom() - PlayheadTint::markerHeight;
+        const auto top = getTimelinePartArea (ruler).getBottom() - PlayheadTint::markerHeight;
         playhead->setBounds (area.getX() + (int) left - PlayheadTint::markerWidth / 2, top, PlayheadTint::markerWidth + 1,
                              area.getBottom() - top);
         playhead->setOffset ((float) (playheadX - left));
@@ -762,10 +904,14 @@ void TimelineEditor::updatePlayhead()
 
 void TimelineEditor::updateScrollBar()
 {
-    // From the time origin, the content plus some room after it.
+    // From the time origin, the content plus some room after it, and as far as the view goes, rounded up to 16 bars of 4/4: a
+    // view followed past the content's end grows the time line now and then, not at every frame, which redrew the overview's
+    // picture at every frame, its marks shrinking and creeping as they went.
+    constexpr double growth = 64.0;
     const auto visibleBeats = std::max (1, getTimelineArea().getWidth()) / view.pixelsPerBeat;
     contentEnd = getContentRange().getEnd().inBeats();
-    const auto total = std::max ({ contentEnd + 64.0, view.start.inBeats() + visibleBeats, timeOrigin.inBeats() + 256.0 });
+    const auto total =
+        std::max ({ contentEnd + 64.0, std::ceil ((view.start.inBeats() + visibleBeats) / growth) * growth, timeOrigin.inBeats() + 256.0 });
     horizontalScrollBar.setRangeLimits (timeOrigin.inBeats(), total, juce::dontSendNotification);
     horizontalScrollBar.setCurrentRange (view.start.inBeats(), visibleBeats, juce::dontSendNotification);
     horizontalScrollBar.setSingleStepSize (scrollPerNotch / view.pixelsPerBeat);
@@ -789,26 +935,46 @@ void TimelineEditor::scrollByWheel (float wheelDelta)
     if (isViewFixed())
         return;
 
+    // By whole steps, as the view starts on one (setViewStart(): a pixel at 100 %), the rest kept for the next move of the
+    // wheel: a trackpad's moves can be parts of a pixel.
     pauseFollowing();
-    setViewStart (view.xToBeat (-getWheelNotches (wheelDelta) * scrollPerNotch));
+    const auto pixels = -getWheelNotches (wheelDelta) * scrollPerNotch + wheelRest;
+    const auto whole = std::trunc (pixels / viewStep) * viewStep;
+    wheelRest = pixels - whole;
+    setViewStart (view.xToBeat (whole));
 }
 
-bool TimelineEditor::autoScroll (juce::Point<int> position, juce::Rectangle<int> area, ScrollDirections directions)
+bool TimelineEditor::autoScroll (const juce::MouseEvent& e, juce::Rectangle<int> area, ScrollDirections directions)
 {
-    // By the time since the last drag, so the speed doesn't depend on how often the mouse reports. The first
-    // drag after a pause counts as a short one.
-    const auto now = juce::Time::getMillisecondCounterHiRes();
-    const auto seconds = juce::jlimit (1.0 / 60.0, 1.0 / 20.0, (now - lastAutoScrollTime) / 1000.0);
-    lastAutoScrollTime = now;
+    // By the time since the drag before, by the events' own times, so that the speed doesn't depend on how often the mouse
+    // reports: the drags' auto-repeat comes 60 times a second while the mouse is still, a moving mouse up to a thousand.
+    // Counted as at least a frame each, as before, they scrolled two to sixteen times as fast while the hand moved. The first
+    // drag after a pause counts as a frame.
+    constexpr double frame = 1.0 / 60.0, longest = 1.0 / 20.0;
+    const auto elapsed = (e.eventTime - lastAutoScrollTime).inSeconds();
+    const auto seconds = elapsed >= 0.0 && elapsed <= longest ? elapsed : frame;
+    lastAutoScrollTime = e.eventTime;
+    const auto position = e.getPosition();
+
+    // By whole steps, as the view starts on one (setViewStart(): a pixel at 100 %), and the rows by whole pixels, the rest kept
+    // for the next drag: a pointer just past the margin scrolls a quarter of a pixel a frame.
+    const auto takeWholeSteps = [seconds] (double speed, int step, double& rest)
+    {
+        const auto pixels = speed * seconds + rest;
+        const auto whole = std::trunc (pixels / step) * step;
+        rest = juce::exactlyEqual (speed, 0.0) ? 0.0 : pixels - whole;
+        return juce::exactlyEqual (speed, 0.0) ? 0.0 : whole;
+    };
 
     auto scrolled = false;
 
     if (directions != ScrollDirections::upAndDown && ! isViewFixed())
     {
-        if (const auto speed = getAutoScrollSpeed (position.x - area.getX(), area.getWidth()); ! juce::exactlyEqual (speed, 0.0))
+        if (const auto pixels = takeWholeSteps (getAutoScrollSpeed (position.x - area.getX(), area.getWidth()), viewStep, autoScrollRest);
+            ! juce::exactlyEqual (pixels, 0.0))
         {
             const auto before = view.start.inBeats();
-            setViewStart (view.xToBeat (speed * seconds));
+            setViewStart (view.xToBeat (pixels));
             scrolled = ! juce::exactlyEqual (view.start.inBeats(), before);
 
             if (scrolled)
@@ -817,10 +983,9 @@ bool TimelineEditor::autoScroll (juce::Point<int> position, juce::Rectangle<int>
     }
 
     if (directions != ScrollDirections::sideways)
-        if (const auto speed = getAutoScrollSpeed (position.y - area.getY(), area.getHeight()); ! juce::exactlyEqual (speed, 0.0))
-            scrolled = scrollVerticallyBy (speed < 0.0 ? std::min (-1, juce::roundToInt (speed * seconds))
-                                                       : std::max (1, juce::roundToInt (speed * seconds)))
-                       || scrolled;
+        if (const auto pixels = takeWholeSteps (getAutoScrollSpeed (position.y - area.getY(), area.getHeight()), 1, autoScrollRestY);
+            ! juce::exactlyEqual (pixels, 0.0))
+            scrolled = scrollVerticallyBy ((int) pixels) || scrolled;
 
     return scrolled;
 }
@@ -1058,32 +1223,46 @@ void TimelineEditor::followPlayhead()
 
     playedWhenFollowed = playing;
     holdsPlayhead = false;
-    auto shift = 0.0f; // the part of a pixel what draws the song moves by, scrolling continuously
+    updateViewStep();  // the window may have gone to a display of another scale
+    auto shift = 0.0f; // the part of a step what draws the song moves by, scrolling continuously
 
     // Turn the page when the playhead passes the right edge, or jumps back out of view (at a loop's end), or scroll it to
-    // the middle, unless the user scrolled away while it played, or holds the mouse down in the editor (dragging what is in
-    // view).
-    if (followPlayback && ! followPaused && ! isViewFixed() && playing && ! horizontalScrollBar.isMouseButtonDown() && ! mouseIsDown)
+    // the middle, unless the user scrolled away while it played. While the mouse holds the time line down (dragging what is
+    // in view; a press anywhere else in the editor, a track's mute, a piano key, doesn't), the view stays where it is, the
+    // part of a pixel too, rather than stepping to a whole pixel and back as the press comes and goes. The playhead followed
+    // is the one shown: the piano roll's, where a clip linked to its notes plays.
+    const auto follows = followPlayback && ! followPaused && ! isViewFixed() && playing;
+
+    if (follows && (horizontalScrollBar.isMouseButtonDown() || holdsTimeline))
     {
-        const auto beat = getShownPlayheadBeat();
+        shift = subPixel;
+    }
+    else if (follows)
+    {
+        const auto songBeat = getShownPlayheadBeat();
+        const auto linkedBeat = getLinkedPlayheadBeat (songBeat.inBeats());
+        const auto beat = linkedBeat.has_value() ? BeatPosition::fromBeats (*linkedBeat) : songBeat;
         const auto width = getTimelineArea().getWidth();
 
         if (scrollContinuously)
         {
-            // The view by whole pixels, which what it draws lines up with, and the rest of a pixel as a shift of what draws the
-            // song (setSubPixel()), so that the song glides under the playhead: by whole pixels alone, it stood still one frame
-            // in four at the owner's zoom (docs/performance-audit.md, section 16). The playhead stays on one column, the
-            // middle's, a whole pixel: a middle half a pixel in (a time line an odd number of pixels wide) put the playhead,
-            // rounded, on one side of it or the other as the song moved on by parts of a pixel, so that it jittered (the owner,
-            // 2026-11-07). Near the song's start the playhead crosses to the middle first.
+            // The view by whole steps (getViewStep(), a pixel at 100 %), which what it draws lines up with, and the rest as a
+            // shift of what draws the song (setSubPixel()), so that the song glides under the playhead: by whole pixels alone, it
+            // stood still one frame in four at the owner's zoom (docs/performance-audit.md, section 16). The view starts at the
+            // last step the song has passed with the playhead in the middle, and the shift, less than a step, is always left,
+            // which the time line's parts are a step wider than their windows for (addTimelinePart()). The playhead stays on one
+            // column, the middle's, a whole pixel: a middle half a pixel in (a time line an odd number of pixels wide) put the
+            // playhead, rounded, on one side of it or the other as the song moved on by parts of a pixel, so that it jittered
+            // (the owner, 2026-11-07). Near the song's start the playhead crosses to the middle first.
             const auto middle = width / 2;
             const auto exact = beat.inBeats() * view.pixelsPerBeat;
-            const auto pixels = std::round (exact) - middle;
-            const auto start = std::max (timeOrigin, BeatPosition::fromBeats (pixels / view.pixelsPerBeat));
-            holdsPlayhead = start > timeOrigin; // the view moves under it, rather than waiting at the song's start
+            const auto startPixels = std::floor ((exact - middle) / viewStep) * viewStep;
+            const auto earliest = getEarliestStart();
+            const auto start = std::max (earliest, BeatPosition::fromBeats (startPixels / view.pixelsPerBeat));
+            holdsPlayhead = start > earliest; // the view moves under it, rather than waiting at the song's start
 
             if (holdsPlayhead)
-                shift = (float) (exact - std::round (exact));
+                shift = (float) (exact - middle - startPixels);
 
             if (start != view.start)
                 setViewStart (start);
@@ -1092,6 +1271,12 @@ void TimelineEditor::followPlayhead()
         {
             setViewStart (beat - BeatDuration::fromBeats (width * 0.05 / view.pixelsPerBeat));
         }
+    }
+    else if (subPixel >= 0.5f * (float) viewStep)
+    {
+        // Stopped, or no longer following: on whole steps again, the nearer of the two, so that what shows moves by half a step
+        // at most.
+        setViewStart (view.xToBeat ((double) viewStep));
     }
 
     setSubPixel (shift);
@@ -1104,17 +1289,20 @@ void TimelineEditor::setSubPixel (float shift)
         return;
 
     // A translation JUCE draws, the parts' mouse positions and hit-testing included, and their children's pictures moved
-    // with them without being drawn again.
+    // with them without being drawn again; their windows keep them to whole pixels.
     subPixel = shift;
     const auto transform = juce::exactlyEqual (shift, 0.0f) ? juce::AffineTransform() : juce::AffineTransform::translation (-shift, 0.0f);
-    ruler.setTransform (transform);
 
-    for (auto* part : getScrollingParts())
-        part->setTransform (transform);
+    for (const auto& window : partWindows)
+        if (auto* part = window->getPart())
+            part->setTransform (transform);
 }
 
 void TimelineEditor::showFrame (double seconds)
 {
+    if (timelineContext.hasProject() && isShowing())
+        frameComing();
+
     const auto playing = timelineContext.hasProject() && isShowing() && isPlaying (timelineContext);
 
     // Stopped, or hidden: the playhead where playback went back to, and the frames since it started into the log.
@@ -1169,13 +1357,16 @@ void paintGridLines (juce::Graphics& g, const TimelineEditor& editor, juce::Rect
     const auto& context = editor.getContext();
     const auto& view = editor.getView();
 
-    // The grid counts from the time origin: the beats here are from there.
+    // The grid counts from the time origin: the beats here are from there. Its step is the view's, chosen where the view
+    // starts, whatever part of it is being painted: chosen where the painting starts, a part repainted alone (under the
+    // playhead, at each frame) could take another step than the rest where the time signature changes.
     const auto origin = fromSongStart (editor.getTimeOrigin());
     const BeatRange visible (view.xToBeat (area.getX() - 1) - origin, view.xToBeat (area.getRight() + 1) - origin);
+    const auto viewStart = view.start - origin;
     auto step = editor.getGridStep();
 
-    if (getStepInBeats (context, step, visible.getStart()) * view.pixelsPerBeat < minLineSpacing)
-        step = getAdaptiveGridStep (context, visible.getStart(), view.pixelsPerBeat, step.triplets, minLineSpacing);
+    if (getStepInBeats (context, step, viewStart) * view.pixelsPerBeat < minLineSpacing)
+        step = getAdaptiveGridStep (context, viewStart, view.pixelsPerBeat, step.triplets, minLineSpacing);
 
     const auto barColour = p.border.interpolatedWith (p.textMuted, 0.3f);
     const auto subdivisionColour = p.border.withMultipliedAlpha (0.5f);

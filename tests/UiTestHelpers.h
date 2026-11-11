@@ -129,11 +129,16 @@ public:
     // double-clicks pause after themselves; a drag doesn't).
     void pause();
 
+    // How far apart in time its events are (juce::MouseEvent::eventTime), in milliseconds: 20 unless set, as a mouse
+    // reporting 50 times a second; a moving mouse reports up to a thousand.
+    void setEventInterval (int milliseconds) noexcept { interval = milliseconds; }
+
 private:
     juce::Component& relativeTo;
     juce::ModifierKeys keys, button; // the modifier keys held, and the mouse button
     juce::Point<int> position;
     juce::int64 time = juce::Time::currentTimeMillis();
+    int interval = 20;
 
     void send (juce::Point<int>, juce::ModifierKeys);
 };

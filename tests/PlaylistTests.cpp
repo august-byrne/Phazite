@@ -62,7 +62,12 @@ struct PlaylistScreen
 
         lanes = phazite::test::findComponentWithTitle (playlist, "Tracks");
         REQUIRE (lanes != nullptr);
+        REQUIRE (dynamic_cast<phazite::ui::TimelinePartWindow*> (lanes->getParentComponent()) != nullptr);
     }
+
+    // Where the lanes show, in the playlist: the window they show through, which they are a pixel wider than
+    // (TimelineEditor::addTimelinePart()). At rest, their own x 0 is its left.
+    juce::Rectangle<int> lanesArea() const { return lanes->getParentComponent()->getBounds(); }
 
     ~PlaylistScreen()
     {
@@ -204,7 +209,7 @@ TEST_CASE ("Dragging a clip past the edge of the playlist scrolls it")
     mouse.press (start);
 
     for (int i = 0; i < 20; ++i)
-        mouse.dragTo ({ screen.lanes->getWidth() + 40 + i % 2, start.y });
+        mouse.dragTo ({ screen.lanesArea().getWidth() + 40 + i % 2, start.y });
 
     mouse.release();
 
@@ -212,8 +217,56 @@ TEST_CASE ("Dragging a clip past the edge of the playlist scrolls it")
     CHECK (view.start.inBeats() > 0.0);
 
     // The clip went along, to beyond what showed when the drag began.
-    const auto widthInBeats = screen.lanes->getWidth() / view.pixelsPerBeat;
+    const auto widthInBeats = screen.lanesArea().getWidth() / view.pixelsPerBeat;
     CHECK (screen.startOf (clip) > widthInBeats);
+}
+
+TEST_CASE ("A drag past the playlist's edge scrolls as far in the same time however often the mouse reports")
+{
+    // Known bug 15 until 2026-11-11: each drag counted as at least a 60th of a second, so a mouse that reports a thousand times
+    // a second, moving, scrolled sixteen times as fast as one held still, whose drags JUCE repeats every 16 ms.
+    const auto pixelsScrolled = [] (int millisecondsApart)
+    {
+        PlaylistScreen screen;
+        screen.addClip (0, 0.0, 4.0);
+        phazite::test::dispatchPendingMessages();
+        phazite::test::Mouse mouse (*screen.lanes);
+        mouse.setEventInterval (millisecondsApart);
+        const auto start = screen.at (1.0, 0).translated (0, phazite::ui::TrackHeight::standard / 4); // the lower half moves it
+        mouse.press (start);
+
+        // Half a second past the right edge, a pixel back and forth, so that each report is a move.
+        for (auto elapsed = 0; elapsed < 500; elapsed += millisecondsApart)
+            mouse.dragTo ({ screen.lanesArea().getWidth() + 20 + (elapsed / millisecondsApart) % 2, start.y });
+
+        mouse.release();
+        const auto& view = screen.playlist.getView();
+        return view.start.inBeats() * view.pixelsPerBeat;
+    };
+
+    const auto still = pixelsScrolled (16), moving = pixelsScrolled (1);
+    CHECK (still > 100.0);
+    CHECK (moving == doctest::Approx (still).epsilon (0.1));
+}
+
+TEST_CASE ("A clip dragged past the playlist's edge shows where the song has it at the next frame, before the playlist hears of it")
+{
+    // Past the edge, the view scrolls first, laying the clips out where the song had them, then the drag moves the clip, which
+    // the playlist hears of a message later: a frame painted between showed the clip a scroll's step from the pointer
+    // (2026-11-11). The display's frame comes first (TimelineEditor::frameComing()).
+    PlaylistScreen screen;
+    const auto clip = screen.addClip (0, 0.0, 4.0);
+    phazite::test::dispatchPendingMessages();
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto start = screen.at (1.0, 0).translated (0, phazite::ui::TrackHeight::standard / 4); // the lower half moves it
+    mouse.press (start);
+    mouse.dragTo ({ screen.lanesArea().getWidth() - 4, start.y }); // into the margin along the edge, which scrolls
+    REQUIRE (screen.playlist.getView().start.inBeats() > 0.0);     // it scrolled
+    REQUIRE (screen.startOf (clip) > 0.0);                         // and moved the clip, which shows still
+
+    screen.playlist.showFrame (juce::Time::getMillisecondCounterHiRes() / 1000.0);
+    CHECK (screen.boundsOf (clip).getX() == screen.playlist.getView().beatToColumn (beats (screen.startOf (clip))));
+    mouse.release();
 }
 
 TEST_CASE ("A clip dragged along its track takes the automation under it, Ctrl copies it too, and to another track it stays")
@@ -691,7 +744,7 @@ TEST_CASE (
 
     REQUIRE (vertical != nullptr);
     CHECK_FALSE (vertical->isVisible());
-    CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
+    CHECK (screen.lanesArea().getRight() == screen.playlist.getWidth());
 
     // The overview of the song along the time bar's top scrolls the time line, as FL Studio's: no scroll bar under the lanes.
     for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
@@ -703,11 +756,12 @@ TEST_CASE (
     phazite::ensureTracks (screen.getSong(), 30);
     phazite::test::dispatchPendingMessages();
     CHECK (vertical->isVisible());
-    CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
+    CHECK (screen.lanesArea().getRight() == screen.playlist.getWidth());
     CHECK (vertical->getWidth() == phazite::ui::ScrollTint::overlayWidth);
-    CHECK (vertical->getRight() == screen.lanes->getRight());
-    CHECK (vertical->getY() == screen.lanes->getY());
-    CHECK (screen.playlist.getIndexOfChildComponent (vertical) > screen.playlist.getIndexOfChildComponent (screen.lanes));
+    CHECK (vertical->getRight() == screen.lanesArea().getRight());
+    CHECK (vertical->getY() == screen.lanesArea().getY());
+    CHECK (screen.playlist.getIndexOfChildComponent (vertical)
+           > screen.playlist.getIndexOfChildComponent (screen.lanes->getParentComponent()));
     CHECK_FALSE (vertical->findColour (juce::ScrollBar::trackColourId).isTransparent());
     CHECK (vertical->findColour (juce::ScrollBar::thumbColourId).getAlpha() < 255);
 
@@ -721,7 +775,7 @@ TEST_CASE (
 
     phazite::test::dispatchPendingMessages();
     CHECK_FALSE (vertical->isVisible());
-    CHECK (screen.lanes->getRight() == screen.playlist.getWidth());
+    CHECK (screen.lanesArea().getRight() == screen.playlist.getWidth());
 }
 
 TEST_CASE (
@@ -734,9 +788,9 @@ TEST_CASE (
 
     auto* overview = phazite::test::findComponentWithTitle (screen.playlist, "Overview");
     REQUIRE (overview != nullptr);
-    CHECK (overview->getY() < screen.lanes->getY());
-    CHECK (overview->getX() == screen.lanes->getX());
-    CHECK (overview->getRight() == screen.lanes->getRight());
+    CHECK (overview->getY() < screen.lanesArea().getY());
+    CHECK (overview->getX() == screen.lanesArea().getX());
+    CHECK (overview->getRight() == screen.lanesArea().getRight());
 
     // The time line's range and the part in view, as its hidden scroll bar keeps them: where the overview puts its thumb.
     juce::ScrollBar* timeline = nullptr;
@@ -770,7 +824,8 @@ TEST_CASE (
     mouse.dragTo (end + juce::Point<int> (30, 0));
     mouse.release();
     CHECK (screen.playlist.getView().pixelsPerBeat < zoomBefore);
-    CHECK (screen.playlist.getView().start.inBeats() == doctest::Approx (startNow));
+    // On the whole pixel nearest it at the new zoom (TimelineEditor::setViewStart()).
+    CHECK (std::abs (screen.playlist.getView().start.inBeats() - startNow) * screen.playlist.getView().pixelsPerBeat <= 0.5);
 
     // A press away from the thumb brings that part of the song into view, centred.
     const auto far = juce::Point<int> (overview->getWidth() - 4, overview->getHeight() / 2);
@@ -847,7 +902,7 @@ TEST_CASE ("Every clip shows in its track's color, and the rows themselves aren'
 
     // An empty stretch of an unselected track's row is the playlist's background, between grid lines.
     const auto image = screen.window.paintEverything();
-    const auto point = screen.lanes->getBounds().getPosition() + screen.at (10.37, 1);
+    const auto point = screen.lanesArea().getPosition() + screen.at (10.37, 1);
     CHECK (image.getPixelAt (point.x, point.y) == phazite::ui::getPalette (screen.playlist).background);
 }
 
@@ -868,7 +923,7 @@ TEST_CASE ("A clip fills its row down to the line under it, and the grid shows t
 
     // Its track's colour, see-through: over the row as it shows without a clip, and with the bar line at beat 4 through it.
     const auto image = screen.window.paintEverything();
-    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto lanesAt = screen.lanesArea().getPosition();
     const auto xOf = [&screen, lanesAt] (double beat)
     { return lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
     const auto y = lanesAt.y + screen.at (0.0, 0).y; // under its name
@@ -892,7 +947,7 @@ TEST_CASE ("Clips side by side on a track have a line of what is behind them bet
     phazite::test::dispatchPendingMessages();
 
     const auto image = screen.window.paintEverything();
-    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto lanesAt = screen.lanesArea().getPosition();
     const auto y = lanesAt.y + screen.at (0.0, 0).y;
     const auto boundary = lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (4.0)));
     const auto colour = phazite::getTrackColour (screen.getSong(), screen.tracks[0], 0);
@@ -929,7 +984,7 @@ TEST_CASE ("A folder's row shows its tracks' clips in their colors, collapsed to
     // The row shows the clip, in its track's color, in the middle of its row (between grid lines); and nothing after it.
     const auto row = screen.lanes->getLocalArea (*header, (*header)->getLocalBounds());
     const auto image = screen.window.paintEverything();
-    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto lanesAt = screen.lanesArea().getPosition();
     const auto xOf = [&screen, lanesAt] (double beat)
     { return lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
     const auto y = lanesAt.y + row.getCentreY();
@@ -1207,10 +1262,10 @@ TEST_CASE ("Scrolling continuously, the playhead stays on one column while the s
     PlaylistScreen screen;
     screen.addClip (0, 0.0, 256.0);
 
-    if (screen.lanes->getWidth() % 2 == 0)
+    if (screen.lanesArea().getWidth() % 2 == 0)
         screen.window.setSize (screen.window.getWidth() + 1, screen.window.getHeight());
 
-    REQUIRE (screen.lanes->getWidth() % 2 == 1);
+    REQUIRE (screen.lanesArea().getWidth() % 2 == 1);
     screen.playlist.zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (16.0) });
     screen.playlist.setScrollingContinuously (true);
     auto* playhead = phazite::test::findComponentWithTitle (screen.playlist, "Playhead");
@@ -1271,7 +1326,7 @@ TEST_CASE ("The playhead's line is drawn where the playhead is, between pixels, 
                 total += pixel.getFloatAlpha();
             }
 
-        return playhead->getX() - screen.lanes->getX() + weighed / std::max (1.0e-9, total);
+        return playhead->getX() - screen.lanesArea().getX() + weighed / std::max (1.0e-9, total);
     };
 
     const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
@@ -1351,7 +1406,8 @@ TEST_CASE ("Scrolling continuously, the song glides under the playhead by parts 
     REQUIRE (session != nullptr);
     REQUIRE (ruler != nullptr);
 
-    // Past whole pixels by parts of one: the lanes and the ruler move left by that part, and the playhead stays on its column.
+    // Past whole pixels by parts of one: the lanes and the ruler move left by the part of a pixel the song is past the one it
+    // reached, always left, and the playhead stays on its column.
     const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
     const auto pixel = std::floor (40.0 * pixelsPerBeat);
     const auto frame = [&screen] { screen.playlist.showFrame (juce::Time::getMillisecondCounterHiRes() / 1000.0); };
@@ -1361,9 +1417,10 @@ TEST_CASE ("Scrolling continuously, the song glides under the playhead by parts 
     {
         session->locate (beats ((pixel + part) / pixelsPerBeat)); // the tests' engine plays no blocks: the song waits there
         frame();
-        CHECK (screen.playlist.getSubPixel() == doctest::Approx (part));
-        CHECK (screen.lanes->getTransform().getTranslationX() == doctest::Approx (-part));
-        CHECK (ruler->getTransform().getTranslationX() == doctest::Approx (-part));
+        const auto past = part - std::floor (part);
+        CHECK (screen.playlist.getSubPixel() == doctest::Approx (past));
+        CHECK (screen.lanes->getTransform().getTranslationX() == doctest::Approx (-past));
+        CHECK (ruler->getTransform().getTranslationX() == doctest::Approx (-past));
         lines.insert (screen.playlist.getPlayheadX());
     }
 
@@ -1492,7 +1549,7 @@ TEST_CASE ("A clip is kept as a picture, which scrolling only moves; one that dr
     CHECK (kept (tagged));
 
     // A change to it drops its picture: muted, it shows faint at once.
-    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto lanesAt = screen.lanesArea().getPosition();
     const auto at = lanesAt + screen.at (6.37, 0);
     const auto before = screen.window.paintEverything().getPixelAt (at.x, at.y);
     phazite::toggleClipsMuted (screen.context, { whole });
@@ -1537,7 +1594,7 @@ TEST_CASE ("A clip with a tag stays a picture while the view's top edge cuts it,
     CHECK (kept());
 
     // Its tag is at the top of what shows of it, in the clip's color: not 10 pixels higher, where its picture had it.
-    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto lanesAt = screen.lanesArea().getPosition();
     const auto tag = screen.window.paintEverything().getPixelAt (lanesAt.x + shown.getX() + phazite::ui::ClipLabelTint::margin + 2,
                                                                  lanesAt.y + phazite::ui::ClipLabelTint::margin
                                                                      + phazite::ui::ClipLabelTint::height / 2);
@@ -1563,7 +1620,7 @@ TEST_CASE ("A clip too long to keep as a picture draws its notes where they are 
         phazite::test::dispatchPendingMessages();
         screen.playlist.setViewStart (beats (200.0));
 
-        const auto lanesAt = screen.lanes->getBounds().getPosition();
+        const auto lanesAt = screen.lanesArea().getPosition();
         const auto columnAt = [&screen, lanesAt] (const juce::Image& image, double beat)
         {
             const auto x = lanesAt.x + juce::roundToInt (screen.playlist.getView().beatToX (beats (beat)));
@@ -1726,10 +1783,12 @@ TEST_CASE ("The playhead is a marker at the foot of the ruler with a line from i
     REQUIRE (playhead != nullptr);
     REQUIRE (playhead->isVisible());
 
-    // Its top is the marker's, at the foot of the ruler: nothing of it above, in the bar numbers.
-    CHECK (playhead->getY() == ruler->getBottom() - phazite::ui::PlayheadTint::markerHeight);
-    CHECK (playhead->getBottom() > ruler->getBottom());
-    CHECK (playhead->getX() + playhead->getWidth() / 2 == ruler->getX() + juce::roundToInt (screen.playlist.getView().beatToX ({})));
+    // Its top is the marker's, at the foot of the ruler (where it shows, through its window): nothing of it above, in the bar
+    // numbers.
+    const auto rulerArea = screen.playlist.getLocalArea (ruler, ruler->getLocalBounds());
+    CHECK (playhead->getY() == rulerArea.getBottom() - phazite::ui::PlayheadTint::markerHeight);
+    CHECK (playhead->getBottom() > rulerArea.getBottom());
+    CHECK (playhead->getX() + playhead->getWidth() / 2 == rulerArea.getX() + juce::roundToInt (screen.playlist.getView().beatToX ({})));
 
     // Painted: the marker filled across its top, the line under its point, in the focus colour; clear beside the line.
     phazite::ui::LookAndFeel lookAndFeel;
@@ -2059,6 +2118,14 @@ TEST_CASE ("While recording, what comes in shows on its track as a clip growing 
     REQUIRE (findRecording() == recording);
     CHECK (std::abs (screen.lanes->getLocalArea (recording, recording->getLocalBounds()).getRight() - screen.at (4.0, 1).x) <= 1);
 
+    // A part of a pixel on, what it shows is over the beats of its whole columns still: spread over the beats it had recorded,
+    // an input's levels went from one column to the next at every frame as it grew (2026-11-11).
+    playback.play (0.013);
+    ticker.tickNow();
+    REQUIRE (findRecording() == recording);
+    CHECK (recording->getInfo().range.getLength().inBeats() * screen.playlist.getView().pixelsPerBeat
+           == doctest::Approx ((double) recording->getWidth()));
+
     // Stopped: it goes, and the clip the take made is where it was.
     phazite::stopRecording (song);
     phazite::test::dispatchPendingMessages();
@@ -2226,7 +2293,7 @@ TEST_CASE ("A muted clip is drawn faint, all of it: its row shows through it mor
     phazite::test::dispatchPendingMessages();
 
     // The middle of its row, between the grid's lines, in it and past its end.
-    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto lanesAt = screen.lanesArea().getPosition();
     const auto inClip = lanesAt + screen.at (2.37, 0), pastIt = lanesAt + screen.at (12.37, 0);
     const auto distance = [] (juce::Colour a, juce::Colour b)
     {
@@ -2263,7 +2330,7 @@ TEST_CASE ("A track that isn't heard, muted or kept quiet by another's solo, sho
     phazite::test::dispatchPendingMessages();
 
     // How far a track's clip is from its row's colour past its end, in the middle of the row, between the grid's lines.
-    const auto lanesAt = screen.lanes->getBounds().getPosition();
+    const auto lanesAt = screen.lanesArea().getPosition();
     const auto contrast = [&screen, lanesAt] (int track)
     {
         const auto image = screen.window.paintEverything();

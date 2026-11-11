@@ -39,7 +39,12 @@ struct PianoRollScreen
 
         notes = phazite::test::findComponentWithTitle (pianoRoll, "Notes");
         REQUIRE (notes != nullptr);
+        REQUIRE (dynamic_cast<phazite::ui::TimelinePartWindow*> (notes->getParentComponent()) != nullptr);
     }
+
+    // Where the notes show, in the piano roll: the window they show through, which they are a pixel wider than
+    // (TimelineEditor::addTimelinePart()). At rest, their own x 0 is its left.
+    juce::Rectangle<int> notesArea() const { return notes->getParentComponent()->getBounds(); }
 
     ~PianoRollScreen() { setSong (context, nullptr); }
 
@@ -107,8 +112,8 @@ TEST_CASE ("The piano roll's overview of its notes runs along its time bar's top
     auto* overview = phazite::test::findComponentWithTitle (screen.pianoRoll, "Overview");
     REQUIRE (overview != nullptr);
     CHECK (overview->isVisible());
-    CHECK (overview->getBottom() <= screen.notes->getY());
-    CHECK (overview->getX() == screen.notes->getX());
+    CHECK (overview->getBottom() <= screen.notesArea().getY());
+    CHECK (overview->getX() == screen.notesArea().getX());
 
     // No scroll bar under the notes: the overview scrolls them sideways. The rows' bar, while they don't fit, over the notes'
     // right edge, thin and see-through.
@@ -121,7 +126,7 @@ TEST_CASE ("The piano roll's overview of its notes runs along its time bar's top
         }
 
         CHECK (bar->getWidth() == phazite::ui::ScrollTint::overlayWidth);
-        CHECK (bar->getRight() == screen.notes->getRight());
+        CHECK (bar->getRight() == screen.notesArea().getRight());
         CHECK_FALSE (bar->findColour (juce::ScrollBar::trackColourId).isTransparent());
     }
 
@@ -241,7 +246,8 @@ TEST_CASE ("While a clip linked to the one shown plays, the piano roll's playhea
     REQUIRE (playhead != nullptr);
     const auto playheadAt = [&screen, playhead] (double beat)
     {
-        return std::abs (playhead->getBounds().getCentreX() - (screen.notes->getX() + screen.pianoRoll.getView().beatToX (beats (beat))))
+        return std::abs (playhead->getBounds().getCentreX()
+                         - (screen.notesArea().getX() + screen.pianoRoll.getView().beatToX (beats (beat))))
                <= 1.0;
     };
 
@@ -263,15 +269,22 @@ TEST_CASE ("The piano roll counts bars from the start of the clip it shows")
     const auto clip = screen.addClip (0, 32.0, 8.0); // at bar 9 of the song
     screen.select (clip);
 
+    // The view starts on the whole pixel of the song nearest a beat (TimelineEditor::setViewStart()).
+    const auto viewStartsAt = [&screen] (double beat)
+    {
+        const auto& view = screen.pianoRoll.getView();
+        return std::abs (view.start.inBeats() - beat) * view.pixelsPerBeat <= 0.5;
+    };
+
     REQUIRE (screen.pianoRoll.getClips() == std::vector { clip });
     CHECK (screen.pianoRoll.getTimeOrigin().inBeats() == doctest::Approx (32.0));
-    CHECK (screen.pianoRoll.getView().start.inBeats() == doctest::Approx (32.0)); // it opens at bar 1
+    CHECK (viewStartsAt (32.0)); // it opens at bar 1
 
     // Moved in the song, the clip still starts at bar 1, and the view stays on its notes.
     phazite::moveClip (screen.song, clip, beats (48.0), screen.tracks[0]);
     phazite::test::dispatchPendingMessages();
     CHECK (screen.pianoRoll.getTimeOrigin().inBeats() == doctest::Approx (48.0));
-    CHECK (screen.pianoRoll.getView().start.inBeats() == doctest::Approx (48.0));
+    CHECK (viewStartsAt (48.0));
 }
 
 TEST_CASE ("The piano roll's grid counts from the start of its clip")
@@ -582,7 +595,7 @@ TEST_CASE ("A clip opens zoomed to fit with room after it, never smaller than th
     const auto bar = screen.addClip (0, 0.0, 4.0);
     const auto longClip = screen.addClip (1, 0.0, 64.0);
     const auto& view = screen.pianoRoll.getView();
-    const auto beatsShown = [&screen, &view] { return screen.notes->getWidth() / view.pixelsPerBeat; };
+    const auto beatsShown = [&screen, &view] { return screen.notesArea().getWidth() / view.pixelsPerBeat; };
 
     // A bar shows with another after it to draw in: a quarter-beat note is wide enough to grab.
     screen.select (bar);

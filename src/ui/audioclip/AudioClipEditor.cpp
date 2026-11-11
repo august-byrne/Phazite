@@ -409,20 +409,25 @@ struct AudioClipEditor::Waveform : public juce::Component
             return triangle;
         };
 
+        // The hits and the markers, each a pixel wide in the column the grid draws its beat in (TimelineView::beatToColumn()):
+        // centred on its exact place, a line went sharp or soft with that place, and a pixel off the grid's line for a marker
+        // quantized onto it.
+        const auto lineAt = [this] (BeatPosition beat) { return TimelineView::getColumnMiddle (beatToColumn (beat)); };
+
         // The hits, as ticks along the strip's foot; one under the pointer shows the marker a drag would make of it, hollow.
         if (hits.has_value())
         {
             g.setColour (p.textMuted.withAlpha (AudioClipTint::hitAlpha));
 
             for (const auto& hit : *hits)
-                g.fillRect (beatToX (hit.beat) - 0.5f, strip - AudioClipTint::hitTick, 1.0f, AudioClipTint::hitTick);
+                g.fillRect (lineAt (hit.beat) - 0.5f, strip - AudioClipTint::hitTick, 1.0f, AudioClipTint::hitTick);
 
             if (hovered == Zone::hit && dragging == Zone::none)
                 for (const auto& hit : *hits)
                     if (juce::exactlyEqual (hit.time, hoveredTime))
                     {
                         g.setColour (p.text);
-                        g.strokePath (flagAt (beatToX (hit.beat)), juce::PathStrokeType (1.0f));
+                        g.strokePath (flagAt (lineAt (hit.beat)), juce::PathStrokeType (1.0f));
                     }
         }
 
@@ -432,7 +437,7 @@ struct AudioClipEditor::Waveform : public juce::Component
             const auto drags = (dragging == Zone::warpMarker || dragging == Zone::hit) && std::abs (marker.time - draggedTime) < 1.0e-7;
             const auto lit = drags || (hovered == Zone::warpMarker && juce::exactlyEqual (marker.time, hoveredTime));
             const auto colour = lit ? p.text : p.warning;
-            const auto x = beatToX (marker.beat);
+            const auto x = lineAt (marker.beat);
             g.setColour (colour.withAlpha (AudioClipTint::warpLine));
             g.fillRect (x - 0.5f, strip, 1.0f, (float) getHeight() - strip);
             g.setColour (colour);
@@ -1019,7 +1024,7 @@ void AudioClipEditor::resized()
     followButton.setBounds (nextRow());
     layOutField (tempoLabel, tempoField, nextRow());
 
-    ruler.setBounds (area.removeFromTop (rulerHeight));
+    placeTimelinePart (ruler, area.removeFromTop (rulerHeight));
     waveform->setBounds (area);
 
     if (info.has_value())

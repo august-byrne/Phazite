@@ -279,9 +279,20 @@ void TempoLane::paint (juce::Graphics& g)
         const auto centre = getPointPosition (i);
         const auto chosen = i == selected;
         const auto radius = chosen ? LaneTint::selectedPointRadius : LaneTint::pointRadius;
+
+        // Its dot and its label, which ends before the next point, in columns as the line's are: none reach what is being
+        // painted from a point right of it, or from one whose next point and dot are left of it (a song read from a MIDI file
+        // can hold hundreds of tempos, each label measured as it is drawn).
+        if (centre.x - radius > (float) clip.getRight())
+            break;
+
+        const auto next = i + 1 < (int) tempos.size() ? getPointPosition (i + 1).x : std::numeric_limits<float>::max();
+
+        if (std::max (next, centre.x + radius) < (float) clip.getX())
+            continue;
+
         const auto text = formatTempoNumber (tempos[(size_t) i].bpm);
         const auto textWidth = juce::GlyphArrangement::getStringWidth (font, text) + (float) Space::xs;
-        const auto next = i + 1 < (int) tempos.size() ? beatToX (tempos[(size_t) i + 1].beat) : std::numeric_limits<float>::max();
 
         if (next - centre.x > textWidth + radius * 2.0f)
         {
@@ -463,7 +474,7 @@ void TempoLane::movePoint (const juce::MouseEvent& e)
     if (! juce::isPositiveAndBelow (pressed, (int) before.size()))
         return;
 
-    editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
+    editor.autoScroll (e, getShownTimeline (*this).toNearestInt(), TimelineEditor::ScrollDirections::sideways);
     const auto& from = before[(size_t) pressed];
     auto beat = BeatPosition();
 

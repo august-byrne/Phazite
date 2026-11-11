@@ -1238,6 +1238,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SandboxedPluginTests.cpp
         tests/SandboxedPlugins.h
         tests/SchemaTests.cpp
+        tests/ScrollingFrameTests.cpp
         tests/SectionTests.cpp
         tests/SelectionTests.cpp
         tests/SettingsTests.cpp

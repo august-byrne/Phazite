@@ -86,8 +86,9 @@ struct PianoRoll::NoteGrid : public juce::Component
     std::optional<NoteData> getNoteToEditAt (juce::Point<float>) const; // that, or a short note whose edge is just beside it
     Zone getZone (const NoteData&, juce::Point<float>) const;
     ClipID getGhostClipAt (juce::Point<float>) const;
-    std::vector<NoteData> getGhostNotes() const; // other tracks' notes in view, as they are now
-    const DrawnGhosts& getDrawnGhosts();         // as they are now, for painting
+    std::vector<NoteData> getGhostNotes() const;           // other tracks' notes in view, as they are now
+    std::vector<NoteData> getGhostNotes (BeatRange) const; // in a part of the song
+    const DrawnGhosts& getDrawnGhosts();                   // as they are now, for painting
 
     void paintRows (juce::Graphics&, juce::Rectangle<int> area);
     void paintChordTones (juce::Graphics&, juce::Rectangle<int> area); // the chord lane's chords' notes, in their rows

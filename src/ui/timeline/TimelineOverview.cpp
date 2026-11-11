@@ -110,8 +110,12 @@ struct TimelineEditor::Overview : public juce::Component
 
         g.drawImageTransformed (picture, juce::AffineTransform::scale (1.0f / scale));
 
-        // The part in view: a see-through thumb, brighter under the pointer and while it is dragged, as FL Studio's.
-        const auto thumb = getThumbArea();
+        // The part in view: a see-through thumb, brighter under the pointer and while it is dragged, as FL Studio's. On the
+        // screen's whole pixels, as wide as the zoom makes it wherever it is: between pixels, its outline went sharp and soft by
+        // turns as following the playhead slid it along, and its two ends apart, so that it seemed to breathe.
+        const auto exact = getThumbArea();
+        const auto toPixels = [scale] (float x) { return std::round (x * scale) / scale; };
+        const auto thumb = exact.withX (toPixels (exact.getX())).withWidth (std::max (1.0f / scale, toPixels (exact.getWidth())));
         const auto lit = drag != Drag::none || hovered != Drag::none;
         g.setColour (p.text.withAlpha (lit ? OverviewTint::thumbLit : OverviewTint::thumb));
         g.fillRoundedRectangle (thumb, cornerRadius);

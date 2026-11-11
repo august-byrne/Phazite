@@ -1140,7 +1140,7 @@ TEST_CASE ("Benchmark: a song scrolling continuously as it plays, each frame pai
         // As the owner played a song: scrolling continuously, at about 22 pixels a beat, so that the song moves about 0.75 of a
         // pixel a frame at 124 BPM and 60 Hz.
         playlist->setScrollingContinuously (true);
-        playlist->zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (lanes->getWidth() / 22.0) });
+        playlist->zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (lanes->getParentComponent()->getWidth() / 22.0) });
         phazite::playOrStop (*song);
         REQUIRE (phazite::isSongPlaying (*song));
         auto* session = phazite::findPlayingSession (*song);
@@ -1321,7 +1321,7 @@ TEST_CASE ("Benchmark: the mouse moving over the playlist while the song scrolls
         REQUIRE (song != nullptr);
         REQUIRE (lanes != nullptr);
         playlist->setScrollingContinuously (true);
-        playlist->zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (lanes->getWidth() / 22.0) });
+        playlist->zoomTo ({ phazite::BeatPosition(), phazite::BeatPosition::fromBeats (lanes->getParentComponent()->getWidth() / 22.0) });
         phazite::test::dispatchPendingMessages();
         std::unique_ptr<phazite::ui::Tooltips> tips;
 
@@ -1357,7 +1357,8 @@ TEST_CASE ("Benchmark: the mouse moving over the playlist while the song scrolls
 
         // The frames, paced as the display's: a frame's work (the mouse's moves before it, the song's position shown and what
         // that posts) and its paint, and the frames missed while one took longer than a frame.
-        const auto area = juce::Rectangle<int> (0, lanes->getY(), playlist->getWidth(), lanes->getHeight()).reduced (8);
+        const auto area =
+            juce::Rectangle<int> (0, lanes->getParentComponent()->getY(), playlist->getWidth(), lanes->getHeight()).reduced (8);
         const auto pathAt = [area] (int step)
         {
             const auto t = step * 0.003;

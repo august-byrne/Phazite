@@ -58,6 +58,10 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
       muteSolo (projectContext),
       arm (projectContext)
 {
+    // It fills itself (paint()), so that what is behind it needn't repaint with it, as its level bar does many times a second
+    // while the song plays.
+    setOpaque (true);
+
     setDescription ("Click to select the track, Ctrl+click to add it to the selection, Shift+click to select up to it. "
                     "Drag it to move the selected tracks, onto a folder to put them in it. Double-click to collapse it "
                     "or expand it, drag the bottom edge to resize it, and right-click for more, such as Rename.");

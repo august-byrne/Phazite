@@ -236,8 +236,8 @@ void SectionsStrip::mouseDrag (const juce::MouseEvent& e)
     if (! section.has_value())
         return;
 
-    // Past an edge, the time line scrolls along.
-    editor.autoScroll (e.getPosition(), getLocalBounds(), TimelineEditor::ScrollDirections::sideways);
+    // Past an edge of what shows of it (its window, a pixel narrower), the time line scrolls along.
+    editor.autoScroll (e, getShownTimeline (*this).toNearestInt(), TimelineEditor::ScrollDirections::sideways);
 
     if (drag->kind == Drag::Kind::resize)
         drag->target = std::max (section->range.getStart() + BeatDuration::fromBeats (1.0),
@@ -351,12 +351,26 @@ void SectionsStrip::startRenaming (SectionID id)
     nameLabel.hideEditor (false);
     renaming = id;
 
-    const auto block = getBlockArea (*section);
     nameLabel.setText (section->name, juce::dontSendNotification);
-    nameLabel.setBounds (block.withWidth (std::max (120, block.getWidth())));
+    placeNameField (*section);
     nameLabel.setVisible (true);
     nameLabel.showEditor();
     repaint();
+}
+
+void SectionsStrip::viewChanged()
+{
+    if (! nameLabel.isVisible())
+        return;
+
+    if (const auto section = getSongSection (context, renaming))
+        placeNameField (*section);
+}
+
+void SectionsStrip::placeNameField (const SongSection& section)
+{
+    const auto block = getBlockArea (section);
+    nameLabel.setBounds (block.withWidth (std::max (120, block.getWidth())));
 }
 
 void SectionsStrip::renamed()

@@ -28,8 +28,10 @@ public:
     // strip when the sections or the tempo change.
     void showProject();
 
-    // Shows the section's name in a text field, to rename it.
+    // Shows the section's name in a text field, to rename it. The editor calls viewChanged() when its view moves or zooms,
+    // which keeps the field over its section, as the song scrolls while it plays too.
     void startRenaming (SectionID);
+    void viewChanged();
 
     // The menu of the section at a place in the song, which it selects, or of none there: renaming and coloring it, adding a
     // section or a chord there, and the song outlines. A right-click shows it, on the time bar's bar numbers too
@@ -81,7 +83,8 @@ private:
     BeatPosition findNearestBoundary (const SongSection&, double x) const;
     juce::PopupMenu getMenu (const std::optional<SongSection>&, BeatPosition where);
     void addSectionAt (BeatPosition);
-    void renamed(); // the name field closed
+    void placeNameField (const SongSection&); // over the section, at least wide enough to type in
+    void renamed();                           // the name field closed
     void dragChanged();
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); } // the selection changed

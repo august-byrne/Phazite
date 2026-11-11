@@ -71,6 +71,41 @@ private:
 };
 
 //==============================================================================
+// The window a part of an editor that draws the time line shows through (TimelineEditor::addTimelinePart()): on whole pixels,
+// untransformed, where the part shows, and clipping it there. The part fills it from its left and is wider by as much as
+// scrolling continuously moves it left (TimelineEditor::getSubPixel(), less than the view's step, a pixel at 100 %), so that
+// it still covers all of it.
+class TimelinePartWindow : public juce::Component,
+                           private juce::ComponentListener
+{
+public:
+    explicit TimelinePartWindow (juce::Component& part);
+    ~TimelinePartWindow() override;
+
+    juce::Component* getPart() const noexcept { return part.getComponent(); }
+    void setOverhang (int pixels); // how much wider than the window the part is (TimelineEditor::getViewStep())
+    void resized() override;
+
+    // Opaque while its part shows and is (the part covers it whole, at any part of a pixel), so that what is behind needn't
+    // paint at each frame the part moves by one; the part paints it all.
+    void paint (juce::Graphics&) override {}
+
+private:
+    juce::Component::SafePointer<juce::Component> part; // which goes before its window, as the editor's derived class's
+    int overhang = 1;
+
+    void componentVisibilityChanged (juce::Component&) override;
+    void componentBeingDeleted (juce::Component&) override;
+};
+
+// What of the time line shows around a component inside one of an editor's time line parts (a clip in the playlist's lanes),
+// in that component's own coordinates: its part's window, which scrolling continuously moves the part a part of a pixel
+// under. What stays in view as the song scrolls past the view's edges (a clip's name) goes in it, so that it stays put on the
+// screen's pixels; in the part's own bounds it would move with the part, back and forth at every frame by up to a pixel. Its
+// own bounds, if it is in none.
+juce::Rectangle<float> getShownTimeline (const juce::Component&);
+
+//==============================================================================
 class TimelineEditor : public juce::Component,
                        private juce::ScrollBar::Listener,
                        private juce::ComponentListener,
@@ -90,7 +125,11 @@ public:
     //==============================================================================
     // The time line. Positions are song beats, but the ruler and the grid count from the time origin: the
     // playlist's is the start of the song, and the piano roll's the start of its clip, so that bar 1 is where
-    // the clip starts, as in FL Studio and Live. The view doesn't scroll back past it.
+    // the clip starts, as in FL Studio and Live. The view doesn't scroll back past it. It starts on the whole pixel of the
+    // song nearest the beat it is given, at its zoom (the origin's too, which can be up to half a pixel before the origin),
+    // so that everything it shows moves together by whole pixels as it scrolls: started between pixels, each line and edge
+    // took the column its own place rounded to, and they stepped at different moments as the view moved by parts of a pixel
+    // (dragging past an edge, a trackpad, turning pages), lines' spacing and clips' widths changing by a pixel as they went.
     const TimelineView& getView() const noexcept { return view; }
     BeatPosition getTimeOrigin() const noexcept { return timeOrigin; }
     void setViewStart (BeatPosition);
@@ -116,13 +155,21 @@ public:
     void showFrame (double seconds);
 
     // Where the playhead's line is drawn, in pixels from the time line's left: between pixels, so that it moves evenly, but on
-    // a whole pixel while the view scrolls under it by whole pixels (for tests).
+    // a whole pixel while the view scrolls under it (for tests).
     double getPlayheadX() const noexcept { return playheadX; }
 
-    // Scrolling continuously, the part of a pixel the song has moved past the view's whole pixel, by which the ruler and the
-    // editor's other parts that draw the time line are moved left, so that the song glides under the playhead rather than
-    // stepping a pixel at a time (docs/performance-audit.md, section 16, option 15); 0 otherwise (for tests).
+    // Scrolling continuously, how far the song has moved past the view's whole step (getViewStep(), a pixel at 100 %), from 0
+    // up to the step, by which the editor's parts that draw the time line (addTimelinePart()) are moved left inside their
+    // windows, so that the song glides under the playhead rather than stepping a pixel at a time (docs/performance-audit.md,
+    // section 16, option 15); 0 otherwise (for tests).
     float getSubPixel() const noexcept { return subPixel; }
+
+    // The whole pixels the view's start goes by (setViewStart()): one where the display's scale makes each of the editor's
+    // pixels a whole number of the screen's (100 %, 200 %), and otherwise the fewest that do (two at 150 %, four at 125 % and
+    // 175 %), so that what is drawn on the screen's own pixels (TimelineView::beatToEdge()) is sharp in every view, as what is
+    // drawn on the editor's columns is. Started on one of the editor's pixels, notes' edges came out half a screen pixel off in
+    // every other view at 150 % (known bug 17 until 2026-11-11). Scrolling continuously moves the parts by less than this.
+    int getViewStep() const noexcept { return viewStep; }
 
     // While playing, turn the page when the playhead reaches the right edge; or, scrolling continuously (View > Scroll
     // Continuously, which the app keeps in its settings), keep the playhead in the middle and scroll the song under it, as
@@ -135,10 +182,11 @@ public:
     bool isScrollingContinuously() const noexcept { return scrollContinuously; }
     void setScrollingContinuously (bool shouldScroll) noexcept { scrollContinuously = shouldScroll; }
 
-    // Scrolling while something is dragged past an edge. Call autoScroll() on each mouse drag, with the
-    // pointer's position and the area it scrolls (in the same coordinates): near or past an edge, the view
-    // scrolls that way, faster the further out the pointer is. Sideways that is the time line; up and down,
-    // scrollVerticallyBy(). Returns true if anything scrolled. A drag that may scroll calls
+    // Scrolling while something is dragged past an edge. Call autoScroll() on each mouse drag, with the drag
+    // and the area it scrolls, in the coordinates of the drag's position (juce::MouseEvent::getEventRelativeTo()):
+    // near or past an edge, the view scrolls that way, faster the further out the pointer is, by the time since the
+    // drag before (the events' own times), however often the mouse reports. Sideways that is the time line; up and
+    // down, scrollVerticallyBy(). Returns true if anything scrolled. A drag that may scroll calls
     // juce::Component::beginDragAutoRepeat() when it starts, so drags keep coming while the mouse is still.
     enum class ScrollDirections
     {
@@ -147,7 +195,7 @@ public:
         both
     };
 
-    bool autoScroll (juce::Point<int> position, juce::Rectangle<int> area, ScrollDirections = ScrollDirections::both);
+    bool autoScroll (const juce::MouseEvent&, juce::Rectangle<int> area, ScrollDirections = ScrollDirections::both);
     static constexpr int autoRepeatInterval = 16; // milliseconds, for beginDragAutoRepeat()
 
     //==============================================================================
@@ -214,11 +262,25 @@ protected:
     // Moves the time origin; the view stays where it is in the song, unless that is before the new origin.
     void setTimeOrigin (BeatPosition);
 
+    // Where the view starts when it starts at the time origin: the whole pixel of the song nearest it (setViewStart()). A view
+    // kept so many pixels from the origin counts them from here.
+    BeatPosition getEarliestStart() const;
+
     // Where beats are drawn, in this component's coordinates: x starts from beat view.start at the left.
     virtual juce::Rectangle<int> getTimelineArea() const = 0;
-    // The parts that draw the time line by the view, besides the ruler: what scrolling continuously moves by parts of a pixel
-    // (getSubPixel()).
-    virtual std::vector<juce::Component*> getScrollingParts() { return {}; }
+
+    // The parts that draw the time line by the view: the ruler, and those the derived class adds, each once, from its
+    // constructor, in the order the editor's children are to be drawn in. Each shows through a window of its own
+    // (TimelinePartWindow), which the derived class places where the part is to show (placeTimelinePart()), and the part, a
+    // step of the view wider (getViewStep(), a pixel at 100 %), fills it. Scrolling continuously moves the parts left by less
+    // than a step (getSubPixel()) inside their windows, so that their edges stay on whole pixels: moved by themselves, a part's
+    // edges fell between pixels, and the
+    // renderer, rounding them out to whole ones, let the part paint over the column beside it at every frame that moved it one
+    // way and not the other (the owner, 2026-11-11: the track headers' edge flickered while the playlist followed the playhead).
+    // A part is shown or hidden as any child is.
+    void addTimelinePart (juce::Component&);
+    void placeTimelinePart (juce::Component&, juce::Rectangle<int> area);    // where it shows, in this component
+    juce::Rectangle<int> getTimelinePartArea (const juce::Component&) const; // where it shows
     // What zoom to fit shows; the scroll bar covers it and some room after it.
     virtual BeatRange getContentRange() const = 0;
     // The view moved or zoomed: lay out and repaint what depends on it.
@@ -235,6 +297,9 @@ protected:
     // The playhead's line was placed again (at each frame of the display while the song plays): for what follows it, as the
     // playlist's recordings grow with it.
     virtual void playheadShown() {}
+    // A frame of the display is about to be painted (at each one, playing or not, before showFrame() moves the playhead): for
+    // what must be up to date in it that the editor would otherwise hear of a message later, after the frame.
+    virtual void frameComing() {}
     // What a tool does here, for its button's tooltip.
     virtual juce::String describeToolHere (Tool toolToDescribe) const { return describeTool (toolToDescribe); }
 
@@ -304,23 +369,32 @@ private:
     bool usedWhileKeyDown = false;     // and whether the mouse was pressed meanwhile
     std::optional<Tool> toolAfterDrag; // the key was let go during a drag: the tool to go back to when it ends
     bool mouseIsDown = false;
+    bool holdsTimeline = false; // the mouse went down on a part that draws the time line, and is down still: the view stays put
     bool followPlayback = true, active = false, scrollContinuously = false;
     bool followPaused = false, playedWhenFollowed = false; // by a scroll while playing; and whether it played last time
     bool layingOutForScrollBar = false, scrollBarChangedMeanwhile = false;
     double contentEnd = 0.0;            // in beats, as the scroll bar knows it
     std::optional<BeatRange> shownLoop; // the loop the ruler shows (none while playback doesn't loop), to repaint it on changes
     bool shownPunch = false;            // whether it shows the loop red, Record punching into it (RecordingModel.h)
-    double lastAutoScrollTime = 0.0;    // milliseconds (juce::Time::getMillisecondCounterHiRes())
+    juce::Time lastAutoScrollTime;      // the drag's before (juce::MouseEvent::eventTime)
+    double autoScrollRest = 0.0;        // the part of a pixel a drag past an edge has scrolled, which the view keeps till it is one
+    double autoScrollRestY = 0.0;       // the same up and down, the rows' scrolling being by whole pixels too
+    double wheelRest = 0.0;             // the same for the wheel (a trackpad's moves are parts of a notch)
     std::unique_ptr<Playhead> playhead;
     std::unique_ptr<juce::Component> overview; // an Overview (TimelineOverview.cpp), made as the derived class first asks for it
-    juce::VBlankAttachment playheadFrames;     // showFrame() at each frame of the display, while a project shows
+    std::vector<std::unique_ptr<TimelinePartWindow>> partWindows; // addTimelinePart()
+    juce::VBlankAttachment playheadFrames;                        // showFrame() at each frame of the display, while a project shows
     std::unique_ptr<UseListener> useListener;
     std::optional<BeatPosition> frameBeat; // while playing, the beat heard at the frame shown last (showFrame())
     bool holdsPlayhead = false;            // scrolling continuously, the view moves under the playhead, which stays put
     double playheadX = 0.0;                // getPlayheadX()
     float subPixel = 0.0f;                 // getSubPixel()
     FrameLog frameLog;
-    void setSubPixel (float); // moves the ruler and getScrollingParts() left by it
+    void setSubPixel (float);                                          // moves the time line's parts left by it, in their windows
+    TimelinePartWindow* findPartWindow (const juce::Component&) const; // the window a part added shows through
+    bool isInTimelinePart (const juce::Component*) const;              // a part added, or inside one
+    int viewStep = 1;                                                  // getViewStep()
+    void updateViewStep();                                             // for the display's scale now
 
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
     void componentVisibilityChanged (juce::Component&) override; // the vertical scroll bar showed or hid itself

@@ -101,7 +101,7 @@ TEST_CASE ("The chord lane shows only while the song has chords: the time bar's 
     CHECK (screen.lane->isVisible());
     CHECK (screen.header->isVisible());
     CHECK (screen.lane->getHeight() == phazite::ui::ChordLane::preferredHeight);
-    CHECK (screen.lane->getBottom() <= screen.window.getHeight());
+    CHECK (screen.lane->getParentComponent()->getBottom() <= screen.window.getHeight()); // its window, where it shows
     CHECK (screen.lane->getDescription().startsWith ("The song's chords"));
 
     const auto chords = phazite::getLaneChords (screen.context);

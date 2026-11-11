@@ -164,6 +164,7 @@ private:
     int pinnedHeight = 0;  // of the pinned band
     bool focusMode = false;
     std::optional<BeatPosition> fileDropBeat; // where files dragged over the playlist would go
+    int fileDropX = 0;                        // the pointer, in the lanes: where the beat is found again as the view moves
     int fileDropRow = -1;
     bool deviceDropping = false; // a device from the browser is dragged over the playlist, to fileDropRow
     TrackID selectionAnchor;     // where Shift-click ranges start
@@ -186,6 +187,12 @@ private:
 
     std::unique_ptr<Gesture> gesture; // what the mouse is doing in the lanes, from mouse down to mouse up
     juce::Rectangle<int> rubberBand;  // the Select and Zoom tools' rectangle, in the lanes
+
+    // A drag past an edge scrolled the view, laying the clips out where the song had them, and then changed them, which the
+    // playlist hears of a message later: the clips are brought up to date before the next frame is painted (frameComing()),
+    // which otherwise could show a dragged clip where it was, a scroll's step away from the pointer.
+    bool clipsBehind = false;
+    void frameComing() override;
 
     void showProject(); // the open project's, or none
     void projectChanged() override { showProject(); }
@@ -283,8 +290,7 @@ private:
     void showAddTrackMenu();
 
     // TimelineEditor
-    juce::Rectangle<int> getTimelineArea() const override;
-    std::vector<juce::Component*> getScrollingParts() override;  // the lanes, the sections, the tempo lane and the chord lane
+    juce::Rectangle<int> getTimelineArea() const override;       // the lanes'
     std::vector<OverviewMark> getOverviewMarks() const override; // each track's clips, a row each
     BeatRange getContentRange() const override;
     void timelineChanged() override;

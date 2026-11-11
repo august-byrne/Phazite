@@ -140,9 +140,10 @@ void Playlist::showColourMenu (TrackID track, juce::Component& target)
 void Playlist::trackDragged (TrackHeader&, const juce::MouseEvent& e)
 {
     // Past the top or bottom, the tracks scroll along.
-    const auto position = e.getEventRelativeTo (lanes.get()).getPosition();
+    const auto inLanes = e.getEventRelativeTo (lanes.get());
+    const auto position = inLanes.getPosition();
     beginDragAutoRepeat (autoRepeatInterval);
-    autoScroll (position, lanes->getLocalBounds().withTrimmedTop (pinnedHeight), ScrollDirections::upAndDown);
+    autoScroll (inLanes, getTimelineArea().withZeroOrigin().withTrimmedTop (pinnedHeight), ScrollDirections::upAndDown);
 
     fadeMovingHeaders (true);
     trackDrop = findTrackDrop (position.y);
@@ -248,10 +249,11 @@ void Playlist::paintTrackDrop (juce::Graphics& g) const
 
     const auto& p = getPalette (*this);
     const auto& row = rows[(size_t) trackDrop->row];
+    const auto lanesArea = getTimelineArea();
     const auto left = (float) headerColumn.getX();
-    const auto right = (float) lanes->getRight();
-    const auto top = (float) (lanes->getY() + getRowTop (row));
-    g.reduceClipRegion (headerColumn.getBounds().getUnion (lanes->getBounds()));
+    const auto right = (float) lanesArea.getRight();
+    const auto top = (float) (lanesArea.getY() + getRowTop (row));
+    g.reduceClipRegion (headerColumn.getBounds().getUnion (lanesArea));
 
     // Into a folder: its row outlined, over a wash.
     if (trackDrop->drop == TrackDrop::into)
@@ -272,7 +274,7 @@ void Playlist::paintTrackDrop (juce::Graphics& g) const
             ++bottom;
 
     const auto y =
-        trackDrop->drop == TrackDrop::before ? top : (float) (lanes->getY() + getRowTop (rows[bottom]) + rows[bottom].getTotalHeight());
+        trackDrop->drop == TrackDrop::before ? top : (float) (lanesArea.getY() + getRowTop (rows[bottom]) + rows[bottom].getTotalHeight());
     const auto x = left + (float) (row.track.depth * TrackStrip::indent);
     const auto dot = TrackDropTint::dot;
     g.setColour (p.accent);

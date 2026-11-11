@@ -7,8 +7,10 @@ namespace phazite::ui
 {
 juce::Point<int> TimelineGesture::getStart (const TimelineView& view, int scrollYNow, int unscrolledHeight) const
 {
+    // In the column the beat's own place rounds to, as lines and edges are (TimelineView::beatToColumn()): rounded where it is
+    // in view, a start half a pixel in went one way at one step of a scroll and the other at the next.
     const auto y = startPosition.y < unscrolledHeight ? startPosition.y : startPosition.y + startScrollY - scrollYNow;
-    return { juce::roundToInt (view.beatToX (startBeat)), y };
+    return { view.beatToColumn (startBeat), y };
 }
 
 void TimelineGesture::beginStep (ProjectContext& context, const juce::String& name)

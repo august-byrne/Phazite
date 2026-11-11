@@ -162,7 +162,8 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
         g.fillRect (x - 1, area.getY(), 3, area.getHeight());
     }
 
-    // Where a device dragged from the browser would go: onto a track, or onto a new track under the last.
+    // Where a device dragged from the browser would go: onto a track, or onto a new track under the last. Across what shows of the
+    // lanes, so that its sides stay on the edges of their window while the song scrolls under it.
     if (playlist.deviceDropping)
     {
         auto lastRowBottom = 0;
@@ -173,8 +174,9 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
         const auto area = juce::isPositiveAndBelow (playlist.fileDropRow, (int) playlist.rows.size())
                               ? getRowArea (playlist.rows[(size_t) playlist.fileDropRow])
                               : getLocalBounds().withTop (lastRowBottom);
+        const auto shown = getShownTimeline (*this);
         g.setColour (p.accent);
-        g.drawRect (area, 2);
+        g.drawRect (area.toFloat().withLeft (shown.getX()).withRight (shown.getRight()), 2.0f);
     }
 
     if (! playlist.rubberBand.isEmpty())
@@ -319,10 +321,18 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
         lanes->addAndMakeVisible (layer);
     }
 
-    for (auto* c : std::initializer_list<juce::Component*> { &addTrackButton, &collapseAllButton, &sectionsStrip, &tempoLaneHeader,
-                                                             &tempoLane, &chordLaneHeader, &chordLane, &headerColumn, lanes.get(),
-                                                             headerEdge.get(), &getOverview() })
-        addAndMakeVisible (c);
+    // The parts that draw the time line, each through a window of its own (TimelineEditor::addTimelinePart()), among the others.
+    addAndMakeVisible (addTrackButton);
+    addAndMakeVisible (collapseAllButton);
+    addTimelinePart (sectionsStrip);
+    addAndMakeVisible (tempoLaneHeader);
+    addTimelinePart (tempoLane);
+    addAndMakeVisible (chordLaneHeader);
+    addTimelinePart (chordLane);
+    addAndMakeVisible (headerColumn);
+    addTimelinePart (*lanes);
+    addAndMakeVisible (*headerEdge);
+    addAndMakeVisible (getOverview());
 
     // The overview along the time bar's top scrolls and zooms the time line, as FL Studio's scroll bar there does: no scroll bar
     // under the lanes. The rows' scroll bar lies over the lanes' right edge, thin and see-through.
@@ -460,6 +470,7 @@ void Playlist::songChanged (const SongChanges& changes)
     // Clips are placed in time, and the time line is in beats: a tempo change moves them on it.
     if (changes.clips || changes.tempo || changes.devices)
     {
+        clipsBehind = false;
         rebuildClips();
         layOutClips();
         updateClips();
@@ -475,12 +486,7 @@ void Playlist::songChanged (const SongChanges& changes)
 //==============================================================================
 juce::Rectangle<int> Playlist::getTimelineArea() const
 {
-    return lanes->getBounds();
-}
-
-std::vector<juce::Component*> Playlist::getScrollingParts()
-{
-    return { lanes.get(), &sectionsStrip, &tempoLane, &chordLane };
+    return getTimelinePartArea (*lanes);
 }
 
 std::vector<TimelineEditor::OverviewMark> Playlist::getOverviewMarks() const
@@ -519,8 +525,14 @@ BeatRange Playlist::getContentRange() const
 
 void Playlist::timelineChanged()
 {
+    // Where files dragged over the lanes would go: the beat under the pointer, which the view moving (following the playhead)
+    // changes without a move of the mouse, which alone told it before, so that the line slid away from where a drop went.
+    if (fileDropBeat.has_value())
+        fileDropBeat = getFileDropBeat (fileDropX);
+
     layOutClips();
     lanes->repaint();
+    sectionsStrip.viewChanged(); // a section's name being typed stays over it
     sectionsStrip.repaint();
     tempoLane.repaint();
     chordLane.repaint();
@@ -529,6 +541,16 @@ void Playlist::timelineChanged()
 void Playlist::gridChanged()
 {
     lanes->repaint();
+}
+
+void Playlist::frameComing()
+{
+    if (std::exchange (clipsBehind, false))
+    {
+        rebuildClips();
+        layOutClips();
+        updateClips();
+    }
 }
 
 void Playlist::verticalScrollBarMoved (double newRangeStart)
@@ -566,22 +588,22 @@ void Playlist::resized()
     collapseAllButton.setBounds (corner.removeFromRight (corner.getHeight()));
     addTrackButton.setBounds (corner.withWidth (96));
     getOverview().setBounds (timeBar.removeFromTop (overviewHeight));
-    sectionsStrip.setBounds (timeBar.removeFromTop (SectionsStrip::preferredHeight));
-    ruler.setBounds (timeBar);
+    placeTimelinePart (sectionsStrip, timeBar.removeFromTop (SectionsStrip::preferredHeight));
+    placeTimelinePart (ruler, timeBar);
 
     // Under it, while the song's tempo changes, the tempo lane, and while it has chords, the chord lane, each with its header
     // over the track headers.
     auto tempoRow = area.removeFromTop (tempoLaneShown ? TempoLane::preferredHeight : 0);
     tempoLaneHeader.setBounds (tempoRow.removeFromLeft (headerWidth));
-    tempoLane.setBounds (tempoRow);
+    placeTimelinePart (tempoLane, tempoRow);
 
     auto chordRow = area.removeFromTop (chordLaneShown ? ChordLane::preferredHeight : 0);
     chordLaneHeader.setBounds (chordRow.removeFromLeft (headerWidth));
-    chordLane.setBounds (chordRow);
+    placeTimelinePart (chordLane, chordRow);
 
     headerColumn.setBounds (area.removeFromLeft (headerWidth));
     headerEdge->setBounds (headerColumn.getBounds().removeFromRight (HeaderEdge::width)); // over the headers, right of their controls
-    lanes->setBounds (area);
+    placeTimelinePart (*lanes, area);
 
     // The rows' scroll bar over the lanes' right edge, thin and see-through, as FL Studio's is: it takes no room of their own.
     verticalScrollBar.setBounds (area.removeFromRight (ScrollTint::overlayWidth));

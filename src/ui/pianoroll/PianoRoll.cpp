@@ -58,9 +58,13 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     clipLabel.setFont (juce::FontOptions (TextSize::small));
 
     for (auto* c : std::initializer_list<juce::Component*> { &instrumentButton, &nextNoteButton, &chordButton, &keyButton, &ghostButton,
-                                                             &transformButton, &notesMenuButton, &clipLabel, keys.get(), grid.get(),
-                                                             velocityLane.get(), &getOverview() })
+                                                             &transformButton, &notesMenuButton, &clipLabel, keys.get() })
         addAndMakeVisible (c);
+
+    // The notes and the velocities draw the time line, each through a window of its own (TimelineEditor::addTimelinePart()).
+    addTimelinePart (*grid);
+    addTimelinePart (*velocityLane);
+    addAndMakeVisible (getOverview());
 
     // The overview of the clips' notes along the time bar's top scrolls and zooms the time line, as the playlist's does, as FL
     // Studio's piano roll has it: no scroll bar under the notes. The rows' scroll bar lies over the notes' right edge, thin and
@@ -241,7 +245,9 @@ void PianoRoll::zoomToClips()
 
 void PianoRoll::updateTimeOrigin (bool scrollToStart)
 {
-    // Bar 1 is where the first clip's notes count from, or for a track without clips, the bar the playhead is in.
+    // Bar 1 is where the first clip's notes count from, or for a track without clips, the bar the playhead was in when the
+    // track was shown: taken again at each change to the song while it played (a track muted), it moved bar 1 and the view
+    // with the playhead.
     auto origin = getTimeOrigin();
 
     if (const auto shown = getShownClips(); ! shown.empty())
@@ -251,15 +257,18 @@ void PianoRoll::updateTimeOrigin (bool scrollToStart)
         for (const auto& clip : shown)
             origin = std::min (origin, clip.contentStart);
     }
-    else if (hasProject() && getTrack().isValid())
+    else if (hasProject() && getTrack().isValid() && scrollToStart)
     {
         origin = getBarStart (context, std::max (0, getBarAt (context, getPlayheadBeat())));
     }
 
-    // A newly shown clip opens at bar 1. Otherwise the view stays on the same notes when the clip moves in the song.
-    const auto offset = getView().start - getTimeOrigin();
+    // A newly shown clip opens at bar 1. Otherwise the view stays on the same notes when the clip moves in the song: as many
+    // whole pixels from bar 1 as it was, as the view starts on whole pixels (TimelineEditor::setViewStart()); counted from the
+    // origin itself, each move added the rounding of the origin's place to the view's.
+    const auto& timeline = getView();
+    const auto pixelsFromOrigin = std::round ((timeline.start - getEarliestStart()).inBeats() * timeline.pixelsPerBeat);
     setTimeOrigin (origin);
-    setViewStart (scrollToStart ? origin : origin + offset);
+    setViewStart (scrollToStart ? origin : getEarliestStart() + BeatDuration::fromBeats (pixelsFromOrigin / timeline.pixelsPerBeat));
 }
 
 ClipID PianoRoll::makeClipForNewNotes()
@@ -496,12 +505,7 @@ juce::String PianoRoll::getQuantizeName() const
 
 juce::Rectangle<int> PianoRoll::getTimelineArea() const
 {
-    return grid->getBounds().getUnion (velocityLane->getBounds());
-}
-
-std::vector<juce::Component*> PianoRoll::getScrollingParts()
-{
-    return { grid.get(), velocityLane.get() };
+    return getTimelinePartArea (*grid).getUnion (getTimelinePartArea (*velocityLane));
 }
 
 std::optional<double> PianoRoll::getLinkedPlayheadBeat (double songBeat) const
@@ -563,13 +567,14 @@ void PianoRoll::paint (juce::Graphics& g)
     paintEditorBackground (g);
 
     const auto& p = getPalette (*this);
+    const auto velocities = getTimelinePartArea (*velocityLane);
     g.setColour (p.surfaceRaised);
-    g.fillRect (velocityLane->getBounds().withX (0).withWidth (keysWidth));
+    g.fillRect (velocities.withX (0).withWidth (keysWidth));
     g.setColour (p.textMuted);
     g.setFont (juce::FontOptions (TextSize::small));
-    g.drawText ("Velocity", velocityLane->getBounds().withX (0).withWidth (keysWidth).reduced (Space::xs), juce::Justification::topLeft);
+    g.drawText ("Velocity", velocities.withX (0).withWidth (keysWidth).reduced (Space::xs), juce::Justification::topLeft);
     g.setColour (p.border);
-    g.fillRect (0, velocityLane->getY() - 1, getWidth(), 1);
+    g.fillRect (0, velocities.getY() - 1, getWidth(), 1);
 }
 
 void PianoRoll::resized()
@@ -595,9 +600,9 @@ void PianoRoll::resized()
     getOverview().setBounds (area.removeFromTop (overviewHeight).withTrimmedLeft (keysWidth));
     auto rulerArea = area.removeFromTop (rulerHeight);
     keys->setBounds (area.removeFromLeft (keysWidth));
-    grid->setBounds (area);
-    ruler.setBounds (rulerArea.withTrimmedLeft (keysWidth));
-    velocityLane->setBounds (velocityArea.withTrimmedLeft (keysWidth));
+    placeTimelinePart (*grid, area);
+    placeTimelinePart (ruler, rulerArea.withTrimmedLeft (keysWidth));
+    placeTimelinePart (*velocityLane, velocityArea.withTrimmedLeft (keysWidth));
 
     // The rows' scroll bar over the notes' right edge, thin and see-through: it takes no room of their own.
     verticalScrollBar.setBounds (area.removeFromRight (ScrollTint::overlayWidth));

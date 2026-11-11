@@ -307,7 +307,7 @@ void Mouse::send (juce::Point<int> where, juce::ModifierKeys mods)
         return;
 
     position = where;
-    time += 20; // milliseconds after the event before
+    time += interval; // milliseconds after the event before
 
     // As the platform code does before it passes an event on.
     juce::ModifierKeys::currentModifiers = mods;
@@ -379,7 +379,7 @@ void Mouse::wheel (juce::Point<int> where, float deltaY, juce::ModifierKeys mods
         return;
 
     position = where;
-    time += 20;
+    time += interval;
     juce::ModifierKeys::currentModifiers = mods.withoutMouseButtons();
 
     juce::MouseWheelDetails details {};

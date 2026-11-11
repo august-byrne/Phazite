@@ -282,6 +282,11 @@ void Playlist::layOutClips()
     std::unordered_map<ClipID, std::unique_ptr<ClipComponent>> inView;
     std::unordered_map<ClipID, juce::Rectangle<int>> partsInView;
 
+    // A layer's columns that show whole however far the lanes are moved while they scroll continuously (less than a step of
+    // the view, a pixel at 100 %): all but a step's at either end, which their window (a step narrower than the lanes) shows
+    // parts of (TimelineEditor::addTimelinePart()).
+    const auto shownWhole = [step = getViewStep()] (const juce::Component& layer) { return layer.getBounds().reduced (step, 0); };
+
     for (size_t i = 0; i < shownClips.size(); ++i)
     {
         const auto& clip = shownClips[i];
@@ -307,13 +312,14 @@ void Playlist::layOutClips()
 
         // Kept as a picture, which scrolling then only moves rather than painting it again (docs/performance-audit.md,
         // section 16, option 16). A clip that draws the part of itself in view (an audio clip's waveform, a tag with its name
-        // or marks, which stay in view) isn't kept while the view's left or right edge crosses it, as scrolling sideways then
-        // changes what it draws at every step; kept, it draws its picture again when what shows of it changes (a scroll up or
-        // down across it). None is kept larger than a picture should be. A clip's picture is also dropped as it repaints (a
-        // change, a waveform loading).
+        // or marks, which stay in view) isn't kept while the view's left or right edge crosses it, at any part of a pixel, as
+        // scrolling sideways then changes what it draws at every frame; kept, it draws its picture again when what shows of it
+        // changes (a scroll up or down across it). None is kept larger than a picture should be. A clip's picture is also
+        // dropped as it repaints (a change, a waveform loading).
         const auto& shown = component.getInfo();
         const auto drawsWhatShows = shown.kind == ClipType::audio || shown.linked || component.getLabel().isNotEmpty();
-        const auto across = bounds.getX() < layer.getX() || bounds.getRight() > layer.getRight();
+        const auto whole = shownWhole (layer);
+        const auto across = bounds.getX() < whole.getX() || bounds.getRight() > whole.getRight();
         const auto part = bounds.getIntersection (layer.getBounds()) - bounds.getPosition();
         const auto keep = ! (drawsWhatShows && across) && bounds.getWidth() <= widestClipPicture
                           && bounds.getWidth() * bounds.getHeight() <= largestClipPicture;

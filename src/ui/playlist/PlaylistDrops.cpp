@@ -73,6 +73,7 @@ void Playlist::fileDragMove (const juce::StringArray&, int x, int y)
     // Where importFiles() would put them.
     const auto position = lanes->getLocalPoint (this, juce::Point<int> (x, y));
     fileDropRow = getRowAt (position.y);
+    fileDropX = position.x;
     fileDropBeat = getFileDropBeat (position.x);
     lanes->repaint();
 }
@@ -108,10 +109,12 @@ void Playlist::itemDragMove (const SourceDetails& details)
     fileDropRow = getRowAt (position.y);
     deviceDropping = getDraggedDevice (details.description).has_value() || getDraggedPreset (details.description).has_value();
 
+    fileDropX = std::max (0, position.x);
+
     if (deviceDropping)
         fileDropBeat.reset();
     else
-        fileDropBeat = getFileDropBeat (std::max (0, position.x));
+        fileDropBeat = getFileDropBeat (fileDropX);
 
     lanes->repaint();
 }

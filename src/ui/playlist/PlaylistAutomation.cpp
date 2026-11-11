@@ -64,6 +64,30 @@ namespace
     {
         return target.deviceName == "Mixer" ? target.name : target.deviceName + ": " + target.name;
     }
+
+    // Where a value is in a lane's curve area, its parameter's range from the bottom up (the middle for a range of one value).
+    float getYOf (float value, juce::Rectangle<float> area, const juce::NormalisableRange<float>& valueRange)
+    {
+        const auto proportion =
+            valueRange.end > valueRange.start ? valueRange.convertTo0to1 (juce::jlimit (valueRange.start, valueRange.end, value)) : 0.5f;
+        return area.getBottom() - proportion * area.getHeight();
+    }
+
+    // A line of dashes from x to x2 at a height, in the colour set, its dashes where the song's own pixels put them (dash on,
+    // dash off, from the song's start), so that a repaint of a part of it (under the playhead, at each frame) draws the dashes
+    // the rest has, and they move with the song as it scrolls. Started where a repaint started, the line went solid where the
+    // playhead had been, and its dashes stood still while the grid glided past them.
+    void paintDashes (juce::Graphics& g, float x, float x2, float y, double songPixelOfZero)
+    {
+        constexpr double dash = 4.0;
+        const auto phase = std::fmod (std::fmod (songPixelOfZero + (double) x, 2.0 * dash) + 2.0 * dash, 2.0 * dash);
+        juce::Path dashes;
+
+        for (auto left = (double) x - phase; left < (double) x2; left += 2.0 * dash)
+            dashes.addRectangle ((float) left, y - 0.5f, (float) dash, 1.0f);
+
+        g.fillPath (dashes);
+    }
 } // namespace
 
 //==============================================================================
@@ -80,8 +104,14 @@ Playlist::AutomationLaneView::AutomationLaneView (Playlist& p, TrackID t, const 
 
 void Playlist::AutomationLaneView::timerCallback()
 {
-    if (points.empty() && isShowing() && ! juce::exactlyEqual (handle.getValue(), shownValue))
+    if (! points.empty() || ! isShowing())
+        return;
+
+    if (const auto value = handle.getValue(); ! juce::exactlyEqual (value, shownValue))
+    {
+        shownValue = value;
         repaint();
+    }
 }
 
 void Playlist::AutomationLaneView::update (juce::Colour newColour, bool isCollapsed)
@@ -89,6 +119,7 @@ void Playlist::AutomationLaneView::update (juce::Colour newColour, bool isCollap
     colour = newColour;
     collapsed = isCollapsed;
     handle = getParameter (playlist.context, parameter);
+    shownValue = handle.getValue();
 
     if (const auto target = getAutomationTarget (playlist.context, parameter))
     {
@@ -101,8 +132,14 @@ void Playlist::AutomationLaneView::update (juce::Colour newColour, bool isCollap
 
 void Playlist::AutomationLaneView::refreshPoints()
 {
-    points = getAutomationPoints (playlist.context, parameter);
+    readPoints();
     repaint();
+}
+
+void Playlist::AutomationLaneView::readPoints()
+{
+    points = getAutomationPoints (playlist.context, parameter);
+    pointsVersion = playlist.context.getSongVersion();
 }
 
 //==============================================================================
@@ -114,11 +151,7 @@ juce::Rectangle<float> Playlist::AutomationLaneView::getCurveArea() const
 
 float Playlist::AutomationLaneView::valueToY (float value) const
 {
-    const auto area = getCurveArea();
-    const auto valueRange = handle.getRange();
-    const auto proportion =
-        valueRange.end > valueRange.start ? valueRange.convertTo0to1 (juce::jlimit (valueRange.start, valueRange.end, value)) : 0.5f;
-    return area.getBottom() - proportion * area.getHeight();
+    return getYOf (value, getCurveArea(), handle.getRange());
 }
 
 float Playlist::AutomationLaneView::yToValue (float y) const
@@ -314,28 +347,37 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
 
     const auto clip = g.getClipBounds();
 
+    // The points as the song holds them now, should it have changed since they were read: a frame painted before the playlist
+    // hears of a change (a message later) draws its dots and its line from the same song.
+    if (playlist.context.getSongVersion() != pointsVersion)
+        readPoints();
+
+    // Where values are, the parameter's range read once for the whole paint: each read asks the model.
+    const auto curveArea = getCurveArea();
+    const auto valueRange = handle.getRange();
+    const auto yOf = [&curveArea, &valueRange] (float value) { return getYOf (value, curveArea, valueRange); };
+    const auto& timeline = playlist.getView();
+    const auto offset = getViewOffset();
+
     if (points.empty())
     {
-        // Without automation, where the parameter is now, dashed.
-        shownValue = handle.getValue();
-        const auto y = valueToY (shownValue);
-        const float dashes[] = { 4.0f, 4.0f };
+        // Without automation, where the parameter is now (as the timer read it), dashed.
         g.setColour (colour.withAlpha (LaneTint::idleLine));
-        g.drawDashedLine ({ (float) clip.getX(), y, (float) clip.getRight(), y }, dashes, 2, 1.0f);
+        paintDashes (g, (float) clip.getX(), (float) clip.getRight(), yOf (shownValue),
+                     std::round (timeline.start.inBeats() * timeline.pixelsPerBeat) + offset);
     }
     else
     {
         // The line as the engine plays it, across what shows, with a wash under it: worked out along the song's own
         // pixels and drawn in the columns that move with the song (TimelineView::getLineSamples()), so that it keeps its
         // shape as the view scrolls, its jumps straight up their beats' columns.
-        const auto offset = getViewOffset();
         std::vector<BeatPosition> pointBeats;
         pointBeats.reserve (points.size());
 
         for (const auto& point : points)
             pointBeats.push_back (point.beat);
 
-        const auto samples = playlist.getView().getLineSamples (clip.getX() + offset, clip.getRight() + offset, pixelsPerValue, pointBeats);
+        const auto samples = timeline.getLineSamples (clip.getX() + offset, clip.getRight() + offset, pixelsPerValue, pointBeats);
         std::vector<BeatPosition> beats;
         beats.reserve (samples.size());
 
@@ -347,7 +389,7 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
 
         for (size_t i = 0; i < values.size() && i < samples.size(); ++i)
         {
-            const juce::Point<float> at (TimelineView::getColumnMiddle (samples[i].column - offset), valueToY (values[i]));
+            const juce::Point<float> at (TimelineView::getColumnMiddle (samples[i].column - offset), yOf (values[i]));
 
             if (i == 0)
                 line.startNewSubPath (at);
@@ -381,10 +423,14 @@ void Playlist::AutomationLaneView::paint (juce::Graphics& g)
 
         for (int i = 0; i < (int) points.size(); ++i)
         {
-            // On the line, in its point's column.
-            const juce::Point<float> centre (
-                TimelineView::getColumnMiddle (playlist.getView().beatToColumn (points[(size_t) i].beat) - offset),
-                valueToY (points[(size_t) i].value));
+            // On the line, in its point's column; those far from what is being painted, skipped first.
+            const auto column = timeline.beatToColumn (points[(size_t) i].beat) - offset;
+
+            if (const auto reach = (int) std::ceil (LaneTint::selectedPointRadius) + 1;
+                column < clip.getX() - reach || column > clip.getRight() + reach)
+                continue;
+
+            const juce::Point<float> centre (TimelineView::getColumnMiddle (column), yOf (points[(size_t) i].value));
             const auto chosen = isSelected (i);
             const auto radius = chosen ? LaneTint::selectedPointRadius : LaneTint::pointRadius;
             const auto dot = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);

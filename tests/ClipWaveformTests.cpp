@@ -5,13 +5,36 @@
 #include "UiTestHelpers.h"
 #include "app/ClipWaveforms.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
+#include "model/transport/internal/Tempo.h"
 
 namespace
 {
+// Writes a sound of silence but for a burst at full scale from one time to another, in seconds.
+juce::File writeBurst (const juce::File& file, double seconds, double from, double to)
+{
+    constexpr double sampleRate = 44100.0;
+    juce::AudioBuffer<float> buffer (1, (int) (seconds * sampleRate));
+    buffer.clear();
+
+    for (auto i = (int) (from * sampleRate); i < (int) (to * sampleRate); ++i)
+        buffer.setSample (0, i, (float) std::sin (juce::MathConstants<double>::twoPi * 440.0 * i / sampleRate));
+
+    file.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (file);
+
+    if (auto writer = juce::WavAudioFormat().createWriterFor (
+            stream, juce::AudioFormatWriterOptions {}.withSampleRate (sampleRate).withNumChannels (1).withBitsPerSample (16)))
+        writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+
+    return file;
+}
+
 // How many pixels of an image's columns, from one to another, a waveform lit.
 int countLit (const juce::Image& image, int fromX, int toX)
 {
@@ -67,6 +90,74 @@ TEST_CASE ("A clip's waveform loads in the background and draws where its file h
     // Another waveform of the same file has its levels at once, from the cache.
     auto again = make (context, clips[0], {});
     CHECK (countLit (paint (*again, span), 0, 190) > 190 * 10);
+
+    setSong (context, nullptr);
+}
+
+TEST_CASE ("A clip that doesn't follow the tempo draws its sound where it plays it, across the song's tempo changes")
+{
+    // Known bug 16 until 2026-11-11: such a clip plays the song's seconds, which a change of tempo puts at other beats, but its
+    // waveform was spread over the clip as if the tempo held, its sound drawn away from where it plays.
+    phazite::test::TemporaryFolder temp;
+    juce::String error;
+    auto project = phazite::Project::create (temp.folder, "Waves", error);
+    REQUIRE (project != nullptr);
+    auto& song = project->getSong();
+    phazite::ProjectContext context { phazite::test::getEngineContext() };
+    setSong (context, &song);
+
+    // Three seconds of silence but for a burst at a second and a half, at its own speed, under 120 BPM for a beat and then 60.
+    const auto file = writeBurst (temp.folder.getChildFile ("Burst.wav"), 3.0, 1.45, 1.55);
+    const auto track = phazite::getTrackIDs (song).front();
+    const auto clips = phazite::importFiles (context, { file.getFullPathName() }, track, phazite::BeatPosition());
+    REQUIRE (clips.size() == 1);
+    phazite::setClipFollowsTempo (song, clips[0], false);
+    phazite::addTempoChange (song, phazite::BeatPosition::fromBeats (1.0), 60.0);
+    REQUIRE_FALSE (phazite::followsTempoChanges (song, phazite::findClipState (song, clips[0])));
+
+    // Painted as the playlist paints a clip, over all of it.
+    constexpr int width = 400, height = 40;
+    auto waveform = phazite::getClipWaveformMaker() (context, clips[0], {});
+    REQUIRE (waveform != nullptr);
+    const auto paintAll = [&waveform]
+    {
+        juce::Image image (juce::Image::ARGB, width, height, true);
+        juce::Graphics g (image);
+        g.setColour (juce::Colours::white);
+        waveform->paint (g, { 0, 0, width, height }, width);
+        return image;
+    };
+
+    // The column where the clip plays the burst's middle, as the model places it.
+    const auto range = phazite::getClipRange (song, clips[0]);
+    auto expected = -1;
+
+    for (int x = 0; x < width && expected < 0; ++x)
+        if (const auto beat = range.getStart() + phazite::BeatDuration::fromBeats (range.getLength().inBeats() * (x + 0.5) / width);
+            phazite::getFileTimeAt (song, clips[0], beat) >= 1.5)
+            expected = x;
+
+    REQUIRE (expected > 0);
+
+    // Where it draws the burst: the middle of the columns it lights more than a few pixels tall.
+    const auto burstAt = [] (const juce::Image& image)
+    {
+        auto weighed = 0.0, total = 0.0;
+
+        for (int x = 0; x < image.getWidth(); ++x)
+            if (const auto lit = countLit (image, x, x + 1); lit > height / 4)
+            {
+                weighed += (x + 0.5) * lit;
+                total += lit;
+            }
+
+        return total > 0.0 ? weighed / total : -1.0;
+    };
+
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return burstAt (paintAll()) >= 0.0; }, 10000));
+    phazite::test::dispatchPendingMessages(); // every level loaded
+    CAPTURE (expected);
+    CHECK (std::abs (burstAt (paintAll()) - (expected + 0.5)) <= 2.0);
 
     setSong (context, nullptr);
 }

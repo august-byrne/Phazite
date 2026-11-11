@@ -180,30 +180,40 @@ PianoRoll::NoteGrid::Zone PianoRoll::NoteGrid::getZone (const NoteData& note, ju
 
 std::vector<NoteData> PianoRoll::NoteGrid::getGhostNotes() const
 {
+    const auto& timeline = roll.getView();
+    return getGhostNotes ({ timeline.xToBeat (0), timeline.xToBeat (getWidth()) });
+}
+
+std::vector<NoteData> PianoRoll::NoteGrid::getGhostNotes (BeatRange range) const
+{
     if (! roll.hasProject() || ! roll.showGhostNotes)
         return {};
 
-    // The other tracks' MIDI clips that are in view.
+    // The other tracks' MIDI clips there.
     std::vector<TrackID> shownTracks { roll.getTrack() };
 
     for (const auto& clip : roll.getShownClips())
         if (std::find (shownTracks.begin(), shownTracks.end(), clip.track) == shownTracks.end())
             shownTracks.push_back (clip.track);
 
-    const auto& timeline = roll.getView();
-    return getNotesOfOtherTracks (roll.context, shownTracks, { timeline.xToBeat (0), timeline.xToBeat (getWidth()) });
+    return getNotesOfOtherTracks (roll.context, shownTracks, range);
 }
 
 const PianoRoll::NoteGrid::DrawnGhosts& PianoRoll::NoteGrid::getDrawnGhosts()
 {
+    // Read for the view and as much again on either side, and again once the view leaves that: following the playhead moves
+    // the view at every frame, and each read walks every track's clips.
     const auto& timeline = roll.getView();
-    const BeatRange range { timeline.xToBeat (0), timeline.xToBeat (getWidth()) };
+    const BeatRange inView { timeline.xToBeat (0), timeline.xToBeat (getWidth()) };
     const auto songVersion = roll.context.getSongVersion();
+    const auto covers = [&inView] (BeatRange range) { return range.getStart() <= inView.getStart() && inView.getEnd() <= range.getEnd(); };
 
-    if (! drawnGhosts.has_value() || drawnGhosts->songVersion != songVersion || drawnGhosts->range != range
+    if (! drawnGhosts.has_value() || drawnGhosts->songVersion != songVersion || ! covers (drawnGhosts->range)
         || drawnGhosts->clips != roll.clips || drawnGhosts->track != roll.emptyTrack || drawnGhosts->shown != roll.showGhostNotes)
     {
-        auto notes = getGhostNotes();
+        const auto length = inView.getLength();
+        const BeatRange range { std::max (BeatPosition(), inView.getStart() - length), inView.getEnd() + length };
+        auto notes = getGhostNotes (range);
         auto colours = getNoteColours (roll.context, notes);
         drawnGhosts =
             DrawnGhosts { std::move (notes), std::move (colours), songVersion, range, roll.clips, roll.emptyTrack, roll.showGhostNotes };
@@ -232,11 +242,20 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
 
     const auto area = g.getClipBounds();
 
-    if (! roll.getTrack().isValid())
+    // A hint, in the middle of what shows of the grid, where its window is: it stays put while the song scrolls under it.
+    const auto paintHint = [this, &g, &p] (const juce::String& hint)
     {
+        const auto shown = getShownTimeline (*this);
+        const juce::Graphics::ScopedSaveState state (g);
+        g.addTransform (juce::AffineTransform::translation (shown.getX(), shown.getY()));
         g.setColour (p.textMuted);
         g.setFont (juce::FontOptions (TextSize::body));
-        g.drawFittedText (noClipsHint, getLocalBounds().reduced (Space::xl), juce::Justification::centred, 2);
+        g.drawFittedText (hint, shown.withZeroOrigin().toNearestInt().reduced (Space::xl), juce::Justification::centred, 2);
+    };
+
+    if (! roll.getTrack().isValid())
+    {
+        paintHint (noClipsHint);
         return;
     }
 
@@ -264,11 +283,7 @@ void PianoRoll::NoteGrid::paint (juce::Graphics& g)
 
     // A track without clips yet: the first note drawn starts one.
     if (shown.empty())
-    {
-        g.setColour (p.textMuted);
-        g.setFont (juce::FontOptions (TextSize::body));
-        g.drawFittedText (emptyTrackHint, getLocalBounds().reduced (Space::xl), juce::Justification::centred, 2);
-    }
+        paintHint (emptyTrackHint);
 
     // Other tracks' notes, faintly.
     const auto& drawn = getDrawnGhosts();

@@ -850,6 +850,73 @@ those of the table above. With them, two runs each (`windows-profile`):
 
 The audio clips take as long as before; the rest varies more from run to run than it differs.
 
+**The edge that flickered, and an audit of everything that scrolls** (2026-11-11). The owner: "the edge of the track header
+in the playlist flickers when autoscroll is on. Audit all ui on the playlist and piano roll for this sort of behaviour,
+since we have now fixed issues like this more than 3 separate times". The cause: option 15 moved each part that draws the
+time line (the lanes, the ruler, the time bar's strips, the piano roll's grid and velocities) by a part of a pixel with a
+transform of its own, and JUCE's Direct2D renderer rounds a transformed part's clip out to whole pixels: at every frame
+that moved a part left, it painted over the last column of what is beside it (the track headers' level bars, the piano
+keys, the tempo and chord lanes' headers, the time bar's corner), and at the others not. A test painting frames as the
+window does found the headers' last column changing from frame to frame, 97 pixels of it, and the keys' 544.
+
+Fixed for every part at once rather than part by part: each shows through a window of its own on whole pixels
+(`TimelinePartWindow`, `TimelineEditor::addTimelinePart()`), which clips it there in any renderer; the part is a pixel
+wider than its window, and the part of a pixel it moves by is from 0 up to 1, always left (`exact - floor (exact)`, where
+it was rounded to either side), so that it covers its window at every frame. The windows are opaque while their parts are,
+so the editor no longer paints its background under them at each frame. Four auditors then read every file of the playlist,
+the piano roll, the time line and the audio clip editor for what else moves on screen otherwise than the song does, and
+the same pattern turned up in four kinds, each fixed:
+
+- *Placed where it is in view rather than in the song.* A clip's tag kept in view was kept at the lanes' edge, which the
+  transform moves: it went back and forth by up to a pixel at every frame (now in the window, `getShownTimeline()`). The
+  piano roll's hints, the device-drop outline and the lanes' auto-scroll margins took the part's own bounds too. A lane
+  without points drew its dashes from wherever a paint began, so they stood still while the grid glided past, and went
+  solid where the playhead had repainted them (now from the song's pixels). A recording's waveform was spread over its
+  exact beats but drawn in whole columns, so its peaks hopped between columns at every frame, and its end sat in a column
+  of its own, from on the playhead's line to a pixel short of it (now over its columns' beats, its end between pixels on
+  the line). The rubber band's anchor, the audio clip editor's hits and warp markers and the ruler's loop rounded from the
+  view, or not at all (now in their beats' columns).
+- *A view that started between pixels.* Dragging past an edge, a trackpad, turning pages, zooming and the overview left
+  the view's start between pixels, and then every line and edge took the column its own place rounded to: lines' spacing
+  and clips' widths changed by a pixel as they scrolled, each width change dropping a clip's picture. Every view now
+  starts on the whole pixel of the song nearest the beat it is given (`TimelineEditor::setViewStart()`), and drags past an
+  edge and the wheel keep the rest of a pixel for their next move.
+- *Drawn from what is being repainted.* The grid's step and the ruler's were chosen where each paint began, so a part
+  repainted alone (under the playhead) could take another; a lane's value was read in its paint, so a part repainted
+  alone kept the timer from seeing it change, and the line showed the new value only where the playhead had passed.
+- *Frames that move what needn't.* A press anywhere in an editor (a track's mute, a piano key) stopped following and
+  stepped the song to a whole pixel and back; now only a press on the time line holds it, as it is. Stopping drops the part
+  of a pixel to the nearer whole one. The piano roll followed the song's position rather than the playhead it shows while a
+  linked clip plays, and a track without clips moved bar 1 to the playhead at any change to the song. The overview's time
+  line grew at every frame once the view passed the content's end, redrawing its picture each time, its marks creeping
+  (now in steps of 16 bars), and its thumb went soft and sharp as it slid (now on whole pixels). A clip dragged past an
+  edge could show for a frame where it was before the drag moved it, a scroll's step from the pointer: the scroll laid
+  the clips out before the edit, which the playlist hears of a message later (now it catches up before a frame is
+  painted, `TimelineEditor::frameComing()`). Also found and fixed:
+  frozen clips' stripes reached into the line between clips, a section's name field stayed put as the view moved, a
+  files' drop line only moved with the mouse, the piano roll read every track's notes at every frame, and track headers
+  made the playlist repaint under them at each tick of their level bar.
+
+A test file guards the whole class, frames painted as the window paints them (`tests/ScrollingFrameTests.cpp`): nothing
+beside the time line changes at any part of a pixel; frames a whole number of pixels apart at the same part show
+everything on the time line moved by exactly that much, in both editors, over a song with something of everything they
+draw (the grid, notes, ghosts, velocities, clips, automation with and without points, a section, chords, tempo changes,
+the ruler); and tags cut by the view's edges stay on the same pixels. With the fixes they guard taken out, they fail: the
+headers' and the keys' last columns, the playlist's dashed line (376 to 582 pixels a frame), and the tags (15 to 36);
+a recording's columns and a dragged clip's frame are checked in `tests/PlaylistTests.cpp`, each failing without its fix (the
+dragged clip at x = -9, where the song had it at 783). Three more,
+known bugs 15 to 17 for a few hours, were fixed the same day, each with a test: a drag past an edge scrolled faster while
+the mouse moved, each report counting as a frame (now timed by the events' own times, `autoScroll()`); an audio clip that
+doesn't follow the tempo was drawn as if the song's tempo held across its changes (now split at the tempo's changes, and
+every 8 pixels where it ramps, `src/app/ClipWaveforms.cpp`); and at 125 to 175 % display scaling notes' edges landed between
+the screen's pixels in every other view (now the view steps by the fewest of the editor's pixels that are whole screen
+pixels, `TimelineEditor::getViewStep()`: two at 150 %). Left for later: a waveform's mask is drawn again at each whole pixel
+while a long clip crosses the view's edge, and a knob turned while playing repaints every clip.
+
+The benchmark of a song scrolling continuously (`windows-profile`, two runs): a frame's paint 4.98 / 5.87 and 5.03 / 5.80 ms
+(mean / 95th percentile), where the runs above gave 5.13 / 6.08 and 5.44 / 6.92 ms, with 29 of the 34 clips kept as
+pictures, as before: no slower.
+
 ## 17. The sampler and the FM synth (2026-11-07)
 
 Roadmap steps 4.6 and 4.7 added two instruments. This is what they cost, from "Benchmark: each device's CPU, latency and

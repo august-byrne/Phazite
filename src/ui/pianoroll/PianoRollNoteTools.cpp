@@ -497,9 +497,10 @@ void PianoRoll::NoteGrid::mouseDrag (const juce::MouseEvent& e)
         beginDrag (e);
     }
 
-    // Past an edge, the grid scrolls along, and the drag goes on from what is under the pointer then.
+    // Past an edge of what shows of the grid (its window, a pixel narrower), it scrolls along, and the drag goes on from what is
+    // under the pointer then.
     if (const auto directions = gesture->getAutoScrollDirections())
-        roll.autoScroll (e.getPosition(), getLocalBounds(), *directions);
+        roll.autoScroll (e, roll.getTimelinePartArea (*this).withZeroOrigin(), *directions);
 
     switch (gesture->kind)
     {
