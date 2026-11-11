@@ -1242,6 +1242,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SelectionTests.cpp
         tests/SettingsTests.cpp
         tests/ShortcutTests.cpp
+        tests/SidechainPresetTests.cpp
         tests/SidechainTests.cpp
         tests/SongTextTests.cpp
         tests/SoundKeyTests.cpp
@@ -1352,8 +1353,9 @@ if(PHAZITE_BUILD_TESTS)
     list(JOIN _phazite_test_patterns "," _phazite_test_patterns)
     add_test(NAME OtherTestFiles COMMAND phazite_tests "--source-file-exclude=${_phazite_test_patterns}" --duration=true)
 
-    # A test file that hangs fails after 10 minutes (the slowest takes about 80 s in CI's slowest builds) rather than
-    # holding CI until its job's limit; what it printed (each test's duration as it ends, --duration) names the last test
+    # A test file that hangs fails after 10 minutes rather than holding CI until its job's limit (the slowest,
+    # FactoryPresetTests, takes about 4 minutes in a local Debug build and longer in linux-asan: a file that nears the limit
+    # is split, as SidechainPresetTests was); what it printed (each test's duration as it ends, --duration) names the last test
     # that ended, and the file's next one hung.
     set_tests_properties(${_phazite_test_names} OtherTestFiles PROPERTIES TIMEOUT 600)
 endif()

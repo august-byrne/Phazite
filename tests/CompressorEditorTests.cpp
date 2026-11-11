@@ -401,15 +401,16 @@ TEST_CASE ("Ducking, the compressor's key is picked over its cuts and Listen: a 
     CHECK (phazite::test::findMenuItem (menu, { "Keys" }) != nullptr);
     CHECK (phazite::test::findMenuItem (menu, { "Bass" }) == nullptr);
 
+    // A click opens it. The kick is then chosen as its item runs: keys reach a menu differently in each system's test window
+    // (in CI's sanitizer builds on Linux the menu hadn't taken them yet).
     phazite::test::Mouse mouse (*picker);
     mouse.click (picker->getLocalBounds().getCentre());
     REQUIRE (findMenuWindow (window) != nullptr);
-    window.pressKey (juce::KeyPress (juce::KeyPress::downKey));
-    window.pressKey (juce::KeyPress (juce::KeyPress::downKey));
-    window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
-    window.releaseKeys();
+    juce::PopupMenu::dismissAllActiveMenus();
     phazite::test::dispatchPendingMessages();
     CHECK (findMenuWindow (window) == nullptr);
+    REQUIRE (phazite::test::runMenuItem (picker->getMenu(), { "Kick" }));
+    phazite::test::dispatchPendingMessages();
 
     // It listens to the kick, set up to duck as it was still as it was made but for its mode, all one undo step; the picker
     // and the history name the kick.

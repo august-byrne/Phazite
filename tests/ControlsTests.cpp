@@ -577,6 +577,11 @@ TEST_CASE ("An overlay scroll bar shows while the pointer is over its editor, an
 
     phazite::test::TestWindow window (editor, 200, 200);
 
+    // The pointer away from the editor to start with. Without a display (Linux's CI) JUCE knows only where the tests' pointer
+    // last was, which an earlier test may have left over this window; JUCE then moves it over the editor of its own accord
+    // a moment later, which showed the bar while the test waited for nothing to repaint.
+    phazite::test::Mouse (editor).moveTo ({ -100, -100 });
+
     // Faded out until it is wanted, though its range was set (the editor scrolling itself doesn't show it), and then nothing
     // repaints.
     const auto rests = [&window]
