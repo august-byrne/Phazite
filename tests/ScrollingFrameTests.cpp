@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The playlist and the piano roll frame by frame while they follow the playhead, painted as the screen shows them (through
-// Direct2D on Windows): nothing beside the time line changes, what the time line shows moves exactly as far as the song
-// played, and what stays in view stays put on the screen's pixels. Each of these broke as the owner watched the song play
-// (docs/performance-audit.md, section 16).
+// The playlist and the piano roll frame by frame while they follow the playhead, painted as the screen shows them, by each
+// of JUCE's renderers that Phazite's windows paint with (Direct2D on Windows, the software renderer on Linux): nothing
+// beside the time line changes, what the time line shows moves exactly as far as the song played, and what stays in view
+// stays put on the screen's pixels. Each of these broke as the owner watched the song play (docs/performance-audit.md,
+// section 16).
 #include "UiTestHelpers.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
@@ -36,9 +37,35 @@ phazite::BeatPosition beats (double b)
 // exactly where the renderer's own rounding doesn't (docs/performance-audit.md, section 16, "The rain that blinked").
 constexpr std::array<double, 6> parts { 0.137, 0.462, 0.731, 0.918, 0.283, 0.594 };
 
-// Where two frames differ in an area, by more than the rounding of a channel: how many pixels, and the first. Each pixel of
-// the second is compared with the one so many columns right of it in the first (as far as what it shows moved left), but in
-// the columns skipped, in either frame (the playhead's, which stays on its column).
+// Each test runs once for each renderer, each frame painted by it: the platform's own (Direct2D on Windows) and JUCE's
+// software renderer, which Linux's windows paint with. They round edges and curves each their own way.
+const juce::ImageType& eachRenderer()
+{
+    static const juce::NativeImageType native;
+    static const juce::SoftwareImageType software;
+    const juce::ImageType* renderer = &native;
+
+    // Both reached at each run, so that doctest finds them both: it enters one a run.
+    SUBCASE ("The platform's renderer")
+    {
+        renderer = &native;
+    }
+
+    SUBCASE ("The software renderer")
+    {
+        renderer = &software;
+    }
+
+    return *renderer;
+}
+
+// Where two frames differ in an area: how many pixels, and the first. Each pixel of the second is compared with the one so
+// many columns right of it in the first (as far as what it shows moved left), but in the columns skipped, in either frame
+// (the playhead's, which stays on its column). Unmoved, a pixel may differ by the rounding of a channel; moved, by a tenth of
+// a channel's range: a curve (a note's rounded corner, a velocity's ball) drawn at another place on the screen is cut into
+// straight pieces there a little differently by the software renderer, which works that out in floating point where the
+// curve is (juce::PathFlatteningIterator), so that its edge pixels came out up to 19 levels apart (Linux CI, 2026-11-11).
+// What these tests guard against moves whole edges and lines by a pixel or more, which changes pixels by far more.
 struct Difference
 {
     int pixels = 0;
@@ -48,7 +75,8 @@ struct Difference
 Difference compare (const juce::Image& before, const juce::Image& after, juce::Rectangle<int> area, int moved = 0,
                     juce::Range<int> skipped = {})
 {
-    const auto near = [] (juce::uint8 x, juce::uint8 y) { return std::abs ((int) x - (int) y) <= 2; };
+    const auto tolerance = moved == 0 ? 2 : 25;
+    const auto near = [tolerance] (juce::uint8 x, juce::uint8 y) { return std::abs ((int) x - (int) y) <= tolerance; };
     const juce::Image::BitmapData pixelsBefore (before, juce::Image::BitmapData::readOnly);
     const juce::Image::BitmapData pixelsAfter (after, juce::Image::BitmapData::readOnly);
     Difference difference;
@@ -159,7 +187,7 @@ void followContinuously (phazite::ui::TimelineEditor& editor)
 // An editor scrolling continuously as the song plays on past the middle of its view, a part of a pixel past a whole one at
 // each frame: everything left of its time line (track headers, piano keys, the corner over them) is the same in every frame.
 void checkBesideTheTimelineStaysStill (PlayingSong& song, phazite::ui::TimelineEditor& editor, phazite::test::TestWindow& window,
-                                       juce::Component& timelinePart)
+                                       juce::Component& timelinePart, const juce::ImageType& renderer)
 {
     followContinuously (editor);
     const auto timelineLeft = editor.getLocalPoint (&timelinePart, juce::Point<int>()).x;
@@ -176,7 +204,7 @@ void checkBesideTheTimelineStaysStill (PlayingSong& song, phazite::ui::TimelineE
         song.showFrameAt (editor, pixel + part);
         REQUIRE (editor.getView().start.inBeats() > 0.0); // the song scrolls under the playhead
         REQUIRE_FALSE (juce::exactlyEqual (editor.getSubPixel(), 0.0f));
-        const auto frame = window.paintEverything();
+        const auto frame = window.paintEverything (renderer);
 
         if (! first.has_value())
         {
@@ -195,7 +223,7 @@ void checkBesideTheTimelineStaysStill (PlayingSong& song, phazite::ui::TimelineE
 // left by as many pixels as the song went, but for the playhead's columns, which stay where they are. Anything placed where
 // it is in view rather than where it is in the song (rounded there, or sampled at the view's pixels) moves otherwise.
 void checkTimelineMovesWithTheSong (PlayingSong& song, phazite::ui::TimelineEditor& editor, phazite::test::TestWindow& window,
-                                    juce::Component& timelinePart)
+                                    juce::Component& timelinePart, const juce::ImageType& renderer)
 {
     followContinuously (editor);
     auto* overview = phazite::test::findComponentWithTitle (editor, "Overview");
@@ -231,7 +259,7 @@ void checkTimelineMovesWithTheSong (PlayingSong& song, phazite::ui::TimelineEdit
             at += step;
             song.showFrameAt (editor, at + part);
             REQUIRE (editor.getSubPixel() == doctest::Approx (part).epsilon (1.0e-4));
-            const auto frame = window.paintEverything();
+            const auto frame = window.paintEverything (renderer);
 
             if (before.has_value())
             {
@@ -289,18 +317,20 @@ TEST_CASE ("Scrolling continuously, the track headers and the corner over them s
     // The owner, 2026-11-11: the track headers' right edge flickered while the playlist followed the playhead. The lanes and
     // the time bar's parts, moved left by a part of a pixel, painted over the column beside them at every frame that moved them
     // that way, and not at the others.
+    const auto& renderer = eachRenderer();
     PlayingSong song;
     PlaylistOn shown (song);
-    checkBesideTheTimelineStaysStill (song, shown.playlist, shown.window, *shown.lanes);
+    checkBesideTheTimelineStaysStill (song, shown.playlist, shown.window, *shown.lanes, renderer);
 }
 
 TEST_CASE ("Scrolling continuously, the piano keys and the velocity lane's name stay still while the song glides under the playhead")
 {
     // As the playlist's headers: the notes and the velocities, moved left by a part of a pixel, painted over the column beside
     // them.
+    const auto& renderer = eachRenderer();
     PlayingSong song;
     PianoRollOn shown (song);
-    checkBesideTheTimelineStaysStill (song, shown.pianoRoll, shown.window, *shown.notes);
+    checkBesideTheTimelineStaysStill (song, shown.pianoRoll, shown.window, *shown.notes, renderer);
 }
 
 TEST_CASE ("Scrolling continuously, everything on the playlist's time line moves with the song, as far as it played")
@@ -308,18 +338,20 @@ TEST_CASE ("Scrolling continuously, everything on the playlist's time line moves
     // The owner, 2026-11-09 and 2026-11-10: every other grid line wiggled and clips' edges flickered, rounded where they were in
     // view; an automation lane's line wobbled, worked out at the view's pixels; and a lane's dashed line stood still, its dashes
     // started where each paint began, while the grid glided past it (2026-11-11).
+    const auto& renderer = eachRenderer();
     PlayingSong song;
     song.fill();
     PlaylistOn shown (song);
-    checkTimelineMovesWithTheSong (song, shown.playlist, shown.window, *shown.lanes);
+    checkTimelineMovesWithTheSong (song, shown.playlist, shown.window, *shown.lanes, renderer);
 }
 
 TEST_CASE ("Scrolling continuously, everything on the piano roll's time line moves with the song, as far as it played")
 {
+    const auto& renderer = eachRenderer();
     PlayingSong song;
     song.fill();
     PianoRollOn shown (song);
-    checkTimelineMovesWithTheSong (song, shown.pianoRoll, shown.window, *shown.notes);
+    checkTimelineMovesWithTheSong (song, shown.pianoRoll, shown.window, *shown.notes, renderer);
 }
 
 TEST_CASE ("Scrolling continuously, the tags of clips the view's edges cut stay put on the screen while the clips glide under them")
@@ -327,6 +359,7 @@ TEST_CASE ("Scrolling continuously, the tags of clips the view's edges cut stay 
     // A clip's name, and an alias's mark, stay in view while the view's edge cuts the clip, as FL Studio keeps a clip's label
     // on screen (ClipComponent::paintTags()): kept at the lanes' own edges, which scrolling continuously moves by parts of a
     // pixel, they went back and forth by up to a pixel at every frame.
+    const auto& renderer = eachRenderer();
     PlayingSong song;
     auto& s = *song.song;
 
@@ -377,7 +410,7 @@ TEST_CASE ("Scrolling continuously, the tags of clips the view's edges cut stay 
             mark = { lanesArea.getRight() - margin - marksWidth + inside, tagTop, marksWidth - 2 * inside, tagHeight };
         }
 
-        const auto frame = shown.window.paintEverything();
+        const auto frame = shown.window.paintEverything (renderer);
 
         if (! first.has_value())
         {

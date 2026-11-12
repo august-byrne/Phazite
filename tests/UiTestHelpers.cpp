@@ -251,9 +251,17 @@ void TestWindow::releaseKeys()
         peer->handleKeyUpOrDown (false);
 }
 
-juce::Image TestWindow::paintEverything()
+juce::Image TestWindow::paintEverything (const juce::ImageType& renderer)
 {
-    return createComponentSnapshot (getLocalBounds());
+    return createComponentSnapshot (getLocalBounds(), true, 1.0f, renderer);
+}
+
+void TestWindow::paint (juce::Graphics& g)
+{
+    // All of it, as JUCE asks of an opaque component: its snapshot is made without clearing it first
+    // (Component::createComponentSnapshot()), so what the content leaves unpainted, a rounded corner's pixels, would be
+    // whatever that memory held, in a release build often the last picture's (Linux CI, 2026-11-11).
+    g.fillAll (juce::Colours::black);
 }
 
 juce::RectangleList<int> TestWindow::takeRepaintedArea()

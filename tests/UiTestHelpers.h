@@ -62,8 +62,11 @@ public:
     void pressKey (const juce::KeyPress&);
     void releaseKeys();
 
-    // Paints the window into an image, as the screen would.
-    juce::Image paintEverything();
+    // Paints the window into an image, as the screen would: by the platform's renderer (Direct2D on Windows), or by another,
+    // such as JUCE's software renderer, which Linux's windows paint with.
+    juce::Image paintEverything (const juce::ImageType& renderer = juce::NativeImageType());
+
+    void paint (juce::Graphics&) override; // a background where the content paints nothing
 
     // What the window was asked to repaint since the last call (or since it opened), in its own coordinates: where
     // components called repaint(), or moved.

@@ -904,7 +904,10 @@ draw (the grid, notes, ghosts, velocities, clips, automation with and without po
 the ruler); and tags cut by the view's edges stay on the same pixels. With the fixes they guard taken out, they fail: the
 headers' and the keys' last columns, the playlist's dashed line (376 to 582 pixels a frame), and the tags (15 to 36);
 a recording's columns and a dragged clip's frame are checked in `tests/PlaylistTests.cpp`, each failing without its fix (the
-dragged clip at x = -9, where the song had it at 783). Three more,
+dragged clip at x = -9, where the song had it at 783). The frames are painted by both renderers Phazite's windows paint with,
+Direct2D and the software renderer that Linux's use, since Linux CI found the software renderer cutting a curve (a note's
+rounded corner) into straight pieces a little differently at another place on the screen: frames moved by whole pixels may
+differ there by a tenth of a channel, where unmoved ones may differ only by its rounding. Three more,
 known bugs 15 to 17 for a few hours, were fixed the same day, each with a test: a drag past an edge scrolled faster while
 the mouse moved, each report counting as a frame (now timed by the events' own times, `autoScroll()`); an audio clip that
 doesn't follow the tempo was drawn as if the song's tempo held across its changes (now split at the tempo's changes, and
