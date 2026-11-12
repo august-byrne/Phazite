@@ -253,7 +253,7 @@ TEST_CASE ("An old version's bounce is its song alone, rendered in the backgroun
     }
 }
 
-TEST_CASE ("The song plays in real time while an old version renders in the background, no block late")
+TEST_CASE ("The song plays in real time while an old version renders in the background, no block held up")
 {
     TestSong s;
     TemporaryFolder sounds;
@@ -263,11 +263,12 @@ TEST_CASE ("The song plays in real time while an old version renders in the back
     s.setVolume (track, -6.0f);
     keepVersion (s.context, "New");
 
-    const RealTimePlayback playback;
+    RealTimePlayback playback;
     auto& engine = phazite::getSession (s.context)->getEngine();
     phazite::playOrStop (*phazite::findSong (s.context));
     RealTimePlayback::wait (300);
     engine.takeBlockTimes(); // from here on
+    playback.takeLongestCall();
 
     REQUIRE (phazite::startBackgroundBounce (s.context, old));
 
@@ -275,9 +276,16 @@ TEST_CASE ("The song plays in real time while an old version renders in the back
     // it plays (CI's windows-release did, 2026-11-06).
     const auto done = dispatchMessagesUntil ([&s, &old] { return hasBounceOf (s.context, old); }, 1500);
     const auto times = engine.takeBlockTimes();
-    INFO ("longest gap " << times.longestGap * 1000.0 << " ms, longest block " << times.longestBlock * 1000.0 << " ms");
+    const auto longestCall = playback.takeLongestCall();
+    INFO ("longest call " << longestCall * 1000.0 << " ms, longest block " << times.longestBlock * 1000.0 << " ms, longest gap "
+                          << times.longestGap * 1000.0 << " ms, " << times.late << " late");
     CHECK ((done || phazite::getBounceProgress (s.context, old).has_value())); // rendering all the while, or done
-    CHECK (times.late == 0);
+
+    // The render held no block up: each of the device's calls played its block, with whatever it waited on, in less than a
+    // block's length. A call that came late was the machine's: CI's windows-debug, running four tests at once, kept the
+    // device's thread from a core for 33 ms while no block took a millisecond (2026-11-12), counted as late blocks.
+    CHECK (times.longestBlock > 0.0); // blocks played meanwhile
+    CHECK (longestCall < times.blockLength);
     phazite::stopAndReturn (*phazite::findSong (s.context));
     REQUIRE (phazite::deleteBounce (s.context, old)); // stops it
 }

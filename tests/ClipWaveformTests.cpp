@@ -128,16 +128,21 @@ TEST_CASE ("A clip that doesn't follow the tempo draws its sound where it plays 
         return image;
     };
 
-    // The column where the clip plays the burst's middle, as the model places it.
+    // The columns where the clip plays the burst's middle and the last of it, as the model places them.
     const auto range = phazite::getClipRange (song, clips[0]);
-    auto expected = -1;
+    const auto columnPlaying = [&] (double fileSeconds)
+    {
+        for (int x = 0; x < width; ++x)
+            if (const auto beat = range.getStart() + phazite::BeatDuration::fromBeats (range.getLength().inBeats() * (x + 0.5) / width);
+                phazite::getFileTimeAt (song, clips[0], beat) >= fileSeconds)
+                return x;
 
-    for (int x = 0; x < width && expected < 0; ++x)
-        if (const auto beat = range.getStart() + phazite::BeatDuration::fromBeats (range.getLength().inBeats() * (x + 0.5) / width);
-            phazite::getFileTimeAt (song, clips[0], beat) >= 1.5)
-            expected = x;
+        return -1;
+    };
 
+    const auto expected = columnPlaying (1.5), last = columnPlaying (1.55) - 1;
     REQUIRE (expected > 0);
+    REQUIRE (last > expected);
 
     // Where it draws the burst: the middle of the columns it lights more than a few pixels tall.
     const auto burstAt = [] (const juce::Image& image)
@@ -154,8 +159,10 @@ TEST_CASE ("A clip that doesn't follow the tempo draws its sound where it plays 
         return total > 0.0 ? weighed / total : -1.0;
     };
 
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return burstAt (paintAll()) >= 0.0; }, 10000));
-    phazite::test::dispatchPendingMessages(); // every level loaded
+    // JUCE's thumbnail reads the file's levels in pieces from its start, here a second and a half of it at a time, and each
+    // is drawn as it comes: the burst straddles the first two, so its start can show before its end (CI's windows-debug
+    // measured it half drawn, 2026-11-12). Once the column that plays the last of it lights, all of it is drawn.
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return countLit (paintAll(), last, last + 1) > height / 4; }, 10000));
     CAPTURE (expected);
     CHECK (std::abs (burstAt (paintAll()) - (expected + 0.5)) <= 2.0);
 

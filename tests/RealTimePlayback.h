@@ -7,17 +7,20 @@
 #include "TestAudioDevice.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "devices/core/AudioThreads.h"
 #include "model/engine/EngineContext.h"
 
 #include <atomic>
 #include <chrono>
+#include <functional>
+#include <memory>
 #include <thread>
 
 namespace phazite::test
 {
-// Plays through the tests' audio device for as long as it lives, on a thread that acts as the audio thread and processes a
-// block every block's length, so that what is played or moved meanwhile is recorded as the app records it. Its two inputs
-// are open, so arming a track to record needn't open them again.
+// Plays through the tests' audio device for as long as it lives, on a thread that acts as the audio thread, at an audio
+// device's priority, and processes a block every block's length, so that what is played or moved meanwhile is recorded as
+// the app records it. Its two inputs are open, so arming a track to record needn't open them again.
 class RealTimePlayback
 {
 public:
@@ -38,8 +41,8 @@ public:
         REQUIRE (device != nullptr);
         wait (settleMilliseconds); // the song for the device's rate
 
-        audioThread = std::thread (
-            [this, input]
+        audioThread = std::make_unique<AudioThread> (
+            [this, input] (const juce::Thread& thread)
             {
                 juce::AudioBuffer<float> buffer (2, blockSize);
                 const auto blockDuration = std::chrono::duration_cast<std::chrono::steady_clock::duration> (
@@ -47,14 +50,19 @@ public:
                 auto nextBlock = std::chrono::steady_clock::now();
                 buffer.clear(); // what comes in first
 
-                while (! stopping.load())
+                while (! thread.threadShouldExit())
                 {
                     nextBlock += blockDuration;
 
                     if (input == Input::silence)
                         buffer.clear(); // otherwise what it played last comes back in
 
+                    const auto called = std::chrono::steady_clock::now();
                     device->process (buffer);
+                    const auto took = (std::chrono::steady_clock::now() - called).count();
+
+                    if (took > longestCall.load (std::memory_order_relaxed))
+                        longestCall.store (took, std::memory_order_relaxed);
 
                     if (capturing.load (std::memory_order_acquire))
                     {
@@ -74,9 +82,16 @@ public:
 
     ~RealTimePlayback()
     {
-        stopping = true;
-        audioThread.join();
+        audioThread = nullptr;
         TestAudioDeviceType::close (getEngineContext().getAudioDeviceManager()); // so later tests start without it
+    }
+
+    // The longest the device's call took to play a block since this was last asked, in seconds: the engine's work, and
+    // whatever the call waited on (a lock another thread held). Message thread.
+    double takeLongestCall() noexcept
+    {
+        const std::chrono::steady_clock::duration longest (longestCall.exchange (0, std::memory_order_relaxed));
+        return std::chrono::duration<double> (longest).count();
     }
 
     // Lets some time pass on the message thread, which delivers its messages and runs its timers meanwhile.
@@ -111,10 +126,40 @@ private:
     static constexpr int blockSize = 256;
     static constexpr int settleMilliseconds = 200;
 
+    // The device's thread, at the priority Phazite's own audio threads have (devices/core/AudioThreads.h), as an audio
+    // device's own is: at the normal priority, a busy machine's other programs keep it from a core for tens of
+    // milliseconds.
+    class AudioThread final : public juce::Thread
+    {
+    public:
+        explicit AudioThread (std::function<void (const juce::Thread&)> body)
+            : juce::Thread ("Phazite test device"),
+              play (std::move (body))
+        {
+            devices::startAudioThread (*this);
+        }
+
+        ~AudioThread() override
+        {
+            signalThreadShouldExit();
+            stopThread (-1); // a block's length at most
+        }
+
+    private:
+        std::function<void (const juce::Thread&)> play;
+
+        void run() override
+        {
+            const devices::ProAudioTask proAudio;
+            play (*this);
+        }
+    };
+
     juce::AudioBuffer<float> captured; // made at once, so the audio thread never allocates
     TestAudioDevice* device;
     std::atomic<int> capturedSamples { 0 };
-    std::atomic<bool> capturing { false }, stopping { false };
-    std::thread audioThread;
+    std::atomic<bool> capturing { false };
+    std::atomic<std::chrono::steady_clock::rep> longestCall { 0 };
+    std::unique_ptr<AudioThread> audioThread;
 };
 } // namespace phazite::test
