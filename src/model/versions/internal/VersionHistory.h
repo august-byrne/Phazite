@@ -157,6 +157,10 @@ public:
     juce::String bounceCompared;
     bool hearingBounce = false;
 
+    // A/B's B waiting for its bounce, rendering in the background, to be heard as soon as it is: none while none waits. An
+    // edit stops waiting. And why the bounce it waited for failed, until the next press or edit.
+    juce::String hearWhenBounced, compareProblem;
+
     //==============================================================================
     // Branches (docs/versions.md: Branches). One made from a version, or from the current branch's last version (none), named
     // "idea-2" and on, in the next color; and made the current one, the song going on there, if asked: its id, or none if it
@@ -176,6 +180,18 @@ public:
     bool switchTo (const juce::String& branchID);
     bool renameBranch (const juce::String& branchID, const juce::String& name);
     juce::String selectedBranch; // the one the Versions view's branch menu picked, which version.switchBranch switches to
+
+    // Checkout (Detached), as VS Code's graph names git switch --detach (docs/versions.md: Checking out a commit): the song
+    // made a commit's in place, as a switch makes it a branch's, the song as it was kept on the branch it leaves, to come back
+    // to. The song is on no branch then, but this computer's record of the checkout (BranchRecord::detachedFrom), the current
+    // one, so that the project opens again where it was left; other computers leave it out. Nothing is committed or merged
+    // while detached: a branch made from the song (makeBranch() from none) takes what changed there. Going back to a branch,
+    // the one it came from (backFromDetached()) or another (switchTo()), keeps what changed in Local History first, and the
+    // record of the checkout goes. Checking out another commit while detached goes on to it alike. False if it can't be.
+    bool checkout (const juce::String& versionID);
+    bool backFromDetached();
+    bool isDetached() const;
+    juce::String getDetachedFrom() const; // the branch's id, none while on a branch
 
     // Delete Branch (git branch -D): a branch but the current one, and the song left on it, gone; its commits that no other
     // branch holds go from the graph and stay in the store, where Verify History finds them and Recover Lost Commits brings
@@ -335,8 +351,10 @@ private:
     void checked (int generation, Check);
 
     // Leaving the current branch for another: the song as it is now kept on it, and the other's as it was left there (or as
-    // its last version had it), to make the song's: invalid if it can't be.
+    // its last version had it), to make the song's: invalid if it can't be. Leaving a checkout, what changed goes into Local
+    // History, and the record of the checkout goes, its id kept for the next.
     juce::ValueTree leaveFor (const juce::String& branchID);
+    juce::String checkoutRecord; // the id of this computer's last record of a checkout, made again for the next
     void setBaseline (juce::ValueTree song, PluginParameterValues, ReportCounts);
 
     void markChanged (const juce::ValueTree&, const juce::Identifier& property);

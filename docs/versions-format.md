@@ -171,6 +171,11 @@ reader keeps the properties it doesn't know and writes them back. The computers'
 
 A deleted branch's commits that no other branch holds leave the graph and stay in the packs, as commits no branch holds.
 
+**A commit checked out on its own** (Phazite's Checkout (Detached), git's detached `HEAD`) is a record of the same kind, of
+no `name`, whose `detachedFrom` is the id of the branch the song came from, and whose `head` is the commit checked out;
+`current` names it while the song is there. It is that computer's alone: a reader leaves out every other computer's
+record that has `detachedFrom`. Phazite writes it `deleted="1"` once the song goes back to a branch.
+
 **A commit's message, edited** (Phazite's Edit Commit Message...): a commit's record never changes, so each computer keeps
 the messages it edited in `messages/<computer>.xml`, a `MESSAGES` element with a `MESSAGE` for each commit: its id
 (`commit`), its `name` and `note` as they are now (either empty: a commit without a name is named by its `summary`), and
@@ -183,12 +188,12 @@ is the oldest.
 computer switched away from with a song of its own on it: the `branch` and the `song` (a song piece, view state
 included). `local/<computer>/logs/<branch>` is a line for each move of the branch's last commit on this computer, as
 git's reflog: when (milliseconds since 1970), the commit it was at (`-` for none), the one it went to (`-` for none), and
-why (`commit`, `merge`, `branch`, `recover`, `undo` for Undo Last Commit, `delete` for a branch deleted), separated by
-spaces. A last line without its line end was cut off and is left out.
+why (`commit`, `merge`, `branch`, `recover`, `undo` for Undo Last Commit, `delete` for a branch deleted, `checkout` for a
+commit checked out on its own), separated by spaces. A last line without its line end was cut off and is left out.
 
 `local/<computer>/history` is this computer's Local History, a line for each snapshot of the song, oldest first: when it
 was taken (milliseconds since 1970), the id of the branch the song was on, the song's piece (written as a branch's song
-left on it is, view state included), and why (`open`, `auto`, `restore`, `discard`, `merge`, `history`), separated by
+left on it is, view state included), and why (`open`, `auto`, `restore`, `discard`, `merge`, `history`, `checkout`), separated by
 spaces. Phazite writes the file whole, thinned: every snapshot of the last two hours, the newest of each hour for a day,
 the newest of each day for 30 days. A last line without its line end was cut off and is left out.
 

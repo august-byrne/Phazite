@@ -281,18 +281,21 @@ TEST_CASE ("The sidechain's menu lists None and every other track, greys one tha
         return items;
     };
 
+    // The drums' bus too, which mixes the kick.
     auto menu = phazite::ui::makeSidechainMenu (mix.context, compressor);
     auto items = itemsOf (menu);
-    REQUIRE (items.size() == 5);
+    REQUIRE (items.size() == 6);
     CHECK (items[0].text == juce::String ("None (its own sound)"));
     CHECK (items[0].isTicked);
-    CHECK (items[1].text == juce::String ("Kick"));
-    CHECK (items[2].text == juce::String ("Keys (its sound comes from Bass)"));
-    CHECK_FALSE (items[2].isEnabled);
-    CHECK (items[3].text == juce::String ("Reverb"));
+    CHECK (items[1].text == juce::String ("Drums"));
+    CHECK (items[1].isEnabled);
+    CHECK (items[2].text == juce::String ("Kick"));
+    CHECK (items[3].text == juce::String ("Keys (its sound comes from Bass)"));
+    CHECK_FALSE (items[3].isEnabled);
+    CHECK (items[4].text == juce::String ("Reverb"));
 
     // Kick: one step, the compressor ducking, and its slot in the mixer shows where it listens.
-    items[1].action();
+    items[2].action();
     CHECK (mix.describeUndo() == juce::String ("Undo Sidechain from Kick"));
     CHECK (phazite::getValueSetByHand (*mix.song, { mix.compressor, "mode" })
            == doctest::Approx ((float) phazite::devices::Compressor::Mode::duck)); // ducking, in its Duck mode
@@ -304,9 +307,10 @@ TEST_CASE ("The sidechain's menu lists None and every other track, greys one tha
     // Duck Under, from the track's menu: the keys can't (their sound comes from the bass); Kick adds a second compressor.
     auto duck = phazite::ui::makeDuckUnderMenu (mix.context, mix.bass);
     auto ducks = itemsOf (duck);
-    REQUIRE (ducks.size() == 4);
-    CHECK_FALSE (ducks[1].isEnabled);
-    ducks[0].action();
+    REQUIRE (ducks.size() == 5);
+    CHECK (ducks[0].text == juce::String ("Drums"));
+    CHECK_FALSE (ducks[2].isEnabled);
+    ducks[1].action();
     CHECK (mix.describeUndo() == juce::String ("Undo Duck Bass Under Kick"));
     CHECK (phazite::getEffects (mix.context, mix.bass).size() == 2);
 }

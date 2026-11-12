@@ -22,9 +22,9 @@ std::vector<TrackID> getTracksFedBy (const Song&, TrackID);
 // Whether a device has a sidechain to route a track into: not one in a container, which hears what passes through it.
 bool hasSidechain (const Song&, DeviceID);
 
-// The tracks a device's sidechain can listen to, in the song's order: every track with sound of its own (not a folder)
-// but the device's own and those whose sound comes from the device's track (through a bus, a send or another sidechain),
-// which would make a loop.
+// The tracks a device's sidechain can listen to, in the song's order: every track with sound of its own (a track, a return
+// or a bus, not a plain folder, which only scales its tracks' volumes) but the device's own and those whose sound comes from
+// the device's track (through a bus, a send or another sidechain), which would make a loop.
 std::vector<TrackID> getSidechainSources (const Song&, DeviceID);
 
 // The track a device's sidechain listens to, or none when it listens to the sound passing through it; and the same, with
@@ -39,10 +39,10 @@ SidechainChoice describeSidechainSource (const Song&, DeviceID);
 bool hearsSidechain (const Song&, DeviceID);
 bool switchesSidechain (const juce::ValueTree& values, const juce::Identifier& property);
 
-// Every track with sound of its own but one, in the song's order, with its colour, and why a device on that one couldn't
-// listen to it: its sound comes from that track, which would make a loop (getSidechainSources()). With none, every
-// track, as a device on the master hears them. describeSidechainChoices() gives them for a device's sidechain, if it has
-// one.
+// Every track but one, in the song's order, with its colour, and why a device on that one couldn't listen to it: its sound
+// comes from that track, which would make a loop (getSidechainSources()), or it is a plain folder, with no sound of its own.
+// With none, every track, as a device on the master hears them. describeSidechainChoices() gives them for a device's
+// sidechain, if it has one.
 std::vector<SidechainChoice> describeTracksToListenTo (const Song&, TrackID listener);
 std::vector<SidechainChoice> describeSidechainChoices (const Song&, DeviceID);
 
@@ -62,4 +62,15 @@ DeviceID duckUnder (Song&, TrackID ducked, TrackID key);
 // Points the sidechains that listen to these tracks, or to tracks inside them, back at the sound passing through each
 // device: for tracks about to be deleted. Joins the caller's undo step.
 void forgetSidechainSources (Song&, const std::vector<TrackID>& tracks);
+
+// The same for the sidechains that listen to a bus itself, as it becomes a plain folder, with no sound of its own
+// (Buses.h: makePlainFolder()), or as it goes, its tracks staying (ungroupFolder()). Joins the caller's undo step.
+void forgetSidechainsOfBus (Song&, TrackID bus);
+
+// Points the sidechains that a change of where sound goes has made into loops back at the sound passing through each
+// device: each that listens to a track whose sound now comes from the device's own, as a track moved into the bus it listens
+// to, or a send to the return it listens to, makes it. Phazite's engine can't play a loop, and the device's picker would go on
+// naming what it no longer hears (FL Studio refuses such a routing; deleting a track a sidechain listens to turns it off
+// alike). Joins the caller's undo step.
+void forgetSidechainLoops (Song&);
 } // namespace phazite

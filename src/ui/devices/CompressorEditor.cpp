@@ -39,8 +39,8 @@ namespace
     // What each mode does, as its tab's tooltip says.
     const std::vector<juce::String> modeTips {
         "Compress: turns its own sound down (or up) as its curve says, in its character's colour",
-        "Duck: turns the sound down under another track, its key (a kick, for the pump), by its threshold, depth, attack, hold "
-        "and release",
+        "Duck: turns the sound down while another track plays, the one its sidechain listens to (a kick, for sidechain "
+        "pumping), by its threshold, depth, attack, hold and release",
     };
 } // namespace
 
@@ -110,10 +110,11 @@ private:
 };
 
 //==============================================================================
-// What the compressor listens to while it ducks: its key, the track picked (given the project), and under it the key's cuts,
-// and Listen beside them: while it is on and the editor shows Duck's page, the compressor plays its key, through its cuts,
-// instead of the sound (Compressor::listenToKey(), which the refresh asks for again and again), to hear what makes it duck.
-// Hidden, or with the editor gone, the sound comes back within half a second.
+// What the compressor listens to while it ducks, under its part's title, Sidechain: the track picked (given the project), as
+// the multiband's Sidechain part shows its own, and under it the sidechain's cuts, and Listen beside them: while it is on and
+// the editor shows Duck's page, the compressor plays its sidechain, through its cuts, instead of the sound
+// (Compressor::listenToKey(), which the refresh asks for again and again), to hear what makes it duck. Hidden, or with the
+// editor gone, the sound comes back within half a second.
 class CompressorEditor::KeyPart : public juce::Component
 {
 public:
@@ -128,36 +129,26 @@ public:
         addAndMakeVisible (listen);
 
         if (picker != nullptr)
-        {
-            picker->setTitle ("Key");
-            label.setFont (juce::FontOptions (TextSize::small));
-            label.setAccessible (false); // the picker's title says it
-            label.setInterceptsMouseClicks (false, false);
-            setThemeColour (label, juce::Label::textColourId, &Palette::textMuted);
-            addAndMakeVisible (label);
             addAndMakeVisible (*picker);
-        }
     }
 
     int getPreferredWidth() const
     {
         const auto cuts = controls.getPreferredWidth() + Space::xs + listenWidth;
-        return picker != nullptr ? std::max (cuts, labelWidth + SidechainButton::minimumWidth) : cuts;
+        return picker != nullptr ? std::max (cuts, SidechainButton::minimumWidth) : cuts;
     }
 
     int getPreferredHeight() const { return (picker != nullptr ? controlHeight + Space::xs : 0) + controls.getPreferredHeight(); }
 
     void resized() override
     {
-        // The key along the top, then its cuts and Listen.
+        // The track picked along the top, then the cuts and Listen.
         auto area = getLocalBounds();
 
         if (picker != nullptr)
         {
-            auto row = area.removeFromTop (controlHeight);
+            picker->setBounds (area.removeFromTop (controlHeight));
             area.removeFromTop (Space::xs);
-            label.setBounds (row.removeFromLeft (labelWidth));
-            picker->setBounds (row);
         }
 
         controls.setBounds (area.removeFromLeft (controls.getPreferredWidth()));
@@ -170,8 +161,7 @@ public:
     juce::TextButton listen { "Listen" };
 
 private:
-    juce::Label label { {}, "Key" };
-    static constexpr int listenWidth = 64, labelWidth = 32;
+    static constexpr int listenWidth = 64;
 };
 
 //==============================================================================
@@ -225,7 +215,8 @@ CompressorEditor::CompressorEditor (const DeviceHandle& handle, ProjectContext* 
     const auto characterWidth = std::max (curveWidth, shownCharacters.getPreferredWidth());
 
     // Duck: the key over its cuts and Listen, beside the history over the knobs.
-    auto& cuts = makeControls ({ "keyLowCut", "keyHighCut" }, 2, ParameterControls::Size::compact, "Key", { "Low Cut", "High Cut" });
+    auto& cuts =
+        makeControls ({ "keyLowCut", "keyHighCut" }, 2, ParameterControls::Size::compact, sidechainLabel, { "Low Cut", "High Cut" });
     auto& shownKey =
         keep (std::make_unique<KeyPart> (cuts, context != nullptr ? std::make_unique<SidechainButton> (*context, id) : nullptr));
     keyPart = &shownKey;

@@ -73,6 +73,13 @@ public:
     void openVersion (const juce::String& versionID);
     int getHistoryRow (const juce::String& versionID) const;
     juce::TextEditor& getMessageField() noexcept;
+
+    // While a commit is checked out on its own (Checkout (Detached)): the bar under the branch that says so, and its two
+    // buttons, Back to the branch and Create Branch Here.
+    bool showsCheckout() const noexcept;
+    juce::Button& getBackButton() noexcept;
+    juce::Button& getBranchHereButton() noexcept;
+
     juce::Button& getSaveButton() noexcept { return saveButton; }
     juce::Button& getSaveMenuButton() noexcept { return saveMenuButton; }
     juce::Button& getDoneButton() noexcept { return doneButton; }
@@ -122,6 +129,7 @@ private:
     class LocalHistoryModel;
     class MessageField;
     class BranchButton;
+    class DetachedBar;
 
     CommandBridge& commands;
     ProjectContext& context;
@@ -130,6 +138,8 @@ private:
     ViewTitle title { "Source Control" }; // with the view's menu
     juce::Label emptyText, roomText;
     std::unique_ptr<BranchButton> branchButton;
+    std::unique_ptr<DetachedBar> detachedBar;
+    juce::String checkedOut; // the commit checked out on its own, none on a branch
     IconButton moreButton { "More Actions", Icon::moreActions };
     std::unique_ptr<MessageField> messageField;
     IconButton saveButton { "Commit", Icon::check }, saveMenuButton { "Commit's choices", Icon::expanded };

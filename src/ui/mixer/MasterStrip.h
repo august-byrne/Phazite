@@ -39,9 +39,9 @@ private:
     StripHeading effectsHeading { "Effects" };
     DeviceSlots effects;
     juce::Viewport deviceView;
-    LevelMeter meter { "Master level" };
     Fader volume { Fader::Direction::vertical, "Master volume", decibelsToFaderPosition (0.0f) };
-    FaderScale volumeScale { volume }; // the decibels along the fader, left of it
+    FaderScale volumeScale { volume };           // the decibels along the fader, left of it
+    LevelMeter meter { "Master level", volume }; // right of the fader, on its scale
     ParameterAttachment volumeAttachment { volume };
     juce::Label loudness;
     juce::TextButton resetButton { "Reset" };

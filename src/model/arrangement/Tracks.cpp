@@ -99,6 +99,9 @@ namespace
 
         oldParent.removeChild (state, undo);
         parent.addChild (state, index, undo);
+
+        // Into a bus that a sidechain on it listens to, say.
+        forgetSidechainLoops (song);
     }
 
     // The tracks that move, in the playlist's order: those given, but those inside a folder that moves, which go with it.
@@ -666,7 +669,8 @@ void ungroupFolder (Song& song, TrackID folder)
     if (! isFolderState (folderState))
         return;
 
-    // Its tracks go where it was, in their order, and it goes.
+    // Its tracks go where it was, in their order, and it goes, with the sidechains that listened to it.
+    forgetSidechainsOfBus (song, folder);
     auto parent = folderState.getParent();
     auto place = parent.indexOf (folderState) + 1;
 

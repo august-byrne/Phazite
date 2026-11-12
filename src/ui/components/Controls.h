@@ -281,11 +281,17 @@ private:
 // a line, and red above 0 dB, where the sound clips. It reads its source (model/mixer/LevelSource.h) at each tick of the
 // displays' ticker (DisplayTicker.h), on the message thread, never on the audio thread, and repaints only when what it
 // draws moves: a silent meter repaints nothing.
+//
+// Alone, it spreads -60 to +6 dB evenly along its length. Beside a volume fader, it shows each level where the fader's
+// thumb is at that level, along the fader's travel, so that the decibels beside the fader (FaderScale) read for both: a
+// sound at -12 dB lights the meter up to the scale's -12, wherever the fader is. (Each spread over its own length, the
+// meter's -12 dB stood beside the fader's 0 dB, so the owner read a limiter's -12 dB ceiling as 0 dB; 2026-11-12.)
 class LevelMeter : public juce::Component,
                    private DisplayTicker::Display
 {
 public:
     explicit LevelMeter (const juce::String& title);
+    LevelMeter (const juce::String& title, const Fader& besideFader); // a vertical fader that outlives it, laid out beside it
     ~LevelMeter() override;
 
     // What to show, as the model hands it out (an empty source for nothing). It follows what it measures.
@@ -298,6 +304,7 @@ private:
     static constexpr int numChannels = 2;
     static constexpr float minDb = -60.0f, maxDb = 6.0f;
 
+    const Fader* fader = nullptr; // beside it, or none
     LevelSource source;
     std::array<float, numChannels> levels, peaks;           // as they fall
     std::array<float, numChannels> shownLevels, shownPeaks; // as drawn

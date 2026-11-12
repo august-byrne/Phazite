@@ -75,11 +75,11 @@ juce::PopupMenu makeDuckUnderMenu (ProjectContext& context, TrackID ducked)
 
 //==============================================================================
 SidechainButton::SidechainButton (ProjectContext& c, DeviceID id)
-    : juce::Button ("Sidechain"),
+    : juce::Button (sidechainLabel),
       context (c),
       device (id)
 {
-    setTitle ("Sidechain");
+    setTitle (sidechainLabel);
     refresh();
 }
 
@@ -99,6 +99,11 @@ void SidechainButton::show (const SidechainChoice& newSource)
                 : listens   ? "Listens to " + source.name + " through its sidechain. Click to choose another track, or None"
                             : none + ". Click to choose a track for it to listen to through its sidechain instead");
     repaint();
+}
+
+int getSidechainLabelWidth()
+{
+    return (int) std::ceil (juce::GlyphArrangement::getStringWidth (juce::FontOptions (TextSize::small), sidechainLabel)) + Space::xs;
 }
 
 void SidechainButton::refresh()

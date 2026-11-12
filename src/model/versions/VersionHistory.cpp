@@ -286,7 +286,11 @@ void VersionHistory::followFolder()
 
 std::vector<BranchRecord> VersionHistory::getBranches() const
 {
-    return sortByFirstVersion (branches, versions);
+    // Not this computer's record of a commit checked out, which is no branch.
+    std::vector<BranchRecord> real;
+    std::copy_if (branches.begin(), branches.end(), std::back_inserter (real),
+                  [] (const auto& branch) { return branch.detachedFrom.isEmpty(); });
+    return sortByFirstVersion (real, versions);
 }
 
 const BranchRecord* VersionHistory::findCurrentBranch() const
@@ -523,6 +527,9 @@ bool VersionHistory::saveVersion (const juce::String& name, const juce::String& 
     if (saving)
         return refuse ("A commit is being made.");
 
+    if (isDetached())
+        return refuse ("The song is on no branch while a commit is checked out: create a branch here to commit what changed.");
+
     // The staged song; or, with nothing staged or a merge being made, the song as a save stores it, its plug-ins' own
     // settings included, and their knobs' values.
     const auto commitsStaged = ! merging.has_value() && ! getStagedChanges().empty();
@@ -653,6 +660,10 @@ void VersionHistory::saved (int number, bool ok, const VersionRecord& version, c
     merging.reset();         // its version finishes it
     comparedVersion.clear(); // the changes since the new version
     comparedSong = {};
+
+    // A/B hears the new commit as B from now on, unless another commit is being heard (getCompareVersion()).
+    if (! hearingBounce)
+        bounceCompared.clear();
 
     if (auto found = std::find_if (branches.begin(), branches.end(), [&branch] (const auto& b) { return b.id == branch.id; });
         found != branches.end())
@@ -1062,7 +1073,14 @@ void VersionHistory::edited()
 {
     editedSinceSnapshot = true; // Local History takes the song again in a while
 
-    // What is heard is what is shown: an edit is heard as it is made, in the song.
+    // What is heard is what is shown: an edit is heard as it is made, in the song, and A/B stops waiting to hear a commit.
+    if (hearWhenBounced.isNotEmpty() || compareProblem.isNotEmpty())
+    {
+        hearWhenBounced.clear();
+        compareProblem.clear();
+        changed();
+    }
+
     if (! hearingBounce)
         return;
 
@@ -1200,6 +1218,7 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
 
     const auto* current = findCurrentBranch();
     const auto head = fromVersion.isNotEmpty() ? fromVersion : current != nullptr ? current->head : juce::String();
+    const auto fromCheckout = makeCurrent && current != nullptr && current->detachedFrom.isNotEmpty() ? current->id : juce::String();
 
     if (findVersion (head) == nullptr)
         return {};
@@ -1232,6 +1251,21 @@ juce::String VersionHistory::makeBranch (const juce::String& fromVersion, bool m
 
     if (makeCurrent)
         currentBranch = branch.id; // the same last version: the changes since stay as they are
+
+    // Made from a commit checked out: the song goes on there, on a branch again, and the record of the checkout goes.
+    if (fromCheckout.isNotEmpty())
+    {
+        if (const auto left =
+                std::find_if (branches.begin(), branches.end(), [&fromCheckout] (const auto& b) { return b.id == fromCheckout; });
+            left != branches.end())
+        {
+            auto gone = *left;
+            gone.deleted = true;
+            store->writeBranch (gone);
+            branches.erase (left);
+            checkoutRecord = fromCheckout;
+        }
+    }
 
     tellNow();
     return branch.id;
@@ -1276,15 +1310,29 @@ juce::ValueTree VersionHistory::leaveFor (const juce::String& branchID)
     if (store == nullptr || ! hasRead || saving || found == branches.end() || current == branches.end() || branchID == currentBranch)
         return {};
 
-    // The song as it is now, its view state and unsaved changes too, its plug-ins' settings stored, on the branch it leaves.
-    song.storeDeviceStates();
-    const auto pieces = splitSong (song.getState().createCopy(), readPluginParameters());
-
-    if (! store->writeSong (pieces))
-        return {};
-
+    // The song as it is now, its view state and unsaved changes too, its plug-ins' settings stored, on the branch it leaves; or,
+    // leaving a commit checked out, what changed there into Local History, and the record of the checkout deleted.
+    const auto leavesCheckout = current->detachedFrom.isNotEmpty();
     auto left = *current;
-    left.working = pieces.song;
+
+    if (leavesCheckout)
+    {
+        if (hasChanges())
+            takeSnapshot ("checkout");
+
+        left.working = {};
+        left.deleted = true;
+    }
+    else
+    {
+        song.storeDeviceStates();
+        const auto pieces = splitSong (song.getState().createCopy(), readPluginParameters());
+
+        if (! store->writeSong (pieces))
+            return {};
+
+        left.working = pieces.song;
+    }
 
     // The other's, as it was left there, or as its last version had it.
     const auto* head = findVersion (found->head);
@@ -1302,12 +1350,117 @@ juce::ValueTree VersionHistory::leaveFor (const juce::String& branchID)
     if (! store->writeBranch (entered) || ! store->writeCurrentBranch (entered.id))
         return {};
 
-    *current = left;
     *found = entered;
     currentBranch = entered.id;
+
+    if (leavesCheckout)
+    {
+        checkoutRecord = left.id; // made again for the next checkout
+        branches.erase (std::find_if (branches.begin(), branches.end(), [&left] (const auto& branch) { return branch.id == left.id; }));
+    }
+    else
+    {
+        *std::find_if (branches.begin(), branches.end(), [&left] (const auto& branch) { return branch.id == left.id; }) = left;
+    }
+
     merging.reset();
     preview.reset();
     return other;
+}
+
+bool VersionHistory::isDetached() const
+{
+    return getDetachedFrom().isNotEmpty();
+}
+
+juce::String VersionHistory::getDetachedFrom() const
+{
+    const auto* current = findCurrentBranch();
+    return current != nullptr ? current->detachedFrom : juce::String();
+}
+
+bool VersionHistory::checkout (const juce::String& versionID)
+{
+    followFolder();
+    const auto current =
+        std::find_if (branches.begin(), branches.end(), [this] (const auto& branch) { return branch.id == currentBranch; });
+
+    if (store == nullptr || ! hasRead || saving || findVersion (versionID) == nullptr || current == branches.end())
+        return false;
+
+    // Checked out already: on to the other commit, in place, what changed here kept in Local History first.
+    if (current->detachedFrom.isNotEmpty())
+    {
+        const auto then = readSong (versionID);
+        auto moved = *current;
+        moved.head = versionID;
+        moved.changed = juce::Time::currentTimeMillis();
+
+        if (! then.isValid() || ! store->writeBranch (moved))
+            return false;
+
+        if (hasChanges())
+            takeSnapshot ("checkout");
+
+        store->logBranchMove (moved.id, current->head, versionID, "checkout");
+        *current = moved;
+        merging.reset();
+        preview.reset();
+        makeSongTheSame (song, then);
+        PluginParameterValues parameters;
+        auto baselineSong = readSong (versionID, &parameters);
+        setBaseline (std::move (baselineSong), std::move (parameters), song.getDeviceChangesOutsideHistory());
+        comparedVersion.clear();
+        comparedSong = {};
+        selectedChange.reset();
+
+        if (! hearingBounce)
+            bounceCompared.clear();
+
+        tellNow();
+        return true;
+    }
+
+    // A record of the checkout, from the branch the song is on (this computer's last one made again), switched to as a branch
+    // is: the branch's song kept there, the commit's made the song's.
+    BranchRecord record;
+    record.id = checkoutRecord.isNotEmpty() ? checkoutRecord : juce::Uuid().toString();
+    record.colour = current->colour;
+    record.head = versionID;
+    record.computer = getThisComputer();
+    record.changed = juce::Time::currentTimeMillis();
+    record.detachedFrom = currentBranch;
+
+    if (! store->writeBranch (record))
+        return false;
+
+    branches.push_back (record);
+
+    if (! switchTo (record.id))
+    {
+        // As it was: the record deleted again.
+        record.deleted = true;
+        store->writeBranch (record);
+        branches.erase (std::find_if (branches.begin(), branches.end(), [&record] (const auto& branch) { return branch.id == record.id; }));
+        checkoutRecord = record.id;
+        return false;
+    }
+
+    store->logBranchMove (record.id, {}, versionID, "checkout");
+    return true;
+}
+
+bool VersionHistory::backFromDetached()
+{
+    // To the branch it came from; or, if that went meanwhile (deleted on another computer), the first branch.
+    const auto from = getDetachedFrom();
+    const auto branchesNow = getBranches();
+
+    if (from.isEmpty() || branchesNow.empty())
+        return false;
+
+    const auto there = std::any_of (branchesNow.begin(), branchesNow.end(), [&from] (const auto& branch) { return branch.id == from; });
+    return switchTo (there ? from : branchesNow.front().id);
 }
 
 bool VersionHistory::switchTo (const juce::String& branchID)
@@ -1333,7 +1486,7 @@ bool VersionHistory::switchTo (const juce::String& branchID)
         mergesWaiting.erase (kept);
     }
 
-    // The other branch's song, in place; its changes since its last version from here on.
+    // The other branch's song, in place; its changes since its last version from here on, which A/B hears as B.
     makeSongTheSame (song, other);
     const auto* last = findLastVersion();
     PluginParameterValues parameters;
@@ -1342,6 +1495,10 @@ bool VersionHistory::switchTo (const juce::String& branchID)
     comparedVersion.clear();
     comparedSong = {};
     selectedChange.reset();
+
+    if (! hearingBounce)
+        bounceCompared.clear();
+
     tellNow();
     return true;
 }
@@ -1354,7 +1511,8 @@ bool VersionHistory::renameBranch (const juce::String& branchID, const juce::Str
     const auto taken = std::any_of (branches.begin(), branches.end(), [&branchID, &newName] (const auto& branch)
                                     { return branch.id != branchID && branch.name.equalsIgnoreCase (newName); });
 
-    if (store == nullptr || found == branches.end() || newName.isEmpty() || taken)
+    // Not a commit checked out, which is no branch: Create Branch Here names one.
+    if (store == nullptr || found == branches.end() || newName.isEmpty() || taken || found->detachedFrom.isNotEmpty())
         return false;
 
     auto renamed = *found;
@@ -1374,7 +1532,8 @@ bool VersionHistory::deleteBranch (const juce::String& branchID)
     followFolder();
     const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
 
-    if (store == nullptr || ! hasRead || saving || found == branches.end() || branchID == currentBranch)
+    if (store == nullptr || ! hasRead || saving || found == branches.end() || branchID == currentBranch || branchID == getDetachedFrom()
+        || found->detachedFrom.isNotEmpty())
         return false;
 
     // A merge of its line under way, or waiting on another branch for its commit, needs its commits.
@@ -1446,7 +1605,7 @@ bool VersionHistory::hasChangesLeftOn (const juce::String& branchID) const
 bool VersionHistory::canUndoLastCommit() const
 {
     const auto* last = findLastVersion();
-    return store != nullptr && hasRead && ! saving && ! merging.has_value() && ! preview.has_value() && last != nullptr
+    return store != nullptr && hasRead && ! saving && ! merging.has_value() && ! preview.has_value() && last != nullptr && ! isDetached()
            && last->parents.size() == 1 && findVersion (last->parents[0]) != nullptr;
 }
 
@@ -1805,11 +1964,13 @@ std::vector<BranchRecord> joinBranchRecords (const std::vector<BranchRecord>& re
                                              const std::map<juce::String, VersionRecord>& versions, const juce::String& computer)
 {
     std::map<juce::String, std::vector<const BranchRecord*>> byBranch;
-
-    for (const auto& record : records)
-        byBranch[record.id].push_back (&record);
-
     const auto legalComputer = juce::File::createLegalFileName (computer);
+
+    // A commit checked out on its own is that computer's alone.
+    for (const auto& record : records)
+        if (record.detachedFrom.isEmpty() || record.computer == legalComputer)
+            byBranch[record.id].push_back (&record);
+
     std::vector<BranchRecord> joined;
 
     for (const auto& [id, group] : byBranch)

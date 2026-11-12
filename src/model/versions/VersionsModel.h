@@ -38,6 +38,10 @@ struct BranchInfo
     juce::String id, name;
     juce::Colour colour;
     juce::String head; // its last version's id; none before its first
+
+    // The current one only: a commit checked out on its own (Checkout (Detached)), the song on no branch, named as the commit
+    // is; its head that commit.
+    bool detached = false;
 };
 
 // A line of the changes, as git lists a file's: a track (a folder or a return too), the master, or the song's own; in the
@@ -208,9 +212,27 @@ bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProj
 bool canSwitchBranch (const ProjectContext&);
 bool canMakeBranch (const ProjectContext&);
 
+// Checkout (Detached) (version.checkout, a commit's in the graph, which a double-click runs too; git switch --detach, as VS
+// Code's graph names it; docs/versions.md: Checking out a commit): the song made a commit's in place, as a switch to a branch
+// makes it, to see and hear it whole as it was then; the branch's song kept on the branch as it is, to come back to. Meanwhile
+// the song is on no branch (getCurrentBranch() is detached): it plays and can change, but nothing is committed or merged;
+// Create Branch makes a branch here that takes what changed, and going back keeps what changed in Local History first. Back to
+// the branch (version.backToBranch, "Back to main") makes the song the branch's again, as it was left; checking out another
+// branch from the picker goes there alike. The project is saved after each, so that its file is the song, as after a switch.
+// Not undo steps: the undo history starts again, as a switch's does.
+bool canCheckout (const ProjectContext&, const juce::String& versionID);
+bool checkoutVersion (ProjectContext&, const juce::String& versionID, const SaveProjectThen&);
+bool isDetached (const ProjectContext&);
+bool canGoBackToBranch (const ProjectContext&);
+bool backToBranch (ProjectContext&, const SaveProjectThen&);
+juce::String describeBackToBranch (const ProjectContext&); // "Back to main"
+void checkoutSelectedVersion (ProjectContext&, const SaveProjectThen&);
+bool canCheckoutSelected (const ProjectContext&);
+
 // A branch named anew, as toBranchName() makes the name: false for an empty one, or one another branch has (in any case).
-// Not an undo step.
+// Not an undo step. And whether Rename Branch... can name the current one: the song is on a branch, not a commit checked out.
 bool renameBranch (ProjectContext&, const juce::String& branchID, const juce::String& name);
+bool canRenameBranch (const ProjectContext&);
 
 // Delete Branch... (version.deleteBranch, the branch picker's; git branch -D): a branch but the current one gone, and the
 // song left on it. Its commits that no other branch holds leave the graph and stay in the store, where Verify History finds
@@ -384,6 +406,19 @@ bool getBounceWithVersion (const ProjectContext&);
 bool hearVersion (ProjectContext&, const juce::String& versionID);
 juce::String getHeardVersion (const ProjectContext&); // none while the song itself is heard
 juce::String describeHearing (const ProjectContext&); // "Hearing: Verse 2" while a version is heard, for the transport bar
+
+// A/B (version.compare, the transport bar's A/B; docs/versions.md: Hearing a version), as a reference plug-in switches a mix
+// and its earlier version: a press hears B, a commit's bounce, in place of the song, A, at the same point and as loud; another,
+// the song again. B is the commit heard last (Hear It), else the one the song comes from: the current branch's last commit,
+// or the one checked out, so that the changes not committed yet are heard against it. A commit without a bounce is bounced
+// in the background first (startBackgroundBounce()), the song playing on, and heard as soon as it is; a press meanwhile, or
+// an edit, stops waiting for it. Nothing to compare while B is the song itself: the last commit with no changes since.
+juce::String getCompareVersion (const ProjectContext&); // B, none without a commit
+bool canCompare (const ProjectContext&);
+void toggleCompare (ProjectContext&);
+bool isWaitingToCompare (const ProjectContext&);        // B is being bounced to be heard
+juce::String getCompareProblem (const ProjectContext&); // why that bounce failed, until the next press or an edit
+juce::String describeCompare (const ProjectContext&);   // the A/B button's tooltip: what a press does now, or why it can't
 
 // Export as DAWproject... (step D1; model/project/internal/DawProject.h): the version the Versions view selects, or the song
 // as it is (Now), written as a DAWproject into the project's Renders folder ("<project> - <version>.dawproject"), in the host,

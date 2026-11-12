@@ -35,8 +35,9 @@ namespace
     }
 } // namespace
 
-ComputerKeyboard::ComputerKeyboard (std::function<void (const juce::MidiMessage&)> send)
-    : sendMessage (std::move (send))
+ComputerKeyboard::ComputerKeyboard (std::function<void (const juce::MidiMessage&)> send, std::function<bool (int)> keyReader)
+    : sendMessage (std::move (send)),
+      isKeyDown (keyReader != nullptr ? std::move (keyReader) : std::function<bool (int)> (wasKeyDown))
 {
     static_assert (std::string_view (noteKeys).size() == numNoteKeys);
     heldNotes.fill (-1);
@@ -73,24 +74,25 @@ void ComputerKeyboard::releaseAll()
     controlKeysDown.fill (false);
 }
 
-bool ComputerKeyboard::update (const std::function<bool (int)>& isKeyDown, juce::ModifierKeys modifiers)
+bool ComputerKeyboard::update (const std::function<bool (int)>& keyIsDown, juce::ModifierKeys modifiers, bool keyWentDown)
 {
     if (! enabled)
         return false;
 
     // A key that goes down with Shift, Ctrl, Alt or Cmd held is part of a shortcut: it plays nothing,
-    // not even once the modifier is let go before the key. Held notes still end.
-    const bool shortcut = isShortcut (modifiers);
+    // not even once the modifier is let go before the key. Held notes still end. So does a key that went
+    // down into a text field.
+    const bool plays = keyWentDown && ! isShortcut (modifiers);
     bool used = false;
 
     for (size_t i = 0; i < heldNotes.size(); ++i)
     {
-        const bool down = isKeyDown (noteKeys[i]);
+        const bool down = keyIsDown (noteKeys[i]);
         const bool pressed = down && ! noteKeysDown[i];
         noteKeysDown[i] = down;
         auto& held = heldNotes[i];
 
-        if (pressed && ! shortcut && held < 0 && lowestNote + (int) i <= 127)
+        if (pressed && plays && held < 0 && lowestNote + (int) i <= 127)
         {
             held = lowestNote + (int) i;
             sendMessage (juce::MidiMessage::noteOn (midiChannel, held, (juce::uint8) velocity));
@@ -111,11 +113,11 @@ bool ComputerKeyboard::update (const std::function<bool (int)>& isKeyDown, juce:
     // Z, X, C and V act once per press, not again while held down.
     for (size_t i = 0; i < controlKeys.size(); ++i)
     {
-        const bool down = isKeyDown (controlKeys[i]);
+        const bool down = keyIsDown (controlKeys[i]);
         const bool pressed = down && ! controlKeysDown[i];
         controlKeysDown[i] = down;
 
-        if (pressed && ! shortcut)
+        if (pressed && plays)
         {
             switch (controlKeys[i])
             {
@@ -176,14 +178,23 @@ std::vector<juce::KeyPress> ComputerKeyboard::getKeys() const
     return keys;
 }
 
-bool ComputerKeyboard::keyStateChanged (bool, juce::Component*)
+bool ComputerKeyboard::keyStateChanged (bool keyWentDown, juce::Component*)
 {
-    return update (wasKeyDown, juce::ModifierKeys::getCurrentModifiersRealtime());
+    // A text field takes the keys that go down into it, but lets those that come up pass on to the window, here
+    // (juce::TextEditor::keyStateChanged()): a letter typed before the last one was let go, as quick typing does, is
+    // down as that one comes up, and played its note. So keys start notes only as they go down, and never while a text
+    // field has the keys.
+    return update (isKeyDown, juce::ModifierKeys::getCurrentModifiersRealtime(), keyWentDown && ! isTyping());
 }
 
 bool ComputerKeyboard::isShortcut (juce::ModifierKeys modifiers)
 {
     return modifiers.isShiftDown() || modifiers.isCommandDown() || modifiers.isCtrlDown() || modifiers.isAltDown();
+}
+
+bool ComputerKeyboard::isTyping()
+{
+    return dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent()) != nullptr;
 }
 
 void ComputerKeyboard::changed()

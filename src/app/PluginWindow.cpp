@@ -26,7 +26,7 @@ namespace
     constexpr int checksPerSecond = 2; // how often a window looks whether what it shows is still there
     constexpr int cascadeOffset = 30;  // how far right and down of the last a window opens, when it has no place kept
 
-    constexpr int keyLabelWidth = 32, keyPickerWidth = 160; // the header's key, at its right end
+    constexpr int keyPickerWidth = 160; // the header's sidechain, at its right end, after its label
 
     // How the settings know a plug-in in every project: by its format, maker and name ("VST3/Xfer Records/Serum").
     juce::String getIdentity (const juce::PluginDescription& plugin)
@@ -602,7 +602,7 @@ struct PluginWindowHeader::Parts
 
     ProjectContext& context;
     juce::MenuBarComponent bar;
-    juce::Label keyLabel { {}, "Key" };
+    juce::Label keyLabel { {}, ui::sidechainLabel };
     std::unique_ptr<ui::SidechainButton> key; // a plug-in's with a sidechain
     int shownSongVersion = -1;
 };
@@ -616,7 +616,6 @@ PluginWindowHeader::PluginWindowHeader (ProjectContext& context, DeviceID id, ju
 
     if (auto* key = parts->key.get())
     {
-        key->setTitle ("Key");
         parts->keyLabel.setFont (juce::FontOptions (ui::TextSize::small));
         parts->keyLabel.setJustificationType (juce::Justification::centredRight);
         parts->keyLabel.setAccessible (false); // the picker's title says it
@@ -655,10 +654,11 @@ void PluginWindowHeader::resized()
 
     if (auto* key = parts->key.get())
     {
-        auto right = area.removeFromRight (std::min (keyLabelWidth + ui::Space::xs + keyPickerWidth, area.getWidth() / 2))
+        const auto labelWidth = ui::getSidechainLabelWidth();
+        auto right = area.removeFromRight (std::min (labelWidth + ui::Space::xs + keyPickerWidth, area.getWidth() / 2))
                          .withTrimmedRight (ui::Space::xs)
                          .reduced (0, 2);
-        parts->keyLabel.setBounds (right.removeFromLeft (keyLabelWidth));
+        parts->keyLabel.setBounds (right.removeFromLeft (labelWidth));
         right.removeFromLeft (ui::Space::xs);
         key->setBounds (right);
     }

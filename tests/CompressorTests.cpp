@@ -858,3 +858,44 @@ TEST_CASE ("Ducking, a kick's low notes don't let the compressor go between thei
         CHECK (ducked[(size_t) t] == doctest::Approx (15.0f).epsilon (0.001));
     }
 }
+
+TEST_CASE ("Ducking, the compressor looks ahead: a note that starts with the hit is down already, its hold still from the hit")
+{
+    // The owner heard a click under each kick in Exodus (2026-11-12): notes that start with the kick played their first
+    // milliseconds at full level before the attack caught them. Given Duck before it is prepared, it delays its sound by its
+    // look-ahead, its attack ending at the hit; compressing, it has no latency.
+    auto values = getDuckValues();
+    values[Compressor::hold] = 100.0f; // 4800 samples
+    auto compressing = values;
+    compressing[Compressor::mode] = (float) Compressor::Mode::compress;
+
+    Compressor compressor;
+    compressor.takeValuesBeforePrepare (values);
+    compressor.prepare (testRate, testBlockSize);
+    const auto latency = (int) std::lround (Compressor::duckLookaheadSeconds * testRate);
+    REQUIRE (latency == 480);
+    CHECK (compressor.getLatencySamples() == latency);
+    CHECK (compressor.getLatencySamplesFor (values) == latency);
+    CHECK (compressor.getLatencySamplesFor (compressing) == 0);
+
+    {
+        Compressor plain;
+        plain.prepare (testRate, testBlockSize);
+        CHECK (plain.getLatencySamples() == 0);
+    }
+
+    // A note that starts with the hit, at 4800, and a key loud for 5 ms from then: what comes out is as late as the latency.
+    constexpr int hit = 4800;
+    const auto played = play (
+        compressor, values, 24000, [] (int t, int) { return t >= hit ? steady (t, duckSound) : 0.0f; },
+        [] (int t, int) { return t >= hit && t < hit + 240 ? steady (t, -6.0f) : 0.0f; });
+    const auto ducked = getDucked (played[0]);
+
+    // Its first sample is down by the whole depth already, and stays down for the hold from the hit.
+    CHECK (juce::exactlyEqual (played[0][(size_t) (hit + latency - 1)], 0.0f));
+    CHECK (ducked[(size_t) (hit + latency)] == doctest::Approx (15.0f).epsilon (0.001));
+    CHECK (ducked[(size_t) (hit + latency + 4799)] == doctest::Approx (15.0f).epsilon (0.001));
+
+    // Then it lets go over its release, half way 20 ms on.
+    CHECK (ducked[(size_t) (hit + latency + 4800 + duckReleaseSamples / 2)] == doctest::Approx (7.5f).epsilon (0.01));
+}

@@ -350,14 +350,18 @@ TEST_CASE ("Sidechain Full Pump and Deep Pump duck a sound under Exodus's kick a
             return juce::Decibels::gainToDecibels (played.getRMSLevel (0, from, (int) std::lround (0.002 * rate)), -200.0f);
         };
 
-        // Each kick after the first, settled: its gain curve against the tone's level just before it, averaged.
+        // Each kick after the first, settled, where it comes out: as late as the compressor's look-ahead, which the engine
+        // lines the song up with (devices/dynamics/Compressor.h): its gain curve against the tone's level just before it,
+        // averaged.
+        const auto late = phazite::getEffects (song.context, tone).back().latencySeconds;
+        CHECK (late == doctest::Approx (devices::Compressor::duckLookaheadSeconds).epsilon (0.01));
         std::array<double, 5> gains {};
         auto deepest = 0.0, deepestAt = 0.0;
 
         for (int beat = firstKick + 1; beat < firstKick + kicks; ++beat)
         {
-            const auto at = beat * beatSeconds;
-            const auto before = levelAt (at - 0.01);
+            const auto at = beat * beatSeconds + late;
+            const auto before = levelAt (at - late - 0.01); // before it starts going down, as far ahead as it looks
             const std::array times { pump.deepestAt, pump.backAt[0], pump.backAt[1], pump.backAt[2], pump.backAt[3] };
 
             for (size_t n = 0; n < times.size(); ++n)

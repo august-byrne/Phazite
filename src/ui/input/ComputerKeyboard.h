@@ -15,12 +15,14 @@ namespace phazite::ui
 // (W E T Y U O P); Z and X change the octave, C and V the velocity. Keys pressed with Shift, Ctrl,
 // Alt or Cmd are shortcuts: as in Ableton Live, Shift and a letter run that letter's single-key
 // shortcut while this plays notes (ui::WindowKeys::keyPressedAfterListeners()). Keys typed into a text
-// field never reach it.
+// field play nothing, however quickly they are typed.
 class ComputerKeyboard : public juce::KeyListener
 {
 public:
-    // sendMessage gets the note-on and note-off messages, on the message thread.
-    explicit ComputerKeyboard (std::function<void (const juce::MidiMessage&)> sendMessage);
+    // sendMessage gets the note-on and note-off messages, on the message thread. isKeyDown says whether a key was down
+    // as the key message being handled was sent: the real keyboard's, unless a test gives one.
+    explicit ComputerKeyboard (std::function<void (const juce::MidiMessage&)> sendMessage,
+                               std::function<bool (int keyCode)> isKeyDown = {});
     ~ComputerKeyboard() override;
 
     void setEnabled (bool);
@@ -38,7 +40,11 @@ public:
     // Starts and ends notes, and changes the octave or velocity, from which keys are down. A key acts
     // when it goes down, unless a shortcut modifier is held then. Returns true if a note started or
     // ended, or the octave or velocity changed. keyStateChanged() calls it with the real keyboard.
-    bool update (const std::function<bool (int keyCode)>& isKeyDown, juce::ModifierKeys);
+    //
+    // Without `keyWentDown` (a key was let go, or a text field has the keys), keys that went down since
+    // went somewhere else, into the text field: they act neither now nor later while they stay down, and
+    // the notes of keys let go still end.
+    bool update (const std::function<bool (int keyCode)>& keyIsDown, juce::ModifierKeys, bool keyWentDown = true);
 
     // Whether a key is one it plays notes with or changes the octave or velocity with, while it is enabled: a layout
     // key without Shift, Ctrl, Alt or Cmd.
@@ -59,6 +65,7 @@ private:
     static constexpr int midiChannel = 1;
 
     std::function<void (const juce::MidiMessage&)> sendMessage;
+    std::function<bool (int keyCode)> isKeyDown;
     bool enabled = true;
     int lowestNote = 60, velocity = 100;
     std::array<int, numNoteKeys> heldNotes;        // the note each key is playing, or -1
@@ -66,6 +73,7 @@ private:
     std::array<bool, 4> controlKeysDown {};
 
     static bool isShortcut (juce::ModifierKeys);
+    static bool isTyping(); // a text field has the keys
     void changed();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ComputerKeyboard)

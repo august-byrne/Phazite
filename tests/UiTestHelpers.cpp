@@ -245,6 +245,12 @@ void TestWindow::pressKey (const juce::KeyPress& key)
         peer->handleKeyPress (key);
 }
 
+void TestWindow::keyGoesDown()
+{
+    if (auto* peer = getPeer())
+        peer->handleKeyUpOrDown (true);
+}
+
 void TestWindow::releaseKeys()
 {
     if (auto* peer = getPeer())

@@ -72,7 +72,7 @@ namespace
         makeTime (band "Sustain", Band " Sustain", 1000.0f, 20.0f, 100.0f), makeChoice (band "Curve", Band " Curve", curveShapes, 1.0f),   \
         makeChoice (band "ReleaseCurve", Band " Release Curve", curveShapes, 2.0f),                                                        \
         makeChoice (band "Detection", Band " Detection", detections, 0.0f), makeBipolar (band "Saturation", Band " Saturation"),           \
-        makeDecibels (band "Ceiling", Band " Ceiling", -24.0f, 6.0f), makeToggle (band "Key", Band " Key"),                                \
+        makeDecibels (band "Ceiling", Band " Ceiling", -24.0f, 6.0f), makeToggle (band "Key", Band " Sidechain"),                          \
         { .id = band "Points", .name = Band " Points", .minimum = 2.0f, .maximum = 8.0f, .defaultValue = 3.0f },                           \
         PHAZITE_MULTIBAND_POINT (band, Band, 1, 0.0f, 0.0f), PHAZITE_MULTIBAND_POINT (band, Band, 2, 0.5f, 0.5f),                          \
         PHAZITE_MULTIBAND_POINT (band, Band, 3, 1.0f, 0.5f), PHAZITE_MULTIBAND_POINT (band, Band, 4, 1.0f, 0.5f),                          \
@@ -111,14 +111,14 @@ namespace
         makeToggle ("midSolo", "Mid Solo"),
         makeToggle ("highSolo", "High Solo"),
         { .id = "keyLowCut",
-          .name = "Key Low Cut",
+          .name = "Sidechain Low Cut",
           .minimum = 20.0f,
           .maximum = 500.0f,
           .defaultValue = 20.0f,
           .unit = Unit::hertz,
           .midpoint = 100.0f },
         { .id = "keyHighCut",
-          .name = "Key High Cut",
+          .name = "Sidechain High Cut",
           .minimum = 100.0f,
           .maximum = 20000.0f,
           .defaultValue = 20000.0f,

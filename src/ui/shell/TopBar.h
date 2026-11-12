@@ -69,7 +69,13 @@ private:
     Fader masterVolume { Fader::Direction::horizontal, "Master volume", decibelsToFaderPosition (0.0f) };
     ParameterAttachment masterVolumeAttachment { masterVolume };
     int shownKeyboardState = -1; // what the keyboard button shows, to update it only on changes
-    juce::Label hearing;         // "Hearing: Verse 2", while a version's bounce is heard in place of the song
+
+    // A/B (version.compare): a press hears the last commit's bounce in place of the song, at the same point and as loud, and
+    // another the song again; lit while it is heard, or bounced to be. And beside it what is heard ("Hearing: Verse 2"), or
+    // bounced to be, while that isn't the song: nothing hidden.
+    juce::TextButton compareButton { "A/B" };
+    juce::Label hearing;
+    void updateCompare();
 
     void projectChanged() override;  // the tempo, the master volume and the meter follow the open project
     void versionsChanged() override; // which version is heard

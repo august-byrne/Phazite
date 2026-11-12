@@ -377,11 +377,11 @@ TEST_CASE ("Ducking, the compressor's key is picked over its cuts and Listen: a 
     phazite::ui::setPopupsInside (window);
     clickMode (editor, Compressor::Mode::duck);
 
-    // Above the key's cuts and Listen: none at first, the compressor hearing its own sound.
+    // Above the sidechain's cuts and Listen: none at first, the compressor hearing its own sound.
     auto* picker = editor.getKeyPicker();
     REQUIRE (picker != nullptr);
     CHECK (picker->isShowing());
-    CHECK (picker->getTitle() == juce::String ("Key"));
+    CHECK (picker->getTitle() == juce::String ("Sidechain"));
     CHECK (picker->getButtonText() == juce::String ("None"));
 
     for (auto* below :

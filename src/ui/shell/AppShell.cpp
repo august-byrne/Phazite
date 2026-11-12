@@ -1247,7 +1247,7 @@ void AppShell::addCommands (CommandRegistry& registry)
                     .description = "Names the branch the song is on anew.",
                     .synonyms = { "branch", "name", "rename", "title" },
                     .perform = [this] { showBranchPicker (BranchPicker::Mode::rename); },
-                    .isEnabled = [this] { return getCurrentBranch (projectContext).has_value(); } });
+                    .isEnabled = [this] { return canRenameBranch (projectContext); } });
 
     registry.add ({ .id = "version.mergeBranch",
                     .name = "Merge Branch...",

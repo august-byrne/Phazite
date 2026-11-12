@@ -63,6 +63,11 @@ struct BranchRecord
     juce::int64 changed = 0; // when its name or color were last set, or it was deleted (milliseconds since 1970): the newest computer's win
     bool deleted = false;    // Delete Branch, on that computer (Schema.h: branchDeleted)
 
+    // Not a branch but that computer's commit checked out (Checkout (Detached): VersionHistory.h), the song on no branch: the
+    // branch it came from, which it goes back to; none for a branch. Other computers leave it out (Schema.h:
+    // branchDetachedFrom).
+    juce::String detachedFrom;
+
     // What its file holds that this build doesn't know (a later Phazite's), written back as it was whenever the branch is
     // written again (a rename), so that nothing a later build keeps there is lost.
     juce::NamedValueSet others;

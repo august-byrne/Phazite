@@ -17,6 +17,7 @@
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/MixerModel.h"
+#include "model/mixer/internal/Buses.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -180,6 +181,126 @@ TEST_CASE ("A sidechain's source reaches the device as the song plays, muted or 
     // A muted kick still feeds the sidechain, the way a "ghost" kick ducks a bass.
     phazite::setSidechainSource (model, ducker, song.kick);
     CHECK (renderPeak (model) > 0.5f * kickAlone);
+}
+
+TEST_CASE ("A bus can be a sidechain's key, but not for a device on a track in it; a bus made a plain folder lets go of its listeners")
+{
+    namespace schema = phazite::schema;
+    Song song;
+    auto& model = *song.song;
+    const auto drums = phazite::groupIntoFolder (model, { song.kick }, nullptr);
+    REQUIRE (drums.isValid());
+    phazite::setTrackName (model, drums, "Drums");
+    phazite::setMixedAsBus (model, drums, true);
+
+    // The bass can listen to the drums' bus, which mixes the kick; the kick can't, since the bus's sound comes from it.
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
+    CHECK (phazite::getSidechainSources (model, ducker) == std::vector<TrackID> { drums, song.kick, song.keys });
+    const auto onKick = song.add (song.kick, TestSidechain::typeID);
+    CHECK (phazite::getSidechainSources (model, onKick) == std::vector<TrackID> { song.bass, song.keys });
+
+    const auto kickChoices = phazite::describeSidechainChoices (model, onKick);
+    REQUIRE (kickChoices.size() == 3);
+    CHECK (kickChoices[0].name == juce::String ("Drums"));
+    CHECK (kickChoices[0].whyNot == juce::String ("its sound comes from Kick"));
+
+    phazite::setSidechainSource (model, ducker, drums);
+    CHECK (phazite::getSidechainSource (model, ducker) == drums);
+    CHECK (model.getUndoManager().getUndoDescription() == juce::String ("Sidechain from Drums"));
+    CHECK (phazite::describeSidechainSource (model, ducker).name == juce::String ("Drums"));
+
+    // A plain folder only scales its tracks, with no sound of its own to hear: made one, the bus's listeners hear the sound
+    // passing through them again, in the same step, and it is offered greyed, saying why.
+    phazite::setMixedAsBus (model, drums, false);
+    CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
+    CHECK_FALSE (phazite::findDeviceState (model, ducker).hasProperty (schema::deviceSidechain));
+    CHECK (phazite::getSidechainSources (model, ducker) == std::vector<TrackID> { song.kick, song.keys });
+
+    const auto choices = phazite::describeSidechainChoices (model, ducker);
+    REQUIRE (choices.size() == 3);
+    CHECK (choices[0].name == juce::String ("Drums"));
+    CHECK (choices[0].whyNot == juce::String ("a plain folder: mix it as a bus to listen to it"));
+    CHECK (phazite::duckUnder (model, song.keys, drums) == DeviceID());
+
+    phazite::undo (model);
+    CHECK (phazite::isBus (model, drums));
+    CHECK (phazite::getSidechainSource (model, ducker) == drums);
+}
+
+TEST_CASE ("A change that would make a sidechain a loop turns it off in the same step: a track moved into the bus it listens to")
+{
+    Song song;
+    auto& model = *song.song;
+    const auto drums = phazite::groupIntoFolder (model, { song.kick }, nullptr);
+    REQUIRE (drums.isValid());
+    phazite::setMixedAsBus (model, drums, true);
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
+    phazite::setSidechainSource (model, ducker, drums);
+    REQUIRE (phazite::getSidechainSource (model, ducker) == drums);
+
+    // The bass into the drums' bus: the bus's sound would come from the bass, which listens to it.
+    {
+        const phazite::UndoStep step (model, "Move Track");
+        phazite::moveTrackIntoFolder (model, song.bass, drums);
+    }
+
+    CHECK (phazite::getParentFolder (model, song.bass) == drums);
+    CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
+    phazite::undo (model);
+    CHECK_FALSE (phazite::getParentFolder (model, song.bass).isValid());
+    CHECK (phazite::getSidechainSource (model, ducker) == drums);
+
+    // The bus ungrouped: what listened to it listens to none, its tracks staying.
+    {
+        const phazite::UndoStep step (model, "Ungroup");
+        phazite::ungroupFolder (model, drums);
+    }
+
+    CHECK_FALSE (phazite::getSidechainSource (model, ducker).isValid());
+    CHECK_FALSE (phazite::findDeviceState (model, ducker).hasProperty (phazite::schema::deviceSidechain));
+    phazite::undo (model);
+    CHECK (phazite::getSidechainSource (model, ducker) == drums);
+
+    // A send from the keys to the return their sidechain listens to.
+    const auto reverb = phazite::addNewReturnTrack (model, nullptr);
+    REQUIRE (reverb.isValid());
+    const auto onKeys = song.add (song.keys, TestSidechain::typeID);
+    phazite::setSidechainSource (model, onKeys, reverb);
+    REQUIRE (phazite::getSidechainSource (model, onKeys) == reverb);
+
+    {
+        const phazite::UndoStep step (model, "Add Send");
+        REQUIRE (phazite::addSend (model, song.keys, reverb, false).isValid());
+    }
+
+    CHECK_FALSE (phazite::getSidechainSource (model, onKeys).isValid());
+    CHECK (phazite::getSidechainSource (model, ducker) == drums); // no loop
+    phazite::undo (model);
+    CHECK (phazite::getSidechainSource (model, onKeys) == reverb);
+}
+
+TEST_CASE ("A bus's sound reaches a sidechain that listens to it as the song plays")
+{
+    Song song;
+    auto& model = *song.song;
+    const auto drums = phazite::groupIntoFolder (model, { song.kick }, nullptr);
+    REQUIRE (drums.isValid());
+    phazite::setMixedAsBus (model, drums, true);
+
+    // The kick plays a steady level through its bus, and the bass plays what its sidechain hears: the bus's sound, lined up
+    // with it, so that the two add up.
+    song.add (song.kick, TestTone::typeID);
+    using phazite::test::at, phazite::test::lasting;
+    const auto clip = phazite::test::addMidiClip (model, song.kick, { at (0.0), at (4.0) }, "Notes");
+    REQUIRE (clip.isValid());
+    phazite::test::addMidiNote (model, clip, 60, at (0.0), lasting (4.0), 64);
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
+
+    const auto drumsAlone = renderPeak (model);
+    CHECK (drumsAlone > 0.1f);
+
+    phazite::setSidechainSource (model, ducker, drums);
+    CHECK (renderPeak (model) == doctest::Approx (2.0f * drumsAlone).epsilon (0.01));
 }
 
 TEST_CASE ("A sidechain's choices name every track but the device's own, in their colours, and why one would make a loop")
@@ -481,4 +602,32 @@ TEST_CASE ("A multiband's band whose Key is on ducks under another track through
     song.setParameter (multiband, "lowKey", 0.0f);
     song.setParameter (multiband, "midKey", 1.0f);
     CHECK (play() == doctest::Approx (alone).epsilon (0.02));
+}
+
+TEST_CASE ("Phazite's compressor's sound comes as late as its look-ahead while it ducks, and as it goes in while it compresses")
+{
+    // Its latency follows its mode, which makes it anew in a new plan (model/playback/internal/SongPlayer.h), so that the
+    // engine lines the other tracks up with it (devices/dynamics/Compressor.h: duckLookaheadSeconds).
+    phazite::test::TestSong song;
+    auto& context = song.context;
+    auto& model = *phazite::findSong (context);
+    phazite::addEffect (context, song.firstTrack, song.findDeviceType (phazite::devices::Compressor::typeID));
+    REQUIRE (phazite::getEffects (context, song.firstTrack).size() == 1);
+    const auto compressor = phazite::getEffects (context, song.firstTrack)[0].id;
+    const auto latency = [&context, &song] { return phazite::getEffects (context, song.firstTrack)[0].latencySeconds; };
+    const auto setMode = [&model, compressor] (phazite::devices::Compressor::Mode mode)
+    {
+        const phazite::UndoStep step (model, "Change Mode");
+        phazite::setValueSetByHand (model, phazite::ParameterRef { compressor, "mode" }, (float) mode);
+    };
+
+    phazite::test::dispatchPendingMessages();
+    CHECK (juce::exactlyEqual (latency(), 0.0));
+
+    setMode (phazite::devices::Compressor::Mode::duck);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return latency() > 0.0; }));
+    CHECK (latency() == doctest::Approx (phazite::devices::Compressor::duckLookaheadSeconds).epsilon (0.01));
+
+    setMode (phazite::devices::Compressor::Mode::compress);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return juce::exactlyEqual (latency(), 0.0); }));
 }

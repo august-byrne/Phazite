@@ -77,14 +77,14 @@ namespace
         { .id = "makeup", .name = "Makeup", .minimum = -12.0f, .maximum = 24.0f, .defaultValue = 0.0f, .unit = Unit::decibels },
         { .id = "drive", .name = "Drive", .defaultValue = 0.0f, .unit = Unit::percent },
         { .id = "keyLowCut",
-          .name = "Key Low Cut",
+          .name = "Sidechain Low Cut",
           .minimum = 20.0f,
           .maximum = 500.0f,
           .defaultValue = 20.0f,
           .unit = Unit::hertz,
           .midpoint = 100.0f },
         { .id = "keyHighCut",
-          .name = "Key High Cut",
+          .name = "Sidechain High Cut",
           .minimum = 100.0f,
           .maximum = 20000.0f,
           .defaultValue = 20000.0f,
@@ -172,7 +172,25 @@ void Compressor::prepare (double newSampleRate, int)
     memoryRise = (float) (1.0 - std::exp (-1.0 / (memoryRiseSeconds * sampleRate)));
     memoryFall = (float) (1.0 - std::exp (-1.0 / (memoryFallSeconds * sampleRate)));
     samplesPerPeak = std::max (1, (int) std::lround (sampleRate * 0.001));
+    latency = ducksAsPrepared ? (int) std::lround (duckLookaheadSeconds * sampleRate) : 0;
+
+    for (auto* delays : { &soundDelays, &keyDelays })
+        for (auto& delay : *delays)
+            delay.prepare (std::max (1, latency));
+
+    gainDelay.prepare (std::max (1, latency));
     reset();
+}
+
+int Compressor::getLatencySamplesFor (std::span<const float> values) const
+{
+    const auto ducks = values.size() > (size_t) mode && getMode (values[(size_t) mode]) == Mode::duck;
+    return ducks ? (int) std::lround (duckLookaheadSeconds * sampleRate) : 0;
+}
+
+void Compressor::takeValuesBeforePrepare (std::span<const float> values)
+{
+    ducksAsPrepared = values.size() > (size_t) mode && getMode (values[(size_t) mode]) == Mode::duck;
 }
 
 void Compressor::reset()
@@ -190,6 +208,7 @@ void Compressor::reset()
     lastDucked = -1.0f;
     duckGain = 1.0f;
     sinceHit = mostSinceHit;
+    sinceUnder = mostSinceHit;
     releaseFrom = 0.0f;
     releaseAlong = 0.0;
     releasing = false;
@@ -205,6 +224,11 @@ void Compressor::reset()
     for (auto& filter : dcBlockers)
         filter.reset();
 
+    for (auto* delays : { &soundDelays, &keyDelays })
+        for (auto& delay : *delays)
+            delay.reset();
+
+    gainDelay.reset();
     isFirstBlock = true;
     keyShare = 0.0f;
     meanSquare = 0.0f;
@@ -378,7 +402,17 @@ void Compressor::compress (const ProcessContext& block)
                 turnedDown = y / driveGain * makeupGain;
             }
 
-            block.channels[channel][i] = turnedDown + keyShare * (key[(size_t) std::min (channel, numHeard - 1)] - turnedDown);
+            auto out = turnedDown + keyShare * (key[(size_t) std::min (channel, numHeard - 1)] - turnedDown);
+
+            // As late as its latency says, when it has one (Duck's, while automation has it compress).
+            if (latency > 0)
+            {
+                auto& delay = soundDelays[(size_t) channel];
+                delay.push (out);
+                out = delay.read (latency);
+            }
+
+            block.channels[channel][i] = out;
         }
 
         wasDriven = driven;
@@ -421,7 +455,15 @@ void Compressor::duck (const ProcessContext& block)
     const auto mostDucked = std::max (0.0f, values[depth]);
     const auto attackSamples = (double) values[attack] * 0.001 * sampleRate;
     const auto attackStep = attackSamples >= 1.0 ? (float) (mostDucked / attackSamples) : mostDucked;
-    const auto holdSamples = (int) std::min ((double) mostSinceHit, std::max (0.0, (double) values[hold] * 0.001 * sampleRate));
+
+    // Looking ahead: the gain worked out from the key now turns the sound that comes this much later, by the attack, or by the
+    // whole look-ahead if the attack is longer, so that it is down as the hit plays; its hold, counted from the key's hit, is
+    // as much longer, and it lets go only once the key has been under its threshold as long, so that in what is heard it
+    // still holds from the hit and while the key is over.
+    const auto ahead = std::clamp ((int) std::ceil (attackSamples), 0, latency);
+    const auto gainLate = latency - ahead;
+    const auto holdSamples =
+        (int) std::min ((double) mostSinceHit, std::max (0.0, (double) values[hold] * 0.001 * sampleRate) + (double) ahead);
     const auto releaseStep = 1.0 / std::max (1.0, (double) values[release] * 0.001 * sampleRate);
     const auto curve = (double) juce::jlimit (-1.0f, 1.0f, values[releaseCurve]);
     const auto thresholdDecibels = values[Compressor::threshold];
@@ -477,6 +519,7 @@ void Compressor::duck (const ProcessContext& block)
         }
 
         wasOver = over;
+        sinceUnder = over ? 0 : std::min (sinceUnder + 1, mostSinceHit);
 
         if (wanted > ducked)
         {
@@ -484,7 +527,7 @@ void Compressor::duck (const ProcessContext& block)
             ducked = std::min (wanted, ducked + attackStep);
             releasing = false;
         }
-        else if (! releasing && ! over && ducked > 0.0f && sinceHit >= holdSamples)
+        else if (! releasing && ! over && sinceUnder > ahead && ducked > 0.0f && sinceHit >= holdSamples)
         {
             // Held long enough, and the key under the threshold: letting go, from where it is.
             releasing = true;
@@ -512,13 +555,33 @@ void Compressor::duck (const ProcessContext& block)
             duckGain = dsp::decibelsToGain (-ducked);
         }
 
-        // The sound, turned down; or what it hears, to listen to, faded in and out.
+        // The sound, turned down, as late as the look-ahead; or what it hears, to listen to, as late, faded in and out.
         keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
+        auto gain = duckGain;
+
+        if (latency > 0)
+        {
+            gainDelay.push (duckGain);
+            gain = gainDelay.read (gainLate);
+        }
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
-            const auto turnedDown = block.channels[channel][i] * duckGain;
-            block.channels[channel][i] = turnedDown + keyShare * (key[(size_t) std::min (channel, numHeard - 1)] - turnedDown);
+            auto sound = block.channels[channel][i];
+            auto keyHeard = key[(size_t) std::min (channel, numHeard - 1)];
+
+            if (latency > 0)
+            {
+                auto& soundDelay = soundDelays[(size_t) channel];
+                auto& keyDelay = keyDelays[(size_t) channel];
+                soundDelay.push (sound);
+                keyDelay.push (keyHeard);
+                sound = soundDelay.read (latency);
+                keyHeard = keyDelay.read (latency);
+            }
+
+            const auto turnedDown = sound * gain;
+            block.channels[channel][i] = turnedDown + keyShare * (keyHeard - turnedDown);
         }
 
         loudestKey = std::max (loudestKey, lastKeyPeak);

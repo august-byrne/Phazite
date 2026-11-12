@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Buses.h"
 #include "internal/Mixer.h"
+#include "internal/Sidechain.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 
@@ -30,12 +31,15 @@ void makePlainFolder (Song& song, TrackID folder)
     if (! isBus (song, folder))
         return;
 
-    // A VCA of its own in place of its fader, at the folder's volume; its devices go from the song too.
+    // A VCA of its own in place of its fader, at the folder's volume; its devices go from the song too, and the sidechains
+    // that listened to it hear the sound passing through them again.
     auto* undo = &song.getUndoManager();
     auto state = findTrackState (song, folder);
 
     for (const auto& device : getDeviceStates (state))
         state.removeChild (device, undo);
+
+    forgetSidechainsOfBus (song, folder);
 
     state.removeProperty (schema::channelFader, undo);
     state.setProperty (schema::channelVCA, (juce::int64) song.makeID(), undo);

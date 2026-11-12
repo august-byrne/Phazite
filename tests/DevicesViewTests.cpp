@@ -458,10 +458,9 @@ TEST_CASE ("An effect's slot has what every effect has along its line, its switc
     }
 
     // The compressor's sidechain isn't chosen under its line, which has its Presets and window's button alone: its editor has
-    // its key (the owner, 2026-11-10: a button here "takes up space and looks cluttered").
+    // its sidechain (the owner, 2026-11-10: a button here "takes up space and looks cluttered").
     auto* compressor = view.findPanel (effects[1]);
     CHECK (phazite::test::findComponentWithTitle (*compressor, "Sidechain") == nullptr);
-    CHECK (phazite::test::findComponentWithTitle (*compressor, "Key") == nullptr);
 }
 
 TEST_CASE ("A modulator dragged by its grip lights every knob it can modulate as the drag starts, until it is let go")
@@ -936,7 +935,7 @@ TEST_CASE (
     };
 
     REQUIRE (findPicker() != nullptr);
-    CHECK (findPicker()->getTitle() == juce::String ("Key"));
+    CHECK (findPicker()->getTitle() == juce::String ("Sidechain"));
     CHECK (findPicker()->getButtonText() == juce::String ("None"));
 
     // Listening to the other track, as an undo or Duck Under would make it: the picker names it once the editor looks again,

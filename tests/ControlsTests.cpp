@@ -149,6 +149,56 @@ TEST_CASE ("A level meter repaints only while what it shows moves: a silent one 
     CHECK (window.takeRepaintedArea().isEmpty());
 }
 
+TEST_CASE ("A meter beside a fader shows each level where the fader's scale marks it")
+{
+    // The owner read a limiter's -12 dB ceiling as 0 dB (2026-11-12): the meter spread -60 to +6 dB over its own length,
+    // and the decibels beside it are the fader's.
+    phazite::engine::LevelMeter measured;
+    juce::Component strip;
+    phazite::ui::Fader volume (phazite::ui::Fader::Direction::vertical, "Volume", phazite::decibelsToFaderPosition (0.0f));
+    volume.setRange (0.0, 1.0); // a volume's positions, as its parameter's attachment sets them
+    phazite::ui::LevelMeter meter ("Level", volume);
+    strip.addAndMakeVisible (volume);
+    strip.addAndMakeVisible (meter);
+    volume.setBounds (0, 0, 56, 160);
+    meter.setBounds (56, 0, 10, 160);
+    meter.setSource (phazite::makeLevelSource ([&measured] { return &measured; }));
+    phazite::test::TestWindow window (strip, 66, 160);
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+
+    // The top of the left bar, in the window: its first row that isn't the meter's background, from above the loudest level
+    // checked (0 dB, three quarters of the way up).
+    const auto barTop = [&]
+    {
+        const auto image = window.paintEverything (juce::SoftwareImageType());
+        const auto x = meter.getX() + 3;
+        const auto background = image.getPixelAt (x, meter.getY() + 8);
+
+        for (int y = meter.getY() + 8; y < meter.getBottom(); ++y)
+            if (image.getPixelAt (x, y) != background)
+                return y;
+
+        return meter.getBottom();
+    };
+
+    // Where the fader's scale marks a level (ui::FaderScale).
+    const auto markY = [&volume] (float decibels)
+    { return (int) std::floor (volume.getPositionOfValue (phazite::decibelsToFaderPosition (decibels))) + volume.getY(); };
+
+    for (const auto decibels : { -24.0f, -12.0f, -6.0f, 0.0f })
+    {
+        juce::AudioBuffer<float> sound (2, 480);
+
+        for (int channel = 0; channel < 2; ++channel)
+            juce::FloatVectorOperations::fill (sound.getWritePointer (channel), juce::Decibels::decibelsToGain (decibels), 480);
+
+        measured.measure (sound.getArrayOfReadPointers(), 2, 480);
+        ticker->tickNow();
+        CAPTURE (decibels);
+        CHECK (std::abs (barTop() - markY (decibels)) <= 2); // the peak's line, a pixel above the level, and the scale's tick
+    }
+}
+
 TEST_CASE ("A track's peak bar shows its louder channel at once, falls 20 dB in half a second, and lights a clip for two seconds")
 {
     phazite::engine::LevelMeter measured;

@@ -135,6 +135,81 @@ public:
 };
 
 //==============================================================================
+// While a commit is checked out on its own (Checkout (Detached)), under the branch: what the song is, and the two ways on, as
+// Figma's and Google Docs' version history say where they are and offer the way back (the research of 2026-11-12): Back to
+// the branch it came from, the main button, and Create Branch Here, which keeps what changes.
+class VersionsView::DetachedBar : public juce::Component
+{
+public:
+    explicit DetachedBar (VersionsView& v)
+        : view (v)
+    {
+        setTitle ("Checked out");
+        text.setFont (juce::FontOptions (TextSize::small));
+        text.setJustificationType (juce::Justification::topLeft);
+        text.setMinimumHorizontalScale (1.0f);
+        text.setInterceptsMouseClicks (false, false);
+        setThemeColour (text, juce::Label::textColourId, &Palette::text);
+        addAndMakeVisible (text);
+
+        backButton.setTooltip ("Makes the song the branch's again, as it was left there. What changed here goes into Local History");
+        backButton.onClick = [this] { view.commands.invoke ("version.backToBranch"); };
+        setThemeColour (backButton, juce::TextButton::buttonColourId, &Palette::accent);
+        setThemeColour (backButton, juce::TextButton::textColourOffId, &Palette::textOnAccent);
+        addAndMakeVisible (backButton);
+
+        branchButton.setTooltip ("Creates a branch from this commit, keeping what changed here, to commit it");
+        branchButton.onClick = [this]
+        {
+            selectVersion (view.context, {}); // here, as the song is now
+            view.commands.invoke ("version.newBranch");
+        };
+        addAndMakeVisible (branchButton);
+    }
+
+    void show (const BranchInfo& checkout, const juce::String& backText)
+    {
+        text.setText ("Checked out \"" + checkout.name + "\", on no branch: it plays and can change, but nothing is committed here.",
+                      juce::dontSendNotification);
+        backButton.setButtonText (backText);
+        backButton.setTitle (backText);
+    }
+
+    int getPreferredHeight (int width) const
+    {
+        juce::AttributedString attributed (text.getText());
+        attributed.setFont (text.getFont());
+        juce::TextLayout layout;
+        layout.createLayout (attributed, (float) juce::jmax (1, width - 2 * Space::s));
+        return juce::roundToInt (layout.getHeight()) + 2 * Space::xs + Space::xs + SideBar::controlHeight + Space::s;
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto& p = getPalette (*this);
+        g.setColour (p.selected);
+        g.fillRoundedRectangle (getLocalBounds().toFloat(), cornerRadius);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (Space::s, Space::xs);
+        auto buttons = area.removeFromBottom (SideBar::controlHeight);
+        area.removeFromBottom (Space::xs);
+        text.setBounds (area);
+        backButton.setBounds (buttons.removeFromLeft ((buttons.getWidth() - Space::xs) / 2));
+        buttons.removeFromLeft (Space::xs);
+        branchButton.setBounds (buttons);
+    }
+
+    juce::TextButton backButton { "Back to Branch" }, branchButton { "Create Branch Here" };
+
+private:
+    VersionsView& view;
+    juce::Label text;
+};
+
+//==============================================================================
 // The branch the song is on, as VS Code's status bar names it: its icon and name in its color, and a chevron; a click opens
 // the branch picker.
 class VersionsView::BranchButton : public juce::Button
@@ -522,6 +597,10 @@ public:
                                   + Space::xs);
         }
 
+        // The commit checked out on its own, which the song is now: filled, as the current branch's name is.
+        if (version.id == view.checkedOut)
+            area.removeFromRight (drawBadge (g, area, "detached", view.getBranchColour (version.branch), p.background) + Space::xs);
+
         auto text = area;
 
         if (version.note.isNotEmpty())
@@ -591,6 +670,13 @@ public:
         // A commit opens, or folds.
         if (const auto* version = view.getRowVersion (row))
             view.openVersion (version->id);
+    }
+
+    // A double-click on a commit checks it out, as GitKraken's and Sourcetree's do.
+    void listBoxItemDoubleClicked (int row, const juce::MouseEvent& e) override
+    {
+        if (view.getRowVersion (row) != nullptr && ! e.mods.isPopupMenu())
+            view.commands.invoke ("version.checkout");
     }
 
     void returnKeyPressed (int row) override
@@ -695,6 +781,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
       context (projectContext),
       settings (s),
       branchButton (std::make_unique<BranchButton>()),
+      detachedBar (std::make_unique<DetachedBar> (*this)),
       messageField (std::make_unique<MessageField>()),
       stagedSection (std::make_unique<SectionHeader> ("Staged Changes", SectionHeader::Style::group)),
       changesSection (std::make_unique<SectionHeader> ("Changes", SectionHeader::Style::group)),
@@ -802,7 +889,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText,
-                                                             stagedSection.get(), &stagedList })
+                                                             stagedSection.get(), &stagedList, detachedBar.get() })
         addChildComponent (c);
 
     refreshTooltips();
@@ -855,6 +942,21 @@ juce::TextEditor& VersionsView::getMessageField() noexcept
 juce::Button& VersionsView::getBranchButton() noexcept
 {
     return *branchButton;
+}
+
+bool VersionsView::showsCheckout() const noexcept
+{
+    return detachedBar->isVisible();
+}
+
+juce::Button& VersionsView::getBackButton() noexcept
+{
+    return detachedBar->backButton;
+}
+
+juce::Button& VersionsView::getBranchHereButton() noexcept
+{
+    return detachedBar->branchButton;
 }
 
 juce::Button& VersionsView::getChangesSection() noexcept
@@ -1078,7 +1180,7 @@ juce::PopupMenu VersionsView::makeHistoryMenu (int row)
     {
         const auto last = getLastVersion (context);
         group ({ "version.hear" });
-        group ({ "version.bringBack", "version.takeFrom" });
+        group ({ "version.checkout", "version.bringBack", "version.takeFrom" });
         group ({ "version.newBranch", "version.merge" });
 
         if (last.has_value() && last->id == version->id)
@@ -1093,6 +1195,10 @@ juce::PopupMenu VersionsView::makeHistoryMenu (int row)
 
     group ({ "version.hear" });
     group ({ "version.newBranch" });
+
+    if (checkedOut.isNotEmpty())
+        group ({ "version.backToBranch" });
+
     group ({ "version.exportDawProject" });
     return menu;
 }
@@ -1325,11 +1431,25 @@ void VersionsView::refresh()
 
     const auto branch = getCurrentBranch (context);
     currentBranch = branch.has_value() ? branch->id : juce::String();
+    const auto detached = branch.has_value() && branch->detached;
+    checkedOut = detached ? branch->head : juce::String();
     refreshHistoryRows();
     refreshHistoryLines (branch.has_value() ? branch->head : juce::String());
-    branchButton->setBranch (branch.has_value() ? branch->name : juce::String(),
+    branchButton->setBranch (! branch.has_value() ? juce::String()
+                             : detached           ? branch->name + " (detached)"
+                                                  : branch->name,
                              branch.has_value() ? branch->colour : getPalette (*this).textMuted);
     branchButton->setVisible (branch.has_value());
+
+    // A commit checked out on its own: the bar that says so, with the ways on.
+    if (detached)
+        detachedBar->show (*branch, describeBackToBranch (context));
+
+    if (detachedBar->isVisible() != detached)
+    {
+        detachedBar->setVisible (detached);
+        resized();
+    }
 
     // A merge's list while it shows; its conflicts while it waits for its commit; otherwise the changes.
     lines = ! mergeLines.empty() ? Lines::merge : ! clashes.empty() ? Lines::clashes : Lines::changes;
@@ -1397,8 +1517,9 @@ void VersionsView::refresh()
         formatKey (juce::KeyPress (juce::KeyPress::returnKey, juce::ModifierKeys::commandModifier, 0).getTextDescription())
             .replace ("Return", "Enter");
     const auto next = describeNextCommit (context);
-    messageField->setTextToShowWhenEmpty ((next.isNotEmpty() ? next : juce::String ("Message")) + " (" + commitKey + " to commit" + onBranch
-                                              + ")",
+    messageField->setTextToShowWhenEmpty (detached ? juce::String ("Create a branch here to commit")
+                                                   : (next.isNotEmpty() ? next : juce::String ("Message")) + " (" + commitKey + " to commit"
+                                                         + onBranch + ")",
                                           getPalette (*this).textMuted);
     messageField->setEnabled (keeps);
 
@@ -1501,6 +1622,16 @@ void VersionsView::resized()
 
     if (branchButton->isVisible())
         branchButton->setBounds (area.removeFromTop (ListRow::height).reduced ((int) ListRow::inset, 0));
+
+    // A commit checked out: the bar that says so, in the fields' width.
+    if (detachedBar->isVisible())
+    {
+        const auto width = area.getWidth() - SideBar::fieldLeft - SideBar::fieldRight;
+        detachedBar->setBounds (area.removeFromTop (detachedBar->getPreferredHeight (width))
+                                    .withTrimmedLeft (SideBar::fieldLeft)
+                                    .withTrimmedRight (SideBar::fieldRight));
+        area.removeFromTop (Space::xs);
+    }
 
     // The message, as tall as its lines as they wrap, up to a few: one line as tall as VS Code's, in its row.
     const auto lineHeight = juce::roundToInt (messageField->getFont().getHeight() * 1.2f);

@@ -114,12 +114,17 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     for (auto* c : std::initializer_list<juce::Component*> { &tempoField, &masterMeter, &masterVolume })
         addAndMakeVisible (c);
 
-    // Nothing hidden: while a version's bounce is heard rather than the song, the bar says so.
+    // A/B, and nothing hidden: while a version's bounce is heard rather than the song, the bar says so.
+    compareButton.setTitle ("A/B");
+    compareButton.setMouseClickGrabsKeyboardFocus (false);
+    compareButton.onClick = [this] { commands.invoke ("version.compare"); };
+    addAndMakeVisible (compareButton);
+
     hearing.setTitle ("Hearing");
     hearing.setFont (juce::FontOptions (TextSize::body, juce::Font::bold));
     hearing.setJustificationType (juce::Justification::centredLeft);
     hearing.setTooltip (
-        "A commit's bounce is heard in place of the song. Hearing the uncommitted changes, or any edit, plays the song again");
+        "A commit's bounce is heard in place of the song. A/B, hearing the uncommitted changes, or any edit, plays the song again");
     addChildComponent (hearing);
 
     lookAndFeelChanged();
@@ -130,9 +135,36 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
 
 void TopBar::versionsChanged()
 {
-    const auto text = describeHearing (projectContext);
-    hearing.setText (text, juce::dontSendNotification);
+    updateCompare();
+}
+
+void TopBar::updateCompare()
+{
+    // What is heard, or bounced to be heard, while it isn't the song; and A/B lit meanwhile, saying what a press does.
+    juce::String text = describeHearing (projectContext);
+    const auto waiting = isWaitingToCompare (projectContext);
+
+    if (waiting)
+    {
+        const auto compared = getCompareVersion (projectContext);
+        const auto progress = getBounceProgress (projectContext, compared);
+        text = "Bouncing to hear it"
+               + (progress.has_value() ? ": " + juce::String (juce::roundToInt (*progress * 100.0f)) + "%" : juce::String());
+    }
+    else if (text.isEmpty())
+    {
+        text = getCompareProblem (projectContext); // why the last press couldn't hear it
+    }
+
+    if (hearing.getText() != text)
+        hearing.setText (text, juce::dontSendNotification);
+
     hearing.setVisible (text.isNotEmpty());
+    compareButton.setEnabled (canCompare (projectContext));
+    compareButton.setToggleState (waiting || getHeardVersion (projectContext).isNotEmpty(), juce::dontSendNotification);
+
+    if (const auto tip = withShortcut (commands, describeCompare (projectContext), "version.compare"); compareButton.getTooltip() != tip)
+        compareButton.setTooltip (tip);
 }
 
 TopBar::~TopBar()
@@ -171,6 +203,7 @@ void TopBar::refreshTooltips()
 
     shownKeyboardState = -1; // its tooltip names a shortcut too
     updateKeyboardButton();
+    updateCompare();
 }
 
 void TopBar::updateKeyboardButton()
@@ -396,6 +429,8 @@ void TopBar::resized()
     area.removeFromRight (Space::xs);
     masterMeter.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 12));
     area.removeFromRight (Space::m);
+    compareButton.setBounds (area.removeFromLeft (44));
+    area.removeFromLeft (Space::s);
     hearing.setBounds (area);
 }
 
@@ -403,6 +438,10 @@ void TopBar::timerCallback()
 {
     const auto open = projectContext.hasProject();
     const bool playing = isPlaying (projectContext);
+
+    // How far the bounce A/B waits for has come.
+    if (isWaitingToCompare (projectContext))
+        updateCompare();
 
     // The play button shows what clicking it does, and screen readers say so.
     if (const auto title = juce::String (playing ? "Stop" : "Play"); playButton.getTitle() != title)

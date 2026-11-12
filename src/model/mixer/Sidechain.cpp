@@ -26,13 +26,21 @@ namespace
         return std::find (tracks.begin(), tracks.end(), track) != tracks.end();
     }
 
-    // The tracks with sound of their own, in the song's order: tracks and returns, not folders.
+    // Whether a track has sound of its own for a sidechain to listen to: a track, a return, or a bus, which mixes the tracks
+    // in it (as Ableton Live's, Logic's and Cubase's sidechains take group and bus channels); not a plain folder, which only
+    // scales its tracks' volumes (Buses.h).
+    bool hasSoundOfItsOwn (const juce::ValueTree& state)
+    {
+        return ! isFolderState (state) || state.hasProperty (schema::channelFader);
+    }
+
+    // The tracks with sound of their own, in the song's order.
     std::vector<TrackID> getSoundTracks (const Song& song)
     {
         std::vector<TrackID> tracks;
 
         for (const auto& state : getTrackStates (song))
-            if (! isFolderState (state))
+            if (hasSoundOfItsOwn (state))
                 tracks.push_back (getTrackID (state));
 
         return tracks;
@@ -69,10 +77,45 @@ namespace
         return { track, getTrackName (song, track), getTrackColour (song, track, row) };
     }
 
+    // Whether a track plays a drum sampler, or, for a bus, a track in it does.
     bool playsDrumSampler (const Song& song, TrackID track)
     {
-        const auto devices = getDeviceStates (findTrackState (song, track));
-        return std::any_of (devices.begin(), devices.end(), [] (const juce::ValueTree& device) { return isDrumSampler (device); });
+        const auto plays = [&song] (TrackID each)
+        {
+            const auto devices = getDeviceStates (findTrackState (song, each));
+            return std::any_of (devices.begin(), devices.end(), [] (const juce::ValueTree& device) { return isDrumSampler (device); });
+        };
+
+        const auto inside = getTracksInFolder (song, track);
+        return plays (track) || std::any_of (inside.begin(), inside.end(), plays);
+    }
+
+    // Points the sidechains that listen to any of these tracks back at the sound passing through each device, in containers
+    // too. Joins the caller's undo step.
+    void forgetSidechainsListeningTo (Song& song, const std::set<juce::int64>& going)
+    {
+        if (going.empty())
+            return;
+
+        auto chains = getTrackStates (song);
+        chains.push_back (song.getState().getChildWithName (schema::MASTER));
+
+        const auto forget = [&song, &going] (juce::ValueTree device)
+        {
+            if (going.contains ((juce::int64) device[schema::deviceSidechain]))
+                device.removeProperty (schema::deviceSidechain, &song.getUndoManager());
+        };
+
+        for (const auto& chain : chains)
+        {
+            for (const auto& device : getDeviceStates (chain))
+            {
+                forget (device);
+
+                for (const auto& inside : getDeviceStates (device))
+                    forget (inside);
+            }
+        }
     }
 
     // Whether every parameter of a device's is still as it was made, as the song holds its values set by hand, but the one
@@ -234,7 +277,7 @@ TrackID getSidechainSource (const Song& song, DeviceID id)
 {
     const auto source = TrackID::fromRaw ((std::uint64_t) (juce::int64) findDeviceState (song, id)[schema::deviceSidechain]);
     const auto state = findTrackState (song, source);
-    return state.hasType (schema::TRACK) && ! isFolderState (state) ? source : TrackID();
+    return state.hasType (schema::TRACK) && hasSoundOfItsOwn (state) ? source : TrackID();
 }
 
 bool hearsSidechain (const Song& song, DeviceID id)
@@ -265,14 +308,18 @@ std::vector<SidechainChoice> describeTracksToListenTo (const Song& song, TrackID
     std::vector<SidechainChoice> choices;
     const auto fed = findTrackState (song, listener).hasType (schema::TRACK) ? getTracksFedBy (song, listener) : std::vector<TrackID>();
 
-    for (const auto track : getSoundTracks (song))
+    for (const auto& state : getTrackStates (song))
     {
+        const auto track = getTrackID (state);
+
         if (track == listener)
             continue;
 
         auto choice = describe (song, track);
 
-        if (contains (fed, track))
+        if (! hasSoundOfItsOwn (state))
+            choice.whyNot = "a plain folder: mix it as a bus to listen to it";
+        else if (contains (fed, track))
             choice.whyNot = "its sound comes from " + getTrackName (song, listener);
 
         choices.push_back (choice);
@@ -316,7 +363,10 @@ void setSidechainSource (Song& song, DeviceID id, TrackID source)
 
 DeviceID duckUnder (Song& song, TrackID ducked, TrackID key)
 {
-    if (ducked == key || ! findTrackState (song, ducked).hasType (schema::TRACK) || contains (getTracksFedBy (song, ducked), key))
+    const auto keyState = findTrackState (song, key);
+
+    if (ducked == key || ! findTrackState (song, ducked).hasType (schema::TRACK) || ! keyState.hasType (schema::TRACK)
+        || ! hasSoundOfItsOwn (keyState) || contains (getTracksFedBy (song, ducked), key))
         return {};
 
     const UndoStep step (song, "Duck " + getTrackName (song, ducked) + " Under " + getTrackName (song, key));
@@ -340,27 +390,29 @@ void forgetSidechainSources (Song& song, const std::vector<TrackID>& tracks)
             going.insert ((juce::int64) inside.getRaw());
     }
 
-    if (going.empty())
-        return;
+    forgetSidechainsListeningTo (song, going);
+}
 
-    // The song's devices that listen to them, in containers too, listen to none.
+void forgetSidechainsOfBus (Song& song, TrackID bus)
+{
+    forgetSidechainsListeningTo (song, { (juce::int64) bus.getRaw() });
+}
+
+void forgetSidechainLoops (Song& song)
+{
+    // One at a time, so that of two devices listening to each other's tracks only the first lets go: the other's is no loop
+    // then. A device in a container has no sidechain (Containers.h).
     auto chains = getTrackStates (song);
     chains.push_back (song.getState().getChildWithName (schema::MASTER));
 
-    const auto forget = [&song, &going] (juce::ValueTree device)
-    {
-        if (going.contains ((juce::int64) device[schema::deviceSidechain]))
-            device.removeProperty (schema::deviceSidechain, &song.getUndoManager());
-    };
-
     for (const auto& chain : chains)
     {
-        for (const auto& device : getDeviceStates (chain))
+        for (auto device : getDeviceStates (chain))
         {
-            forget (device);
+            const auto source = TrackID::fromRaw ((std::uint64_t) (juce::int64) device[schema::deviceSidechain]);
 
-            for (const auto& inside : getDeviceStates (device))
-                forget (inside);
+            if (source.isValid() && chain.hasType (schema::TRACK) && contains (getTracksFedBy (song, getTrackID (chain)), source))
+                device.removeProperty (schema::deviceSidechain, &song.getUndoManager());
         }
     }
 }

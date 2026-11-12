@@ -30,8 +30,16 @@ juce::PopupMenu makeSidechainMenu (ProjectContext&, DeviceID, const std::functio
                                    const juce::String& noneMeaning = "its own sound");
 juce::PopupMenu makeDuckUnderMenu (ProjectContext&, TrackID ducked);
 
-// The drop-down. Titled "Sidechain" for screen readers, unless its owner names it otherwise ("Key"). Off, saying why, while
-// the device has no sidechain of its own to choose (one in a container hears what passes through it).
+// The word for what a sidechain listens to, on the label beside the drop-down and as its title for screen readers: the word
+// every DAW prints on its source picker (Ableton Live, FL Studio, Logic, Cubase, Studio One). "Key", Pro Tools' word, was
+// Phazite's until 2026-11-12, and read as the song's musical key, which the piano roll, the inspector and the browser name so.
+inline constexpr const char* sidechainLabel = "Sidechain";
+
+// How wide the label is, in small text, with a little room after it.
+int getSidechainLabelWidth();
+
+// The drop-down, titled sidechainLabel. Off, saying why, while the device has no sidechain of its own to choose (one in a
+// container hears what passes through it).
 class SidechainButton : public juce::Button
 {
 public:

@@ -103,6 +103,8 @@ version.stageAll
 version.unstageAll
 version.discardAll
 version.putBack
+version.checkout
+version.backToBranch
 version.bringBack
 version.takeFrom
 version.restoreChange
@@ -113,6 +115,7 @@ version.merge
 version.finishMerge
 version.cancelMerge
 version.hear
+version.compare | N
 version.bounce
 version.deleteBounce
 version.exportDawProject

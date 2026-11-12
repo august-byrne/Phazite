@@ -104,8 +104,9 @@ public:
         : editor (e)
     {
         setTitle ("Monitor");
-        setDescription ("The last seconds of the selected band: what comes in, what goes out, what its compressor hears (the key, "
-                        "in its track's colour and named, while the band's Key is on) and its gain, scrolling; a click pauses it.");
+        setDescription ("The last seconds of the selected band: what comes in, what goes out, what its compressor hears (the "
+                        "sidechain, in its track's colour and named, while the band's Sidechain is on) and its gain, scrolling; a "
+                        "click pauses it.");
         setMouseCursor (juce::MouseCursor::PointingHandCursor);
 
         // Silence at first, so that a history that stays silent is the same all along and needn't repaint.
@@ -805,8 +806,8 @@ public:
         }
 
         listen.setTitle ("Listen");
-        listen.setTooltip ("Plays the key, as the bands whose Key is on hear it through its cuts, instead of the sound, to hear what "
-                           "makes them duck");
+        listen.setTooltip ("Plays the sidechain, as the bands whose Sidechain is on hear it through its cuts, instead of the sound, "
+                           "to hear what makes them duck");
         listen.setClickingTogglesState (true);
         addAndMakeVisible (cuts);
         addAndMakeVisible (listen);
@@ -929,8 +930,8 @@ public:
 
         sidechainTab.setClickingTogglesState (true);
         sidechainTab.setRadioGroupId (tabGroup);
-        sidechainTab.setTooltip ("Shows the Sidechain part in place of the band: the track the bands whose Key is on hear, its cuts "
-                                 "and Listen");
+        sidechainTab.setTooltip ("Shows the Sidechain part in place of the band: the track the bands whose Sidechain is on hear, its "
+                                 "cuts and Listen");
         sidechainTab.onClick = [this] { showSidechain (true); };
         addChildComponent (sidechainTab);
 
@@ -1201,7 +1202,8 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle, ProjectContext* co
     auto& bandsPart = keep (std::make_unique<BandsPart> (shownGraph, bandKnobs));
 
     // The Sidechain part.
-    auto& cuts = makeControls ({ idOf (Multiband::keyLowCut), idOf (Multiband::keyHighCut) }, 2, compact, "Key", { "Low Cut", "High Cut" });
+    auto& cuts =
+        makeControls ({ idOf (Multiband::keyLowCut), idOf (Multiband::keyHighCut) }, 2, compact, sidechainLabel, { "Low Cut", "High Cut" });
     sidechain = &keep (std::make_unique<SidechainPart> (*this, cuts, context, id));
 
     // The band's part, and each band's controls in it, by their parameters' IDs, named as Maximus names them.
@@ -1216,8 +1218,8 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle, ProjectContext* co
         return made;
     };
 
-    const juce::String keyTip ("Key: the band's compressor hears the sidechain's key, through its cuts, in place of the band, so that "
-                               "it ducks under another track (with no track picked, under what comes in)");
+    const juce::String keyTip ("Sidechain: the band's compressor hears the sidechain, through its cuts, in place of the band, so "
+                               "that it ducks under another track (with no track picked, under what comes in)");
 
     for (int band = 0; band < Multiband::numBands; ++band)
     {
@@ -1235,7 +1237,7 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle, ProjectContext* co
         shown.mode = &mode;
 
         if (band == Multiband::master)
-            shown.switches = { &makeSwitch (idOf (band, Multiband::key), "Key", keyTip),
+            shown.switches = { &makeSwitch (idOf (band, Multiband::key), sidechainLabel, keyTip),
                                &makeSwitch (idOf (Multiband::midDrivesMaster), "Mid Drives",
                                             "Mid Drives Master: the master's compressor hears the mid band in place of what it "
                                             "plays, the low and high bands' compression off meanwhile, as Maximus's Master Mid "
@@ -1243,7 +1245,7 @@ MultibandEditor::MultibandEditor (const DeviceHandle& handle, ProjectContext* co
         else
             shown.switches = { &makeSwitch (idOf (Multiband::getSoloParameter (band)), "Solo",
                                             "Solo: only the soloed bands play, and the master band after them"),
-                               &makeSwitch (idOf (band, Multiband::key), "Key", keyTip) };
+                               &makeSwitch (idOf (band, Multiband::key), sidechainLabel, keyTip) };
 
         shown.knobs = &makeControls ({ idOf (band, Multiband::pre), idOf (band, Multiband::stereo), idOf (band, Multiband::saturation),
                                        idOf (band, Multiband::ceiling), idOf (band, Multiband::attack), idOf (band, Multiband::release),
@@ -1403,7 +1405,7 @@ juce::String MultibandEditor::describeListeners() const
             bands.add (juce::String (bandNames[band]).toLowerCase());
 
     if (bands.isEmpty())
-        return "No band hears it yet: turn on a band's Key, under its mode";
+        return "No band hears it yet: turn on a band's Sidechain, under its mode";
 
     const auto last = bands[bands.size() - 1];
     bands.remove (bands.size() - 1);

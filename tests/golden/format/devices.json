@@ -32822,7 +32822,7 @@
       },
       {
         "id": "keyLowCut",
-        "name": "Key Low Cut",
+        "name": "Sidechain Low Cut",
         "unit": "hertz",
         "minimum": 20.0,
         "maximum": 500.0,
@@ -32830,7 +32830,7 @@
       },
       {
         "id": "keyHighCut",
-        "name": "Key High Cut",
+        "name": "Sidechain High Cut",
         "unit": "hertz",
         "minimum": 100.0,
         "maximum": 20000.0,
@@ -33269,7 +33269,7 @@
       },
       {
         "id": "keyLowCut",
-        "name": "Key Low Cut",
+        "name": "Sidechain Low Cut",
         "unit": "hertz",
         "minimum": 20.0,
         "maximum": 500.0,
@@ -33277,7 +33277,7 @@
       },
       {
         "id": "keyHighCut",
-        "name": "Key High Cut",
+        "name": "Sidechain High Cut",
         "unit": "hertz",
         "minimum": 100.0,
         "maximum": 20000.0,
@@ -33419,7 +33419,7 @@
       },
       {
         "id": "lowKey",
-        "name": "Low Key",
+        "name": "Low Sidechain",
         "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,
@@ -33881,7 +33881,7 @@
       },
       {
         "id": "midKey",
-        "name": "Mid Key",
+        "name": "Mid Sidechain",
         "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,
@@ -34343,7 +34343,7 @@
       },
       {
         "id": "highKey",
-        "name": "High Key",
+        "name": "High Sidechain",
         "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,
@@ -34805,7 +34805,7 @@
       },
       {
         "id": "masterKey",
-        "name": "Master Key",
+        "name": "Master Sidechain",
         "unit": "toggle",
         "minimum": 0.0,
         "maximum": 1.0,

@@ -879,3 +879,37 @@ TEST_CASE ("Local History lists the song as it was before Discard All Changes, f
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
     CHECK (phazite::describeUndo (phazite::findSong (context)).startsWith ("Undo Restore Local History of "));
 }
+
+TEST_CASE ("A double-click on a commit checks it out: the view says so under the branch, Commit is off, and Back to main goes back")
+{
+    Screen screen;
+    auto& context = screen.session.getContext();
+    screen.click (screen.getBar().getButton (LeftView::versions));
+    REQUIRE (screen.registry.invoke ("track.add")); // a new project starts with none
+    screen.setFirstTrackVolume (0.5f);
+    const auto first = screen.saveVersion ("First");
+    screen.setFirstTrackVolume (0.3f); // left on main, not committed
+
+    auto& view = screen.getVersionsView();
+    CHECK_FALSE (view.showsCheckout());
+    const auto row = view.getHistoryRow (first);
+    REQUIRE (row > 0);
+    phazite::test::Mouse mouse (view.getHistoryList());
+    mouse.doubleClick (view.getHistoryList().getRowPosition (row, true).getCentre());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return phazite::isDetached (context); }));
+    screen.waitForVersions();
+    phazite::test::dispatchPendingMessages();
+
+    CHECK (view.showsCheckout());
+    CHECK (view.getBackButton().isShowing());
+    CHECK (view.getBackButton().getButtonText() == juce::String ("Back to main"));
+    CHECK (view.getBranchButton().getButtonText() == juce::String ("First (detached)"));
+    CHECK_FALSE (view.getSaveButton().isEnabled());
+
+    screen.click (view.getBackButton());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&context] { return ! phazite::isDetached (context); }));
+    screen.waitForVersions();
+    phazite::test::dispatchPendingMessages();
+    CHECK_FALSE (view.showsCheckout());
+    CHECK (view.getBranchButton().getButtonText() == juce::String ("main"));
+}

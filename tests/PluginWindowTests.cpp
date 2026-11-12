@@ -191,7 +191,7 @@ TEST_CASE ("A plug-in with a sidechain has its key in its window's header, by th
     auto* picker = dynamic_cast<phazite::ui::SidechainButton*> (header.getKeyPicker());
     REQUIRE (picker != nullptr);
     CHECK (picker->isShowing());
-    CHECK (picker->getTitle() == juce::String ("Key"));
+    CHECK (picker->getTitle() == juce::String ("Sidechain"));
     CHECK (picker->getButtonText() == juce::String ("None"));
     auto* bar = phazite::test::findAll<juce::MenuBarComponent> (header).getFirst();
     REQUIRE (bar != nullptr);
@@ -245,7 +245,7 @@ TEST_CASE ("A plug-in with a sidechain has its key on its panel in the Devices v
     phazite::test::dispatchPendingMessages();
     auto* picker = showingPicker();
     REQUIRE (picker != nullptr);
-    CHECK (picker->getTitle() == juce::String ("Key"));
+    CHECK (picker->getTitle() == juce::String ("Sidechain"));
     CHECK (picker->getButtonText() == juce::String ("None"));
 
     REQUIRE (phazite::test::runMenuItem (picker->getMenu(), { "Tone" }));

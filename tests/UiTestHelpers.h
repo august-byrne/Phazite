@@ -58,8 +58,10 @@ public:
 
     // A key going down (again for each repeat while it is held), and the keys being let go. The window's key
     // listeners hear about them, as the app's main window's do. (JUCE asks the computer which keys are down,
-    // and none is while the tests run.)
+    // and none is while the tests run.) A key typed goes down before it is pressed, as JUCE hears it on Windows: that
+    // the key state changed (keyGoesDown()), then the key (pressKey()).
     void pressKey (const juce::KeyPress&);
+    void keyGoesDown();
     void releaseKeys();
 
     // Paints the window into an image, as the screen would: by the platform's renderer (Direct2D on Windows), or by another,

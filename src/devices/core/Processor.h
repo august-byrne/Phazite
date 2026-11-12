@@ -113,6 +113,13 @@ public:
     // tracks to match. Known once prepared.
     virtual int getLatencySamples() const { return 0; }
 
+    // For a device whose latency depends on its values set by hand (the compressor looks ahead only while it ducks): its
+    // latency with these values, at the rate it is prepared at; -1 for a device whose latency doesn't. Its engine's model makes
+    // the device anew when a value would change it (model/playback/internal/SongPlayer.h), giving it the values before it is
+    // prepared, so that getLatencySamples() is known once prepared still. Message thread.
+    virtual int getLatencySamplesFor (std::span<const float> /* valuesSetByHand */) const { return -1; }
+    virtual void takeValuesBeforePrepare (std::span<const float> /* valuesSetByHand */) {}
+
     // How long its sound goes on after its input stops, in seconds (a reverb's tail).
     virtual double getTailSeconds() const { return 0.0; }
 

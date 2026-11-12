@@ -51,11 +51,10 @@ namespace
             if (device.hasSidechain)
             {
                 key = std::make_unique<SidechainButton> (context, device.id);
-                key->setTitle ("Key");
                 key->show (device.sidechain);
                 addAndMakeVisible (*key);
 
-                keyLabel.setText ("Key", juce::dontSendNotification);
+                keyLabel.setText (sidechainLabel, juce::dontSendNotification);
                 keyLabel.setFont (juce::FontOptions (TextSize::small));
                 keyLabel.setInterceptsMouseClicks (false, false);
                 addAndMakeVisible (keyLabel);
@@ -92,7 +91,7 @@ namespace
             if (key != nullptr)
             {
                 auto row = juce::Rectangle<int> (Space::l, Space::l, getWidth() - 2 * Space::l, controlHeight);
-                keyLabel.setBounds (row.removeFromLeft (keyLabelWidth));
+                keyLabel.setBounds (row.removeFromLeft (getSidechainLabelWidth()));
                 key->setBounds (row.withWidth (std::max (SidechainButton::minimumWidth, std::min (row.getWidth(), 3 * knobSize))));
             }
 
@@ -105,10 +104,8 @@ namespace
             }
         }
 
-        // Where the knobs start: under the key's row, when there is one.
+        // Where the knobs start: under the sidechain's row, when there is one.
         int getKnobsTop() const { return Space::l + (key != nullptr ? controlHeight + Space::m : 0); }
-
-        static constexpr int keyLabelWidth = 32;
 
         std::unique_ptr<SidechainButton> key; // a plug-in that has a sidechain
         juce::Label keyLabel;

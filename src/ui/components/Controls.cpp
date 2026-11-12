@@ -1027,6 +1027,12 @@ LevelMeter::LevelMeter (const juce::String& title)
     shownPeaks = peaks;
 }
 
+LevelMeter::LevelMeter (const juce::String& title, const Fader& besideFader)
+    : LevelMeter (title)
+{
+    fader = &besideFader;
+}
+
 LevelMeter::~LevelMeter() = default;
 
 void LevelMeter::setSource (LevelSource newSource)
@@ -1088,7 +1094,26 @@ void LevelMeter::paint (juce::Graphics& g)
     const auto gap = 1.0f;
     const auto barThickness = ((vertical ? area.getWidth() : area.getHeight()) - gap) / numChannels;
 
-    const auto toProportion = [] (float dB) { return juce::jlimit (0.0f, 1.0f, (dB - minDb) / (maxDb - minDb)); };
+    // How far up a bar a level reaches, from 0 to 1. Beside a fader, the bars run along its travel, from where its thumb is
+    // at silence to where it is at its top, and a level reaches its position there; else -60 to +6 dB spread evenly.
+    const auto* besideFader = vertical ? fader : nullptr;
+
+    if (besideFader != nullptr)
+    {
+        const auto thumbY = [this, besideFader] (double position)
+        { return getLocalPoint (besideFader, juce::Point<float> (0.0f, (float) besideFader->getPositionOfValue (position))).y; };
+
+        area = area.withTop (std::max (area.getY(), thumbY (1.0))).withBottom (std::min (area.getBottom(), thumbY (0.0)));
+    }
+
+    const auto toProportion = [besideFader] (float dB)
+    {
+        if (besideFader != nullptr)
+            return dB > minDb ? juce::jlimit (0.0f, 1.0f, decibelsToFaderPosition (dB)) : 0.0f;
+
+        return juce::jlimit (0.0f, 1.0f, (dB - minDb) / (maxDb - minDb));
+    };
+
     const auto zeroDb = toProportion (0.0f);
 
     for (size_t ch = 0; ch < (size_t) numChannels; ++ch)

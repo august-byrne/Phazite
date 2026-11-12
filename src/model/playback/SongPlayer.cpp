@@ -115,6 +115,35 @@ namespace
     private:
         std::unique_ptr<juce::AudioFormatReader> reader;
     };
+
+    // A device's values set by hand, in its description's order: as the song holds them, or as its node has them now.
+    std::vector<float> readValuesSetByHand (const devices::DeviceInfo& info, const juce::ValueTree& deviceState)
+    {
+        std::vector<float> values;
+
+        for (const auto& parameter : info.parameters)
+            values.push_back (readValueSetByHand (deviceState, parameter));
+
+        return values;
+    }
+
+    std::vector<float> readValuesSetByHand (const engine::DeviceNode& node)
+    {
+        std::vector<float> values;
+
+        for (int i = 0; i < (int) node.getDeviceInfo().parameters.size(); ++i)
+            values.push_back (node.getValue (i));
+
+        return values;
+    }
+
+    // Whether these values set by hand would make a device's sound come later or sooner than the latency it was prepared
+    // with (the compressor looks ahead only while it ducks: devices/core/Processor.h).
+    bool changesLatency (const engine::DeviceNode& node, std::span<const float> values)
+    {
+        const auto latency = node.getRunner().getProcessor().getLatencySamplesFor (values);
+        return latency >= 0 && latency != node.getRunner().getLatencySamples();
+    }
 } // namespace
 
 SongPlayer::SongPlayer (Song& s, PluginInstances* p)
@@ -433,10 +462,15 @@ std::shared_ptr<engine::DeviceNode> SongPlayer::getDevice (const juce::ValueTree
 
     const auto id = getID (deviceState, schema::deviceID);
     auto& node = devices[id];
+    const auto values = readValuesSetByHand (*info, deviceState);
 
-    if (node == nullptr || &node->getDeviceInfo() != info)
+    // Made anew for another kind of device, and for values set by hand that make its sound come later or sooner (the
+    // compressor looks ahead only while it ducks): its runner takes the latency as it is prepared, as a plug-in's does.
+    if (node == nullptr || &node->getDeviceInfo() != info || changesLatency (*node, values))
     {
-        node = std::make_shared<engine::DeviceNode> (*info, createOwnDevice (info->typeID));
+        auto processor = createOwnDevice (info->typeID);
+        processor->takeValuesBeforePrepare (values);
+        node = std::make_shared<engine::DeviceNode> (*info, std::move (processor));
         node->getRunner().prepare (preparedRate, preparedBlockSize);
         loadSounds (*node, deviceState);
     }
@@ -1307,7 +1341,8 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
         return true;
     }
 
-    // A parameter's value set by hand, or its default again.
+    // A parameter's value set by hand, or its default again; in a new plan, with the device made anew (getDevice()), if it
+    // makes the device's sound come later or sooner.
     if (tree.hasType (schema::VALUES))
     {
         if (auto* node = findDevice (getID (tree.getParent(), schema::deviceID)))
@@ -1316,6 +1351,9 @@ bool SongPlayer::takeValue (const juce::ValueTree& tree, const juce::Identifier&
 
             if (const auto index = devices::findParameter (info, property.toString().toStdString()); index >= 0)
                 node->setValue (index, readSavedValue (info.parameters[(size_t) index], tree.getProperty (property)));
+
+            if (changesLatency (*node, readValuesSetByHand (*node)))
+                return false;
         }
 
         return true;

@@ -68,6 +68,7 @@
     "project.save": [ "command + S" ],
     "project.saveAs": [ "command + shift + S" ],
     "version.save": [ "command + N" ],
+    "version.compare": [ "N" ],
     "project.export": [ "command + R" ],
     "view.commandPalette": [ "command + K" ],
     "view.pianoRoll": [ "F7" ],

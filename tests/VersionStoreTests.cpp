@@ -444,6 +444,32 @@ TEST_CASE (
     }
 }
 
+TEST_CASE ("A computer's record of a commit checked out on its own names the branch it came from, and other computers leave it out")
+{
+    std::map<juce::String, phazite::VersionRecord> versions;
+    phazite::VersionRecord version;
+    version.id = "a";
+    versions.emplace (version.id, version);
+
+    auto main = makeBranch ("main", juce::Colours::red, "a");
+    auto checkout = makeBranch ({}, juce::Colours::red, "a");
+    checkout.detachedFrom = main.id;
+
+    CHECK (phazite::joinBranchRecords ({ main, checkout }, versions, thisComputer).size() == 2);
+    const auto elsewhere = phazite::joinBranchRecords ({ main, checkout }, versions, "another computer");
+    REQUIRE (elsewhere.size() == 1);
+    CHECK (elsewhere[0].id == main.id);
+
+    // Its file keeps it (Schema.h: branchDetachedFrom).
+    TemporaryFolder temporary;
+    phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
+    REQUIRE (store.writeBranch (checkout));
+    const auto read = store.readBranches();
+    REQUIRE (read.size() == 1);
+    CHECK (read[0].detachedFrom == main.id);
+    CHECK (read[0].others.isEmpty());
+}
+
 TEST_CASE ("A branch's log on this computer keeps each move of its last version, and leaves out a line a crash cut off")
 {
     TemporaryFolder temporary;

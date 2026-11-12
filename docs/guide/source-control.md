@@ -23,7 +23,9 @@ Commit is greyed out while nothing has changed since the last commit.
 The **Graph** lists every commit, newest first.
 
 - **Click a commit** to open it: what it changed shows under it, a line per track. Click it again to fold it.
-- **Hear it:** right-click a commit and choose **Bounce** to render it once. Its play mark then plays it in place of the song, at the same beat and just as loud, so you can switch between the old mix and the new one while the song plays.
+- **Check it out:** double-click a commit, or right-click it and choose **Checkout (Detached)**. The song becomes that commit, on no branch, so you can play it, solo its tracks and open its devices. Your branch keeps your work as it was. Click **Back to main** in the bar at the top of Source Control to return to it. Changes you make while checked out aren't committed. They go into Local History when you leave, or click **Create Branch Here** to keep them on a branch of their own.
+- **A/B:** press **N**, or click **A/B** in the transport bar, to hear the last commit in place of the song, at the same point and just as loud. Press it again to hear the song. This is the quick way to hear a change before you commit it. The first time, Phazite bounces the commit in the background while the song plays on, and switches as soon as it's ready. Any edit switches back to the song.
+- **Hear an older one:** a commit with a bounce has a play mark, which plays it in place of the song. Right-click a commit and choose **Bounce** to give it one. A/B then switches between the song and the commit you heard last.
 - **Name it later:** right-click a commit and choose **Edit Commit Message...**, for example to mark the version you sent to the label.
 
 ## Go back
@@ -41,7 +43,7 @@ While the song differs from its last commit, Phazite keeps snapshots of it witho
 
 - when the project opens;
 - every 10 minutes while you work;
-- just before anything that replaces the song, such as Restore or discarding every change.
+- just before anything that replaces the song, such as Restore, discarding every change, or leaving a commit you checked out.
 
 Open **Local History** at the bottom of Source Control. Each row's arrow makes the song what it was then, as one undo step. Snapshots are kept for 30 days, fewer as they grow older.
 

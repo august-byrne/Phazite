@@ -36,6 +36,7 @@
 #include "devices/core/DeviceInfo.h"
 #include "devices/core/MeterValue.h"
 #include "devices/core/Processor.h"
+#include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Filters.h"
 
@@ -120,6 +121,19 @@ public:
     bool overridesMix() const noexcept override { return keyShare > 0.0f; } // the block it last played: the key, or fading
     const FallingValue* getGainReduction() const noexcept override { return &gainReduction; }
 
+    // Ducking, it looks ahead: its sound comes this much later than it goes in, while it hears its key as it comes, so that
+    // it is down already as the hit plays. Without, a note that starts with the kick played its first milliseconds at full
+    // level before the attack caught it, and then went down: a click under each kick (the owner heard it in Exodus,
+    // 2026-11-12), which the kick covers in the mix but not alone. Its attack ends at the hit while it is no longer than this,
+    // its hold still counting from the hit; a longer one starts this much before it. Compressing, it doesn't look ahead, and
+    // its sound comes as it goes in. The engine makes up for the latency on the other tracks, and Low Latency leaves the
+    // ducking out while it is on (model/playback/internal/PlaybackHost.h), as it does a limiter's.
+    static constexpr double duckLookaheadSeconds = 0.010;
+
+    int getLatencySamples() const override { return latency; }
+    int getLatencySamplesFor (std::span<const float> valuesSetByHand) const override;
+    void takeValuesBeforePrepare (std::span<const float> valuesSetByHand) override;
+
     void prepare (double sampleRate, int maximumBlockSize) override;
     void reset() override;
     void process (const ProcessContext&) override;
@@ -170,10 +184,19 @@ private:
     float keyPeakNow = 0.0f, keyPeakBefore = 0.0f; // the millisecond going on, and the loudest of those before it
     float lastKeyPeak = -1.0f, keyDecibels = -120.0f;
     float ducked = 0.0f, lastDucked = -1.0f, duckGain = 1.0f;
-    int sinceHit = 0;
+    int sinceHit = 0, sinceUnder = 0; // the samples since the last hit, and since the key went under its threshold
     float releaseFrom = 0.0f;
     double releaseAlong = 0.0;
     bool releasing = false, wasOver = false;
+
+    // The look-ahead it plays with (duckLookaheadSeconds while it was given Duck before it was prepared, else none), in
+    // samples, and what it delays by it: the sound and the key it plays, each channel's, and Duck's gain, by the look-ahead
+    // less the attack (so that a short attack ends at the hit). Compressing with a latency (a mode that automation changed),
+    // what it plays comes as late, unchanged.
+    bool ducksAsPrepared = false;
+    int latency = 0;
+    std::array<dsp::DelayLine, 2> soundDelays, keyDelays;
+    dsp::DelayLine gainDelay;
 
     static_assert (std::atomic<double>::is_always_lock_free);
 };

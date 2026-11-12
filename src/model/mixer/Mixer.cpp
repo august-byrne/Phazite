@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Mixer.h"
+#include "internal/Sidechain.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
@@ -762,6 +763,7 @@ DeviceID addSend (Song& song, TrackID from, TrackID returnTrack, bool preFader)
         send.setProperty (schema::sendPreFader, true, nullptr);
 
     state.appendChild (send, getUndo (song));
+    forgetSidechainLoops (song); // a sidechain on the track that listens to the return, say
     return DeviceID::fromRaw (id);
 }
 

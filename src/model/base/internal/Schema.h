@@ -606,9 +606,12 @@ namespace versions
     // branch's; where not, the lines went their own ways, to be merged (model/versions/internal/VersionHistory.h). Deleted
     // (deleted, 1) on the computer whose record says so: the branch is gone where that record is the newest and its last
     // version follows every other record's, so that commits another computer made on it since bring it back.
+    // A commit checked out on its own (Checkout (Detached), as git's detached HEAD) is a record of the same kind, of no
+    // name, that names the branch the song came from (detachedFrom, its id): that computer's alone, which the other
+    // computers leave out, and deleted once the song goes back to a branch.
     inline const juce::Identifier BRANCH { "BRANCH" };
     inline const juce::Identifier branchID { "id" }, branchName { "name" }, branchColour { "colour" }, branchHead { "head" },
-        branchChanged { "changed" }, branchDeleted { "deleted" };
+        branchChanged { "changed" }, branchDeleted { "deleted" }, branchDetachedFrom { "detachedFrom" };
 
     // working.xml: WORKING, with a LEFT for each branch this computer left with a song of its own on it: the branch's id
     // (branch) and the song as it was left there (song: its piece, view state included).

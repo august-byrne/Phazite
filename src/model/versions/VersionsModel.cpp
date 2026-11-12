@@ -135,8 +135,19 @@ std::vector<BranchInfo> getBranches (const ProjectContext& context)
 std::optional<BranchInfo> getCurrentBranch (const ProjectContext& context)
 {
     if (const auto* history = findHistory (context))
+    {
         if (const auto* branch = history->findCurrentBranch())
-            return toInfo (*branch);
+        {
+            // A commit checked out on its own: no branch, named as the commit is.
+            auto info = toInfo (*branch);
+            info.detached = branch->detachedFrom.isNotEmpty();
+
+            if (const auto* version = info.detached ? history->findVersion (branch->head) : nullptr)
+                info.name = getDisplayName (*version);
+
+            return info;
+        }
+    }
 
     return std::nullopt;
 }
@@ -384,7 +395,8 @@ bool canSaveVersion (const ProjectContext& context)
 bool hasSomethingToCommit (const ProjectContext& context)
 {
     auto* history = findHistory (context);
-    return history != nullptr && ! history->isReading() && (history->merging.has_value() || history->hasChanges());
+    return history != nullptr && ! history->isReading() && ! history->isDetached()
+           && (history->merging.has_value() || history->hasChanges());
 }
 
 juce::String describeNextCommit (const ProjectContext& context)
@@ -760,10 +772,80 @@ bool switchBranch (ProjectContext& context, const juce::String& branchID, const 
     return true;
 }
 
+bool canCheckout (const ProjectContext& context, const juce::String& versionID)
+{
+    // Whenever the song can switch, but while a merge is shown: it lists what the song would take.
+    const auto* history = findHistory (context);
+    return history != nullptr && history->findVersion (versionID) != nullptr && canSwitchBranch (context) && ! history->preview.has_value();
+}
+
+bool checkoutVersion (ProjectContext& context, const juce::String& versionID, const SaveProjectThen& saveProjectThen)
+{
+    auto* history = findHistory (context);
+
+    if (history == nullptr || ! canCheckout (context, versionID)
+        || ! switchSongInPlace (context, [history, &versionID] { return history->checkout (versionID); }))
+        return false;
+
+    // The project's file the commit's song, as the versions now say it is.
+    saveProjectThen ([] (bool) {});
+    return true;
+}
+
+bool isDetached (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->isDetached();
+}
+
+bool canGoBackToBranch (const ProjectContext& context)
+{
+    return isDetached (context) && canSwitchBranch (context);
+}
+
+bool backToBranch (ProjectContext& context, const SaveProjectThen& saveProjectThen)
+{
+    auto* history = findHistory (context);
+
+    if (history == nullptr || ! canGoBackToBranch (context)
+        || ! switchSongInPlace (context, [history] { return history->backFromDetached(); }))
+        return false;
+
+    saveProjectThen ([] (bool) {});
+    return true;
+}
+
+juce::String describeBackToBranch (const ProjectContext& context)
+{
+    // The branch the commit was checked out from.
+    if (const auto* history = findHistory (context))
+        for (const auto& branch : history->getBranches())
+            if (branch.id == history->getDetachedFrom())
+                return "Back to " + branch.name;
+
+    return "Back to Branch";
+}
+
+void checkoutSelectedVersion (ProjectContext& context, const SaveProjectThen& saveProjectThen)
+{
+    checkoutVersion (context, getSelectedVersion (context), saveProjectThen);
+}
+
+bool canCheckoutSelected (const ProjectContext& context)
+{
+    return canCheckout (context, getSelectedVersion (context));
+}
+
 bool renameBranch (ProjectContext& context, const juce::String& branchID, const juce::String& name)
 {
     auto* history = findHistory (context);
     return history != nullptr && history->renameBranch (branchID, name);
+}
+
+bool canRenameBranch (const ProjectContext& context)
+{
+    const auto current = getCurrentBranch (context);
+    return current.has_value() && ! current->detached;
 }
 
 bool canDeleteBranch (const ProjectContext& context, const juce::String& branchID)
@@ -777,7 +859,8 @@ bool canDeleteBranch (const ProjectContext& context, const juce::String& branchI
     const auto branches = history->getBranches();
     const auto found = std::find_if (branches.begin(), branches.end(), [&branchID] (const auto& branch) { return branch.id == branchID; });
 
-    if (found == branches.end() || (current.has_value() && current->id == branchID))
+    // Nor the one a commit checked out came from, which Back to goes to.
+    if (found == branches.end() || (current.has_value() && current->id == branchID) || branchID == history->getDetachedFrom())
         return false;
 
     // Not while a merge of its line is under way, here or waiting on another branch.
@@ -850,7 +933,11 @@ void selectBranch (ProjectContext& context, const juce::String& branchID)
 
 void newBranchFromSelection (ProjectContext& context, const SaveProjectThen& saveProjectThen)
 {
-    newBranch (context, getSelectedVersion (context), saveProjectThen);
+    // On the commit checked out, a branch here, which keeps what changed.
+    const auto selected = getSelectedVersion (context);
+    const auto current = getCurrentBranch (context);
+    const auto here = current.has_value() && current->detached && selected == current->head;
+    newBranch (context, here ? juce::String() : selected, saveProjectThen);
 }
 
 void switchToSelectedBranch (ProjectContext& context, const SaveProjectThen& saveProjectThen)
@@ -887,7 +974,7 @@ bool canMerge (const ProjectContext& context)
 {
     const auto* history = findHistory (context);
 
-    if (history == nullptr || history->isReading() || history->isSaving())
+    if (history == nullptr || history->isReading() || history->isSaving() || history->isDetached())
         return false;
 
     const auto* last = history->findLastVersion();
@@ -1209,7 +1296,7 @@ bool canMergeBranch (const ProjectContext& context, const juce::String& branchID
     const auto current = getCurrentBranch (context);
 
     return history != nullptr && ! history->isReading() && ! history->isSaving() && current.has_value() && current->id != branchID
-           && ! history->preview.has_value() && countCommitsToMerge (context, branchID) > 0;
+           && ! current->detached && ! history->preview.has_value() && countCommitsToMerge (context, branchID) > 0;
 }
 
 bool canMergeAnyBranch (const ProjectContext& context)
@@ -1420,6 +1507,22 @@ namespace
             history->bouncingVersion.clear();
             const auto self = std::move (history->backgroundBounce); // this: it goes as this returns
             history->readBounces();
+
+            // A/B waiting for it: heard now, or why not said.
+            if (history->hearWhenBounced == versionID)
+            {
+                history->hearWhenBounced.clear();
+
+                if (result.wasOk())
+                {
+                    hearVersion (context, versionID);
+                }
+                else
+                {
+                    history->compareProblem = history->bounceProblem;
+                    history->tellNow();
+                }
+            }
         }
     };
 } // namespace
@@ -1548,13 +1651,14 @@ namespace
     // What a snapshot's reason is called in the view.
     juce::String describeReason (const juce::String& reason)
     {
-        return reason == "open"      ? "As opened"
-               : reason == "auto"    ? "Auto-saved"
-               : reason == "restore" ? "Before Restore"
-               : reason == "discard" ? "Before Discard All Changes"
-               : reason == "merge"   ? "Before Merge"
-               : reason == "history" ? "Before Restoring Local History"
-                                     : reason;
+        return reason == "open"       ? "As opened"
+               : reason == "auto"     ? "Auto-saved"
+               : reason == "restore"  ? "Before Restore"
+               : reason == "discard"  ? "Before Discard All Changes"
+               : reason == "merge"    ? "Before Merge"
+               : reason == "history"  ? "Before Restoring Local History"
+               : reason == "checkout" ? "Before Leaving a Checkout"
+                                      : reason;
     }
 
     // The song as it is, kept in Local History before what makes it another, while it differs from its last commit.
@@ -1893,6 +1997,119 @@ juce::String describeHearing (const ProjectContext& context)
     return version != nullptr ? "Hearing: " + getDisplayName (*version) : juce::String();
 }
 
+juce::String getCompareVersion (const ProjectContext& context)
+{
+    // The commit heard last, else the one the song comes from.
+    const auto* history = findHistory (context);
+
+    if (history == nullptr)
+        return {};
+
+    if (history->findVersion (history->bounceCompared) != nullptr)
+        return history->bounceCompared;
+
+    const auto* last = history->findLastVersion();
+    return last != nullptr ? last->id : juce::String();
+}
+
+bool canCompare (const ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    const auto compared = getCompareVersion (context);
+
+    if (history == nullptr || compared.isEmpty() || history->isReading())
+        return false;
+
+    // Hearing B, or waiting to: a press goes back to the song.
+    if (history->hearingBounce || history->hearWhenBounced.isNotEmpty())
+        return true;
+
+    // B the song itself, nothing to compare.
+    if (isSongNow (*history, compared))
+        return false;
+
+    return history->hasBounce (compared) || history->bouncingVersion == compared || canBounce (context, compared);
+}
+
+void toggleCompare (ProjectContext& context)
+{
+    auto* history = findHistory (context);
+
+    if (history == nullptr || ! canCompare (context))
+        return;
+
+    history->compareProblem.clear();
+
+    // Back to the song, from B or from waiting for it.
+    if (history->hearingBounce || history->hearWhenBounced.isNotEmpty())
+    {
+        history->hearWhenBounced.clear();
+
+        if (history->hearingBounce)
+            hearVersion (context, {});
+
+        history->tellNow();
+        return;
+    }
+
+    const auto compared = getCompareVersion (context);
+
+    if (history->hasBounce (compared))
+    {
+        hearVersion (context, compared);
+        return;
+    }
+
+    // Bounced first, the song playing on, then heard; or why it can't be, said.
+    if (history->bouncingVersion == compared || startBackgroundBounce (context, compared))
+        history->hearWhenBounced = compared;
+    else
+        history->compareProblem = history->bounceProblem;
+
+    history->tellNow();
+}
+
+bool isWaitingToCompare (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr && history->hearWhenBounced.isNotEmpty();
+}
+
+juce::String getCompareProblem (const ProjectContext& context)
+{
+    const auto* history = findHistory (context);
+    return history != nullptr ? history->compareProblem : juce::String();
+}
+
+juce::String describeCompare (const ProjectContext& context)
+{
+    auto* history = findHistory (context);
+    const auto compared = getCompareVersion (context);
+    const auto* version = history != nullptr ? history->findVersion (compared) : nullptr;
+
+    if (version == nullptr)
+        return "A/B: there is no commit yet to hear the song against";
+
+    const auto name = "\"" + getDisplayName (*version) + "\"";
+
+    if (history->hearingBounce)
+        return "A/B: hearing " + name + " (B) in place of the song. Press to hear the song (A) again";
+
+    if (history->hearWhenBounced.isNotEmpty())
+    {
+        const auto progress = getBounceProgress (context, compared);
+        return "A/B: bouncing " + name + " to hear it"
+               + (progress.has_value() ? " (" + juce::String (juce::roundToInt (*progress * 100.0f)) + "%)" : juce::String())
+               + ". Press to stop waiting";
+    }
+
+    if (isSongNow (*history, compared))
+        return "A/B: nothing to compare. The song is " + name + ", with no changes since";
+
+    return "A/B: hear " + name + " (B) in place of the song (A), at the same point and as loud"
+           + (history->hasBounce (compared) ? juce::String() : juce::String ("; it is bounced first, in the background"));
+}
+
 void hearSelectedVersion (ProjectContext& context)
 {
     hearVersion (context, getSelectedVersion (context));
@@ -2099,11 +2316,29 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .currentName = [&context] { return describePutBack (context); } });
 
     // On the commit selected in the graph; each a change of its own, which names its undo step after what it restores.
+    add ({ .id = "version.checkout",
+           .name = "Checkout (Detached)",
+           .description = "Makes the song the selected commit's, to see and hear it whole as it was then, on no branch: the branch "
+                          "keeps its song as it is, to come back to. Nothing is committed meanwhile; Create Branch keeps what "
+                          "changes there.",
+           .synonyms = { "checkout", "detach", "detached head", "go to commit", "view commit", "look at", "visit", "git switch" },
+           .perform = [&context, saveProjectThen] { checkoutSelectedVersion (context, saveProjectThen); },
+           .isEnabled = [&context] { return canCheckoutSelected (context); } });
+
+    add ({ .id = "version.backToBranch",
+           .name = "Back to Branch",
+           .description = "Leaves the commit checked out for the branch it came from: the song becomes that branch's again, as it "
+                          "was left there. What changed meanwhile goes into Local History first.",
+           .synonyms = { "back", "return", "leave detached", "reattach", "go back to branch", "head" },
+           .perform = [&context, saveProjectThen] { backToBranch (context, saveProjectThen); },
+           .isEnabled = [&context] { return canGoBackToBranch (context); },
+           .currentName = [&context] { return describeBackToBranch (context); } });
+
     add ({ .id = "version.bringBack",
            .name = "Restore from This Commit",
            .description = "Makes the song what it was in the selected commit, as one undo step, as git restore --source does. "
                           "The history keeps every commit, so the changes show what it took back.",
-           .synonyms = { "revert", "go back", "checkout", "roll back", "bring back" },
+           .synonyms = { "revert", "go back", "roll back", "bring back", "reset" },
            .perform = [&context] { bringBackSelectedVersion (context); },
            .isEnabled = [&context] { return canBringBack (context); },
            .currentName = [&context] { return describeBringBack (context); } });
@@ -2181,6 +2416,17 @@ void addVersionCommands (CommandRegistry& registry, ProjectContext& context, Sav
            .synonyms = { "listen", "compare", "a/b", "reference", "play commit" },
            .perform = [&context] { hearSelectedVersion (context); },
            .isEnabled = [&context] { return canHearSelected (context); } });
+
+    add ({ .id = "version.compare",
+           .name = "A/B Compare",
+           .description = "Hears the last commit (or the commit heard last) in place of the song, at the same point and as loud, "
+                          "and the song again at the next press: what isn't committed yet against what is. A commit without a "
+                          "bounce is bounced first, in the background.",
+           .synonyms = { "a/b", "ab", "compare", "before and after", "reference", "listen", "stash", "toggle" },
+           .perform = [&context] { toggleCompare (context); },
+           .isEnabled = [&context] { return canCompare (context); },
+           .isTicked = [&context] { return getHeardVersion (context).isNotEmpty(); },
+           .overPlugins = true });
 
     add ({ .id = "version.bounce",
            .name = "Bounce",
