@@ -1017,3 +1017,19 @@ drum samplers 1.81 % playing on one thread, against 2.96 % measured on 2026-11-0
 
 **Turned on, Safe Bass** in the chorus, the phaser and the flanger is a Linkwitz-Riley split, four filter sections a
 sample on each side where it had one; off, it costs nothing. The benchmarks leave it off.
+
+## 20. The analyzer's two resolutions (2026-11-13)
+
+The spectrum every device's editor shows (`devices::Spectrum`) gives the lows frames of about 170 ms of the sound taken
+down to about 12 kHz, zero-padded to twice their length, besides the highs' frames of about 43 ms (docs/design.md,
+section 9: a sub's sine showed as a block 50 Hz wide). It works on the message thread, only while an editor shows it.
+Measured from `windows-profile` ("Benchmark: an analyzer's work on a second of sound", ten seconds of noise taken in at
+the display's 30 refreshes a second, each reading the curve as a paint does; three runs, steady to 4 %), in % of a core:
+
+| Rate | Now | Before | Why |
+|---|---|---|---|
+| 48 kHz | 0.77 | 0.44 | The lows' transforms of 4096 points, 47 a second, beside the highs' 94 of 2048, and their two moving sums |
+| 96 kHz | 1.11 | 0.79 | The same lows (the sound taken down to 12 kHz), beside the highs' 4096 points |
+
+Smaller transforms of a slower sound, as Smaart's multi-time window makes them: one long frame at the full rate (8192
+points zero-padded to 16384) would cost, by the transforms' sizes, about four times what the lows do.

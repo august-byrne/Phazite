@@ -90,6 +90,77 @@ TEST_CASE ("A spectrum shows a sine at its frequency and level, and falls slowly
     CHECK (spectrum.getSize() == 4096);
 }
 
+TEST_CASE ("A spectrum shows a sub's sine as a narrow peak at its level, every sine at its level, and the lows without flicker")
+{
+    // The owner, 2026-11-13: a 40 Hz sine showed as a block 50 Hz wide, in levels 23 Hz apart. The lows come from longer frames
+    // of the sound at about 12 kHz, their levels about 3 Hz apart, each frame an eighth of one after the last.
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        CAPTURE (rate);
+        phazite::devices::Spectrum spectrum;
+        spectrum.setSampleRate (rate);
+        CHECK (spectrum.getLowsSpacing() > 2.5);
+        CHECK (spectrum.getLowsSpacing() < 3.2);
+        const auto refresh = (int) (rate / 30.0); // the samples between two of the display's refreshes
+
+        // A second of a sine at -6 dB, as the display's refreshes take it in; the levels at each of the last refreshes.
+        const auto play = [&spectrum, rate, refresh] (double hertz, std::vector<float>* lastLevels = nullptr)
+        {
+            std::vector<float> sound ((size_t) rate);
+
+            for (size_t i = 0; i < sound.size(); ++i)
+                sound[i] = 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * hertz * (double) i / rate);
+
+            for (size_t at = 0; at + (size_t) refresh <= sound.size(); at += (size_t) refresh)
+            {
+                spectrum.add (sound.data() + at, refresh);
+                spectrum.update (40.0f / 30.0f);
+
+                if (lastLevels != nullptr && at >= sound.size() / 2)
+                    lastLevels->push_back (spectrum.getLevelAt (hertz));
+            }
+        };
+
+        // A sub: at its level, held steady from refresh to refresh, and narrow: 20 Hz from it, far under it.
+        std::vector<float> levels;
+        play (40.0, &levels);
+        CHECK (spectrum.getLevelAt (40.0) == doctest::Approx (-6.02).epsilon (0.1));
+        CHECK (*std::max_element (levels.begin(), levels.end()) - *std::min_element (levels.begin(), levels.end()) < 0.3f);
+        CHECK (spectrum.getLevelAt (20.0) < spectrum.getLevelAt (40.0) - 25.0f);
+        CHECK (spectrum.getLevelAt (60.0) < spectrum.getLevelAt (40.0) - 25.0f);
+
+        // Every sine at its level, in the lows, where the two are blended and in the highs (a sine between two of the highs'
+        // levels reads up to 1.4 dB low, as a Hann window's does).
+        for (const auto hertz : { 100.0, 150.0, 212.0, 300.0, 1000.0 })
+        {
+            CAPTURE (hertz);
+            phazite::devices::Spectrum fresh;
+            fresh.setSampleRate (rate);
+            std::swap (spectrum, fresh);
+            play (hertz);
+            CHECK (spectrum.getLevelAt (hertz) > -7.6f);
+            CHECK (spectrum.getLevelAt (hertz) < -5.9f);
+        }
+    }
+
+    // What would fold down onto the lows as the rate is divided stays out: a sine just under 12 kHz, at 48 kHz, which a
+    // quarter of the rate would put at 50 Hz.
+    phazite::devices::Spectrum spectrum;
+    spectrum.setSampleRate (48000.0);
+    std::vector<float> high (48000);
+
+    for (size_t i = 0; i < high.size(); ++i)
+        high[i] = 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 11950.0 * (double) i / 48000.0);
+
+    // Its second second alone, once the frames that held its start, a step that spreads over every frequency, have gone.
+    spectrum.add (high.data(), (int) high.size());
+    spectrum.update (100.0f);
+    spectrum.add (high.data(), (int) high.size());
+    spectrum.update (200.0f);
+    CHECK (spectrum.getLevelAt (11950.0) > -8.0f);
+    CHECK (spectrum.getLevelOver (20.0, 140.0) < -80.0f);
+}
+
 TEST_CASE ("A spectrum shows a short sound that comes and goes between two refreshes near its level, wherever it falls")
 {
     // The owner, 2026-11-10: the EQ didn't show short sounds such as claps. A frame of the newest samples was read at each

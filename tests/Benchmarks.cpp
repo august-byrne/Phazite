@@ -13,6 +13,7 @@
 #include "TestHelpers.h"
 #include "TestSong.h"
 #include "app/ClipWaveforms.h"
+#include "devices/core/Spectrum.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -402,6 +403,43 @@ TEST_CASE ("Benchmark: a sound made ready for the sampler as it loads, a minute 
     const auto octaves = millisecondsOf ([&] { dev::Sampler::makeOctaves (sound); });
     CHECK (sound.onsets.size() > 1);
     MESSAGE ("Its hits found: " << milliseconds (hits, 1) << "; its octaves made: " << milliseconds (octaves, 1));
+}
+
+TEST_CASE ("Benchmark: an analyzer's work on a second of sound, as an EQ's editor shows it" * doctest::test_suite ("benchmark")
+           * doctest::skip())
+{
+    // The spectrum of a device's sound (devices/core/Spectrum.h), worked out on the message thread while an editor shows it:
+    // ten seconds of noise taken in as the display's refreshes take it, each refresh showing it and reading the curve's
+    // levels as a paint does, a point every 2 pixels across a 600-pixel graph from 20 Hz to 20 kHz.
+    for (const auto rate : { 48000.0, 96000.0 })
+    {
+        dev::Spectrum spectrum;
+        spectrum.setSampleRate (rate);
+        std::vector<float> sound ((size_t) (10.0 * rate));
+        juce::Random random (11);
+
+        for (auto& sample : sound)
+            sample = random.nextFloat() - 0.5f;
+
+        const auto perRefresh = (int) (rate / 30.0);
+        auto levels = 0.0f;
+        const auto ms = millisecondsOf (
+            [&]
+            {
+                for (size_t at = 0; at + (size_t) perRefresh <= sound.size(); at += (size_t) perRefresh)
+                {
+                    spectrum.add (sound.data() + at, perRefresh);
+                    spectrum.update (1.3f);
+
+                    for (int x = 0; x < 600; x += 2)
+                        levels += spectrum.getLevelOver (20.0 * std::pow (1000.0, x / 600.0), 20.0 * std::pow (1000.0, (x + 2) / 600.0));
+                }
+            });
+
+        CHECK (levels < 0.0f);
+        MESSAGE ("At " << (int) rate << " Hz: " << milliseconds (ms / 10.0) << " a second of sound, " << juce::String (ms / 100.0, 2)
+                       << "% of a core");
+    }
 }
 
 TEST_CASE ("Benchmark: a live note's way through Phazite's engine" * doctest::test_suite ("benchmark") * doctest::skip())
