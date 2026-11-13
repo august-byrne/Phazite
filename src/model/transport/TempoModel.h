@@ -35,4 +35,8 @@ int moveTempoChange (ProjectContext&, int index, BeatPosition, double bpm);
 void setTempoCurve (ProjectContext&, int index, float curve);
 void deleteTempoChange (ProjectContext&, int index);
 void removeTempoChanges (ProjectContext&);
+
+// A tempo change's tempo set as it was typed, its beat and its line to the next staying, as "Change Tempo" (within the
+// tempo's limits, to a hundredth).
+void setTempoChangeBpm (ProjectContext&, int index, double bpm);
 } // namespace phazite

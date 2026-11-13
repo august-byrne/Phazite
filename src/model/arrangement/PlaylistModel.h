@@ -122,6 +122,10 @@ std::vector<ClipInfo> getClips (const ProjectContext&, TrackID); // left to righ
 std::optional<ClipInfo> getClip (const ProjectContext&, ClipID);
 bool canHoldClips (const ProjectContext&, TrackID); // a track, not a folder
 
+// The clips linked to a clip, its aliases, which play the same notes, the clip itself first; the clip alone while it has
+// none, and none while it isn't in the song.
+std::vector<ClipID> getLinkedClips (const ProjectContext&, ClipID);
+
 // Clips on a track that overlap play together (mixed, as in FL Studio and REAPER), so the playlist shows them one under
 // another in their track's row, as REAPER offsets overlapping items, rather than one over another, where they are hard
 // to tell apart and to grab (docs/design.md, section 6). For a track's clips (getClips()), in their order: each one's

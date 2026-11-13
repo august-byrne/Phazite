@@ -4,11 +4,12 @@
 // to the next tempo holds and then jumps, or ramps, straight or bent, as an automation lane's does, and the lane takes the
 // automation lanes' gestures: a click adds a tempo change, a press on the line pulls one from it, a point drags (on the grid
 // unless Alt is held, Shift for fine steps), the handle in a ramp's middle bends it, and a double-click deletes a point or
-// straightens a ramp. Right-click for a line's jump or ramp. Its header, over the track headers, offers Add Tempo Change and
-// Remove Tempo Changes, which takes the lane away. It reaches the tempos through the model (model/transport/TempoModel.h).
+// straightens a ramp. Right-click for a line's jump or ramp, or a point's Type a Value.... Its header, over the track
+// headers, offers Add Tempo Change and Remove Tempo Changes, which takes the lane away. It reaches the tempos through the model (model/transport/TempoModel.h).
 #pragma once
 
 #include "model/transport/TempoModel.h"
+#include "ui/components/TypedField.h"
 #include "ui/theme/DesignTokens.h"
 #include "ui/timeline/TimelineEditor.h"
 #include "ui/timeline/TimelineGesture.h"
@@ -44,6 +45,12 @@ public:
     // The tempos it shows, in beats per minute, from the bottom of its line's area to its top.
     juce::Range<double> getShownTempos() const noexcept { return shown; }
 
+    // A tempo change's tempo typed (the owner, 2026-11-13), as an automation point's value is: Type a Value... in its point's
+    // menu opens a field over the point with its tempo, all of it selected; Enter sets what it says ("128", "92.5 bpm"), as
+    // one undo step, and Esc leaves it. The field while it is open, else nullptr (for tests).
+    void typeTempo (int index);
+    juce::TextEditor* getTempoField() const;
+
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
@@ -69,9 +76,10 @@ private:
     TimelineGesture gesture;
     Drag drag = Drag::none, pendingDrag = Drag::none;
     juce::Point<float> start;
-    int pressed = -1;  // the point pressed, or the line a bend bends
-    int selected = -1; // the point clicked last, shown larger
-    int hovered = -1;  // the line under the pointer, whose handle shows
+    int pressed = -1;                       // the point pressed, or the line a bend bends
+    int selected = -1;                      // the point clicked last, shown larger
+    int hovered = -1;                       // the line under the pointer, whose handle shows
+    std::unique_ptr<TypedField> tempoField; // while it is open, and until a message after it closed
 
     void refresh(); // reads the tempos, and fits the tempos shown to them unless a drag goes on
 

@@ -2,6 +2,7 @@
 #include "TempoLane.h"
 #include "model/arrangement/TimelineModel.h"
 #include "model/project/ProjectContext.h"
+#include "ui/components/TypedField.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -201,11 +202,11 @@ juce::String TempoLane::describeHere (juce::Point<float> position) const
         const auto tempo = formatTempo (tempos[(size_t) *point].bpm);
 
         if (*point == 0)
-            return tempo + ", the song's first tempo. Drag it up or down to change it.";
+            return tempo + ", the song's first tempo. Drag it up or down to change it, or right-click it to type it.";
 
         return tempo
-               + ". Drag the point to move it, and double-click it to delete it. Hold Alt to place it freely, and Shift "
-                 "for fine steps.";
+               + ". Drag the point to move it, right-click it to type its tempo, and double-click it to delete it. Hold Alt to "
+                 "place it freely, and Shift for fine steps.";
     }
 
     if (getHandleAt (position).has_value())
@@ -567,6 +568,15 @@ juce::PopupMenu TempoLane::getMenuAt (juce::Point<float> position)
         const auto& tempo = tempos[(size_t) index];
         menu.addSectionHeader (formatTempo (tempo.bpm) + " from bar " + juce::String (getBarAt (context, tempo.beat) + 1));
 
+        // Its tempo typed, first, as an automation point's value is.
+        menu.addItem ("Type a Value...",
+                      [safeThis = juce::Component::SafePointer<TempoLane> (this), index]
+                      {
+                          if (safeThis != nullptr)
+                              safeThis->typeTempo (index);
+                      });
+        menu.addSeparator();
+
         if (index + 1 < (int) tempos.size())
             addLineMenu (menu, index);
 
@@ -588,6 +598,51 @@ juce::PopupMenu TempoLane::getMenuAt (juce::Point<float> position)
     menu.addSeparator();
     addCommandItem (menu, editor.getCommands(), "transport.removeTempoChanges");
     return menu;
+}
+
+void TempoLane::typeTempo (int index)
+{
+    refresh();
+
+    if (! context.hasProject() || ! juce::isPositiveAndBelow (index, (int) tempos.size()))
+        return;
+
+    auto* parent = TypedField::findParent (*this);
+
+    if (parent == nullptr)
+        return;
+
+    // Over its point, as wide as the tempos' texts, following the lane as it scrolls. One that has finished, hidden, goes now.
+    selected = index;
+    repaint();
+    const auto centre = getPointPosition (index).roundToInt();
+    tempoField = std::make_unique<TypedField> (*this);
+    tempoField->setTitle ("Tempo");
+    tempoField->getTarget = [this, centre] (const juce::Component& in)
+    { return in.getLocalArea (this, juce::Rectangle<int> (TypedField::getMinimumWidth(), controlHeight).withCentre (centre)); };
+    tempoField->getTexts = [] { return juce::StringArray { formatTempo (minTempo), formatTempo (maxTempo) }; };
+    tempoField->onApply = [this, index] (const juce::String& text)
+    {
+        if (const auto bpm = parseTempo (text))
+            setTempoChangeBpm (context, index, *bpm);
+    };
+    tempoField->onFinished = [safeThis = juce::Component::SafePointer<TempoLane> (this)]
+    {
+        juce::MessageManager::callAsync (
+            [safeThis]
+            {
+                if (safeThis != nullptr && safeThis->tempoField != nullptr && safeThis->tempoField->isFinished())
+                    safeThis->tempoField = nullptr;
+            });
+    };
+
+    parent->addAndMakeVisible (*tempoField);
+    tempoField->show (formatTempo (tempos[(size_t) index].bpm));
+}
+
+juce::TextEditor* TempoLane::getTempoField() const
+{
+    return tempoField != nullptr && ! tempoField->isFinished() ? tempoField.get() : nullptr;
 }
 
 void TempoLane::addLineMenu (juce::PopupMenu& menu, int line)

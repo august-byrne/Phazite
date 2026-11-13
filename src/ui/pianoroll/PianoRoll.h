@@ -60,6 +60,11 @@ public:
     std::function<void (int height, bool folded)> onVelocityLaneChanged; // by a drag or the chevron
     static constexpr int defaultVelocityHeight = 72, minimumVelocityHeight = 32, foldedVelocityHeight = 20;
 
+    // How far down the rows are scrolled, in pixels from the top row; set, they scroll there, within their range, as the wheel
+    // and the rows' scroll bar scroll them.
+    int getScrollY() const noexcept { return scrollY; }
+    void setScrollY (int);
+
     // TimelineEditor
     bool canUseTool (Tool) const override;       // all but Slip
     bool usesSmartToolFor (Tool) const override; // Draw: the Smart Tool adds notes with a click already
@@ -131,7 +136,9 @@ private:
     Transform transformBefore;  // as they were when the bar opened: closing it without Apply puts them back
     bool transformOpen = false; // while its preview shows
 
-    // Each clip's view as it was left, by the clip's ID, to open it there again (forgotten when another project opens).
+    // Each clip's view as it was left, by the clip's ID, to open it there again (forgotten when another project opens). Linked
+    // clips (aliases), which show the same notes, share it: left in one, each opens as that one was left (the owner,
+    // 2026-11-13), counted from its own bar 1.
     struct ClipView
     {
         double pixelsPerBeat = 0.0;
@@ -226,7 +233,6 @@ private:
     int getPitchForRow (int row) const;
     int getRowTop (int row) const;
     int getRowAt (int y) const;
-    void setScrollY (int);
     void scrollToNotes(); // so that the clips' notes (or middle C) are in view
     void updateVerticalScrollBar();
     juce::Rectangle<float> getNoteBounds (const NoteData&) const;

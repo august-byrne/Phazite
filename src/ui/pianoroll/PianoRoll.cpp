@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "DrumRows.h"
 #include "PianoRollParts.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -266,22 +267,32 @@ void PianoRoll::setClips (const std::vector<ClipID>& newClips, bool keepView)
 
 void PianoRoll::rememberView()
 {
-    // A clip shown alone opens again as it was left (several shown at once open zoomed to fit).
+    // A clip shown alone opens again as it was left, and so do the clips linked to it (several shown at once open zoomed to
+    // fit).
     if (clips.size() == 1 && hasProject())
-        clipViews[clips.front()] = { getView().pixelsPerBeat, (getView().start - getTimeOrigin()).inBeats(), scrollY };
+    {
+        const ClipView left { getView().pixelsPerBeat, (getView().start - getTimeOrigin()).inBeats(), scrollY };
+
+        for (const auto clip : getLinkedClips (context, clips.front()))
+            clipViews[clip] = left;
+    }
 }
 
 void PianoRoll::showNewClips()
 {
+    // As it was left, or as a clip linked to it was, made since (its own view first: getLinkedClips() lists it first).
     if (clips.size() == 1)
     {
-        if (const auto found = clipViews.find (clips.front()); found != clipViews.end())
+        for (const auto clip : getLinkedClips (context, clips.front()))
         {
-            const auto& left = found->second;
-            const auto start = getTimeOrigin() + BeatDuration::fromBeats (left.offsetBeats);
-            zoomTo ({ start, start + BeatDuration::fromBeats (std::max (1, getTimelineArea().getWidth()) / left.pixelsPerBeat) });
-            setScrollY (left.scrollY);
-            return;
+            if (const auto found = clipViews.find (clip); found != clipViews.end())
+            {
+                const auto& left = found->second;
+                const auto start = getTimeOrigin() + BeatDuration::fromBeats (left.offsetBeats);
+                zoomTo ({ start, start + BeatDuration::fromBeats (std::max (1, getTimelineArea().getWidth()) / left.pixelsPerBeat) });
+                setScrollY (left.scrollY);
+                return;
+            }
         }
     }
 

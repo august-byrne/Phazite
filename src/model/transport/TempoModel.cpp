@@ -48,6 +48,14 @@ int moveTempoChange (ProjectContext& context, int index, BeatPosition beat, doub
     return song != nullptr ? moveTempoChange (*song, index, beat, bpm) : -1;
 }
 
+void setTempoChangeBpm (ProjectContext& context, int index, double bpm)
+{
+    // The tempo in effect from its own beat, which is this one.
+    if (auto* song = findSong (context))
+        if (const auto changes = getTempoChanges (*song); juce::isPositiveAndBelow (index, (int) changes.size()))
+            setTempoAt (*song, changes[(size_t) index].beat, bpm);
+}
+
 void setTempoCurve (ProjectContext& context, int index, float curve)
 {
     if (auto* song = findSong (context))

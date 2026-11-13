@@ -8,6 +8,7 @@
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
+#include "ui/components/ValueText.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/playlist/TempoLane.h"
 
@@ -198,4 +199,58 @@ TEST_CASE ("The tempo lane: a point drags, a line ramps and bends, a click adds 
     CHECK_FALSE (deleteFirst->isEnabled);
     REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.lane->getPointPosition (1)), { "Delete Tempo Change" }));
     CHECK_FALSE (phazite::hasTempoChanges (*screen.song));
+}
+
+TEST_CASE ("A tempo change's menu types its tempo in a field over its point, as one step")
+{
+    // The owner, 2026-11-13: "Same thing for the tempo automation. should be able to type a value", as an automation point's
+    // menu types its value.
+    TempoScreen screen;
+    phazite::addTempoChange (*screen.song, beat (8.0), 140.0);
+    screen.song->getUndoManager().clearUndoHistory();
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.lane->isVisible());
+
+    // Its point's menu: Type a Value..., which opens a field over the point with its tempo, all of it selected.
+    REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.lane->getPointPosition (1)), { "Type a Value..." }));
+    auto* field = screen.lane->getTempoField();
+    REQUIRE (field != nullptr);
+    CHECK (field->isShowing());
+    CHECK (field->hasKeyboardFocus (false));
+    CHECK (field->getText() == phazite::ui::formatTempo (140.0));
+    CHECK (field->getHighlightedRegion().getLength() == field->getText().length());
+    const auto pointInPlaylist = screen.playlist.getLocalPoint (screen.lane, screen.lane->getPointPosition (1));
+    CHECK (screen.playlist.getLocalArea (field->getParentComponent(), field->getBounds()).getCentreX()
+           == doctest::Approx (pointInPlaylist.x).epsilon (0.01));
+
+    // "128.5" and Enter: that tempo from the same beat, as one step.
+    for (const auto key : { '1', '2', '8', '.', '5' })
+        screen.window.pressKey (juce::KeyPress (key, {}, (juce::juce_wchar) key));
+
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (screen.lane->getTempoField() == nullptr);
+    REQUIRE (screen.tempos().size() == 2);
+    CHECK (screen.tempos()[1].beat == beat (8.0));
+    CHECK (screen.tempos()[1].bpm == doctest::Approx (128.5));
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Change Tempo"));
+    phazite::test::dispatchPendingMessages(); // the field goes, a message after it closed
+
+    // The first tempo too. Esc leaves it as it was, and a tempo past the limits is the limit.
+    REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.lane->getPointPosition (0)), { "Type a Value..." }));
+    REQUIRE (screen.lane->getTempoField() != nullptr);
+    screen.lane->getTempoField()->setText ("90", false);
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+    CHECK (screen.tempos()[0].bpm == doctest::Approx (120.0));
+    phazite::test::dispatchPendingMessages();
+
+    REQUIRE (runMenuItem (screen.lane->getMenuAt (screen.lane->getPointPosition (0)), { "Type a Value..." }));
+    REQUIRE (screen.lane->getTempoField() != nullptr);
+    screen.lane->getTempoField()->setText ("999 bpm", false);
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (screen.tempos()[0].bpm == doctest::Approx (phazite::maxTempo));
+    CHECK (screen.tempos()[1].bpm == doctest::Approx (128.5));
+
+    // One undo puts it back.
+    phazite::undo (*screen.song);
+    CHECK (screen.tempos()[0].bpm == doctest::Approx (120.0));
 }

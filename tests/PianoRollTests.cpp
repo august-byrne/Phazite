@@ -3,6 +3,7 @@
 #include "GoldenFiles.h"
 #include "UiTestHelpers.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -700,6 +701,42 @@ TEST_CASE ("A clip opens zoomed to fit with room after it, never smaller than th
     screen.select (bar);
     CHECK (view.pixelsPerBeat == doctest::Approx (zoomed));
     CHECK (view.start.inBeats() == doctest::Approx (1.0));
+}
+
+TEST_CASE ("Linked clips show their notes as any of them was left: the same zoom, the same notes in view and the same rows")
+{
+    // The owner, 2026-11-13: "the scroll positions of the piano roll should be the same for all linked [clips] when any of
+    // them are the selected item". An alias plays the same notes, so it shows them where its link was left.
+    PianoRollScreen screen;
+    const auto clip = screen.addClip (0, 0.0, 4.0);
+    phazite::addNote (screen.song, clip, 60, beats (0.0), phazite::BeatDuration::fromBeats (1.0), 100);
+    const auto alias = phazite::copyClips (screen.song, { clip }, true).front();
+    phazite::moveClip (screen.context, alias, beats (8.0), screen.tracks[0]);
+    const auto other = screen.addClip (1, 16.0, 4.0);
+    CHECK (phazite::getLinkedClips (screen.context, alias) == std::vector { alias, clip });
+    CHECK (phazite::getLinkedClips (screen.context, other) == std::vector { other });
+
+    // Left zoomed in and scrolled down in the first.
+    const auto& view = screen.pianoRoll.getView();
+    screen.select (clip);
+    screen.pianoRoll.zoomTo ({ beats (1.0), beats (3.0) });
+    screen.pianoRoll.setScrollY (screen.pianoRoll.getScrollY() + 120);
+    const auto zoomed = view.pixelsPerBeat;
+    const auto scrolled = screen.pianoRoll.getScrollY();
+
+    // The alias, never shown, opens so, from its own bar 1.
+    screen.select (alias);
+    CHECK (screen.pianoRoll.getTimeOrigin() == beats (8.0));
+    CHECK (view.pixelsPerBeat == doctest::Approx (zoomed));
+    CHECK ((view.start - screen.pianoRoll.getTimeOrigin()).inBeats() == doctest::Approx (1.0));
+    CHECK (screen.pianoRoll.getScrollY() == scrolled);
+
+    // Scrolled further there, the first opens as the alias was left, past a clip of its own.
+    screen.pianoRoll.setScrollY (scrolled - 60);
+    screen.select (other);
+    screen.select (clip);
+    CHECK (view.start.inBeats() == doctest::Approx (1.0));
+    CHECK (screen.pianoRoll.getScrollY() == scrolled - 60);
 }
 
 TEST_CASE ("A short note's edges are grabbed just outside it, and a long note's start as easily as its end")

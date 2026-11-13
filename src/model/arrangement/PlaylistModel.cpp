@@ -302,6 +302,18 @@ std::optional<ClipInfo> getClip (const ProjectContext& context, ClipID id)
     return {};
 }
 
+std::vector<ClipID> getLinkedClips (const ProjectContext& context, ClipID id)
+{
+    std::vector<ClipID> linked;
+
+    if (auto* song = findSong (context))
+        if (const auto clipState = findClipState (*song, id); clipState.isValid())
+            for (const auto& alias : getAliasStates (clipState))
+                linked.push_back (getClipID (alias));
+
+    return linked;
+}
+
 bool canHoldClips (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
