@@ -112,7 +112,7 @@ void SendLevel::setDecibels (float decibels) noexcept
 
 std::pair<float, float> SendLevel::moveOn() noexcept
 {
-    const auto now = gain.load (std::memory_order_relaxed);
+    const auto now = cut.load (std::memory_order_relaxed) ? 0.0f : gain.load (std::memory_order_relaxed);
     const auto from = applied < 0.0f ? now : applied;
     applied = now;
     return { from, now };

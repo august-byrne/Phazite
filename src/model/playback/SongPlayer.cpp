@@ -1236,6 +1236,40 @@ void SongPlayer::updateAudibility()
         return false;
     };
 
+    // What the song's sidechains listen to, the master's and those in containers too. A bus among them hears its tracks
+    // before its own mute, so a track in it that is only soloed out plays on into it (known bug 18): the bus's own solo
+    // silences them after the key is taken, and they send nothing meanwhile.
+    std::set<std::int64_t> keys;
+    const auto addKeys = [&keys] (const juce::ValueTree& chain, auto& addInside) -> void
+    {
+        for (const auto& device : chain)
+        {
+            if (device.hasType (schema::DEVICE))
+            {
+                if (const auto source = getID (device, schema::deviceSidechain); source != 0)
+                    keys.insert (source);
+            }
+            else if (device.hasType (schema::CONTAINER) || device.hasType (schema::CHAIN))
+            {
+                addInside (device, addInside);
+            }
+        }
+    };
+
+    for (const auto& state : trackStates)
+        addKeys (state, addKeys);
+
+    addKeys (song.getState().getChildWithName (schema::MASTER), addKeys);
+
+    const auto isInKey = [&keys] (const juce::ValueTree& state)
+    {
+        for (auto folder = state.getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
+            if (keys.contains (getID (folder, schema::trackID)))
+                return true;
+
+        return false;
+    };
+
     for (const auto& state : trackStates)
     {
         auto* strip = findStrip (getID (state, schema::trackID));
@@ -1262,7 +1296,15 @@ void SongPlayer::updateAudibility()
 
         soloed = soloed || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
         const auto isRendered = beforeFader && getID (state, schema::trackID) == rendered->channel;
-        strip->getChannel().setAudible (isRendered || (! muted && (! anySoloed || soloed || isReturnState (state))));
+        const auto heard = isRendered || (! muted && (! anySoloed || soloed || isReturnState (state)));
+        const auto playsForKey = ! heard && ! muted && isInKey (state);
+        strip->getChannel().setAudible (heard || playsForKey);
+
+        // What isn't heard sends nothing, also while it plays on for a sidechain.
+        for (const auto& child : state)
+            if (child.hasType (schema::SEND))
+                if (const auto found = sendLevels.find (getID (child, schema::sendID)); found != sendLevels.end())
+                    found->second->setCut (! heard);
     }
 }
 

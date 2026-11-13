@@ -80,17 +80,21 @@ private:
     juce::AudioBuffer<float> line;
 };
 
-// A send's level, which the message thread sets and the audio thread glides to over a block. Kept by the send's ID.
+// A send's level, which the message thread sets and the audio thread glides to over a block. Kept by the send's ID. Cut, it
+// sends nothing whatever its level, gliding there over a block too: a send's track that isn't heard (muted, or soloed
+// out) sends nothing, also while it plays on for a sidechain that listens to it or to a bus it is in.
 class SendLevel
 {
 public:
     void setDecibels (float decibels) noexcept;
+    void setCut (bool shouldCut) noexcept { cut.store (shouldCut, std::memory_order_relaxed); }
 
     // Audio thread: the gain as the last block ended, and as this one does.
     std::pair<float, float> moveOn() noexcept;
 
 private:
     std::atomic<float> gain { 1.0f };
+    std::atomic<bool> cut { false };
     float applied = -1.0f; // none yet
 };
 

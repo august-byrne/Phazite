@@ -631,3 +631,55 @@ TEST_CASE ("Phazite's compressor's sound comes as late as its look-ahead while i
     setMode (phazite::devices::Compressor::Mode::compress);
     REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return juce::exactlyEqual (latency(), 0.0); }));
 }
+
+TEST_CASE ("A sidechain's key reaches its device while the device's track is soloed, a bus's too, whose tracks send nothing meanwhile")
+{
+    // The owner, 2026-11-13 (known bug 18): a sub ducking under the Drums bus stopped ducking while it was soloed. A track
+    // soloed out plays on for a sidechain that listens to it, and a track in a bus that is a key plays on into the bus, which
+    // its own solo silences after the key is taken; neither sends to a return meanwhile.
+    Song song;
+    auto& model = *song.song;
+    using phazite::test::at, phazite::test::lasting;
+    song.add (song.kick, TestTone::typeID);
+    const auto clip = phazite::test::addMidiClip (model, song.kick, { at (0.0), at (4.0) }, "Notes");
+    REQUIRE (clip.isValid());
+    phazite::test::addMidiNote (model, clip, 60, at (0.0), lasting (4.0), 64);
+    const auto ducker = song.add (song.bass, TestSidechain::typeID); // plays what its sidechain hears
+    const auto kickAlone = renderPeak (model);
+    REQUIRE (kickAlone > 0.1f);
+
+    SUBCASE ("A track as the key")
+    {
+        phazite::setSidechainSource (model, ducker, song.kick);
+        phazite::setTrackSoloed (model, song.bass, true);
+        CHECK (renderPeak (model) == doctest::Approx (kickAlone).epsilon (0.01)); // the bass alone, playing its key
+    }
+
+    SUBCASE ("A bus as the key, with a track in it that sends to a return")
+    {
+        const auto drums = phazite::groupIntoFolder (model, { song.kick }, nullptr);
+        REQUIRE (drums.isValid());
+        phazite::setMixedAsBus (model, drums, true);
+        const auto reverb = phazite::addReturnTrack (model, "Reverb", nullptr);
+        REQUIRE (reverb.isValid());
+
+        for (const auto preFader : { false, true })
+        {
+            const auto send = phazite::addSend (model, song.kick, reverb, preFader);
+            REQUIRE (send.isValid());
+            phazite::setSendLevel (model, send, 0.0f);
+        }
+
+        phazite::setSidechainSource (model, ducker, drums);
+        CHECK (renderPeak (model) > 2.0f * kickAlone); // the bus, the bass playing its key and the return
+
+        // Soloed, the bass alone: its key still comes, and neither the bus nor the return is heard.
+        phazite::setTrackSoloed (model, song.bass, true);
+        CHECK (renderPeak (model) == doctest::Approx (kickAlone).epsilon (0.01));
+
+        // Muted, the kick is heard nowhere, its key and its sends silent too, as the bus's sound is.
+        phazite::setTrackSoloed (model, song.bass, false);
+        phazite::setTrackMuted (model, song.kick, true);
+        CHECK (renderPeak (model) < 1.0e-4f);
+    }
+}
