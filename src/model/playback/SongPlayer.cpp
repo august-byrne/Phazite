@@ -1236,9 +1236,7 @@ void SongPlayer::updateAudibility()
         return false;
     };
 
-    // What the song's sidechains listen to, the master's and those in containers too. A bus among them hears its tracks
-    // before its own mute, so a track in it that is only soloed out plays on into it (known bug 18): the bus's own solo
-    // silences them after the key is taken, and they send nothing meanwhile.
+    // What the song's sidechains listen to, the master's and those in containers too.
     std::set<std::int64_t> keys;
     const auto addKeys = [&keys] (const juce::ValueTree& chain, auto& addInside) -> void
     {
@@ -1261,22 +1259,14 @@ void SongPlayer::updateAudibility()
 
     addKeys (song.getState().getChildWithName (schema::MASTER), addKeys);
 
-    const auto isInKey = [&keys] (const juce::ValueTree& state)
+    // A pad's track goes with its sampler's track, whose mute and solo cover its pads on tracks of their own.
+    const auto getSamplerTrack = [this] (const juce::ValueTree& padState)
     {
-        for (auto folder = state.getParent(); folder.hasType (schema::TRACK); folder = folder.getParent())
-            if (keys.contains (getID (folder, schema::trackID)))
-                return true;
-
-        return false;
+        return findTrackState (song, getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) getID (padState, schema::trackPadDevice))));
     };
 
-    for (const auto& state : trackStates)
+    const auto isHeard = [&] (const juce::ValueTree& state)
     {
-        auto* strip = findStrip (getID (state, schema::trackID));
-
-        if (strip == nullptr)
-            continue;
-
         auto muted = false, soloed = false;
         const auto addFrom = [&muted, &soloed] (const juce::ValueTree& from)
         {
@@ -1289,16 +1279,48 @@ void SongPlayer::updateAudibility()
 
         addFrom (state);
 
-        // A pad's track as its sampler's track is too, whose mute and solo cover its pads on tracks of their own.
         if (state.hasProperty (schema::trackPad))
-            addFrom (
-                findTrackState (song, getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) getID (state, schema::trackPadDevice)))));
+            addFrom (getSamplerTrack (state));
 
         soloed = soloed || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
         const auto isRendered = beforeFader && getID (state, schema::trackID) == rendered->channel;
-        const auto heard = isRendered || (! muted && (! anySoloed || soloed || isReturnState (state)));
-        const auto playsForKey = ! heard && ! muted && isInKey (state);
-        strip->getChannel().setAudible (heard || playsForKey);
+        return isRendered || (! muted && (! anySoloed || soloed || isReturnState (state)));
+    };
+
+    // Whether a track, or a folder it is in, is muted below a bus: the bus's own mute, and its folders', don't count.
+    const auto isMutedBelow = [] (juce::ValueTree track, const juce::ValueTree& bus)
+    {
+        for (; track.hasType (schema::TRACK) && track != bus && ! bus.isAChildOf (track); track = track.getParent())
+            if ((bool) track[schema::trackMute])
+                return true;
+
+        return false;
+    };
+
+    // A track that isn't heard plays on into a bus that is a key while that bus isn't heard either (soloed out, or muted: a
+    // muted bus feeds its key, as a muted track does), unless it is muted below the bus, a pad on a track of its own by its
+    // sampler's track too (known bug 18): the bus's own mute or solo silences it after the key is taken, and it sends
+    // nothing meanwhile. A bus that is heard plays its tracks as they are heard, so a track soloed in it plays alone (the
+    // owner, 2026-11-13: soloing a drum in the Drums bus played the bus's other drums).
+    const auto playsForKey = [&] (const juce::ValueTree& state)
+    {
+        for (auto bus = state.getParent(); bus.hasType (schema::TRACK); bus = bus.getParent())
+            if (keys.contains (getID (bus, schema::trackID)) && ! isHeard (bus))
+                return ! isMutedBelow (state, bus)
+                       && ! (state.hasProperty (schema::trackPad) && isMutedBelow (getSamplerTrack (state), bus));
+
+        return false;
+    };
+
+    for (const auto& state : trackStates)
+    {
+        auto* strip = findStrip (getID (state, schema::trackID));
+
+        if (strip == nullptr)
+            continue;
+
+        const auto heard = isHeard (state);
+        strip->getChannel().setAudible (heard || playsForKey (state));
 
         // What isn't heard sends nothing, also while it plays on for a sidechain.
         for (const auto& child : state)

@@ -15,6 +15,7 @@
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
+#include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Buses.h"
@@ -682,4 +683,103 @@ TEST_CASE ("A sidechain's key reaches its device while the device's track is sol
         phazite::setTrackMuted (model, song.kick, true);
         CHECK (renderPeak (model) < 1.0e-4f);
     }
+}
+
+TEST_CASE ("Soloing a track in a bus that is a key plays it alone; a muted bus still feeds its key, and a track muted in it doesn't")
+{
+    // The owner, 2026-11-13: after known bug 18's fix, soloing a drum in the Drums bus still played the bus's other drums,
+    // which played on for the bus's key while the bus, holding the soloed drum, was heard. They play on for the key only while
+    // the bus isn't heard.
+    Song song;
+    auto& model = *song.song;
+    using phazite::test::at, phazite::test::lasting;
+
+    // Two drums in a bus, each a steady level, the second half the first's; and the bass playing what its sidechain hears.
+    for (const auto& [track, velocity] : { std::pair { song.kick, 64 }, std::pair { song.keys, 32 } })
+    {
+        song.add (track, TestTone::typeID);
+        const auto clip = phazite::test::addMidiClip (model, track, { at (0.0), at (4.0) }, "Notes");
+        REQUIRE (clip.isValid());
+        phazite::test::addMidiNote (model, clip, 60, at (0.0), lasting (4.0), velocity);
+    }
+
+    const auto drums = phazite::groupIntoFolder (model, { song.kick, song.keys }, nullptr);
+    REQUIRE (drums.isValid());
+    phazite::setMixedAsBus (model, drums, true);
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
+    phazite::setSidechainSource (model, ducker, drums);
+    const auto all = renderPeak (model); // the bus, and the bass playing it again as loud
+    REQUIRE (all > 0.1f);
+
+    // A drum soloed plays alone, through its bus: the other drum and the bass silent.
+    phazite::setTrackSoloed (model, song.kick, true);
+    const auto kickAlone = renderPeak (model);
+    phazite::setTrackSoloed (model, song.kick, false);
+    phazite::setTrackSoloed (model, song.keys, true);
+    const auto snareAlone = renderPeak (model);
+    phazite::setTrackSoloed (model, song.keys, false);
+    CHECK (kickAlone == doctest::Approx (2.0f * snareAlone).epsilon (0.01));
+    CHECK (kickAlone + snareAlone == doctest::Approx (all / 2.0f).epsilon (0.01));
+
+    // The bass soloed: its key is the whole bus, which isn't heard (known bug 18).
+    phazite::setTrackSoloed (model, song.bass, true);
+    CHECK (renderPeak (model) == doctest::Approx (all / 2.0f).epsilon (0.01));
+    phazite::setTrackSoloed (model, song.bass, false);
+
+    // The bus muted still feeds its key, as a muted track does: a "ghost" bus, the bass alone heard.
+    phazite::setTrackMuted (model, drums, true);
+    CHECK (renderPeak (model) == doctest::Approx (all / 2.0f).epsilon (0.01));
+    phazite::setTrackMuted (model, drums, false);
+
+    // A drum muted in it leaves the bus's sound, and so its key, soloed out or not.
+    phazite::setTrackMuted (model, song.kick, true);
+    CHECK (renderPeak (model) == doctest::Approx (all / 3.0f).epsilon (0.01));
+    phazite::setTrackSoloed (model, song.bass, true);
+    CHECK (renderPeak (model) == doctest::Approx (all / 6.0f).epsilon (0.01));
+}
+
+TEST_CASE ("A drum pad on a track of its own in a bus that is a key feeds the key unless its sampler's track or a folder of it is muted")
+{
+    // A pad's track goes with its sampler's track, whose mute covers it as a folder's covers its tracks
+    // (model/devices/internal/DrumKit.h): muted so, it is muted before the bus, and feeds the bus's key no more than a track
+    // muted in the bus does, while the bass is soloed or the bus muted.
+    Song song;
+    auto& model = *song.song;
+    using phazite::test::at, phazite::test::lasting;
+    const auto sampler =
+        phazite::setInstrument (model, song.keys, phazite::makeOwnDeviceState (model, phazite::devices::DrumSampler::typeID));
+    REQUIRE (sampler.isValid());
+    const auto clip = phazite::test::addMidiClip (model, song.keys, { at (0.0), at (4.0) }, "Beat");
+    REQUIRE (clip.isValid());
+    phazite::test::addMidiNote (model, clip, 36, at (0.0), lasting (0.25), 127);
+
+    // The kick on a track of its own in the Drums bus, which the bass's sidechain listens to; the kit in a folder of its own.
+    const auto kickPad = phazite::givePadItsOwnTrack (model, sampler, 36);
+    REQUIRE (kickPad.isValid());
+    const auto drums = phazite::groupIntoFolder (model, { kickPad }, nullptr);
+    REQUIRE (drums.isValid());
+    phazite::setMixedAsBus (model, drums, true);
+    const auto kit = phazite::groupIntoFolder (model, { song.keys }, nullptr);
+    REQUIRE (kit.isValid());
+    const auto ducker = song.add (song.bass, TestSidechain::typeID);
+    phazite::setSidechainSource (model, ducker, drums);
+    const auto all = renderPeak (model); // the bus, and the bass playing it again as loud
+    REQUIRE (all > 0.1f);
+
+    // The bass soloed, or the bus muted: the kick plays on for the key, the bass alone heard.
+    phazite::setTrackSoloed (model, song.bass, true);
+    CHECK (renderPeak (model) == doctest::Approx (all / 2.0f).epsilon (0.01));
+    phazite::setTrackSoloed (model, song.bass, false);
+    phazite::setTrackMuted (model, drums, true);
+    CHECK (renderPeak (model) == doctest::Approx (all / 2.0f).epsilon (0.01));
+    phazite::setTrackMuted (model, drums, false);
+
+    // The kit's folder muted, the kick with it: heard nowhere, nor in the key, also with the bass soloed or the bus muted.
+    phazite::setTrackMuted (model, kit, true);
+    CHECK (renderPeak (model) < 1.0e-4f);
+    phazite::setTrackSoloed (model, song.bass, true);
+    CHECK (renderPeak (model) < 1.0e-4f);
+    phazite::setTrackSoloed (model, song.bass, false);
+    phazite::setTrackMuted (model, drums, true);
+    CHECK (renderPeak (model) < 1.0e-4f);
 }
