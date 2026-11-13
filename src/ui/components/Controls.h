@@ -17,6 +17,8 @@
 
 namespace phazite::ui
 {
+class TypedField; // TypedField.h: the field a value is typed in
+
 //==============================================================================
 // What Phazite's sliders do: double-clicking returns to the default value, dragging with Shift held
 // moves in fine steps, the value shows while dragging, and Tab and the arrow keys reach and change it.
@@ -64,13 +66,12 @@ public:
     void resized() override;
 
 private:
-    struct ValueField;
     struct ReadoutClicks;
 
     bool fineDrag = false;   // Shift was held when the drag started
     bool showedMenu = false; // the press was a right-click that showed the menu
     double dragStep = 0.0;
-    std::unique_ptr<ValueField> valueField; // while it is open, and until a message after it closed
+    std::unique_ptr<TypedField> valueField; // while it is open, and until a message after it closed
     juce::Component::SafePointer<juce::Component> readout;
     std::unique_ptr<ReadoutClicks> readoutClicks;
 

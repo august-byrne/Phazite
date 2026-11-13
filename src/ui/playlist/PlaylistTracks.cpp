@@ -310,6 +310,16 @@ void Playlist::addCommands (CommandRegistry& registry)
                     .perform = [this] { quantizeAudio (context, selection.getClips(), BeatDuration::fromBeats (getGridStepInBeats())); },
                     .isEnabled = [this] { return canQuantizeAudio (context, selection.getClips()); } });
 
+    // An automation point's exact value, typed in a field over it (typeAutomationValue()).
+    registry.add ({ .id = "automation.typeValue",
+                    .name = "Type a Value...",
+                    .category = "Automation",
+                    .description = "Types an exact value for the selected automation points, in a field over them, in the parameter's "
+                                   "units (\"-6 dB\", \"L20\", \"2.5 kHz\").",
+                    .synonyms = { "edit value", "enter value", "set value", "exact value", "type in value", "number", "point value" },
+                    .perform = [this] { typeAutomationValue(); },
+                    .isEnabled = [this] { return canTypeAutomationValue(); } });
+
     registry.add ({ .id = "edit.rename",
                     .name = "Rename",
                     .category = "Edit",

@@ -49,10 +49,23 @@ public:
     std::function<void (int)> onHeaderWidthChanged; // as the drag ends
     static constexpr int defaultHeaderWidth = 200, minHeaderWidth = 150, maxHeaderWidth = 360;
 
-    // Adds the playlist's own commands: renaming and coloring tracks, and focus mode. The time line's
-    // commands are addTimelineCommands()'s.
+    // Adds the playlist's own commands: renaming and coloring tracks, focus mode, and typing the selected automation points'
+    // value. The time line's commands are addTimelineCommands()'s.
     void addCommands (CommandRegistry&);
     void refreshShortcutTexts() override;
+
+    // Typing an automation point's value (the owner, 2026-11-13: "dragging to exactly the right point can be hard"), as
+    // Ableton Live's Edit Value and FL Studio's Type in value... take one: a field over the point, which opens with its value
+    // in the parameter's units, all of it selected; Enter sets every selected point in its lane to what it says, as one undo
+    // step, and Esc leaves them. It opens over the point pressed or right-clicked last, if it is selected, else the first
+    // selected; Type a Value... (automation.typeValue) in a point's menu and the command search open it. The field while it
+    // is open, else nullptr (for tests).
+    bool canTypeAutomationValue() const;
+    void typeAutomationValue();
+    juce::TextEditor* getAutomationValueField() const;
+
+    // A lane's right-click menu, as it shows; with a point, the point's: Type a Value... first.
+    juce::PopupMenu makeLaneMenu (TrackID, const ParameterRef&, bool onPoint = false);
 
     // TimelineEditor
     bool canUseTool (Tool) const override { return true; }
@@ -231,11 +244,13 @@ private:
     void refreshLanes(); // the rows' lanes as the model has them now, laid out; it scrolls to show a lane shown just now
     void rebuildLanes(); // their headers and views, keeping those of lanes still shown
     void layOutLanes();
-    void updateLanes();                               // their colors, modes, selected points and curves
-    void noteLanes();                                 // after the lanes were built: one shown since the last time scrolls into view
-    void showLaneMenu (TrackID, const ParameterRef&); // a lane's right-click menu
-    void setLaneCollapsed (TrackID, const ParameterRef&, bool collapse); // expanding one opens a collapsed track
-    int getRowAt (int y) const;                                          // y in the lanes; -1 below the last row
+    void updateLanes(); // their colors, modes, selected points and curves
+    void noteLanes();   // after the lanes were built: one shown since the last time scrolls into view
+    void showLaneMenu (TrackID, const ParameterRef&, bool onPoint = false); // a lane's right-click menu (makeLaneMenu())
+    AutomationLaneView* findLaneView (const ParameterRef&) const;           // the lane showing a parameter's automation, if any
+    std::optional<std::pair<ParameterRef, int>> pointPressed;               // the automation point pressed or right-clicked last
+    void setLaneCollapsed (TrackID, const ParameterRef&, bool collapse);    // expanding one opens a collapsed track
+    int getRowAt (int y) const;                                             // y in the lanes; -1 below the last row
     int getRowOf (TrackID) const;
     int getRowTop (const Row&) const; // where a row is in the lanes now
     bool isInFocus (TrackID) const;   // in focus mode, the rest are made small

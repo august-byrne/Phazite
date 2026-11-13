@@ -13,6 +13,7 @@
 #include "model/transport/TempoModel.h"
 #include "model/transport/TransportModel.h"
 #include "ui/components/Controls.h"
+#include "ui/components/ParameterText.h"
 #include "ui/components/TrackSwitch.h"
 #include "ui/components/ValueText.h"
 #include "ui/devices/DeviceMenus.h"
@@ -1192,39 +1193,11 @@ namespace
         // A value as the parameter's lane and control show it, and one typed so.
         ParameterKind getParameterKind() const { return target.has_value() ? target->kind : ParameterKind::other; }
 
-        juce::String getValueText (float value) const
-        {
-            if (getParameterKind() == ParameterKind::volume)
-                return formatDecibels (faderPositionToDecibels (value));
-
-            if (getParameterKind() == ParameterKind::pan)
-                return formatPan (value);
-
-            if (const auto info = handle.getInfo())
-                return formatParameterValue (*info, value);
-
-            return handle.getText (value);
-        }
+        juce::String getValueText (float value) const { return formatParameterText (handle, getParameterKind(), value); }
 
         std::optional<double> parseValue (const juce::String& text) const
         {
-            if (getParameterKind() == ParameterKind::volume)
-            {
-                const auto dB = parseDecibels (text);
-                return dB.has_value() ? std::optional ((double) decibelsToFaderPosition ((float) *dB)) : std::nullopt;
-            }
-
-            if (getParameterKind() == ParameterKind::pan)
-                return parsePan (text);
-
-            if (const auto info = handle.getInfo())
-            {
-                const auto value = parseParameterValue (*info, text);
-                return value.has_value() ? std::optional ((double) *value) : std::nullopt;
-            }
-
-            // As the device writes it: a plug-in's as the plug-in reads it.
-            const auto value = handle.readText (text);
+            const auto value = parseParameterText (handle, getParameterKind(), text);
             return value.has_value() ? std::optional ((double) *value) : std::nullopt;
         }
 

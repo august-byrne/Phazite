@@ -8,6 +8,7 @@
 
 #include "Playlist.h"
 #include "model/transport/RecordingModel.h"
+#include "ui/components/TypedField.h"
 #include "ui/timeline/TimelineGesture.h"
 
 #include <map>
@@ -67,9 +68,9 @@ struct Playlist::AddTrackRow : public juce::Button
 // them as the engine plays it, in the track's color. The tools edit it. The Smart Tool needs no keys: a click adds a
 // point (pressed on the line, the new point sits on it, and a drag pulls it), a point drags, the handle in the middle of
 // the line under the mouse bends that line, a drag on empty space selects the points in a rectangle, and a double-click
-// deletes a point or straightens a line at its handle. Draw draws steps on the grid (or, with Alt, a free line); Paint
-// draws the chosen shape; Delete deletes the points it passes; Select selects. Each drag is one undo step. Collapsed, it
-// shows the line in a thin row, and a double-click expands it.
+// deletes a point or straightens a line at its handle; a point's right-click menu types its value. Draw draws steps on the
+// grid (or, with Alt, a free line); Paint draws the chosen shape; Delete deletes the points it passes; Select selects. Each
+// drag is one undo step. Collapsed, it shows the line in a thin row, and a double-click expands it.
 struct Playlist::AutomationLaneView : public juce::Component,
                                       public juce::SettableTooltipClient,
                                       private juce::Timer
@@ -151,6 +152,11 @@ struct Playlist::AutomationLaneView : public juce::Component,
     juce::String getValueText (float) const;
     juce::String describeHere (juce::Point<float>) const; // for the hint bar
     void setHovered (int line);
+
+    // A point's value typed in a field over it (Playlist::typeAutomationValue()): the selected points of this lane take what it
+    // says. The field while it is open, and until a message after it closed.
+    void typeValue (int point);
+    std::unique_ptr<TypedField> valueField;
 
     void pressPoint (int index, const juce::ModifierKeys&); // selects it as a click does, ready to move it
     void pullPointFrom (const juce::MouseEvent&);           // a press on the line: a point there, which a drag moves

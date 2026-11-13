@@ -706,6 +706,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/DisplayTicker.h
     src/ui/components/ListRowHover.h
     src/ui/components/ModulatorDrag.h
+    src/ui/components/ParameterText.cpp
+    src/ui/components/ParameterText.h
     src/ui/components/PeakBar.cpp
     src/ui/components/PeakBar.h
     src/ui/components/PowerSwitch.cpp
@@ -718,6 +720,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/ToolRow.h
     src/ui/components/TrackSwitch.cpp
     src/ui/components/TrackSwitch.h
+    src/ui/components/TypedField.cpp
+    src/ui/components/TypedField.h
     src/ui/components/ValueText.cpp
     src/ui/components/ValueText.h
     src/ui/components/ViewTitle.cpp

@@ -13,6 +13,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "ui/components/Controls.h"
+#include "ui/components/ValueText.h"
 #include "ui/input/KeyDispatcher.h"
 #include "ui/playlist/Playlist.h"
 #include "ui/playlist/TrackHeights.h"
@@ -164,6 +165,80 @@ TEST_CASE ("Dragging a point moves it on the grid as one step, and a double-clic
 
     mouse.doubleClick (screen.at (6.0, screen.getPoints()[0].value));
     CHECK (screen.getPoints().empty());
+}
+
+TEST_CASE ("A point's menu types its value in a field over it, in the parameter's units, for every point selected, as one step")
+{
+    // The owner, 2026-11-13: "dragging to exactly the right point can be hard"; as Ableton Live's Edit Value and FL Studio's
+    // Type in value... on a point's right-click.
+    LaneScreen screen;
+
+    for (const auto [beat, value] : { std::pair { 0.0, 0.5f }, std::pair { 4.0, 0.6f }, std::pair { 8.0, 0.7f } })
+        phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (beat), value });
+
+    phazite::test::dispatchPendingMessages();
+    screen.song->getUndoManager().clearUndoHistory();
+    const auto& typeValue = *screen.registry.find ("automation.typeValue");
+    CHECK_FALSE (phazite::CommandRegistry::isEnabled (typeValue)); // no point selected
+
+    // A right-click on the second point selects it, and shows its menu, Type a Value... first; the lane's own has none.
+    phazite::test::Mouse mouse (screen.lane());
+    mouse.click (screen.at (4.0, 0.6f), juce::ModifierKeys::rightButtonModifier);
+    juce::PopupMenu::dismissAllActiveMenus();
+    CHECK (screen.context.getSongSelection().getSelectedAutomationPoints().indices == std::vector { 1 });
+    CHECK (phazite::CommandRegistry::isEnabled (typeValue));
+    auto menu = screen.playlist.makeLaneMenu (screen.trackID (0), screen.volume, true);
+    CHECK (phazite::test::findMenuItem (screen.playlist.makeLaneMenu (screen.trackID (0), screen.volume), { "Type a Value..." })
+           == nullptr);
+
+    // The field over the point, with its value in decibels, all of it selected: "-6" typed and Enter set it, as one step.
+    const auto* item = phazite::test::findMenuItem (menu, { "Type a Value..." });
+    REQUIRE (item != nullptr);
+    CHECK (item->isEnabled);
+    REQUIRE (screen.registry.invoke ("automation.typeValue")); // as the item runs it, through the command manager
+    auto* field = screen.playlist.getAutomationValueField();
+    REQUIRE (field != nullptr);
+    CHECK (field->isShowing());
+    CHECK (field->hasKeyboardFocus (false));
+    CHECK (field->getText() == phazite::ui::formatDecibels (phazite::faderPositionToDecibels (0.6f)));
+    CHECK (field->getHighlightedRegion().getLength() == field->getText().length());
+    const auto lane = screen.playlist.getLocalArea (&screen.lane(), screen.lane().getLocalBounds());
+    CHECK (screen.playlist.getLocalArea (field->getParentComponent(), field->getBounds()).getCentreX()
+           == doctest::Approx (lane.getX() + screen.at (4.0, 0.6f).x).epsilon (0.01));
+
+    for (const auto key : { '-', '6' })
+        screen.window.pressKey (juce::KeyPress (key, {}, (juce::juce_wchar) key));
+
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (screen.playlist.getAutomationValueField() == nullptr);
+    CHECK (screen.getPoints()[1].value == doctest::Approx (phazite::decibelsToFaderPosition (-6.0f)));
+    CHECK (screen.getPoints()[0].value == doctest::Approx (0.5f));
+    CHECK (screen.describeUndo() == juce::String ("Undo Set Automation Value"));
+    phazite::test::dispatchPendingMessages(); // the field goes, a message after it closed
+
+    // Every point selected takes it, from the command too; Esc leaves them, and text that names no value changes nothing.
+    screen.context.getSongSelection().selectAutomationPoints (screen.volume, { 0, 2 });
+    REQUIRE (screen.registry.invoke ("automation.typeValue"));
+    REQUIRE (screen.playlist.getAutomationValueField() != nullptr);
+    screen.playlist.getAutomationValueField()->setText ("0 dB", false);
+    screen.window.pressKey (juce::KeyPress (juce::KeyPress::returnKey));
+    CHECK (screen.getPoints()[0].value == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
+    CHECK (screen.getPoints()[2].value == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
+    phazite::test::dispatchPendingMessages();
+
+    for (const auto* text : { "", "loud" })
+    {
+        REQUIRE (screen.registry.invoke ("automation.typeValue"));
+        REQUIRE (screen.playlist.getAutomationValueField() != nullptr);
+        screen.playlist.getAutomationValueField()->setText (text, false);
+        screen.window.pressKey (juce::KeyPress (juce::String (text).isEmpty() ? juce::KeyPress::escapeKey : juce::KeyPress::returnKey));
+        CHECK (screen.getPoints()[0].value == doctest::Approx (phazite::decibelsToFaderPosition (0.0f)));
+        phazite::test::dispatchPendingMessages();
+    }
+
+    CHECK (screen.describeUndo() == juce::String ("Undo Set Automation Value"));
+    phazite::undo (*screen.song);
+    CHECK (screen.getPoints()[0].value == doctest::Approx (0.5f));
 }
 
 TEST_CASE ("Dragging one of several points moves that point only")

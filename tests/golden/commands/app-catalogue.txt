@@ -188,6 +188,7 @@ edit.nudgeLeft | cursor left
 edit.nudgeRight | cursor right
 edit.quantize | ctrl + U
 clip.quantizeAudio
+automation.typeValue
 edit.rename | ctrl + R, F2
 track.color
 view.focusMode

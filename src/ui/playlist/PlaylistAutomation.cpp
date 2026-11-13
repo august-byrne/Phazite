@@ -4,6 +4,7 @@
 #include "PlaylistParts.h"
 #include "TrackHeights.h"
 #include "model/mixer/MixerModel.h"
+#include "ui/components/ParameterText.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
@@ -278,19 +279,59 @@ void Playlist::AutomationLaneView::setHovered (int line)
 
 juce::String Playlist::AutomationLaneView::getValueText (float value) const
 {
-    switch (kind)
-    {
-        case ParameterKind::volume:
-            return formatDecibels (faderPositionToDecibels (value));
-        case ParameterKind::pan:
-            return formatPan (value);
-        case ParameterKind::other:
-        default:
-            if (const auto info = handle.getInfo())
-                return formatParameterValue (*info, value);
+    return formatParameterText (handle, kind, value);
+}
 
-            return handle.getText (value);
-    }
+void Playlist::AutomationLaneView::typeValue (int index)
+{
+    refreshPoints();
+
+    if (collapsed || ! juce::isPositiveAndBelow (index, (int) points.size()))
+        return;
+
+    auto* parent = TypedField::findParent (*this);
+
+    if (parent == nullptr)
+        return;
+
+    // The point selected, alone unless it is one of those selected, which all take the value typed.
+    auto& songSelection = playlist.selection;
+
+    if (! songSelection.isSelected (parameter, index))
+        songSelection.selectAutomationPoints (parameter, { index });
+
+    const auto indices = songSelection.getSelectedAutomationPoints().indices;
+    const auto point = points[(size_t) index];
+    const auto centre = juce::Point<int> (juce::roundToInt (beatToX (point.beat)), juce::roundToInt (valueToY (point.value)));
+
+    // Over the point, as wide as the parameter's texts, following the lane as it scrolls. One that has finished, hidden, goes
+    // now.
+    valueField = std::make_unique<TypedField> (*this);
+    valueField->setTitle ("Value of " + getTitle().fromFirstOccurrenceOf ("Automation of ", false, false));
+    valueField->getTarget = [this, centre] (const juce::Component& in)
+    { return in.getLocalArea (this, juce::Rectangle<int> (TypedField::getMinimumWidth(), controlHeight).withCentre (centre)); };
+    valueField->getTexts = [this]
+    {
+        const auto range = handle.getRange();
+        return juce::StringArray { getValueText ((float) range.start), getValueText ((float) range.end) };
+    };
+    valueField->onApply = [this, indices] (const juce::String& text)
+    {
+        if (const auto value = parseParameterText (handle, kind, text))
+            setAutomationPointValues (playlist.context, parameter, indices, *value);
+    };
+    valueField->onFinished = [safeThis = juce::Component::SafePointer<AutomationLaneView> (this)]
+    {
+        juce::MessageManager::callAsync (
+            [safeThis]
+            {
+                if (safeThis != nullptr && safeThis->valueField != nullptr && safeThis->valueField->isFinished())
+                    safeThis->valueField = nullptr;
+            });
+    };
+
+    parent->addAndMakeVisible (*valueField);
+    valueField->show (getValueText (point.value));
 }
 
 juce::String Playlist::AutomationLaneView::describeHere (juce::Point<float> position) const
@@ -300,7 +341,8 @@ juce::String Playlist::AutomationLaneView::describeHere (juce::Point<float> posi
 
     if (const auto point = getPointAt (position))
         return getValueText (points[(size_t) *point].value)
-               + ". Drag the point to move it, and double-click it to delete it. Hold Alt to place it freely, and Shift for fine steps.";
+               + ". Drag the point to move it, right-click it to type its value, and double-click it to delete it. Hold Alt to place it "
+                 "freely, and Shift for fine steps.";
 
     switch (playlist.getTool())
     {
@@ -538,12 +580,23 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
 
     if (e.mods.isPopupMenu())
     {
-        // In FL Studio's keymap, right-click deletes, as it deletes clips: this point and those the mouse moves on to.
+        // In FL Studio's keymap, right-click deletes, as it deletes clips: this point and those the mouse moves on to (and
+        // Shift+right-click shows the menu).
         if (playlist.getCommands().getKeymap().rightClickDeletes && ! e.mods.isShiftDown() && point.has_value())
         {
             gesture.beginStep (playlist.context, "Delete Automation Points");
             drag = Drag::erase;
             eraseAt (e.position);
+        }
+        else if (point.has_value())
+        {
+            // A point's menu, its value typed first, as Ableton Live's Edit Value and FL Studio's Type in value... are: the
+            // point selected first (alone, unless it is one of those selected), as a clip's menu selects its clip.
+            if (! playlist.selection.isSelected (parameter, *point))
+                playlist.selection.selectAutomationPoints (parameter, { *point });
+
+            playlist.pointPressed = std::pair (parameter, *point);
+            playlist.showLaneMenu (track, parameter, true);
         }
         else
         {
@@ -648,6 +701,7 @@ void Playlist::AutomationLaneView::pressPoint (int index, const juce::ModifierKe
     }
 
     pressed = index;
+    playlist.pointPressed = std::pair (parameter, index); // the one Type a Value... types over
     pendingDrag = Drag::movePoints;
     drag = Drag::pending;
 }
@@ -1212,11 +1266,23 @@ void Playlist::AutomationLaneHeader::showModeMenu()
 }
 
 //==============================================================================
-void Playlist::showLaneMenu (TrackID track, const ParameterRef& parameter)
+void Playlist::showLaneMenu (TrackID track, const ParameterRef& parameter, bool onPoint)
+{
+    makeLaneMenu (track, parameter, onPoint).showMenuAsync (juce::PopupMenu::Options());
+}
+
+juce::PopupMenu Playlist::makeLaneMenu (TrackID track, const ParameterRef& parameter, bool onPoint)
 {
     auto& projectContext = context;
     const juce::Component::SafePointer<Playlist> safeThis (this);
     juce::PopupMenu menu;
+
+    // On a point: its value typed, first, as Ableton Live's Edit Value and FL Studio's Type in value... are.
+    if (onPoint)
+    {
+        addCommandItems (menu, getCommands(), { "automation.typeValue" });
+        menu.addSeparator();
+    }
 
     // Collapsing it, as its chevron does; and taking it away, with its automation if it has some (an undo brings both
     // back): automation never hides.
@@ -1264,7 +1330,50 @@ void Playlist::showLaneMenu (TrackID track, const ParameterRef& parameter)
     menu.addSubMenu ("Mode", modes);
     menu.addSeparator();
     addCommandItems (menu, getCommands(), { "edit.delete", "edit.duplicate" });
-    menu.showMenuAsync (juce::PopupMenu::Options());
+    return menu;
+}
+
+Playlist::AutomationLaneView* Playlist::findLaneView (const ParameterRef& parameter) const
+{
+    for (auto* laneView : laneViews)
+        if (laneView->parameter == parameter)
+            return laneView;
+
+    return nullptr;
+}
+
+bool Playlist::canTypeAutomationValue() const
+{
+    // Points selected in a lane that shows them, not collapsed to its line.
+    const auto selected = selection.getSelectedAutomationPoints();
+    const auto* laneView = selected.indices.empty() ? nullptr : findLaneView (selected.parameter);
+    return laneView != nullptr && ! laneView->collapsed && laneView->isShowing();
+}
+
+void Playlist::typeAutomationValue()
+{
+    if (! canTypeAutomationValue())
+        return;
+
+    // Over the point pressed or right-clicked last, if it is one of those selected, else the first of them.
+    const auto selected = selection.getSelectedAutomationPoints();
+    auto index = *std::min_element (selected.indices.begin(), selected.indices.end());
+
+    if (pointPressed.has_value() && pointPressed->first == selected.parameter
+        && std::find (selected.indices.begin(), selected.indices.end(), pointPressed->second) != selected.indices.end())
+        index = pointPressed->second;
+
+    if (auto* laneView = findLaneView (selected.parameter))
+        laneView->typeValue (index);
+}
+
+juce::TextEditor* Playlist::getAutomationValueField() const
+{
+    for (auto* laneView : laneViews)
+        if (laneView->valueField != nullptr && ! laneView->valueField->isFinished())
+            return laneView->valueField.get();
+
+    return nullptr;
 }
 
 //==============================================================================
