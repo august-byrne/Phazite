@@ -6,7 +6,8 @@
 namespace phazite::ui
 {
 // The strip along the bottom of the window. It says what the control under the pointer does (its
-// tooltip, or its description), and otherwise shows the default hint: the guide's next step, or a general tip.
+// tooltip, or its description), and otherwise shows the default hint: the guide's next step, or a general tip. While a drag in
+// an editor moves something, it says where that is now instead (TimelineEditor::getDragReadout()).
 class HintBar : public juce::Component,
                 private juce::Timer
 {
@@ -31,6 +32,9 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
 
 private:
+    // How often it looks for what to say: ten times a second, and while a drag's readout shows, as often as it changes.
+    static constexpr int hintHz = 10, dragReadoutHz = 30;
+
     std::function<juce::String()> defaultHint;
     juce::String hint, alert;
     std::function<void()> fixAlert;

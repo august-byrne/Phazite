@@ -766,9 +766,34 @@ void LookAndFeel::drawTabButton (juce::TabBarButton& button, juce::Graphics& g, 
         g.drawRoundedRectangle (pill.reduced (0.5f), cornerRadius, 1.0f);
     }
 
+    // The editor the time line's commands act on: a line in the accent colour along the pill's foot.
+    if (front && isTabInUse (button))
+    {
+        g.setColour (p.accent);
+        g.fillRoundedRectangle (pill.reduced (TabTint::inUseInset, 0.0f).withTrimmedTop (pill.getHeight() - TabTint::inUseLine),
+                                TabTint::inUseLine / 2.0f);
+    }
+
     g.setColour (front ? p.textBright : isMouseOver ? p.text : p.textMuted);
     g.setFont (getTabButtonFont (button, pill.getHeight()));
     g.drawText (button.getButtonText().trim(), pill, juce::Justification::centred, false);
+}
+
+void setTabInUse (juce::TabBarButton& button, bool inUse)
+{
+    static const juce::Identifier property ("phaziteTabInUse");
+
+    if (isTabInUse (button) != inUse)
+    {
+        button.getProperties().set (property, inUse);
+        button.repaint();
+    }
+}
+
+bool isTabInUse (const juce::TabBarButton& button)
+{
+    static const juce::Identifier property ("phaziteTabInUse");
+    return (bool) button.getProperties()[property];
 }
 
 juce::Font LookAndFeel::getTabButtonFont (juce::TabBarButton&, float)

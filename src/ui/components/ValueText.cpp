@@ -212,6 +212,39 @@ juce::String formatTimeSignature (int numerator, int denominator)
     return juce::String (numerator) + "/" + juce::String (denominator);
 }
 
+juce::String formatSongTime (double seconds)
+{
+    const auto tenths = (juce::int64) std::floor (std::max (0.0, seconds) * 10.0 + 1.0e-6);
+    const auto minutes = tenths / 600, inMinute = tenths % 600;
+    return juce::String (minutes) + ":" + juce::String (inMinute / 10).paddedLeft ('0', 2) + "." + juce::String (inMinute % 10);
+}
+
+std::optional<double> parseSongTime (const juce::String& text)
+{
+    const auto t = text.trim();
+
+    if (t.isEmpty() || ! t.containsOnly ("0123456789:.") || ! t.containsAnyOf ("0123456789"))
+        return {};
+
+    const auto parts = juce::StringArray::fromTokens (t, ":", {});
+
+    if (parts.size() > 3)
+        return {};
+
+    // Each part counts sixty of the next: hours, minutes and seconds, whichever are there.
+    auto seconds = 0.0;
+
+    for (const auto& part : parts)
+    {
+        if (part.isEmpty() || part.indexOfChar ('.') != part.lastIndexOfChar ('.'))
+            return {};
+
+        seconds = seconds * 60.0 + part.getDoubleValue();
+    }
+
+    return seconds;
+}
+
 juce::String formatLoudness (double lufs)
 {
     return withOneDecimal (lufs) + " LUFS";

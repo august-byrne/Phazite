@@ -59,7 +59,8 @@ public:
     bool canNudgeSelection() const override;
     void nudgeSelection (int direction) override; // the selected clips, or the range
     bool canQuantizeSelection() const override;
-    void quantizeSelection() override; // the selected clips' starts
+    void quantizeSelection() override;                          // the selected clips' starts
+    std::optional<BeatRange> getSelectedRange() const override; // the time range selected, or the selected clips'
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override; // where dragged tracks would go
@@ -127,6 +128,11 @@ private:
     // layers the same way.
     juce::Component headerColumn, pinnedHeaders, scrollingHeaders, headerContent;
     std::unique_ptr<AddTrackRow> addTrackRow;
+
+    // While the song has no tracks, what to do, over the lanes, where the eye is, as the mixer and the Devices view say it in
+    // place (the owner's UX audit, 2026-11-12; NN/g's empty states: the system's status, a cue to learn, a way to start). It
+    // takes no clicks: a double-click there adds a track, and a drop there makes one.
+    juce::Label emptyTitle, emptyText;
     std::unique_ptr<Lanes> lanes;
     std::unique_ptr<HeaderEdge> headerEdge;
     void keepHeaderWidth();        // tells the app the width the headers' edge was dragged to
@@ -259,6 +265,7 @@ private:
     void lanesDoubleClick (const juce::MouseEvent&);
     void smartToolDown (const juce::MouseEvent&);
     void beginDrag (const juce::MouseEvent&);
+    juce::String describeDrag() const;        // where the drag has the clip under the pointer, for the hint bar
     juce::Point<int> getGestureStart() const; // where the mouse went down, in the lanes as they are now
     std::optional<CrossfadeSpot> findCrossfadeAt (juce::Point<int>);
     void selectRange (BeatPosition from, BeatPosition to, int fromRow, int toRow);

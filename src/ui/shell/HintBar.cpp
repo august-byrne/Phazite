@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "HintBar.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/timeline/TimelineEditor.h"
 
 namespace phazite::ui
 {
@@ -8,7 +9,7 @@ HintBar::HintBar()
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Hint bar");
-    startTimerHz (10);
+    startTimerHz (hintHz);
 }
 
 void HintBar::setDefaultHint (std::function<juce::String()> getText)
@@ -65,10 +66,19 @@ void HintBar::mouseUp (const juce::MouseEvent& e)
 void HintBar::timerCallback()
 {
     juce::String text;
+    auto* under = juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse();
+
+    // While a drag in an editor moves something, where it is now (TimelineEditor::getDragReadout()), followed more often than
+    // the hints, as the drag goes.
+    for (auto* c = under; c != nullptr && text.isEmpty(); c = c->getParentComponent())
+        if (auto* editor = dynamic_cast<TimelineEditor*> (c))
+            text = editor->getDragReadout();
+
+    if (const auto rate = text.isNotEmpty() ? dragReadoutHz : hintHz; getTimerInterval() != 1000 / rate)
+        startTimerHz (rate);
 
     // The nearest component under the pointer that explains itself.
-    for (auto* c = juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse(); c != nullptr && text.isEmpty();
-         c = c->getParentComponent())
+    for (auto* c = under; c != nullptr && text.isEmpty(); c = c->getParentComponent())
     {
         if (auto* client = dynamic_cast<juce::TooltipClient*> (c))
             text = client->getTooltip();

@@ -1,16 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TopBar.h"
+#include "model/arrangement/TimelineModel.h"
 #include "model/transport/RecordingModel.h"
 #include "ui/components/ValueText.h"
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
+#include "ui/timeline/SongPlaceText.h"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <utility>
 
 namespace phazite::ui
 {
+namespace
+{
+    // The farthest a place or a time can be typed; the position and time fields' widths; and the arrows joined to Record and
+    // the metronome.
+    constexpr double latestBeat = 1.0e6, latestSeconds = 1.0e6;
+    constexpr int positionWidth = 84, timeWidth = 72; // "100.4.4", "12:34.5", with room
+    constexpr int optionsArrowWidth = 18;
+} // namespace
+
 // Hears every press in the app while what the tempo stretches shows: one anywhere but on it or on the tempo field hides it.
 struct TopBar::OutsideClick : public juce::MouseListener
 {
@@ -37,7 +49,9 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
       projectContext (context),
       tempoField ("Tempo", minTempo, maxTempo, 1.0, 120.0),
       tempoStretch (bridge, context),
-      outsideClick (std::make_unique<OutsideClick> (*this))
+      outsideClick (std::make_unique<OutsideClick> (*this)),
+      positionField ("Playhead position", 0.0, latestBeat, 1.0, 0.0),
+      timeField ("Playhead time", 0.0, latestSeconds, 1.0, 0.0)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Transport");
@@ -76,6 +90,22 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     lowLatencyButton.onClick = [this] { commands.invoke ("transport.lowLatency"); };
     keyboardButton.onClick = [this] { commands.invoke ("input.computerKeyboard"); };
 
+    // Each options arrow joined to its button's right, as one split button.
+    recordMenuButton.onClick = [this] { showRecordMenu(); };
+    recordMenuButton.setTooltip ("Record's options: the count-in, punch-in, overdub, quantizing recordings, and recording an input "
+                                 "on a new track");
+    metronomeMenuButton.onClick = [this] { showMetronomeMenu(); };
+    metronomeMenuButton.setTooltip ("The metronome's options: the count-in before recording");
+
+    for (auto [button, arrow] : { std::pair<juce::Button*, juce::Button*> { &recordButton, &recordMenuButton },
+                                  std::pair<juce::Button*, juce::Button*> { &metronomeButton, &metronomeMenuButton } })
+    {
+        button->setConnectedEdges (juce::Button::ConnectedOnRight);
+        arrow->setConnectedEdges (juce::Button::ConnectedOnLeft);
+        arrow->setMouseClickGrabsKeyboardFocus (false);
+        addAndMakeVisible (arrow);
+    }
+
     // The tempo: each drag is one undo step, as are a typed tempo and each step of the wheel or the arrow keys.
     tempoField.textFromValueFunction = [] (double bpm) { return formatTempo (bpm); };
     tempoField.valueFromTextFunction = [this] (const juce::String& text) { return parseTempo (text).value_or (tempoField.getValue()); };
@@ -97,6 +127,41 @@ TopBar::TopBar (CommandBridge& bridge, ComputerKeyboard& keyboard, ProjectContex
     timeSignatureButton.setTitle ("Time signature");
     timeSignatureButton.setTooltip ("Time signature: the beats in a bar, and the note that counts as a beat. Click for others");
     timeSignatureButton.onClick = [this] { showTimeSignatureMenu(); };
+
+    // Where the playhead is, in bars and in time: dragged, scrolled or typed, each takes it there. A drag silences the song
+    // meanwhile, as dragging the playhead along a ruler does, and it plays on from where the drag ends.
+    positionField.textFromValueFunction = [this] (double beat)
+    { return formatBarPosition (projectContext, BeatPosition::fromBeats (beat)); };
+    positionField.valueFromTextFunction = [this] (const juce::String& text)
+    { return parseBarPosition (projectContext, text).value_or (BeatPosition::fromBeats (positionField.getValue())).inBeats(); };
+    positionField.onValueChange = [this] { movePlayhead (projectContext, BeatPosition::fromBeats (positionField.getValue())); };
+    positionField.setTooltip ("Where the playhead is, in bars, beats and sixteenths: drag it, scroll, or click it and type a bar and a "
+                              "beat (17.3) to go there");
+    timeField.textFromValueFunction = [] (double seconds) { return formatSongTime (seconds); };
+    timeField.valueFromTextFunction = [this] (const juce::String& text) { return parseSongTime (text).value_or (timeField.getValue()); };
+    timeField.onValueChange = [this] { movePlayhead (projectContext, getBeatAtSeconds (projectContext, timeField.getValue())); };
+    timeField.setTooltip ("Where the playhead is, in minutes and seconds from the song's start: drag it, scroll, or click it and "
+                          "type a time (1:23.5) to go there");
+
+    for (auto* field : { &positionField, &timeField })
+    {
+        field->onDragStart = [this] { pausedForPositionDrag = pausePlayback (projectContext); };
+        field->onDragEnd = [this]
+        {
+            if (std::exchange (pausedForPositionDrag, false))
+                resumePlayback (projectContext);
+        };
+        field->updateText();
+        addAndMakeVisible (field);
+    }
+
+    // While the song plays, at each frame of the display: where the playhead is heard then.
+    positionFrames = juce::VBlankAttachment (this,
+                                             [this] (double seconds)
+                                             {
+                                                 if (projectContext.hasProject() && isPlaying (projectContext))
+                                                     updatePosition (seconds * 1000.0);
+                                             });
     refreshTooltips();
 
     showAsDecibels (masterVolume);
@@ -194,8 +259,9 @@ void TopBar::refreshTooltips()
                                          "Loop: at the end of the song, playback starts again from its start. The song ends with "
                                          "the bar its last clip ends in, so the loop grows as you add clips later",
                                          "transport.loop"));
-    metronomeButton.setTooltip (withShortcut (
-        commands, "Metronome: clicks on every beat while the song plays. Right-click for the count-in", "transport.metronome"));
+    metronomeButton.setTooltip (
+        withShortcut (commands, "Metronome: clicks on every beat while the song plays. Its arrow, or a right-click, has the count-in",
+                      "transport.metronome"));
     lowLatencyButton.setTooltip (withShortcut (commands,
                                                "Low latency: while on, what you play has no delay to wait for. Devices that look ahead "
                                                "are bypassed, delay compensation is off and the buffer shrinks. Turn it off to mix",
@@ -228,6 +294,33 @@ void TopBar::updateKeyboardButton()
                                                       + "). Hold Shift for single-key shortcuts. Click to turn it off"
                                                 : juce::String ("Click to play notes with the computer keyboard"),
                                              "input.computerKeyboard"));
+}
+
+bool TopBar::isEditing (const NumberField& field) const
+{
+    const auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    return field.isMouseButtonDown() || (dynamic_cast<const juce::TextEditor*> (focused) != nullptr && field.isParentOf (focused));
+}
+
+void TopBar::updatePosition (std::optional<double> frameMilliseconds)
+{
+    const auto open = projectContext.hasProject();
+    positionField.setEnabled (open);
+    timeField.setEnabled (open);
+
+    if (! open)
+        return;
+
+    // Where the playhead is heard at the frame shown while playing, or where playback starts while stopped; each field's
+    // value only as fine as it shows it, so that it repaints only when what it says changes.
+    const auto beat =
+        frameMilliseconds.has_value() ? getHeardPlayheadBeat (projectContext, *frameMilliseconds) : getPlayheadBeat (projectContext);
+
+    if (! isEditing (positionField))
+        positionField.setValue (std::floor (beat.inBeats() / sixteenthBeats + 1.0e-9) * sixteenthBeats, juce::dontSendNotification);
+
+    if (! isEditing (timeField))
+        timeField.setValue (std::floor (getSecondsAt (projectContext, beat) * 10.0 + 1.0e-6) / 10.0, juce::dontSendNotification);
 }
 
 void TopBar::updateTempo()
@@ -333,11 +426,11 @@ void TopBar::refreshRecordTooltip()
     // What it records onto, as the tracks' arm switches show it, or what to do while it would record nothing.
     const auto text = recordTargets.isNotEmpty()
                           ? "Record onto " + recordTargets
-                                + ", from where playback starts. Right-click to record an input on a new track, and for the "
-                                  "count-in, punch-in, overdub and quantizing"
+                                + ", from where playback starts. Its arrow, or a right-click, records an input on a new track, and "
+                                  "has the count-in, punch-in, overdub and quantizing"
                           : juce::String ("Record: nothing records yet. Arm a track with the circle in its header: one with an instrument "
                                           "records what you play on MIDI, one without records an input. Click to record an input on "
-                                          "a new track, and right-click for the count-in, punch-in, overdub and quantizing");
+                                          "a new track; its arrow, or a right-click, has the count-in, punch-in, overdub and quantizing");
     recordButton.setTooltip (withShortcut (commands, text, "transport.record"));
 }
 
@@ -412,10 +505,12 @@ void TopBar::resized()
     auto area = getLocalBounds().reduced (Space::s, 0).removeFromTop (controlHeight);
 
     playButton.setBounds (area.removeFromLeft (44));
-    recordButton.setBounds (area.removeFromLeft (44));
+    recordButton.setBounds (area.removeFromLeft (40));
+    recordMenuButton.setBounds (area.removeFromLeft (optionsArrowWidth));
     captureButton.setBounds (area.removeFromLeft (44));
     loopButton.setBounds (area.removeFromLeft (44));
-    metronomeButton.setBounds (area.removeFromLeft (44));
+    metronomeButton.setBounds (area.removeFromLeft (40));
+    metronomeMenuButton.setBounds (area.removeFromLeft (optionsArrowWidth));
     lowLatencyButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::m);
     tempoField.setBounds (area.removeFromLeft (96));
@@ -429,6 +524,27 @@ void TopBar::resized()
     area.removeFromRight (Space::xs);
     masterMeter.setBounds (area.removeFromRight (64).withSizeKeepingCentre (64, 12));
     area.removeFromRight (Space::m);
+
+    // Where the playhead is, after the time signature, while there is room for it before A/B: in a narrow window the time
+    // goes first, then the bars, as VS Code's status bar drops its items.
+    const auto compareWidth = 44 + Space::s;
+    const auto showsPosition = area.getWidth() >= positionWidth + Space::m + compareWidth;
+    const auto showsTime = area.getWidth() >= positionWidth + Space::xs + timeWidth + Space::m + compareWidth;
+    positionField.setVisible (showsPosition);
+    timeField.setVisible (showsTime);
+
+    if (showsPosition)
+    {
+        positionField.setBounds (area.removeFromLeft (positionWidth));
+        area.removeFromLeft (Space::xs);
+    }
+
+    if (showsTime)
+        timeField.setBounds (area.removeFromLeft (timeWidth));
+
+    if (showsPosition)
+        area.removeFromLeft (Space::m - Space::xs);
+
     compareButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (Space::s);
     hearing.setBounds (area);
@@ -453,6 +569,8 @@ void TopBar::timerCallback()
     playButton.setEnabled (open);
     recordButton.setEnabled (open); // with nothing to record onto, a click offers what could record (showRecordMenu())
     recordButton.setToggleState (isCommandTicked ("transport.record"), juce::dontSendNotification);
+    recordMenuButton.setEnabled (open);
+    metronomeMenuButton.setEnabled (open);
 
     if (const auto targets = open ? describeRecordTargets (projectContext) : juce::String(); targets != recordTargets)
     {
@@ -467,6 +585,9 @@ void TopBar::timerCallback()
     lowLatencyButton.setEnabled (open);
     lowLatencyButton.setToggleState (isCommandTicked ("transport.lowLatency"), juce::dontSendNotification);
     updateTempo();
+
+    if (! playing) // while it plays, the display's frames move it (positionFrames)
+        updatePosition();
 
     updateKeyboardButton();
 

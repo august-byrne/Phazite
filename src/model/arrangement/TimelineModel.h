@@ -55,6 +55,11 @@ void movePlayhead (ProjectContext&, BeatPosition);
 // display shows while the song plays: where playback was as long before as its sound takes to reach the speakers.
 BeatPosition getHeardPlayheadBeat (const ProjectContext&, double milliseconds);
 
+// Where a beat is in time, in seconds from the song's start along its tempo and its changes, and the beat at a time, as the
+// transport bar shows the playhead in time and takes a time typed there. At 120 BPM without a project.
+double getSecondsAt (const ProjectContext&, BeatPosition);
+BeatPosition getBeatAtSeconds (const ProjectContext&, double seconds);
+
 // The loop as a ruler shows and changes it: where it is while playback loops (nothing while it doesn't); a range to
 // loop, which turns looping on (an empty one changes nothing); looping on or off; and the whole song. Not undo steps,
 // as in most DAWs (Playback.h).

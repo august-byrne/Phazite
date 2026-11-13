@@ -222,7 +222,8 @@ struct Playlist::Gesture : public TimelineGesture
         mute,   // the Mute tool, over clips
         erase,  // the Delete tool (or right-click, in FL Studio's keymap), over clips
         select, // the Select tool's rectangle
-        zoom    // the Zoom tool's range
+        zoom,   // the Zoom tool's range
+        pan     // the middle button: moves the view, as in the piano roll, and never edits
     };
 
     // A clip being moved, and where it started: its row, and its track and place there, whose automation goes with it.
@@ -255,6 +256,7 @@ struct Playlist::Gesture : public TimelineGesture
             case Kind::fadeOut:
             case Kind::crossfade:
             case Kind::slip:
+            case Kind::pan:
             default:
                 return std::nullopt;
         }
@@ -273,6 +275,7 @@ struct Playlist::Gesture : public TimelineGesture
 
     std::optional<CrossfadeSpot> crossfade; // where the mouse went down to draw a crossfade
     double startOffset = 0.0;               // Slip: the clip's offset when the drag began, in seconds
+    BeatPosition panViewStart;              // the middle button: where the view started
 
     // Select with Ctrl: what was selected already.
     std::vector<TrackID> tracksBefore;

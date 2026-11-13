@@ -69,6 +69,11 @@ bool ProjectSession::isUntitled() const
     return project != nullptr && projectUnsavedFolder != nullptr && project->getFile().isAChildOf (projectUnsavedFolder->getFolder());
 }
 
+bool ProjectSession::hasAutosaveFailed() const
+{
+    return autosaveTimer != nullptr && autosaveTimer->hasFailedRepeatedly();
+}
+
 void ProjectSession::openAtStartup (bool afterCrash, const juce::File& fileToOpen)
 {
     // An untitled project that an earlier Phazite didn't close properly, such as in a crash, comes first: its changes are

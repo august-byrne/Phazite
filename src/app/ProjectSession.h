@@ -33,6 +33,7 @@ public:
     // Whether the open project is a new one that hasn't been saved yet: its first save asks what it is called and where
     // it goes (model/project/internal/UnsavedProjects.h).
     bool isUntitled() const;
+    bool hasAutosaveFailed() const; // several autosaves in a row, until one works: the status bar says so
 
     // The open project's song and what is selected in it: tracks and clips (live MIDI input follows the selected
     // track), and a time range across tracks.

@@ -4,7 +4,9 @@
 // show a view wherever it is, an area left without views, and Reset View Places.
 #include "AppScreen.h"
 #include "services/Settings.h"
+#include "ui/components/ToolRow.h"
 #include "ui/shell/Panels.h"
+#include "ui/theme/LookAndFeel.h"
 
 #include <vector>
 
@@ -245,4 +247,72 @@ TEST_CASE ("Showing a row left without views brings its views back to it, as its
     CHECK (lowerRow->isShowing());
     CHECK (lowerRow->getArea (0).getTabNames() == juce::StringArray { "Piano roll", "Instrument", "Effects" });
     CHECK (upperRow->getArea (0).getTabNames() == juce::StringArray { "Playlist", "Mixer" });
+}
+
+TEST_CASE ("Each editor's tools are in its area's tab row: all of them at the default window size, the editor in use's tab marked, "
+           "and they go with their view")
+{
+    // The owner's UX audit, 2026-11-12: not in the transport bar, where they would serve two editors at once and had no room,
+    // but beside each editor's tabs, as Bitwig 6 puts each panel's tools along its top, winning back the row they took.
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& upper = dynamic_cast<ViewRow&> (screen.shell.getPanel (Panel::song)).getArea (0);
+    auto& lower = dynamic_cast<ViewRow&> (screen.shell.getPanel (Panel::editor)).getArea (0);
+    REQUIRE (upper.getShownTab() == ViewTab::playlist);
+    REQUIRE (lower.getShownTab() == ViewTab::clipEditor);
+
+    // The window at its first size, every panel showing: each row whole, right of its tabs and clear of the corner's buttons.
+    for (auto* area : { &upper, &lower })
+    {
+        auto* tools = dynamic_cast<phazite::ui::ToolRow*> (area->getShownTools());
+        REQUIRE (tools != nullptr);
+        CHECK (tools->getParentComponent() == area);
+        CHECK (tools->getY() == 0);
+        CHECK (tools->getHeight() == area->getTabBarDepth());
+        CHECK (tools->getX() >= area->getTabbedButtonBar().getRight());
+        CHECK (tools->getIdealWidth() <= tools->getWidth());
+
+        // The tabs as wide as they are at their best, none squeezed by the tools (JUCE workaround W29).
+        auto& bar = area->getTabbedButtonBar();
+
+        for (int i = 0; i < bar.getNumTabs(); ++i)
+            if (auto* tab = bar.getTabButton (i); tab != nullptr && tab->isVisible())
+                CHECK (tab->getWidth() == tab->getBestTabLength (bar.getHeight()));
+
+        for (auto* child : tools->getChildren())
+            if (child->isVisible())
+                CHECK (area->getLocalArea (child, child->getLocalBounds()).getRight() <= tools->getRight());
+    }
+
+    CHECK (lower.getShownTools()->getRight()
+           <= lower.getWidth() - phazite::ui::Shell::getPanelCornerWidth (phazite::ui::Shell::panelCornerButtons));
+
+    // The playlist is the editor in use at first: its tab marked, the piano roll's not. A press in the piano roll's notes makes
+    // it the one.
+    const auto inUse = [] (ViewArea& area)
+    { return phazite::ui::isTabInUse (*area.getTabbedButtonBar().getTabButton (area.getCurrentTabIndex())); };
+    CHECK (inUse (upper));
+    CHECK_FALSE (inUse (lower));
+
+    auto* notes = phazite::test::findComponentWithTitle (lower, "Notes");
+    REQUIRE (notes != nullptr);
+    phazite::test::Mouse mouse (*notes);
+    mouse.click ({ 4, 4 }, juce::ModifierKeys::rightButtonModifier); // a right-click on empty grid deletes nothing
+    CHECK_FALSE (inUse (upper));
+    CHECK (inUse (lower));
+
+    // A tab that shows no editor (the mixer) has no tools beside it, and its area shows the playlist's again with it.
+    upper.showTab (ViewTab::mixer);
+    CHECK (upper.getShownTools() == nullptr);
+    upper.showTab (ViewTab::playlist);
+    REQUIRE (upper.getShownTools() != nullptr);
+
+    // The piano roll moved up beside the playlist takes its tools with it.
+    auto* pianoTools = lower.getShownTools();
+    upper.itemDropped ({ phazite::ui::makeViewDrag (View::clipEditor), nullptr, { 1, 1 } });
+    upper.showTab (ViewTab::clipEditor);
+    CHECK (upper.getShownTools() == pianoTools);
+    CHECK (pianoTools->getParentComponent() == &upper);
+    CHECK (lower.getShownTools() == nullptr);
 }

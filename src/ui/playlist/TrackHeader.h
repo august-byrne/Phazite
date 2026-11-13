@@ -25,7 +25,8 @@ namespace phazite::ui
 int getTrackStripsWidth (const TrackRow&);
 void paintTrackStrips (juce::Graphics&, const juce::Component&, const TrackRow&);
 
-class TrackHeader : public juce::Component
+class TrackHeader : public juce::Component,
+                    public juce::TooltipClient // what its colour strip does, under the pointer
 {
 public:
     // What a header leaves to the playlist.
@@ -64,7 +65,13 @@ public:
     void resized() override;
     void lookAndFeelChanged() override { updateColours(); } // the theme's colors
     void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
+
+    // Over its colour strip, that a click there chooses another colour; elsewhere nothing, so that the hint bar says what the
+    // header does (its description).
+    juce::String getTooltip() override;
+    bool isColourStripLit() const noexcept { return overColour; } // under the pointer (for tests)
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
@@ -106,7 +113,9 @@ private:
     bool selectOnMouseUp = false; // a click on a selected track selects it alone, unless it starts a drag
     int heightAtDragStart = 0;
 
-    juce::Rectangle<int> getColourArea() const;
+    juce::Rectangle<int> getColourArea() const;    // the track's colour strip, as drawn
+    juce::Rectangle<int> getColourHitArea() const; // what takes a click for its menu: the strip and some of the header beside it
     bool isOnResizeEdge (juce::Point<int>) const;
+    bool overColour = false; // the pointer is over the colour strip's hit area
 };
 } // namespace phazite::ui

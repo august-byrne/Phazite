@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll's parts, for its own .cpp files: PianoRoll.cpp is the view and what it shows, PianoRollRows.cpp
-// lays out the rows, PianoRollCommands.cpp holds the transforms, the toolbar's menus and the commands, PianoRollNotes.cpp
+// lays out the rows, PianoRollCommands.cpp holds the transforms, the settings' menus and the commands, PianoRollNotes.cpp
 // is the note grid and PianoRollNoteTools.cpp what the mouse does in it, and PianoRollLanes.cpp the keys, the velocity
 // lane and the transform bar.
 #pragma once
@@ -96,11 +96,13 @@ struct PianoRoll::NoteGrid : public juce::Component
     void beginDrag (const juce::MouseEvent&);
     juce::Point<int> getGestureStart() const; // where the mouse went down, in the grid as it is now
     void dragNotes (const juce::MouseEvent&);
+    juce::String describeDrag() const;        // where the drag has the note under the pointer, for the hint bar: "E4 at 3.2.1"
     void addNoteAt (const juce::MouseEvent&); // or a chord, with a chord stamp chosen
     void eraseOrMuteAt (juce::Point<float>, bool erase);
     void beginPaint (const juce::MouseEvent&);
     void paintAt (const juce::MouseEvent&);
-    void showMenu (juce::Component* target = nullptr); // the notes' menu, at the pointer or under the toolbar's button
+    void showMenu();                      // the notes' menu, at the pointer (Shift+right-click)
+    void addMenuItems (juce::PopupMenu&); // what it holds, which the tab row's More menu shows too (TimelineEditor::getToolRow())
     void updateHint (juce::Point<float>);
     void cancelGesture(); // when the tool changes mid-drag: what it did stays
 

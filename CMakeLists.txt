@@ -308,6 +308,8 @@ target_sources(phazite_core PRIVATE
     src/model/commands/SongGesture.h
     src/model/commands/Undo.cpp
     src/model/commands/UndoCommands.cpp
+    src/model/commands/UndoHistory.cpp
+    src/model/commands/UndoHistory.h
     src/model/commands/internal/Undo.h
     src/model/commands/internal/UndoCommands.h
     src/model/devices/DeviceHandle.cpp
@@ -541,6 +543,7 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/circle.svg
         resources/icons/lucide/clipboard-list.svg
         resources/icons/lucide/circle-user-round.svg
+        resources/icons/lucide/circle-x.svg
         resources/icons/lucide/clock-arrow-down.svg
         resources/icons/lucide/clock.svg
         resources/icons/lucide/corner-down-left.svg
@@ -554,10 +557,12 @@ juce_add_binary_data(phazite_data
         resources/icons/lucide/folder.svg
         resources/icons/lucide/git-branch.svg
         resources/icons/lucide/headphones.svg
+        resources/icons/lucide/info.svg
         resources/icons/lucide/keyboard-music.svg
         resources/icons/lucide/layout-dashboard.svg
         resources/icons/lucide/library.svg
         resources/icons/lucide/link.svg
+        resources/icons/lucide/locate-fixed.svg
         resources/icons/lucide/magnet.svg
         resources/icons/lucide/maximize-2.svg
         resources/icons/lucide/menu.svg
@@ -709,6 +714,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/components/ScrollBarFade.h
     src/ui/components/SectionHeader.cpp
     src/ui/components/SectionHeader.h
+    src/ui/components/ToolRow.cpp
+    src/ui/components/ToolRow.h
     src/ui/components/TrackSwitch.cpp
     src/ui/components/TrackSwitch.h
     src/ui/components/ValueText.cpp
@@ -884,6 +891,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/shell/NewProjectPanel.h
     src/ui/shell/NoticeCard.cpp
     src/ui/shell/NoticeCard.h
+    src/ui/shell/Notices.cpp
+    src/ui/shell/Notices.h
     src/ui/shell/PanelLayout.cpp
     src/ui/shell/PanelLayout.h
     src/ui/shell/Panels.cpp
@@ -917,6 +926,8 @@ target_sources(phazite_ui PRIVATE
     src/ui/timeline/FrameLog.h
     src/ui/timeline/SmartTool.cpp
     src/ui/timeline/SmartTool.h
+    src/ui/timeline/SongPlaceText.cpp
+    src/ui/timeline/SongPlaceText.h
     src/ui/timeline/TimelineEditor.cpp
     src/ui/timeline/TimelineEditor.h
     src/ui/timeline/TimelineGesture.cpp
@@ -1204,6 +1215,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/NewProjectTests.cpp
         tests/NoteIDTests.cpp
         tests/NoteTests.cpp
+        tests/NoticesTests.cpp
         tests/NotesModelTests.cpp
         tests/PanelLayoutTests.cpp
         tests/PanelsTests.cpp
@@ -1247,6 +1259,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ShortcutTests.cpp
         tests/SidechainPresetTests.cpp
         tests/SidechainTests.cpp
+        tests/SongPlaceTextTests.cpp
         tests/SongTextTests.cpp
         tests/SoundKeyTests.cpp
         tests/SoundPackTestHelpers.h
@@ -1276,6 +1289,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/TimelineViewTests.cpp
         tests/TitleBarTests.cpp
         tests/ToggleTests.cpp
+        tests/ToolRowTests.cpp
         tests/TopBarTests.cpp
         tests/TrackTests.cpp
         tests/TransportModelTests.cpp

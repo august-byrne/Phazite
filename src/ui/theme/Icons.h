@@ -34,6 +34,7 @@ enum class Icon
     erase,
     select,
     zoom,
+    follow, // the view follows the playhead while the song plays: a target, as maps show "follow my position"
     // The browser
     folder,
     openFolder, // a folder in the playlist whose tracks show
@@ -74,7 +75,10 @@ enum class Icon
     layout, // the Layout menu
     minimiseWindow,
     maximiseWindow,
-    restoreWindow
+    restoreWindow,
+    // The notices (ui/shell/Notices.h), as VS Code marks its notifications: something done, and something that went wrong
+    info,
+    error
 };
 
 // The icon, drawn in black (IconButton recolors it), or nullptr if it couldn't be read. A filled icon has its shape
@@ -117,11 +121,15 @@ public:
     // An accented button is a view's main one, in the accent color, as Commit is.
     void setAccented (bool);
 
+    // A button that asks for attention while it is off (Follow, paused by a scroll) is washed in the warning colour, as the
+    // piano roll's instrument button is while the track has none.
+    void setAttention (bool);
+
     void paintButton (juce::Graphics&, bool isHighlighted, bool isDown) override;
 
 private:
     Icon icon;
-    bool quiet = false, accented = false;
+    bool quiet = false, accented = false, attention = false;
     std::unique_ptr<juce::Drawable> drawable;
     juce::Colour drawableColour { juce::Colours::black }; // the color the drawing is in now
 };

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The piano roll's transforms (quantize, legato, chop, transpose, strum, humanize and arpeggiate, with a preview), its
-// toolbar's menus, and its commands.
+// settings' menus, and its commands.
 #include "PianoRollParts.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/mixer/MixerModel.h"
@@ -160,10 +160,10 @@ void PianoRoll::showNextNoteMenu()
 void PianoRoll::lookAndFeelChanged()
 {
     makeSeeThrough (verticalScrollBar);
-    updateToolbar(); // its instrument button's tint, while it asks for one
+    updateSettings(); // its instrument button's tint, while it asks for one
 }
 
-void PianoRoll::updateToolbar()
+void PianoRoll::updateSettings()
 {
     const auto track = getTrack();
     const auto trackRow = getTrackRow (context, track);
@@ -181,7 +181,7 @@ void PianoRoll::updateToolbar()
 
     nextNoteButton.setButtonText (describeNextNote());
 
-    for (auto* c : std::initializer_list<juce::Component*> { &nextNoteButton, &chordButton, &keyButton, &ghostButton, &transformButton })
+    for (auto* c : std::initializer_list<juce::Component*> { &nextNoteButton, &chordButton, &keyButton, &ghostButton })
         c->setEnabled (track.isValid());
 
     // The instrument that plays the notes, or a request for one: without it they make no sound.
@@ -248,7 +248,7 @@ void PianoRoll::showChordMenu()
                   [this]
                   {
                       chordStamp.reset();
-                      updateToolbar();
+                      updateSettings();
                   });
     menu.addSectionHeader ("A click places the chord, from the note clicked");
 
@@ -259,7 +259,7 @@ void PianoRoll::showChordMenu()
                       [this, type]
                       {
                           chordStamp = type;
-                          updateToolbar();
+                          updateSettings();
                       });
     }
 
@@ -297,18 +297,6 @@ void PianoRoll::showKeyMenu()
     menu.addSeparator();
     addCommandItems (menu, getCommands(), { "pianoRoll.snapToKey", "pianoRoll.keyForAllTracks" });
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&keyButton));
-}
-
-void PianoRoll::showTransformMenu()
-{
-    juce::PopupMenu menu;
-    menu.addSectionHeader ("Show what it does first");
-    addCommandItems (menu, getCommands(),
-                     { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings", "note.strumSettings",
-                       "note.humanizeSettings", "note.arpeggiateSettings" });
-    menu.addSectionHeader ("Right away");
-    addCommandItems (menu, getCommands(), { "edit.quantize", "note.legato", "note.chop" });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transformButton));
 }
 
 void PianoRoll::setDrumMode (bool on)
@@ -446,7 +434,7 @@ void PianoRoll::addCommands (CommandRegistry& registry)
                         [this]
                     {
                         showGhostNotes = ! showGhostNotes;
-                        updateToolbar();
+                        updateSettings();
                         grid->repaint();
                     },
                     .isTicked = [this] { return showGhostNotes; } });
@@ -460,7 +448,7 @@ void PianoRoll::addCommands (CommandRegistry& registry)
                         [this]
                     {
                         snapToKey = ! snapToKey;
-                        updateToolbar();
+                        updateSettings();
                     },
                     .isEnabled = [this] { return getKey().has_value(); },
                     .isTicked = [this] { return snapToKey && getKey().has_value(); } });
@@ -484,7 +472,5 @@ void PianoRoll::refreshShortcutTexts()
     chordButton.setTooltip ("Chord stamp: a click places a whole chord of this kind instead of one note");
     keyButton.setTooltip ("The track's key, if you choose one: rows outside it are shaded, and notes can snap to it");
     ghostButton.setTooltip (withShortcut (getCommands(), "Ghost notes: other tracks' notes, shown faintly", "pianoRoll.ghostNotes"));
-    transformButton.setTooltip ("Quantize, legato, chop, transpose, strum, humanize or arpeggiate the selected notes, with a preview "
-                                "first");
 }
 } // namespace phazite::ui

@@ -9,6 +9,7 @@
 #include "Guide.h"
 #include "LessonCard.h"
 #include "Lessons.h"
+#include "Notices.h"
 #include "PanelLayout.h"
 #include "Panels.h"
 #include "StatusBar.h"
@@ -60,9 +61,13 @@ public:
     ActivityBar& getActivityBar() noexcept { return activityBar; } // whose settings' icon the window marks for an update
     juce::Component::WindowControlKind getWindowControlAt (juce::Point<int>) const;
 
-    // The open project's name, whether it is saved and when it was last autosaved, which the window knows: the title bar
-    // and the status bar show them.
-    void showProject (const juce::String& name, bool unsavedChanges, bool neverSaved, std::optional<juce::Time> lastAutosave = {});
+    // The open project's name, whether it is saved, when it was last autosaved and whether autosaves keep failing, which the
+    // window knows: the title bar and the status bar show them.
+    void showProject (const juce::String& name, bool unsavedChanges, bool neverSaved, std::optional<juce::Time> lastAutosave = {},
+                      bool autosaveFailed = false);
+
+    // What Phazite tells without asking, news or a problem, in a card over the bottom right corner (Notices.h).
+    Notices& getNotices() noexcept { return notices; }
 
     // How far the panels keep from the window's sides: the band there that resizes a restored window on Windows, whose
     // scroll bars it would take (app/MainWindow.h). The bars across the top and the bottom reach the sides.
@@ -105,7 +110,7 @@ public:
     DeviceNotices& getDeviceNotices() noexcept { return deviceNotices; }
 
     // The control a lesson's step names (Lessons::Step::target), if it shows: a component with that ID, the first found depth
-    // first, or one inside another ("pianoRoll/tool.draw").
+    // first, or one inside another ("playlist/track.add").
     juce::Component* findLessonTarget (const juce::String& target);
 
     void paint (juce::Graphics&) override;
@@ -163,6 +168,7 @@ private:
     Lessons lessons;         // Help > Lessons, in the lesson card while one runs
     LessonCard lessonCard { lessons, [this] (const juce::String& target) { return findLessonTarget (target); } };
     DeviceNotices deviceNotices { engineContext.getAudioDeviceManager() }; // audio devices plugged in, over the lesson card
+    Notices notices;                                                       // news and problems, over the devices' notices
     juce::Label openingLabel; // over the centre until a project is open: what the window shows as Phazite starts
 
     // The editor used last, which the time line's commands (zoom, grid, tools, nudge) act on.

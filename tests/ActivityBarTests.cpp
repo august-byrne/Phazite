@@ -4,7 +4,9 @@
 #include "AppScreen.h"
 #include "TestClips.h"
 #include "TestSong.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/commands/UndoHistory.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/MixerModel.h"
 #include "model/project/internal/ProjectContext.h"
@@ -878,6 +880,48 @@ TEST_CASE ("Local History lists the song as it was before Discard All Changes, f
     mouse.click (view.getSnapshotRestorePosition (0).getCentre());
     REQUIRE (phazite::test::dispatchMessagesUntil ([&view] { return view.getNumChanges() == 1; }));
     CHECK (phazite::describeUndo (phazite::findSong (context)).startsWith ("Undo Restore Local History of "));
+}
+
+TEST_CASE ("Undo History lists the song's steps newest first, folded at first, and a click on one goes back or forth to it")
+{
+    Screen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    auto& view = screen.getVersionsView();
+    const auto before = (int) phazite::getUndoHistory (context).steps.size();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&view, before] { return view.getNumUndoRows() == before + 3; }));
+
+    // Newest first, the song at the newest, and under the oldest, the song before them all.
+    CHECK (view.getUndoHistorySection().isVisible());
+    CHECK_FALSE (view.getUndoHistorySection().getToggleState());
+    CHECK (view.getUndoHistoryList().getBounds().isEmpty());
+    CHECK (view.getUndoNowRow() == 0);
+    CHECK (view.describeUndoRow (0).endsWith (", now"));
+    CHECK (view.describeUndoRow (view.getNumUndoRows() - 1) == "Before these steps");
+
+    // Opened, a click on the second row undoes the newest step, which stays listed, undone.
+    screen.click (view.getUndoHistorySection());
+    auto& list = view.getUndoHistoryList();
+    REQUIRE_FALSE (list.getBounds().isEmpty());
+    const auto tracks = phazite::getPlaylistRows (context).size();
+    phazite::test::Mouse mouse (list);
+    mouse.click (list.getRowPosition (1, true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getPlaylistRows (context).size() == tracks - 1);
+    CHECK (view.getUndoNowRow() == 1);
+    CHECK (view.describeUndoRow (0).endsWith (", undone"));
+    CHECK (view.describeUndoRow (1).endsWith (", now"));
+    CHECK (list.isRowSelected (1));
+    juce::ignoreUnused (view.createComponentSnapshot (view.getLocalBounds())); // its rows drawn
+
+    // The top row redoes it.
+    mouse.pause();
+    mouse.click (list.getRowPosition (0, true).getCentre());
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getPlaylistRows (context).size() == tracks);
+    CHECK (view.getUndoNowRow() == 0);
 }
 
 TEST_CASE ("A double-click on a commit checks it out: the view says so under the branch, Commit is off, and Back to main goes back")

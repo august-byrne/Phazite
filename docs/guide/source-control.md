@@ -45,7 +45,15 @@ While the song differs from its last commit, Phazite keeps snapshots of it witho
 - every 10 minutes while you work;
 - just before anything that replaces the song, such as Restore, discarding every change, or leaving a commit you checked out.
 
-Open **Local History** at the bottom of Source Control. Each row's arrow makes the song what it was then, as one undo step. Snapshots are kept for 30 days, fewer as they grow older.
+Open **Local History** near the bottom of Source Control. Each row's arrow makes the song what it was then, as one undo step. Snapshots are kept for 30 days, fewer as they grow older.
+
+## Undo History: every change since the project opened
+
+**Undo History**, at the very bottom of Source Control, lists each change you made since the project opened, newest first, by name ("Move Clip", "Change Volume"). The one the song is at says "now".
+
+- **Go back:** click an older change. Everything after it is undone, as if you had pressed Undo that many times.
+- **Go forward again:** the undone changes stay in the list, dimmed. Click one to redo up to it.
+- A new change clears the dimmed ones, as it does after Undo.
 
 ## Try an idea on a branch
 

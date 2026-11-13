@@ -144,6 +144,12 @@ void setThemeColour (juce::Component&, int colourId, juce::Colour Palette::* rol
 // takes for the colours it works out itself (an attention tint, a track's ink).
 void refreshTheme (juce::Component& window);
 
+// A view area's tab that shows the editor the time line's commands act on (ui/shell/Panels.h: ViewArea::markEditorInUse()),
+// which drawTabButton() marks with a line in the accent colour along its pill's foot (TabTint::inUseLine). Setting it
+// repaints the tab only when it changes.
+void setTabInUse (juce::TabBarButton&, bool);
+bool isTabInUse (const juce::TabBarButton&);
+
 // A row of a list as VS Code's lists draw theirs: under the pointer, the hover wash; selected, the selection's wash (or, where
 // the keyboard isn't in the list, the inactive selection's), rounded and inset from the list's sides (ListRow). The colour its
 // text is drawn in: the bright text's on a selection.

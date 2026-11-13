@@ -403,12 +403,25 @@ PanelDivider::PanelDivider (const juce::String& title, bool isBetweenColumns)
     setMouseCursor (betweenColumns ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::UpDownResizeCursor);
 }
 
+void PanelDivider::place (juce::Rectangle<int> gap, juce::Component* keepBehind)
+{
+    setBounds (betweenColumns ? gap.expanded (Shell::dividerGrab, 0) : gap.expanded (0, Shell::dividerGrab));
+
+    if (keepBehind != nullptr)
+        toBehind (keepBehind);
+    else
+        toFront (false);
+}
+
 void PanelDivider::paint (juce::Graphics& g)
 {
-    // The window's frame shows through, between the cards, until the pointer is on it: then a line in the focus colour, as
-    // VS Code's sashes light.
+    // The window's frame shows through, between the cards, until the pointer is on it: then a line in the focus colour over the
+    // gap, as VS Code's sashes light.
     if (isMouseOverOrDragging())
-        g.fillAll (getPalette (*this).focus.withAlpha (Shell::dividerLit));
+    {
+        g.setColour (getPalette (*this).focus.withAlpha (Shell::dividerLit));
+        g.fillRect (betweenColumns ? getLocalBounds().reduced (Shell::dividerGrab, 0) : getLocalBounds().reduced (0, Shell::dividerGrab));
+    }
 }
 
 void PanelDivider::mouseDown (const juce::MouseEvent&)

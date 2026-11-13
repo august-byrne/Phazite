@@ -17,10 +17,13 @@
 //   with a play mark on those with a bounce, which hears it in place of the song (the uncommitted changes', the song again).
 //   A click on a commit opens it, as a tree's row opens: what it changed shows under it, a line a track, each with its
 //   letter and, under the pointer, its Restore from This Commit; another click folds it;
+// - Local History, the song as it was while it differed from its last commit, and Undo History, the song's undo steps, a
+//   click going back or forth to one (docs/design.md, open question 22), each folded at first;
 // - and the room the history takes.
 // The sections fold under their headings. By the model's functions (model/versions/VersionsModel.h) and the commands.
 #pragma once
 
+#include "model/commands/UndoHistory.h"
 #include "model/project/ProjectContext.h"
 #include "model/versions/VersionsModel.h"
 #include "services/Settings.h"
@@ -104,6 +107,17 @@ public:
     juce::String getChangesHeading() const;
     juce::String getRoomText() const { return roomText.getText(); }
 
+    // Undo History, at the foot (folded at first, as Local History; as Ableton Live 12.1's, Logic Pro's and Studio One's): the
+    // song's undo steps newest first, those undone (which Redo would do again) dimmed above the one the song is at, and under
+    // the oldest, the song before them all. A click on a row, or Return on the one selected, goes back or forth to it, undoing
+    // or redoing as Undo and Redo do (model/commands/UndoHistory.h). Its section, its list, its rows (none while it has no
+    // steps), a row as screen readers say it, and the row the song is at (none without steps).
+    juce::Button& getUndoHistorySection() noexcept;
+    juce::ListBox& getUndoHistoryList() noexcept { return undoList; }
+    int getNumUndoRows() const noexcept;
+    juce::String describeUndoRow (int row) const;
+    int getUndoNowRow() const noexcept;
+
     // The menus of Commit's part and of the view's three dots, as their buttons show them.
     juce::PopupMenu makeSaveMenu();
     juce::PopupMenu makeMoreMenu();
@@ -127,6 +141,7 @@ private:
     class ChangesModel;
     class HistoryModel;
     class LocalHistoryModel;
+    class UndoHistoryModel;
     class MessageField;
     class BranchButton;
     class DetachedBar;
@@ -143,15 +158,21 @@ private:
     IconButton moreButton { "More Actions", Icon::moreActions };
     std::unique_ptr<MessageField> messageField;
     IconButton saveButton { "Commit", Icon::check }, saveMenuButton { "Commit's choices", Icon::expanded };
-    std::unique_ptr<SectionHeader> stagedSection, changesSection, historySection, localSection;
+    std::unique_ptr<SectionHeader> stagedSection, changesSection, historySection, localSection, undoSection;
     juce::TextButton doneButton;                // from another commit's differences back to the changes
     juce::TextButton mergeButton, cancelButton; // a merge's list's
     std::unique_ptr<ChangesModel> stagedModel, changesModel;
     std::unique_ptr<HistoryModel> historyModel;
     std::unique_ptr<LocalHistoryModel> localModel;
-    juce::ListBox stagedList, changesList, historyList, localList;
-    std::unique_ptr<ListRowHover> stagedHover, changesHover, historyHover, localHover;
+    std::unique_ptr<UndoHistoryModel> undoModel;
+    juce::ListBox stagedList, changesList, historyList, localList, undoList;
+    std::unique_ptr<ListRowHover> stagedHover, changesHover, historyHover, localHover, undoHover;
     std::vector<SnapshotInfo> snapshots;
+
+    // The song's undo history as the list last showed it, read again as the song changes; and going to a row's step.
+    UndoHistoryInfo undoHistory;
+    void refreshUndoHistory();
+    void goToUndoRow (int row);
 
     Lines lines = Lines::changes;
     std::vector<VersionChange> staged, changes;
@@ -188,6 +209,7 @@ private:
     TintedIcon discardIcon { Icon::undo }, stageIcon { Icon::plus }, unstageIcon { Icon::minus };
     TintedIcon openIcon { Icon::expanded }, foldedIcon { Icon::folded };
     TintedIcon clockIcon { Icon::recent }; // a snapshot of Local History's
+    TintedIcon redoIcon { Icon::redo };    // an undone step of Undo History's, which Redo would do again
 
     // The graph's lines, from a row to the row of a commit it follows: down the column of the newer row's branch, turning into
     // the older's at its end (a commit's first parent: its own branch's line, or where its branch started), or turning at the
@@ -221,6 +243,7 @@ private:
 
     void projectChanged() override { refresh(); }
     void versionsChanged() override { refresh(); }
+    void songChanged (const SongChanges&) override { refreshUndoHistory(); } // each change is a step, or a step's part
     void textEditorTextChanged (juce::TextEditor&) override;
 };
 } // namespace phazite::ui

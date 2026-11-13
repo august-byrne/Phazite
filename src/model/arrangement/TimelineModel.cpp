@@ -113,6 +113,20 @@ void movePlayhead (ProjectContext& context, BeatPosition beat)
         movePlayhead (*song, beat);
 }
 
+double getSecondsAt (const ProjectContext& context, BeatPosition beat)
+{
+    constexpr double secondsPerBeatAt120 = 0.5;
+    auto* song = findSong (context);
+    return song != nullptr ? toSeconds (*song, beat) : beat.inBeats() * secondsPerBeatAt120;
+}
+
+BeatPosition getBeatAtSeconds (const ProjectContext& context, double seconds)
+{
+    constexpr double beatsPerSecondAt120 = 2.0;
+    auto* song = findSong (context);
+    return song != nullptr ? toBeats (*song, seconds) : BeatPosition::fromBeats (seconds * beatsPerSecondAt120);
+}
+
 std::optional<BeatRange> getLoop (const ProjectContext& context)
 {
     auto* song = findSong (context);

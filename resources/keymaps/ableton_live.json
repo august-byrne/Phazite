@@ -94,6 +94,8 @@
     "view.zoomIn": [ "=", "numpad +" ],
     "view.zoomOut": [ "-", "numpad -" ],
     "view.zoomToFit": [ "W" ],
+    "view.zoomToSelection": [ "Z" ],
+    "view.zoomBack": [ "X" ],
     "view.followPlayback": [ "command + shift + F" ],
     "grid.finer": [ "command + 1" ],
     "grid.coarser": [ "command + 2" ],

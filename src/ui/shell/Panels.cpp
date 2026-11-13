@@ -459,6 +459,75 @@ void ViewArea::currentTabChanged (int index, const juce::String&)
 
     if (tab == ViewTab::instrument || tab == ViewTab::effects)
         views.devices.showPage (tab == ViewTab::instrument ? DevicesView::Page::instrument : DevicesView::Page::effects);
+
+    refreshTools();
+}
+
+TimelineEditor* ViewArea::getEditor (ViewTab tab) const
+{
+    switch (tab)
+    {
+        case ViewTab::playlist:
+            return dynamic_cast<TimelineEditor*> (&views.playlist);
+        case ViewTab::clipEditor:
+            return &views.clipEditor.getEditor();
+        case ViewTab::mixer:
+        case ViewTab::instrument:
+        case ViewTab::effects:
+        default:
+            return nullptr;
+    }
+}
+
+void ViewArea::refreshTools()
+{
+    // The shown view's controls come here from wherever they were (the view's last area, or the other editor of the clip
+    // editor's tab), and the controls of a view no longer shown here go.
+    const auto shown = getShownTab();
+    auto* editor = shown.has_value() ? getEditor (*shown) : nullptr;
+    juce::Component* header = editor != nullptr ? &editor->getToolRow() : nullptr;
+
+    if (shownTools != nullptr && shownTools != header && shownTools->getParentComponent() == this)
+        removeChildComponent (shownTools);
+
+    shownTools = header;
+
+    if (header != nullptr && header->getParentComponent() != this)
+        addAndMakeVisible (header);
+
+    markEditorInUse();
+    resized();
+}
+
+void ViewArea::markEditorInUse()
+{
+    auto& bar = getTabbedButtonBar();
+
+    for (int i = 0; i < (int) tabs.size(); ++i)
+    {
+        if (auto* button = bar.getTabButton (i))
+        {
+            const auto* editor = getEditor (tabs[(size_t) i]);
+            setTabInUse (*button, editor != nullptr && editor->isActive() && i == getCurrentTabIndex());
+        }
+    }
+}
+
+int ViewArea::getTabsLength() const
+{
+    // As juce::TabbedButtonBar adds up its tabs' best lengths, less what they overlap, which it keeps to itself.
+    // JUCE workaround W29 (docs/juce-workarounds.md)
+    auto& bar = getTabbedButtonBar();
+    auto& lf = bar.getLookAndFeel();
+    const auto depth = getTabBarDepth();
+    const auto overlap = lf.getTabButtonOverlap (depth) + lf.getTabButtonSpaceAroundImage() * 2;
+    auto length = std::max (0, overlap);
+
+    for (int i = 0; i < bar.getNumTabs(); ++i)
+        if (auto* button = bar.getTabButton (i))
+            length += button->getBestTabLength (depth) - overlap;
+
+    return length;
 }
 
 void ViewArea::refreshTooltips (const CommandBridge& commands)
@@ -507,6 +576,8 @@ void ViewArea::refreshTabs()
             button->setTooltip (keyed ? withShortcut (*shortcuts, text, getCommandID (tab)) : text);
         }
     }
+
+    refreshTools(); // the clip editor's tab shows the other editor's controls once it shows the other editor
 }
 
 juce::TabBarButton* ViewArea::createTabButton (const juce::String& name, int)
@@ -542,6 +613,17 @@ void ViewArea::resized()
 {
     juce::TabbedComponent::resized();
     leaveCorner (*this, cornerButtons); // the lower row's maximize, own window and hide, in its right area
+
+    // While the shown view has controls: the tabs as wide as they need, and the controls in the rest of the row up to the
+    // corner, the tabs leaving room for the controls' More button at least.
+    if (shownTools != nullptr && shownTools->getParentComponent() == this)
+    {
+        auto& bar = getTabbedButtonBar();
+        const auto row = bar.getBounds();
+        const auto tabsWidth = std::min (getTabsLength(), std::max (0, row.getWidth() - ToolRowTint::fromTabs - ToolRowTint::button));
+        bar.setBounds (row.withWidth (tabsWidth));
+        shownTools->setBounds (row.withTrimmedLeft (tabsWidth + ToolRowTint::fromTabs));
+    }
 
     for (auto& holder : holders)
         holder.resized();
@@ -615,9 +697,10 @@ void ViewArea::setCornerButtons (int buttons)
 
 ViewArea::Drop ViewArea::getDropAt (juce::Point<int> position) const
 {
-    // Over the tabs, among them; on the views, a quarter of the way in from their left or right edge, beside this area, while
-    // its row has room, and from its edge toward a row without views, into that row; anywhere else, among the tabs too.
-    if (getTabbedButtonBar().getBounds().contains (position))
+    // Over the tab row (the tabs, or the shown view's controls beside them), among the tabs; on the views, a quarter of the way
+    // in from their left or right edge, beside this area, while its row has room, and from its edge toward a row without
+    // views, into that row; anywhere else, among the tabs too.
+    if (getTabbedButtonBar().getBounds().contains (position) || position.y < getTabBarDepth())
         return Drop::tabs;
 
     const auto content = getLocalBounds().withTrimmedTop (getTabBarDepth());
@@ -791,7 +874,7 @@ void ViewRow::resized()
     {
         const auto room = std::max (0, area.getWidth() - Shell::dividerSize);
         areas[0]->setBounds (area.removeFromLeft (juce::roundToInt (share * room)));
-        divider.setBounds (area.removeFromLeft (Shell::dividerSize));
+        divider.place (area.removeFromLeft (Shell::dividerSize));
         areas[1]->setBounds (area);
         areas[0]->setCornerButtons (0);
         areas[1]->setCornerButtons (buttons);

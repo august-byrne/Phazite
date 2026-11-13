@@ -72,7 +72,7 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
     }
 
     // New notes get the length and velocity of the note pressed last with a tool that places or edits notes, as in FL Studio;
-    // the toolbar shows them. (Deleting or muting a note doesn't choose it.)
+    // its settings show them. (Deleting or muting a note doesn't choose it.)
     if (hit.has_value() && (smart || roll.getTool() == Tool::paint || roll.getTool() == Tool::select))
         roll.setNextNote (hit->length, hit->velocity);
 
@@ -553,11 +553,32 @@ void PianoRoll::NoteGrid::mouseDrag (const juce::MouseEvent& e)
         default:
             break;
     }
+
+    roll.setDragReadout (describeDrag());
+}
+
+juce::String PianoRoll::NoteGrid::describeDrag() const
+{
+    // The note under the pointer: its pitch and where it starts, and while its edges move, how long it is.
+    if (gesture == nullptr
+        || (gesture->kind != Gesture::Kind::move && gesture->kind != Gesture::Kind::resizeStart
+            && gesture->kind != Gesture::Kind::resizeEnd))
+        return {};
+
+    const auto note = getNote (roll.context, gesture->anchor.note);
+
+    if (! note.has_value())
+        return {};
+
+    return roll.describePitch (note->pitch) + " at "
+           + (gesture->kind == Gesture::Kind::move ? roll.describePlace (note->start)
+                                                   : roll.describeSpan (note->start, note->start + note->length));
 }
 
 void PianoRoll::NoteGrid::mouseUp (const juce::MouseEvent& e)
 {
     roll.stopAudition();
+    roll.setDragReadout ({});
 
     if (gesture == nullptr)
         return;
@@ -624,6 +645,7 @@ void PianoRoll::NoteGrid::cancelGesture()
 {
     // What the drag did so far stays, as one undo step.
     roll.stopAudition();
+    roll.setDragReadout ({});
     gesture = nullptr;
     rubberBand = {};
     updateHint (getMouseXYRelative().toFloat());
@@ -638,6 +660,7 @@ void PianoRoll::NoteGrid::cancelDrag()
         return;
 
     roll.stopAudition();
+    roll.setDragReadout ({});
     gesture->rollBack();
     roll.selectNotes (gesture->selectionBefore, false);
 
@@ -661,23 +684,32 @@ void PianoRoll::NoteGrid::mouseDoubleClick (const juce::MouseEvent& e)
             roll.selection.selectOnly (clip);
 }
 
-void PianoRoll::NoteGrid::showMenu (juce::Component* target)
+void PianoRoll::NoteGrid::addMenuItems (juce::PopupMenu& menu)
 {
     auto& registry = roll.getCommands();
-    juce::PopupMenu menu;
     addCommandItems (menu, registry, { "edit.cut", "edit.copy", "edit.paste" });
     menu.addSeparator();
     addCommandItems (menu, registry, { "edit.duplicate", "edit.delete", "edit.mute" });
     menu.addSeparator();
     addCommandItems (menu, registry, { "note.slide", "note.portamento" });
-    menu.addSeparator();
+
+    // The transforms, as the toolbar's Transform button offered them until 2026-11-13.
+    menu.addSectionHeader ("Show what it does first");
+    addCommandItems (menu, registry,
+                     { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings", "note.strumSettings",
+                       "note.humanizeSettings", "note.arpeggiateSettings" });
+    menu.addSectionHeader ("Right away");
     addCommandItems (menu, registry, { "edit.quantize", "note.legato", "note.chop" });
-    addCommandItems (menu, registry, { "note.quantizeSettings", "note.legatoSettings", "note.chopSettings", "note.transposeSettings" });
-    addCommandItems (menu, registry, { "note.strumSettings", "note.humanizeSettings", "note.arpeggiateSettings" });
     menu.addSeparator();
     addCommandItems (menu, registry, { "note.selectAll", "note.deselectAll" });
     menu.addSeparator();
     addCommandItems (menu, registry, { "pianoRoll.drumMode", "pianoRoll.ghostNotes", "pianoRoll.snapToKey" });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target));
+}
+
+void PianoRoll::NoteGrid::showMenu()
+{
+    juce::PopupMenu menu;
+    addMenuItems (menu);
+    menu.showMenuAsync (juce::PopupMenu::Options());
 }
 } // namespace phazite::ui

@@ -6,6 +6,8 @@
 #include "model/transport/RecordingModel.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <utility>
+
 namespace phazite::ui
 {
 namespace
@@ -64,7 +66,8 @@ TrackHeader::TrackHeader (Owner& o, ProjectContext& projectContext, const TrackR
 
     setDescription ("Click to select the track, Ctrl+click to add it to the selection, Shift+click to select up to it. "
                     "Drag it to move the selected tracks, onto a folder to put them in it. Double-click to collapse it "
-                    "or expand it, drag the bottom edge to resize it, and right-click for more, such as Rename.");
+                    "or expand it, drag the bottom edge to resize it, click its colour strip at the left for another colour, and "
+                    "right-click for more, such as Rename.");
 
     // The header handles clicks on the name; the text field gets them while renaming.
     nameLabel.setTitle ("Track name");
@@ -193,6 +196,16 @@ juce::Rectangle<int> TrackHeader::getColourArea() const
     return getLocalBounds().withTrimmedLeft (getTrackStripsWidth (row) - TrackStrip::width).withWidth (TrackStrip::width);
 }
 
+juce::Rectangle<int> TrackHeader::getColourHitArea() const
+{
+    return getColourArea().withWidth (TrackStrip::hitWidth);
+}
+
+juce::String TrackHeader::getTooltip()
+{
+    return overColour ? juce::String ("The track's colour: click to choose another") : juce::String();
+}
+
 bool TrackHeader::isOnResizeEdge (juce::Point<int> position) const
 {
     return position.y >= getHeight() - resizeEdgeHeight;
@@ -208,6 +221,12 @@ void TrackHeader::paint (juce::Graphics& g)
     g.setColour (background);
     g.fillRect (area);
     paintTrackStrips (g, *this, row);
+
+    if (overColour)
+    {
+        g.setColour (p.textBright.withAlpha (TrackStrip::hoverWash));
+        g.fillRect (getColourArea());
+    }
 
     // A folder's or a return's icon, before its name, in the header's ink.
     if (kindIcon != nullptr && ! kindIconArea.isEmpty())
@@ -254,8 +273,9 @@ void TrackHeader::resized()
     {
         if (! isMaster())
         {
-            // Mute and solo at the right end, small, as FL Studio's mute switch is.
-            const auto switchSize = juce::jmin (SwitchTint::size, size);
+            // Mute and solo at the right end, its light small, as FL Studio's mute switch is, but large to click (24 pixels,
+            // WCAG 2.2's target size, where the row has room).
+            const auto switchSize = juce::jmin (SwitchTint::trackHitSize, top.getHeight());
             muteSolo.setBounds (top.removeFromRight (switchSize).withSizeKeepingCentre (switchSize, switchSize));
             top.removeFromRight (Space::xs);
 
@@ -292,8 +312,21 @@ void TrackHeader::showArmedInput()
 
 void TrackHeader::mouseMove (const juce::MouseEvent& e)
 {
-    setMouseCursor (! isMaster() && isOnResizeEdge (e.getPosition()) ? juce::MouseCursor::UpDownResizeCursor
-                                                                     : juce::MouseCursor::NormalCursor);
+    // The bottom edge sizes the track; the colour strip opens its colour menu, lit under the pointer, a hand over it.
+    const auto onEdge = ! isMaster() && isOnResizeEdge (e.getPosition());
+    const auto onColour = ! isMaster() && ! onEdge && getColourHitArea().contains (e.getPosition());
+    setMouseCursor (onEdge     ? juce::MouseCursor::UpDownResizeCursor
+                    : onColour ? juce::MouseCursor::PointingHandCursor
+                               : juce::MouseCursor::NormalCursor);
+
+    if (std::exchange (overColour, onColour) != onColour)
+        repaint (getColourArea());
+}
+
+void TrackHeader::mouseExit (const juce::MouseEvent&)
+{
+    if (std::exchange (overColour, false))
+        repaint (getColourArea());
 }
 
 void TrackHeader::mouseDown (const juce::MouseEvent& e)
@@ -334,7 +367,7 @@ void TrackHeader::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (getColourArea().contains (e.getPosition()))
+    if (getColourHitArea().contains (e.getPosition()))
     {
         if (! selected)
             owner.trackClicked (row.id, {});

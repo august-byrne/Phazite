@@ -34,6 +34,12 @@ std::optional<double> parseTempo (const juce::String&);
 // A time signature: "4/4", "6/8".
 juce::String formatTimeSignature (int numerator, int denominator);
 
+// A time from the song's start as the transport bar shows the playhead's, in minutes and seconds to a tenth, "1:23.4"
+// (rounded down, as a clock counts); and a time typed as seconds ("83.5"), minutes and seconds ("1:23.5") or hours, minutes
+// and seconds ("1:02:03"). Nothing for text that isn't one.
+juce::String formatSongTime (double seconds);
+std::optional<double> parseSongTime (const juce::String&);
+
 // An integrated loudness, to a tenth: "-14.0 LUFS".
 juce::String formatLoudness (double lufs);
 

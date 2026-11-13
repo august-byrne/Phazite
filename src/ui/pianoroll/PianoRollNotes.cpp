@@ -20,7 +20,7 @@ namespace
     constexpr float quietPaleness = 0.45f;
 
     const juce::String
-        emptyHint ("Click to add a note with the length and velocity the toolbar shows, and drag to move it; Ctrl+drag selects notes "
+        emptyHint ("Click to add a note with the length and velocity shown at the left, and drag to move it; Ctrl+drag selects notes "
                    "in a rectangle. Right-click deletes notes, or on empty grid clears the selection; Shift+right-click opens the "
                    "menu. Ctrl+wheel zooms, Alt+wheel makes the rows taller, and a middle drag moves the view.");
     const juce::String

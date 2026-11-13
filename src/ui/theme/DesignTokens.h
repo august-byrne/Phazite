@@ -160,6 +160,10 @@ namespace Space
 
 inline constexpr int controlHeight = 28;
 
+// What an empty view says in its middle, as the playlist does while the song has no tracks: no wider than a paragraph
+// reads easily.
+inline constexpr int emptyHintWidth = 400;
+
 // Corners, as VS Code's: a control's, a button's, a field's, a row's or a tab's (cornerRadius.small); a menu's items
 // (cornerRadius.medium); and the panels' cards and what pops up, menus, lists and tooltips (cornerRadius.large).
 inline constexpr float cornerRadius = 4.0f;
@@ -247,7 +251,28 @@ namespace TabTint
     inline constexpr int textInset = 10;
     inline constexpr float pagePillHeight = 20.0f;
     inline constexpr int pageTextInset = 8;
+
+    // The tab of the editor that the time line's commands act on (the one used last; ui/timeline/TimelineEditor.h): a line this
+    // thick in the accent colour along its pill's foot, so far in from the pill's ends.
+    inline constexpr float inUseLine = 2.0f, inUseInset = 8.0f;
 } // namespace TabTint
+
+// A view's controls in its area's tab row, right of its tabs (ui/components/ToolRow.h), as Bitwig 6 puts each panel's tools
+// at its top and VS Code an editor's actions beside its tabs: each button so big, square (a tool's, the snap's, the More
+// button), so far from the next, a group (the grid, the tools, Follow) this much further from the one before; and the room
+// between the tabs and the row.
+namespace ToolRowTint
+{
+    inline constexpr int button = 24, gap = 2, groupGap = 10, fromTabs = 12;
+} // namespace ToolRowTint
+
+// The grid's button in an editor's row (ui/timeline/TimelineEditor.h: GridButton): its menu's arrow, so big, so far from its
+// text.
+namespace GridButtonTint
+{
+    inline constexpr float arrowSize = 12.0f;
+    inline constexpr int arrowGap = 4;
+} // namespace GridButtonTint
 
 // A shortcut's keys as VS Code's command search shows them (drawKeyCaps()): each in a little box with these corners, so tall,
 // its text so big and so far from its ends, the boxes so far apart; filled in the muted text colour this opaque, outlined in
@@ -309,6 +334,7 @@ namespace Shell
     inline constexpr int statusHintsMinimumWidth = 240;
 
     inline constexpr int dividerSize = cardGap; // between panels, dragged to size them
+    inline constexpr int dividerGrab = 2;       // and taking drags this far into the cards beside it (PanelDivider::place())
     inline constexpr float dividerLit = 0.5f;   // the focus colour's alpha on a divider under the pointer
 
     // A divider dragged until its panel would be smaller than this part of the least it shrinks to closes the panel, as
@@ -542,10 +568,14 @@ namespace TrackTint
 
 // A track's header's left edge in the playlist (ui/playlist/TrackHeader.h), and its automation lanes': the strip in its
 // color, and how far each folder it is in moves it right, which the folder's rail, as wide as a strip, runs down (pixels).
+// A click on the strip opens its colour menu: it takes clicks this wide, into the header beside it, and under the pointer it
+// is washed in the bright text colour this much (the owner's UX audit, 2026-11-12: nothing showed the menu was there).
 namespace TrackStrip
 {
     inline constexpr int width = 8;
     inline constexpr int indent = 12;
+    inline constexpr int hitWidth = 16;
+    inline constexpr float hoverWash = 0.35f;
 } // namespace TrackStrip
 
 // A track's peak bar along its header's right edge (ui/components/PeakBar.h), as FL Studio's playlist shows that a track
@@ -812,6 +842,7 @@ namespace SwitchTint
     inline constexpr float ring = 1.5f, ringGap = 2.0f;
     inline constexpr float silenced = 0.3f;
     inline constexpr int size = 20;
+    inline constexpr int trackHitSize = 24; // a track header's mute and solo switch takes clicks this large, its light no larger
     inline constexpr float partOff = 0.45f; // a device's part while its switch is off (PowerSwitch.h), faint
 } // namespace SwitchTint
 
@@ -849,13 +880,14 @@ namespace RenderingTint
 
 // How the loop shows in a ruler: its lane along the top, which a drag loops, in the hover wash under the pointer and
 // otherwise as the rest of the ruler, a bar of the loop color in that lane over the part that loops, and a wash of it below
-// (alphas); the lane's height, and how near the loop's edge a press takes the edge (pixels).
+// (alphas); the lane's height, and how near the loop's edge a press takes the edge (pixels): 8 and 4 until the owner's UX
+// audit (2026-11-12) made them easier to take.
 namespace LoopTint
 {
     inline constexpr float bar = 0.9f;
     inline constexpr float wash = 0.14f;
-    inline constexpr int laneHeight = 8;
-    inline constexpr int edgeGrab = 4;
+    inline constexpr int laneHeight = 10;
+    inline constexpr int edgeGrab = 6;
 } // namespace LoopTint
 
 // How a ruler marks the time (ui/timeline/TimelineEditor.h: TimelineRuler), in the muted text colour, kept quiet (the owner,

@@ -210,9 +210,11 @@ public:
     explicit AutosaveTimer (Project&, int intervalSeconds = 120, int firstDelaySeconds = 15);
     ~AutosaveTimer() override;
 
-    // Called once when failuresToReport autosaves (or auto saves) in a row have failed (docs/performance-audit.md, R7).
+    // Called once when failuresToReport autosaves (or auto saves) in a row have failed (docs/performance-audit.md, R7); and
+    // whether they have, until one works, which the status bar says.
     std::function<void()> onRepeatedFailures;
     static constexpr int failuresToReport = 3;
+    bool hasFailedRepeatedly() const noexcept { return failures >= failuresToReport; }
     static constexpr int maxWaitWhilePlayingSeconds = 600;
 
     // Auto Save, as VS Code's files.autoSave "afterDelay": while on (for a project with a file of its own), the project saves

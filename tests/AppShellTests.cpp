@@ -22,6 +22,19 @@ namespace
 {
 using Screen = phazite::test::AppScreen;
 
+// What a part of the window takes of it: a divider takes drags a little way into the cards beside it, over their edges, on
+// purpose (PanelDivider::place()), so it takes its gap alone.
+juce::Rectangle<int> getTakenArea (const juce::Component& part)
+{
+    const auto bounds = part.getBounds();
+
+    if (dynamic_cast<const phazite::ui::PanelDivider*> (&part) == nullptr)
+        return bounds;
+
+    return bounds.getWidth() < bounds.getHeight() ? bounds.reduced (phazite::ui::Shell::dividerGrab, 0)
+                                                  : bounds.reduced (0, phazite::ui::Shell::dividerGrab);
+}
+
 // The window's parts, as checkChildrenApart() checks them, except the panels' buttons (maximize, a window of its own,
 // hide), which sit in their panel's top right corner on purpose: each lies inside a panel; and what lies over them all
 // and takes no clicks, the panels' cards' corners and edges (ui::PanelCards).
@@ -46,7 +59,7 @@ void checkPartsApart (juce::Component& shell)
         for (int j = i + 1; j < parts.size(); ++j)
         {
             CAPTURE (parts[j]->getTitle().toStdString());
-            CHECK_FALSE (parts[i]->getBounds().intersects (parts[j]->getBounds()));
+            CHECK_FALSE (getTakenArea (*parts[i]).intersects (getTakenArea (*parts[j])));
         }
     }
 
@@ -232,7 +245,7 @@ TEST_CASE ("The lower panel's corner maximizes and hides it, as VS Code's panel'
     // A divider dragged sizes the left panel, which keeps that width while it hides and shows, in the settings too.
     auto* divider = phazite::test::findComponentWithTitle (screen.shell, "Left panel's edge");
     REQUIRE (divider != nullptr);
-    CHECK (divider->getX() == browser.getRight());
+    CHECK (divider->getX() + phazite::ui::Shell::dividerGrab == browser.getRight()); // it takes drags a little way into the card
     CHECK (browserWidth == phazite::ui::Shell::leftPanelWidth);
     phazite::test::Mouse dividerMouse (screen.shell); // the divider moves with the drag
     const auto middle = divider->getBounds().getCentre();

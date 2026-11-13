@@ -2,6 +2,8 @@
 #include "TrackSwitch.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <algorithm>
+
 namespace phazite::ui
 {
 namespace
@@ -93,8 +95,9 @@ void TrackSwitch::paintButton (juce::Graphics& g, bool isHighlighted, bool isDow
 void paintMuteSoloLight (juce::Graphics& g, const juce::Component& component, const MuteSolo& state, bool isHighlighted, bool isDown)
 {
     const auto& p = getPalette (component);
+    // The light as large as a switch of the usual size's, however large the switch is to click (SwitchTint::trackHitSize).
     const auto bounds = component.getLocalBounds().toFloat();
-    const auto size = std::min (bounds.getWidth(), bounds.getHeight()) * SwitchTint::light;
+    const auto size = std::min ({ bounds.getWidth(), bounds.getHeight(), (float) SwitchTint::size }) * SwitchTint::light;
     const auto light = bounds.withSizeKeepingCentre (size, size);
 
     if (isHighlighted || isDown)

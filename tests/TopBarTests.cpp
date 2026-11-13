@@ -13,6 +13,7 @@
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
 #include "model/transport/internal/Metronome.h"
+#include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Tempo.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/input/ComputerKeyboard.h"
@@ -202,4 +203,77 @@ TEST_CASE ("The top bar shows the song's time signature")
 
     phazite::setTimeSignature (*screen.song, { 6, 8 });
     CHECK (phazite::test::dispatchMessagesUntil ([button] { return button->getButtonText() == "6/8"; }));
+}
+
+TEST_CASE ("The top bar shows where the playhead is, in bars and in time, and a place typed in either takes the playhead there")
+{
+    // The owner's UX audit, 2026-11-12: the playhead's place showed nowhere, where every DAW checked has a readout.
+    TopBarScreen screen;
+    auto* bars = dynamic_cast<phazite::ui::NumberField*> (phazite::test::findComponentWithTitle (screen.topBar, "Playhead position"));
+    auto* time = dynamic_cast<phazite::ui::NumberField*> (phazite::test::findComponentWithTitle (screen.topBar, "Playhead time"));
+    REQUIRE (bars != nullptr);
+    REQUIRE (time != nullptr);
+    CHECK (bars->isVisible());
+    CHECK (time->isVisible());
+    const auto shown = [] (phazite::ui::NumberField& field) { return field.getTextFromValue (field.getValue()); };
+    CHECK (shown (*bars) == juce::String ("1.1.1"));
+    CHECK (shown (*time) == juce::String ("0:00.0"));
+
+    // Moved elsewhere: at 120 BPM in 4/4, beat 9.5 is bar 3, its second beat and that beat's third sixteenth, 4.75 seconds in
+    // (a clock's tenths, rounded down).
+    phazite::movePlayhead (*screen.song, phazite::BeatPosition::fromBeats (9.5));
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return shown (*bars) == "3.2.3"; }));
+    CHECK (shown (*time) == juce::String ("0:04.7"));
+
+    // Typed: bar 5's third beat; a minute in; and text that names no place changes nothing.
+    bars->setValue (bars->getValueFromText ("5.3"), juce::sendNotificationSync);
+    CHECK (phazite::getPlayheadBeat (*screen.song).inBeats() == doctest::Approx (18.0));
+    time->setValue (time->getValueFromText ("1:00"), juce::sendNotificationSync);
+    CHECK (phazite::getPlayheadBeat (*screen.song).inBeats() == doctest::Approx (120.0));
+    CHECK (bars->getValueFromText ("no place") == doctest::Approx (bars->getValue()));
+    CHECK (time->getValueFromText ("1:2:3:4") == doctest::Approx (time->getValue()));
+
+    // In 6/8 a beat is an eighth note: beat 3.5 (in quarter notes) is bar 2, its second eighth.
+    phazite::setTimeSignature (*screen.song, { 6, 8 });
+    phazite::movePlayhead (*screen.song, phazite::BeatPosition::fromBeats (3.5));
+    CHECK (phazite::test::dispatchMessagesUntil ([&] { return shown (*bars) == "2.2.1"; }));
+
+    // A narrower bar: the time goes first, then the bars, as the rest of the bar needs its room.
+    screen.topBar.setSize (960, screen.topBar.getHeight());
+    CHECK (bars->isVisible());
+    CHECK_FALSE (time->isVisible());
+    screen.topBar.setSize (900, screen.topBar.getHeight());
+    CHECK_FALSE (bars->isVisible());
+}
+
+TEST_CASE ("Record and the metronome have their options on an arrow joined to each, as a split button")
+{
+    // The owner's UX audit, 2026-11-12: only a right-click opened them, and nothing showed they were there.
+    phazite::ui::LookAndFeel lookAndFeel;
+    juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+    const juce::ScopeGuard noLook { [] { juce::LookAndFeel::setDefaultLookAndFeel (nullptr); } };
+    TopBarScreen screen (300);
+
+    for (const auto& [name, options] : { std::pair { "Record", "Record options" }, std::pair { "Metronome", "Metronome options" } })
+    {
+        CAPTURE (name);
+        auto* button = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (screen.topBar, name));
+        auto* arrow = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (screen.topBar, options));
+        REQUIRE (button != nullptr);
+        REQUIRE (arrow != nullptr);
+        CHECK (arrow->isShowing());
+        CHECK (arrow->isEnabled());
+        CHECK (arrow->getX() == button->getRight());
+        CHECK (arrow->getY() == button->getY());
+        CHECK (arrow->getHeight() == button->getHeight());
+        CHECK (button->isConnectedOnRight());
+        CHECK (arrow->isConnectedOnLeft());
+        CHECK (arrow->getTooltip().isNotEmpty());
+
+        // A click opens the menu that a right-click on the button opens.
+        phazite::test::Mouse mouse (*arrow);
+        mouse.click (arrow->getLocalBounds().getCentre());
+        CHECK (juce::PopupMenu::dismissAllActiveMenus());
+        phazite::test::dispatchPendingMessages();
+    }
 }

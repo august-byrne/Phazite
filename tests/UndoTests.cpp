@@ -3,11 +3,15 @@
 // joins a step already in progress for the same song, and a drag is a Gesture.
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
+#include "TestSong.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
+#include "model/commands/UndoHistory.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/project/internal/Project.h"
+#include "model/project/internal/ProjectContext.h"
 
 namespace
 {
@@ -248,4 +252,53 @@ TEST_CASE ("A gesture is one named undo step until it ends, and rolling it back 
 
     CHECK (undo.getUndoDescription() == juce::String ("Kept"));
     CHECK ((int) song->getState()["d"] == 7);
+}
+
+TEST_CASE ("The undo history lists the song's steps by name, oldest first, and goes back or forth to one as Undo and Redo do")
+{
+    phazite::test::TestSong song;
+    auto& context = song.context;
+    const auto countTracks = [&context] { return phazite::getPlaylistRows (context).size(); };
+    const auto tracksBefore = countTracks();
+    const auto before = phazite::getUndoHistory (context);
+    CHECK (before.done == (int) before.steps.size());
+
+    for (int i = 0; i < 3; ++i)
+        REQUIRE (phazite::addTrackAtEnd (context, false).isValid());
+
+    auto history = phazite::getUndoHistory (context);
+    const auto all = (int) history.steps.size();
+    REQUIRE (all == (int) before.steps.size() + 3);
+    CHECK (history.done == all);
+    CHECK (history.steps.back().isNotEmpty());
+    CHECK (history.steps.back() == phazite::describeUndo (phazite::findSong (context)).fromFirstOccurrenceOf ("Undo ", false, false));
+
+    // Back two steps: two tracks fewer, the steps still listed, undone, for Redo.
+    phazite::goToUndoStep (context, all - 2);
+    CHECK (countTracks() == tracksBefore + 1);
+    history = phazite::getUndoHistory (context);
+    CHECK ((int) history.steps.size() == all);
+    CHECK (history.done == all - 2);
+    CHECK (phazite::canRedo (*phazite::findSong (context)));
+
+    // Forth again; and past either end, to that end.
+    phazite::goToUndoStep (context, all);
+    CHECK (countTracks() == tracksBefore + 3);
+    phazite::goToUndoStep (context, -5);
+    CHECK (phazite::getUndoHistory (context).done == 0);
+    phazite::goToUndoStep (context, all + 5);
+    CHECK (phazite::getUndoHistory (context).done == all);
+    CHECK (countTracks() == tracksBefore + 3);
+
+    // A change after going back leaves the steps undone behind, as any change after Undo does.
+    phazite::goToUndoStep (context, all - 1);
+    REQUIRE (phazite::addTrackAtEnd (context, false).isValid());
+    history = phazite::getUndoHistory (context);
+    CHECK ((int) history.steps.size() == all);
+    CHECK (history.done == all);
+
+    // Without a project: none, and going to a step does nothing.
+    phazite::ProjectContext none { phazite::test::getEngineContext() };
+    CHECK (phazite::getUndoHistory (none).steps.empty());
+    phazite::goToUndoStep (none, 3);
 }

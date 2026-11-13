@@ -246,6 +246,23 @@ bool Playlist::canQuantizeSelection() const
     return ! selection.getClips().empty();
 }
 
+std::optional<BeatRange> Playlist::getSelectedRange() const
+{
+    // A time range selected across tracks, or else the selected clips, from the first's start to the last's end.
+    if (! range.isEmpty())
+        return range.getRange();
+
+    std::optional<BeatRange> shown;
+
+    for (const auto id : selection.getClips())
+        if (const auto clip = getClip (context, id))
+            shown = shown.has_value()
+                        ? BeatRange (std::min (shown->getStart(), clip->range.getStart()), std::max (shown->getEnd(), clip->range.getEnd()))
+                        : clip->range;
+
+    return shown;
+}
+
 void Playlist::quantizeSelection()
 {
     // To the grid as it is now, whether or not snapping is on: quantizing is asked for explicitly.
@@ -258,6 +275,7 @@ void Playlist::quantizeSelection()
 void Playlist::toolChanged()
 {
     gesture = nullptr;
+    setDragReadout ({});
     rubberBand = {};
 
     lanes->setMouseCursor (getCursorFor (getTool()));
@@ -295,9 +313,21 @@ void Playlist::lanesMouseMove (const juce::MouseEvent& e)
 void Playlist::lanesMouseDown (const juce::MouseEvent& e)
 {
     gesture = nullptr;
+    setDragReadout ({});
 
     if (! context.hasProject())
         return;
+
+    // The middle button moves the view, as a page by hand, as it does in the piano roll; it never edits.
+    if (e.mods.isMiddleButtonDown())
+    {
+        gesture = std::make_unique<Gesture>();
+        gesture->kind = Gesture::Kind::pan;
+        gesture->startPosition = e.getPosition();
+        gesture->panViewStart = getView().start;
+        gesture->startScrollY = scrollY;
+        return;
+    }
 
     // The master's row holds no clips, only the lanes under it.
     if (const auto row = getRowAt (e.y); row >= 0 && rows[(size_t) row].track.kind == TrackType::master && getTool() != Tool::zoom)
@@ -516,6 +546,15 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
     if (gesture == nullptr || ! context.hasProject())
         return;
 
+    if (gesture->kind == Gesture::Kind::pan)
+    {
+        // The song moves with the pointer, sideways and up and down; while it plays, following pauses, as a scroll pauses it.
+        pauseFollowing();
+        setViewStart (gesture->panViewStart - BeatDuration::fromBeats (e.getDistanceFromDragStartX() / getView().pixelsPerBeat));
+        setScrollY (gesture->startScrollY - e.getDistanceFromDragStartY());
+        return;
+    }
+
     if (gesture->kind == Gesture::Kind::pending)
     {
         if (! TimelineGesture::isPastDragThreshold (e))
@@ -639,6 +678,38 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
         case Gesture::Kind::pending:
         default:
             break;
+    }
+
+    setDragReadout (describeDrag());
+}
+
+juce::String Playlist::describeDrag() const
+{
+    // Where the clip under the pointer is now: its start, and its track while clips move between tracks; or the edge trimmed,
+    // with the clip's length.
+    const auto clip = gesture != nullptr ? getClip (context, gesture->clip) : std::nullopt;
+
+    if (! clip.has_value())
+        return {};
+
+    const auto start = clip->range.getStart(), end = clip->range.getEnd();
+
+    switch (gesture->kind)
+    {
+        case Gesture::Kind::move:
+        {
+            const auto track = getTrackRow (context, clip->track);
+            return "Starts at " + describePlace (start) + (track.has_value() && gesture->rowOffset != 0 ? " on " + track->name : "");
+        }
+
+        case Gesture::Kind::trimStart:
+            return "Starts at " + describeSpan (start, end);
+
+        case Gesture::Kind::trimEnd:
+            return "Ends at " + describePlace (end) + ", " + describeLength (start, end);
+
+        default:
+            return {};
     }
 }
 
@@ -793,6 +864,7 @@ void Playlist::lanesMouseUp (const juce::MouseEvent& e)
     }
 
     gesture = nullptr;
+    setDragReadout ({});
 
     if (! rubberBand.isEmpty())
     {
@@ -807,7 +879,7 @@ void Playlist::lanesDoubleClick (const juce::MouseEvent& e)
 {
     const auto row = getRowAt (e.y);
 
-    if (! context.hasProject() || getTool() != Tool::smart)
+    if (! context.hasProject() || getTool() != Tool::smart || e.mods.isMiddleButtonDown()) // the middle button only moves the view
         return;
 
     // Under the last track: a new one at the end, as in Logic, Cubase and REAPER.

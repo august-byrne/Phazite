@@ -222,6 +222,38 @@ TEST_CASE ("Dragging a clip past the edge of the playlist scrolls it")
     CHECK (screen.startOf (clip) > widthInBeats);
 }
 
+TEST_CASE ("While a clip is dragged, the playlist says where it starts, and trimmed, where its edge is and how long it is")
+{
+    PlaylistScreen screen;
+    const auto clip = screen.addClip (0, 4.0, 4.0);
+    phazite::test::dispatchPendingMessages();
+    CHECK (screen.playlist.getDragReadout().isEmpty());
+
+    // Moved by its lower half, four beats on (bar 3 in 4/4).
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto lower = phazite::ui::TrackHeight::standard / 4;
+    const auto from = screen.at (6.0, 0).translated (0, lower);
+    mouse.press (from);
+    mouse.dragTo (from.translated (3, 0));
+    mouse.dragTo (screen.at (10.0, 0).translated (0, lower));
+    CHECK (screen.startOf (clip) == 8.0);
+    CHECK (screen.playlist.getDragReadout() == "Starts at 3.1.1");
+    mouse.release();
+    CHECK (screen.playlist.getDragReadout().isEmpty());
+
+    // Its end dragged out to bar 5: two bars long.
+    mouse.pause();
+    const auto edge = screen.boundsOf (clip);
+    REQUIRE_FALSE (edge.isEmpty());
+    const auto grab = juce::Point<int> (edge.getRight() - 2, edge.getBottom() - 4);
+    mouse.press (grab);
+    mouse.dragTo (grab.translated (3, 0));
+    mouse.dragTo ({ screen.at (16.0, 0).x, grab.y });
+    CHECK (screen.playlist.getDragReadout() == "Ends at 5.1.1, 2 bars long");
+    mouse.release();
+    CHECK (screen.playlist.getDragReadout().isEmpty());
+}
+
 TEST_CASE ("A drag past the playlist's edge scrolls as far in the same time however often the mouse reports")
 {
     // Known bug 15 until 2026-11-11: each drag counted as at least a 60th of a second, so a mouse that reports a thousand times
@@ -370,6 +402,31 @@ TEST_CASE ("The row after the last track, and a double-click under it, add track
     // Each is an undo step.
     phazite::undo (screen.getSong());
     CHECK (phazite::getTrackIDs (screen.getSong()).size() == 4);
+}
+
+TEST_CASE ("An empty song's playlist says over its lanes how to start, and a double-click there still adds a track")
+{
+    PlaylistScreen screen;
+    juce::Label* hint = nullptr;
+
+    for (auto* label : phazite::test::findAll<juce::Label> (screen.playlist))
+        if (label->getText() == "This song is empty")
+            hint = label;
+
+    REQUIRE (hint != nullptr);
+    CHECK (! hint->isVisible()); // a song with tracks has none
+
+    phazite::deleteTracks (screen.getSong(), screen.tracks, &screen.selection);
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::getTrackIDs (screen.getSong()).empty());
+    CHECK (hint->isShowing());
+    CHECK (screen.lanesArea().contains (hint->getBounds()));
+
+    // It takes no clicks: the lanes under it do.
+    phazite::test::Mouse mouse (*screen.lanes);
+    mouse.doubleClick (screen.lanes->getLocalPoint (&screen.playlist, hint->getBounds().getCentre()));
+    CHECK (phazite::getTrackIDs (screen.getSong()).size() == 1);
+    CHECK (! hint->isVisible());
 }
 
 TEST_CASE ("The playlist paints, with sections, a clip and a selected track")

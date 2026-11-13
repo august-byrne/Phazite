@@ -286,6 +286,7 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Playlist");
+    toolRow.setTitle ("Playlist tools");
 
     // What lessons point at (Lessons::Step::target): controls by the commands they run, others by names of their own.
     setComponentID ("playlist");
@@ -339,6 +340,22 @@ Playlist::Playlist (CommandBridge& bridge, ProjectContext& projectContext)
     horizontalScrollBar.setVisible (false);
     updateScrollBarColours();
 
+    // An empty song's hint over the lanes.
+    emptyTitle.setText ("This song is empty", juce::dontSendNotification);
+    emptyTitle.setFont (juce::FontOptions (TextSize::title, juce::Font::bold));
+    emptyText.setText ("Drag an instrument or a sound here from the browser to make a track with it, or double-click here for an "
+                       "empty one. Help > Example Songs opens finished songs to take apart.",
+                       juce::dontSendNotification);
+    emptyText.setFont (juce::FontOptions (TextSize::body));
+    setThemeColour (emptyText, juce::Label::textColourId, &Palette::textMuted);
+
+    for (auto* label : { &emptyTitle, &emptyText })
+    {
+        label->setJustificationType (juce::Justification::centredTop);
+        label->setInterceptsMouseClicks (false, false);
+        addChildComponent (label);
+    }
+
     selection.addChangeListener (this);
     range.addChangeListener (this);
     context.addListener (this);
@@ -374,6 +391,7 @@ void Playlist::showProject()
     selectionAnchor = {};
     lastClip = {};
     gesture = nullptr;
+    setDragReadout ({});
     rubberBand = {};
     fileDropBeat.reset();
     headers.clear();
@@ -579,10 +597,10 @@ void Playlist::paintOverChildren (juce::Graphics& g)
 void Playlist::resized()
 {
     auto area = getLocalBounds();
-    layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
 
-    // The time bar: the whole song in miniature with the part in view over it, as FL Studio's scroll bar shows it along the
-    // top, then the song's sections over the bar numbers. Left of them, over the track headers, the button that adds a track.
+    // The time bar (its tools are in its area's tab row: TimelineEditor::getToolRow()): the whole song in miniature with the part
+    // in view over it, as FL Studio's scroll bar shows it along the top, then the song's sections over the bar numbers. Left of
+    // them, over the track headers, the button that adds a track.
     auto timeBar = area.removeFromTop (overviewHeight + SectionsStrip::preferredHeight + rulerHeight);
     auto corner = timeBar.removeFromLeft (headerWidth).withTrimmedTop (overviewHeight).reduced (Space::s, Space::s);
     collapseAllButton.setBounds (corner.removeFromRight (corner.getHeight()));
@@ -604,6 +622,12 @@ void Playlist::resized()
     headerColumn.setBounds (area.removeFromLeft (headerWidth));
     headerEdge->setBounds (headerColumn.getBounds().removeFromRight (HeaderEdge::width)); // over the headers, right of their controls
     placeTimelinePart (*lanes, area);
+
+    // An empty song's hint, near the lanes' top, in their middle, no wider than a paragraph reads.
+    const auto hintWidth = std::min (area.getWidth() - 2 * Space::l, emptyHintWidth);
+    auto hint = area.withSizeKeepingCentre (std::max (0, hintWidth), area.getHeight()).withTrimmedTop (2 * Space::l);
+    emptyTitle.setBounds (hint.removeFromTop (juce::roundToInt (TextSize::title) + Space::s));
+    emptyText.setBounds (hint.removeFromTop (4 * (juce::roundToInt (TextSize::body) + Space::xs)));
 
     // The rows' scroll bar over the lanes' right edge, thin and see-through, as FL Studio's is: it takes no room of their own.
     verticalScrollBar.setBounds (area.removeFromRight (ScrollTint::overlayWidth));

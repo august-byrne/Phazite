@@ -776,6 +776,87 @@ private:
 };
 
 //==============================================================================
+// Undo History: the song's undo steps newest first, those undone dimmed with Redo's arrow above the one the song is at, which
+// says "now" at its end, and under the oldest, the song before them. A click on a row goes back or forth to it; the keys move
+// the selection, and Return goes to the row selected. The row selected is the one the song is at, until the keys move it.
+class VersionsView::UndoHistoryModel : public juce::ListBoxModel
+{
+public:
+    explicit UndoHistoryModel (VersionsView& v)
+        : view (v)
+    {
+    }
+
+    int getNumRows() override { return view.getNumUndoRows(); }
+
+    void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
+    {
+        if (! juce::isPositiveAndBelow (row, getNumRows()))
+            return;
+
+        const auto& p = getPalette (view);
+        const auto now = view.getUndoNowRow();
+        drawListRow (g, view, juce::Rectangle<int> (width, height).toFloat(), selected,
+                     view.undoHover != nullptr && row == view.undoHover->row);
+        auto area = getRowContent (width, height);
+
+        if (row == now)
+        {
+            g.setColour (p.textMuted);
+            g.setFont (juce::FontOptions (TextSize::small));
+            const juce::String nowText ("now");
+            g.drawText (
+                nowText,
+                area.removeFromRight (juce::roundToInt (juce::TextLayout::getStringWidth (g.getCurrentFont(), nowText)) + Space::xs),
+                juce::Justification::centredRight, false);
+        }
+
+        const auto icon = takeIconColumn (area, History::rowIconSize);
+
+        if (row < now)
+            view.redoIcon.draw (g, icon, p.textMuted);
+
+        g.setColour (row < now || row == getNumRows() - 1 ? p.textMuted : p.text);
+        g.setFont (juce::FontOptions (TextSize::body));
+        g.drawText (getStepName (row), area, juce::Justification::centredLeft, true);
+    }
+
+    juce::String getNameForRow (int row) override { return view.describeUndoRow (row); }
+
+    juce::String getTooltipForRow (int row) override
+    {
+        const auto now = view.getUndoNowRow();
+        return row == now                ? juce::String ("The song is here now")
+               : row < now               ? juce::String ("Click to redo the steps up to this one")
+               : row == getNumRows() - 1 ? juce::String ("Click to undo every step listed")
+                                         : juce::String ("Click to undo the steps after this one");
+    }
+
+    void listBoxItemClicked (int row, const juce::MouseEvent& e) override
+    {
+        if (! e.mods.isPopupMenu())
+            view.goToUndoRow (row);
+    }
+
+    void returnKeyPressed (int row) override { view.goToUndoRow (row); }
+
+    // A step's name, or what the song was before them all (the last row).
+    juce::String getStepName (int row) const
+    {
+        const auto& steps = view.undoHistory.steps;
+
+        if (row >= (int) steps.size())
+            return "Before these steps";
+
+        const auto& name = steps[steps.size() - 1 - (size_t) row];
+        return name.isNotEmpty() ? name : juce::String ("A change");
+    }
+
+private:
+    VersionsView& view;
+};
+
+//==============================================================================
 VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContext, Settings& s)
     : commands (bridge),
       context (projectContext),
@@ -787,14 +868,17 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
       changesSection (std::make_unique<SectionHeader> ("Changes", SectionHeader::Style::group)),
       historySection (std::make_unique<SectionHeader> ("Graph", SectionHeader::Style::pane)),
       localSection (std::make_unique<SectionHeader> ("Local History", SectionHeader::Style::pane)),
+      undoSection (std::make_unique<SectionHeader> ("Undo History", SectionHeader::Style::pane)),
       stagedModel (std::make_unique<ChangesModel> (*this, true)),
       changesModel (std::make_unique<ChangesModel> (*this, false)),
       historyModel (std::make_unique<HistoryModel> (*this)),
       localModel (std::make_unique<LocalHistoryModel> (*this)),
+      undoModel (std::make_unique<UndoHistoryModel> (*this)),
       stagedList ("Staged Changes", stagedModel.get()),
       changesList ("Changes", changesModel.get()),
       historyList ("Graph", historyModel.get()),
-      localList ("Local History", localModel.get())
+      localList ("Local History", localModel.get()),
+      undoList ("Undo History", undoModel.get())
 {
     setTitle ("Source Control");
 
@@ -846,10 +930,18 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     changesSection->addAction (Icon::plus, "Stage All Changes", [this] { commands.invoke ("version.stageAll"); });
     changesSection->addAction (Icon::undo, "Discard All Changes", [this] { commands.invoke ("version.discardAll"); });
 
-    for (auto* section : { stagedSection.get(), changesSection.get(), historySection.get(), localSection.get() })
+    for (auto* section : { stagedSection.get(), changesSection.get(), historySection.get(), localSection.get(), undoSection.get() })
         section->onClick = [this] { resized(); };
 
     localSection->setToggleState (false, juce::dontSendNotification); // folded at first, its count on its badge
+    undoSection->setToggleState (false, juce::dontSendNotification);
+    undoSection->onClick = [this]
+    {
+        resized();
+
+        if (const auto now = getUndoNowRow(); now >= 0)
+            undoList.scrollToEnsureRowIsOnscreen (now); // opened, the row the song is at in view
+    };
 
     doneButton.setButtonText ("Done");
     doneButton.onClick = [this] { commands.invoke ("version.showChanges"); };
@@ -858,7 +950,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     cancelButton.setButtonText ("Abort");
     cancelButton.onClick = [this] { commands.invoke ("version.cancelMerge"); };
 
-    for (auto* list : { &stagedList, &changesList, &historyList, &localList })
+    for (auto* list : { &stagedList, &changesList, &historyList, &localList, &undoList })
     {
         list->setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
         list->setTitle (list->getName());
@@ -868,6 +960,7 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     changesList.setRowHeight (History::changeRowHeight);
     historyList.setRowHeight (History::versionRowHeight);
     localList.setRowHeight (History::changeRowHeight);
+    undoList.setRowHeight (History::changeRowHeight);
 
     const auto repaintRows = [] (juce::ListBox& list)
     {
@@ -882,14 +975,15 @@ VersionsView::VersionsView (CommandBridge& bridge, ProjectContext& projectContex
     changesHover = std::make_unique<ListRowHover> (changesList, repaintRows (changesList));
     historyHover = std::make_unique<ListRowHover> (historyList, repaintRows (historyList));
     localHover = std::make_unique<ListRowHover> (localList, repaintRows (localList));
+    undoHover = std::make_unique<ListRowHover> (undoList, repaintRows (undoList));
 
     for (auto* c : std::initializer_list<juce::Component*> { &title, branchButton.get(), messageField.get(), &saveButton, &saveMenuButton,
                                                              changesSection.get(), &changesList, historySection.get(), &historyList,
-                                                             localSection.get(), &localList })
+                                                             localSection.get(), &localList, &undoList })
         addAndMakeVisible (c);
 
     for (auto* c : std::initializer_list<juce::Component*> { &emptyText, &doneButton, &mergeButton, &cancelButton, &roomText,
-                                                             stagedSection.get(), &stagedList, detachedBar.get() })
+                                                             stagedSection.get(), &stagedList, detachedBar.get(), undoSection.get() })
         addChildComponent (c);
 
     refreshTooltips();
@@ -903,12 +997,67 @@ VersionsView::~VersionsView()
     changesHover = nullptr;
     historyHover = nullptr;
     localHover = nullptr;
+    undoHover = nullptr;
     context.removeListener (this);
 }
 
 juce::Button& VersionsView::getLocalHistorySection() noexcept
 {
     return *localSection;
+}
+
+juce::Button& VersionsView::getUndoHistorySection() noexcept
+{
+    return *undoSection;
+}
+
+int VersionsView::getNumUndoRows() const noexcept
+{
+    return undoHistory.steps.empty() ? 0 : (int) undoHistory.steps.size() + 1; // the steps, and the song before them
+}
+
+int VersionsView::getUndoNowRow() const noexcept
+{
+    return undoHistory.steps.empty() ? -1 : (int) undoHistory.steps.size() - undoHistory.done;
+}
+
+juce::String VersionsView::describeUndoRow (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, getNumUndoRows()))
+        return {};
+
+    const auto now = getUndoNowRow();
+    return undoModel->getStepName (row) + (row == now ? ", now" : row < now ? ", undone" : "");
+}
+
+void VersionsView::goToUndoRow (int row)
+{
+    // A row is the song as it was after its step, the last row as it was before them all: so many steps done.
+    if (juce::isPositiveAndBelow (row, getNumUndoRows()))
+        goToUndoStep (context, (int) undoHistory.steps.size() - row);
+}
+
+void VersionsView::refreshUndoHistory()
+{
+    auto history = getUndoHistory (context);
+    const auto shown = context.hasProject();
+
+    if (history == undoHistory && undoSection->isVisible() == shown)
+        return;
+
+    undoHistory = std::move (history);
+    undoSection->set ("Undo History", {}, (int) undoHistory.steps.size());
+    undoSection->setVisible (shown);
+    undoList.updateContent();
+    resized();
+
+    // The row the song is at, selected and in view.
+    if (const auto now = getUndoNowRow(); now >= 0)
+        undoList.selectRow (now);
+    else
+        undoList.deselectAllRows();
+
+    undoList.repaint();
 }
 
 juce::String VersionsView::describeSnapshot (int row) const
@@ -1004,6 +1153,10 @@ void VersionsView::refreshTooltips()
     localSection->setTooltip ("The song as it was while it differed from its last commit, kept without asking: as the project opened, "
                               "every few minutes while it changed, and before what made it another");
     localList.setTooltip ("Local History, newest first: each one's arrow restores the song to it, as one undo step");
+    undoSection->setTooltip (
+        "The changes made to the song since it opened, as Undo and Redo go through them: click one to go back or forth to it");
+    undoList.setTooltip ("Undo History, newest first: the dimmed steps are undone, and Redo would do them again. Click a step to go "
+                         "back or forth to it");
     roomText.setTooltip ("What the history takes on disk: nearly all of it is bounces, each deleted on its own (Delete Bounce)");
 }
 
@@ -1545,6 +1698,7 @@ void VersionsView::refresh()
     changesList.repaint();
     historyList.repaint();
     localList.repaint();
+    refreshUndoHistory();
     resized();
 }
 
@@ -1704,21 +1858,26 @@ void VersionsView::resized()
     const auto listHeight = juce::jmin (juce::jmax (listsRoom, History::changeRowHeight), rows * History::changeRowHeight);
     changesList.setBounds (rows == 0 ? juce::Rectangle<int>() : area.removeFromTop (listHeight));
 
-    // Local History at the foot, its rows (while open) up to a third of what is left, then the graph above it.
-    if (localSection->isVisible())
+    // Undo History at the foot and Local History above it, each one's rows (while open) up to a third of what is left, then the
+    // graph above them.
+    const auto placeAtFoot = [&area] (SectionHeader& section, juce::ListBox& list, int rows)
     {
-        const auto localRows = localSection->getToggleState() ? (int) snapshots.size() : 0;
-        const auto localHeight =
-            localRows == 0 ? 0
-                           : juce::jmin (juce::jmax (History::changeRowHeight, area.getHeight() / 3), localRows * History::changeRowHeight);
-        localList.setBounds (localRows == 0 ? juce::Rectangle<int>() : area.removeFromBottom (localHeight));
-        localSection->setBounds (area.removeFromBottom (localSection->getPreferredHeight()));
-    }
-    else
-    {
-        localSection->setBounds ({});
-        localList.setBounds ({});
-    }
+        if (! section.isVisible())
+        {
+            section.setBounds ({});
+            list.setBounds ({});
+            return;
+        }
+
+        const auto shown = section.getToggleState() ? rows : 0;
+        const auto height =
+            shown == 0 ? 0 : juce::jmin (juce::jmax (History::changeRowHeight, area.getHeight() / 3), shown * History::changeRowHeight);
+        list.setBounds (shown == 0 ? juce::Rectangle<int>() : area.removeFromBottom (height));
+        section.setBounds (area.removeFromBottom (section.getPreferredHeight()));
+    };
+
+    placeAtFoot (*undoSection, undoList, getNumUndoRows());
+    placeAtFoot (*localSection, localList, (int) snapshots.size());
 
     historySection->setBounds (area.removeFromTop (historySection->getPreferredHeight()));
     historyList.setBounds (historySection->getToggleState() ? area : juce::Rectangle<int>());

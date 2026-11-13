@@ -10,6 +10,7 @@
 #include "model/arrangement/TimelineModel.h"
 #include "model/project/ProjectContext.h"
 #include "ui/components/ScrollBarFade.h"
+#include "ui/components/ToolRow.h"
 #include "ui/input/CommandBridge.h"
 #include "ui/theme/Icons.h"
 
@@ -18,6 +19,27 @@
 namespace phazite::ui
 {
 class TimelineEditor;
+
+//==============================================================================
+// The grid's button in an editor's row (TimelineEditor::getToolRow()): the grid's size as the editor uses it now, "1/4 beat" or
+// "2 bars", with "auto" after it, quieter, while the grid adapts to the zoom, and an arrow that says a click opens the grid's
+// menu. As wide as what it says (getIdealWidth()): it was 180 pixels wide in a toolbar of its own until 2026-11-13.
+class GridButton : public juce::Button
+{
+public:
+    GridButton();
+
+    void setGrid (const juce::String& size, bool adaptive);
+    int getIdealWidth() const;
+
+    void paintButton (juce::Graphics&, bool isHighlighted, bool isDown) override;
+
+private:
+    juce::String size;
+    bool adaptive = false;
+    std::unique_ptr<juce::Drawable> arrow;
+    juce::Colour arrowColour { juce::Colours::black };
+};
 
 //==============================================================================
 // The ruler over a time line: the bar numbers, each by a tick from its foot, and shorter ticks for the other bars and the
@@ -112,7 +134,7 @@ class TimelineEditor : public juce::Component,
                        private juce::Timer
 {
 public:
-    static constexpr int toolbarHeight = 36, rulerHeight = 28, scrollBarSize = 12;
+    static constexpr int rulerHeight = 28, scrollBarSize = 12;
 
     // The editor keeps its grid in the project as that GridOwner's (loadGridSettings()).
     TimelineEditor (CommandBridge&, ProjectContext&, GridOwner);
@@ -121,6 +143,12 @@ public:
     ProjectContext& getContext() const noexcept { return timelineContext; }
     bool hasProject() const noexcept { return timelineContext.hasProject(); }
     CommandBridge& getCommands() const noexcept { return commands; }
+
+    // The editor's controls, which the area that shows it puts in its tab row, right of its tabs (ui/shell/Panels.h), as
+    // Bitwig 6 puts each panel's tools along its top: Snap, the grid, the tools and Follow, and what a derived editor adds;
+    // what doesn't fit goes into the row's More menu (ToolRow.h). Until 2026-11-13 they were a toolbar of the editor's own, a
+    // row 36 pixels tall under the tabs. A press there makes this the editor in use, as a press in the editor does.
+    ToolRow& getToolRow() noexcept { return toolRow; }
 
     //==============================================================================
     // The time line. Positions are song beats, but the ruler and the grid count from the time origin: the
@@ -138,6 +166,14 @@ public:
     void zoomTo (BeatRange);
     void zoomToFit(); // shows getContentRange()
     void centreOnPlayhead();
+
+    // Zoom to Selection shows what is selected (getSelectedRange()), filling the editor but for a little room either side, and
+    // Zoom Back goes back to how the editor was zoomed before that or Zoom to Fit, as Ableton Live's Z and X do (the owner's
+    // UX audit, 2026-11-12). Neither moves a view the editor keeps fixed (isViewFixed()).
+    void zoomToSelection();
+    void zoomBack();
+    bool canZoomBack() const noexcept { return ! zoomHistory.empty(); }
+    virtual std::optional<BeatRange> getSelectedRange() const { return {}; }
 
     // Whether the view stays where the editor puts it (zoomTo()): zooming, scrolling and centring by the user, and turning
     // the page while playing, leave it. The audio clip editor's shows its clip's whole audio, always.
@@ -177,10 +213,10 @@ public:
     // either, as in Ableton Live, until playback starts again, the playhead is moved or the view is centred on it
     // (centreOnPlayhead()).
     bool isFollowingPlayback() const noexcept { return followPlayback; }
-    void setFollowingPlayback (bool shouldFollow) noexcept;
+    void setFollowingPlayback (bool shouldFollow);
     bool isFollowingPaused() const noexcept { return followPaused; }
     bool isScrollingContinuously() const noexcept { return scrollContinuously; }
-    void setScrollingContinuously (bool shouldScroll) noexcept { scrollContinuously = shouldScroll; }
+    void setScrollingContinuously (bool shouldScroll);
 
     // Scrolling while something is dragged past an edge. Call autoScroll() on each mouse drag, with the drag
     // and the area it scrolls, in the coordinates of the drag's position (juce::MouseEvent::getEventRelativeTo()):
@@ -207,6 +243,7 @@ public:
     BeatPosition snap (BeatPosition, juce::ModifierKeys) const;     // to the nearest line; Alt places freely
     BeatPosition snapDown (BeatPosition, juce::ModifierKeys) const; // to the line at or before it
     void showGridMenu();
+    juce::PopupMenu makeGridMenu(); // what the grid's button shows: snapping, adapting, triplets and the fixed sizes
 
     //==============================================================================
     // The tools.
@@ -235,11 +272,11 @@ public:
     // nothing for the plain name.
     virtual juce::String getQuantizeName() const { return {}; }
 
-    // Puts the current shortcuts into the toolbar's tooltips; call after the keymap changed.
+    // Puts the current shortcuts into the row's tooltips; call after the keymap changed.
     virtual void refreshShortcutTexts();
 
     // Whether the time line's commands act on this editor: the one used last, while it is on the screen. AppShell
-    // sets it; the active editor has a line in the accent color along its top.
+    // sets it; the active editor's tab has a line in the accent colour along its foot (ui/shell/Panels.h).
     bool isActive() const { return active && isShowing(); }
     void setActive (bool);
 
@@ -251,8 +288,20 @@ public:
     // sections there too.
     virtual void showRulerMenu (BeatPosition);
 
+    // While a drag moves something, where it is now, which the hint bar shows in place of the hints (the owner's UX audit,
+    // 2026-11-12, as Logic Pro's help tag and Cubase's info line show it): "Starts at 17.3.1, 2 bars long". Empty while
+    // nothing is dragged.
+    const juce::String& getDragReadout() const noexcept { return dragReadout; }
+
 protected:
-    // Fills the editor's background, with the toolbar's border and, while active, the accent line.
+    // Says where what a drag moves is now (getDragReadout()), or nothing, as the drag ends; and the words for it: a clip's or a
+    // note's start and end, and a place with a value at it.
+    void setDragReadout (const juce::String& text) { dragReadout = text; }
+    juce::String describePlace (BeatPosition) const;                          // "17.3.1"
+    juce::String describeLength (BeatPosition start, BeatPosition end) const; // "2 bars 1.5 beats long"
+    juce::String describeSpan (BeatPosition start, BeatPosition end) const;   // "17.3.1, 2 bars long"
+
+    // Fills the editor's background.
     void paintEditorBackground (juce::Graphics&);
 
     // Call when another project opens, or none (the derived class's projectChanged()): resets the view and loads the grid
@@ -303,10 +352,14 @@ protected:
     // What a tool does here, for its button's tooltip.
     virtual juce::String describeToolHere (Tool toolToDescribe) const { return describeTool (toolToDescribe); }
 
-    // The toolbar's controls, which the derived class lays out (layOutToolbarControls() does the usual).
-    juce::OwnedArray<IconButton> toolButtons; // one for each of allTools, in order; shown if canUseTool()
+    // The row's controls (getToolRow()): Snap, the grid, a button for each of allTools, in order, that the editor uses
+    // (canUseTool()), and Follow, which a derived editor whose view doesn't follow the playhead leaves out (isViewFixed()).
+    // A derived editor adds its own after them.
+    juce::OwnedArray<IconButton> toolButtons;
     IconButton snapButton { "Snap to grid", Icon::magnet };
-    juce::TextButton gridButton;
+    GridButton gridButton;
+    IconButton followPlaybackButton { "Follow playback", Icon::follow };
+    ToolRow toolRow;
     TimelineRuler ruler { *this };
     juce::ScrollBar horizontalScrollBar { false }, verticalScrollBar { true };
     ScrollBarFade verticalFade { verticalScrollBar, *this }; // the rows' bar, over them, shown while it is wanted
@@ -314,9 +367,6 @@ protected:
     // The room the vertical scroll bar takes: none while everything fits, when it hides (the editor is laid out again
     // when it shows or hides). The horizontal one always shows, as the time line goes on past the song.
     int getVerticalScrollBarWidth() const noexcept { return verticalScrollBar.isVisible() ? scrollBarSize : 0; }
-
-    // Lays out the snap and grid buttons and the tools from the left of the toolbar; returns what is left.
-    juce::Rectangle<int> layOutToolbarControls (juce::Rectangle<int> toolbar);
 
     // The mouse wheel over the time line. Each notch zooms by a step around x, or scrolls in time.
     void zoomByWheel (float x, float wheelDelta);
@@ -361,6 +411,7 @@ private:
     CommandBridge& commands;
     const GridOwner gridOwner;
     ProjectContext& timelineContext;
+    juce::String dragReadout;
     TimelineView view;
     BeatPosition timeOrigin;
     GridSettings grid;
@@ -395,6 +446,23 @@ private:
     bool isInTimelinePart (const juce::Component*) const;              // a part added, or inside one
     int viewStep = 1;                                                  // getViewStep()
     void updateViewStep();                                             // for the display's scale now
+
+    // Follow's look and tooltip: lit while the view follows the playhead; in the attention colour while a scroll has paused it as
+    // the song plays, a click following again, as Ableton Live's Follow turns orange while paused; plain while it is off. Only
+    // a change repaints it.
+    void updateFollowButton();
+    int shownFollow = -1;
+
+    // How the editor was zoomed before each Zoom to Selection and Zoom to Fit, the latest last, for Zoom Back; forgotten when
+    // another project opens.
+    struct ZoomState
+    {
+        double pixelsPerBeat = 0.0;
+        BeatPosition start;
+    };
+
+    std::vector<ZoomState> zoomHistory;
+    void rememberZoom();
 
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
     void componentVisibilityChanged (juce::Component&) override; // the vertical scroll bar showed or hid itself

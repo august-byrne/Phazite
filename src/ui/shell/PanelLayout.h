@@ -153,6 +153,11 @@ class PanelDivider : public juce::Component
 public:
     PanelDivider (const juce::String& title, bool betweenColumns);
 
+    // Puts it over the gap between two cards, taking drags as far again into each card's edge (Shell::dividerGrab), so that it
+    // is easier to take than the gap alone (the owner's UX audit, 2026-11-12: WCAG 2.2's target size), and lighting only the
+    // gap. Over the cards beside it: in front of its siblings, or just behind one that goes over everything (the cards' edges).
+    void place (juce::Rectangle<int> gap, juce::Component* keepBehind = nullptr);
+
     std::function<void()> onDragStart;
     std::function<void (int distance)> onDrag; // from where the drag began, right or down
     std::function<void()> onDragEnd;

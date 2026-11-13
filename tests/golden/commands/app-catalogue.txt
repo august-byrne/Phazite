@@ -166,6 +166,8 @@ view.detachEditor
 view.zoomIn | =, numpad +
 view.zoomOut | -, numpad -
 view.zoomToFit
+view.zoomToSelection
+view.zoomBack
 view.centreOnPlayhead
 view.followPlayback | ctrl + shift + F
 grid.snap | ctrl + 4

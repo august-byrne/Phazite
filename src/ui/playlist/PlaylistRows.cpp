@@ -115,6 +115,18 @@ void Playlist::layOutRows()
     scrollingHeaders.setBounds (0, pinnedHeight, headerWidth, std::max (0, headerColumn.getHeight() - pinnedHeight));
     headerContent.setSize (headerWidth, contentHeight + TrackHeight::standard); // the scrolling leaves room for the row that adds a track
     addTrackRow->setBounds (0, contentHeight, headerWidth, TrackHeight::standard);
+
+    // While the song has no tracks, what to do, over the lanes.
+    const auto empty = rows.empty() && context.hasProject();
+
+    for (auto* label : { &emptyTitle, &emptyText })
+    {
+        label->setVisible (empty);
+
+        if (empty)
+            label->toFront (false);
+    }
+
     pinnedClips.setBounds (0, 0, lanes->getWidth(), pinnedHeight);
     scrollingClips.setBounds (0, pinnedHeight, lanes->getWidth(), std::max (0, lanes->getHeight() - pinnedHeight));
 

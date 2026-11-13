@@ -8,9 +8,12 @@ namespace phazite::ui
 namespace
 {
     constexpr int keysWidth = 72;
-    constexpr int velocityLaneHeight = 72;
+    constexpr int settingsWidth = 176; // the settings down the left: "1/16 beat, velocity 127" fits
     constexpr int transformBarHeight = 40;
     constexpr int minRowHeight = 6, maxRowHeight = 32;
+    constexpr int minimumNotesHeight = 48; // what dragging the velocity lane taller leaves the notes
+    constexpr int velocityEdgeHeight = 6;  // the line between them takes a drag this tall
+    constexpr int chevronSize = 16;        // the velocity lane's, which folds it
 
     // A clip opens zoomed to show it with a quarter of its length after it to draw on, and at least two bars of 4/4, but
     // never smaller than the editors' usual zoom, so that a quarter-beat note is wide enough to grab.
@@ -19,10 +22,45 @@ namespace
 } // namespace
 
 //==============================================================================
+// The line between the notes and the velocity lane: a drag up or down sizes the lane, as Ableton Live's lanes are sized by
+// the divider over them, and a double-click puts it back at its first height.
+struct PianoRoll::VelocityEdge : public juce::Component
+{
+    explicit VelocityEdge (PianoRoll& r)
+        : roll (r)
+    {
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        setTitle ("Velocity lane's edge");
+        setHelpText ("Drag up or down to make the velocity lane taller or shorter; double-click for its first height");
+    }
+
+    void mouseDown (const juce::MouseEvent&) override { heightAtPress = roll.velocityHeight; }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        roll.velocityHeight = roll.clampVelocityHeight (heightAtPress - e.getDistanceFromDragStartY());
+        roll.resized();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override { roll.velocityLaneChanged(); }
+
+    void mouseDoubleClick (const juce::MouseEvent&) override
+    {
+        roll.velocityHeight = defaultVelocityHeight;
+        roll.resized();
+        roll.velocityLaneChanged();
+    }
+
+    PianoRoll& roll;
+    int heightAtPress = defaultVelocityHeight;
+};
+
+//==============================================================================
 PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     : TimelineEditor (bridge, projectContext, GridOwner::pianoRoll),
       context (projectContext),
       selection (projectContext.getSongSelection()),
+      velocityEdge (std::make_unique<VelocityEdge> (*this)),
       keys (std::make_unique<Keys> (*this)),
       grid (std::make_unique<NoteGrid> (*this)),
       velocityLane (std::make_unique<VelocityLane> (*this)),
@@ -31,10 +69,16 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Piano roll");
     setComponentID ("pianoRoll"); // what lessons point at (Lessons::Step::target)
+    toolRow.setTitle ("Piano roll tools");
 
     // The notes being edited stay in view while the song plays (the owner's choice, 2026-10-16); View > Follow
     // Playback turns following on, as the playlist has it.
     setFollowingPlayback (false);
+
+    // The notes' menu is the More menu at the end of the tab row's tools, after what of them doesn't fit.
+    toolRow.setMoreItems ([this] (juce::PopupMenu& menu) { grid->addMenuItems (menu); },
+                          "More: the notes' menu, with the transforms (quantize, legato, chop, transpose, strum, humanize, "
+                          "arpeggiate), slide and portamento notes, cut, copy and more. Shift+right-click on the notes shows it too");
 
     instrumentButton.setTitle ("Instrument");
     instrumentButton.onClick = [this] { instrumentClicked(); };
@@ -44,22 +88,37 @@ PianoRoll::PianoRoll (CommandBridge& bridge, ProjectContext& projectContext)
     chordButton.onClick = [this] { showChordMenu(); };
     keyButton.setTitle ("Key");
     keyButton.onClick = [this] { showKeyMenu(); };
-    transformButton.onClick = [this] { showTransformMenu(); };
-    notesMenuButton.setTooltip ("The notes' menu: slide and portamento notes, legato, chop, cut, copy and more for the selected notes. "
-                                "Shift+right-click on the notes shows it too");
-    notesMenuButton.onClick = [this] { grid->showMenu (&notesMenuButton); };
 
     // It runs its command, so the palette, the keys and the button agree. (Drum mode has no button: it comes
     // with drum tracks, and the grid's menu has it.)
+    ghostButton.setTitle ("Ghost notes");
     ghostButton.setClickingTogglesState (true);
     ghostButton.onClick = [this] { getCommands().invoke ("pianoRoll.ghostNotes"); };
 
-    clipLabel.setJustificationType (juce::Justification::centredRight);
+    // Which clips, and where in the song: at the settings' top, its lines as many as there is room for.
+    clipLabel.setJustificationType (juce::Justification::topLeft);
     clipLabel.setFont (juce::FontOptions (TextSize::small));
+    setThemeColour (clipLabel, juce::Label::textColourId, &Palette::textMuted);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &instrumentButton, &nextNoteButton, &chordButton, &keyButton, &ghostButton,
-                                                             &transformButton, &notesMenuButton, &clipLabel, keys.get() })
-        addAndMakeVisible (c);
+    for (auto* c :
+         std::initializer_list<juce::Component*> { &clipLabel, &instrumentButton, &keyButton, &nextNoteButton, &chordButton, &ghostButton })
+        settingsContent.addAndMakeVisible (c);
+
+    settingsContent.setTitle ("Piano roll settings");
+    settingsView.setViewedComponent (&settingsContent, false);
+    settingsView.setScrollBarsShown (true, false);
+    settingsView.setScrollBarThickness (ScrollTint::overlayWidth);
+    settingsView.setTitle ("Piano roll settings");
+    makeSeeThrough (settingsView.getVerticalScrollBar());
+    addAndMakeVisible (settingsView);
+    addAndMakeVisible (keys.get());
+
+    // The velocity lane folds by its chevron to a thin row, and sizes by its edge.
+    velocityFoldButton.setQuiet (true);
+    velocityFoldButton.setMouseClickGrabsKeyboardFocus (false);
+    velocityFoldButton.onClick = [this] { setVelocityFolded (! velocityFolded); };
+    addAndMakeVisible (velocityFoldButton);
+    addAndMakeVisible (*velocityEdge);
 
     // The notes and the velocities draw the time line, each through a window of its own (TimelineEditor::addTimelinePart()).
     addTimelinePart (*grid);
@@ -99,13 +158,13 @@ void PianoRoll::projectChanged()
     emptyTrack = {};
     shownProject = context.getProjectNumber();
     showProject();
-    updateToolbar();
+    updateSettings();
 }
 
 void PianoRoll::songChanged (const SongChanges& changes)
 {
     // Notes and clips, where they are in time, a track's key or drum rows, the chords whose notes its rows show, and its
-    // instrument (the toolbar shows it, and a drum sampler names the rows).
+    // instrument (its settings show it, and a drum sampler names the rows).
     if (! (changes.clips || changes.tempo || changes.tracks || changes.view || changes.devices || changes.chords))
         return;
 
@@ -299,7 +358,7 @@ void PianoRoll::clipsChanged()
 
     updateVerticalScrollBar();
     updateScrollBar();
-    updateToolbar();
+    updateSettings();
     keys->repaint();
     grid->repaint();
     velocityLane->repaint();
@@ -424,7 +483,7 @@ void PianoRoll::setKey (const std::optional<Key>& key)
     if (const auto track = getTrack(); track.isValid())
         chooseTrackKey (context, track, key);
 
-    updateToolbar();
+    updateSettings();
     grid->repaint();
 }
 
@@ -472,6 +531,17 @@ void PianoRoll::nudgeSelection (int direction)
 bool PianoRoll::canQuantizeSelection() const
 {
     return ! getSelectedNoteRefs().empty();
+}
+
+std::optional<BeatRange> PianoRoll::getSelectedRange() const
+{
+    std::optional<BeatRange> shown;
+
+    for (const auto& note : getSelectedNotesHere())
+        shown = shown.has_value() ? BeatRange (std::min (shown->getStart(), note.start), std::max (shown->getEnd(), note.getEnd()))
+                                  : BeatRange (note.start, note.getEnd());
+
+    return shown;
 }
 
 void PianoRoll::quantizeSelection()
@@ -565,44 +635,55 @@ bool PianoRoll::scrollVerticallyBy (int pixels)
 void PianoRoll::paint (juce::Graphics& g)
 {
     paintEditorBackground (g);
-
     const auto& p = getPalette (*this);
-    const auto velocities = getTimelinePartArea (*velocityLane);
+
+    // The settings down the left, with a line at their right, as the audio clip editor's.
+    g.setColour (p.border);
+    g.fillRect (settingsWidth - 1, 0, 1, getHeight());
+
+    // The velocity lane's corner under the keys, its name after its chevron; folded, the lane is that row alone, all of it.
     g.setColour (p.surfaceRaised);
-    g.fillRect (velocities.withX (0).withWidth (keysWidth));
+    g.fillRect (velocityFolded ? velocityRow : velocityRow.withWidth (keysWidth));
     g.setColour (p.textMuted);
     g.setFont (juce::FontOptions (TextSize::small));
-    g.drawText ("Velocity", velocities.withX (0).withWidth (keysWidth).reduced (Space::xs), juce::Justification::topLeft);
+    g.drawText ("Velocity",
+                velocityRow.withWidth (keysWidth)
+                    .withHeight (foldedVelocityHeight)
+                    .withTrimmedLeft (velocityFoldButton.getRight() - velocityRow.getX()),
+                juce::Justification::centredLeft);
     g.setColour (p.border);
-    g.fillRect (0, velocities.getY() - 1, getWidth(), 1);
+    g.fillRect (velocityRow.getX(), velocityRow.getY() - 1, velocityRow.getWidth(), 1);
 }
 
 void PianoRoll::resized()
 {
+    // Down the left, the settings. Its tools are in its area's tab row (TimelineEditor::getToolRow()).
     auto area = getLocalBounds();
-    auto toolbar = layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
-
-    for (auto [button, width] : { std::pair { &instrumentButton, 140 }, std::pair { &nextNoteButton, 150 }, std::pair { &chordButton, 120 },
-                                  std::pair { &keyButton, 150 }, std::pair { &ghostButton, 64 }, std::pair { &transformButton, 96 } })
-    {
-        button->setBounds (toolbar.removeFromLeft (width));
-        toolbar.removeFromLeft (Space::xs);
-    }
-
-    notesMenuButton.setBounds (toolbar.removeFromLeft (toolbar.getHeight()));
-    clipLabel.setBounds (toolbar.withTrimmedLeft (Space::s));
+    settingsView.setBounds (area.removeFromLeft (settingsWidth));
+    layOutSettings();
 
     if (transformOpen)
         transformBar->setBounds (area.removeFromBottom (transformBarHeight));
 
-    // The overview of the notes over the bar numbers, over the notes; the velocities under them.
-    auto velocityArea = area.removeFromBottom (velocityLaneHeight);
+    // The overview of the notes over the bar numbers, over the notes; the velocities under them, or a thin row while folded.
+    velocityRow = area.removeFromBottom (getVelocityLaneHeight());
     getOverview().setBounds (area.removeFromTop (overviewHeight).withTrimmedLeft (keysWidth));
     auto rulerArea = area.removeFromTop (rulerHeight);
     keys->setBounds (area.removeFromLeft (keysWidth));
     placeTimelinePart (*grid, area);
     placeTimelinePart (ruler, rulerArea.withTrimmedLeft (keysWidth));
-    placeTimelinePart (*velocityLane, velocityArea.withTrimmedLeft (keysWidth));
+    velocityLane->setVisible (! velocityFolded);
+    placeTimelinePart (*velocityLane, velocityRow.withTrimmedLeft (keysWidth));
+
+    // The lane's chevron at its top left, and its edge over the line above it, which a folded lane hasn't.
+    const auto chevron = chevronSize;
+    velocityFoldButton.setIcon (velocityFolded ? Icon::folded : Icon::expanded);
+    velocityFoldButton.setTooltip (velocityFolded ? "Show the velocity lane" : "Fold the velocity lane to a thin row");
+    velocityFoldButton.setBounds (velocityRow.getX() + Space::xs / 2, velocityRow.getY() + (foldedVelocityHeight - chevron) / 2, chevron,
+                                  chevron);
+    velocityEdge->setVisible (! velocityFolded);
+    velocityEdge->setBounds (velocityRow.getX(), velocityRow.getY() - velocityEdgeHeight / 2, velocityRow.getWidth(), velocityEdgeHeight);
+    velocityEdge->toFront (false);
 
     // The rows' scroll bar over the notes' right edge, thin and see-through: it takes no room of their own.
     verticalScrollBar.setBounds (area.removeFromRight (ScrollTint::overlayWidth));
@@ -610,6 +691,64 @@ void PianoRoll::resized()
 
     setScrollY (scrollY);
     setViewStart (getView().start);
+}
+
+void PianoRoll::layOutSettings()
+{
+    // From the top: which clips, in up to three lines, then a row for each setting, as the audio clip editor's rows; a scroll
+    // bar where the piano roll is too short for them all.
+    constexpr int labelLines = 3;
+    const auto lineHeight = juce::roundToInt (juce::Font (juce::FontOptions (TextSize::small)).getHeight());
+    const auto buttons = { &instrumentButton, &keyButton, &nextNoteButton, &chordButton, &ghostButton };
+    const auto height = 2 * Space::s + labelLines * lineHeight + (int) buttons.size() * (Space::xs + controlHeight);
+    const auto scrolls = height > settingsView.getHeight();
+    settingsContent.setSize (settingsView.getWidth() - (scrolls ? settingsView.getScrollBarThickness() : 0),
+                             std::max (height, settingsView.getHeight()));
+
+    auto area = settingsContent.getLocalBounds().reduced (Space::s);
+    clipLabel.setBounds (area.removeFromTop (labelLines * lineHeight));
+
+    for (auto* button : buttons)
+    {
+        area.removeFromTop (Space::xs);
+        button->setBounds (area.removeFromTop (controlHeight));
+    }
+}
+
+void PianoRoll::setVelocityLane (int height, bool folded)
+{
+    velocityHeight = std::max (minimumVelocityHeight, height);
+    velocityFolded = folded;
+    resized();
+    repaint();
+}
+
+int PianoRoll::getVelocityLaneHeight() const noexcept
+{
+    return velocityFolded ? foldedVelocityHeight : clampVelocityHeight (velocityHeight);
+}
+
+int PianoRoll::clampVelocityHeight (int height) const
+{
+    const auto room = getHeight() - (transformOpen ? transformBarHeight : 0) - overviewHeight - rulerHeight - minimumNotesHeight;
+    return juce::jlimit (minimumVelocityHeight, std::max (minimumVelocityHeight, room), height);
+}
+
+void PianoRoll::setVelocityFolded (bool shouldFold)
+{
+    velocityFolded = shouldFold;
+    resized();
+    repaint();
+    velocityLaneChanged();
+}
+
+void PianoRoll::velocityLaneChanged()
+{
+    // The height as dragged, not as squeezed into a short piano roll: a taller one shows it all again.
+    velocityHeight = std::max (minimumVelocityHeight, velocityHeight);
+
+    if (onVelocityLaneChanged != nullptr)
+        onVelocityLaneChanged (velocityHeight, velocityFolded);
 }
 
 void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

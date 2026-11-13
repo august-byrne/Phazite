@@ -20,6 +20,14 @@ public:
     // How wide a card is in an area so wide (as wide as NoticeTint::width, or the area), its shadow's room included.
     static int getWidthIn (int areaWidth) noexcept;
 
+    // How tall text is, wrapped at a width, with a little to spare, as a label breaks lines a little differently.
+    static int getTextHeight (const juce::String&, const juce::FontOptions&, int width);
+
+    // Whether the pointer is over a component or what it holds, as the mouse's events last found it: a notice that goes by
+    // itself stays while it is. (Component::isMouseOver() asks also where the system's pointer is now, which the tests' events
+    // don't move.) JUCE workaround W26 (docs/juce-workarounds.md).
+    static bool isUnderPointer (const juce::Component&);
+
     void paint (juce::Graphics&) override; // the card, under what a card paints over it after
     bool hitTest (int x, int y) override;  // the card alone
 };

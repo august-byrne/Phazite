@@ -33,6 +33,14 @@ int PianoRoll::getRowForPitch (int pitch) const
     return -1;
 }
 
+juce::String PianoRoll::describePitch (int pitch) const
+{
+    if (const auto row = getRowForPitch (pitch); drumMode && juce::isPositiveAndBelow (row, (int) drumRows.size()))
+        return drumRows[(size_t) row].name;
+
+    return juce::MidiMessage::getMidiNoteName (pitch, true, true, 4); // C4 is middle C, as the keys say
+}
+
 int PianoRoll::getPitchForRow (int row) const
 {
     if (! juce::isPositiveAndBelow (row, getNumRows()))

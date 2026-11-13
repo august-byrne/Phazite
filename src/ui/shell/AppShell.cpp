@@ -206,13 +206,19 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     addChildComponent (lessonCard.getRing());
     addChildComponent (lessonCard);
 
-    // Over them all, the notices of audio devices plugged in, which offer to switch to them.
+    // Over them all, the notices of audio devices plugged in, which offer to switch to them; and over those, what Phazite tells
+    // without asking: a song exported, what went wrong.
     addChildComponent (deviceNotices);
-    deviceNotices.onChange = [this]
+    addChildComponent (notices);
+
+    for (auto* column : std::initializer_list<std::function<void()>*> { &deviceNotices.onChange, &notices.onChange })
     {
-        placeNotices();
-        keepOverlaysInFront();
-    };
+        *column = [this]
+        {
+            placeNotices();
+            keepOverlaysInFront();
+        };
+    }
 
     // How the editors follow playback, as it was left; the panels as they were left, or every panel, and the views where
     // they were left.
@@ -220,6 +226,13 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     playlist.setHeaderWidth (juce::roundToInt (settings.get (Settings::playlistHeaderWidth)));
     playlist.onHeaderWidthChanged = [this] (int width) { settings.set (Settings::playlistHeaderWidth, (double) width); };
     pianoRoll.setScrollingContinuously (settings.get (Settings::scrollContinuously));
+    pianoRoll.setVelocityLane (juce::roundToInt (settings.get (Settings::pianoRollVelocityHeight)),
+                               settings.get (Settings::pianoRollVelocityFolded));
+    pianoRoll.onVelocityLaneChanged = [this] (int height, bool folded)
+    {
+        settings.set (Settings::pianoRollVelocityHeight, (double) height);
+        settings.set (Settings::pianoRollVelocityFolded, folded);
+    };
     panels.setFromText (settings.get (Settings::panelLayout));
     upperRow.share = panels.rowShares[0];
     lowerRow.share = panels.rowShares[1];
@@ -261,6 +274,10 @@ void AppShell::setActiveEditor (TimelineEditor* editor)
 
     for (auto* each : std::initializer_list<TimelineEditor*> { &playlist, &pianoRoll, &audioClipEditor })
         each->setActive (each == editor);
+
+    // Its tab shows it (a line in the accent colour along its foot).
+    for (auto* area : getAreas())
+        area->markEditorInUse();
 }
 
 void AppShell::projectChanged()
@@ -957,6 +974,7 @@ void AppShell::keepOverlaysInFront()
     lessonCard.getRing().toFront (false);
     lessonCard.toFront (false);
     deviceNotices.toFront (false);
+    notices.toFront (false);
 }
 
 void AppShell::placeNotices()
@@ -976,8 +994,14 @@ void AppShell::placeNotices()
         bottom = lessonCard.getY() + 2 * NoticeCard::getMargin() - NoticeTint::gap;
     }
 
-    const auto height = deviceNotices.getHeightFor (width);
-    deviceNotices.setBounds (left, bottom - height, width, height);
+    const auto devicesHeight = deviceNotices.getHeightFor (width);
+    deviceNotices.setBounds (left, bottom - devicesHeight, width, devicesHeight);
+
+    if (devicesHeight > 0)
+        bottom = deviceNotices.getY() + 2 * NoticeCard::getMargin() - NoticeTint::gap;
+
+    const auto noticesHeight = notices.getHeightFor (width);
+    notices.setBounds (left, bottom - noticesHeight, width, noticesHeight);
 }
 
 void AppShell::updateAudioAlert()
@@ -992,14 +1016,15 @@ void AppShell::updateAudioAlert()
                                [this] { commands.invoke ("options.audioSettings"); });
 }
 
-void AppShell::showProject (const juce::String& name, bool unsavedChanges, bool neverSaved, std::optional<juce::Time> lastAutosave)
+void AppShell::showProject (const juce::String& name, bool unsavedChanges, bool neverSaved, std::optional<juce::Time> lastAutosave,
+                            bool autosaveFailed)
 {
     titleBar.setProjectName (name, unsavedChanges);
     statusBar.showSaveState (name.isEmpty()   ? StatusBar::SaveState::none
                              : neverSaved     ? StatusBar::SaveState::neverSaved
                              : unsavedChanges ? StatusBar::SaveState::unsaved
                                               : StatusBar::SaveState::saved,
-                             lastAutosave);
+                             lastAutosave, autosaveFailed);
 }
 
 void AppShell::setEdgeInset (int inset)
@@ -1043,7 +1068,7 @@ void AppShell::resized()
         leftPanel.setBounds (area.removeFromLeft (sides.left));
 
         if (centreDocked)
-            leftDivider.setBounds (area.removeFromLeft (Shell::dividerSize));
+            leftDivider.place (area.removeFromLeft (Shell::dividerSize), &cards);
     }
     else if (centreDocked)
     {
@@ -1051,7 +1076,7 @@ void AppShell::resized()
         const auto gap = area.removeFromLeft (Shell::cardGap);
 
         if (dividerDragged == Panel::left)
-            leftDivider.setBounds (gap.withWidth (Shell::dividerSize));
+            leftDivider.place (gap.withWidth (Shell::dividerSize), &cards);
     }
 
     if (panels.takesRoom (Panel::inspector))
@@ -1059,11 +1084,11 @@ void AppShell::resized()
         inspector.setBounds (area.removeFromRight (sides.inspector));
 
         if (centreDocked)
-            inspectorDivider.setBounds (area.removeFromRight (Shell::dividerSize));
+            inspectorDivider.place (area.removeFromRight (Shell::dividerSize), &cards);
     }
     else if (centreDocked && dividerDragged == Panel::inspector)
     {
-        inspectorDivider.setBounds (area.removeFromRight (Shell::dividerSize));
+        inspectorDivider.place (area.removeFromRight (Shell::dividerSize), &cards);
     }
 
     if (centreDocked)
@@ -1140,18 +1165,18 @@ void AppShell::layOutCentre()
     if (songDocked && editorDocked)
     {
         lowerRow.setBounds (area.removeFromBottom (panels.getEditorHeight (area.getHeight())));
-        editorDivider.setBounds (area.removeFromBottom (Shell::dividerSize));
+        editorDivider.place (area.removeFromBottom (Shell::dividerSize));
     }
     else if (editorDocked)
     {
         if (keepsDivider)
-            editorDivider.setBounds (area.removeFromTop (Shell::dividerSize));
+            editorDivider.place (area.removeFromTop (Shell::dividerSize));
 
         lowerRow.setBounds (area);
     }
     else if (songDocked && keepsDivider)
     {
-        editorDivider.setBounds (area.removeFromBottom (Shell::dividerSize));
+        editorDivider.place (area.removeFromBottom (Shell::dividerSize));
     }
 
     if (songDocked)

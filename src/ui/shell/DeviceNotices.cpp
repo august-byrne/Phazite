@@ -18,33 +18,6 @@ namespace
     {
         return device.name + (device.isInput ? " is connected. Record from it?" : " is connected. Play through it?");
     }
-
-    // Whether the pointer is over a component or what it holds, as the mouse's events last found it. (Component::isMouseOver()
-    // asks also where the system's pointer is now, which the tests' events don't move.) JUCE workaround W26
-    // (docs/juce-workarounds.md).
-    bool isUnderPointer (const juce::Component& component)
-    {
-        for (const auto& source : juce::Desktop::getInstance().getMouseSources())
-            if (const auto* under = source.getComponentUnderMouse();
-                under != nullptr && (under == &component || component.isParentOf (under)))
-                return true;
-
-        return false;
-    }
-
-    // How tall text is, wrapped at a width, with a little to spare, as a label breaks lines a little differently.
-    int getTextHeight (const juce::String& text, const juce::FontOptions& font, int width)
-    {
-        if (text.isEmpty())
-            return 0;
-
-        juce::AttributedString attributed (text);
-        attributed.setFont (juce::Font (font));
-        attributed.setWordWrap (juce::AttributedString::byWord);
-        juce::TextLayout layout;
-        layout.createLayout (attributed, (float) juce::jmax (1, width));
-        return (int) std::ceil (layout.getHeight() + font.getHeight() / 4.0f);
-    }
 } // namespace
 
 //==============================================================================
@@ -330,7 +303,7 @@ void DeviceNotices::countShown (double seconds)
     {
         auto& notice = **it;
 
-        if (notice.isVisible() && ! isUnderPointer (notice))
+        if (notice.isVisible() && ! NoticeCard::isUnderPointer (notice))
             notice.shown += seconds;
 
         if (notice.shown >= NoticeTint::shownSeconds)

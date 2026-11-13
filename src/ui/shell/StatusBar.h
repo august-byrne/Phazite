@@ -41,7 +41,9 @@ public:
         neverSaved
     };
 
-    void showSaveState (SaveState, std::optional<juce::Time> lastAutosave = std::nullopt);
+    // While several autosaves in a row have failed, until one works, it says so in the warning colour, in sight until then
+    // (the owner's UX audit, 2026-11-12: a dialog told it once).
+    void showSaveState (SaveState, std::optional<juce::Time> lastAutosave = std::nullopt, bool autosaveFailed = false);
     void showAudioOutput (const EngineContext::AudioOutput&); // when the audio devices change
 
     // What the items show now (empty for one that doesn't show), for tests.

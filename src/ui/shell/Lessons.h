@@ -27,7 +27,7 @@ public:
     // without a key; the commands that do it (an id ending in "*" stands for every id it starts); and, for a step whose
     // result shows in the song, whether it is done. Its target is the control the card rings, by its component ID: a
     // control that runs a command has the command's ID ("view.mixer", "transport.record"), others a name of their own
-    // ("chordLane", "pianoRoll"); "pianoRoll/tool.draw" is one inside another. Without one, the first of doneBy's commands'.
+    // ("chordLane", "pianoRoll"); "playlist/track.add" is one inside another. Without one, the first of doneBy's commands'.
     struct Step
     {
         const char* text;

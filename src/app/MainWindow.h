@@ -26,6 +26,7 @@ class MainWindow : public juce::DocumentWindow,
                    public TrackRenderHost,
                    private juce::MenuBarModel,
                    private juce::ChangeListener,
+                   private juce::DarkModeSettingListener,
                    private juce::Timer
 {
 public:
@@ -93,6 +94,13 @@ private:
     void showUpdateState(); // the settings' icon's badge and the update command's name, as the update check is now
     juce::String shownUpdateName;
     void setTheme (ui::ThemeName);
+
+    // Theme: Follow System: dark or light as the operating system is set, changing with it, as Ableton Live 12's Follow System,
+    // VS Code's and Figma's do (the owner's UX audit, 2026-11-12); the settings keep it as "system".
+    void followSystemTheme();
+    bool followsSystemTheme = false;
+    void applyTheme (ui::ThemeName); // the palette, in every window
+    void darkModeSettingChanged() override;
     void setHoverHelp (bool);
     void setInterfaceScale (float);
     void stepInterfaceScale (int direction); // to the next larger (1) or smaller (-1) size
@@ -101,6 +109,11 @@ private:
     void setStartupSound (bool); // whether Phazite plays its sound once it has opened ("options.startupSound")
     void setKeymap (const juce::String& name);
     void updateTitle();
+
+    // Tells something without asking anything: news, or a problem, with a button for what to do next if there is one, in a
+    // notice card over the window's corner (ui/shell/Notices.h); in a dialog while the window has no content yet.
+    void tell (const juce::String& title, const juce::String& message, bool isProblem, const juce::String& actionName = {},
+               std::function<void()> action = {});
     ui::TitleBar::WindowActions getWindowActions(); // what the title bar's own window buttons do
 
     void timerCallback() override { updateTitle(); }

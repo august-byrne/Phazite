@@ -4,6 +4,8 @@
 
 #include <PhaziteData.h>
 
+#include <utility>
+
 namespace phazite::ui
 {
 namespace
@@ -62,6 +64,12 @@ namespace
                 return "square-dashed-mouse-pointer.svg";
             case Icon::zoom:
                 return "zoom-in.svg";
+            case Icon::follow:
+                return "locate-fixed.svg";
+            case Icon::info:
+                return "info.svg";
+            case Icon::error:
+                return "circle-x.svg";
             case Icon::folder:
                 return "folder.svg";
             case Icon::openFolder:
@@ -243,12 +251,23 @@ void IconButton::setAccented (bool shouldBeAccented)
     repaint();
 }
 
+void IconButton::setAttention (bool shouldAskForAttention)
+{
+    if (std::exchange (attention, shouldAskForAttention) != shouldAskForAttention)
+        repaint();
+}
+
 void IconButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown)
 {
     const auto& p = getPalette (*this);
     const bool on = getToggleState() || accented;
 
-    if (quiet && ! on)
+    if (attention && ! on)
+    {
+        getLookAndFeel().drawButtonBackground (g, *this, p.surfaceRaised.interpolatedWith (p.warning, attentionTint), isHighlighted,
+                                               isDown);
+    }
+    else if (quiet && ! on)
     {
         // As VS Code's toolbars' buttons: no border, the hover wash under the pointer, the focus outline with the keyboard.
         const auto bounds = getLocalBounds().toFloat();

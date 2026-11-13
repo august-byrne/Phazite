@@ -158,9 +158,17 @@ public:
     std::optional<ViewTab> getShownTab() const;
 
     // What each tab shows, with its key in the keymap in use (AppShell::refreshShortcutTexts()), and the clip editor's
-    // name as it changes.
+    // name as it changes, with its controls.
     void refreshTooltips (const CommandBridge&);
     void refreshTabs();
+
+    // The shown view's controls, in the tab row right of the tabs, while it has any (TimelineEditor::getToolRow(): the
+    // playlist's and the clip editor's tools), as Bitwig 6 puts each panel's tools along its top and VS Code an editor's
+    // actions beside its tabs; and the tab of the editor that the time line's commands act on marked with a line in the
+    // accent colour (AppShell::setActiveEditor()).
+    void refreshTools();
+    void markEditorInUse();
+    juce::Component* getShownTools() const noexcept { return shownTools.getComponent(); } // for tests
 
     // Where a view dragged over it can go besides its tabs (the shell says, as the places change): beside it, while its row
     // has room; and into the other row, while that has no views. And how many of the row's panel buttons its tab bar leaves
@@ -214,6 +222,10 @@ private:
     int cornerButtons = 0;
     std::optional<Drop> drop;
     std::optional<int> dropIndex;
+    juce::Component::SafePointer<juce::Component> shownTools; // the shown view's controls, which another area may take with it
+
+    TimelineEditor* getEditor (ViewTab) const; // the editor a tab shows, if it shows one
+    int getTabsLength() const;                 // how wide the tabs are at their best, as the tab bar lays them out
 
     // A tab's name, and what its tooltip says it shows.
     struct TabText

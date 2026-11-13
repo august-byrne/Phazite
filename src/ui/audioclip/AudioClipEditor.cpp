@@ -567,12 +567,22 @@ struct AudioClipEditor::Waveform : public juce::Component
         }
 
         editor.refresh();
+
+        // Where a trimmed edge is now, with the clip's length, for the hint bar.
+        if (const auto& shown = editor.info; shown.has_value() && (dragging == Zone::trimStart || dragging == Zone::trimEnd))
+        {
+            const auto start = shown->clip.range.getStart(), end = shown->clip.range.getEnd();
+            editor.setDragReadout (dragging == Zone::trimStart
+                                       ? "Starts at " + editor.describeSpan (start, end)
+                                       : "Ends at " + editor.describePlace (end) + ", " + editor.describeLength (start, end));
+        }
     }
 
     void mouseUp (const juce::MouseEvent& e) override
     {
         gesture = nullptr; // keeps the drag's change as its undo step
         dragging = Zone::none;
+        editor.setDragReadout ({});
 
         // The view fits the clip's audio again, as it is now.
         if (std::exchange (editor.viewHeld, false))
@@ -701,6 +711,7 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
 {
     setOpaque (true); // it fills itself, so what is behind it needn't repaint with it
     setTitle ("Audio clip editor");
+    toolRow.setTitle ("Audio clip tools");
     setDescription ("The selected audio clip's whole audio. Drag the clip's edges to trim it, the round handles at its top to fade "
                     "it, the handle in a fade's middle to bend it, and the clip along its audio to play another part of it. Along the "
                     "top, warp markers pin the audio to beats: double-click to add one, and drag it or a hit to stretch the audio");
@@ -748,8 +759,10 @@ AudioClipEditor::AudioClipEditor (CommandBridge& bridge, ProjectContext& project
         addAndMakeVisible (label);
     }
 
-    clipLabel.setJustificationType (juce::Justification::centredRight);
+    // Which clip, where in the song, and its file: at the foot of the settings, its lines as many as there is room for.
+    clipLabel.setJustificationType (juce::Justification::topLeft);
     clipLabel.setFont (juce::FontOptions (TextSize::small));
+    setThemeColour (clipLabel, juce::Label::textColourId, &Palette::textMuted);
 
     for (auto* c : std::initializer_list<juce::Component*> { &gainField, &normalizeButton, &pitchField, &fineField, &tempoField,
                                                              &reverseButton, &followButton, &clipLabel, waveform.get() })
@@ -910,7 +923,8 @@ void AudioClipEditor::updateControls()
                 + juce::String (getBarAt (context, info->clip.range.getStart()) + 1) + " of the song";
 
     if (info->state != AudioState::missing)
-        text << "  |  " << info->fileName << ", " << formatSampleRate (info->sampleRate) << " " << describeChannels (info->channels) << ", "
+        text << "\n"
+             << info->fileName << ", " << formatSampleRate (info->sampleRate) << " " << describeChannels (info->channels) << ", "
              << formatDuration (info->seconds);
 
     clipLabel.setText (text, juce::dontSendNotification);
@@ -986,18 +1000,16 @@ void AudioClipEditor::paint (juce::Graphics& g)
 {
     paintEditorBackground (g);
 
-    // The settings' panel, down the left under the toolbar.
+    // The settings' panel, down the left.
     const auto& p = getPalette (*this);
     g.setColour (p.border);
-    g.fillRect (panelWidth - 1, toolbarHeight, 1, getHeight() - toolbarHeight);
+    g.fillRect (panelWidth - 1, 0, 1, getHeight());
 }
 
 void AudioClipEditor::resized()
 {
+    // Its tools are in its area's tab row (TimelineEditor::getToolRow()).
     auto area = getLocalBounds();
-    const auto toolbar = layOutToolbarControls (area.removeFromTop (toolbarHeight).reduced (Space::s, Space::xs));
-    clipLabel.setBounds (toolbar.withTrimmedLeft (Space::s));
-
     auto panel = area.removeFromLeft (panelWidth).reduced (Space::s);
 
     const auto nextRow = [&panel]
@@ -1023,6 +1035,7 @@ void AudioClipEditor::resized()
     reverseButton.setBounds (nextRow());
     followButton.setBounds (nextRow());
     layOutField (tempoLabel, tempoField, nextRow());
+    clipLabel.setBounds (panel.withTrimmedTop (Space::xs));
 
     placeTimelinePart (ruler, area.removeFromTop (rulerHeight));
     waveform->setBounds (area);

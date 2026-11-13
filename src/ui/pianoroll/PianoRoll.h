@@ -2,7 +2,7 @@
 // The piano roll (docs/design.md, section 7; roadmap step 1.3): the notes of the MIDI clips selected in the
 // playlist, several at once, each in its track's color, or of the selected track's clip nearest the playhead.
 // Bar 1 is where the (first) clip starts, as in FL Studio and Live. FL Studio's mouse model: a click adds a
-// note with the length and velocity its toolbar shows (the note touched last's), a right-click deletes,
+// note with the length and velocity its settings show (the note touched last's), a right-click deletes,
 // dragging a note moves it (Ctrl copies, as in the playlist) and dragging its edge resizes it; Escape takes a
 // drag back. It has the playlist's tools and grid (TimelineEditor), a velocity lane, velocity shown on the
 // notes, ghost notes from other tracks, shading for notes outside the track's key, chord stamps, drum mode for
@@ -47,10 +47,18 @@ public:
     // The gap Legato... was given last, which the Legato command leaves too (NotesModel.h: addNoteCommands()).
     double getLegatoGapBeats() const noexcept { return transform.legatoGapBeats; }
 
-    // What a click adds, as the toolbar shows it: the length and velocity of the note touched last, as in FL Studio, or
-    // those chosen in the toolbar's menu.
+    // What a click adds, as its settings show it: the length and velocity of the note touched last, as in FL Studio, or
+    // those chosen in its button's menu.
     BeatDuration getNextNoteLength() const noexcept { return lastLength; }
     int getNextNoteVelocity() const noexcept { return lastVelocity; }
+
+    // The velocity lane under the notes: its height, which the line between them drags, and whether it is folded to a thin
+    // row by its chevron (rows fold, never close), as the settings keep them (AppShell); and its height as it shows now.
+    void setVelocityLane (int height, bool folded);
+    int getVelocityLaneHeight() const noexcept;
+    bool isVelocityLaneFolded() const noexcept { return velocityFolded; }
+    std::function<void (int height, bool folded)> onVelocityLaneChanged; // by a drag or the chevron
+    static constexpr int defaultVelocityHeight = 72, minimumVelocityHeight = 32, foldedVelocityHeight = 20;
 
     // TimelineEditor
     bool canUseTool (Tool) const override;       // all but Slip
@@ -58,6 +66,7 @@ public:
     bool canNudgeSelection() const override;
     void nudgeSelection (int direction) override;
     bool canQuantizeSelection() const override;
+    std::optional<BeatRange> getSelectedRange() const override; // the selected notes', from the first's start to the last's end
     void quantizeSelection() override;
     juce::String getQuantizeName() const override; // with the strength and swing Quantize... was given last
 
@@ -132,9 +141,27 @@ private:
 
     std::map<ClipID, ClipView> clipViews;
 
-    juce::TextButton instrumentButton, nextNoteButton, chordButton, keyButton, ghostButton { "Ghosts" }, transformButton { "Transform" };
-    IconButton notesMenuButton { "Notes menu", Icon::menu }; // what a Shift+right-click on the notes shows: slide, portamento...
-    juce::Label clipLabel;                                   // which clips are shown, and where they are in the song
+    // Down the left (layOutSettings()), in a view that scrolls where the piano roll is too short for them, as the audio clip
+    // editor in the same tab shows its clip's settings down its left: which clips show and where, the track's instrument and
+    // key, what a click adds, the chord stamp and ghost notes. The notes' menu, with the transforms, is the More menu of the
+    // area's tab row (TimelineEditor::getToolRow()). Until 2026-11-13 they were in a toolbar along the top, which the default
+    // window was too narrow for.
+    juce::Label clipLabel; // which clips are shown, and where they are in the song
+    juce::TextButton instrumentButton, keyButton, nextNoteButton, chordButton, ghostButton { "Ghost notes" };
+    juce::Component settingsContent;
+    juce::Viewport settingsView;
+    void layOutSettings();
+
+    // The velocity lane's height, while it isn't folded, and its chevron, at its top left; and where its row is, as laid out last.
+    int velocityHeight = defaultVelocityHeight;
+    bool velocityFolded = false;
+    juce::Rectangle<int> velocityRow;
+    IconButton velocityFoldButton { "Fold the velocity lane", Icon::expanded };
+    struct VelocityEdge; // the line between the notes and the velocities, dragged to size the lane
+    std::unique_ptr<VelocityEdge> velocityEdge;
+    void setVelocityFolded (bool);
+    int clampVelocityHeight (int) const; // tall enough to draw on, and leaving the notes some room
+    void velocityLaneChanged();          // tells the settings (onVelocityLaneChanged)
 
     std::unique_ptr<Keys> keys;
     std::unique_ptr<NoteGrid> grid;
@@ -187,14 +214,15 @@ private:
     void closeTransform (bool keepSettings = false); // without keepSettings, as they were when it opened
     juce::String describeTransform() const;
 
-    // The length and velocity new notes get, which the toolbar's button shows and its menu chooses.
+    // The length and velocity new notes get, which its button in the settings shows and its menu chooses.
     void setNextNote (BeatDuration, int velocity);
     juce::String describeNextNote() const; // "1/4 beat, velocity 100"
     void showNextNoteMenu();
 
-    // Rows: in the note grid's coordinates, row 0 at the top.
+    // Rows: in the note grid's coordinates, row 0 at the top. A pitch as its row names it: "C4" (middle C), or a drum's name.
     int getNumRows() const;
     int getRowForPitch (int pitch) const; // -1 for a drum without a row
+    juce::String describePitch (int pitch) const;
     int getPitchForRow (int row) const;
     int getRowTop (int row) const;
     int getRowAt (int y) const;
@@ -212,11 +240,10 @@ private:
     void audition (ClipID, const std::vector<int>& pitches, int velocity);
     void stopAudition();
 
-    void updateToolbar();
+    void updateSettings();    // what the settings down the left say: the clips, the instrument, the key, the next note, the chord
     void instrumentClicked(); // opens or replaces the track's instrument, or chooses one
     void showChordMenu();
     void showKeyMenu();
-    void showTransformMenu();
     void setDrumMode (bool);
 
     // TimelineEditor

@@ -226,10 +226,21 @@ StatusBar::~StatusBar()
     context.removeListener (this);
 }
 
-void StatusBar::showSaveState (SaveState state, std::optional<juce::Time> lastAutosave)
+void StatusBar::showSaveState (SaveState state, std::optional<juce::Time> lastAutosave, bool autosaveFailed)
 {
     using Emphasis = Item::Emphasis;
     saveItem->setVisible (state != SaveState::none);
+
+    if (autosaveFailed && (state == SaveState::unsaved || state == SaveState::neverSaved))
+    {
+        saveItem->show ("Autosave failed", Emphasis::warning);
+        saveItem->setTooltip (withShortcut (commands,
+                                            "Phazite couldn't save your changes automatically, several times in a row: click to save the "
+                                            "project, and check that its folder can be written to",
+                                            "project.save"));
+        resized();
+        return;
+    }
 
     // How long ago the changes were autosaved, in whole minutes, which the window brings up to date once a second.
     juce::String autosaved, autosavedTip;

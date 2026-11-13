@@ -776,6 +776,11 @@ void Playlist::AutomationLaneView::dragPoints (const juce::MouseEvent& e)
         moveAutomationPoints (playlist.context, parameter, moving, target - now.beat, value - now.value);
         refreshPoints();
     }
+
+    // Where the pressed point is now, for the hint bar: "-6.0 dB at 17.3.1".
+    if (juce::isPositiveAndBelow (pressed, (int) points.size()))
+        playlist.setDragReadout (getValueText (points[(size_t) pressed].value) + " at "
+                                 + playlist.describePlace (points[(size_t) pressed].beat));
 }
 
 void Playlist::AutomationLaneView::bendLine (const juce::MouseEvent& e)
@@ -910,6 +915,7 @@ void Playlist::AutomationLaneView::mouseUp (const juce::MouseEvent& e)
     gesture.endStep();
     drag = pendingDrag = Drag::none;
     rubberBand = {};
+    playlist.setDragReadout ({});
     refreshPoints();
     setHovered (playlist.getTool() == Tool::smart && getLocalBounds().contains (e.getPosition()) ? getLineUnder (e.position.x) : -1);
 }

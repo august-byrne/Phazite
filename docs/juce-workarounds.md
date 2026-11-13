@@ -51,6 +51,8 @@ How to keep it:
 
 **W14. Phazite's own blur.** JUCE's blur radius blurs as far as another on each renderer: on Direct2D its standard deviation is a third of the radius (`juce_graphics/native/juce_Direct2DImage_windows.cpp`), in software it is the radius, with the kernel cut off at one standard deviation (`juce_graphics/images/juce_Image.cpp`, `juce_ImageConvolutionKernel.cpp`), and on macOS it is Core Image's radius. The frosted glass behind popups blurs by three box blurs of Phazite's own, the same on all of them (`blur()`, `src/ui/theme/Popups.*`; docs/vscode-look.md).
 
+**W29. How wide a view area's tabs are, added up as JUCE adds them (*JUCE's insides*).** An editor's tools sit in its area's tab row right of the tabs (`ToolRow`), so the tab bar is made only as wide as its tabs; JUCE works that width out inside `TabbedButtonBar::resized()` (`juce_gui_basics/layout/juce_TabbedButtonBar.cpp`: each tab's best length less the look's overlap, and the overlap and the space round an image once) and doesn't give it. `ViewArea::getTabsLength()` adds it up the same way from the same public parts (`src/ui/shell/Panels.cpp`); `tests/PanelsTests.cpp` checks that the tabs keep their best widths beside the tools. To end it: JUCE handing out that length.
+
 **W15. JUCE's standard mouse pointers held all session.** JUCE keeps a standard pointer only while something holds it (`juce_gui_basics/mouse/juce_MouseCursor.cpp`), so a view that switched between two made one again at each switch, the hand's from an image. Phazite's look holds each of them while it lives (`src/ui/theme/LookAndFeel.*`).
 
 ### Menus, tooltips and the keyboard focus
@@ -77,7 +79,7 @@ How to keep it:
 
 **W25. The order of the main window's key listeners (*JUCE's insides*).** The computer keyboard hears its letters before the shortcuts do because `WindowKeys` adds it after them, and JUCE asks the listener added last first (`ComponentPeer::handleKeyPress()`, `juce_ComponentPeer.cpp`), which `Component::addKeyListener()`'s documentation doesn't promise (`src/ui/input/WindowKeys.*`). To end it: one key listener of `WindowKeys`' own that asks the computer keyboard, then the shortcuts.
 
-**W26. Whether the pointer is over a notice, from the mouse's last events.** `Component::isMouseOver()` also asks where the system's pointer is now (`juce_Component.cpp`), which the tests' mouse events don't move. The device notices ask what the mouse's events last found under it (`isUnderPointer()`, `src/ui/shell/DeviceNotices.cpp`). Only the tests need it.
+**W26. Whether the pointer is over a notice, from the mouse's last events.** `Component::isMouseOver()` also asks where the system's pointer is now (`juce_Component.cpp`), which the tests' mouse events don't move. The device notices ask what the mouse's events last found under it (`NoticeCard::isUnderPointer()`, `src/ui/shell/NoticeCard.cpp`), as the other notices do (`src/ui/shell/Notices.cpp`). Only the tests need it.
 
 **W27. The display's frames on JUCE's millisecond clock (*JUCE's insides*).** The playhead goes where the song is at the time of the display's frame, which `VBlankAttachment` gives in seconds without saying from when. Phazite reads it as `Time::getMillisecondCounterHiRes()`'s clock (`showFrame()`, `src/ui/timeline/TimelineEditor.*`), which it is on Windows and Linux (`juce_gui_basics/native/juce_VBlank_windows.cpp`, `juce_Windowing_linux.cpp`) but not on macOS, where it is the display's own. Check it when Phazite builds on macOS.
 

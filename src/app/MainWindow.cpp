@@ -44,6 +44,9 @@ namespace
         }
     }
 
+    // What the settings keep while the theme follows the system's (MainWindow::followSystemTheme()).
+    constexpr const char* systemThemeName = "system";
+
     ui::ThemeName themeFromString (const juce::String& name)
     {
         if (name == "light")
@@ -125,7 +128,13 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
     // (ui/theme/Popups.h).
     ui::setPopupsInside (*this);
     lookAndFeel.setTransparencyReduced (ui::isTransparencyReducedBySystem());
-    setTheme (themeFromString (services.settings.get (Settings::theme)));
+
+    if (const auto theme = services.settings.get (Settings::theme); theme == systemThemeName)
+        followSystemTheme();
+    else
+        setTheme (themeFromString (theme));
+
+    juce::Desktop::getInstance().addDarkModeSettingListener (this);
     setHoverHelp (services.settings.get (Settings::hoverHelp));
 
     computerKeyboard.setEnabled (services.settings.get (Settings::computerKeyboard));
@@ -184,6 +193,11 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
         menuItemsChanged(); // the recent projects
     };
 
+    // What the session tells without asking anything, news or a problem, in a card over the window's corner rather than a
+    // dialog that stops everything (the owner's UX audit, 2026-11-12).
+    session.onNotice = [this] (const juce::String& title, const juce::String& message) { tell (title, message, false); };
+    session.onError = [this] (const juce::String& title, const juce::String& message) { tell (title, message, true); };
+
     // A newer release found marks the settings' icon, and names the update command after it.
     services.updates.addChangeListener (this);
     showUpdateState();
@@ -196,9 +210,12 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
 MainWindow::~MainWindow()
 {
     stopTimer();
+    juce::Desktop::getInstance().removeDarkModeSettingListener (this);
     services.updates.removeChangeListener (this);
     session.onProjectClosing = nullptr;
     session.onProjectChanged = nullptr;
+    session.onNotice = nullptr;
+    session.onError = nullptr;
     session.onExport = nullptr;
     session.onCleanUpAudio = nullptr;
     session.dialogParent = nullptr;
@@ -423,8 +440,16 @@ void MainWindow::addCommands()
                         .description = choice.description,
                         .synonyms = { "colours", "colors", "appearance", "dark mode", "accessibility" },
                         .perform = [this, theme] { setTheme (theme); },
-                        .isTicked = [this, theme] { return lookAndFeel.getTheme() == theme; } });
+                        .isTicked = [this, theme] { return ! followsSystemTheme && lookAndFeel.getTheme() == theme; } });
     }
+
+    registry.add ({ .id = "options.theme.followsystem",
+                    .name = "Theme: Follow System",
+                    .category = "Options",
+                    .description = "Dark or light as the operating system is set, changing when it does.",
+                    .synonyms = { "colours", "colors", "appearance", "dark mode", "light mode", "automatic", "os theme" },
+                    .perform = [this] { followSystemTheme(); },
+                    .isTicked = [this] { return followsSystemTheme; } });
 
     registry.add ({ .id = "options.startupSound",
                     .name = "Startup Sound",
@@ -645,13 +670,7 @@ void MainWindow::installUpdate()
 
             if (const auto started = safeThis->services.updates.startInstaller(); started.failed())
             {
-                juce::AlertWindow::showAsync (juce::MessageBoxOptions()
-                                                  .withIconType (juce::MessageBoxIconType::WarningIcon)
-                                                  .withTitle ("Phazite couldn't install the update")
-                                                  .withMessage (started.getErrorMessage())
-                                                  .withButton ("OK", 0)
-                                                  .withAssociatedComponent (safeThis.getComponent()),
-                                              nullptr);
+                safeThis->tell ("Phazite couldn't install the update", started.getErrorMessage(), true);
                 return;
             }
 
@@ -758,34 +777,42 @@ void MainWindow::renderFinished (const juce::String& title, const juce::Result& 
 {
     delete renderWindow.getComponent(); // and the render, which is calling back: it lets go of itself last
 
-    if (result.wasOk())
-        return;
-
-    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
-                                      .withIconType (juce::MessageBoxIconType::WarningIcon)
-                                      .withTitle (title)
-                                      .withMessage (result.getErrorMessage())
-                                      .withButton ("OK", 0)
-                                      .withAssociatedComponent (this),
-                                  nullptr);
+    if (result.failed())
+        tell (title, result.getErrorMessage(), true);
 }
 
 void MainWindow::renderWrote (const juce::String& title, const juce::File& file)
 {
     // Where it went, and the folder shown on asking.
-    juce::AlertWindow::showAsync (
-        juce::MessageBoxOptions()
-            .withIconType (juce::MessageBoxIconType::InfoIcon)
-            .withTitle (title)
-            .withMessage ("Phazite wrote " + file.getFileName() + " into " + file.getParentDirectory().getFullPathName() + ".")
-            .withButton ("Show in Folder", 1)
-            .withButton ("OK", 0)
-            .withAssociatedComponent (this),
-        [file] (int button)
-        {
-            if (button == 1)
-                file.revealToUser();
-        });
+    tell (title, "Phazite wrote " + file.getFileName() + " into " + file.getParentDirectory().getFullPathName() + ".", false,
+          "Show in Folder", [file] { file.revealToUser(); });
+}
+
+void MainWindow::tell (const juce::String& title, const juce::String& message, bool isProblem, const juce::String& actionName,
+                       std::function<void()> action)
+{
+    if (shell != nullptr)
+    {
+        shell->getNotices().show (
+            { .title = title, .text = message, .isProblem = isProblem, .actionName = actionName, .action = std::move (action) });
+        return;
+    }
+
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (isProblem ? juce::MessageBoxIconType::WarningIcon : juce::MessageBoxIconType::InfoIcon)
+                       .withTitle (title)
+                       .withMessage (message)
+                       .withAssociatedComponent (this);
+
+    if (actionName.isNotEmpty())
+        options = options.withButton (actionName, 1);
+
+    juce::AlertWindow::showAsync (options.withButton ("OK", 0),
+                                  [then = std::move (action)] (int button)
+                                  {
+                                      if (button == 1 && then != nullptr)
+                                          then();
+                                  });
 }
 
 void MainWindow::showProgressions()
@@ -879,6 +906,28 @@ void MainWindow::changeListenerCallback (juce::ChangeBroadcaster* source)
 
 void MainWindow::setTheme (ui::ThemeName theme)
 {
+    followsSystemTheme = false;
+    applyTheme (theme);
+    services.settings.set (Settings::theme, toString (theme));
+    menuItemsChanged();
+}
+
+void MainWindow::followSystemTheme()
+{
+    followsSystemTheme = true;
+    applyTheme (juce::Desktop::getInstance().isDarkModeActive() ? ui::ThemeName::dark : ui::ThemeName::light);
+    services.settings.set (Settings::theme, juce::String (systemThemeName));
+    menuItemsChanged();
+}
+
+void MainWindow::darkModeSettingChanged()
+{
+    if (followsSystemTheme)
+        applyTheme (juce::Desktop::getInstance().isDarkModeActive() ? ui::ThemeName::dark : ui::ThemeName::light);
+}
+
+void MainWindow::applyTheme (ui::ThemeName theme)
+{
     const auto oldSurface = lookAndFeel.getPalette().surface;
     lookAndFeel.setTheme (theme);
     const auto surface = lookAndFeel.getPalette().surface;
@@ -902,9 +951,6 @@ void MainWindow::setTheme (ui::ThemeName theme)
     }
 
     repaint();
-
-    services.settings.set (Settings::theme, toString (theme));
-    menuItemsChanged();
 }
 
 void MainWindow::setHoverHelp (bool on)
@@ -998,7 +1044,8 @@ void MainWindow::updateTitle()
         setName (title);
 
     if (shell != nullptr)
-        shell->showProject (name, unsaved, session.getProject() != nullptr && session.isUntitled(), lastAutosave);
+        shell->showProject (name, unsaved, session.getProject() != nullptr && session.isUntitled(), lastAutosave,
+                            session.hasAutosaveFailed());
 }
 
 //==============================================================================
@@ -1135,7 +1182,7 @@ juce::PopupMenu MainWindow::getMenuForIndex (int menuIndex, const juce::String&)
             menu.addSeparator();
 
             juce::PopupMenu zoomMenu;
-            add (zoomMenu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit" });
+            add (zoomMenu, { "view.zoomIn", "view.zoomOut", "view.zoomToFit", "view.zoomToSelection", "view.zoomBack" });
             menu.addSubMenu ("Zoom", zoomMenu);
 
             // The playhead, how the view follows it and where playback loops: the song, unless something else is looped

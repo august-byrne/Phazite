@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TimelineEditor.h"
+#include "SongPlaceText.h"
 #include "TimelineGesture.h"
 #include "model/transport/RecordingModel.h"
 #include "model/transport/TransportModel.h"
@@ -12,10 +13,11 @@ namespace phazite::ui
 namespace
 {
     constexpr double zoomPerNotch = 1.25;
-    constexpr double scrollPerNotch = 48.0; // pixels
-    constexpr double zoomStep = 1.5;        // for the zoom commands
-    constexpr double minLineSpacing = 6.0;  // grid lines closer than this many pixels aren't drawn
-    constexpr double minGridSpacing = 20.0; // adaptive grid lines at least this far apart, in pixels
+    constexpr double scrollPerNotch = 48.0;        // pixels
+    constexpr double zoomStep = 1.5;               // for the zoom commands
+    constexpr double zoomToSelectionMargin = 0.05; // the room either side of what Zoom to Selection shows, a part of its length
+    constexpr double minLineSpacing = 6.0;         // grid lines closer than this many pixels aren't drawn
+    constexpr double minGridSpacing = 20.0;        // adaptive grid lines at least this far apart, in pixels
 
     constexpr int autoScrollMargin = 16;             // pixels inside an edge where a drag starts to scroll
     constexpr double autoScrollSpeedPerPixel = 15.0; // pixels per second for each pixel nearer the edge, or past it
@@ -125,7 +127,126 @@ namespace
                 return Icon::smartTool;
         }
     }
+
+    // How much a tool's button is needed in an editor's row, where the row is too narrow for them all (ToolRow.h): the Smart
+    // Tool most, then the tools with no other way to them; the Zoom Tool least, as the wheel, the overview's ends and the zoom
+    // commands zoom too, and the Select Tool next, as Ctrl+drag selects.
+    int getToolPriority (Tool tool)
+    {
+        switch (tool)
+        {
+            case Tool::smart:
+                return 100;
+            case Tool::draw:
+                return 70;
+            case Tool::slice:
+                return 65;
+            case Tool::paint:
+                return 60;
+            case Tool::erase:
+                return 55;
+            case Tool::mute:
+                return 50;
+            case Tool::slip:
+                return 45;
+            case Tool::select:
+                return 30;
+            case Tool::zoom:
+            default:
+                return 20;
+        }
+    }
+
+    // The row's other controls: Snap and the grid are needed most after the Smart Tool, and Follow after them.
+    constexpr int snapPriority = 90, gridPriority = 90, followPriority = 80;
+
+    // What the grid's button says after its size while the grid adapts to the zoom.
+    constexpr const char* adaptiveGridWord = "auto";
 } // namespace
+
+//==============================================================================
+GridButton::GridButton()
+    : juce::Button ("Grid"),
+      arrow (createIcon (Icon::expanded))
+{
+    setTitle ("Grid");
+}
+
+void GridButton::setGrid (const juce::String& newSize, bool isAdaptive)
+{
+    if (size == newSize && adaptive == isAdaptive)
+        return;
+
+    size = newSize;
+    adaptive = isAdaptive;
+    setButtonText (adaptive ? size + ", adapting to the zoom" : size); // what screen readers say
+    repaint();
+}
+
+int GridButton::getIdealWidth() const
+{
+    // As paintButton() lays it out: each text with a pixel to spare, as a text drawn in less room than it measures loses its
+    // last letters ("2 bars aut").
+    const auto main = juce::Font (juce::FontOptions (TextSize::body)), small = juce::Font (juce::FontOptions (TextSize::small));
+    auto width = 2.0f * (float) Space::s + juce::GlyphArrangement::getStringWidth (main, size) + 1.0f + (float) GridButtonTint::arrowGap
+                 + GridButtonTint::arrowSize;
+
+    if (adaptive)
+        width += (float) Space::xs + juce::GlyphArrangement::getStringWidth (small, adaptiveGridWord) + 1.0f;
+
+    return (int) std::ceil (width);
+}
+
+void GridButton::paintButton (juce::Graphics& g, bool isHighlighted, bool isDown)
+{
+    // A quiet button, as the row's others: the hover wash under the pointer, the focus outline with the keyboard.
+    const auto& p = getPalette (*this);
+    const auto bounds = getLocalBounds().toFloat();
+
+    if (isEnabled() && (isHighlighted || isDown))
+    {
+        g.setColour (isDown ? p.selected : p.hover);
+        g.fillRoundedRectangle (bounds, cornerRadius);
+    }
+
+    if (hasKeyboardFocus (false))
+    {
+        g.setColour (p.focus);
+        g.drawRoundedRectangle (bounds.reduced (0.5f), cornerRadius, 1.0f);
+    }
+
+    // The size, "auto" after it while the grid adapts, and the arrow of a menu at the right.
+    const auto alpha = isEnabled() ? 1.0f : 0.5f;
+    const auto main = juce::Font (juce::FontOptions (TextSize::body)), small = juce::Font (juce::FontOptions (TextSize::small));
+    auto area = bounds.reduced ((float) Space::s, 0.0f);
+    const auto arrowArea =
+        area.removeFromRight (GridButtonTint::arrowSize).withSizeKeepingCentre (GridButtonTint::arrowSize, GridButtonTint::arrowSize);
+    area.removeFromRight ((float) GridButtonTint::arrowGap);
+
+    g.setColour (p.text.withMultipliedAlpha (alpha));
+    g.setFont (main);
+    const auto sizeWidth = juce::GlyphArrangement::getStringWidth (main, size);
+    g.drawText (size, area.removeFromLeft (sizeWidth + 1.0f), juce::Justification::centredLeft, false);
+
+    if (adaptive)
+    {
+        area.removeFromLeft ((float) Space::xs);
+        g.setColour (p.textMuted.withMultipliedAlpha (alpha));
+        g.setFont (small);
+        g.drawText (adaptiveGridWord, area, juce::Justification::centredLeft, false);
+    }
+
+    if (arrow != nullptr)
+    {
+        if (const auto colour = p.textMuted.withMultipliedAlpha (alpha); arrowColour != colour)
+        {
+            arrow->replaceColour (arrowColour, colour);
+            arrowColour = colour;
+        }
+
+        arrow->drawWithin (g, arrowArea, juce::RectanglePlacement::centred, 1.0f);
+    }
+}
 
 //==============================================================================
 TimelinePartWindow::TimelinePartWindow (juce::Component& shown)
@@ -583,15 +704,38 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, 
       playhead (std::make_unique<Playhead>()),
       useListener (std::make_unique<UseListener> (*this))
 {
-    // The editor itself takes the keys it is given (a view's key, or a panel hiding with the keys in it), rather than
-    // passing them to its toolbar's first button, which would show its focus ring.
+    // The editor itself takes the keys it is given (a view's key, or a panel hiding with the keys in it).
     setWantsKeyboardFocus (true);
 
+    // The row's controls (getToolRow()), which its area shows in its tab row. Their commands act on the editor in use, which a
+    // press in the row makes this one first (UseListener). A click leaves the keys where they were, so that Space still plays
+    // rather than pressing the button again; Tab still reaches them.
+    toolRow.setTitle ("Tools");
     snapButton.onClick = [this] { commands.invoke ("grid.snap"); };
-    gridButton.setTitle ("Grid");
     gridButton.onClick = [this] { showGridMenu(); };
+    followPlaybackButton.onClick = [this]
+    {
+        // Paused by a scroll while the song plays: following again, from the playhead. Otherwise on or off.
+        if (followPlayback && followPaused && isPlaying (timelineContext))
+            centreOnPlayhead();
+        else
+            commands.invoke ("view.followPlayback");
 
-    // The tools, one button each; the commands set them, so the keys and the buttons agree.
+        updateFollowButton();
+    };
+
+    toolRow.add ({ .control = &snapButton,
+                   .getWidth = [] { return ToolRowTint::button; },
+                   .addToMenu = [this] (juce::PopupMenu& menu) { addCommandItems (menu, commands, { "grid.snap" }); },
+                   .priority = snapPriority });
+    toolRow.add ({ .control = &gridButton,
+                   .getWidth = [this] { return gridButton.getIdealWidth(); },
+                   .addToMenu = [this] (juce::PopupMenu& menu)
+                   { menu.addSubMenu ("Grid: " + describeGridStep (getGridStep()), makeGridMenu(), hasProject()); },
+                   .priority = gridPriority,
+                   .gapBefore = ToolRowTint::gap });
+
+    // The tools, one button each, those the editor uses; the commands set them, so the keys and the buttons agree.
     for (const auto toolToShow : allTools)
     {
         auto* button = toolButtons.add (
@@ -601,8 +745,36 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, 
         button->setToggleState (toolToShow == tool, juce::dontSendNotification);
         button->onClick = [this, toolToShow] { commands.invoke (getToolCommandID (toolToShow)); };
         button->setComponentID (getToolCommandID (toolToShow)); // what lessons point at (Lessons::Step::target)
-        addChildComponent (button);
+        toolRow.add (
+            { .control = button,
+              .getWidth = [] { return ToolRowTint::button; },
+              .addToMenu = [this, toolToShow] (juce::PopupMenu& menu) { addCommandItem (menu, commands, getToolCommandID (toolToShow)); },
+              .priority = getToolPriority (toolToShow),
+              .gapBefore = toolToShow == allTools[0] ? ToolRowTint::groupGap : ToolRowTint::gap,
+              .isWanted = [this, toolToShow] { return canUseTool (toolToShow) && ! usesSmartToolFor (toolToShow); } });
     }
+
+    // Follow, in editors whose view follows the playhead.
+    toolRow.add ({ .control = &followPlaybackButton,
+                   .getWidth = [] { return ToolRowTint::button; },
+                   .addToMenu = [this] (juce::PopupMenu& menu) { addCommandItems (menu, commands, { "view.followPlayback" }); },
+                   .priority = followPriority,
+                   .gapBefore = ToolRowTint::groupGap,
+                   .isWanted = [this] { return ! isViewFixed(); } });
+
+    for (auto* button : std::initializer_list<juce::Button*> { &snapButton, &gridButton, &followPlaybackButton })
+        button->setMouseClickGrabsKeyboardFocus (false);
+
+    for (auto* button : toolButtons)
+        button->setMouseClickGrabsKeyboardFocus (false);
+
+    for (auto* button : std::initializer_list<IconButton*> { &snapButton, &followPlaybackButton })
+        button->setQuiet (true);
+
+    for (auto* button : toolButtons)
+        button->setQuiet (true);
+
+    followPlaybackButton.setClickingTogglesState (false); // its state follows the editor's (updateFollowButton())
 
     // The vertical scroll bar hides while everything fits; the horizontal one always shows (the time line goes on).
     for (auto* scrollBar : { &horizontalScrollBar, &verticalScrollBar })
@@ -611,8 +783,6 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, 
         scrollBar->setAutoHide (scrollBar == &verticalScrollBar);
     }
 
-    addAndMakeVisible (snapButton);
-    addAndMakeVisible (gridButton);
     addTimelinePart (ruler);
 
     for (auto* c : std::initializer_list<juce::Component*> { &horizontalScrollBar, &verticalScrollBar, playhead.get() })
@@ -622,13 +792,17 @@ TimelineEditor::TimelineEditor (CommandBridge& bridge, ProjectContext& context, 
 
     snapButton.setEnabled (false); // until a project is open
     gridButton.setEnabled (false);
+    followPlaybackButton.setEnabled (false);
     updateGridControls();
+    updateFollowButton();
     addMouseListener (useListener.get(), true);
+    toolRow.addMouseListener (useListener.get(), true); // a press in the row makes this the editor in use, as one in the editor
     playhead->log = &frameLog;
 }
 
 TimelineEditor::~TimelineEditor()
 {
+    toolRow.removeMouseListener (useListener.get());
     removeMouseListener (useListener.get());
     verticalScrollBar.removeComponentListener (this);
     horizontalScrollBar.removeListener (this);
@@ -724,11 +898,14 @@ void TimelineEditor::showProject()
     grid = loadGridSettings (timelineContext, gridOwner);
     snapButton.setEnabled (open);
     gridButton.setEnabled (open);
+    followPlaybackButton.setEnabled (open);
 
     frameBeat.reset();
     holdsPlayhead = false;
     frameLog = FrameLog();
+    zoomHistory.clear();
     updateGridControls();
+    updateFollowButton();
     setViewStart ({});
 
     // At each frame of the display from now on (showFrame()), so that the playhead moves from the first frame after Play;
@@ -807,6 +984,39 @@ void TimelineEditor::zoomTo (BeatRange range)
     updateGridControls();
 }
 
+void TimelineEditor::rememberZoom()
+{
+    constexpr size_t mostRemembered = 16;
+    zoomHistory.push_back ({ view.pixelsPerBeat, view.start });
+
+    if (zoomHistory.size() > mostRemembered)
+        zoomHistory.erase (zoomHistory.begin());
+}
+
+void TimelineEditor::zoomToSelection()
+{
+    const auto selected = getSelectedRange();
+
+    if (isViewFixed() || ! selected.has_value() || selected->getLength() <= BeatDuration())
+        return;
+
+    rememberZoom();
+    const auto margin = selected->getLength() * zoomToSelectionMargin;
+    zoomTo ({ selected->getStart() - margin, selected->getEnd() + margin });
+}
+
+void TimelineEditor::zoomBack()
+{
+    if (isViewFixed() || zoomHistory.empty())
+        return;
+
+    const auto previous = zoomHistory.back();
+    zoomHistory.pop_back();
+    view.pixelsPerBeat = previous.pixelsPerBeat;
+    setViewStart (previous.start);
+    updateGridControls();
+}
+
 void TimelineEditor::zoomToFit()
 {
     // The content fills the width but for a margin at the right.
@@ -815,6 +1025,8 @@ void TimelineEditor::zoomToFit()
     if (content.getLength() <= BeatDuration())
         return;
 
+    rememberZoom(); // for Zoom Back
+
     const auto width = std::max (1, getTimelineArea().getWidth() - Space::l);
     view.pixelsPerBeat =
         juce::jlimit (TimelineView::minPixelsPerBeat, TimelineView::maxPixelsPerBeat, width / content.getLength().inBeats());
@@ -822,16 +1034,26 @@ void TimelineEditor::zoomToFit()
     updateGridControls();
 }
 
-void TimelineEditor::setFollowingPlayback (bool shouldFollow) noexcept
+void TimelineEditor::setScrollingContinuously (bool shouldScroll)
+{
+    scrollContinuously = shouldScroll;
+    shownFollow = -1; // Follow's tooltip says how the view follows
+    updateFollowButton();
+}
+
+void TimelineEditor::setFollowingPlayback (bool shouldFollow)
 {
     followPlayback = shouldFollow;
     followPaused = false;
+    updateFollowButton();
 }
 
 void TimelineEditor::pauseFollowing()
 {
     if (isPlaying (timelineContext))
         followPaused = true;
+
+    updateFollowButton();
 }
 
 void TimelineEditor::centreOnPlayhead()
@@ -840,6 +1062,7 @@ void TimelineEditor::centreOnPlayhead()
         return;
 
     followPaused = false;
+    updateFollowButton();
     setViewStart (getShownPlayheadBeat() - BeatDuration::fromBeats (getTimelineArea().getWidth() / 2.0 / view.pixelsPerBeat));
 }
 
@@ -849,8 +1072,32 @@ void TimelineEditor::movePlayheadTo (BeatPosition beat)
     // there at once, not where the last frame heard it.
     phazite::movePlayhead (timelineContext, beat);
     followPaused = false;
+    updateFollowButton();
     frameBeat.reset();
     updatePlayhead();
+}
+
+void TimelineEditor::updateFollowButton()
+{
+    // 0 off, 1 following, 2 paused by a scroll while the song plays.
+    const auto paused = followPlayback && followPaused && timelineContext.hasProject() && isPlaying (timelineContext);
+    const auto state = ! followPlayback ? 0 : paused ? 2 : 1;
+
+    if (std::exchange (shownFollow, state) == state)
+        return;
+
+    followPlaybackButton.setToggleState (state == 1, juce::dontSendNotification);
+    followPlaybackButton.setAttention (state == 2);
+
+    const auto continuous = scrollContinuously ? "keeps the playhead in the middle, the song moving under it"
+                                               : "turns the page as the playhead reaches its edge";
+    const auto text = state == 0 ? juce::String ("Follow playback is off: the view stays where it is while the song plays. Click to "
+                                                 "follow the playhead")
+                      : state == 1
+                          ? "Follow playback: while the song plays, the view " + juce::String (continuous) + ". Click to stop following"
+                          : juce::String ("Following is paused, as you scrolled while the song played. Click to follow the playhead "
+                                          "again; starting playback again follows it too");
+    followPlaybackButton.setTooltip (withShortcut (commands, text, "view.followPlayback"));
 }
 
 BeatPosition TimelineEditor::getPlayheadBeat() const
@@ -1031,43 +1278,44 @@ void TimelineEditor::setGrid (const GridSettings& newGrid)
 void TimelineEditor::updateGridControls()
 {
     snapButton.setToggleState (grid.snap, juce::dontSendNotification);
+    const auto before = gridButton.getIdealWidth();
+    gridButton.setGrid (timelineContext.hasProject() ? describeGridStep (getGridStep()) : juce::String ("Grid"), grid.adaptive);
 
-    juce::String text ("Grid: ");
-
-    if (timelineContext.hasProject())
-        text << describeGridStep (getGridStep());
-
-    gridButton.setButtonText (grid.adaptive ? text + " (auto)" : text);
+    // The row lays out again when the button's text needs another width ("Beat" to "1/4 beat").
+    if (gridButton.getIdealWidth() != before)
+        toolRow.update();
 }
 
-void TimelineEditor::showGridMenu()
+juce::PopupMenu TimelineEditor::makeGridMenu()
 {
-    if (! timelineContext.hasProject())
-        return;
-
     juce::PopupMenu menu;
     addCommandItems (menu, commands, { "grid.snap" });
     menu.addSeparator();
     addCommandItems (menu, commands, { "grid.adaptive", "grid.finer", "grid.coarser", "grid.triplets" });
     menu.addSectionHeader ("Fixed size");
 
-    // Item IDs are the levels plus one, as an ID can't be 0; command items have much larger IDs.
     for (auto level = GridSettings::minFixedLevel; level <= GridSettings::maxFixedLevel; ++level)
-        menu.addItem (level + 1, describeGridStep ({ level, grid.triplets }), true, ! grid.adaptive && grid.fixedLevel == level);
+    {
+        menu.addItem (describeGridStep ({ level, grid.triplets }), true, ! grid.adaptive && grid.fixedLevel == level,
+                      [safeThis = juce::Component::SafePointer<TimelineEditor> (this), level]
+                      {
+                          if (safeThis == nullptr)
+                              return;
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridButton),
-                        [safeThis = juce::Component::SafePointer<TimelineEditor> (this)] (int result)
-                        {
-                            const auto level = result - 1;
+                          auto newGrid = safeThis->grid;
+                          newGrid.adaptive = false;
+                          newGrid.fixedLevel = level;
+                          safeThis->setGrid (newGrid);
+                      });
+    }
 
-                            if (safeThis == nullptr || level < GridSettings::minFixedLevel || level > GridSettings::maxFixedLevel)
-                                return;
+    return menu;
+}
 
-                            auto newGrid = safeThis->grid;
-                            newGrid.adaptive = false;
-                            newGrid.fixedLevel = level;
-                            safeThis->setGrid (newGrid);
-                        });
+void TimelineEditor::showGridMenu()
+{
+    if (timelineContext.hasProject())
+        makeGridMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gridButton));
 }
 
 //==============================================================================
@@ -1110,53 +1358,24 @@ void TimelineEditor::releaseTool()
         setTool (*back);
 }
 
-juce::Rectangle<int> TimelineEditor::layOutToolbarControls (juce::Rectangle<int> toolbar)
-{
-    snapButton.setBounds (toolbar.removeFromLeft (controlHeight + Space::s));
-    toolbar.removeFromLeft (Space::xs);
-    gridButton.setBounds (toolbar.removeFromLeft (180));
-    toolbar.removeFromLeft (Space::l);
-
-    for (size_t i = 0; i < std::size (allTools); ++i)
-    {
-        auto* button = toolButtons[(int) i];
-        button->setVisible (canUseTool (allTools[i]) && ! usesSmartToolFor (allTools[i]));
-
-        if (button->isVisible())
-            button->setBounds (toolbar.removeFromLeft (controlHeight + Space::s));
-    }
-
-    return toolbar;
-}
-
 void TimelineEditor::setActive (bool isNowActive)
 {
-    if (active != isNowActive)
-    {
-        active = isNowActive;
-        repaint (getLocalBounds().removeFromTop (toolbarHeight));
-    }
+    // Its area marks its tab while it is (AppShell::setActiveEditor(), ViewArea::markEditorInUse()).
+    active = isNowActive;
 }
 
 void TimelineEditor::paintEditorBackground (juce::Graphics& g)
 {
-    const auto& p = getPalette (*this);
-    g.fillAll (p.surface);
-    g.setColour (p.border);
-    g.fillRect (0, toolbarHeight - 1, getWidth(), 1);
-
-    if (active)
-    {
-        g.setColour (p.accent);
-        g.fillRect (0, 0, getWidth(), 2);
-    }
+    g.fillAll (getPalette (*this).surface);
 }
 
 void TimelineEditor::refreshShortcutTexts()
 {
     snapButton.setTooltip (
         withShortcut (commands, "Snap to grid: what you move or place lines up with the grid. Hold Alt to place freely", "grid.snap"));
-    gridButton.setTooltip ("The grid's size. An adaptive grid gets finer as you zoom in");
+    gridButton.setTooltip ("The grid's size, and its menu. \"auto\" after it: the grid adapts, getting finer as you zoom in");
+    shownFollow = -1; // its tooltip names its key
+    updateFollowButton();
 
     for (size_t i = 0; i < std::size (allTools); ++i)
         toolButtons[(int) i]->setTooltip (withShortcut (commands, toolButtons[(int) i]->getTitle() + ": " + describeToolHere (allTools[i]),
@@ -1168,6 +1387,22 @@ void TimelineEditor::showRulerMenu (BeatPosition)
     juce::PopupMenu menu;
     addCommandItems (menu, commands, { "transport.loop", "transport.loopSong" });
     menu.showMenuAsync (juce::PopupMenu::Options());
+}
+
+juce::String TimelineEditor::describePlace (BeatPosition place) const
+{
+    // Counted as the ruler counts bars: from the time origin (the piano roll's clip's start).
+    return formatBarPosition (timelineContext, BeatPosition() + (place - timeOrigin));
+}
+
+juce::String TimelineEditor::describeLength (BeatPosition start, BeatPosition end) const
+{
+    return formatSongLength (timelineContext, BeatPosition() + (start - timeOrigin), end - start) + " long";
+}
+
+juce::String TimelineEditor::describeSpan (BeatPosition start, BeatPosition end) const
+{
+    return describePlace (start) + ", " + describeLength (start, end);
 }
 
 //==============================================================================
@@ -1211,6 +1446,7 @@ void TimelineEditor::timerCallback()
     }
 
     followPlayhead();
+    updateFollowButton(); // playback that started follows again, and stopped ends a pause
 }
 
 void TimelineEditor::followPlayhead()
@@ -1445,6 +1681,24 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .perform = withEditor ([] (TimelineEditor& editor) { editor.zoomToFit(); }),
                     .isEnabled = hasEdit });
 
+    registry.add (
+        { .id = "view.zoomToSelection",
+          .name = "Zoom to Selection",
+          .category = "View",
+          .description = "Shows the selected clips, notes or time range, filling the editor.",
+          .synonyms = { "zoom selected", "frame", "focus", "show selection" },
+          .perform = withEditor ([] (TimelineEditor& editor) { editor.zoomToSelection(); }),
+          .isEnabled = ticked ([] (const TimelineEditor& editor)
+                               { return editor.hasProject() && ! editor.isViewFixed() && editor.getSelectedRange().has_value(); }) });
+
+    registry.add ({ .id = "view.zoomBack",
+                    .name = "Zoom Back",
+                    .category = "View",
+                    .description = "Goes back to how the editor was zoomed before Zoom to Selection or Zoom to Fit.",
+                    .synonyms = { "previous zoom", "undo zoom", "zoom previous" },
+                    .perform = withEditor ([] (TimelineEditor& editor) { editor.zoomBack(); }),
+                    .isEnabled = ticked ([] (const TimelineEditor& editor) { return editor.canZoomBack(); }) });
+
     registry.add ({ .id = "view.centreOnPlayhead",
                     .name = "Center on Playhead",
                     .category = "View",
@@ -1519,7 +1773,7 @@ void addTimelineCommands (CommandRegistry& registry, std::function<TimelineEdito
                     .isTicked = ticked ([] (const TimelineEditor& editor) { return editor.getGrid().triplets; }) });
 
     // The tools, with FL Studio's letters in the keymaps (Esc for the Smart Tool), and in Phazite's also the
-    // digits 1 to 9 in the toolbar's order, which never play notes. Their keys spring back (pressTool()).
+    // digits 1 to 9 in the tools' order, which never play notes. Their keys spring back (pressTool()).
     for (const auto toolToAdd : allTools)
     {
         registry.add ({ .id = getToolCommandID (toolToAdd),

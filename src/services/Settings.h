@@ -54,7 +54,7 @@ class Settings
 {
 public:
     // Every setting Phazite keeps, each by the key its file keeps it under.
-    static constexpr TextSetting theme { "phaziteTheme", "dark", SaveTiming::now };             // dark, light, highContrast
+    static constexpr TextSetting theme { "phaziteTheme", "dark", SaveTiming::now };             // dark, light, highContrast, system
     static constexpr BoolSetting startupSound { "phaziteStartupSound", true, SaveTiming::now }; // model/engine/StartupSound.h
     static constexpr BoolSetting hoverHelp { "phaziteHoverHelp", true, SaveTiming::now };
     static constexpr BoolSetting scrollContinuously { "phaziteScrollContinuously", false, SaveTiming::now }; // or turn pages
@@ -98,6 +98,9 @@ public:
     static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon };  // ui/shell/PanelLayout.h
     static constexpr TextSetting viewPlaces { "phaziteViewPlaces", "", SaveTiming::soon };    // ui/shell/Panels.h: ViewPlaces
     static constexpr NumberSetting playlistHeaderWidth { "phazitePlaylistHeaderWidth", 200.0, SaveTiming::soon }; // ui/playlist/Playlist.h
+    // The piano roll's velocity lane: its height as dragged, and whether its chevron folds it (ui/pianoroll/PianoRoll.h).
+    static constexpr NumberSetting pianoRollVelocityHeight { "phazitePianoRollVelocityHeight", 72.0, SaveTiming::soon };
+    static constexpr BoolSetting pianoRollVelocityFolded { "phazitePianoRollVelocityFolded", false, SaveTiming::soon };
 
     // Bounce Each Commit, in Commit's menu (ui/versions/VersionsView.h); and Auto Save (File > Auto Save, as VS Code's: a
     // saved project saves itself a moment after each change, app/ProjectSession.h).

@@ -84,7 +84,9 @@ struct PianoRollScreen
     phazite::CommandRegistry registry;
     phazite::ui::CommandBridge commands { registry };
     phazite::ui::PianoRoll pianoRoll { commands, context };
-    phazite::test::TestWindow window { pianoRoll, 1000, 600 };
+    // Its notes as large as they were before its settings went down its left and its tools into a tab row (2026-11-13), so
+    // that the grid adapts to the same step.
+    phazite::test::TestWindow window { pianoRoll, 1176, 564 };
     juce::Component* notes = nullptr;
 };
 } // namespace
@@ -119,6 +121,10 @@ TEST_CASE ("The piano roll's overview of its notes runs along its time bar's top
     // right edge, thin and see-through.
     for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.pianoRoll))
     {
+        // The settings' own, down the left, which scrolls them where the piano roll is too short for them.
+        if (bar->findParentComponentOfClass<juce::Viewport>() != nullptr)
+            continue;
+
         if (! bar->isVertical())
         {
             CHECK_FALSE (bar->isVisible());
@@ -345,11 +351,11 @@ TEST_CASE ("The piano roll paints notes, with and without a key")
     screen.select (clip);
 
     CHECK (screen.pianoRoll.getTrack().isValid());
-    CHECK (screen.window.paintEverything().getWidth() == 1000);
+    CHECK (screen.window.paintEverything().getWidth() == 1176);
 
     phazite::setTrackKey (screen.song, screen.tracks[0], phazite::Key { 2, phazite::Scale::dorian });
     phazite::test::dispatchPendingMessages();
-    CHECK (screen.window.paintEverything().getWidth() == 1000);
+    CHECK (screen.window.paintEverything().getWidth() == 1176);
 }
 
 TEST_CASE ("On a track without an instrument, the piano roll asks for one, since its notes make no sound")
@@ -407,6 +413,25 @@ TEST_CASE ("A note added and dragged is one undo step, however long the drag tak
     CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Add Note"));
     phazite::undo (screen.song);
     CHECK (screen.notesOf (clip).empty()); // the note and all its moves, in one step
+}
+
+TEST_CASE ("While a note is dragged, the piano roll says its pitch and where it is, counted from its clip as the ruler counts")
+{
+    PianoRollScreen screen;
+    const auto clip = screen.addClip (0, 4.0, 8.0); // its bar 1 is the song's bar 2
+    screen.select (clip);
+    CHECK (screen.pianoRoll.getDragReadout().isEmpty());
+
+    // A note added at the clip's beat 1 and dragged to its beat 3: the clip's bar 1, beat 4.
+    phazite::test::Mouse mouse (*screen.notes);
+    mouse.press (screen.at (5.0));
+    mouse.dragTo (screen.at (6.0));
+    mouse.dragTo (screen.at (7.0));
+    REQUIRE (screen.notesOf (clip).size() == 1);
+    const auto pitch = screen.notesOf (clip).front().pitch;
+    CHECK (screen.pianoRoll.getDragReadout() == juce::MidiMessage::getMidiNoteName (pitch, true, true, 4) + " at 1.4.1");
+    mouse.release();
+    CHECK (screen.pianoRoll.getDragReadout().isEmpty());
 }
 
 TEST_CASE ("The mouse adds, selects, copies, resizes and deletes notes, each change one undo step that keeps the notes' IDs")
@@ -556,7 +581,7 @@ TEST_CASE ("Ctrl+drag copies the selected notes and the one pressed, once howeve
     CHECK (screen.getNotes().size() == 3);
 }
 
-TEST_CASE ("The toolbar shows what a click adds: the note pressed last's length and velocity, which deleting doesn't change")
+TEST_CASE ("The settings show what a click adds: the note pressed last's length and velocity, which deleting doesn't change")
 {
     NotesScreen screen;
     auto& mouse = screen.mouse;
@@ -587,6 +612,67 @@ TEST_CASE ("The toolbar shows what a click adds: the note pressed last's length 
     mouse.click (screen.at (7.5), juce::ModifierKeys::rightButtonModifier);
     CHECK (screen.getSelected().empty());
     CHECK (screen.getNotes().size() == 1);
+}
+
+TEST_CASE ("The piano roll's settings show down its left, and its velocity lane folds to a thin row and sizes by its edge")
+{
+    // The owner's UX audit, 2026-11-12: the toolbar along the top was too narrow for its settings at the default window size,
+    // and took a row the notes need; the velocity lane folds, as every row does, by its chevron.
+    using phazite::ui::PianoRoll;
+    PianoRollScreen screen;
+    auto& roll = screen.pianoRoll;
+
+    // Down the left, from the top, each whole and left of the keys: the instrument, the key, what a click adds, the chord stamp
+    // and ghost notes.
+    auto lastBottom = 0;
+
+    for (const auto* title : { "Instrument", "Key", "Next note", "Chord stamp", "Ghost notes" })
+    {
+        CAPTURE (title);
+        auto* button = phazite::test::findComponentWithTitle (roll, title);
+        REQUIRE (button != nullptr);
+        CHECK (button->isShowing());
+        const auto bounds = roll.getLocalArea (button, button->getLocalBounds());
+        CHECK (bounds.getY() >= lastBottom);
+        CHECK (bounds.getRight() < screen.notesArea().getX());
+        CHECK (bounds.getBottom() <= roll.getHeight());
+        lastBottom = bounds.getBottom();
+    }
+
+    // Folded by its chevron, the lane is a thin row and the notes take its room; the settings hear of it. Shown again, as it was.
+    std::vector<std::pair<int, bool>> heard;
+    roll.onVelocityLaneChanged = [&heard] (int height, bool folded) { heard.emplace_back (height, folded); };
+    const auto notesHeight = screen.notesArea().getHeight();
+    auto* chevron = phazite::test::findComponentWithTitle (roll, "Fold the velocity lane");
+    REQUIRE (chevron != nullptr);
+    const auto chevronCentre = roll.getLocalArea (chevron, chevron->getLocalBounds()).getCentre();
+    phazite::test::Mouse mouse (roll);
+    mouse.click (chevronCentre);
+    CHECK (roll.isVelocityLaneFolded());
+    CHECK (roll.getVelocityLaneHeight() == PianoRoll::foldedVelocityHeight);
+    CHECK (screen.notesArea().getHeight() == notesHeight + PianoRoll::defaultVelocityHeight - PianoRoll::foldedVelocityHeight);
+    REQUIRE (heard.size() == 1);
+    CHECK (heard.back() == std::pair { PianoRoll::defaultVelocityHeight, true });
+
+    mouse.click (roll.getLocalArea (chevron, chevron->getLocalBounds()).getCentre());
+    CHECK_FALSE (roll.isVelocityLaneFolded());
+    CHECK (screen.notesArea().getHeight() == notesHeight);
+
+    // Its edge dragged up makes the lane taller by as much and the notes shorter; a double-click puts it back.
+    auto* edge = phazite::test::findComponentWithTitle (roll, "Velocity lane's edge");
+    REQUIRE (edge != nullptr);
+    const auto edgeCentre = roll.getLocalArea (edge, edge->getLocalBounds()).getCentre();
+    mouse.press (edgeCentre);
+    mouse.dragTo (edgeCentre - juce::Point<int> (0, 40));
+    mouse.release();
+    CHECK (roll.getVelocityLaneHeight() == PianoRoll::defaultVelocityHeight + 40);
+    CHECK (screen.notesArea().getHeight() == notesHeight - 40);
+    CHECK (heard.back() == std::pair { PianoRoll::defaultVelocityHeight + 40, false });
+
+    const auto movedEdge = roll.getLocalArea (edge, edge->getLocalBounds()).getCentre();
+    mouse.doubleClick (movedEdge);
+    CHECK (roll.getVelocityLaneHeight() == PianoRoll::defaultVelocityHeight);
+    CHECK (screen.notesArea().getHeight() == notesHeight);
 }
 
 TEST_CASE ("A clip opens zoomed to fit with room after it, never smaller than the usual zoom, and opens again as it was left")
@@ -728,7 +814,7 @@ TEST_CASE ("A click on a key selects its notes, Ctrl+click adds them, and a drag
     const auto rowHeight = [&screen]
     {
         for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.pianoRoll))
-            if (bar->isVertical())
+            if (bar->isVertical() && bar->findParentComponentOfClass<juce::Viewport>() == nullptr) // not the settings'
                 return juce::roundToInt (bar->getMaximumRangeLimit() / 128.0);
 
         return 0;
@@ -813,7 +899,7 @@ TEST_CASE ("In the piano roll the Draw Tool's key picks the Smart Tool, which ad
     REQUIRE (screen.registry.invoke ("tool.draw"));
     CHECK (screen.pianoRoll.getTool() == phazite::ui::Tool::smart);
 
-    auto* draw = phazite::test::findComponentWithTitle (screen.pianoRoll, "Draw tool");
+    auto* draw = phazite::test::findComponentWithTitle (screen.pianoRoll.getToolRow(), "Draw tool");
     REQUIRE (draw != nullptr);
     CHECK_FALSE (draw->isVisible());
 }
@@ -867,7 +953,7 @@ TEST_CASE ("Alt+wheel makes the rows taller, as it makes the playlist's tracks, 
     juce::ScrollBar* rows = nullptr;
 
     for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.pianoRoll))
-        if (bar->isVertical())
+        if (bar->isVertical() && bar->findParentComponentOfClass<juce::Viewport>() == nullptr) // not the settings'
             rows = bar;
 
     REQUIRE (rows != nullptr);
