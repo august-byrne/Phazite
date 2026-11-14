@@ -16,6 +16,7 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        writeErrorsTo (commandLine);
         endQuietlyOnCrashes();
         host = std::make_unique<Host>();
 

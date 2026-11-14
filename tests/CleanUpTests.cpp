@@ -91,6 +91,42 @@ TEST_CASE ("Clean Up lists the audio nothing plays: not the song's, nor a versio
     CHECK (getNames (phazite::findUnusedAudio (p.s.context)) == juce::StringArray ("Generated/Leftover.wav"));
 }
 
+TEST_CASE ("Clean Up keeps the audio that the project file as saved, its autosave or a backup plays")
+{
+    // The audit's model-project-services 13: what the file on the disk, the autosave and the backups play is in use too, so
+    // that closing without saving, restoring the autosave or opening a backup never finds its sounds gone.
+    TestSong s;
+    const auto track = s.addTrack ("Audio");
+    auto& project = s.getProject();
+    const auto add = [&s, track] (const char* name)
+    { return s.addAudioClip (track, writeSound (s.getSoundsFolder().getChildFile (name), 0.5), 0.0); };
+
+    const auto remove = [&s] (phazite::ClipID clip)
+    {
+        s.select (clip);
+        s.run ("edit.delete");
+    };
+
+    // In a backup alone: saved, taken out and saved again.
+    const auto backedUp = add ("Backed up.wav");
+    REQUIRE (project.save().wasOk());
+    remove (backedUp);
+    REQUIRE (project.save().wasOk());
+
+    // In the project file as saved alone: saved, then taken out without a save.
+    const auto saved = add ("Saved.wav");
+    REQUIRE (project.save().wasOk());
+    remove (saved);
+
+    // In the autosave alone: written there, then taken out.
+    const auto autosaved = add ("Autosaved.wav");
+    REQUIRE (project.autosave().wasOk());
+    remove (autosaved);
+
+    writeSound (project.getAudioFolder().getChildFile ("Old take.wav"), 0.5);
+    CHECK (getNames (phazite::findUnusedAudio (s.context)) == juce::StringArray ("Audio/Old take.wav"));
+}
+
 TEST_CASE ("The Clean Up window lists the files ticked, a click keeps one, and Delete deletes the others and says so")
 {
     Files p;

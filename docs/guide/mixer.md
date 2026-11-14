@@ -159,7 +159,7 @@ another. Click a device in a chain to show it; the line over it leads back to th
   to play the track live again. Changing what it froze (its clips or a frozen device) unfreezes it. Freezing is not an
   undo step.
 - **Bounce in Place** (in the track's right-click menu) renders the track through its instrument and effects onto a
-  new audio track under it, and mutes and collapses the original. It is one undo step.
+  new audio track under it, and mutes the original. It is one undo step.
 - **Consolidate** joins clips into one ([Audio clips](audio-clips.md#consolidating)).
 
 ## Not yet

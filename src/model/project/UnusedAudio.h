@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Clean Up Unused Audio... (docs/design/versions.md: outside the steps): the audio files in the open project's Audio and Generated
-// folders that neither its song plays, nor any of its versions, nor a branch's song as it was left, to delete those the user
-// ticks. Takes, imports and generated sounds pile up there, versions or not. Deleting moves them to the recycle bin, where
+// folders that neither its song plays, nor its files on the disk (the project file as saved, its autosave and its backups,
+// which closing without saving, restoring or opening a backup brings back), nor any of its versions, nor a branch's song as
+// it was left, to delete those the user ticks. Takes, imports and generated sounds pile up there, versions or not. Deleting moves them to the recycle bin, where
 // they can still be found: no undo brings them back, and a clip that an undo brings back plays without them. Not an undo
 // step.
 #pragma once

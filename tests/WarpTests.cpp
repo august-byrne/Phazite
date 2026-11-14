@@ -10,6 +10,7 @@
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
+#include "model/arrangement/internal/Transients.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/AudioFiles.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -202,6 +203,28 @@ TEST_CASE ("The hits in a clip's audio are found in the background, each with wh
         CHECK ((*hits)[i].time == doctest::Approx (warp.hits[i]).epsilon (0.002));
         CHECK ((*hits)[i].beat.inBeats() == doctest::Approx (warp.hits[i] * 2.0).epsilon (0.004));
     }
+}
+
+TEST_CASE ("A file's hits are found once, however often they are asked for while they are being found")
+{
+    // Asked for again while the thread analysed it, a file was queued again and analysed twice (known bug 52).
+    phazite::test::TemporaryFolder temp;
+    std::vector<double> times;
+
+    for (int i = 0; i < 60; ++i)
+        times.push_back (i * 0.5);
+
+    const auto first = writeHitsAt (temp.folder.getChildFile ("Long.wav"), times, 30.0);
+    const auto second = writeHitsAt (temp.folder.getChildFile ("Short.wav"), { 0.0 }, 1.0);
+    phazite::Transients transients;
+
+    // As a view asks at every repaint until they are there.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return transients.find (first).has_value(); }, 60000));
+
+    // The thread takes files in turn: once the next one asked for is found, nothing asked for before it waits.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return transients.find (second).has_value(); }, 60000));
+
+    CHECK (transients.getNumAnalysed() == 2);
 }
 
 TEST_CASE ("Quantize Audio moves each hit a clip plays towards the grid line nearest it, through warp markers, as one undo step")

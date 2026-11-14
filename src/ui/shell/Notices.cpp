@@ -28,8 +28,8 @@ namespace
 class Notices::Card final : public NoticeCard
 {
 public:
-    Card (Notices& notices, Notice shown)
-        : notice (std::move (shown)),
+    Card (Notices& notices, Notice toShow)
+        : notice (std::move (toShow)),
           owner (notices),
           icon (notice.isProblem ? Icon::error : Icon::info)
     {

@@ -110,7 +110,9 @@ void ClipComponent::describe()
 
     juce::StringArray about;
 
-    if (rendering.has_value())
+    if (renderFailed)
+        about.add ("Couldn't be stretched, pitched or reversed: silent until its file changes");
+    else if (rendering.has_value())
         about.add ("Being stretched again: silent until it is ready");
     else if (info.followsTempo)
         about.add ("Stretches with the song's tempo");
@@ -141,6 +143,15 @@ void ClipComponent::showRendering (std::optional<double> progress)
         showClip (info); // its description
     else
         repaint (getLocalBounds().removeFromBottom (juce::roundToInt (RenderingTint::barHeight) + 2));
+}
+
+void ClipComponent::showRenderFailed (bool failed)
+{
+    if (std::exchange (renderFailed, failed) == failed)
+        return;
+
+    describe();
+    repaint();
 }
 
 juce::Colour ClipComponent::getFill() const
@@ -195,16 +206,23 @@ void ClipComponent::paint (juce::Graphics& g)
         // The part of it in view, which stays the same while the playlist does (ClipWaveform.h).
         if (const auto* parent = getParentComponent(); waveform != nullptr && parent != nullptr)
         {
-            g.setColour (ink.withAlpha (rendering.has_value() ? RenderingTint::waveform : 0.7f));
+            g.setColour (ink.withAlpha (rendering.has_value() || renderFailed ? RenderingTint::waveform : 0.7f));
             waveform->paint (g, content.getIntersection (getLocalArea (parent, parent->getLocalBounds())), getWidth());
         }
 
         paintFades (g, shape);
 
-        // Silent while its render is being made: how far that has come, along its bottom edge.
-        if (rendering.has_value())
+        // Silent while its render is being made: how far that has come, along its bottom edge; or, where it failed, the
+        // whole bar in the warning colour.
+        const auto bar = body.reduced (2.0f, 0.0f).removeFromBottom (RenderingTint::barHeight + 1.0f).withTrimmedBottom (1.0f);
+
+        if (renderFailed)
         {
-            const auto bar = body.reduced (2.0f, 0.0f).removeFromBottom (RenderingTint::barHeight + 1.0f).withTrimmedBottom (1.0f);
+            g.setColour (p.warning);
+            g.fillRect (bar);
+        }
+        else if (rendering.has_value())
+        {
             g.setColour (ink.withAlpha (RenderingTint::barTrack));
             g.fillRect (bar);
             g.setColour (ink);

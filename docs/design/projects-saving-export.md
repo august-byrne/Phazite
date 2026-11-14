@@ -110,7 +110,9 @@ shared memory checked, and a DAWproject written past 4 GB refused (known bugs 10
 - Until then the project lives in a folder of its own in the user's application data (`Unsaved Projects` in
   Phazite's folder there), so that recordings, imported audio and the autosave have a place from the start.
 - The first save copies its folders across and goes on there with its undo history. The untitled folder is deleted
-  when the project closes, saved or not.
+  when the project closes, saved or not. The folders are copied into "*name* (saving)" beside, which takes the
+  project's name only once it is whole; until then the project stays where it was. Past 8 MB the copy runs in the
+  background, in a progress window with Cancel, which leaves nothing behind.
 - An untitled project is not in Open Recent, and Export Song offers `Documents/Phazite/Exports` for it.
 - A lock keeps a second Phazite running at the same time away from the folders the first one uses.
 - What a new project starts with (its tempo, key and outline) is part of its first save. It is not an undo step and
@@ -119,7 +121,8 @@ shared memory checked, and a DAWproject written past 4 GB refused (known bugs 10
 ### Save
 
 - **Save Project** (`project.save`, Ctrl+S) writes the project file. A copy of the previous file goes into
-  `Backups/` first, and the newest ten are kept.
+  `Backups/` first, and the newest ten are kept. A backup that can't be made is reported, once until one is made
+  again, and the save goes on without it.
 - **Save Project As** (`project.saveAs`, Ctrl+Shift+S) saves the project, unsaved changes included, as a new folder
   with copies of its `Audio`, `Generated`, `Renders` and `Cache` folders and its `Versions`, and goes on in the copy.
   The project it came from keeps its last saved version.
@@ -145,7 +148,8 @@ history's files (`writeWholeFile()` in `src/model/base/WholeFile.h`).
 - It never saves while the song records, halfway through a drag, or while something is being tried in place (Swap).
   It saves at once as a recording ends.
 - The previous file goes into `Backups/` at most every 10 minutes, so the backups keep the project as it was then.
-- Closing the project saves it without asking.
+- Closing the project saves it without asking. If that save fails (a drive gone, a folder that can't be written),
+  closing asks instead: **Save As...** (a copy where the user chooses), **Don't Save**, or **Cancel**.
 - An untitled project is not auto-saved into a file the user never chose. It is autosaved for a crash instead.
 
 ### Autosave for a crash
@@ -165,7 +169,7 @@ An untitled project, and any project while Auto Save is off, is autosaved into a
   properly, and it asks before it opens the project that was open then: **Open**, **Open with Plug-ins Off**, or
   **Start a New Project** ([plugin-hosting.md](plugin-hosting.md)).
 - A project with an autosave newer than its file offers the autosaved changes: **Restore**, or **Open the last
-  saved version**.
+  saved version**. An autosave that can't be read gives way to the project file, with a message that says so.
 - An untitled project with changes saved automatically is offered first, before anything else: **Restore** or
   **Discard them**. Recordings made after the last autosave come back on tracks of their own. Untitled folders with
   nothing to restore are deleted.
@@ -262,7 +266,8 @@ before its fader, from the song's start to the end of its last clip and its tail
 
 - The file plays on a new audio track right under the original, named after it with "(Bounce)", in its colour, with
   its fader, pan, sends and output, and the automation and modulation of its fader and sends.
-- The original is muted and collapsed: nothing is lost, and nothing hidden plays.
+- The original is muted, and shown as it was (its rows are view state, which no undo step holds, so the bounce leaves
+  them alone and Undo gives back exactly what was): nothing is lost, and nothing hidden plays.
 - It is one undo step, "Bounce in Place".
 - A device that listens to a sidechain hears its source while bouncing.
 - Folders, buses and returns are not bounced: their sound is their tracks', and stems export it.
@@ -272,8 +277,8 @@ Consolidate, which joins clips into one, is in [playlist.md](playlist.md).
 ## Clean Up Unused Audio
 
 **Clean Up Unused Audio...** (File menu, `project.cleanUpAudio`) lists the files in the project's `Audio` and
-`Generated` folders that neither the song nor any commit or branch of its history plays, and deletes the ticked
-ones.
+`Generated` folders that neither the song, nor its file as saved, its autosave or a backup, nor any commit or branch
+of its history plays, and deletes the ticked ones.
 
 ## DAWproject
 
@@ -305,7 +310,10 @@ is, or the commit selected in the graph, into the project's `Renders` folder ("*
   what the other DAW changed. It takes notes, faders, mutes and tracks added or taken away. Its devices, automation
   and audio clips stay the commit's. What DAWproject can't hold stays as the commit had it, instead of counting as
   removed.
-- A new project made from a file gets no plug-ins or sends from it.
+- A new project made from a file gets no plug-ins or sends from it. It takes notes, faders, mutes, audio clips (an
+  audio file once, however many clips play it; Bitwig Studio's clips stretched by their warps follow the tempo at the
+  tempo the warps give them), the tempo, the time signature and the markers. What it couldn't bring in is told by
+  track when it opens: devices and plug-ins by name, sends, automation, groups, and audio it couldn't take.
 - A `.dawproject` file offers Phazite in its Open With menu, without taking the file type from another DAW.
 
 ## Decisions

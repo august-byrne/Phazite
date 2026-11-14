@@ -189,6 +189,8 @@ step, "Capture", and selects it.
 - The song keeps whether the metronome is on, as it keeps the loop. Switching it is not an undo step.
 - **The count-in** is a bar of clicks before recording starts from a stop, on the same beats, at the tempo there,
   while the song waits. It is heard with the metronome off too.
+- Both click as late as the song's sound comes out of its delay compensation, so a note played to the click lands on
+  its beat in the take, which places what was played by that delay.
 
 ## How it works
 

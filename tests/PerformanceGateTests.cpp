@@ -7,8 +7,8 @@
 //
 // What they don't see: anything slower that does the same amount of work (a device three times as costly, a slower
 // paint): the benchmark gates (BenchmarkGates.cpp) compare such costs with a reference workload run beside them. The
-// allocation counts are only counted in Windows Debug builds (AudioThreadMonitor.h); elsewhere those cases say so and
-// check nothing.
+// allocations are counted where AudioThreadMonitor.h can count them (Windows Debug and Linux builds); elsewhere those
+// cases say so and check nothing.
 #include "AudioThreadMonitor.h"
 #include "BenchmarkSong.h"
 #include "EditorScreens.h"
@@ -263,7 +263,7 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
 {
     if (! phazite::test::AudioThreadMonitor::isAvailable())
     {
-        MESSAGE ("Allocations are counted only in Windows Debug builds: nothing checked here.");
+        MESSAGE ("Allocations aren't counted in this build (AudioThreadMonitor.h): nothing checked here.");
         return;
     }
 

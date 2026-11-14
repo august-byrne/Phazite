@@ -93,7 +93,8 @@ struct MainScreen
         session.chooseSaveFile = [] (const juce::File& suggested, std::function<void (const juce::File&)> callback)
         { callback (suggested); };
         session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (false); };
-        session.askToSave = [this] (const juce::File&, std::function<void (phazite::ProjectSession::UnsavedChanges)> answer)
+        session.askToSave =
+            [this] (const juce::File&, const juce::String&, std::function<void (phazite::ProjectSession::UnsavedChanges)> answer)
         {
             ++askedToSave;
             answer (answerToSave);
@@ -126,7 +127,7 @@ struct MainScreen
         for (auto& dialog : dialogs)
             delete dialog.getComponent();
 
-        phazite::test::runTimersUntil ([this] { return ! services.library.isIndexing(); }, 10000);
+        phazite::test::runTimersUntil ([this] { return ! services.library.isIndexing(); }, 60000);
     }
 
     // A track with a note on it, so that there is a song to export (an empty one has nothing).

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The real-time audit (roadmap step 0.3). Each scenario builds a small project and plays it through Phazite's engine as
 // the app plays it, on the tests' audio device (TestAudioDevice.h), which a separate thread drives as the audio thread.
-// In Windows Debug builds it counts the heap allocations and frees made on that thread and shows where they came from
-// (AudioThreadMonitor). Under the linux-asan and linux-tsan presets the same playback runs under AddressSanitizer and
-// ThreadSanitizer.
+// In Windows Debug and Linux builds it counts the heap allocations and frees made on that thread and on the engine's
+// workers, and shows where they came from (AudioThreadMonitor; without stacks under the sanitizers). Under the linux-asan
+// and linux-tsan presets the same playback runs under AddressSanitizer and ThreadSanitizer.
 //
 // The scenarios whose steady playback must stay clean fail if it allocates or frees; those that read audio files only
 // report what they find. To see the report:
@@ -18,6 +18,7 @@
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/core/AudioThreads.h"
 #include "devices/delay/Delay.h"
 #include "devices/drums/DrumSampler.h"
 #include "devices/dynamics/Compressor.h"
@@ -78,6 +79,7 @@
 #include <array>
 #include <chrono>
 #include <limits>
+#include <optional>
 #include <string_view>
 #include <thread>
 
@@ -187,10 +189,14 @@ struct Measurement
     float peakLevel = 0.0f;
 };
 
+// How many threads the engine plays a block on, the audio thread one of them: the others are its workers
+// (engine/core/Workers.h), whose allocations the monitor counts as the audio thread's.
+constexpr int severalThreads = 4;
+
 // How a scenario plays: what is done once the engine has the song, before it plays; whether it records a take instead,
 // while another thread plays a note every twentieth of a second into a track live, as a MIDI driver would; the blocks
-// that may allocate as it starts (noWarmUp, or a number with its reason where the scenario gives it); and the edits made
-// while it plays.
+// that may allocate as it starts (noWarmUp, or a number with its reason where the scenario gives it); the edits made
+// while it plays; and on how many threads.
 struct Playing
 {
     std::function<void()> before = {};
@@ -198,6 +204,7 @@ struct Playing
     phazite::TrackID liveTrack = {};
     int warmUpBlocks = noWarmUp;
     std::vector<Edit> edits = {};
+    int threads = severalThreads;
 };
 
 // Plays the open project from its start through Phazite's engine as the app plays it, in real time on a separate "audio"
@@ -266,9 +273,9 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const Playi
             }
         });
 
-    // On one thread, so that the monitor counts every allocation (the workers play the same strips' code).
+    // On the threads asked for: the monitor counts what the audio thread allocates and what the engine's workers do.
     const auto threads = engine.getNumThreads();
-    engine.setNumThreads (1);
+    engine.setNumThreads (playing.threads);
 
     Measurement m;
     m.warmUpBlocks = playing.warmUpBlocks;
@@ -402,6 +409,12 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::
     return playProjectAndMeasure (context, Playing { .before = before, .recording = recording, .liveTrack = liveTrack });
 }
 
+// As above, on the audio thread alone.
+Measurement playProjectAndMeasureOnOneThread (phazite::ProjectContext& context)
+{
+    return playProjectAndMeasure (context, Playing { .threads = 1 });
+}
+
 // Plays a test song as playProjectAndMeasure() does, with what is to be done once Phazite's engine has it, before it plays,
 // and after.
 Measurement playAndMeasure (TestSong& song, const std::function<void()>& before = {}, const std::function<void()>& after = {})
@@ -445,14 +458,15 @@ void report (const juce::String& scenario, const Measurement& m)
     }
     else
     {
-        text << "  (allocations are only counted in Windows Debug builds)\n";
+        text << "  (allocations are counted only in Windows Debug and Linux builds: AudioThreadMonitor.h)\n";
     }
 
     MESSAGE (text.toStdString());
 }
 
 // For playback paths that must stay clean: after the warm-up's blocks (none, unless the scenario gave some, with why),
-// nothing is allocated or freed on the audio thread, whatever comes. (Only measured in Windows Debug builds.)
+// nothing is allocated or freed on the audio thread, whatever comes. (Measured where AudioThreadMonitor can: Windows Debug
+// and Linux builds.)
 void checkSteadyPlaybackDoesNotAllocate (const Measurement& m)
 {
     if (AudioThreadMonitor::isAvailable())
@@ -556,6 +570,29 @@ TEST_SUITE ("realtime-audit")
 
         const auto m = playProjectAndMeasure (song.context);
         report ("Phazite's engine: chords on the synth", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: Phazite's own engine on the audio thread alone, chords on two tracks of Phazite's synth into a bus")
+    {
+        // The other scenarios play on several threads, the engine's workers taking tasks beside the audio thread; this one
+        // on the audio thread alone, as a machine with one core plays, and as the engine plays a song of one strip.
+        TestSong song;
+        const auto second = song.addTrack ("Second");
+
+        for (const auto& track : { song.firstTrack, second })
+        {
+            song.setInstrument (track, phazite::devices::Synth::typeID);
+            const auto clip = song.addMidiClip (track, 0.0, 16.0);
+
+            for (int beat = 0; beat < 16; ++beat)
+                song.addChord (clip, { 48 + (beat % 2) * 5, 52, 55, 59 }, beat, 0.75);
+        }
+
+        song.addBus ("Bus", { song.firstTrack, second });
+        const auto m = playProjectAndMeasureOnOneThread (song.context);
+        report ("Phazite's engine on the audio thread alone", m);
         CHECK (m.peakLevel > 0.01f); // it plays
         checkSteadyPlaybackDoesNotAllocate (m);
     }
@@ -703,6 +740,36 @@ TEST_SUITE ("realtime-audit")
         CHECK (phazite::getClips (song.context, voice).size() == 1);           // the input's take
         CHECK (phazite::getClips (song.context, song.firstTrack).size() == 1); // the notes'
         checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: the monitor counts what Phazite's own audio threads allocate, and what other threads do not")
+    {
+        // The engine's workers are such threads (engine/core/Workers.h): a ProAudioTask lives on each while it runs.
+        if (! AudioThreadMonitor::isAvailable())
+            return;
+
+        const auto allocateOnThread = [] (bool asAudioThread)
+        {
+            std::thread thread (
+                [asAudioThread]
+                {
+                    std::optional<phazite::devices::ProAudioTask> task;
+
+                    if (asAudioThread)
+                        task.emplace();
+
+                    std::vector<int> made (100, 1);
+                    juce::ignoreUnused (made);
+                });
+            thread.join();
+        };
+
+        AudioThreadMonitor::reset();
+        allocateOnThread (false);
+        CHECK (AudioThreadMonitor::getCounts().allocations == 0);
+        allocateOnThread (true);
+        CHECK (AudioThreadMonitor::getCounts().allocations >= 1);
+        CHECK (AudioThreadMonitor::getCounts().frees >= 1);
     }
 
     TEST_CASE ("Real-time audit: a take's input that falls a whole buffer behind notes what it loses without allocating, past its room to")

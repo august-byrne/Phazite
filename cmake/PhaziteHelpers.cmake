@@ -30,6 +30,23 @@ function(phazite_limit_parallel_compiles mib_per_job)
     message(STATUS "Phazite: up to ${_jobs} parallel compiles (${_ram_mib} MiB RAM, ${_cpus} logical CPUs)")
 endfunction()
 
+# Precompiles JUCE's module headers (named as juce_core, juce_gui_basics...) for a target's own files, when
+# PHAZITE_PRECOMPILED_HEADERS is on: each of them then starts from the headers read once, not again for every file. Every
+# file still includes what it uses: a build with the option off (CI's) compiles each without them.
+function(phazite_precompile_juce target)
+    if(NOT PHAZITE_PRECOMPILED_HEADERS)
+        return()
+    endif()
+
+    set(_headers "")
+
+    foreach(_module IN LISTS ARGN)
+        list(APPEND _headers "<${_module}/${_module}.h>")
+    endforeach()
+
+    target_precompile_headers(${target} PRIVATE ${_headers})
+endfunction()
+
 # JUCE builds its juceaide helper in <build>/external/JUCE/tools and reuses that
 # folder on every configure, even after `cmake --preset <name> --fresh`. After a compiler update it would
 # keep using the old (deleted) compiler, so delete the folder whenever the compiler, the toolchain file or

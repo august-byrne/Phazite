@@ -408,6 +408,12 @@ void setProblemReporter (ProjectContext& context, ProblemReporter reporter)
     context.getImpl().problems = std::move (reporter);
 }
 
+void reportProblem (const ProjectContext& context, const juce::String& title, const juce::String& message)
+{
+    if (const auto& problems = context.getImpl().problems; problems != nullptr)
+        problems (title, message);
+}
+
 void setSong (ProjectContext& context, Song* song)
 {
     auto& impl = context.getImpl();

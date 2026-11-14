@@ -3,10 +3,27 @@
 
 namespace phazite
 {
+namespace
+{
+    int undoSteps = Song::defaultUndoSteps;
+}
+
+void Song::setUndoSteps (int steps)
+{
+    undoSteps = juce::jlimit (minimumUndoSteps, maximumUndoSteps, steps);
+}
+
+int Song::getUndoSteps()
+{
+    return undoSteps;
+}
+
 Song::Song (juce::ValueTree s)
     : state (std::move (s))
 {
-    undoManager.setMaxNumberOfStoredUnits (30000, 30);
+    // By steps alone: JUCE weighs each change by the size of its record, not by what it holds, so a budget of units kept as
+    // few as 30 steps after a drag of many notes.
+    undoManager.setMaxNumberOfStoredUnits (1, undoSteps);
 }
 
 Song::~Song()

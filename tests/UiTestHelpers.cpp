@@ -149,8 +149,8 @@ namespace
     class HeadlessPeer final : public juce::ComponentPeer
     {
     public:
-        HeadlessPeer (juce::Component& c, int styleFlags)
-            : juce::ComponentPeer (c, styleFlags)
+        HeadlessPeer (juce::Component& c, int flags)
+            : juce::ComponentPeer (c, flags)
         {
         }
 

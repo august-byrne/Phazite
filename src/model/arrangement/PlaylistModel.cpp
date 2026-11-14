@@ -27,11 +27,11 @@ namespace
         return { section.id, section.name, section.range, section.colour, section.tip, section.energy };
     }
 
-    // A track of the song's that holds clips: a track or a return, not a folder or the master.
+    // A track of the song's that holds clips (Schema.h: trackKind): a track, not a folder, a return or the master.
     bool holdsClips (const Song& song, TrackID id)
     {
         const auto state = findTrackState (song, id);
-        return state.hasType (schema::TRACK) && ! isFolderState (state);
+        return state.hasType (schema::TRACK) && ! isFolderState (state) && ! isReturnState (state);
     }
 
     // A track's row; its color is its row's in the palette unless it has its own. The master's is gray. Without the colors

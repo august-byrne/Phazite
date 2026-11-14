@@ -36,6 +36,11 @@ public:
 
     bool isRunning() const noexcept { return running.load(); }
 
+    // The helper's process's ID, as it told it once started (0 before). On Windows it is then in a job of Phazite's that
+    // ends it as Phazite ends, however that is (not what it starts); on Linux and macOS it watches for Phazite to go
+    // itself (host/core/Host.h).
+    std::int64_t getProcessID() const noexcept { return processID.load(); }
+
     // A request's message, under a number of its own, for its fields; then sent with request(), which waits for its
     // answer (the reply, read with MessageReader), or none if it didn't come within the time or the helper went.
     MessageWriter makeRequest (MessageType type) { return { type, makeNumber() }; }
@@ -70,7 +75,6 @@ public:
 private:
     class Pipe;
     class Watch;
-    class Relay;
 
     struct Waiting
     {
@@ -81,7 +85,7 @@ private:
 
     const juce::File program;
     juce::ChildProcess process;
-    std::unique_ptr<Relay> relay; // built with a sanitizer, the helper's stderr passed on to this process's (Helper.cpp)
+    std::atomic<std::int64_t> processID { 0 };
     std::unique_ptr<Pipe> pipe;
     std::unique_ptr<Watch> watch; // stopped before the process and the pipe go
     std::atomic<bool> running { false }, lost { false }, hung { false }, endedForHanging { false };

@@ -37,7 +37,8 @@ struct TestPlugins
 
     // The playhead stand-in's state: its place in quarter notes (ppqPosition), its time in samples, its tempo, its time
     // signature, whether the song played, and where the bar it is in starts, in quarter notes, and which bar that is; each
-    // -1 (0 for the time signature) where the playhead said nothing.
+    // -1 (0 for the time signature) where the playhead said nothing. And whether it had been told it plays offline
+    // (isNonRealtime()) as it played that piece, and whether it is now, as its state is taken.
     struct Playhead
     {
         double ppq = -1.0;
@@ -47,6 +48,7 @@ struct TestPlugins
         bool playing = false;
         double barStart = -1.0;
         juce::int64 barCount = -1;
+        bool playedOffline = false, offline = false;
 
         static Playhead read (const juce::MemoryBlock& state);
     };

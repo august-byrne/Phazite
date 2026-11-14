@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <utility>
 
 namespace phazite::engine
 {
@@ -45,28 +47,27 @@ void Engine::prepare (double rate, int blockSize)
     click = makeClick (sampleRate, false);
     accentClick = makeClick (sampleRate, true);
     clicking = nullptr;
+    numClickStarts = 0;
     transport.plan = nullptr;  // a plan for another rate: the playhead stays on its beat
     blockClock = BlockClock(); // the device's blocks timed afresh
+    monoSides.setSize (2, maximumBlockSize);
 
-    // What was asked while no audio thread took it (no device played; past 64 commands, the latest were dropped): the
-    // transport as last asked, at once, rather than the commands one by one.
-    if (commandFifo.getNumReady() > 0)
+    // The fades at this rate. A jump fading out is taken again as the next block starts (it is still asked for), and fades
+    // out afresh.
+    fadeLength = std::max (1, (int) std::lround (fadeSeconds * sampleRate));
+    jump.pending = false;
+    fadingIn = 0;
+    stopFade = {};
+
+    // A stop asked while no audio thread took it (no device played the engine) is taken at once: nothing fades out after
+    // it, nothing having played.
+    if (const auto asked = askedTransport.load(); transport.playing && isStopAsked (asked))
     {
-        commandFifo.reset();
-        transport.notesOff = transport.notesOff || transport.playing;
-        transport.chase = transport.chase || playing;
-        transport.flush = transport.flush || (playing && ! transport.playing);
-        transport.playing = playing;
+        transport.notesOff = true;
+        transport.playing = false;
         transport.countIn.left = 0;
         brokeTake = true;
-
-        if (const auto asked = locatesAsked.load(); asked != locatesTaken.load())
-        {
-            transport.beat = requestedBeat.load();
-            transport.chase = true;
-            publishPlayhead (transport.beat, 0.0, getMilliseconds(), 0.0); // shown there until the next block
-            locatesTaken.store (asked);
-        }
+        stopsTaken = asked >> stopsShift;
     }
 
     controlPoints.assign ((size_t) (maximumBlockSize / controlPointSpacing + 3), {});
@@ -114,39 +115,35 @@ void Engine::setRecording (std::unique_ptr<Recording> recording)
 }
 
 //==============================================================================
-void Engine::push (Command command)
-{
-    const auto scope = commandFifo.write (1);
-
-    // Full, the audio thread hasn't taken the commands for 64 blocks: no device plays the engine, and the one that does next
-    // prepares it, which takes the transport as last asked (prepare()).
-    if (scope.blockSize1 > 0)
-        commands[(size_t) scope.startIndex1] = command;
-}
-
 void Engine::play (bool countIn)
 {
     playing = true;
-    push ({ Command::Type::play, 0.0, countIn });
+    askedTransport.store ((stopsAsked << stopsShift) | playBit | (countIn ? countInBit : 0u));
 }
 
 void Engine::stop()
 {
     playing = false;
-    push ({ Command::Type::stop });
+    askedTransport.store (++stopsAsked << stopsShift);
+}
+
+bool Engine::isStopAsked (std::uint32_t asked) const noexcept
+{
+    return (asked & playBit) == 0 || (asked >> stopsShift) != stopsTaken;
 }
 
 void Engine::locate (double beat)
 {
+    // Sequentially consistent, all three: a beat read between two equal even counts was written before the first.
+    locateCount.fetch_add (1);
     requestedBeat.store (beat);
-    locatesAsked.fetch_add (1);
-    push ({ Command::Type::locate, beat });
+    locateCount.fetch_add (1);
 }
 
 double Engine::getPlayheadBeat() const noexcept
 {
     // A locate the audio thread hasn't taken yet: where the playhead will be.
-    if (locatesAsked.load() != locatesTaken.load())
+    if (getLocatesAsked() != locatesTaken.load())
         return requestedBeat.load();
 
     // From where the latest block started, by the time since. A block that started later than now (one of several the device
@@ -160,7 +157,7 @@ double Engine::getPlayheadBeat() const noexcept
 
 double Engine::getPlayheadBeatAt (double milliseconds) const noexcept
 {
-    if (locatesAsked.load() != locatesTaken.load())
+    if (getLocatesAsked() != locatesTaken.load())
         return requestedBeat.load();
 
     return playheadStamps.getBeatAt (milliseconds).value_or (requestedBeat.load());
@@ -173,62 +170,155 @@ void Engine::publishPlayhead (double beat, double beatsPerSecond, double startMi
 }
 
 //==============================================================================
-void Engine::takeCommands (const Plan& plan) noexcept
+void Engine::takeTransport (const Plan& plan) noexcept
 {
-    const auto scope = commandFifo.read (commandFifo.getNumReady());
+    // The last locate asked for, if it isn't taken yet: read between two equal even counts; and what the transport was
+    // asked, with no locate asked meanwhile (a locate() and a play() between the two would start from where the song was).
+    // A few tries, else the next part's.
+    std::optional<std::pair<double, std::uint32_t>> locate;
+    auto asked = askedTransport.load();
 
-    scope.forEach (
-        [this, &plan] (int index)
+    for (int attempt = 0; attempt < 4; ++attempt)
+    {
+        locate.reset();
+        const auto before = locateCount.load();
+        const auto beat = requestedBeat.load();
+        asked = askedTransport.load();
+
+        if (before % 2 != 0 || locateCount.load() != before)
+            continue;
+
+        if (before / 2 != locatesTaken.load (std::memory_order_relaxed))
+            locate = std::pair (beat, before / 2);
+
+        break;
+    }
+
+    // A stop first, then the jump, then a start: whatever their order was, from where the playhead was asked to be.
+    if (transport.playing && isStopAsked (asked))
+        stopTransport (plan);
+
+    stopsTaken = asked >> stopsShift;
+
+    if (locate.has_value() && locate->second != locatesTaken.load (std::memory_order_relaxed)) // not taken by the stop
+    {
+        // While the song plays (not counting in), what sounds fades out first; the latest beat asked for is taken then.
+        if (transport.playing && transport.countIn.left == 0)
         {
-            const auto& command = commands[(size_t) index];
-
-            switch (command.type)
+            // From where what follows a jump just before fades in, if it does, rather than from full level.
+            if (! jump.pending)
             {
-                case Command::Type::play:
-                    // The notes sounding where it starts start too. A count-in from a stop: a bar there, on its time
-                    // signature's beats, at the tempo there.
-                    if (command.countIn && ! transport.playing)
-                    {
-                        auto& countIn = transport.countIn;
-                        const auto signature = plan.tempo.getTimeSignatureAt (transport.beat);
-                        countIn.barLength = signature.getBarLength();
-                        countIn.beatLength = signature.getBeatLength();
-                        countIn.samplesPerBeat = plan.tempo.getSamplesPerQuarterNote (transport.beat);
-                        countIn.length = std::llround (countIn.barLength * countIn.samplesPerBeat);
-                        countIn.left = countIn.length;
-                        countIn.firstBeat = transport.beat - countIn.barLength;
-                        countIn.barStart = plan.tempo.getBarStart (transport.beat);
-                        clicking = nullptr;
-                    }
-
-                    // From a stop, the song starts from silence: tails ringing on from before (a reverb's, a delay's)
-                    // stop as it starts, as Ableton Live and Bitwig reset plug-ins. Its loop's end doesn't cut them.
-                    transport.chase = transport.chase || ! transport.playing;
-                    transport.flush = transport.flush || ! transport.playing;
-                    transport.playing = true;
-                    break;
-
-                case Command::Type::stop:
-                    transport.notesOff = transport.notesOff || transport.playing;
-                    transport.playing = false;
-                    transport.countIn.left = 0;
-                    brokeTake = true;
-                    clicking = nullptr;
-                    break;
-
-                case Command::Type::locate:
-                    // A jump while playing: the notes sounding stop, and those where it lands start, from silence.
-                    transport.notesOff = transport.notesOff || transport.playing;
-                    transport.flush = transport.flush || transport.playing;
-                    brokeTake = true;
-                    transport.chase = true;
-                    transport.beat = command.beat;
-                    transport.sample = std::llround (plan.tempo.toSamples (command.beat));
-                    clicking = nullptr;
-                    locatesTaken.fetch_add (1);
-                    break;
+                jump = { true, 0.0, 0, fadingIn > 0 ? std::max (1, fadeLength - fadingIn + 1) : fadeLength };
+                fadingIn = 0;
             }
-        });
+
+            jump.beat = locate->first;
+            jump.count = locate->second;
+        }
+        else
+        {
+            takeJump (plan, locate->first, locate->second);
+        }
+    }
+
+    if ((asked & playBit) != 0 && ! transport.playing)
+        startTransport (plan, (asked & countInBit) != 0);
+}
+
+void Engine::startTransport (const Plan& plan, bool countIn) noexcept
+{
+    // The notes sounding where it starts start too. A count-in: a bar there, on its time signature's beats, at the tempo
+    // there.
+    if (countIn)
+    {
+        auto& counting = transport.countIn;
+        const auto signature = plan.tempo.getTimeSignatureAt (transport.beat);
+        counting.barLength = signature.getBarLength();
+        counting.beatLength = signature.getBeatLength();
+        counting.samplesPerBeat = plan.tempo.getSamplesPerQuarterNote (transport.beat);
+        counting.length = std::llround (counting.barLength * counting.samplesPerBeat);
+        counting.left = counting.length;
+        counting.firstBeat = transport.beat - counting.barLength;
+        counting.barStart = plan.tempo.getBarStart (transport.beat);
+        numClickStarts = 0;
+    }
+
+    // From a stop, the song starts from silence: tails ringing on from before (a reverb's, a delay's) stop as it starts, as
+    // Ableton Live and Bitwig reset plug-ins. Its loop's end doesn't cut them. The audio clips' fade out after the stop
+    // before ends there: they start again (AudioRegion fades them in).
+    transport.chase = true;
+    transport.flush = true;
+    transport.playing = true;
+    stopFade = {};
+}
+
+void Engine::stopTransport (const Plan& plan) noexcept
+{
+    // The notes sounding end, and what they leave rings on; the audio clips that play, which would stop in a step, fade
+    // out from where the song is (a jump still fading out is taken at once, while the song plays, after it). The clicks to
+    // come don't, but the one sounding rings on.
+    if (transport.countIn.left == 0)
+        stopFade = { transport.sample, transport.sample + fadeLength };
+
+    if (jump.pending)
+        takeJump (plan, jump.beat, jump.count);
+
+    transport.notesOff = true;
+    transport.playing = false;
+    transport.countIn.left = 0;
+    brokeTake = true;
+    numClickStarts = 0;
+}
+
+void Engine::takeJump (const Plan& plan, double beat, std::uint32_t count) noexcept
+{
+    // A jump while playing: the notes sounding stop, and those where it lands start, from silence, fading in if what
+    // sounded faded out. The clicks to come were for where the song was, but the one sounding rings on.
+    if (transport.playing)
+    {
+        transport.notesOff = true;
+        transport.flush = true;
+
+        if (jump.pending)
+            fadingIn = fadeLength;
+    }
+
+    brokeTake = true;
+    transport.chase = true;
+    transport.beat = beat;
+    transport.sample = std::llround (plan.tempo.toSamples (beat));
+    numClickStarts = 0;
+    jump.pending = false;
+    locatesTaken.store (count);
+}
+
+void Engine::fadeMaster (float* const* sides, int numSamples) noexcept
+{
+    // Down to silence over what is left of a jump's fade out, and up from it after: each sample a step of fadeLength + 1.
+    const auto step = 1.0f / (float) (fadeLength + 1);
+
+    if (jump.pending)
+    {
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const auto gain = (float) std::max (0, jump.left - i) * step;
+            sides[0][i] *= gain;
+            sides[1][i] *= gain;
+        }
+    }
+    else if (fadingIn > 0)
+    {
+        const auto count = std::min (numSamples, fadingIn);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto gain = (float) (fadeLength - fadingIn + 1 + i) * step;
+            sides[0][i] *= gain;
+            sides[1][i] *= gain;
+        }
+
+        fadingIn -= count;
+    }
 }
 
 void Engine::expectAudio (const Plan& plan) noexcept
@@ -256,6 +346,146 @@ void Engine::playLive (std::int64_t track, devices::NoteEvent event, bool record
     liveQueue.push ({ track, event, getMilliseconds(), recordable });
 }
 
+void Engine::endLive (std::int64_t track) noexcept
+{
+    liveQueue.push ({ track, {}, getMilliseconds(), true, true });
+}
+
+void Engine::dropLiveEvents() noexcept
+{
+    // What lets go, each once (a note's end by its track and pitch, a controller by its number, what endLive() ends by its
+    // track), kept; the rest dropped.
+    using Type = devices::NoteEvent::Type;
+
+    for (LiveEvent live; liveQueue.pop (live);)
+    {
+        const auto& event = live.event;
+
+        if (! live.endsLive && (event.type == Type::noteOn || event.type == Type::portamentoOn || event.type == Type::slide))
+            continue;
+
+        const auto same = [&live] (const LiveEvent& waiting)
+        {
+            return waiting.track == live.track && waiting.endsLive == live.endsLive && waiting.event.type == live.event.type
+                   && waiting.event.number == live.event.number;
+        };
+
+        if (const auto end = std::find_if (endsWaiting.begin(), endsWaiting.begin() + numEndsWaiting, same);
+            end != endsWaiting.begin() + numEndsWaiting)
+            *end = live; // the latest value
+        else if (numEndsWaiting < (int) endsWaiting.size())
+            endsWaiting[(size_t) numEndsWaiting++] = live;
+    }
+
+    lastBlockMilliseconds = 0.0; // the next part's live notes are timed from its own start
+}
+
+void Engine::followLive (const LiveEvent& live) noexcept
+{
+    using Type = devices::NoteEvent::Type;
+    constexpr int sustainPedal = 64;
+    const auto& event = live.event;
+    const auto starts = event.type == Type::noteOn || event.type == Type::portamentoOn
+                        || (event.type == Type::controller && event.number == sustainPedal && event.value >= 0.5f);
+
+    // Its track's hold; one that holds nothing any more is taken for a track that starts holding.
+    LiveHold* hold = nullptr;
+
+    for (int i = 0; i < numLiveHolds && hold == nullptr; ++i)
+        if (liveHolds[(size_t) i].track == live.track)
+            hold = &liveHolds[(size_t) i];
+
+    if (hold == nullptr && starts)
+    {
+        for (int i = 0; i < numLiveHolds && hold == nullptr; ++i)
+            if (liveHolds[(size_t) i].numNotes == 0 && ! liveHolds[(size_t) i].pedalDown)
+                hold = &liveHolds[(size_t) i];
+
+        if (hold == nullptr && numLiveHolds < (int) liveHolds.size())
+            hold = &liveHolds[(size_t) numLiveHolds++];
+
+        if (hold != nullptr)
+            *hold = { live.track };
+    }
+
+    if (hold == nullptr)
+        return;
+
+    auto& times = hold->notes[(size_t) std::clamp (event.number, 0, 127)];
+
+    if ((event.type == Type::noteOn || event.type == Type::portamentoOn) && times < 255)
+    {
+        ++times;
+        ++hold->numNotes;
+    }
+    else if (event.type == Type::noteOff && times > 0)
+    {
+        --times;
+        --hold->numNotes;
+    }
+    else if (event.type == Type::allNotesOff)
+    {
+        hold->notes.fill (0);
+        hold->numNotes = 0;
+    }
+    else if (event.type == Type::controller && event.number == sustainPedal)
+    {
+        hold->pedalDown = event.value >= 0.5f;
+    }
+}
+
+void Engine::addLiveEvent (LiveEvent live, std::int64_t loopStart, std::int64_t loopEnd) noexcept
+{
+    // endLive(): each note its track holds live ends, as often as it was started, and its pedal, if it holds it down; as
+    // live events of their own, so that a take and Capture record the notes' ends where they came.
+    if (live.endsLive)
+    {
+        using Type = devices::NoteEvent::Type;
+        constexpr int sustainPedal = 64;
+        const auto held = std::find_if (liveHolds.begin(), liveHolds.begin() + numLiveHolds,
+                                        [&live] (const LiveHold& hold) { return hold.track == live.track; });
+
+        if (held == liveHolds.begin() + numLiveHolds)
+            return;
+
+        const auto hold = *held; // a copy: the ends below change it
+
+        for (int pitch = 0; pitch < 128; ++pitch)
+            for (int times = 0; times < hold.notes[(size_t) pitch]; ++times)
+                addLiveEvent ({ live.track, { Type::noteOff, live.event.sample, pitch, 0.0f }, live.milliseconds, live.recordable },
+                              loopStart, loopEnd);
+
+        if (hold.pedalDown)
+            addLiveEvent ({ live.track, { Type::controller, live.event.sample, sustainPedal, 0.0f }, live.milliseconds, false }, loopStart,
+                          loopEnd);
+
+        return;
+    }
+
+    if (numLiveEvents >= (int) liveEvents.size())
+        return;
+
+    followLive (live);
+    liveEvents[(size_t) numLiveEvents++] = live;
+
+    if (! live.recordable)
+        return;
+
+    // Where the song was as it came in, in the last part: round the loop, as it plays.
+    PlayedEvent event { live.track, live.event, lastPart.clock + live.event.sample, -1 };
+
+    if (lastPart.playing)
+    {
+        event.songSample = lastPart.sample + live.event.sample;
+
+        if (loopEnd > loopStart && lastPart.sample < loopEnd && event.songSample >= loopEnd)
+            event.songSample = loopStart + (event.songSample - loopEnd);
+    }
+
+    if (const auto scope = playedFifo.write (1); scope.blockSize1 > 0)
+        played[(size_t) scope.startIndex1] = event;
+}
+
 void Engine::takeLiveEvents (const Plan& plan, int numSamples, std::int64_t partClock) noexcept
 {
     // Each in the block as far as it came after the last block started: a block's delay, the same for every note.
@@ -263,8 +493,6 @@ void Engine::takeLiveEvents (const Plan& plan, int numSamples, std::int64_t part
     const auto since = lastBlockMilliseconds > 0.0 ? lastBlockMilliseconds : now;
     lastBlockMilliseconds = now;
     numLiveEvents = 0;
-
-    // Where the song was as each came in, in the last part: round the loop, as it plays.
     std::int64_t loopStart = 0, loopEnd = 0;
 
     if (plan.loop.has_value())
@@ -273,26 +501,21 @@ void Engine::takeLiveEvents (const Plan& plan, int numSamples, std::int64_t part
         loopEnd = std::llround (plan.tempo.toSamples (plan.loop->end));
     }
 
+    // What let go while there was no plan, first, unrecorded (what started it wasn't).
+    for (int i = 0; i < numEndsWaiting; ++i)
+    {
+        auto end = endsWaiting[(size_t) i];
+        end.event.sample = 0;
+        end.recordable = false;
+        addLiveEvent (end, loopStart, loopEnd);
+    }
+
+    numEndsWaiting = 0;
+
     for (LiveEvent live; numLiveEvents < (int) liveEvents.size() && liveQueue.pop (live);)
     {
         live.event.sample = std::clamp ((int) std::lround ((live.milliseconds - since) * sampleRate / 1000.0), 0, numSamples - 1);
-        liveEvents[(size_t) numLiveEvents++] = live;
-
-        if (! live.recordable)
-            continue;
-
-        PlayedEvent event { live.track, live.event, lastPart.clock + live.event.sample, -1 };
-
-        if (lastPart.playing)
-        {
-            event.songSample = lastPart.sample + live.event.sample;
-
-            if (loopEnd > loopStart && lastPart.sample < loopEnd && event.songSample >= loopEnd)
-                event.songSample = loopStart + (event.songSample - loopEnd);
-        }
-
-        if (const auto scope = playedFifo.write (1); scope.blockSize1 > 0)
-            played[(size_t) scope.startIndex1] = event;
+        addLiveEvent (live, loopStart, loopEnd);
     }
 
     lastPart = { partClock, transport.sample, transport.playing && transport.countIn.left == 0 };
@@ -367,11 +590,11 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                 transport.plan = plan;
             }
 
-            takeCommands (*plan);
+            takeTransport (*plan);
             takeLiveEvents (*plan, length, clock + done);
             expectAudio (*plan);
-            const auto startBeat = transport.beat;
-            auto counted = 0;
+            auto startBeat = transport.beat;
+            auto counted = 0, jumpedAt = 0;
 
             // A take ends as playback stops or jumps.
             if (recording != nullptr && brokeTake)
@@ -389,7 +612,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                 playSpan (*plan, part.data(), numOutputs, 0, counted);
                 transport.playing = true;
                 transport.chase = chase;
-                playCountIn (part.data(), numOutputs, counted);
+                findCountInClicks (*plan, counted);
                 transport.countIn.left -= counted;
             }
 
@@ -425,13 +648,18 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                         }
                     }
 
+                    // A jump fading out: as far as its fade's end, where it is taken.
+                    if (jump.pending)
+                        span = std::min (span, jump.left);
+
                     // At the loop's end, the notes sounding end on its last sample, and those at its start start again.
                     endsAtLoop = loopEnd > loopStart && transport.sample + span >= loopEnd;
                     playSpan (*plan, part.data(), numOutputs, offset, span);
                     endsAtLoop = false;
 
-                    // What comes in meanwhile, into the take, which starts here if it hasn't yet.
-                    if (recording != nullptr)
+                    // What comes in meanwhile, into the take, which starts here if it hasn't yet: not while a jump fades
+                    // out, which ends the take as it was asked for (a take given after it starts where it lands).
+                    if (recording != nullptr && ! jump.pending)
                         recording->record (partInputs.data(), numPartInputs, offset, span, transport.sample, clock + done + offset);
 
                     transport.sample += span;
@@ -442,21 +670,45 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
                         transport.sample = loopStart;
                         transport.chase = true;
                     }
+
+                    // The jump, its fade out done; the take ends with it. The live notes taken in the next part, from
+                    // this one's start, are where the song is from here.
+                    if (jump.pending && (jump.left -= span) <= 0)
+                    {
+                        takeJump (*plan, jump.beat, jump.count);
+
+                        if (recording != nullptr)
+                            recording->end();
+
+                        brokeTake = false;
+                        jumpedAt = offset;
+                        startBeat = transport.beat;
+                        lastPart.sample = transport.sample - offset;
+                    }
                 }
 
                 transport.beat = plan->tempo.toBeats ((double) transport.sample);
             }
 
-            // Where this part started, and when: the block's start on its smoothed clock and the samples before the part.
+            // Where this part started, and when: the block's start on its smoothed clock and the samples before the part;
+            // or after a jump taken in it, where it landed and when.
             const auto beatsPerSecond =
                 transport.playing && transport.countIn.left == 0 ? sampleRate / plan->tempo.getSamplesPerQuarterNote (startBeat) : 0.0;
-            publishPlayhead (startBeat, beatsPerSecond, startMilliseconds + done * 1000.0 / sampleRate, length * 1000.0 / sampleRate);
+            publishPlayhead (startBeat, beatsPerSecond, startMilliseconds + (done + jumpedAt) * 1000.0 / sampleRate,
+                             (length - jumpedAt) * 1000.0 / sampleRate);
         }
         else
         {
             transport.plan = nullptr; // freed once replaced: never compared with the next
+
+            // No plan (a render has the song's plug-ins, or a plan for the device's new rate is still being built): live
+            // notes don't wait to sound as one burst when one comes, but what lets go does; and the transport is taken
+            // as last asked when one comes.
+            dropLiveEvents();
         }
 
+        // The clicks that start in it, or ring on into it.
+        playClicks (part.data(), numOutputs, length);
         done += length;
     }
 
@@ -499,6 +751,13 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
         // the two that is heard.
         auto& master = *plan.strips.back().state;
 
+        // Around a jump while playing, what goes out fades out and in (the meters before it don't see it).
+        if (jump.pending || fadingIn > 0)
+        {
+            float* sides[] = { master.buffer.getWritePointer (0, offset), master.buffer.getWritePointer (1, offset) };
+            fadeMaster (sides, numSamples);
+        }
+
         // The last line of defence: a stretch with a sample that is no finite number (a device gone wrong, a plug-in's bad
         // output that nothing before caught) goes out as silence, rather than to the audio device, and to the loudness
         // meter, whose filters would keep it.
@@ -511,18 +770,39 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
 
         const float* out[] = { master.buffer.getReadPointer (0, offset), master.buffer.getReadPointer (1, offset) };
 
+        // One output alone (a mono device, or one channel chosen in the settings) plays both sides, each at half, rather
+        // than the left alone.
+        const auto mono = numOutputs == 1 && outputs[0] != nullptr;
+
         if (plan.comparison.has_value() && numOutputs > 0)
         {
             float* heard[] = { outputs[0] != nullptr ? outputs[0] + offset : nullptr,
                                numOutputs > 1 && outputs[1] != nullptr ? outputs[1] + offset : nullptr };
+
+            if (mono)
+            {
+                monoSides.clear (0, numSamples);
+                heard[0] = monoSides.getWritePointer (0);
+                heard[1] = monoSides.getWritePointer (1);
+            }
+
             const auto& comparison = *plan.comparison;
-            comparison.state->process (comparison.bounce, plan.tempo, comparison.tempo, out, heard, std::min (numOutputs, 2),
+            comparison.state->process (comparison.bounce, plan.tempo, comparison.tempo, out, heard, mono ? 2 : std::min (numOutputs, 2),
                                        transport.sample, numSamples, transport.playing && transport.countIn.left == 0);
 
             // The version's bounce, a file's samples, the same.
             for (auto* side : heard)
                 if (side != nullptr && ! isFinite (side, numSamples))
                     juce::FloatVectorOperations::clear (side, numSamples);
+
+            if (mono)
+                for (const auto* side : heard)
+                    juce::FloatVectorOperations::addWithMultiply (outputs[0] + offset, side, 0.5f, numSamples);
+        }
+        else if (mono)
+        {
+            for (const auto* side : out)
+                juce::FloatVectorOperations::addWithMultiply (outputs[0] + offset, side, 0.5f, numSamples);
         }
         else
         {
@@ -539,8 +819,12 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
     transport.chase = false;
     transport.flush = false;
 
+    // The audio clips' fade out after a stop moves on.
+    if (! transport.playing && stopFade.sample < stopFade.end)
+        stopFade.sample = std::min (stopFade.end, stopFade.sample + numSamples);
+
     if (plan.metronome && transport.playing)
-        playClicks (plan, outputs, numOutputs, offset, numSamples);
+        findClicks (plan, offset, numSamples);
 }
 
 void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
@@ -566,6 +850,27 @@ void Engine::playStrips (const Plan& plan, int offset, int numSamples) noexcept
     span.gridSample = transport.playing ? transport.sample : clock + partStart + offset;
     span.pass = ++passes;
     span.flush = transport.flush;
+
+    // The audio clips: while the song plays, faded out before the loop's end, which cuts them (as much as half the loop);
+    // after a stop, for as long as they fade out from where it stopped.
+    if (transport.playing)
+    {
+        span.playsAudio = true;
+        span.audioSample = transport.sample;
+
+        if (plan.loop.has_value())
+        {
+            const auto loopStart = std::llround (plan.tempo.toSamples (plan.loop->start));
+            const auto loopEnd = std::llround (plan.tempo.toSamples (plan.loop->end));
+            span.cut = { loopEnd, (int) std::min<std::int64_t> (fadeLength, (loopEnd - loopStart) / 2) };
+        }
+    }
+    else if (stopFade.sample < stopFade.end)
+    {
+        span.playsAudio = true;
+        span.audioSample = stopFade.sample;
+        span.cut = { stopFade.end, fadeLength, true };
+    }
     findControlPoints (plan, span.gridSample, numSamples);
 
     // Each strip a task, in the plan's order, on the audio thread and the workers; each waits for what it takes in, done
@@ -930,9 +1235,10 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
             // buffer).
             const auto playAudio = [&]
             {
-                if (transport.playing)
+                if (span.playsAudio)
                     for (const auto& region : strip.audio)
-                        region.play (channels, transport.sample, numSamples, sampleRate, rendering || playingAsRender, state.scratch);
+                        region.play (channels, span.audioSample, numSamples, sampleRate, rendering || playingAsRender, state.scratch,
+                                     span.cut);
             };
 
             auto audioPlayed = false;
@@ -1233,9 +1539,9 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     }
 }
 
-void Engine::continueClick (float* const* outputs, int numOutputs, int offset, int from, int to) noexcept
+void Engine::continueClick (float* const* outputs, int numOutputs, int from, int to) noexcept
 {
-    // The click playing on, as far as a sample of the span.
+    // The click playing on, as far as a sample of the part.
     if (clicking == nullptr)
         return;
 
@@ -1244,7 +1550,7 @@ void Engine::continueClick (float* const* outputs, int numOutputs, int offset, i
 
     for (int channel = 0; channel < numOutputs; ++channel)
         if (outputs[channel] != nullptr)
-            juce::FloatVectorOperations::add (outputs[channel] + offset + from, samples, length);
+            juce::FloatVectorOperations::add (outputs[channel] + from, samples, length);
 
     clickPosition += length;
 
@@ -1252,13 +1558,47 @@ void Engine::continueClick (float* const* outputs, int numOutputs, int offset, i
         clicking = nullptr;
 }
 
-void Engine::playCountIn (float* const* outputs, int numOutputs, int numSamples) noexcept
+void Engine::addClickStart (const Plan& plan, int start, bool accent) noexcept
+{
+    // As late as the song's sound comes out of the master. A click past the 64 waiting (a delay of seconds at a fast tempo)
+    // is dropped.
+    if (numClickStarts < (int) clickStarts.size())
+        clickStarts[(size_t) ((firstClickStart + numClickStarts++) % (int) clickStarts.size())] = {
+            clock + partStart + start + getOutputLatency (plan), accent
+        };
+}
+
+void Engine::playClicks (float* const* outputs, int numOutputs, int numSamples) noexcept
+{
+    // Each click that starts in the part, the one sounding playing on until then (a click that should have started before
+    // starts at once).
+    const auto partClock = clock + partStart;
+    auto done = 0;
+
+    for (; numClickStarts > 0; --numClickStarts)
+    {
+        const auto& next = clickStarts[(size_t) firstClickStart];
+
+        if (next.clock >= partClock + numSamples)
+            break;
+
+        const auto start = (int) std::max<std::int64_t> (done, next.clock - partClock);
+        continueClick (outputs, numOutputs, done, start);
+        done = start;
+        clicking = next.accent ? &accentClick : &click;
+        clickPosition = 0;
+        firstClickStart = (firstClickStart + 1) % (int) clickStarts.size();
+    }
+
+    continueClick (outputs, numOutputs, done, numSamples);
+}
+
+void Engine::findCountInClicks (const Plan& plan, int numSamples) noexcept
 {
     // The time signature's beats in the bar before where the song starts, as long as a bar there at the tempo there, each
     // counted from the bar the playhead is in: each starts a click, a bar's first the accented one.
     const auto& countIn = transport.countIn;
     const auto from = (double) (countIn.length - countIn.left);
-    auto done = 0;
 
     // From the first beat after the sample before this stretch, as the song's clicks are (playClicks()).
     const auto earliest = countIn.firstBeat + std::max (0.0, from - 1.0) / countIn.samplesPerBeat;
@@ -1274,18 +1614,12 @@ void Engine::playCountIn (float* const* outputs, int numOutputs, int numSamples)
         if (at < 0.0)
             continue; // the stretch before played it
 
-        const auto start = (int) at;
-        continueClick (outputs, numOutputs, 0, done, start);
-        done = start;
         const auto inBar = (beat - countIn.barStart) / countIn.barLength;
-        clicking = std::abs (inBar - std::round (inBar)) < 1.0e-6 ? &accentClick : &click;
-        clickPosition = 0;
+        addClickStart (plan, (int) at, std::abs (inBar - std::round (inBar)) < 1.0e-6);
     }
-
-    continueClick (outputs, numOutputs, 0, done, numSamples);
 }
 
-void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept
+void Engine::findClicks (const Plan& plan, int offset, int numSamples) noexcept
 {
     // Each of the time signature's beats starts a click at the first sample at or after it, a bar's first the accented one.
     // A beat that falls between the sample before this stretch and its first is first heard on its first, so the beats are
@@ -1293,7 +1627,6 @@ void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs
     // ends there, leaves its click to this one.
     const auto from = (double) transport.sample;
     const auto to = from + numSamples;
-    auto done = 0;
 
     for (auto beat = plan.tempo.getBeatAtOrAfter (plan.tempo.toBeats (std::max (0.0, from - 1.0)));; beat = plan.tempo.getNextBeat (beat))
     {
@@ -1305,14 +1638,8 @@ void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs
         if (at < from)
             continue; // the stretch before played it
 
-        const auto start = (int) (at - from);
-        continueClick (outputs, numOutputs, offset, done, start);
-        done = start;
-        clicking = std::abs (plan.tempo.getBarStart (beat) - beat) < 1.0e-6 ? &accentClick : &click;
-        clickPosition = 0;
+        addClickStart (plan, offset + (int) (at - from), std::abs (plan.tempo.getBarStart (beat) - beat) < 1.0e-6);
     }
-
-    continueClick (outputs, numOutputs, offset, done, numSamples);
 }
 
 //==============================================================================

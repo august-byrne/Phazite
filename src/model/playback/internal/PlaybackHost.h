@@ -57,8 +57,12 @@ public:
     PlaybackSession* getPlayingSession() const noexcept;
 
     // Gives the engine no plan, and lets go of what it played once the audio thread can't be playing it (a render that
-    // plays the project's plug-ins has them alone then: PlaybackSession::lendToRender()).
-    void dropPlan() { letGoOfPlans(); }
+    // plays the project's plug-ins has them alone then: PlaybackSession::lendToRender(), which waits as long as a block
+    // takes); whether the audio thread let go of it.
+    bool dropPlan (bool waitAsLongAsItTakes = false) { return letGoOfPlans (waitAsLongAsItTakes); }
+
+    // Whether letting go of the plans waits, past half a second, for a block the audio thread is still in (for the tests).
+    bool isWaitingForAudioThread() const noexcept { return waitingForAudioThread.load(); }
 
     // Prepares the engine as a device would (the tests' devices, which aren't JUCE's, with so many inputs, whose sound comes in
     // so late), and gives it the playing session's song for that rate.
@@ -98,7 +102,8 @@ private:
     void prepareEngines (double sampleRate, int maximumBlockSize);
     std::vector<PlaybackSession*> sessions;
     std::atomic<bool> running { false }; // a device calls the engine from its own thread
-    void letGoOfPlans();
+    std::atomic<bool> waitingForAudioThread { false };
+    bool letGoOfPlans (bool waitAsLongAsItTakes = false);
     void forgetPlayed();
 
     std::atomic<int> numInputs { 0 }, inputLatency { 0 }, outputLatency { 0 };

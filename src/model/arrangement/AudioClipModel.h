@@ -24,6 +24,7 @@ enum class AudioState
 {
     ready,     // it plays
     preparing, // Phazite is rendering it stretched, pitched or reversed in the background: the clip is silent until then
+    failed,    // that render failed: the clip is silent until its file changes, or it is stretched otherwise
     missing    // its audio file can't be found
 };
 
@@ -69,8 +70,8 @@ std::optional<ClipID> getAudioClipToEdit (const ProjectContext&, BeatPosition);
 // The inspector's edits of clips, audio and MIDI, as its edits of notes (model/notes/NotesModel.h: changeNotes()): steps
 // of their own ("Move Clips", "Change Clip Length", "Change Clip Gain", "Change Clip Pitch"), unless a gesture is open,
 // whose one step they join. Changed by an amount, every clip changes by it: clips moved together as far as the earliest
-// can go (not before the song's start), each length a 64th note at least, and an audio clip's gain and pitch kept within
-// the editor's range; MIDI clips have neither. Set to a value, each length, gain and pitch becomes it, and the earliest
+// can go (not before the song's start), each length at least what a trim leaves (a 64th of a beat), and an audio clip's
+// gain and pitch kept within the editor's range; MIDI clips have neither. Set to a value, each length, gain and pitch becomes it, and the earliest
 // start moves to it, the others with it.
 enum class ClipProperty
 {
@@ -158,4 +159,7 @@ ClipRenderProgress getClipRenderProgress (const ProjectContext&);
 // The clips whose renders are being made or wait their turn, each with how far its render has come (0 to 1), as the
 // playlist shows them: silent until it is ready. None while nothing is being made.
 std::map<ClipID, double> getClipsBeingRendered (const ProjectContext&);
+
+// The clips whose renders failed (AudioState::failed), as the playlist shows them in place of a render's progress.
+std::vector<ClipID> getClipsWhoseRenderFailed (const ProjectContext&);
 } // namespace phazite

@@ -283,6 +283,12 @@ namespace
             valueFromTextFunction = [this] (const juce::String& text)
             {
                 typed = parse (text);
+
+                // A value typed equal to the field's (the lowest item's) changes no slider value, so JUCE's slider tells
+                // no one (Slider::setValue() sends only a change): set the items to it here.
+                if (typed.has_value() && juce::exactlyEqual (getNormalisableRange().snapToLegalValue (*typed), getValue()))
+                    set (*std::exchange (typed, std::nullopt));
+
                 return typed.value_or (getValue());
             };
 

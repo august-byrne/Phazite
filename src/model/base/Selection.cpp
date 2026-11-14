@@ -192,7 +192,12 @@ int Selection::getNumObjectsSelected() const
     if (auto* song = getSong(); song != nullptr && ! notes.empty())
         count += countNotesThere (song->getState(), noteClips, notes);
 
-    return count + (int) points.size();
+    if (auto* song = getSong())
+        for (const auto& point : points)
+            if (point.isAChildOf (song->getState()))
+                ++count;
+
+    return count;
 }
 
 std::vector<TrackID> Selection::getTracks() const
@@ -296,13 +301,15 @@ void Selection::selectNotes (const std::vector<NoteRef>& refs, bool addToSelecti
 }
 
 //==============================================================================
-void Selection::selectPoints (const ParameterRef& parameter, const std::vector<int>& indices)
+void Selection::selectPoints (const ParameterRef& parameter, const std::vector<juce::ValueTree>& pointStates)
 {
-    auto sorted = indices;
-    std::sort (sorted.begin(), sorted.end());
-    sorted.erase (std::unique (sorted.begin(), sorted.end()), sorted.end());
+    std::vector<juce::ValueTree> chosen;
 
-    if (! parameter.isValid() || sorted.empty())
+    for (const auto& point : pointStates)
+        if (point.isValid() && std::find (chosen.begin(), chosen.end(), point) == chosen.end())
+            chosen.push_back (point);
+
+    if (! parameter.isValid() || chosen.empty())
     {
         if (pointsParameter.isValid())
         {
@@ -314,13 +321,13 @@ void Selection::selectPoints (const ParameterRef& parameter, const std::vector<i
         return;
     }
 
-    if (parameter == pointsParameter && sorted == points && items.empty() && sections.empty() && notes.empty())
+    if (parameter == pointsParameter && chosen == points && items.empty() && sections.empty() && notes.empty())
         return;
 
     clearItems();
     notes.clear();
     pointsParameter = parameter;
-    points = std::move (sorted);
+    points = std::move (chosen);
     changed();
 }
 } // namespace phazite

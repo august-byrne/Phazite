@@ -3,7 +3,9 @@
 // all of it plays, its gain, pitch, reverse and following the song's tempo, each change one undo step; what the selection
 // asks the editor dock to show; Normalize; and the Reverse, Follow Tempo and Normalize commands for the selected clips.
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/AudioClipModel.h"
+#include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Selection.h"
@@ -444,4 +446,50 @@ TEST_CASE ("Reverse and Follow Tempo are commands for the selected audio clips")
     CHECK_FALSE (song.get().reversed);
     CHECK (registry.invoke ("clip.followTempo"));
     CHECK_FALSE (song.get().followsTempo);
+}
+
+TEST_CASE ("A slip keeps the part a clip plays inside its file, as long as it was, backwards or forwards")
+{
+    // Reversed, a slip cut the part at the file's start, so that it shrank, down to no length; forwards it ran past the
+    // file's end into silence (known bug 47).
+    Song song;
+    auto& context = song.context;
+    phazite::trimClipStart (context, song.audio, beat (1.0));
+    phazite::trimClipEnd (context, song.audio, beat (6.0)); // half a second in, for two and a half seconds
+    song.song->getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (*song.song);
+
+    const auto part = [&song] { return phazite::getFilePart (phazite::findClipState (*song.song, song.audio)); };
+    const auto slip = [&song, &context] (double beats)
+    {
+        const phazite::UndoStep step (*song.song, "Slip Clip");
+        phazite::slipClip (context, song.audio, phazite::getSlipOffset (context, song.audio), beat (20.0), beat (20.0 + beats));
+    };
+
+    const auto checkPart = [&part] (double start)
+    {
+        CHECK (part().start == doctest::Approx (start));
+        CHECK (part().end - part().start == doctest::Approx (2.5));
+    };
+
+    SUBCASE ("Forwards")
+    {
+        undo.check ("slipped far earlier", [&] { slip (-20.0); });
+        checkPart (1.5); // its end at the file's
+        undo.check ("slipped far later", [&] { slip (20.0); });
+        checkPart (0.0);
+    }
+
+    SUBCASE ("Reversed")
+    {
+        undo.check ("reversed", [&] { phazite::setClipReversed (context, song.audio, true); });
+        undo.check ("slipped far earlier", [&] { slip (-20.0); });
+        checkPart (0.0); // backwards, what plays after its part is the file's start
+        undo.check ("slipped far later", [&] { slip (20.0); });
+        checkPart (1.5);
+    }
+
+    CHECK (song.get().clip.range.getStart().inBeats() == doctest::Approx (1.0));
+    CHECK (song.get().clip.range.getEnd().inBeats() == doctest::Approx (6.0));
+    undo.walkBackAndForth();
 }

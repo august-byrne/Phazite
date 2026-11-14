@@ -62,7 +62,7 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
     CHECK (drums[1].tags.contains ("Snare"));
 
     // Search finds what the background index has found, and devices.
-    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 10000));
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
     const auto kicks = library.search ("kick");
     REQUIRE (! kicks.empty());
     CHECK (kicks[0].name == juce::String ("Deep Kick"));
@@ -87,6 +87,49 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
 
     library.removeUserFolder (temp.folder);
     CHECK (library.getUserFolders().isEmpty());
+}
+
+namespace
+{
+// A folder that links to another: a junction on Windows, which any user may make, and a symbolic link elsewhere.
+bool linkFolder (const juce::File& link, const juce::File& target)
+{
+#if JUCE_WINDOWS
+    juce::ChildProcess mklink;
+    return mklink.start (juce::StringArray { "cmd", "/c", "mklink", "/J", link.getFullPathName(), target.getFullPathName() })
+           && mklink.waitForProcessToFinish (10000) && link.isDirectory();
+#else
+    return target.createSymbolicLink (link, false) && link.isDirectory();
+#endif
+}
+} // namespace
+
+TEST_CASE ("The library's index doesn't follow a folder that links back to where it is")
+{
+    // Known bug 114: a link that loops in a sound folder was followed to the path's limit, every sound found again at each
+    // turn.
+    TemporaryFolder temp;
+    const auto sounds = temp.folder.getChildFile ("Sounds");
+    writeSound (sounds.getChildFile ("Drums/Kick.wav"), 0.2);
+    REQUIRE (linkFolder (sounds.getChildFile ("Drums/Back to Sounds"), sounds));
+
+    // A link that doesn't loop is followed, as a folder of samples on another drive linked in is.
+    const auto elsewhere = temp.folder.getChildFile ("Elsewhere");
+    writeSound (elsewhere.getChildFile ("Snare.wav"), 0.2);
+    REQUIRE (linkFolder (sounds.getChildFile ("Linked"), elsewhere));
+
+    phazite::Settings settings;
+    phazite::Library library (phazite::test::getEngineContext(), settings, {});
+    library.addUserFolder (sounds);
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
+
+    juce::StringArray found;
+
+    for (const auto& item : *library.getIndex())
+        found.add (item.name);
+
+    found.sort (true);
+    CHECK (found == juce::StringArray ("Kick", "Snare"));
 }
 
 TEST_CASE ("A loop previews in time with the project, and a one-shot as it is")

@@ -8,7 +8,7 @@
 //   a frozen device, by undo too) unfreezes it, so that what plays is always what is shown. Freezing and unfreezing
 //   aren't undo steps (a track keeps one frozen file, which a later freeze replaces), as mute and solo aren't.
 // - Bounce in Place renders a track through its instrument and devices, before its fader, onto a new audio track under it,
-//   in the project's Audio folder, and mutes and collapses the original: one undo step, "Bounce in Place".
+//   in the project's Audio folder, and mutes the original (shown as it was): one undo step, "Bounce in Place".
 // - Consolidate, as Ableton Live's: the clips selected on each track, from the first one's start to the last one's end, or
 //   what lies in the time range selected across tracks, become one clip on each track: a MIDI clip of the notes they play,
 //   and an audio clip of a file rendered from what the audio clips play there, before the track's devices (with their gain,

@@ -3,6 +3,7 @@
 // selected (a track, clips, notes, automation points, a section), and the song's with nothing selected; changed from its
 // rows, each one undo step, several items at once.
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -252,6 +253,39 @@ TEST_CASE ("Selected notes show the range of their values, which a step changes 
     phazite::changeNotes (screen.context, { c4, e4 }, phazite::NoteProperty::pitch, 100.0);
     CHECK (noteOf (e4).pitch == 127);
     CHECK (noteOf (c4).pitch == 123);
+}
+
+TEST_CASE ("Typing the lowest of several items' values sets every item to it, as any value typed does")
+{
+    // The field's value is the lowest item's, and JUCE's slider skips a value typed equal to its own: with velocities 64 and
+    // 100, typing 64 did nothing (known bug 57).
+    Screen screen;
+    using phazite::BeatDuration;
+    const auto clip = phazite::addMidiClipAt (screen.context, screen.track (0), BeatPosition());
+    const auto c4 = phazite::addNote (screen.context, clip, 60, BeatPosition(), BeatDuration::fromBeats (1.0), 64);
+    const auto e4 = phazite::addNote (screen.context, clip, 64, BeatPosition::fromBeats (1.0), BeatDuration::fromBeats (0.5), 100);
+    screen.song->getUndoManager().clearUndoHistory();
+    auto& selection = screen.context.getSongSelection();
+    selection.setNoteClips ({ clip });
+    selection.selectNotes ({ c4, e4 });
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (screen.shows ("64 to 100"));
+    const auto noteOf = [&screen] (phazite::NoteRef ref) { return *phazite::getNote (screen.context, ref); };
+    phazite::test::UndoCheck undo (*screen.song);
+
+    undo.check ("the lowest velocity typed", [&] { type (findField (screen, "Velocity"), "64"); });
+    CHECK (noteOf (c4).velocity == 64);
+    CHECK (noteOf (e4).velocity == 64);
+    CHECK (phazite::describeUndo (screen.song.get()) == juce::String ("Undo Change Velocity"));
+
+    undo.check ("the shortest length typed", [&] { type (findField (screen, "Length"), "1/8"); });
+    CHECK (noteOf (c4).length.inBeats() == doctest::Approx (0.5));
+
+    // And a step after it is a step, not a value typed again.
+    undo.check ("a step up", [&] { step (findField (screen, "Velocity"), true); });
+    CHECK (noteOf (c4).velocity == 65);
+    CHECK (noteOf (e4).velocity == 65);
+    undo.walkBackAndForth();
 }
 
 TEST_CASE ("Selected clips' starts, lengths, gain and pitch change together, and selected automation points' too")

@@ -5,8 +5,10 @@
 # .github/problem-matchers turn compiler messages, failed tests and sanitizer reports into annotations on the run,
 # which the public API serves without signing in, unlike the logs. Builds keep going after
 # a failure (ninja -k 0) to report every problem at once. Every compile goes through ccache, whose cache each preset
-# keeps from its last run on the branch (or on main), so that a build compiles only what changed since. Actions are
-# pinned to full commit hashes, so a moved tag can't change what runs.
+# keeps from its last run on the branch (or on main), so that a build compiles only what changed since; without
+# precompiled headers (PHAZITE_PRECOMPILED_HEADERS=OFF), which ccache documents no support for with MSVC and serves from
+# GCC only with its checks loosened, and so that every push shows each file compiles with what it includes itself. Actions
+# are pinned to full commit hashes, so a moved tag can't change what runs.
 name: CI
 
 on:
@@ -52,6 +54,23 @@ jobs:
         run: |
           dash -n tools/check-architecture.sh
           AWK=mawk dash tools/check-architecture.sh --ci
+
+      # A release is the tag v<version>, where <version> is what CMakeLists.txt's project() gives the app, its installer and
+      # the update file, which names the installer by its address in the release v<version> (cmake/WriteUpdateFile.cmake):
+      # a tag that says another version would publish an update that points nowhere, so it fails here.
+      - name: The tag and the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^project(Phazite VERSION \([0-9][0-9.]*\)[ )].*/\1/p' CMakeLists.txt)
+          if [ -z "$version" ]; then
+            echo "::error file=CMakeLists.txt::No project(Phazite VERSION ...) line found."
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error file=CMakeLists.txt::The tag $GITHUB_REF_NAME isn't v$version, the version CMakeLists.txt builds."
+            exit 1
+          fi
+          echo "The tag $GITHUB_REF_NAME is the version CMakeLists.txt builds."
 
       # A reader written from docs/versions-format.md alone, with nothing of Phazite's, lists the test vectors' pack as
       # Phazite's own reader does (tests/GoldenFormatTests.cpp): the specification stays true to what Phazite writes.
@@ -100,7 +119,7 @@ jobs:
           & "$env:RUNNER_TEMP\ccache-4.14.2-windows-x86_64\ccache.exe" --dir "$env:RUNNER_TEMP\ccache" --zero-stats
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_LINK_WARNING_AS_ERROR=ON
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_LINK_WARNING_AS_ERROR=ON -DPHAZITE_PRECOMPILED_HEADERS=OFF
 
       - name: Build
         run: |
@@ -179,7 +198,7 @@ jobs:
               libfontconfig-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DPHAZITE_PRECOMPILED_HEADERS=OFF
 
       - name: Build
         run: |
@@ -219,3 +238,81 @@ jobs:
       - name: Sanitizer reports
         if: ${{ !cancelled() && (matrix.preset == 'linux-asan' || matrix.preset == 'linux-tsan') }}
         run: sh tools/ci-sanitizer-reports.sh "build/${{ matrix.preset }}/Testing/Temporary/LastTest.log"
+
+  # Clang, the compiler macOS will build with, and its static analysis: the linux-clang preset, then clang-tidy with the
+  # checks .clang-tidy lists over Phazite's own files (tools/clang-tidy.sh; every finding fails the job), then the tests.
+  clang:
+    name: Linux (linux-clang, clang-tidy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150 # the build without the compiler cache, clang-tidy over every file, and the tests
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DEPEND: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-linux-clang-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-linux-clang-
+
+      - name: Compiler cache (ccache 4.14.2)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/ccache.tar.xz" https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-linux-x86_64-glibc.tar.xz
+          echo "bd1313f5316f594443dcb4113a4191c666ac6450e0cf016ff8cb8b080f46c160  $RUNNER_TEMP/ccache.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/ccache.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-glibc" >> "$GITHUB_PATH"
+          echo "CCACHE_DIR=$RUNNER_TEMP/ccache" >> "$GITHUB_ENV"
+          echo "PHAZITE_CCACHE_START=$(date +%s)" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/ccache-4.14.2-linux-x86_64-glibc/ccache" --dir "$RUNNER_TEMP/ccache" --zero-stats
+
+      # Clang 18 and its clang-tidy are Ubuntu 24.04's (and the runner image's); clang and clang++ are 18 there.
+      - name: Install JUCE's Linux build dependencies, Clang and clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libfreetype-dev \
+              libfontconfig-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+              clang-18 clang-tidy-18
+          clang --version
+          clang-tidy-18 --version
+
+      # Clang's warnings show as annotations without failing the build: JUCE's list for Clang is far longer than GCC's (every
+      # implicit conversion, every function without a declaration before it), and Phazite's code has never been held to it.
+      # GCC's jobs above hold it to theirs.
+      - name: Configure
+        run: cmake --preset linux-clang
+
+      - name: Build
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          cmake --build --preset linux-clang -- -k 0
+
+      - name: Compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: |
+          ccache --evict-older-than "$(( $(date +%s) - PHAZITE_CCACHE_START ))s"
+          ccache --show-stats
+
+      - name: Save the compiler cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-linux-clang-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: clang-tidy
+        if: ${{ !cancelled() }}
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          CLANG_TIDY=clang-tidy-18 sh tools/clang-tidy.sh build/linux-clang
+
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: |
+          echo "::add-matcher::.github/problem-matchers/tests.json"
+          ctest --preset linux-clang

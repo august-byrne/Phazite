@@ -2,11 +2,13 @@
 // DAWproject (model/project/internal/DawProject.h; docs/design/versions.md: DAWproject with versions, steps D1 and D2): a song
 // written as one, in DAWproject's names (Project.xsd, version 1.0), what another DAW can't play bounced beside it, and the
 // zip, from the song as it is and from an old version.
+#include "SongCheck.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "app/ProjectSession.h"
 #include "devices/eq/Equalizer.h"
 #include "devices/synth/Synth.h"
+#include "model/arrangement/internal/AudioClips.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Sections.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -386,7 +388,7 @@ TEST_CASE ("A DAWproject opens as a new song: its tracks with their notes, audio
     CHECK (phazite::getTimeSignatureChanges (imported).front().signature.numerator == 3);
     REQUIRE (phazite::getSections (imported).size() == 1);
     CHECK (phazite::getSections (imported).front().name == "Intro");
-    CHECK (said.contains ("sends"));
+    CHECK (said.contains ("Bass: its sends"));
 }
 
 TEST_CASE ("A DAWproject carries the tempo's changes both ways: steps held, ramps straight, and bent ones in straight pieces")
@@ -478,11 +480,14 @@ TEST_CASE ("Import DAWproject opens one from elsewhere as a new untitled project
     phazite::Settings settings;
     phazite::RecentProjects recent (settings);
     phazite::ProjectSession session (getEngineContext(), recent, folder.folder, folder.folder.getChildFile ("Unsaved"));
+    juce::StringArray notices; // what the import left out, which without a listener would be a dialog left open
+    session.onNotice = [&notices] (const juce::String& title, const juce::String& message) { notices.add (title + ": " + message); };
     session.importDawProject (file);
     dispatchPendingMessages();
 
     REQUIRE (session.getProject() != nullptr);
     CHECK (session.isUntitled());
+    CHECK (notices.size() <= 1);
     juce::StringArray names;
 
     for (const auto track : phazite::getTrackIDs (session.getProject()->getSong()))
@@ -558,4 +563,330 @@ TEST_CASE ("Changed in another DAW and imported back: a branch from its version 
     REQUIRE (lines.size() == 2);
     CHECK_FALSE (lines[0].clashes);
     CHECK_FALSE (lines[1].clashes);
+}
+
+//==============================================================================
+// DAWprojects as other DAWs write them. No file that another DAW wrote is in the repository (none may come from a product),
+// so these are written by hand, small, from the format's public specification (github.com/bitwig/dawproject: Project.xsd,
+// and its README's example, which Bitwig Studio 5.0 wrote) and shaped as the programs that write them do as far as that says:
+// their elements in the same order, their units, their ids ("id0" on), six decimals, and what they add that Phazite doesn't
+// read. Each audio file in them is a sound of the tests' own. The real thing is a hand check (docs/hand-checks.md).
+namespace
+{
+// A DAWproject's zip: its project.xml, and each audio file under its path there.
+juce::File writeArchive (const juce::File& file, const juce::String& projectXml,
+                         const std::vector<std::pair<juce::String, juce::File>>& audio)
+{
+    juce::ZipFile::Builder zip;
+    zip.addEntry (std::make_unique<juce::MemoryInputStream> (projectXml.toRawUTF8(), projectXml.getNumBytesAsUTF8(), true), 9,
+                  "project.xml", juce::Time::getCurrentTime());
+    const juce::String metadata ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<MetaData/>\n");
+    zip.addEntry (std::make_unique<juce::MemoryInputStream> (metadata.toRawUTF8(), metadata.getNumBytesAsUTF8(), true), 9, "metadata.xml",
+                  juce::Time::getCurrentTime());
+
+    for (const auto& [path, source] : audio)
+        zip.addFile (source, 0, path);
+
+    juce::FileOutputStream out (file);
+    REQUIRE (out.openedOk());
+    REQUIRE (zip.writeToStream (out, nullptr));
+    return file;
+}
+
+// Shaped as Bitwig Studio 5 writes one, after its README's example: a track on a CLAP instrument with a clip of notes, and a
+// group of a drum loop played twice, each audio clip a timeline of its own (Clips in a Clip) whose event stretches the loop,
+// recorded at 170 BPM, to the project's 149 by two warps (Warps, in seconds of the file against beats).
+juce::String getBitwigProject (double loopSeconds)
+{
+    const auto seconds = juce::String (loopSeconds, 6);
+    juce::String clips;
+
+    for (const auto* time : { "0.0", "8.0" })
+        clips << "            <Clip time=\"" << time
+              << "\" duration=\"8.0\" playStart=\"0.0\" loopStart=\"0.0\" loopEnd=\"8.0\" "
+                 "fadeTimeUnit=\"beats\" fadeInTime=\"0.0\" fadeOutTime=\"0.0\" name=\"Drumfunk3 170bpm\">\n"
+                 "              <Clips id=\"id100"
+              << time[0]
+              << "\">\n"
+                 "                <Clip time=\"0.0\" duration=\"8.0\" contentTimeUnit=\"beats\" playStart=\"0.0\" fadeTimeUnit=\"beats\" "
+                 "fadeInTime=\"0.0\" fadeOutTime=\"0.0\">\n"
+                 "                  <Warps contentTimeUnit=\"seconds\" timeUnit=\"beats\" id=\"id200"
+              << time[0] << "\">\n"
+              << "                    <Audio algorithm=\"stretch\" channels=\"1\" duration=\"" << seconds
+              << "\" sampleRate=\"44100\" id=\"id300" << time[0]
+              << "\">\n"
+                 "                      <File path=\"audio/Drumfunk3 170bpm.wav\"/>\n"
+                 "                    </Audio>\n"
+                 "                    <Warp time=\"0.0\" contentTime=\"0.0\"/>\n"
+                 "                    <Warp time=\"8.0\" contentTime=\""
+              << seconds
+              << "\"/>\n"
+                 "                  </Warps>\n"
+                 "                </Clip>\n"
+                 "              </Clips>\n"
+                 "            </Clip>\n";
+
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+           "<Project version=\"1.0\">\n"
+           "  <Application name=\"Bitwig Studio\" version=\"5.0\"/>\n"
+           "  <Transport>\n"
+           "    <Tempo max=\"666.000000\" min=\"20.000000\" unit=\"bpm\" value=\"149.000000\" id=\"id0\" name=\"Tempo\"/>\n"
+           "    <TimeSignature denominator=\"4\" numerator=\"4\" id=\"id1\"/>\n"
+           "  </Transport>\n"
+           "  <Structure>\n"
+           "    <Track contentType=\"notes\" loaded=\"true\" id=\"id2\" name=\"Bass\" color=\"#a2eabf\">\n"
+           "      <Channel audioChannels=\"2\" destination=\"id15\" role=\"regular\" solo=\"false\" id=\"id3\">\n"
+           "        <Devices>\n"
+           "          <ClapPlugin deviceID=\"org.surge-synth-team.surge-xt\" deviceName=\"Surge XT\" deviceRole=\"instrument\" "
+           "loaded=\"true\" id=\"id7\" name=\"Surge XT\">\n"
+           "            <Parameters/>\n"
+           "            <Enabled value=\"true\" id=\"id8\" name=\"On/Off\"/>\n"
+           "            <State path=\"plugins/d19b1f6e-bbb6-42fe-a6c9-54b41d97a05d.clap-preset\"/>\n"
+           "          </ClapPlugin>\n"
+           "        </Devices>\n"
+           "        <Mute value=\"false\" id=\"id6\" name=\"Mute\"/>\n"
+           "        <Pan max=\"1.000000\" min=\"0.000000\" unit=\"normalized\" value=\"0.500000\" id=\"id5\" name=\"Pan\"/>\n"
+           "        <Volume max=\"2.000000\" min=\"0.000000\" unit=\"linear\" value=\"0.659140\" id=\"id4\" name=\"Volume\"/>\n"
+           "      </Channel>\n"
+           "    </Track>\n"
+           "    <Track contentType=\"tracks\" loaded=\"true\" id=\"id40\" name=\"Drums\" color=\"#b53bba\">\n"
+           "      <Channel audioChannels=\"2\" destination=\"id15\" role=\"submix\" solo=\"false\" id=\"id41\">\n"
+           "        <Mute value=\"false\" id=\"id44\" name=\"Mute\"/>\n"
+           "        <Pan max=\"1.000000\" min=\"0.000000\" unit=\"normalized\" value=\"0.500000\" id=\"id43\" name=\"Pan\"/>\n"
+           "        <Volume max=\"2.000000\" min=\"0.000000\" unit=\"linear\" value=\"1.000000\" id=\"id42\" name=\"Volume\"/>\n"
+           "      </Channel>\n"
+           "      <Track contentType=\"audio\" loaded=\"true\" id=\"id9\" name=\"Drumloop\" color=\"#b53bba\">\n"
+           "        <Channel audioChannels=\"2\" destination=\"id41\" role=\"regular\" solo=\"false\" id=\"id10\">\n"
+           "          <Mute value=\"false\" id=\"id13\" name=\"Mute\"/>\n"
+           "          <Pan max=\"1.000000\" min=\"0.000000\" unit=\"normalized\" value=\"0.500000\" id=\"id12\" name=\"Pan\"/>\n"
+           "          <Volume max=\"2.000000\" min=\"0.000000\" unit=\"linear\" value=\"0.177125\" id=\"id11\" name=\"Volume\"/>\n"
+           "        </Channel>\n"
+           "      </Track>\n"
+           "    </Track>\n"
+           "    <Track contentType=\"audio notes\" loaded=\"true\" id=\"id14\" name=\"Master\">\n"
+           "      <Channel audioChannels=\"2\" role=\"master\" solo=\"false\" id=\"id15\">\n"
+           "        <Mute value=\"false\" id=\"id18\" name=\"Mute\"/>\n"
+           "        <Pan max=\"1.000000\" min=\"0.000000\" unit=\"normalized\" value=\"0.500000\" id=\"id17\" name=\"Pan\"/>\n"
+           "        <Volume max=\"2.000000\" min=\"0.000000\" unit=\"linear\" value=\"1.000000\" id=\"id16\" name=\"Volume\"/>\n"
+           "      </Channel>\n"
+           "    </Track>\n"
+           "  </Structure>\n"
+           "  <Arrangement id=\"id19\">\n"
+           "    <Lanes timeUnit=\"beats\" id=\"id20\">\n"
+           "      <Lanes track=\"id2\" id=\"id21\">\n"
+           "        <Clips id=\"id22\">\n"
+           "          <Clip time=\"0.0\" duration=\"8.0\" playStart=\"0.0\">\n"
+           "            <Notes id=\"id23\">\n"
+           "              <Note time=\"0.000000\" duration=\"0.250000\" channel=\"0\" key=\"65\" vel=\"0.787402\" rel=\"0.787402\"/>\n"
+           "              <Note time=\"1.500000\" duration=\"2.500000\" channel=\"0\" key=\"53\" vel=\"0.787402\" rel=\"0.787402\"/>\n"
+           "            </Notes>\n"
+           "          </Clip>\n"
+           "        </Clips>\n"
+           "      </Lanes>\n"
+           "      <Lanes track=\"id9\" id=\"id24\">\n"
+           "        <Clips id=\"id25\">\n"
+           + clips
+           + "        </Clips>\n"
+             "      </Lanes>\n"
+             "      <Lanes track=\"id14\" id=\"id29\">\n"
+             "        <Clips id=\"id30\"/>\n"
+             "      </Lanes>\n"
+             "    </Lanes>\n"
+             "  </Arrangement>\n"
+             "  <Scenes/>\n"
+             "</Project>\n";
+}
+
+// Shaped as Studio One 6.5 writes one, as far as the specification says: an audio track whose clips hold their audio
+// directly, in seconds, the same recording played by three of them; a VST3 effect on it, a send to an effect channel, and
+// its volume's automation in its lane.
+juce::String getStudioOneProject()
+{
+    juce::String clips;
+
+    for (const auto* time : { "0.000000", "4.000000", "8.000000" })
+        clips << "          <Clip time=\"" << time << "\" duration=\"4.000000\" playStart=\"0.000000\" contentTimeUnit=\"seconds\" "
+              << "fadeTimeUnit=\"seconds\" fadeInTime=\"0.010000\" fadeOutTime=\"0.010000\" name=\"Vox\">\n"
+              << "            <Audio algorithm=\"\" channels=\"1\" duration=\"2.000000\" sampleRate=\"44100\" id=\"id50" << time[0]
+              << "\">\n"
+                 "              <File path=\"Audio/Vox.wav\"/>\n"
+                 "            </Audio>\n"
+                 "          </Clip>\n";
+
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+           "<Project version=\"1.0\">\n"
+           "  <Application name=\"Studio One\" version=\"6.5.2\"/>\n"
+           "  <Transport>\n"
+           "    <Tempo unit=\"bpm\" value=\"120.000000\" id=\"id0\" name=\"Tempo\"/>\n"
+           "    <TimeSignature numerator=\"4\" denominator=\"4\" id=\"id1\"/>\n"
+           "  </Transport>\n"
+           "  <Structure>\n"
+           "    <Track contentType=\"audio\" loaded=\"true\" id=\"id2\" name=\"Vocals\" color=\"#e0533f\">\n"
+           "      <Channel audioChannels=\"1\" destination=\"id30\" role=\"regular\" solo=\"false\" id=\"id3\">\n"
+           "        <Devices>\n"
+           "          <Vst3Plugin deviceID=\"72C4DB717A4D459AB97E51745D84B39D\" deviceName=\"Pro-Q 3\" deviceRole=\"audioFX\" "
+           "loaded=\"true\" id=\"id8\" name=\"Pro-Q 3\">\n"
+           "            <Enabled value=\"true\" id=\"id9\" name=\"On/Off\"/>\n"
+           "            <State path=\"plugins/Pro-Q 3.vstpreset\"/>\n"
+           "          </Vst3Plugin>\n"
+           "        </Devices>\n"
+           "        <Mute value=\"false\" id=\"id4\" name=\"Mute\"/>\n"
+           "        <Pan unit=\"normalized\" value=\"0.500000\" min=\"0.000000\" max=\"1.000000\" id=\"id5\" name=\"Pan\"/>\n"
+           "        <Sends>\n"
+           "          <Send destination=\"id20\" type=\"post\" id=\"id10\">\n"
+           "            <Volume unit=\"linear\" value=\"0.500000\" min=\"0.000000\" max=\"2.000000\" id=\"id11\" name=\"Send\"/>\n"
+           "          </Send>\n"
+           "        </Sends>\n"
+           "        <Volume unit=\"linear\" value=\"0.800000\" min=\"0.000000\" max=\"2.000000\" id=\"id6\" name=\"Volume\"/>\n"
+           "      </Channel>\n"
+           "    </Track>\n"
+           "    <Track contentType=\"audio\" loaded=\"true\" id=\"id19\" name=\"Reverb\" color=\"#3f8fe0\">\n"
+           "      <Channel audioChannels=\"2\" destination=\"id30\" role=\"effect\" solo=\"false\" id=\"id20\">\n"
+           "        <Devices>\n"
+           "          <BuiltinDevice deviceName=\"Room Reverb\" deviceRole=\"audioFX\" loaded=\"true\" id=\"id21\" name=\"Room Reverb\">\n"
+           "            <Enabled value=\"true\" id=\"id22\" name=\"On/Off\"/>\n"
+           "          </BuiltinDevice>\n"
+           "        </Devices>\n"
+           "        <Mute value=\"false\" id=\"id23\" name=\"Mute\"/>\n"
+           "        <Pan unit=\"normalized\" value=\"0.500000\" min=\"0.000000\" max=\"1.000000\" id=\"id24\" name=\"Pan\"/>\n"
+           "        <Volume unit=\"linear\" value=\"1.000000\" min=\"0.000000\" max=\"2.000000\" id=\"id25\" name=\"Volume\"/>\n"
+           "      </Channel>\n"
+           "    </Track>\n"
+           "    <Track contentType=\"audio notes\" loaded=\"true\" id=\"id29\" name=\"Main\">\n"
+           "      <Channel audioChannels=\"2\" role=\"master\" solo=\"false\" id=\"id30\">\n"
+           "        <Mute value=\"false\" id=\"id31\" name=\"Mute\"/>\n"
+           "        <Pan unit=\"normalized\" value=\"0.500000\" min=\"0.000000\" max=\"1.000000\" id=\"id32\" name=\"Pan\"/>\n"
+           "        <Volume unit=\"linear\" value=\"1.000000\" min=\"0.000000\" max=\"2.000000\" id=\"id33\" name=\"Volume\"/>\n"
+           "      </Channel>\n"
+           "    </Track>\n"
+           "  </Structure>\n"
+           "  <Arrangement id=\"id40\">\n"
+           "    <Lanes timeUnit=\"beats\" id=\"id41\">\n"
+           "      <Lanes track=\"id2\" id=\"id42\">\n"
+           "        <Clips id=\"id43\">\n"
+           + clips
+           + "        </Clips>\n"
+             "        <Points unit=\"linear\" id=\"id44\">\n"
+             "          <Target parameter=\"id6\"/>\n"
+             "          <RealPoint time=\"0.000000\" value=\"0.800000\" interpolation=\"linear\"/>\n"
+             "          <RealPoint time=\"8.000000\" value=\"0.400000\" interpolation=\"linear\"/>\n"
+             "        </Points>\n"
+             "      </Lanes>\n"
+             "    </Lanes>\n"
+             "  </Arrangement>\n"
+             "</Project>\n";
+}
+
+juce::StringArray getAudioFiles (const phazite::Song& song)
+{
+    juce::StringArray names;
+
+    for (const auto& file : song.getFile().getSiblingFile ("Audio").findChildFiles (juce::File::findFiles, true))
+        names.add (file.getFileName());
+
+    names.sort (true);
+    return names;
+}
+
+std::vector<juce::ValueTree> getClipStates (const phazite::Song& song, phazite::TrackID track)
+{
+    std::vector<juce::ValueTree> clips;
+
+    for (const auto& child : phazite::findTrackState (song, track))
+        if (child.hasType (phazite::schema::CLIP))
+            clips.push_back (child);
+
+    return clips;
+}
+
+phazite::TrackID findTrack (const phazite::Song& song, const juce::String& name)
+{
+    for (const auto track : phazite::getTrackIDs (song))
+        if (phazite::getTrackName (song, track) == name)
+            return track;
+
+    return {};
+}
+} // namespace
+
+TEST_CASE ("A DAWproject shaped as Bitwig Studio writes one: notes, an audio clip in a clip stretched by its warps, a group")
+{
+    TemporaryFolder folder;
+    const auto loopSeconds = 8.0 * 60.0 / 170.0; // two bars at 170 BPM
+    const auto loop = writeSound (folder.folder.getChildFile ("Loop.wav"), loopSeconds);
+    const auto file = writeArchive (folder.folder.getChildFile ("Bitwig.dawproject"), getBitwigProject (loopSeconds),
+                                    { { "audio/Drumfunk3 170bpm.wav", loop } });
+
+    const auto read = phazite::readDawProject (file);
+    REQUIRE (read.project != nullptr);
+    TestSong into;
+    auto& song = *phazite::findSong (into.context);
+    const auto said = phazite::takeDawProject (song, read);
+    INFO (said.joinIntoString ("\n").toStdString());
+    phazite::test::checkSong (song);
+
+    // Its tracks, the group's in it on their own; the tempo; Bass's notes.
+    const auto bass = findTrack (song, "Bass"), drumloop = findTrack (song, "Drumloop");
+    REQUIRE (bass.isValid());
+    REQUIRE (drumloop.isValid());
+    CHECK (phazite::getTempo (song) == doctest::Approx (149.0));
+    const auto notes = getClipStates (song, bass);
+    REQUIRE (notes.size() == 1);
+    CHECK (getPitches (song, phazite::getClipID (notes[0])) == std::vector<int> { 53, 65 });
+
+    // The loop twice, from one copy of its file, each clip at its own place and following the tempo at the loop's own, 170.
+    const auto clips = getClipStates (song, drumloop);
+    REQUIRE (clips.size() == 2);
+    CHECK (getAudioFiles (song) == juce::StringArray ("Drumfunk3 170bpm.wav"));
+
+    for (size_t i = 0; i < clips.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK ((double) clips[i][phazite::schema::clipStart] == doctest::Approx (8.0 * (double) i));
+        CHECK (phazite::getClipTempo (song, phazite::getClipID (clips[i])) == doctest::Approx (170.0).epsilon (0.001));
+        CHECK (phazite::getClipFile (song, clips[i]).getFileName() == "Drumfunk3 170bpm.wav");
+    }
+
+    // What it left out, by track: the instrument, and the group's own channel.
+    CHECK (said.joinIntoString ("\n").contains ("Bass: its devices (Surge XT)"));
+    CHECK (said.joinIntoString ("\n").contains ("Drums"));
+}
+
+TEST_CASE ("A DAWproject shaped as Studio One writes one: one copy of a recording three clips play, and what it left out")
+{
+    TemporaryFolder folder;
+    const auto vox = writeSound (folder.folder.getChildFile ("Vox.wav"), 2.0);
+    const auto file =
+        writeArchive (folder.folder.getChildFile ("Studio One.dawproject"), getStudioOneProject(), { { "Audio/Vox.wav", vox } });
+    const auto read = phazite::readDawProject (file);
+    REQUIRE (read.project != nullptr);
+
+    // Imported as the app imports one: a new untitled project, with what it left out told.
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (getEngineContext(), recent, folder.folder, folder.folder.getChildFile ("Unsaved"));
+    juce::StringArray notices;
+    session.onNotice = [&notices] (const juce::String& title, const juce::String& message) { notices.add (title + ": " + message); };
+    session.importDawProject (file);
+    dispatchPendingMessages();
+    REQUIRE (session.getProject() != nullptr);
+    auto& song = session.getProject()->getSong();
+    phazite::test::checkSong (song);
+
+    const auto vocals = findTrack (song, "Vocals");
+    REQUIRE (vocals.isValid());
+    const auto clips = getClipStates (song, vocals);
+    REQUIRE (clips.size() == 3);
+    CHECK (getAudioFiles (song) == juce::StringArray ("Vox.wav"));
+
+    for (const auto& clip : clips)
+        CHECK (phazite::getClipFile (song, clip).getFileName() == "Vox.wav");
+
+    REQUIRE (notices.size() == 1);
+    const auto& told = notices[0];
+    INFO (told.toStdString());
+    CHECK (told.contains ("Vocals: its devices (Pro-Q 3)"));
+    CHECK (told.contains ("Vocals: its sends"));
+    CHECK (told.contains ("Vocals: its automation"));
+    CHECK (told.contains ("Reverb: its devices (Room Reverb)"));
 }

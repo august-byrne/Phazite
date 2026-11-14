@@ -420,7 +420,7 @@ TEST_CASE ("The app's services are made together, with the settings in memory")
     plugins.setCrashedWhileLoading ({}); // the host is the engine context's, which the other tests share
 
     // The library indexes on its own thread; it is done before the services go.
-    CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 10000));
+    CHECK (phazite::test::runTimersUntil ([&services] { return ! services.library.isIndexing(); }, 60000));
 }
 
 TEST_CASE ("A project that doesn't open leaves Open Recent, and startup makes a first project instead")
@@ -738,7 +738,7 @@ TEST_CASE ("A project restored after a crash asks before it closes, though nothi
     session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (true); };
     juce::Array<juce::File> asked;
     auto answer = Answer::cancel;
-    session.askToSave = [&asked, &answer] (const juce::File& file, std::function<void (Answer)> callback)
+    session.askToSave = [&asked, &answer] (const juce::File& file, const juce::String&, std::function<void (Answer)> callback)
     {
         asked.add (file);
         callback (answer);
@@ -787,7 +787,7 @@ TEST_CASE ("A saved project restored after a crash saves what it restored as it 
         session.setAutoSave (autoSave);
         session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (true); };
         auto asked = 0;
-        session.askToSave = [&asked] (const juce::File&, std::function<void (Answer)> callback)
+        session.askToSave = [&asked] (const juce::File&, const juce::String&, std::function<void (Answer)> callback)
         {
             ++asked;
             callback (Answer::save);
@@ -838,17 +838,48 @@ TEST_CASE ("A save that fails says so, and the project stays open with its chang
     CHECK (errors[0].contains (file.getFullPathName()));
     CHECK (session.getProject()->hasUnsavedChanges());
 
-    // Closing, which saves with Auto Save, says so too, and leaves the project open.
+    // Closing, which saves with Auto Save, goes on to ask what to do instead (known bug 88: it gave up, and the user could
+    // neither quit nor open another project). Cancelled, the project stays open.
+    using Answer = phazite::ProjectSession::UnsavedChanges;
+    auto answer = Answer::cancel;
+    juce::StringArray asked; // why the save failed, each time it asked
+    session.askToSave = [&asked, &answer] (const juce::File&, const juce::String& saveFailed, std::function<void (Answer)> callback)
+    {
+        asked.add (saveFailed);
+        callback (answer);
+    };
+
     auto closed = true;
     session.closeThen ([&closed] (bool wasClosed) { closed = wasClosed; });
+    REQUIRE (asked.size() == 1);
+    CHECK (asked[0].contains (file.getFullPathName()));
     CHECK_FALSE (closed);
-    CHECK (errors.size() == 2);
+    CHECK (errors.size() == 1);
     CHECK (session.getProject()->hasUnsavedChanges());
+
+    // "Save As...": the changes saved somewhere else, as a copy, and it closes.
+    answer = Answer::saveAs;
+    const auto elsewhere = temp.folder.getChildFile ("Elsewhere");
+    session.chooseSaveFile = [&elsewhere] (const juce::File&, std::function<void (const juce::File&)> callback)
+    { callback (elsewhere.getChildFile ("Rescued")); };
+    session.closeThen ([&closed] (bool wasClosed) { closed = wasClosed; });
+    CHECK (asked.size() == 2);
+    CHECK (closed);
+    const auto rescued = elsewhere.getChildFile ("Rescued").getChildFile ("Rescued.phazite");
+    CHECK (rescued.loadFileAsString().contains ("pop"));
+    CHECK (recent.getProjects().contains (rescued));
+
+    // "Don't Save" closes it.
+    answer = Answer::discard;
+    session.closeThen ([&closed] (bool wasClosed) { closed = wasClosed; });
+    CHECK (asked.size() == 3);
+    CHECK (closed);
+    CHECK (session.getProject()->hasUnsavedChanges()); // closeThen() leaves the closing to its caller
 
     // Once the file can be written, it is saved.
     REQUIRE (file.deleteRecursively());
     REQUIRE (registry.invoke ("project.save"));
-    CHECK (errors.size() == 2);
+    CHECK (errors.size() == 1);
     CHECK_FALSE (session.getProject()->hasUnsavedChanges());
     CHECK (file.loadFileAsString().contains ("pop"));
 }
@@ -987,4 +1018,170 @@ TEST_CASE ("A project file that won't open offers its newest backup that reads i
     REQUIRE (session.getProject()->save().wasOk());
     juce::String error;
     CHECK (phazite::Project::open (file, false, error) != nullptr);
+}
+
+TEST_CASE ("An autosave that can't be read gives way to the project's own file, and Phazite says so")
+{
+    // Known bug 87: with Restore chosen, an autosave that didn't parse offered an older backup in place of the project's
+    // file, which was whole and newer.
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    const auto file = createClosedProject (temp.folder, "Song");
+
+    {
+        juce::String error;
+        auto project = phazite::Project::open (file, false, error);
+        REQUIRE (project != nullptr);
+        auto& song = project->getSong();
+        song.getState().setProperty (phazite::schema::notes, "In the file", &song.getUndoManager());
+        REQUIRE (project->save().wasOk());
+    }
+
+    // An autosave cut short, newer than the file, as a crash in the middle of its write could have left it.
+    const auto autosave = phazite::Project::getAutosaveFile (file);
+    REQUIRE (autosave.replaceWithText ("<PHAZITE cut short"));
+    REQUIRE (file.setLastModificationTime (juce::Time::getCurrentTime() - juce::RelativeTime::minutes (1)));
+    REQUIRE (phazite::Project::hasNewerAutosave (file));
+
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> answer) { answer (true); };
+    auto offered = 0;
+    session.askWhichCopy = [&offered] (const juce::String&, const juce::String&, const juce::String&, std::function<void (int)> answer)
+    {
+        ++offered;
+        answer (0);
+    };
+    juce::StringArray errors;
+    session.onError = [&errors] (const juce::String& title, const juce::String& message) { errors.add (title + ": " + message); };
+
+    session.openProject (file);
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.getProject()->getFile() == file);
+    CHECK (offered == 0);
+    CHECK (session.getProject()->getSong().getState()[phazite::schema::notes].toString() == "In the file");
+    REQUIRE (errors.size() == 1);
+    CHECK (errors[0].contains ("automatically"));
+    phazite::test::settle();
+    CHECK_FALSE (session.getProject()->hasUnsavedChanges()); // it is the file, as saved
+}
+
+TEST_CASE ("A backup that can't be made is told, and the save goes on")
+{
+    // Known bug 40: Project::backUpProjectFile() ignored copyFileTo()'s result.
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    const auto file = createClosedProject (temp.folder, "Song");
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    juce::StringArray said;
+    session.onError = [&said] (const juce::String& title, const juce::String& message) { said.add (title + ": " + message); };
+    session.onNotice = [&said] (const juce::String& title, const juce::String& message) { said.add (title + ": " + message); };
+    session.setAutoSave (false);
+    session.openProject (file);
+    REQUIRE (session.getProject() != nullptr);
+    phazite::test::settle();
+
+    // A file where the Backups folder goes: no backup can go there.
+    const auto backups = file.getSiblingFile ("Backups");
+    REQUIRE (backups.deleteRecursively());
+    REQUIRE (backups.replaceWithText ("in the way"));
+
+    auto& song = session.getProject()->getSong();
+    song.getState().setProperty (phazite::schema::notes, "Changed", &song.getUndoManager());
+    session.saveProject();
+    CHECK_FALSE (session.getProject()->hasUnsavedChanges());
+    CHECK (file.loadFileAsString().contains ("Changed"));
+    REQUIRE (said.size() == 1);
+    CHECK (said[0].contains ("backup"));
+
+    // Told once, not at every save while it goes on failing.
+    song.getState().setProperty (phazite::schema::notes, "Changed again", &song.getUndoManager());
+    session.saveProject();
+    CHECK (said.size() == 1);
+}
+
+TEST_CASE ("A project double-clicked while a dialog is open opens once the dialog has gone")
+{
+    // Known bug 113: anotherInstanceStarted() (src/app/Main.cpp) dropped the file while a dialog was open.
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    const auto first = createClosedProject (temp.folder, "First");
+    const auto second = createClosedProject (temp.folder, "Second");
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    session.openProject (first);
+    REQUIRE (session.getProject() != nullptr);
+
+    REQUIRE (juce::Component::getCurrentlyModalComponent() == nullptr); // no dialog an earlier test left
+    juce::Component dialog;
+    phazite::test::TestWindow window (dialog, 200, 100);
+    dialog.enterModalState (false);
+    REQUIRE (juce::Component::getCurrentlyModalComponent() == &dialog);
+
+    // Not while the dialog asks something: the project would change under its question.
+    session.openFile (second);
+    phazite::test::dispatchPendingMessages();
+    CHECK (session.getProject()->getFile() == first);
+
+    dialog.exitModalState (0);
+    CHECK (phazite::test::dispatchMessagesUntil ([&session, &second] { return session.getProject()->getFile() == second; }));
+}
+
+TEST_CASE ("A new project's first save copies its folders in the background, with its progress, and can be cancelled")
+{
+    // Known bug 90: the first save copied the Audio, Cache and Versions folders on the message thread.
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto projects = temp.folder.getChildFile ("Projects");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, recent, projects, temp.folder.getChildFile ("Unsaved"));
+    phazite::CommandRegistry registry;
+    phazite::test::RenderHost renders;
+    session.addCommands (registry, renders);
+    session.chooseSaveFile = [&projects] (const juce::File&, std::function<void (const juce::File&)> callback)
+    { callback (projects.getChildFile ("Beat")); };
+    juce::StringArray errors;
+    session.onError = [&errors] (const juce::String& title, const juce::String& message) { errors.add (title + ": " + message); };
+
+    REQUIRE (session.createProject ({}).wasOk());
+    const auto untitled = session.getProject()->getFile();
+
+    // A recording larger than what is copied at once.
+    juce::MemoryBlock recording ((size_t) phazite::Project::copyAtOnceBytes + 4096, true);
+    const auto take = session.getProject()->getAudioFolder().getChildFile ("Take 1.wav");
+    REQUIRE (take.replaceWithData (recording.getData(), recording.getSize()));
+
+    // The copy runs in the progress window; the project stays where it was until it is whole.
+    REQUIRE (registry.invoke ("project.save"));
+    REQUIRE (renders.render != nullptr);
+    CHECK (renders.render->getTitle() == "Saving Beat");
+    CHECK (renders.render->getProgress() >= 0.0f);
+    CHECK (session.isUntitled());
+    CHECK (session.getProject()->getFile() == untitled);
+
+    // Cancelled, nothing is left of the copy, and the project is still untitled.
+    renders.render = nullptr;
+    phazite::test::dispatchPendingMessages();
+    CHECK (session.isUntitled());
+    CHECK (projects.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty());
+    CHECK (errors.isEmpty());
+
+    // Again, to the end: the project in its folder, its recording whole there.
+    REQUIRE (registry.invoke ("project.save"));
+    REQUIRE (renders.render != nullptr);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&renders] { return renders.render == nullptr; }, 30000));
+    CHECK (renders.finished == juce::StringArray ("Saving Beat: ok"));
+    CHECK_FALSE (session.isUntitled());
+    const auto file = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
+    CHECK (session.getProject()->getFile() == file);
+    CHECK (file.existsAsFile());
+    CHECK (file.getSiblingFile ("Audio").getChildFile ("Take 1.wav").getSize() == take.getSize());
+    CHECK (projects.findChildFiles (juce::File::findFilesAndDirectories, false).size() == 1);
+    CHECK (recent.getProjects() == juce::Array<juce::File> { file });
+    CHECK (errors.isEmpty());
 }

@@ -14,6 +14,11 @@ namespace phazite::devices
 // Starts a thread that plays audio.
 void startAudioThread (juce::Thread&);
 
+// Whether the calling thread is one of Phazite's own that play audio, a ProAudioTask living on it (the engine's workers, a
+// helper's threads that play plug-ins): what the tests' real-time audit counts the allocations of, with the audio device's
+// thread. Real-time safe.
+bool isOwnAudioThread() noexcept;
+
 // A moment's pause in a spin, which lets the core's other thread on.
 void pauseInSpin() noexcept;
 
@@ -29,8 +34,8 @@ void spinUntil (Done&& done) noexcept
         pauseInSpin();
 }
 
-// While it lives, the thread that made it is in MMCSS's Pro Audio task (Windows; nothing elsewhere). Made first thing in
-// the thread's run().
+// While it lives, the thread that made it is in MMCSS's Pro Audio task (Windows; nothing elsewhere), and is one of
+// Phazite's own audio threads (isOwnAudioThread()). Made first thing in the thread's run().
 class ProAudioTask
 {
 public:

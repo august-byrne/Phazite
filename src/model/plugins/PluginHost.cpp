@@ -232,14 +232,16 @@ bool PluginHost::reload (SandboxedInstance& instance, juce::String& error)
     if (running == nullptr)
         return false;
 
-    // As it was: at its rate with its channel's limits, from the state it last had (the values it tells as it opens are
-    // those); where that left another program, its program, then the state again, so that the program never overrides the
-    // settings (as PluginInstances opens one).
-    const auto limits = instance.getRemote().getChannel().getLimits();
+    // As it was: at the rate it was last prepared for (crashed or not) with its channel's limits, for the longest block it
+    // was last prepared for, from the state it last had (the values it tells as it opens are those); where that left
+    // another program, its program, then the state again, so that the program never overrides the settings (as
+    // PluginInstances opens one).
+    auto limits = instance.getRemote().getChannel().getLimits();
+    limits.maxSamples = std::max ({ limits.maxSamples, smallestChannel, instance.getPreparedBlockSize() });
     const auto programNow = instance.getRemote().getProgram();
     const auto& state = instance.getLastState();
-    auto remote =
-        open (*running, description, state, instance.getPreparedRate() > 0.0 ? instance.getPreparedRate() : 44100.0, limits, error);
+    const auto rate = instance.getPreparedRate() > 0.0 ? instance.getPreparedRate() : 44100.0;
+    auto remote = open (*running, description, state, rate, limits, error);
 
     if (remote == nullptr)
         return false;
@@ -253,7 +255,7 @@ bool PluginHost::reload (SandboxedInstance& instance, juce::String& error)
     }
 
     const auto id = remote->getID();
-    instance.replaceRemote (std::move (remote), running, running->unlist (id));
+    instance.replaceRemote (std::move (remote), rate, running, running->unlist (id));
     track (*running, id, instance);
     sendChangeMessage();
     return true;

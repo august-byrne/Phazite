@@ -1,0 +1,66 @@
+# clang-tidy over Phazite's own code (src/ and tests/, never external/): a small set of checks for real bugs, each passing
+# today, every finding an error. tools/clang-tidy.sh runs them over a build's compile_commands.json; CI's Clang job does
+# (.github/workflows/ci.yml). A check joins the list once its findings are fixed; one that finds only false alarms here
+# stays off. What each catches:
+# - bugprone-use-after-move: an object read after std::move took its contents.
+# - bugprone-dangling-handle: a std::string_view or std::span left pointing into a temporary.
+# - bugprone-unused-raii: a lock, a gesture or another scoped object made and destroyed at once (a name forgotten).
+# - bugprone-undelegated-constructor, bugprone-copy-constructor-init: a constructor that builds a temporary of its own class,
+#   or a copy that leaves its base unset.
+# - bugprone-move-forwarding-reference, bugprone-forwarding-reference-overload: std::move on a forwarding reference, and a
+#   perfect-forwarding constructor that hides the copy and move ones.
+# - bugprone-string-constructor, bugprone-string-literal-with-embedded-nul, bugprone-suspicious-string-compare,
+#   bugprone-misplaced-operator-in-strlen-in-alloc: strings made or compared wrongly.
+# - bugprone-suspicious-memset-usage, bugprone-undefined-memory-manipulation, bugprone-sizeof-container: memory written
+#   or measured wrongly.
+# - bugprone-unhandled-self-assignment, bugprone-virtual-near-miss, bugprone-parent-virtual-call: classes that misbehave
+#   when assigned to themselves, or override a function they don't.
+# - bugprone-throw-keyword-missing, bugprone-terminating-continue, bugprone-suspicious-semicolon, bugprone-fold-init-type,
+#   bugprone-bool-pointer-implicit-conversion, bugprone-inaccurate-erase, bugprone-infinite-loop: slips of the pen.
+# - clang-analyzer-core.*, clang-analyzer-cplusplus.*: Clang's static analyzer, path by path: undefined values, memory
+#   leaked, freed twice or used after it is freed, objects used after a move. But for seven of its checks, which found only
+#   what an invariant the analyzer can't see rules out (2026-11-14): a ValueTree found in the song only when there is a
+#   song (NonNullParamChecker, 11 times); a helper's instance there whenever its channel opened (CallAndMessage); a voice
+#   to take whenever all are playing (UndefReturn, NullDereference); a lambda's moved std::function (StackAddressEscape);
+#   a sample rate under 100 Hz (UndefinedBinaryOperatorResult); a component's row height (DivideZero).
+#   tests/.clang-tidy turns its memory checks off for the tests, whose doctest macros trip them in doctest's own code.
+# Off: bugprone-incorrect-roundings, whose one finding, (int) (x + 0.5f) for a value never negative, is right; and
+# bugprone-swapped-arguments, whose one finding (a test's int and double, in the order its function takes them) is too.
+Checks: >
+  -*,
+  bugprone-use-after-move,
+  bugprone-dangling-handle,
+  bugprone-unused-raii,
+  bugprone-undelegated-constructor,
+  bugprone-copy-constructor-init,
+  bugprone-move-forwarding-reference,
+  bugprone-forwarding-reference-overload,
+  bugprone-string-constructor,
+  bugprone-string-literal-with-embedded-nul,
+  bugprone-suspicious-string-compare,
+  bugprone-misplaced-operator-in-strlen-in-alloc,
+  bugprone-suspicious-memset-usage,
+  bugprone-undefined-memory-manipulation,
+  bugprone-sizeof-container,
+  bugprone-unhandled-self-assignment,
+  bugprone-virtual-near-miss,
+  bugprone-parent-virtual-call,
+  bugprone-throw-keyword-missing,
+  bugprone-terminating-continue,
+  bugprone-suspicious-semicolon,
+  bugprone-fold-init-type,
+  bugprone-bool-pointer-implicit-conversion,
+  bugprone-inaccurate-erase,
+  bugprone-infinite-loop,
+  clang-analyzer-core.*,
+  -clang-analyzer-core.NonNullParamChecker,
+  -clang-analyzer-core.CallAndMessage,
+  -clang-analyzer-core.uninitialized.UndefReturn,
+  -clang-analyzer-core.StackAddressEscape,
+  -clang-analyzer-core.UndefinedBinaryOperatorResult,
+  -clang-analyzer-core.DivideZero,
+  -clang-analyzer-core.NullDereference,
+  clang-analyzer-cplusplus.*
+WarningsAsErrors: "*"
+# Findings in Phazite's own headers too; JUCE's, doctest's and the other submodules' are theirs.
+HeaderFilterRegex: '.*[/\\](src|tests)[/\\].*'

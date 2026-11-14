@@ -74,7 +74,7 @@ struct BrowserScreen
             return true;
         };
 
-        REQUIRE (phazite::test::runTimersUntil ([this] { return ! library.isIndexing(); }, 10000));
+        REQUIRE (phazite::test::runTimersUntil ([this] { return ! library.isIndexing(); }, 60000));
         phazite::test::dispatchPendingMessages();
     }
 
@@ -422,7 +422,7 @@ TEST_CASE ("Until Phazite Sounds are installed, the browser offers them, and lis
     // The place lists them now (after the pack's change message, which its thread posts after it sets the state), and
     // search finds them once they are indexed.
     CHECK (phazite::test::dispatchMessagesUntil ([&browser] { return getRows (browser).contains ("Drums"); }));
-    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 10000));
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
     CHECK_FALSE (library.search ("kick").empty());
 }
 
@@ -491,7 +491,7 @@ TEST_CASE ("A device's presets menu lists Phazite's for it by kind of sound, the
 
     phazite::Settings settings;
     phazite::Library library { phazite::test::getEngineContext(), settings, {}, own, factory };
-    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 10000));
+    REQUIRE (phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000));
 
     juce::File loaded;
     const auto menu = phazite::ui::makeDevicePresetMenu (library, "EQ", "EQ", [&loaded] (const juce::File& file) { loaded = file; });

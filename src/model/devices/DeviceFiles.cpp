@@ -104,18 +104,28 @@ void writeDeviceFilePaths (const Song& song, juce::ValueTree& state)
         writeDeviceFilePaths (song, child);
 }
 
-bool isSoundFileToTake (const juce::String& path)
+juce::String getWhySoundNotTaken (const juce::String& path)
 {
     // Never a network path, which Windows would connect to as it is asked whether the file is there (the first two
     // characters slashes: "\\server\share", "//server/share", "\\?\UNC\..."); only a full path, of a file whose name says it
     // is audio; and one that is there.
-    const auto isNetwork = path.length() >= 2 && (path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/');
+    if (path.length() >= 2 && (path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/'))
+        return "on a network share";
 
-    if (isNetwork || ! juce::File::isAbsolutePath (path))
-        return false;
+    if (! juce::File::isAbsolutePath (path))
+        return "not beside the preset";
 
     const juce::File file (path);
-    return getFileKind (file) == FileKind::audio && file.existsAsFile();
+
+    if (getFileKind (file) != FileKind::audio)
+        return "not a sound file";
+
+    return file.existsAsFile() ? juce::String() : juce::String ("not found");
+}
+
+bool isSoundFileToTake (const juce::String& path)
+{
+    return getWhySoundNotTaken (path).isEmpty();
 }
 
 void copyDeviceFilesInto (Song& song, juce::ValueTree& state)

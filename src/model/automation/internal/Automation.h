@@ -111,8 +111,10 @@ AutomationMode getAutomationMode (const Song&, TrackID);
 void setAutomationMode (Song&, TrackID, AutomationMode);
 
 //==============================================================================
-// Automation points selected: one parameter's, by their indices, as the selection holds them (Selection: getPoints()), so
-// that selecting anything else deselects them, and the selection commands (arrangement/internal/Selection.h) find them.
+// Automation points selected: one parameter's, in the selection (Selection: getPoints(), which holds the points' elements,
+// so that it follows them as points are added or removed before them and as undo and redo change the curve), so that
+// selecting anything else deselects them, and the selection commands (arrangement/internal/Selection.h) find them; by
+// their indices in the curve as it is now.
 struct PointSelection
 {
     ParameterRef parameter;

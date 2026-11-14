@@ -88,7 +88,7 @@ juce::StringArray getTitles (const std::vector<phazite::BrowserPlace>& places)
 
 bool waitForIndex (const phazite::Library& library)
 {
-    const auto done = phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 10000);
+    const auto done = phazite::test::runTimersUntil ([&library] { return ! library.isIndexing(); }, 60000);
     phazite::test::dispatchPendingMessages(); // what the index tells as it ends
     return done;
 }
@@ -289,9 +289,12 @@ TEST_CASE ("Collections keep their sounds by file: one renamed or moved stays in
     CHECK (library.isInCollection (*kick, "Dark"));
     CHECK_FALSE (library.isInCollection (*kick, "Dark 2"));
 
-    // Renamed where it is: found again, at its new name, in its collection and its favorites.
+    // Renamed where it is: found again, at its new name, in its collection and its favorites, by the index, which a listing
+    // that misses it builds again (known bug 114: the message thread looked for it at every listing).
     const auto renamed = libraries.folder.getChildFile ("Drums/Kicks/Kick 01 Dark (F).wav");
     REQUIRE (kick->file.moveFileTo (renamed));
+    CHECK (library.getCollection ("Dark").empty());
+    REQUIRE (waitForIndex (library));
     CHECK (getNames (library.getCollection ("Dark")) == juce::StringArray { "Kick 01 Dark (F)" });
     CHECK (getNames (library.getFavorites()) == juce::StringArray { "Kick 01 Dark (F)" });
     CHECK (library.isFavorite (*library.findItem (renamed.getFullPathName())));

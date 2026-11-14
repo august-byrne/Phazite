@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <vector>
 
 namespace phazite
@@ -79,6 +80,12 @@ namespace
 
     void removeClipState (Song& song, juce::ValueTree clipState)
     {
+        // The last one left of a group of linked clips leaves it, as Make Unique leaves it (makeClipsUnique()): it would
+        // still show as linked to nothing.
+        if (clipState.hasProperty (schema::clipLink))
+            if (auto aliases = getAliasStates (clipState); aliases.size() == 2)
+                aliases[1].removeProperty (schema::clipLink, &song.getUndoManager());
+
         clipState.getParent().removeChild (clipState, &song.getUndoManager());
     }
 
@@ -383,7 +390,8 @@ ClipID placeClipState (Song& song, juce::ValueTree clipState, TrackID track)
 {
     auto trackState = findTrackState (song, track);
 
-    if (! trackState.hasType (schema::TRACK))
+    // Only a track holds clips, not a folder or a return (Schema.h: trackKind), which would neither show nor play them.
+    if (! trackState.hasType (schema::TRACK) || isFolderState (trackState) || isReturnState (trackState))
         return {};
 
     if (clipState.getParent() != trackState)
@@ -690,13 +698,20 @@ void slipClip (Song& song, ClipID clip, double startOffset, double distance)
 
     if (isAudioState (clipState))
     {
-        // The same length of its file, from as far into what it plays.
-        const auto from = getPartStartFor (song, clipState, offset);
+        // The same length of its file, from as far into what it plays, the whole part kept inside the file either way.
         auto part = getFilePart (clipState);
         const auto length = part.end - part.start;
+        const auto fileLength = getClipFileLength (song, clipState);
+        const auto reversed = (bool) clipState.getProperty (schema::clipReversed, false);
 
-        if ((bool) clipState.getProperty (schema::clipReversed, false))
-            part.end = getClipFileLength (song, clipState) - from;
+        if (reversed && fileLength <= 0.0)
+            return; // backwards, from the end of a file that can't be read
+
+        const auto latest = fileLength > 0.0 ? std::max (0.0, fileLength - length) : std::numeric_limits<double>::max();
+        const auto from = juce::jlimit (0.0, latest, getPartStartFor (song, clipState, offset));
+
+        if (reversed)
+            part.end = fileLength - from;
         else
             part.end = from + length;
 
@@ -767,6 +782,19 @@ std::vector<ClipID> duplicateClips (Song& song, const std::vector<ClipID>& clips
     // The automation under the clips is copied with them.
     moveAutomation (song, getStretchesOf (song, clips), span->getLength(), true);
     return copies;
+}
+
+void unlinkLoneClips (Song& song)
+{
+    std::map<juce::String, std::vector<juce::ValueTree>> groups;
+
+    for (const auto& clipState : getClipStates (song))
+        if (const auto link = clipState[schema::clipLink].toString(); link.isNotEmpty())
+            groups[link].push_back (clipState);
+
+    for (auto& [link, members] : groups)
+        if (members.size() == 1)
+            members.front().removeProperty (schema::clipLink, &song.getUndoManager());
 }
 
 void makeClipsUnique (Song& song, const std::vector<ClipID>& clips)

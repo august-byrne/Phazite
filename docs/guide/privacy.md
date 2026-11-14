@@ -13,6 +13,7 @@ sidebar:
   - **Updates:** **Help > Check for Updates...** reads one small file from Phazite's latest release on GitHub, and sends nothing but the request. **Check for Updates When Phazite Opens**, off until you turn it on, does the same each time Phazite opens. An installer downloads only when you click **Download and Install**: over HTTPS, from Phazite's own releases, and checked by its size and SHA-256 before it runs.
   - GitHub sees these requests as it sees any visit to it, under [its privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
 - **Your projects hold no personal data.** A project file is the song alone, without your name; it keeps the files it plays by their paths within the project's folder, and its versions know each computer by an ID made at random, never by its name or yours.
+- **Nor do your presets.** A preset keeps the sound files it plays in a folder beside it, named after it, and names them by their paths from there, so it never holds a path of your computer's (where your user name usually is). A plug-in installed for you alone is named by its file's name. What a plug-in keeps of its own settings in a preset is the plug-in's to say.
 
 ## This website
 

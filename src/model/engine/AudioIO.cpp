@@ -111,9 +111,14 @@ void AudioIO::openMidiInputsOn()
                             [&id] (const juce::MidiDeviceInfo& device) { return device.identifier == id; });
     };
 
-    // Those switched off or unplugged close (each stops before it goes).
-    std::erase_if (openMidiInputs, [&] (const std::unique_ptr<juce::MidiInput>& input)
-                   { return midiInputsOff.contains (input->getIdentifier()) || ! isThere (input->getIdentifier()); });
+    // Those switched off or unplugged close (each stops before it goes), and what is held live on the track live MIDI plays
+    // lets go, its pedal too, as their ends will never come: what every input and the computer keyboard hold there, the
+    // engine not knowing which input played what (Engine::endLive()).
+    const auto closed = std::erase_if (openMidiInputs, [&] (const std::unique_ptr<juce::MidiInput>& input)
+                                       { return midiInputsOff.contains (input->getIdentifier()) || ! isThere (input->getIdentifier()); });
+
+    if (auto* engine = liveEngine.load(); closed > 0 && engine != nullptr)
+        engine->endLive (liveTrack.load());
 
     for (const auto& device : available)
     {

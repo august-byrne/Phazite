@@ -48,7 +48,11 @@ inline constexpr const char* trackPresetsFolder = "Tracks";
 // container's holds its devices and its macros with what they modulate in it.
 // A track's holds its name, color, volume and pan, its devices and containers, and its modulators and macros with what
 // they modulate on it: not its clips, automation, sends or what goes into it. The sound files a device plays (a drum
-// sampler's pads', a wavetable synth's tables) go by their paths, for another project to copy in.
+// sampler's pads', a wavetable synth's tables, a sampler's sound) go with it, copied into a folder beside it named after it
+// ("Kit Sounds", the one there that is the same taken as it is), and it names each by its path from its own folder ("Kit
+// Sounds/Boom.wav"): copied with that folder, a preset works on any computer, and it holds no path of this one's, the
+// user's name in it (known bug 107). One that can't be taken (internal/DeviceFiles.h: isSoundFileToTake()) is left out. A
+// plug-in installed for the user alone, under their home folder, is named by its file's name, not where it is.
 bool saveDevicePreset (const ProjectContext&, DeviceID, const juce::File&);
 bool saveTrackPreset (const ProjectContext&, TrackID, const juce::File&);
 
@@ -56,7 +60,9 @@ bool saveTrackPreset (const ProjectContext&, TrackID, const juce::File&);
 // with an empty ID, below the tracks): a device's or a container's goes where a device dropped there would
 // (MixerModel.h: addDeviceTo()), an effect after the track's effects or on the master, an instrument in place of the
 // track's or on a new track; a container is named after the preset. A track's goes after the track, as a new one, or at
-// the end. Returns whether anything went in.
+// the end. Returns whether anything went in. The sounds it names that can't be taken (on a network share, or not there),
+// which their devices play their own sounds in place of, are told by name as a problem with the song
+// (internal/ProjectContext.h: reportProblem()); loadPresetInto() tells them the same.
 bool loadPreset (ProjectContext&, const juce::File&, TrackID);
 
 // Puts a device preset's settings and mix into a device of the preset's kind, in place of its own, as one undo step named

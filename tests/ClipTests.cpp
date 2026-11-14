@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "UndoCheck.h"
 #include "devices/synth/Synth.h"
 #include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -700,6 +701,52 @@ TEST_CASE ("Slip moves what a clip plays, not the clip, and its content can't st
 
     phazite::slipClip (e.song, clip, 1.0, 3.0);
     CHECK (phazite::getClipStartOffset (e.song, clip) == doctest::Approx (0.0));
+}
+
+TEST_CASE ("The last clip left of a group of linked clips is linked no more, whether the others or their tracks went")
+{
+    // It kept its link, and still showed as linked, to nothing (known bug 52).
+    ClipEdit e;
+    const auto original = e.addClip (0, 0.0, 4.0);
+    const auto aliases = phazite::copyClips (e.song, { original }, true);
+    REQUIRE (aliases.size() == 1);
+    const auto other = phazite::copyClips (e.song, { original }, true);
+    REQUIRE (other.size() == 1);
+    phazite::moveClip (e.song, other[0], beats (16.0), e.tracks[1]);
+    e.song.getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (e.song);
+    const auto isLinked = [&e] (phazite::ClipID clip) { return phazite::hasAliases (e.song, { clip }); };
+
+    SUBCASE ("The others deleted")
+    {
+        undo.check ("one of three deleted",
+                    [&]
+                    {
+                        const phazite::UndoStep step (e.song, "Delete Clip");
+                        phazite::deleteClips (e.song, { aliases[0] }, false);
+                    });
+        CHECK (isLinked (original)); // two are left, linked
+        undo.check ("another deleted",
+                    [&]
+                    {
+                        const phazite::UndoStep step (e.song, "Delete Clip");
+                        phazite::deleteClips (e.song, { original }, false);
+                    });
+        CHECK_FALSE (isLinked (other[0]));
+    }
+
+    SUBCASE ("Their track deleted")
+    {
+        undo.check ("the first track deleted",
+                    [&]
+                    {
+                        const phazite::UndoStep step (e.song, "Delete Track");
+                        phazite::deleteTracks (e.song, { e.tracks[0] }, nullptr);
+                    });
+        CHECK_FALSE (isLinked (other[0]));
+    }
+
+    undo.walkBackAndForth();
 }
 
 TEST_CASE ("Where linked clips play, an editor showing one of them sees its notes playing")

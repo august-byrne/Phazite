@@ -67,6 +67,11 @@ public:
 
     const Limits& getLimits() const noexcept { return limits; }
 
+    // The name it was made under; and, for its maker, that name let go of once the helper has opened it (or won't), so
+    // that nothing of it is left once both sides have gone (SharedMemory::forgetName()).
+    const std::string& getName() const noexcept { return name; }
+    void forgetName() noexcept { memory->forgetName(); }
+
     // The block, in shared memory: written by the engine before play(), by the helper before finish().
     BlockInfo& getInfo() noexcept { return header->info; }
     float* getChannel (int channel) noexcept { return audio + (std::size_t) channel * (std::size_t) limits.maxSamples; }
@@ -120,6 +125,7 @@ private:
     BlockChannel() = default;
     static std::unique_ptr<BlockChannel> make (const std::string& name, const Limits&, bool create);
 
+    std::string name;
     std::unique_ptr<SharedMemory> memory;
     std::unique_ptr<Bell> requestBell, replyBell;
     Limits limits;

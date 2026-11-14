@@ -234,7 +234,8 @@ TEST_CASE ("The playhead moved while recording audio: what came in before is kep
     CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (2.4 - 256.0 / 24000.0)); // a block less: it came in late
     CHECK (clips[1].kind == phazite::ClipType::audio);
     CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (8.5));
-    CHECK (clips[1].range.getLength().inBeats() == doctest::Approx (2.4 - 256.0 / 24000.0));
+    // And less what plays as the jump fades out what sounded before it (engine::Engine::fadeSeconds).
+    CHECK (clips[1].range.getLength().inBeats() == doctest::Approx (2.4 - (256.0 + 144.0) / 24000.0));
 
     // The metronome's clicks, recorded, each where it played: beats 0 to 2, then 9 and 10.
     const auto clicks = studio.renderClicks (5.6);

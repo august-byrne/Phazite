@@ -7,6 +7,16 @@
 
 namespace phazite::devices
 {
+namespace
+{
+    thread_local bool ownAudioThread = false; // set while a ProAudioTask lives on the thread
+} // namespace
+
+bool isOwnAudioThread() noexcept
+{
+    return ownAudioThread;
+}
+
 void pauseInSpin() noexcept
 {
 #if defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
@@ -45,10 +55,14 @@ ProAudioTask::ProAudioTask()
         task = join (L"Pro Audio", &index);
     }
 #endif
+
+    ownAudioThread = true; // after what joining the task allocated
 }
 
 ProAudioTask::~ProAudioTask()
 {
+    ownAudioThread = false;
+
 #if JUCE_WINDOWS
     if (task != nullptr)
         if (auto* leave = reinterpret_cast<Leave> (avrt.getFunction ("AvRevertMmThreadCharacteristics")))

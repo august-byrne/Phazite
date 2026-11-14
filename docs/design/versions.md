@@ -169,7 +169,8 @@ Local History keeps the song as it was at times while it differed from its last 
   song as it is kept first.
 - It is this computer's own, and folded at first.
 
-**Undo History**, under it, lists the song's undo steps; a click goes back or forth to one.
+**Undo History**, under it, lists the song's undo steps; a click goes back or forth to one. The history keeps the last
+1000 steps (the setting `phaziteUndoSteps`, which no window shows yet: `src/services/Settings.h`).
 
 ## Keeping the history whole
 

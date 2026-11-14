@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // A plug-in hosted in a helper as Phazite's engine plays it: each block straight through the channel of its instance
-// (SandboxedInstance.h), one round trip with a deadline of the block's own length in real time, so that a plug-in that
-// hangs makes its own blocks late and never the song's. A block the helper hasn't answered in time, one a render holds
-// the channel for, one that holds what isn't a number, and every block of a plug-in whose helper has gone let an effect's
-// sound through, and are silent for an instrument; a block kept for seconds is a hang, which its helper is ended for
-// (sandbox/client/Helper.h). A render waits for the plug-in instead, but not for ever: until its helper has gone, until it
-// has kept the block so long that it hangs (several times as long as a hang is live), or until the render is cancelled;
-// the render then says so (hasFailedInRender()). The notes of a block that couldn't be handed over go with the next that
+// (SandboxedInstance.h), one round trip with a deadline of the block's own length in real time (a millisecond at least),
+// so that a plug-in that hangs makes its own blocks late and never the song's. A block the helper hasn't answered in time,
+// one a render holds the channel for, one that holds what isn't a number or comes back otherwise than it went, and every
+// block of a plug-in whose helper has gone or whose channel waits to be prepared are silent: an effect's sound fades out
+// over a few milliseconds (its input, as late as the plug-in would have played it), an instrument's stops; and the
+// plug-in's sound fades in again as it plays again. A block kept for seconds is a hang, which its helper is ended for
+// (sandbox/client/Helper.h). A render waits for the plug-in instead (for a block of live playback it is still on too), but
+// not for ever: until its helper has gone, until it has kept the block so long that it hangs (several times as long as a
+// hang is live), or until the render is cancelled; the render then says so (hasFailedInRender()), as it does for a
+// plug-in that had crashed before it began (OfflineRender.h). The notes of a block that couldn't be handed over go with the next that
 // is, at its start, so that no note that ended sounds on. Its mix with what came in is the engine's, as for Phazite's own
 // devices. Its parameters are the plug-in's, by its own IDs for them (a VST3's numbers), so that the song's automation,
 // modulators and macros move them on Phazite's engine as they move its own devices': the block goes whole, with their
@@ -62,6 +65,10 @@ public:
     // How many times as long as a hang is live (sandbox::Helper's audio hang limit) a render waits for a block.
     static constexpr int renderHangFactor = 6;
 
+    // How long its sound takes to fade out as it stops playing (an effect's then silent rather than dry: a limiter or a
+    // fully wet reverb passed dry is worse than a gap), and to fade in as it plays again.
+    static constexpr double fadeSeconds = 0.005;
+
 private:
     std::shared_ptr<SandboxedInstance> kept;
     SandboxedInstance& instance;
@@ -70,8 +77,19 @@ private:
     std::vector<devices::ParameterInfo> parameters;
     devices::DeviceInfo info;
     double rate = 44100.0;
+    int maximumBlock = 512;
     std::int64_t busySince = 0; // the audio thread's: when it found the channel still on a block, in high-resolution ticks
     bool resetWanted = false;   // the audio thread's: reset() since a block was last handed over
+    int handedChannels = 0;     // the audio thread's: the channels of the block handed over last, which it reads back
+
+    // The audio thread's: how much of the plug-in's sound is heard (0 while it plays nothing, rising and falling over the
+    // fade), and an effect's input over the last of its latency and a block, from which it fades out as late as the plug-in
+    // would have played it (made as it is prepared, for the latency it says then, as the engine's delays of other sounds
+    // are).
+    float heard = 1.0f;
+    float fadeStep = 1.0f;
+    int latency = 0, historyAt = 0;
+    juce::AudioBuffer<float> history;
 
     // The audio thread's: a block started early (start()), whether it was handed over, and when, in high-resolution ticks.
     bool started = false, handed = false;
@@ -81,14 +99,15 @@ private:
     // made as this is. A note that began and ended among them isn't played.
     std::vector<devices::NoteEvent> waiting;
 
-    const bool wasCrashed; // its helper had gone as this was made: nothing a render waits for
     std::atomic<bool> failedInRender { false }, renderCancelled { false };
 
     bool handOver (const devices::ProcessContext&) noexcept;                    // held and handed over, or silent
     void collect (const devices::ProcessContext&, std::int64_t since) noexcept; // its answer, then the channel let go
-    bool waitInRender (sandbox::BlockChannel&) noexcept;                        // for a render's block: whether it was answered
+    bool waitInRender() noexcept;                                               // for a render's block: whether it was answered
     void skip (const devices::ProcessContext&) noexcept;                        // a block not handed over: its events kept
     void keep (std::span<const devices::NoteEvent>) noexcept;
-    void silence (const devices::ProcessContext&) const noexcept;
+    void remember (const devices::ProcessContext&) noexcept; // an effect's input, before it is handed over
+    void silence (const devices::ProcessContext&) noexcept;  // what it plays in place of a block it didn't play
+    void fadeIn (const devices::ProcessContext&) noexcept;   // a block it played, after one it didn't
 };
 } // namespace phazite

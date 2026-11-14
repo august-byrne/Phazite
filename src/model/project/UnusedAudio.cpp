@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "UnusedAudio.h"
+#include "internal/Project.h"
 #include "internal/ProjectContext.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/transport/internal/Recording.h"
@@ -18,7 +19,17 @@ namespace
         return juce::File::isAbsolutePath (path) ? juce::File (path) : projectFolder.getChildFile (path);
     }
 
-    // What the song plays, and its versions, and its branches' songs as they were left.
+    // The songs the project's files on the disk hold: the project file as saved, its autosave and its backups, which closing
+    // without saving, restoring the autosave or opening a backup brings back. Each a small file, read whole.
+    juce::Array<juce::File> findSavedSongFiles (const juce::File& projectFile)
+    {
+        juce::Array<juce::File> files { projectFile, Project::getAutosaveFile (projectFile) };
+        files.addArray (projectFile.getSiblingFile ("Backups").findChildFiles (juce::File::findFiles, false,
+                                                                               juce::String ("*") + Project::fileExtension));
+        return files;
+    }
+
+    // What the song plays, and its versions, and its branches' songs as they were left, and its files on the disk.
     std::set<juce::File> findUsedAudio (const ProjectContext& context)
     {
         const auto* song = findSong (context);
@@ -27,6 +38,10 @@ namespace
 
         if (const auto* history = getVersionHistory (context))
             paths.addArray (history->findVersionsAudioPaths());
+
+        for (const auto& file : findSavedSongFiles (song->getFile()))
+            if (const auto xml = file.existsAsFile() ? juce::XmlDocument::parse (file) : nullptr)
+                paths.addArray (findAudioFilePaths (juce::ValueTree::fromXml (*xml)));
 
         std::set<juce::File> used;
 

@@ -683,6 +683,34 @@ TEST_CASE ("Capture while stopped, in a song with clips, keeps its tempo and goe
     CHECK (notes.back().start.inBeats() == doctest::Approx (7.0).epsilon (withinABlock));
 }
 
+TEST_CASE ("Capture takes the notes played, not the guide notes a click in the piano roll or a preset tried in the browser plays")
+{
+    // Known bug 147: the guide notes were played as recordable, so Capture (and a take) took them as played; and a test that
+    // played them without playing blocks left them in the engine's queue for the next test's Capture.
+    EngineTake take;
+    const auto clip = take.song.addMidiClip (take.song.firstTrack, 0.0, 4.0);
+
+    for (const auto pitch : { 60, 64, 67, 72 })
+    {
+        // As a click on the piano roll's keys plays its guide note (a preset tried in the browser plays one the same way).
+        REQUIRE (phazite::auditionNotes (take.song.context, clip, { pitch + 13 }, 100) == take.song.firstTrack);
+        take.playNote (pitch, 0.25, 0.25);
+        phazite::stopAuditioning (take.song.context, take.song.firstTrack);
+    }
+
+    take.playback.play (0.25);
+    take.song.run ("transport.capture");
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    auto pitches = std::vector<int>();
+
+    for (const auto& note : phazite::getNotes (take.song.context, { clips[1].id }))
+        pitches.push_back (note.pitch);
+
+    std::sort (pitches.begin(), pitches.end());
+    CHECK (pitches == std::vector<int> { 60, 64, 67, 72 }); // the notes played alone
+}
+
 TEST_CASE ("Capture while the song plays keeps the notes where they were played")
 {
     EngineTake take;

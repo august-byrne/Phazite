@@ -63,7 +63,8 @@ names that start with what was typed, then names with a word that does.
 - Showing the browser by its icon gives the keys to the browser itself, not to the search field, so that Space still
   plays the song while the browser is looked through.
 - A background thread indexes the sounds, first by their names, then again with what their loop data say. It indexes
-  up to 50,000 sounds; a larger library is searched as far as that, and the results say so.
+  up to 50,000 sounds; a larger library is searched as far as that, and the results say so. It follows a folder that
+  links elsewhere, but not one that links back into a folder it is already in.
 
 ## Tags
 
@@ -180,7 +181,8 @@ keymaps and Alt+F8 in FL Studio's.
   Collection**, which asks first; its sounds stay where they are on disk.
 - **Kept by file:** a sound, MIDI file or preset is known by its size and the SHA-256 of its first 64 KiB besides its
   path, so one renamed or moved stays in its collections and among the favorites, found again in the folder it was
-  in, or anywhere in the library once the folders are indexed again. The sets are kept in the settings.
+  in, or anywhere in the library. The index looks for them on its own thread as it is built; a listing that misses
+  one builds the index again, which shows it once found. The sets are kept in the settings.
 
 ## Swap
 

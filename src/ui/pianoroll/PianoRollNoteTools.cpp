@@ -363,6 +363,13 @@ void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
     gesture->beginStep (roll.context, gesture->zone != Zone::body ? "Resize Notes" : (gesture->copies ? "Copy Notes" : "Move Notes"));
     setDraggedNotes (roll.getSelectedNotesHere());
 
+    std::vector<ClipID> shownClips;
+
+    for (const auto& clip : roll.getShownClips())
+        shownClips.push_back (clip.id);
+
+    gesture->clipEndsAtPress = getClipEnds (roll.context, shownClips);
+
     if (gesture->anchor.note.isValid())
         gesture->kind = gesture->zone == Zone::body ? Gesture::Kind::move
                                                     : (gesture->zone == Zone::end ? Gesture::Kind::resizeEnd : Gesture::Kind::resizeStart);
@@ -440,6 +447,9 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
     const auto snapped = [this, &e] (BeatPosition b) { return roll.snap (b, e.mods); };
     const auto& anchor = gesture->anchor; // the note under the mouse, or its copy once copies move
     std::vector<NoteData> moved;          // where the drag puts each note
+
+    // The clips as long as they were at the press, which grow again to hold where the notes go now.
+    restoreClipEnds (roll.context, gesture->clipEndsAtPress);
 
     const auto add = [&moved] (const Gesture::Original& original, BeatPosition start, BeatDuration length, int pitch)
     { moved.push_back ({ .clip = original.note.clip, .id = original.note.note, .pitch = pitch, .start = start, .length = length }); };

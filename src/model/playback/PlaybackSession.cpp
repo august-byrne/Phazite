@@ -249,11 +249,21 @@ void PlaybackSession::timerCallback()
 void PlaybackSession::setLiveTrack (TrackID track)
 {
     // A track live MIDI starts playing records it, as Ableton Live arms the selected MIDI track by itself.
-    if (track != liveTrack)
-        liveTrackRecords = true;
+    if (track == liveTrack)
+    {
+        followLiveMidi();
+        return;
+    }
 
+    liveTrackRecords = true;
+    const auto before = liveTrack;
     liveTrack = track;
     followLiveMidi();
+
+    // What was held on the track it played lets go, its pedal too: their ends would go to the new one (once live MIDI goes
+    // there, so that nothing played meanwhile is left behind).
+    if (before.isValid() && isPlayingProject())
+        host.getEngine().endLive ((std::int64_t) before.getRaw());
 }
 
 void PlaybackSession::followLiveMidi()
@@ -267,7 +277,9 @@ void PlaybackSession::playGuideNotes (std::int64_t track, const std::vector<int>
 {
     for (const auto pitch : pitches)
     {
-        host.getEngine().playLive (track, { devices::NoteEvent::Type::noteOn, 0, pitch, (float) juce::jlimit (1, 127, velocity) / 127.0f });
+        // Not recordable: Capture and a take leave them out.
+        host.getEngine().playLive (track, { devices::NoteEvent::Type::noteOn, 0, pitch, (float) juce::jlimit (1, 127, velocity) / 127.0f },
+                                   false);
         guideNotes.emplace_back (track, pitch);
     }
 }
@@ -276,7 +288,7 @@ void PlaybackSession::stopGuideNotes (std::int64_t track)
 {
     for (const auto& [on, pitch] : guideNotes)
         if (on == track)
-            host.getEngine().playLive (track, { devices::NoteEvent::Type::noteOff, 0, pitch, 0.0f });
+            host.getEngine().playLive (track, { devices::NoteEvent::Type::noteOff, 0, pitch, 0.0f }, false);
 
     std::erase_if (guideNotes, [track] (const auto& note) { return note.first == track; });
 }
@@ -321,8 +333,9 @@ void PlaybackSession::lendToRender (bool lent)
 
     if (lent)
     {
+        // Never beside a block still in its plug-ins: one that stalls is waited for as long as it takes.
         if (isPlayingProject())
-            host.dropPlan();
+            host.dropPlan (true);
 
         return;
     }

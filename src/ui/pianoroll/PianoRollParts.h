@@ -195,6 +195,7 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
     std::vector<NoteRef> selectionBeforeCopies; // and what was selected until then,
     std::vector<Original> originalsOfCopies;    // and the notes they copy, which move again if the copies go
     Original anchorOfCopies;
+    ClipEnds clipEndsAtPress;                   // where the shown clips ended as the drag began, which each step puts back
     BeatDuration movedBy;                       // a move: how far the notes are from where they began,
     int movedRows = 0;                          // along and in rows
     std::unordered_set<NoteRef> selectedBefore; // a rectangle with Ctrl adds to these

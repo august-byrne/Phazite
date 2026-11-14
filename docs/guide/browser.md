@@ -132,7 +132,7 @@ from a File...** on the Welcome window's Phazite Sounds page.
 Instruments and Effects, in the **+ Instrument** and **+ Effect** menus and in the plug-in picker.
 
 - **Each plug-in plays in a helper process of its own,** so a plug-in that crashes or hangs can't take Phazite down. A
-  crashed plug-in's slot reads "*name* - Crashed" and plays nothing (an effect lets its sound through); click the slot,
+  crashed plug-in's slot reads "*name* - Crashed" and plays nothing (an effect's sound fades out); click the slot,
   or choose **Reload** in its menu, to open it again as it was. The Project view lists crashed plug-ins too
   ([The window](window.md#the-left-panel)).
 - **A plug-in's window** opens from its slot's menu (**Open Window**) or its window button in the Devices view. Its

@@ -41,6 +41,11 @@ public:
     // faint, as it is silent until then, and a bar along its bottom edge; nothing once it plays.
     void showRendering (std::optional<double> progress);
     std::optional<double> getRendering() const noexcept { return rendering; }
+
+    // Whether its render failed (model/arrangement/AudioClipModel.h: getClipsWhoseRenderFailed()), which it shows in place
+    // of the render's progress: its waveform faint, as it is silent, and a bar along its bottom edge in the warning colour.
+    void showRenderFailed (bool);
+    bool hasRenderFailed() const noexcept { return renderFailed; }
     juce::Colour getColour() const noexcept { return colour; }
     bool isFrozen() const noexcept { return frozen; }
     bool isFaint() const noexcept { return info.muted || trackSilent; } // muted, or on a track that isn't heard
@@ -72,7 +77,7 @@ private:
     ClipInfo info;
     std::vector<NoteShape> notes; // a MIDI clip's
     juce::Colour colour;
-    bool selected = false, frozen = false, trackSilent = false;
+    bool selected = false, frozen = false, trackSilent = false, renderFailed = false;
     int recordingTake = 0;             // while it shows a recording: the take it is on, from 1
     std::optional<float> recordingEnd; // showRecordingEnd()
     std::optional<double> rendering;   // to a hundredth

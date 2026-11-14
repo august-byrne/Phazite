@@ -143,8 +143,9 @@ public:
 
     //==============================================================================
     // Favorites and collections (docs/design.md, section 11): sets of sounds, presets, folders and devices, kept by file: a
-    // file renamed or moved stays in them, found again by its size and what its start holds, when the index is built and
-    // when they are listed. Favorites are the set of the star.
+    // file renamed or moved stays in them, found again by its size and what its start holds, on the index's thread as the
+    // index is built, once for each index. A listing that meets a member that went since and that the index didn't look for
+    // builds the index again, which tells onIndexChanged once it has found it. Favorites are the set of the star.
     bool isFavorite (const LibraryItem&) const;
     void setFavorite (const LibraryItem&, bool);
     std::vector<LibraryItem> getFavorites() const; // those still there
@@ -199,23 +200,26 @@ private:
     juce::StringArray audioExtensions; // of the formats the engine reads, as ".wav"
     std::unique_ptr<Indexer> indexer;
 
-    // The index, what it read of the sounds' files by path, and its sounds and presets by size, guarded by indexLock.
+    // The index, what it read of the sounds' files by path, and the members of the sets that went and where those found
+    // again went (their keys before and after), guarded by indexLock.
     mutable juce::CriticalSection indexLock;
     std::shared_ptr<const std::vector<LibraryItem>> index;
     std::map<juce::String, SoundFacts> facts;
-    std::multimap<juce::int64, juce::File> filesBySize;
+    std::set<juce::String> lookedFor;
+    std::map<juce::String, juce::String> movedTo;
 
-    // Favorites and collections, as the settings keep them (message thread). A member is found again where it moved as
-    // they are listed, which then writes them.
+    // Favorites and collections, as the settings keep them (message thread), and the keys of the members the last index
+    // looked for, which a listing doesn't ask it to look for again.
     mutable std::vector<Member> favorites;
     mutable std::vector<Collection> collections;
     mutable std::set<juce::String> favoriteKeys; // for the star on every row
+    mutable std::set<juce::String> searchedFor;
 
     bool isSoundFile (const juce::File&) const;
     static bool isPreset (const juce::File&); // a preset file Phazite can read
     bool isMidiFile (const juce::File&) const;
     juce::File findRoot (const juce::File&) const;
-    void reindex();
+    void reindex(); // the index built again on its thread, the one before stopped
     void handleAsyncUpdate() override;
 
     // A file's item with what the index read of it, if it read anything; knownFile skips asking whether it is a folder.
@@ -225,10 +229,10 @@ private:
     juce::Array<juce::File> getRoots() const; // the factory library, the user's folders, and the presets
 
     Member makeMember (const LibraryItem&) const;
-    std::vector<LibraryItem> getItems (std::vector<Member>&, bool& moved) const; // finding each again where it moved
-    bool isStillThere (const Member&) const;                                     // where it was found last
-    bool findAgain (Member&) const;                                              // where it moved, by its size and start
-    void findMovedMembers();
+    std::vector<LibraryItem> getItems (const std::vector<Member>&) const; // those still there
+    static bool isStillThere (const Member&);                             // where it was found last
+    std::vector<Member> getAllMembers() const;                            // of the favorites and the collections
+    void takeMovedMembers();                                              // what the index found
     void readSets();
     void writeFavorites() const;
     void writeCollections() const;

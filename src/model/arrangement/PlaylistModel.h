@@ -120,7 +120,7 @@ struct ClipInfo
 
 std::vector<ClipInfo> getClips (const ProjectContext&, TrackID); // left to right
 std::optional<ClipInfo> getClip (const ProjectContext&, ClipID);
-bool canHoldClips (const ProjectContext&, TrackID); // a track, not a folder
+bool canHoldClips (const ProjectContext&, TrackID); // a track, not a folder or a return
 
 // The clips linked to a clip, its aliases, which play the same notes, the clip itself first; the clip alone while it has
 // none, and none while it isn't in the song.

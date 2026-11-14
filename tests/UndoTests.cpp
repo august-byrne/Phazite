@@ -600,3 +600,63 @@ TEST_CASE ("Automation lanes shown and removed between undo steps leave each ste
     CHECK (countClips() == 3);
     CHECK (phazite::getEffects (song.context, track).size() == 1);
 }
+
+TEST_CASE ("The undo history keeps the steps its setting says, however much each step changes")
+{
+    // A step that changes many values, as a drag of many notes does: JUCE's budget of units kept only 30 such steps.
+    const auto bigStep = [] (phazite::Song& song, int step)
+    {
+        const phazite::UndoStep undoStep (song, "Step " + juce::String (step));
+
+        for (int i = 0; i < 600; ++i)
+            change (song, juce::String ("p" + juce::String (i)).toRawUTF8(), step);
+    };
+
+    SUBCASE ("By default: hundreds of steps")
+    {
+        CHECK (phazite::Song::getUndoSteps() == phazite::Song::defaultUndoSteps);
+        auto song = newSong();
+
+        for (int step = 1; step <= 100; ++step)
+            bigStep (*song, step);
+
+        auto undone = 0;
+
+        while (phazite::canUndo (*song))
+        {
+            phazite::undo (*song);
+            ++undone;
+        }
+
+        CHECK (undone == 100);
+        CHECK (! song->getState().hasProperty ("p0"));
+    }
+
+    SUBCASE ("Set lower: the oldest steps go")
+    {
+        phazite::Song::setUndoSteps (20);
+        auto song = newSong();
+        phazite::Song::setUndoSteps (phazite::Song::defaultUndoSteps);
+
+        for (int step = 1; step <= 25; ++step)
+            bigStep (*song, step);
+
+        auto undone = 0;
+
+        while (phazite::canUndo (*song))
+        {
+            phazite::undo (*song);
+            ++undone;
+        }
+
+        CHECK (undone == 20);
+        CHECK ((int) song->getState()["p0"] == 5);
+    }
+
+    SUBCASE ("Kept within its range")
+    {
+        phazite::Song::setUndoSteps (0);
+        CHECK (phazite::Song::getUndoSteps() == phazite::Song::minimumUndoSteps);
+        phazite::Song::setUndoSteps (phazite::Song::defaultUndoSteps);
+    }
+}

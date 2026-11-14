@@ -52,6 +52,40 @@ if(MSVC)
     endforeach()
 endif()
 
+# MSVC's AddressSanitizer (the windows-asan preset): memory errors in the code that only Windows builds (the sandbox's shared
+# memory and bells, the helper's windows, WASAPI and ASIO) and in the rest as MSVC compiles it, as linux-asan finds them on
+# Linux. Every target is built with it, the tests' VST3s too, as a process and what it loads must agree. It needs Visual
+# Studio's AddressSanitizer component (tools\setup-windows.cmd installs it), and goes without MSVC's run-time checks (/RTC1,
+# which it can't be used with) and incremental linking. Each program finds the sanitizer's runtime next to it.
+option(PHAZITE_ADDRESS_SANITIZER "Build with MSVC's AddressSanitizer (the windows-asan preset)" OFF)
+
+if(PHAZITE_ADDRESS_SANITIZER)
+    if(NOT MSVC)
+        message(FATAL_ERROR "PHAZITE_ADDRESS_SANITIZER is for MSVC; on Linux, use the linux-asan preset.")
+    endif()
+
+    get_filename_component(_phazite_msvc_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    file(GLOB PHAZITE_ASAN_RUNTIME "${_phazite_msvc_bin}/clang_rt.asan*_dynamic-x86_64.dll")
+
+    if(NOT PHAZITE_ASAN_RUNTIME)
+        message(FATAL_ERROR "MSVC's AddressSanitizer isn't installed (no clang_rt.asan_dynamic-x86_64.dll in ${_phazite_msvc_bin}). "
+                            "Run tools\\setup-windows.cmd, which adds Visual Studio's C++ AddressSanitizer component.")
+    endif()
+
+    set(CMAKE_MSVC_RUNTIME_CHECKS "") # CMake's /RTC1 in Debug builds (policy CMP0184)
+    add_compile_options(/fsanitize=address)
+    add_link_options(/INCREMENTAL:NO)
+endif()
+
+# Puts the AddressSanitizer's runtime next to a program built with it.
+function(phazite_add_sanitizer_runtime target)
+    if(PHAZITE_ADDRESS_SANITIZER)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${PHAZITE_ASAN_RUNTIME} "$<TARGET_FILE_DIR:${target}>"
+            VERBATIM)
+    endif()
+endfunction()
+
 # JUCE builds its "juceaide" helper during configure with a second, nested CMake run that is not given
 # our toolchain file. CMake reads the CMAKE_TOOLCHAIN_FILE environment variable when it creates a new
 # build folder, so exporting it lets that nested run find MSVC too. CMakePresets.json sets the same
@@ -610,6 +644,13 @@ if(NOT MSVC)
     set_source_files_properties(src/devices/stretch/RubberBandLibrary.cpp PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
+# The drum sampler names its 128 pads' parameters at compile time (constexpr), in about four million of Clang's evaluation
+# steps, past its default limit of about one million (GCC's and MSVC's are far higher). tools/clang-tidy.sh gives an MSVC
+# build's clang-tidy the same.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    set_source_files_properties(src/devices/drums/DrumSampler.cpp PROPERTIES COMPILE_OPTIONS "-fconstexpr-steps=16777216")
+endif()
+
 # r8brain-free-src 7.6 (MIT), header-only, which resamples audio files at another rate than the engine's
 # (src/engine/audio/Resampler.cpp). Its code is third-party: its folder is a system one, so that GCC and Clang keep its
 # warnings to themselves, and Resampler.cpp turns MSVC's off around it.
@@ -688,6 +729,30 @@ function(phazite_use_core target)
     target_compile_definitions(${target} PRIVATE $<TARGET_PROPERTY:phazite_core,COMPILE_DEFINITIONS>)
     target_link_libraries(${target} PRIVATE phazite_core)
 endfunction()
+
+# --- Precompiled headers: JUCE's module headers, read once for each library's own files rather than by every file again,
+# which took most of a full build's time (docs/building.md). Off in CI (.github/workflows/ci.yml): there the compiler cache
+# (ccache) serves instead, which documents no support for MSVC's precompiled headers and needs its checks loosened for
+# GCC's, and a build without them shows on every push that every file includes what it uses. Each target's headers are
+# the modules its layer may use; JUCE's own units, Rubber Band's and r8brain's (which turn warnings off around what they
+# include) compile without. ---
+option(PHAZITE_PRECOMPILED_HEADERS "Precompile JUCE's module headers for Phazite's own files" ON)
+
+file(GLOB _phazite_juce_units LIST_DIRECTORIES false
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/JUCE/modules/*/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/JUCE/modules/*/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/JUCE/modules/*/*.mm")
+set_source_files_properties(${_phazite_juce_units} src/devices/stretch/RubberBandLibrary.cpp src/engine/audio/Resampler.cpp
+    PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+
+# The model, the services, the engine, the sandbox and the devices: no window modules.
+phazite_precompile_juce(phazite_core
+    juce_core juce_events juce_data_structures juce_audio_basics juce_dsp juce_graphics juce_audio_formats)
+
+# The UI, the app and the tests: all of them.
+set(PHAZITE_UI_MODULES
+    juce_core juce_events juce_data_structures juce_audio_basics juce_dsp juce_graphics juce_audio_formats juce_gui_basics
+    juce_gui_extra juce_audio_processors juce_audio_devices juce_audio_utils)
 
 # --- phazite_ui: the window's components and the look ---
 # A static library like phazite_core, so that the tests can build the real playlist, piano roll and mixer
@@ -952,6 +1017,7 @@ target_sources(phazite_ui PRIVATE
     src/ui/versions/VersionsView.h)
 
 phazite_use_core(phazite_ui)
+phazite_precompile_juce(phazite_ui ${PHAZITE_UI_MODULES})
 
 # --- phazite_app: the app's parts (the main window, the open project, the song's commands), in a library the tests
 # link, so the app's logic can be tested without a window. The Phazite executable is Main.cpp. ---
@@ -976,6 +1042,7 @@ target_sources(phazite_app PRIVATE
     src/app/SandboxedEditor.h)
 
 phazite_use_core(phazite_app)
+phazite_precompile_juce(phazite_app ${PHAZITE_UI_MODULES})
 target_link_libraries(phazite_app PRIVATE phazite_ui)
 
 # --- The app ---
@@ -1002,6 +1069,7 @@ target_compile_definitions(Phazite PRIVATE
 
 phazite_use_core(Phazite)
 target_link_libraries(Phazite PRIVATE phazite_app phazite_ui)
+phazite_add_sanitizer_runtime(Phazite)
 
 # --- PhaziteHost: the helper program that hosts plug-ins for Phazite, each in a process of its own or with others, so
 # that one that crashes or hangs can't take the song with it. It links phazite_core, as phazite_soundkit does, for JUCE
@@ -1032,25 +1100,7 @@ target_sources(PhaziteHost PRIVATE src/host/app/HostMain.cpp src/host/app/Format
 target_compile_definitions(PhaziteHost PRIVATE JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:PhaziteHost,JUCE_VERSION>")
 phazite_use_core(PhaziteHost)
 target_link_libraries(PhaziteHost PRIVATE phazite_host)
-
-add_dependencies(Phazite PhaziteHost)
-add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:PhaziteHost>" "$<TARGET_FILE_DIR:Phazite>"
-    VERBATIM)
-
-# The UI font, Inter (SIL Open Font License 1.1), goes next to the app as separate files with its licence
-# text (fonts/Inter), as CLAUDE.md asks of fonts. ui::LookAndFeel loads it from there.
-add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts" "$<TARGET_FILE_DIR:Phazite>/fonts"
-    VERBATIM)
-
-# Phazite's own presets for its devices, data files that the browser and the devices' Presets menus list (presets/<device>/<kind>),
-# go next to the app, as the fonts do. services/Library.h finds them there.
-add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources/presets" "$<TARGET_FILE_DIR:Phazite>/presets"
-    VERBATIM)
+phazite_add_sanitizer_runtime(PhaziteHost)
 
 # Phazite's licence, and the notices of the code and fonts from others that it is built with, which their licences ask to go
 # with every copy (resources/licenses/notices.json: JUCE and what it bundles, Rubber Band's GPL, r8brain-free-src, Inter's
@@ -1058,9 +1108,25 @@ add_custom_command(TARGET Phazite POST_BUILD
 # app, licenses/ and NOTICES.txt, which the About box reads and the installer installs.
 phazite_write_notices("${CMAKE_BINARY_DIR}/notices")
 
-add_custom_command(TARGET Phazite POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory_if_different "${CMAKE_BINARY_DIR}/notices" "$<TARGET_FILE_DIR:Phazite>"
+# What goes next to the app, which runs from there and which the installer packs (packaging/windows/Phazite.iss):
+# - the plug-ins' helper, PhaziteHost, which the app starts;
+# - the UI font, Inter (SIL Open Font License 1.1), as separate files with its licence text (fonts/Inter), as CLAUDE.md asks
+#   of fonts; ui::LookAndFeel loads it from there;
+# - Phazite's own presets for its devices, data files that the browser and the devices' Presets menus list
+#   (presets/<device>/<kind>); services/Library.h finds them there;
+# - the notices above (licenses/, NOTICES.txt).
+# On every build of the app, made what the build has now (cmake/SyncAppFolder.cmake): a file deleted from the sources goes from
+# there too, and the helper is the one just built.
+add_custom_target(phazite_app_folder
+    COMMAND "${CMAKE_COMMAND}" "-DAPP_FOLDER=$<TARGET_FILE_DIR:Phazite>"
+            "-DFOLDERS=${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts=fonts$<SEMICOLON>${CMAKE_CURRENT_SOURCE_DIR}/resources/presets=presets$<SEMICOLON>${CMAKE_BINARY_DIR}/notices/licenses=licenses"
+            "-DFILES=$<TARGET_FILE:PhaziteHost>$<SEMICOLON>${CMAKE_BINARY_DIR}/notices/NOTICES.txt"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SyncAppFolder.cmake"
+    COMMENT "Making what goes next to the app what the build has"
     VERBATIM)
+
+add_dependencies(phazite_app_folder PhaziteHost)
+add_dependencies(Phazite phazite_app_folder)
 
 # --- The installer, on Windows: Inno Setup 6.6 or newer (tools\setup-windows.cmd installs it) compiles
 # packaging/windows/Phazite.iss into build/<preset>/installer/Phazite-<version>-Setup.exe, from the app's folder and the
@@ -1111,6 +1177,7 @@ endif()
 juce_add_console_app(phazite_soundkit)
 target_sources(phazite_soundkit PRIVATE tools/soundkit/SoundKit.cpp)
 phazite_use_core(phazite_soundkit)
+phazite_add_sanitizer_runtime(phazite_soundkit)
 
 # --- Tests: doctest (MIT, external/doctest). Run them with `ctest --preset <preset>`. ---
 option(PHAZITE_BUILD_TESTS "Build Phazite's unit tests (phazite_tests)" ON)
@@ -1190,6 +1257,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/EnginePlayback.h
         tests/EnginePlaybackTests.cpp
         tests/EngineTests.cpp
+        tests/EngineTransportTests.cpp
         tests/EffectDeviceTests.cpp
         tests/EffectEditorTests.cpp
         tests/EqEditorTests.cpp
@@ -1372,7 +1440,16 @@ if(PHAZITE_BUILD_TESTS)
 
     phazite_use_core(phazite_tests)
     target_link_libraries(phazite_tests PRIVATE phazite_app phazite_ui)
+    phazite_add_sanitizer_runtime(phazite_tests)
     target_include_directories(phazite_tests SYSTEM PRIVATE external/doctest) # its warnings off: it is third-party
+    phazite_precompile_juce(phazite_tests ${PHAZITE_UI_MODULES} juce_cryptography)
+
+    # On Linux the test program exports its symbols (-rdynamic): its own malloc and free, which the real-time audit counts
+    # allocations with in place of glibc's, and its functions' names, which name where they came from
+    # (tests/AudioThreadMonitor.cpp).
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set_target_properties(phazite_tests PROPERTIES ENABLE_EXPORTS ON)
+    endif()
 
     # The tests' helper: the app's, with the tests' stand-ins for plug-ins (tests/host/TestPlugins.h), which the tests
     # start in its place.
@@ -1391,6 +1468,7 @@ if(PHAZITE_BUILD_TESTS)
     target_compile_definitions(phazite_test_host PRIVATE JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:phazite_test_host,JUCE_VERSION>")
     phazite_use_core(phazite_test_host)
     target_link_libraries(phazite_test_host PRIVATE phazite_host)
+    phazite_add_sanitizer_runtime(phazite_test_host)
 
     add_dependencies(phazite_tests phazite_test_host)
     target_compile_definitions(phazite_tests PRIVATE PHAZITE_TEST_HOST="$<TARGET_FILE:phazite_test_host>")

@@ -7,6 +7,7 @@
 #include "GoldenFiles.h"
 #include "TestHelpers.h"
 #include "UiTestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/SongSelection.h"
 #include "model/arrangement/internal/Selection.h"
@@ -543,6 +544,60 @@ TEST_CASE ("Selected points go with Delete and Duplicate, and the arrow keys' co
     selection.selectOnly (song.b);
     CHECK_FALSE (selection.getSelectedAutomationPoints().parameter.isValid());
     CHECK_FALSE (phazite::CommandRegistry::isEnabled (*registry.find ("automation.raisePoints")));
+}
+
+TEST_CASE ("Selected points stay selected, and only they, as points are added or removed before them, undone and redone")
+{
+    // The selection kept the points' indices: an earlier point's addition undone left it on the points after them, which
+    // Delete or a drag then acted on (known bug 53).
+    Song song;
+    auto& context = song.context;
+    const auto makeup = song.makeup();
+    phazite::addAutomationPoint (context, makeup, { beats (0), -3.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (2), -6.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (4), -9.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (6), -12.0f });
+    phazite::addAutomationPoint (context, makeup, { beats (8), 0.0f });
+
+    auto& selection = context.getSongSelection();
+    const auto selectedBeats = [&]
+    {
+        std::vector<double> result;
+        const auto points = phazite::getAutomationPoints (context, makeup);
+
+        for (const auto index : selection.getSelectedAutomationPoints().indices)
+            result.push_back (points[(size_t) index].beat.inBeats());
+
+        return result;
+    };
+
+    selection.selectAutomationPoints (makeup, { 2, 3 });
+    REQUIRE (selectedBeats() == std::vector { 4.0, 6.0 });
+
+    // A point added before them, undone, redone, and another removed before them.
+    phazite::addAutomationPoint (context, makeup, { beats (1), -1.0f });
+    CHECK (selectedBeats() == std::vector { 4.0, 6.0 });
+    phazite::undo (*song.song);
+    CHECK (selectedBeats() == std::vector { 4.0, 6.0 });
+    phazite::redo (*song.song);
+    CHECK (selectedBeats() == std::vector { 4.0, 6.0 });
+    phazite::undo (*song.song);
+    phazite::undo (*song.song); // the point at 8 gone again: after them
+    CHECK (selectedBeats() == std::vector { 4.0, 6.0 });
+    phazite::redo (*song.song);
+
+    // Delete takes them, not their neighbours.
+    phazite::CommandRegistry registry;
+    phazite::addSelectionCommands (registry, getSelection (context), getRangeSelection (context));
+    phazite::addAutomationCommands (registry, context);
+    phazite::test::UndoCheck undo (*song.song);
+    undo.command (registry, "edit.delete");
+    CHECK (beatsOf (phazite::getAutomationPoints (context, makeup)) == std::vector { 0.0, 2.0, 8.0 });
+
+    // Undone, the points are back; one that isn't the one selected is never selected in its place.
+    phazite::undo (*song.song);
+    for (const auto beat : selectedBeats())
+        CHECK ((juce::approximatelyEqual (beat, 4.0) || juce::approximatelyEqual (beat, 6.0)));
 }
 
 TEST_CASE ("Show Automation collapses the selected tracks' lanes while one shows expanded, and expands them again")

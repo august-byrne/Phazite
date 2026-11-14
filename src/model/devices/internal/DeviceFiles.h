@@ -21,8 +21,8 @@ std::vector<juce::Identifier> getSoundProperties (const devices::DeviceInfo&);
 juce::String getProjectPath (const Song&, const juce::File&);
 juce::File findProjectFile (const Song&, const juce::String& path);
 
-// Devices' states as a preset keeps them (model/presets/internal/Presets.h): their files by their full paths, so that
-// another project can copy them in. And the other way, devices' states from a preset made a project's: their files copied
+// Devices' states as a preset holds them before it is written (model/presets/internal/Presets.h): their files by their full
+// paths, so that another project can copy them in (a preset's file names them from its own folder: PresetModel.h). And the other way, devices' states from a preset made a project's: their files copied
 // into its Audio folder, and those that aren't there any more left out, so that the device plays its own sound (a factory
 // sound, or a factory table). Each goes through a state and everything in it (a container's, a track's), and isn't an
 // undo step: the state isn't in a project.
@@ -30,7 +30,9 @@ void writeDeviceFilePaths (const Song& from, juce::ValueTree& state);
 
 // Whether a path a preset names is a sound file a device can take from it: a full path to a file there, whose name says it
 // is audio (model/arrangement/internal/Import.h: getFileKind()), and never a network path, which isn't even looked at. A
-// preset is a file from anyone: what it names is copied into the project, or played from where it is.
+// preset is a file from anyone: what it names is copied into the project, or played from where it is. And why one isn't,
+// as words that follow its name ("on a network share", "not found"), or nothing for one that is.
 bool isSoundFileToTake (const juce::String& path);
+juce::String getWhySoundNotTaken (const juce::String& path);
 void copyDeviceFilesInto (Song&, juce::ValueTree& state);
 } // namespace phazite

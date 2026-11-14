@@ -65,6 +65,10 @@ void moveNote (Song&, const NoteRef&, BeatPosition start, int pitch);
 // Sets a note's length (at least getMinimumNoteLength()); the clip grows to hold it, as addNote() says.
 void setNoteLength (Song&, const NoteRef&, BeatDuration);
 
+// Both at once, as moveNote() and setNoteLength() say: the clip grows only to hold the note as it ends up, not as it is
+// between the two (moved with its old length, or made longer from its old start).
+void placeNote (Song&, const NoteRef&, BeatPosition start, int pitch, BeatDuration);
+
 void deleteNotes (Song&, const std::vector<NoteRef>&);
 
 // Transposes the notes by semitones, all by the same amount and none beyond the MIDI range.

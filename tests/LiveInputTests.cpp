@@ -2,6 +2,7 @@
 #include "EnginePlayback.h"
 #include "HostedDevice.h"
 #include "TestClips.h"
+#include "TestDevices.h"
 #include "TestHelpers.h"
 #include "devices/dynamics/Limiter.h"
 #include "devices/dynamics/Multiband.h"
@@ -187,6 +188,7 @@ TEST_CASE ("The computer keyboard's notes play live into the track live MIDI pla
 
     phazite::test::EnginePlayback playback;
     auto& host = getPlaybackHost();
+    playback.play (0.01);   // what earlier tests left in the engine's queue (the ends of their live notes)
     host.getPlayedEvents(); // none from before
     auto playedSince = [&host, before = host.getPlayedEvents().size()]() mutable
     {
@@ -385,4 +387,27 @@ TEST_CASE ("Low latency leaves what renders play as the song has it")
         largest = std::max (largest, std::abs (asItIs.getSample (0, i) - whileLow.getSample (0, i)));
 
     CHECK (largest < 1.0e-6f);
+}
+
+TEST_CASE ("A note held as live MIDI moves to another track ends on the track it played")
+{
+    // Hold a key, select another instrument's track, let go: the note's end went to the new track, and the note played on
+    // the first for ever (known bug 84). Now the track that was live lets go of every note, and its pedal, as live MIDI
+    // moves away.
+    OpenSong open (2);
+    auto& song = *open.song;
+
+    for (const auto track : open.tracks)
+        phazite::test::addTestDevice (song, track, phazite::test::TestTone::typeID);
+
+    REQUIRE (phazite::setLiveMidiTrack (song, open.tracks[0]));
+    phazite::test::EnginePlayback playback;
+    playLive (juce::MidiMessage::noteOn (1, 60, 0.8f));
+    const auto held = playback.play (0.05);
+    REQUIRE (held.getMagnitude (0, held.getNumSamples() / 2, held.getNumSamples() / 2) > 0.1f);
+
+    REQUIRE (phazite::setLiveMidiTrack (song, open.tracks[1]));
+    playLive (juce::MidiMessage::noteOff (1, 60));
+    const auto after = playback.play (0.05);
+    CHECK (after.getMagnitude (0, after.getNumSamples() / 2, after.getNumSamples() / 2) < 1.0e-6f);
 }

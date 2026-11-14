@@ -212,7 +212,6 @@ the frame every editor shares).
   and can click.
 - Sounds read from floating-point files aren't checked for values that aren't numbers (known bug 35 in
   [known-bugs.md](../../known-bugs.md)).
-- A held note that is silent for longer than the sampler's tail lets the sampler sleep (known bug 37).
 - The drawing can't be zoomed or scrolled, so markers on a long sound are placed to the nearest pixel of the whole
   sound; a reversed sound is drawn forwards, marked "Reversed".
 - A right-click on the drawing plays the sound as a left click does, and a double-click removes a slice where it resets

@@ -433,16 +433,18 @@ void Playlist::tick()
 
     ticksToSkip = 2;
     const auto rendering = getClipsBeingRendered (context);
+    const auto failed = getClipsWhoseRenderFailed (context);
 
-    if (rendering.empty() && ! showsRendering)
+    if (rendering.empty() && failed.empty() && ! showsRendering)
         return;
 
-    showsRendering = ! rendering.empty();
+    showsRendering = ! rendering.empty() || ! failed.empty();
 
     for (auto& [id, component] : clipComponents)
     {
         const auto found = rendering.find (id);
         component->showRendering (found != rendering.end() ? std::optional (found->second) : std::nullopt);
+        component->showRenderFailed (std::find (failed.begin(), failed.end(), id) != failed.end());
     }
 }
 

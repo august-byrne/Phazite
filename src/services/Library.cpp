@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Library.h"
+#include "model/base/WholeFile.h"
 #include "model/engine/AppInfo.h"
 #include "model/engine/EngineContext.h"
 
@@ -7,6 +8,7 @@
 
 #include <algorithm>
 #include <set>
+#include <utility>
 
 namespace phazite
 {
@@ -353,8 +355,11 @@ namespace
         for (const auto& [path, each] : facts)
             text << toLine (path, each) << "\n";
 
+        // Whole or not at all: one that couldn't be written is read again from the sounds at the next start.
         file.getParentDirectory().createDirectory();
-        file.replaceWithText (text.toString());
+
+        if (const auto written = writeWholeFile (file, text.getData(), text.getDataSize()); written.failed())
+            juce::Logger::writeToLog ("Phazite couldn't keep what the library read of its sounds: " + written.getErrorMessage());
     }
 
     //==============================================================================
@@ -406,10 +411,11 @@ juce::String LibraryItem::getKey() const
 //==============================================================================
 struct Library::Indexer : public juce::Thread
 {
-    Indexer (Library& o, juce::Array<juce::File> rootsToScan)
+    Indexer (Library& o, juce::Array<juce::File> rootsToScan, std::vector<Member> membersToFind)
         : juce::Thread ("Phazite library index"),
           owner (o),
-          roots (std::move (rootsToScan))
+          roots (std::move (rootsToScan)),
+          members (std::move (membersToFind))
     {
     }
 
@@ -423,20 +429,42 @@ struct Library::Indexer : public juce::Thread
         juce::int64 size = 0, modified = 0;
     };
 
+    // A folder's files, and those of its folders where the listing meets them; a folder that links to one
+    // the walk is already inside (a loop, which would be followed to the path's limit) is left out. One that links elsewhere,
+    // as a folder of samples on another drive, is followed. Folders are told apart by what the file system knows them by
+    // (File::getFileIdentifier(), which follows links), so a loop is found however its links are written.
+    void walk (const juce::File& folder, const juce::File& root, std::vector<juce::uint64>& inside, std::vector<Found>& files)
+    {
+        const auto id = folder.getFileIdentifier();
+
+        if (id != 0 && std::find (inside.begin(), inside.end(), id) != inside.end())
+            return;
+
+        inside.push_back (id);
+
+        for (const auto& entry :
+             juce::RangedDirectoryIterator (folder, false, "*", juce::File::findFilesAndDirectories | juce::File::ignoreHiddenFiles))
+        {
+            if (threadShouldExit() || (int) files.size() >= maxIndexed)
+                break;
+
+            if (const auto& file = entry.getFile(); entry.isDirectory())
+                walk (file, root, inside, files);
+            else if (owner.isSoundFile (file) || owner.isMidiFile (file) || isPreset (file))
+                files.push_back ({ file, root, entry.getFileSize(), entry.getModificationTime().toMilliseconds() });
+        }
+
+        inside.pop_back();
+    }
+
     void run() override
     {
         std::vector<Found> files;
 
         for (const auto& root : roots)
         {
-            for (const auto& entry : juce::RangedDirectoryIterator (root, true, "*", juce::File::findFiles | juce::File::ignoreHiddenFiles))
-            {
-                if (threadShouldExit() || (int) files.size() >= maxIndexed)
-                    break;
-
-                if (const auto& file = entry.getFile(); owner.isSoundFile (file) || owner.isMidiFile (file) || isPreset (file))
-                    files.push_back ({ file, root, entry.getFileSize(), entry.getModificationTime().toMilliseconds() });
-            }
+            std::vector<juce::uint64> inside;
+            walk (root, root, inside, files);
         }
 
         if (threadShouldExit())
@@ -484,7 +512,10 @@ struct Library::Indexer : public juce::Thread
             items.push_back (owner.makeFileItem (found.file, found.root, fact, true));
         }
 
-        publish (items, read, files);
+        publish (items, read);
+
+        // The members of the sets that went since, looked for among the files found.
+        findMovedMembers (files);
 
         // Then again with the loop data of the WAV and AIFF files not read before.
         for (const auto i : unread)
@@ -499,26 +530,73 @@ struct Library::Indexer : public juce::Thread
         }
 
         if (! unread.empty())
-            publish (items, read, files);
+            publish (items, read);
 
         // Kept for the next start, when anything changed.
         if (owner.factsFile != juce::File() && (! unread.empty() || read.size() != known.size()))
             writeFactsFile (owner.factsFile, read);
     }
 
-    void publish (const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read, const std::vector<Found>& files)
+    void publish (const std::vector<LibraryItem>& items, const std::map<juce::String, SoundFacts>& read)
     {
         auto built = std::make_shared<const std::vector<LibraryItem>> (items);
-        std::multimap<juce::int64, juce::File> bySize;
-
-        for (const auto& found : files)
-            bySize.emplace (found.size, found.file);
 
         {
             const juce::ScopedLock lock (owner.indexLock);
             owner.index = std::move (built);
             owner.facts = read;
-            owner.filesBySize = std::move (bySize);
+        }
+
+        owner.triggerAsyncUpdate();
+    }
+
+    // Each member of the sets that isn't where it was found last, looked for where it moved: among the files of its size in
+    // the folder it was in (renamed there), then among those of the index, anywhere in the library; the one that starts as
+    // it does. Here, once for each index, rather than as the sets are listed on the message thread (known bug 114).
+    void findMovedMembers (const std::vector<Found>& files)
+    {
+        std::multimap<juce::int64, juce::File> bySize;
+
+        for (const auto& found : files)
+            bySize.emplace (found.size, found.file);
+
+        std::set<juce::String> looked;
+        std::map<juce::String, juce::String> moved;
+
+        for (const auto& member : members)
+        {
+            if (threadShouldExit())
+                return;
+
+            if (member.size < 0 || member.start.isEmpty() || isStillThere (member) || ! looked.insert (member.key).second)
+                continue;
+
+            std::vector<juce::File> candidates;
+
+            for (const auto& entry :
+                 juce::RangedDirectoryIterator (juce::File (member.key).getParentDirectory(), false, "*", juce::File::findFiles))
+                if (entry.getFileSize() == member.size && (int) candidates.size() < mostCandidates)
+                    candidates.push_back (entry.getFile());
+
+            const auto [from, to] = bySize.equal_range (member.size);
+
+            for (auto i = from; i != to && (int) candidates.size() < 2 * mostCandidates; ++i)
+                candidates.push_back (i->second);
+
+            for (const auto& file : candidates)
+            {
+                if (file.getFullPathName() != member.key && file.existsAsFile() && readStart (file) == member.start)
+                {
+                    moved[member.key] = file.getFullPathName();
+                    break;
+                }
+            }
+        }
+
+        {
+            const juce::ScopedLock lock (owner.indexLock);
+            owner.lookedFor = std::move (looked);
+            owner.movedTo = std::move (moved);
         }
 
         owner.triggerAsyncUpdate();
@@ -526,6 +604,7 @@ struct Library::Indexer : public juce::Thread
 
     Library& owner;
     const juce::Array<juce::File> roots;
+    const std::vector<Member> members; // of the sets, as they were when the index started
 };
 
 //==============================================================================
@@ -845,14 +924,14 @@ juce::StringArray Library::getSoundTypes()
 void Library::reindex()
 {
     indexer = nullptr; // stops the one before
-    indexer = std::make_unique<Indexer> (*this, getRoots());
+    indexer = std::make_unique<Indexer> (*this, getRoots(), getAllMembers());
     indexer->startThread (juce::Thread::Priority::low);
 }
 
 void Library::handleAsyncUpdate()
 {
     // Members of the sets renamed or moved since, found again, before the browser lists them.
-    findMovedMembers();
+    takeMovedMembers();
 
     if (onIndexChanged != nullptr)
         onIndexChanged();
@@ -958,7 +1037,7 @@ Library::Member Library::makeMember (const LibraryItem& item) const
     return member;
 }
 
-bool Library::isStillThere (const Member& member) const
+bool Library::isStillThere (const Member& member)
 {
     if (member.key.startsWith (devicePrefix) || ! juce::File::isAbsolutePath (member.key))
         return true; // a device, found by findItem()
@@ -967,76 +1046,70 @@ bool Library::isStillThere (const Member& member) const
     return member.size < 0 ? file.exists() : file.existsAsFile() && file.getSize() == member.size;
 }
 
-bool Library::findAgain (Member& member) const
+std::vector<Library::Member> Library::getAllMembers() const
 {
-    if (member.size < 0 || member.start.isEmpty())
-        return false;
+    auto all = favorites;
 
-    // The files of its size in the folder it was in, renamed there since the index was built perhaps; then the index's,
-    // anywhere in the library. Among them, the one that starts as it does.
-    std::vector<juce::File> candidates;
+    for (const auto& collection : collections)
+        all.insert (all.end(), collection.members.begin(), collection.members.end());
 
-    for (const auto& entry :
-         juce::RangedDirectoryIterator (juce::File (member.key).getParentDirectory(), false, "*", juce::File::findFiles))
-        if (entry.getFileSize() == member.size && (int) candidates.size() < mostCandidates)
-            candidates.push_back (entry.getFile());
-
-    {
-        const juce::ScopedLock lock (indexLock);
-        const auto [from, to] = filesBySize.equal_range (member.size);
-
-        for (auto i = from; i != to && (int) candidates.size() < 2 * mostCandidates; ++i)
-            candidates.push_back (i->second);
-    }
-
-    for (const auto& file : candidates)
-    {
-        if (file.getFullPathName() != member.key && file.existsAsFile() && readStart (file) == member.start)
-        {
-            member.key = file.getFullPathName();
-            return true;
-        }
-    }
-
-    return false;
+    return all;
 }
 
-std::vector<LibraryItem> Library::getItems (std::vector<Member>& members, bool& moved) const
+std::vector<LibraryItem> Library::getItems (const std::vector<Member>& members) const
 {
     std::vector<LibraryItem> items;
+    auto lookAgain = false;
 
-    for (auto& member : members)
+    for (const auto& member : members)
     {
-        if (! isStillThere (member))
-            moved = findAgain (member) || moved;
-
         if (auto item = findItem (member.key))
             items.push_back (std::move (*item));
+        else if (member.size >= 0 && member.start.isNotEmpty() && searchedFor.insert (member.key).second)
+            lookAgain = true; // gone since the index looked: looked for by the next
     }
+
+    // A Library is never made const: what lists it is const, and asks for the index again. Not while one is built, which
+    // looks for the members gone by then.
+    if (lookAgain && ! isIndexing())
+        const_cast<Library*> (this)->reindex();
 
     return items;
 }
 
-void Library::findMovedMembers()
+void Library::takeMovedMembers()
 {
-    const auto findAll = [this] (std::vector<Member>& members)
+    std::map<juce::String, juce::String> moved;
+
     {
-        auto moved = false;
+        const juce::ScopedLock lock (indexLock);
+        moved = std::exchange (movedTo, {});
+        searchedFor.insert (lookedFor.begin(), lookedFor.end());
+    }
+
+    const auto follow = [&moved] (std::vector<Member>& members)
+    {
+        auto any = false;
 
         for (auto& member : members)
-            if (! isStillThere (member))
-                moved = findAgain (member) || moved;
+        {
+            if (const auto found = moved.find (member.key); found != moved.end())
+            {
+                member.key = found->second;
+                any = true;
+            }
+        }
 
-        return moved;
+        return any;
     };
 
-    if (findAll (favorites))
+    if (follow (favorites))
         writeFavorites();
 
     auto collectionsMoved = false;
 
     for (auto& collection : collections)
-        collectionsMoved = findAll (collection.members) || collectionsMoved;
+        collectionsMoved = follow (collection.members) || collectionsMoved;
 
     if (collectionsMoved)
         writeCollections();
@@ -1065,13 +1138,7 @@ void Library::setFavorite (const LibraryItem& item, bool favorite)
 
 std::vector<LibraryItem> Library::getFavorites() const
 {
-    auto moved = false;
-    auto items = getItems (favorites, moved);
-
-    if (moved)
-        writeFavorites();
-
-    return items;
+    return getItems (favorites);
 }
 
 Library::Collection* Library::findCollection (const juce::String& name) const
@@ -1166,13 +1233,7 @@ std::vector<LibraryItem> Library::getCollection (const juce::String& name) const
     if (collection == nullptr)
         return {};
 
-    auto moved = false;
-    auto items = getItems (collection->members, moved);
-
-    if (moved)
-        writeCollections();
-
-    return items;
+    return getItems (collection->members);
 }
 
 //==============================================================================

@@ -294,19 +294,25 @@ TEST_CASE ("A channel's CPU meter shows the share of each block's time its devic
     REQUIRE (phazite::groupIntoContainer (context, { second }).isValid());
     CHECK (phazite::getCpuLoad (context, tracks.a) == 0.0f);
 
+    // Each block of each device takes a fifth of its time at least: the meter's lower bounds hold on any machine. Its upper
+    // bounds are what the devices really took, a block at most as long as their longest (more than a fifth only where the
+    // system took the thread away while one worked), with room for the engine's own work around them: a device counted
+    // twice (a container's time with that of the devices in it) would pass them.
+    TestBusy::longestShare = 0.0;
     phazite::test::EnginePlayback playback;
     playback.play (1.5);
     const auto both = phazite::getCpuLoad (context, tracks.a);
     CHECK (both > 1.5 * TestBusy::share);
-    CHECK (both < 3.0 * TestBusy::share); // the time the engine itself took for them, or the test thread waited
+    CHECK (both < 2.0 * TestBusy::longestShare.load() + 0.5 * TestBusy::share);
     CHECK (phazite::getCpuLoad (context, tracks.b) == 0.0f);
 
     // Switched off, a device takes none, and its share falls away as the engine plays on.
     phazite::setDeviceOn (context, first, false);
+    TestBusy::longestShare = 0.0;
     playback.play (2.0);
     const auto one = phazite::getCpuLoad (context, tracks.a);
     CHECK (one > 0.75 * TestBusy::share);
-    CHECK (one < 1.5 * TestBusy::share);
+    CHECK (one < TestBusy::longestShare.load() + 0.5 * TestBusy::share);
 }
 
 TEST_CASE ("The values set by hand of Phazite's own devices are the song's, which what plays takes in, undo and redo too")

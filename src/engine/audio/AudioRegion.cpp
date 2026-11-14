@@ -212,10 +212,11 @@ void AudioRegion::expect (std::int64_t songSample, double engineRate) const noex
 }
 
 void AudioRegion::play (float* const* channels, std::int64_t songSample, int numSamples, double engineRate, bool isRender,
-                        juce::AudioBuffer<float>& scratch) const noexcept
+                        juce::AudioBuffer<float>& scratch, Cut cut) const noexcept
 {
-    // The part of the stretch it plays in.
-    const auto from = std::max (songSample, start), to = std::min (songSample + numSamples, getEnd());
+    // The part of the stretch it plays in: up to a cut, if it is cut.
+    const auto isCut = cut.length > 0 && getEnd() > cut.at + 1;
+    const auto from = std::max (songSample, start), to = std::min ({ songSample + numSamples, getEnd(), isCut ? cut.at : getEnd() });
 
     if (to <= from || file == nullptr || scratch.getNumChannels() < 2 || scratch.getNumSamples() < to - from)
         return;
@@ -229,12 +230,21 @@ void AudioRegion::play (float* const* channels, std::int64_t songSample, int num
     const auto offset = (int) (from - songSample);
     const auto count = (int) (to - from);
 
-    // A jump, or a start other than its own (playback started inside it): it fades in, from where the file is there.
-    if (playing.playedTo != from)
+    // In a stop's fade, only what was playing up to here plays on.
+    if (cut.continuesOnly && playing.playedTo != from)
+        return;
+
+    // A jump, a start other than its own (playback started inside it), or the region moved under the playhead, slipped in
+    // its file or played from another (rendered again): it fades in, from where the file is there.
+    if (playing.playedTo != from || playing.playedFile != file.get() || playing.playedStart != start
+        || ! juce::exactlyEqual (playing.playedFileStart, fileStart))
     {
         playing.fadingIn = from != start ? jumpFade : 0;
         playing.missed = false; // what it missed was somewhere else
         playing.filePosition = fileStart + (double) (from - start) * file->getSampleRate() / engineRate;
+        playing.playedFile = file.get();
+        playing.playedStart = start;
+        playing.playedFileStart = fileStart;
 
         if (playing.conversion != nullptr)
             playing.conversion->restart (std::llround (playing.filePosition));
@@ -279,8 +289,9 @@ void AudioRegion::play (float* const* channels, std::int64_t songSample, int num
     if (std::exchange (playing.missed, false))
         playing.fadingIn = jumpFade;
 
-    // At its gain, through its fades, and fading in after a jump.
-    const auto plain = fadeIn <= (from - start) && (to - start) <= length - fadeOut && playing.fadingIn == 0;
+    // At its gain, through its fades, fading in after a jump, and out before a cut.
+    const auto cutFrom = isCut ? cut.at - cut.length : getEnd();
+    const auto plain = fadeIn <= (from - start) && (to - start) <= length - fadeOut && playing.fadingIn == 0 && to <= cutFrom;
 
     for (int channel = 0; channel < 2; ++channel)
     {
@@ -307,6 +318,9 @@ void AudioRegion::play (float* const* channels, std::int64_t songSample, int num
 
             if (fadingIn > 0)
                 g *= (float) (jumpFade - --fadingIn) / (float) jumpFade;
+
+            if (from + i >= cutFrom)
+                g *= (float) (cut.at - (from + i)) / (float) (cut.length + 1);
 
             destination[i] += sound[channel][i] * g;
         }

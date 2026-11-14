@@ -75,6 +75,7 @@ void DeviceRunner::prepare (double rate, int maximumBlockSize)
     sleepAfterSamples = std::max ((int) (sleepAfterSeconds * rate), 2 * latencySamples);
     silentSamples = 0;
     asleep = false;
+    letGoOfNotes();
     hasPreviousValues = false;
     startedEarly = false;
 
@@ -93,6 +94,7 @@ void DeviceRunner::reset()
     processor->reset();
     silentSamples = 0;
     asleep = false;
+    letGoOfNotes();
     hasPreviousValues = false;
 
     for (auto& delay : dryDelays)
@@ -145,6 +147,43 @@ namespace
         return events.first (count);
     }
 } // namespace
+
+void DeviceRunner::letGoOfNotes() noexcept
+{
+    held.fill (0);
+    numHeld = 0;
+    pedalDown = false;
+}
+
+void DeviceRunner::followNotes (std::span<const devices::NoteEvent> events) noexcept
+{
+    using Type = devices::NoteEvent::Type;
+    constexpr int sustainPedal = 64;
+
+    for (const auto& event : events)
+    {
+        auto& times = held[(size_t) std::clamp (event.number, 0, 127)];
+
+        if ((event.type == Type::noteOn || event.type == Type::portamentoOn) && times < 255)
+        {
+            ++times;
+            ++numHeld;
+        }
+        else if (event.type == Type::noteOff && times > 0)
+        {
+            --times;
+            --numHeld;
+        }
+        else if (event.type == Type::allNotesOff)
+        {
+            letGoOfNotes();
+        }
+        else if (event.type == Type::controller && event.number == sustainPedal)
+        {
+            pedalDown = event.value >= 0.5f;
+        }
+    }
+}
 
 DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int start, int numSamples, const Block& in)
 {
@@ -199,6 +238,9 @@ DeviceRunner::Begun DeviceRunner::begin (juce::AudioBuffer<float>& buffer, int s
                                                [this] (const Automated& automated) { return automated.parameter == mixIndex; })));
     begun.hasSidechain = in.hasSidechain && buffer.getNumChannels() >= 4;
     const auto isSynth = isInstrument();
+
+    if (isSynth)
+        followNotes (in.events);
 
     if (isSynth) // its own channels, not a sidechain's
         for (int channel = 0; channel < std::min (2, buffer.getNumChannels()); ++channel)
@@ -257,7 +299,7 @@ void DeviceRunner::end (juce::AudioBuffer<float>& buffer, int start, int numSamp
     {
         silentSamples = (int) std::min<std::int64_t> ((std::int64_t) silentSamples + numSamples, maximumSilentSamples);
         asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence()
-                 && (double) silentSamples >= processor->getTailSeconds() * sampleRate;
+                 && (double) silentSamples >= processor->getTailSeconds() * sampleRate && numHeld == 0 && ! pedalDown;
     }
     else
     {

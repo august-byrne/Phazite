@@ -13,8 +13,11 @@ namespace
 {
     constexpr int stateMilliseconds = 10000; // how long a plug-in's state may take to come or go
     constexpr int prepareMilliseconds = 10000;
-    constexpr int textMilliseconds = 250; // how a value reads, for a tooltip or a field
-    constexpr int smallestChannel = 4096; // the longest block a channel takes at least
+    constexpr int textMilliseconds = 250;                // how a value reads, for a tooltip or a field
+    constexpr int smallestChannel = 4096;                // the longest block a channel takes at least
+    constexpr std::int64_t smallestDeadline = 1'000'000; // a millisecond, which a round trip to the helper takes well within
+    constexpr std::int64_t waitNanoseconds = 50'000'000; // how long a wait for a block goes before it looks whether to go on
+    constexpr int preparingLookMilliseconds = 10;        // how often the message thread looks at a channel that waits
 } // namespace
 
 juce::AudioProcessor::BusesProperties SandboxedInstance::getBuses (const sandbox::PluginInfo& info)
@@ -152,6 +155,8 @@ SandboxedInstance::SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance> i
 SandboxedInstance::~SandboxedInstance()
 {
     // Told of no more, then closed in its helper (remote), then its helper let go of (keepHelper).
+    stopTimer();
+
     if (onGone != nullptr)
         onGone();
 
@@ -188,7 +193,7 @@ void SandboxedInstance::helperLost()
     triggerAsyncUpdate();
 }
 
-void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> newRemote, std::shared_ptr<void> keep,
+void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> newRemote, double openedAtRate, std::shared_ptr<void> keep,
                                        std::function<void()> gone)
 {
     // No block plays while it changes (the engine skips them; a render waits).
@@ -201,6 +206,9 @@ void SandboxedInstance::replaceRemote (std::unique_ptr<sandbox::RemoteInstance> 
     auto old = std::exchange (remote, std::move (newRemote));
     auto oldHelper = std::exchange (keepHelper, std::move (keep));
     onGone = std::move (gone);
+    channelRate = openedAtRate;
+    preparing.store (false, std::memory_order_release);
+    stopTimer();
 
     {
         const juce::ScopedLock locked (lock);
@@ -296,9 +304,35 @@ void SandboxedInstance::setMovedByEngine (int parameter, bool isMoved)
         std::erase (movedByEngine, parameter);
 }
 
-std::int64_t SandboxedInstance::getDeadlineNanoseconds (int numSamples, double sampleRate) noexcept
+std::int64_t SandboxedInstance::getDeadlineNanoseconds (int numSamples, int maximumBlockSize, double sampleRate) noexcept
 {
-    return (std::int64_t) (1.0e9 * numSamples / std::max (1.0, sampleRate));
+    const auto lasting = [sampleRate] (int samples) { return (std::int64_t) (1.0e9 * samples / std::max (1.0, sampleRate)); };
+    return std::max (lasting (numSamples), std::min (smallestDeadline, lasting (maximumBlockSize)));
+}
+
+SandboxedInstance::Answer SandboxedInstance::waitForAnswer (std::int64_t limitNanoseconds, const std::atomic<bool>* cancelled) noexcept
+{
+    auto& channel = remote->getChannel();
+    const auto since = sandbox::getNanoseconds();
+
+    for (;;)
+    {
+        // Nothing rings the bell for a helper that has gone: it is looked for between the slices.
+        if (channel.waitForAnswer (0, waitNanoseconds) == sandbox::BlockChannel::Played::done)
+            return Answer::played;
+
+        if (cancelled != nullptr && cancelled->load (std::memory_order_acquire))
+            return Answer::cancelled;
+
+        if (hasCrashed())
+            return Answer::gone;
+
+        if (sandbox::getNanoseconds() - since > limitNanoseconds)
+        {
+            remote->getHelper().reportHung();
+            return Answer::hung;
+        }
+    }
 }
 
 void SandboxedInstance::fillInPluginDescription (juce::PluginDescription& out) const
@@ -332,21 +366,88 @@ bool SandboxedInstance::acceptsMidi() const
 
 void SandboxedInstance::prepareToPlay (double sampleRate, int maximumBlockSize)
 {
+    // What it is to play at, kept by a crashed one too, which its reload opens at.
     setRateAndBufferSizeDetails (sampleRate, maximumBlockSize);
-    const auto channelSize = std::max (smallestChannel, maximumBlockSize);
+    preparedRate.store (sampleRate, std::memory_order_relaxed);
+    preparedBlockSize.store (maximumBlockSize, std::memory_order_relaxed);
 
-    // A new channel only for another rate or a longer block than it takes.
-    if (hasCrashed() || (juce::exactlyEqual (sampleRate, preparedRate) && channelSize <= remote->getChannel().getLimits().maxSamples))
+    if (hasCrashed())
         return;
 
+    // A new channel only for another rate or a longer block than it takes; not while the helper keeps a block, which it
+    // can't prepare the plug-in before it gives back: the channel waits for it then.
     hold();
-    auto limits = remote->getChannel().getLimits();
-    limits.maxSamples = channelSize;
 
-    if (remote->prepare (sampleRate, limits, prepareMilliseconds))
+    if (isPrepared())
     {
-        preparedRate = sampleRate;
-        preparedBlockSize = maximumBlockSize;
+        preparing.store (false, std::memory_order_release);
+    }
+    else
+    {
+        if (remote->getChannel().isBusy())
+        {
+            preparingSince = sandbox::getNanoseconds();
+            preparing.store (true, std::memory_order_release);
+            startTimer (preparingLookMilliseconds);
+        }
+        else
+        {
+            prepareNow();
+        }
+    }
+
+    let();
+}
+
+bool SandboxedInstance::isPrepared() noexcept
+{
+    return juce::exactlyEqual (channelRate, getPreparedRate())
+           && std::max (smallestChannel, getPreparedBlockSize()) <= remote->getChannel().getLimits().maxSamples;
+}
+
+void SandboxedInstance::prepareNow()
+{
+    auto limits = remote->getChannel().getLimits();
+    limits.maxSamples = std::max ({ smallestChannel, getPreparedBlockSize(), limits.maxSamples });
+
+    if (remote->prepare (getPreparedRate(), limits, prepareMilliseconds))
+        channelRate = getPreparedRate();
+
+    preparing.store (false, std::memory_order_release);
+}
+
+void SandboxedInstance::playLive()
+{
+    if (! hasCrashed())
+        remote->playLive();
+}
+
+void SandboxedInstance::finishPreparing()
+{
+    if (isPreparing() && ! hasCrashed() && ! remote->getChannel().isBusy())
+        prepareNow();
+}
+
+void SandboxedInstance::timerCallback()
+{
+    if (! isPreparing() || hasCrashed())
+    {
+        stopTimer();
+        return;
+    }
+
+    // Not while a block plays, nor while a render has the channel (it prepares it itself).
+    if (! tryHold())
+        return;
+
+    if (! remote->getChannel().isBusy())
+    {
+        prepareNow();
+        stopTimer();
+    }
+    else if (sandbox::getNanoseconds() - preparingSince > (std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000)
+    {
+        remote->getHelper().reportHung();
     }
 
     let();
@@ -356,6 +457,11 @@ void SandboxedInstance::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 {
     // A block through JUCE's processor: the channel waited for, and the plug-in for as long as it takes.
     hold();
+
+    if (remote->getChannel().isBusy())
+        waitForAnswer ((std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000);
+
+    finishPreparing();
     playBlock (buffer, midi);
     let();
 }
@@ -368,7 +474,7 @@ void SandboxedInstance::playBlock (juce::AudioBuffer<float>& buffer, const juce:
     const auto numSamples = std::min (buffer.getNumSamples(), limits.maxSamples);
     const auto numMain = std::min (2, buffer.getNumChannels());
 
-    if (hasCrashed() || channel.isBusy())
+    if (hasCrashed() || channel.isBusy() || isPreparing())
     {
         buffer.clear();
         return;
@@ -430,14 +536,12 @@ void SandboxedInstance::playBlock (juce::AudioBuffer<float>& buffer, const juce:
     info.isRendering = 1;
     info.reset = 0;
 
-    // As long as the plug-in takes, but for a block kept so long that it is a hang, which its helper is ended for.
+    // As long as the plug-in takes, but for a block kept so long that it is a hang, which its helper is ended for, or a
+    // helper that has gone, which nothing tells the channel of.
     const auto hangNanoseconds = (std::int64_t) remote->getHelper().getAudioHangMilliseconds() * 1'000'000;
 
-    if (channel.play (0, hangNanoseconds) != sandbox::BlockChannel::Played::done)
+    if (! channel.handOver() || waitForAnswer (hangNanoseconds) != Answer::played)
     {
-        if (channel.isBusy())
-            remote->getHelper().reportHung();
-
         buffer.clear();
         return;
     }

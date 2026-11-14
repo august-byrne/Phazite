@@ -3,6 +3,7 @@
 #include "devices/modulation/Modulators.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/BackgroundJobs.h"
 #include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
@@ -20,6 +21,7 @@
 #include "model/transport/internal/Tempo.h"
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <cmath>
 #include <functional>
@@ -78,9 +80,9 @@ namespace
         return writeWholeFile (file, text.getData(), text.getDataSize());
     }
 
-    // Makes the folder <parentFolder>/<name>, named as files can be, for a project of that name, or sets error and
-    // returns nothing if the name is empty, the folder exists or it can't be made.
-    juce::File makeProjectFolder (const juce::File& parentFolder, const juce::String& name, juce::String& error)
+    // The folder <parentFolder>/<name>, named as files can be, for a project of that name, or nothing, with error set, if
+    // the name is empty or the folder exists.
+    juce::File findNewProjectFolder (const juce::File& parentFolder, const juce::String& name, juce::String& error)
     {
         const auto safeName = juce::File::createLegalFileName (name.trim());
 
@@ -98,6 +100,17 @@ namespace
             return {};
         }
 
+        return folder;
+    }
+
+    // That folder made, or nothing, with error set, if it can't be.
+    juce::File makeProjectFolder (const juce::File& parentFolder, const juce::String& name, juce::String& error)
+    {
+        const auto folder = findNewProjectFolder (parentFolder, name, error);
+
+        if (folder == juce::File())
+            return {};
+
         if (const auto result = folder.createDirectory(); result.failed())
         {
             error = "Phazite couldn't create the project folder: " + result.getErrorMessage();
@@ -105,6 +118,147 @@ namespace
         }
 
         return folder;
+    }
+
+    //==============================================================================
+    // What a copy of a project takes along: the files it plays and made, its frozen tracks' and renders' (Cache), and its
+    // versions (model/versions/), if it keeps any: a copy of a project is a copy with its past. Its backups don't come.
+    constexpr const char* foldersCopied[] = { "Audio", "Generated", "Renders", "Cache", "Versions" };
+
+    // Those folders' folders and files, and how many bytes the files hold, listed before any is copied.
+    struct FoldersToCopy
+    {
+        std::vector<juce::File> folders, files;
+        juce::int64 bytes = 0;
+    };
+
+    FoldersToCopy listFoldersToCopy (const juce::File& projectFolder)
+    {
+        FoldersToCopy list;
+
+        for (const auto* name : foldersCopied)
+        {
+            const auto folder = projectFolder.getChildFile (name);
+
+            if (! folder.isDirectory())
+                continue;
+
+            list.folders.push_back (folder);
+
+            for (const auto& entry : juce::RangedDirectoryIterator (folder, true, "*", juce::File::findFilesAndDirectories))
+            {
+                if (entry.isDirectory())
+                {
+                    list.folders.push_back (entry.getFile());
+                }
+                else
+                {
+                    list.files.push_back (entry.getFile());
+                    list.bytes += entry.getFileSize();
+                }
+            }
+        }
+
+        return list;
+    }
+
+    // A file copied into a new one, a piece at a time, so that a copy can stop between pieces, with its time of change kept
+    // (a frozen track's file is known by it); counts what it copied. False if it stopped or anything couldn't be written.
+    bool copyFile (const juce::File& from, const juce::File& to, const std::function<bool()>& shouldStop, std::atomic<juce::int64>& copied)
+    {
+        juce::FileInputStream in (from);
+
+        if (! in.openedOk())
+            return false;
+
+        {
+            juce::FileOutputStream out (to);
+
+            if (! out.openedOk())
+                return false;
+
+            constexpr int pieceBytes = 1 << 20;
+            juce::HeapBlock<char> piece (pieceBytes);
+
+            for (;;)
+            {
+                if (shouldStop())
+                    return false;
+
+                const auto read = in.read (piece, pieceBytes);
+
+                if (read < 0)
+                    return false;
+
+                if (read == 0)
+                    break;
+
+                if (! out.write (piece, (size_t) read))
+                    return false;
+
+                copied += read;
+            }
+
+            out.flush();
+
+            if (out.getStatus().failed())
+                return false;
+        }
+
+        return to.getSize() == from.getSize() && to.setLastModificationTime (from.getLastModificationTime());
+    }
+
+    // The folders listed copied into another project's folder, which holds every folder a project has once it is done
+    // (those it hadn't made empty). Any thread; whatever it leaves is the caller's to delete.
+    juce::Result copyFolders (const juce::File& from, const juce::File& to, const FoldersToCopy& list,
+                              const std::function<bool()>& shouldStop, std::atomic<juce::int64>& copied)
+    {
+        for (const auto& folder : list.folders)
+            if (! to.getChildFile (folder.getRelativePathFrom (from)).createDirectory())
+                return juce::Result::fail ("Phazite couldn't make the folder " + folder.getRelativePathFrom (from) + " of the copy.");
+
+        for (const auto& file : list.files)
+        {
+            if (shouldStop())
+                return juce::Result::fail ("The copy was cancelled.");
+
+            if (! copyFile (file, to.getChildFile (file.getRelativePathFrom (from)), shouldStop, copied))
+                return juce::Result::fail ("Phazite couldn't copy " + file.getRelativePathFrom (from).replaceCharacter ('\\', '/')
+                                           + " into the project's new folder.");
+        }
+
+        for (const auto* name : { "Audio", "Generated", "Renders", "Cache", "Backups" })
+            if (! to.getChildFile (name).createDirectory())
+                return juce::Result::fail ("Phazite couldn't make the project's " + juce::String (name) + " folder.");
+
+        return juce::Result::ok();
+    }
+
+    // Where the copy goes until it is whole, beside the folder it becomes: "<name> (saving)".
+    juce::File makeCopyFolder (const juce::File& folder, juce::String& error)
+    {
+        const auto copy = folder.getParentDirectory().getNonexistentChildFile (folder.getFileName() + " (saving)", {}, true);
+
+        if (const auto result = copy.createDirectory(); result.failed())
+        {
+            error = "Phazite couldn't create the project folder: " + result.getErrorMessage();
+            return {};
+        }
+
+        return copy;
+    }
+
+    // The whole copy put in the folder's place; false if the folder was made meanwhile, or the copy couldn't move.
+    juce::Result putInPlace (const juce::File& copy, const juce::File& folder)
+    {
+        if (folder.exists())
+            return juce::Result::fail ("There is already a folder called \"" + folder.getFileName() + "\" in "
+                                       + folder.getParentDirectory().getFullPathName() + ".");
+
+        if (! copy.moveFileTo (folder))
+            return juce::Result::fail ("Phazite couldn't name the project's folder \"" + folder.getFileName() + "\".");
+
+        return juce::Result::ok();
     }
 
     //==============================================================================
@@ -822,7 +976,7 @@ std::unique_ptr<Project> Project::create (const juce::File& parentFolder, const 
     return project;
 }
 
-std::unique_ptr<Project> Project::open (const juce::File& projectFile, bool restoreAutosave, juce::String& error)
+std::unique_ptr<Project> Project::open (const juce::File& projectFile, bool restoreAutosave, juce::String& error, juce::String* notRestored)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
@@ -832,9 +986,16 @@ std::unique_ptr<Project> Project::open (const juce::File& projectFile, bool rest
         return {};
     }
 
+    // An autosave that doesn't read (cut short by a crash as it was written, say) gives way to the project file.
     const auto autosaveFile = getAutosaveFile (projectFile);
-    const bool useAutosave = restoreAutosave && autosaveFile.existsAsFile();
-    auto song = makeSong (readSong (useAutosave ? autosaveFile : projectFile), projectFile, getCacheFolder (projectFile));
+    auto state = restoreAutosave && autosaveFile.existsAsFile() ? readSong (autosaveFile) : juce::ValueTree();
+    const auto useAutosave = state.isValid();
+
+    if (restoreAutosave && autosaveFile.existsAsFile() && ! useAutosave && notRestored != nullptr)
+        *notRestored = "The changes Phazite saved automatically couldn't be read, so \"" + projectFile.getFileNameWithoutExtension()
+                       + "\" opened as it was last saved.";
+
+    auto song = makeSong (useAutosave ? state : readSong (projectFile), projectFile, getCacheFolder (projectFile));
 
     if (song == nullptr)
     {
@@ -1183,24 +1344,123 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
     return newFile;
 }
 
-juce::Result Project::moveTo (const juce::File& parentFolder, const juce::String& name)
+//==============================================================================
+// A first save's copy of the project's folders on a background thread, as its progress window shows it; then, on the message
+// thread, the project moved into it (finishMoveTo()). Deleted before then, it stops the copy and deletes what was copied.
+class Project::FolderCopy final : public TrackRender::Impl,
+                                  private juce::Timer
+{
+public:
+    FolderCopy (Project& p, juce::File into, juce::File becomes, FoldersToCopy what, std::function<void (const juce::Result&)> callback)
+        : project (p),
+          copy (std::move (into)),
+          folder (std::move (becomes)),
+          list (std::move (what)),
+          onFinished (std::move (callback))
+    {
+        const auto from = project.getFolder();
+        jobs.add (
+            [this, from] (const BackgroundJobs::ShouldStop& shouldStop)
+            {
+                result = copyFolders (from, copy, list, shouldStop, copied);
+                done = true;
+            });
+
+        startTimer (50);
+    }
+
+    ~FolderCopy() override
+    {
+        stopTimer();
+        jobs.removeAll (true); // asked to stop between pieces, and waited for
+
+        if (! finished)
+            copy.deleteRecursively();
+    }
+
+    float getProgress() const override
+    {
+        return list.bytes > 0 ? juce::jlimit (0.0f, 1.0f, (float) ((double) copied.load() / (double) list.bytes)) : 1.0f;
+    }
+
+    juce::String getTitle() const override { return "Saving " + folder.getFileName(); }
+
+private:
+    Project& project;
+    const juce::File copy, folder;
+    const FoldersToCopy list;
+    const std::function<void (const juce::Result&)> onFinished;
+    std::atomic<juce::int64> copied { 0 };
+    std::atomic<bool> done { false };
+    juce::Result result = juce::Result::ok(); // the job's, read once done is set
+    bool finished = false;
+    BackgroundJobs jobs { "Phazite first save", 1, juce::Thread::Priority::normal };
+
+    void timerCallback() override
+    {
+        if (! done)
+            return;
+
+        stopTimer();
+        finished = true;
+        const auto moved = result.wasOk() ? project.finishMoveTo (copy, folder) : result;
+
+        if (moved.failed())
+            copy.deleteRecursively();
+
+        onFinished (moved); // last: the progress window may delete this
+    }
+};
+
+std::unique_ptr<TrackRender> Project::moveTo (const juce::File& parentFolder, const juce::String& name,
+                                              std::function<void (const juce::Result&)> onFinished)
 {
     JUCE_ASSERT_MESSAGE_THREAD
     autosaveWriter->wait(); // its autosave goes with it
 
     juce::String error;
-    const auto newFile = makeFolderWithFiles (parentFolder, name, error);
+    const auto folder = findNewProjectFolder (parentFolder, name, error);
+    const auto copy = folder != juce::File() ? makeCopyFolder (folder, error) : juce::File();
 
-    if (newFile == juce::File())
-        return juce::Result::fail (error);
+    if (copy == juce::File())
+    {
+        onFinished (juce::Result::fail (error));
+        return {};
+    }
+
+    auto list = listFoldersToCopy (getFolder());
+
+    if (list.bytes > copyAtOnceBytes)
+        return std::make_unique<TrackRender> (std::make_unique<FolderCopy> (*this, copy, folder, std::move (list), std::move (onFinished)));
+
+    std::atomic<juce::int64> copied { 0 };
+    auto result = copyFolders (getFolder(), copy, list, [] { return false; }, copied);
+
+    if (result.wasOk())
+        result = finishMoveTo (copy, folder);
+
+    if (result.failed())
+        copy.deleteRecursively();
+
+    onFinished (result);
+    return {};
+}
+
+juce::Result Project::finishMoveTo (const juce::File& copy, const juce::File& folder)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    autosaveWriter->wait();
+
+    if (const auto placed = putInPlace (copy, folder); placed.failed())
+        return placed;
 
     const auto oldFile = file;
-    setFile (newFile);
+    setFile (folder.getChildFile (folder.getFileName() + fileExtension));
 
     if (const auto result = save(); result.failed())
     {
         setFile (oldFile);
-        newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
+        folder.deleteRecursively(); // so that the name can be tried again
         return result;
     }
 
@@ -1210,36 +1470,26 @@ juce::Result Project::moveTo (const juce::File& parentFolder, const juce::String
 
 juce::File Project::makeFolderWithFiles (const juce::File& parentFolder, const juce::String& name, juce::String& error) const
 {
-    const auto folder = makeProjectFolder (parentFolder, name, error);
+    const auto folder = findNewProjectFolder (parentFolder, name, error);
+    const auto copy = folder != juce::File() ? makeCopyFolder (folder, error) : juce::File();
 
-    if (folder == juce::File())
+    if (copy == juce::File())
         return {};
 
-    // The files the project uses come along, its frozen tracks' too; its earlier versions (Backups) don't. A failure removes
-    // the half-made copy (the folder is new), so that the name can be tried again.
-    for (const auto* subfolderName : { "Audio", "Generated", "Renders", "Cache" })
-    {
-        const auto source = getFolder().getChildFile (subfolderName);
-        const auto target = folder.getChildFile (subfolderName);
+    // A failure removes the half-made copy, so that the name can be tried again.
+    std::atomic<juce::int64> copied { 0 };
+    auto result = copyFolders (getFolder(), copy, listFoldersToCopy (getFolder()), [] { return false; }, copied);
 
-        if (! (source.isDirectory() ? source.copyDirectoryTo (target) : target.createDirectory().wasOk()))
-        {
-            folder.deleteRecursively();
-            error = "Phazite couldn't copy the project's " + juce::String (subfolderName) + " folder.";
-            return {};
-        }
-    }
+    if (result.wasOk())
+        result = putInPlace (copy, folder);
 
-    // Its versions (model/versions/), if it keeps any: a copy of a project is a copy with its past.
-    if (const auto versions = getFolder().getChildFile ("Versions");
-        versions.isDirectory() && ! versions.copyDirectoryTo (folder.getChildFile ("Versions")))
+    if (result.failed())
     {
-        folder.deleteRecursively();
-        error = "Phazite couldn't copy the project's versions.";
+        copy.deleteRecursively();
+        error = result.getErrorMessage();
         return {};
     }
 
-    folder.getChildFile ("Backups").createDirectory();
     return folder.getChildFile (folder.getFileName() + fileExtension);
 }
 
@@ -1262,8 +1512,19 @@ void Project::backUpProjectFile()
     const auto backups = getBackupsFolder();
     backups.createDirectory();
 
+    // One that can't be made is told, once until one is made again; the save goes on without it.
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
-    file.copyFileTo (backups.getNonexistentChildFile (file.getFileNameWithoutExtension() + " " + stamp, fileExtension, false));
+
+    if (! file.copyFileTo (backups.getNonexistentChildFile (file.getFileNameWithoutExtension() + " " + stamp, fileExtension, false)))
+    {
+        if (! std::exchange (backupFailed, true) && onBackupFailed != nullptr)
+            onBackupFailed ("Phazite couldn't copy the project's last saved version into " + backups.getFullPathName()
+                            + ". It saved the project without a backup; check that that folder can be written to.");
+
+        return;
+    }
+
+    backupFailed = false;
 
     // Keep the newest numBackupsToKeep. A copy keeps the original's modification time, which is
     // when that version was saved.

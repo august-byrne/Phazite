@@ -335,9 +335,12 @@ device cannot break a saved preset. Presets carry no format version.
 | Container | Its name and Mix, its chains with their devices, settings and ranges, its split and its kind, and its macros with what they modulate in it | The same |
 | Track | Its name, colour, volume and pan, its instrument, effects and containers, and its modulators and macros with what they modulate on it | Its clips, automation and sends, and where its sound goes |
 
-The sound files a device plays (a Drum Sampler's pads', a Sampler's sound, a Wavetable's tables) go into a preset by
-their paths, and a project that takes the preset copies them into its own folder. The sounds and tables that come with
-Phazite go by their names.
+The sound files a device plays (a Drum Sampler's pads', a Sampler's sound, a Wavetable's tables) go with a preset: they
+are copied into a folder beside it named after it ("Kit Sounds"), and the preset names each by its path from its own
+folder ("Kit Sounds/Boom.wav"), as a sampler's patch keeps its samples beside it. Copied with that folder, a preset
+works on any computer, and it holds no path of the computer it was saved on. A project that takes the preset copies
+them into its own folder; the sounds it can't take (on a network share, or not there) are told by name. The sounds
+and tables that come with Phazite go by their names.
 
 ### Loading
 

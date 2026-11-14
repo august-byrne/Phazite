@@ -106,22 +106,40 @@ void PlaybackHost::remove (PlaybackSession& session)
         next->update();
 }
 
-void PlaybackHost::letGoOfPlans()
+bool PlaybackHost::letGoOfPlans (bool waitAsLongAsItTakes)
 {
     // While a device plays the engine, the audio thread may be in a block of a plan it was handed: once it has finished
-    // two blocks since it was handed none, it plays none of them. It lets go of them on the message thread.
+    // two blocks since it was handed none, it plays none of them, and they go at once. A block that takes longer than half
+    // a second (a debugger, a suspended machine, a driver that stalls) may still be in one: they are left to the handover,
+    // which frees them once it has finished (Handover.h), never while it plays them (known bug 83 until 2026-11-14); or,
+    // for a render that takes the plug-ins it plays, waited for as long as it takes, which never plays them beside it.
     engine.setPlan (nullptr);
 
     if (running)
     {
         const auto from = engine.getBlocksPlayed().load();
+        const auto hasLetGo = [this, from] { return ! running || engine.getBlocksPlayed().load() >= from + 2; };
         const auto until = juce::Time::getMillisecondCounter() + 500;
 
-        while (running && engine.getBlocksPlayed().load() < from + 2 && juce::Time::getMillisecondCounter() < until)
+        while (! hasLetGo() && juce::Time::getMillisecondCounter() < until)
             juce::Thread::sleep (1);
+
+        if (! hasLetGo())
+        {
+            if (! waitAsLongAsItTakes)
+                return false;
+
+            waitingForAudioThread = true;
+
+            while (! hasLetGo())
+                juce::Thread::sleep (1);
+
+            waitingForAudioThread = false;
+        }
     }
 
     engine.dropPlans();
+    return true;
 }
 
 void PlaybackHost::forgetPlayed()

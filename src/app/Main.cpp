@@ -101,10 +101,12 @@ public:
             mainWindow->toFront (true);
         }
 
-        // A project double-clicked while Phazite runs opens here, once the user has answered what an open dialog asks.
+        // A project double-clicked while Phazite runs opens here, once the user has answered what an open dialog asks, which
+        // comes forward (ProjectSession::openFile() waits for it).
         if (auto* modal = juce::Component::getCurrentlyModalComponent())
             modal->toFront (true);
-        else if (const auto file = ProjectSession::findFileToOpen (commandLine); file != juce::File() && session != nullptr)
+
+        if (const auto file = ProjectSession::findFileToOpen (commandLine); file != juce::File() && session != nullptr)
             session->openFile (file);
     }
 
@@ -182,7 +184,7 @@ public:
         if (smoke)
         {
             // Nothing asks: a question would wait for an answer nobody gives.
-            session->askToSave = [] (const juce::File&, std::function<void (ProjectSession::UnsavedChanges)> answer)
+            session->askToSave = [] (const juce::File&, const juce::String&, std::function<void (ProjectSession::UnsavedChanges)> answer)
             { answer (ProjectSession::UnsavedChanges::discard); };
             session->askToRestore = [] (const juce::File&, bool, std::function<void (bool)> answer) { answer (false); };
             session->askWhichCopy = [] (const juce::String&, const juce::String&, const juce::String&, std::function<void (int)> answer)

@@ -69,7 +69,12 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
         for (const auto& strip : compiled.plan->strips)
             for (const auto& device : strip.devices)
                 if (auto* plugin = dynamic_cast<SandboxedProcessor*> (&device.node->getRunner().getProcessor()))
+                {
                     compiled.plugins.push_back (plugin);
+
+                    if (device.node->isOn())
+                        compiled.heard.push_back (plugin);
+                }
 
         jobs.push_back (std::move (compiled));
     }
@@ -89,6 +94,13 @@ OfflineRender::~OfflineRender()
             plugin->cancelRender();
 
     stopThread (-1);
+
+    // Its plug-ins told that they play live again now, not as the first live block comes (which their switch would make
+    // late): a post, which waits for no helper.
+    for (const auto& job : jobs)
+        for (auto* plugin : job.plugins)
+            plugin->getInstance().playLive();
+
     jobs.clear(); // what the renders played, before the project's engine plays the plug-ins again
 
     if (setup.session != nullptr)
@@ -115,6 +127,14 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
 {
     const auto& job = compiled.job;
     const auto failed = juce::Result::fail ("Phazite couldn't write " + job.file.getFileName() + ".");
+
+    // A plug-in that had crashed before (and wasn't reloaded) would play nothing: nothing is rendered without it. One
+    // switched off isn't heard, crashed or not.
+    for (const auto* plugin : compiled.heard)
+        if (plugin->getInstance().hasCrashed())
+            return juce::Result::fail (plugin->getInstance().getDescription().name
+                                       + " has crashed. Reload the plug-in, then render again.");
+
     auto writer = makeFloatWriter (job.file, setup.sampleRate);
 
     if (writer == nullptr)

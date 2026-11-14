@@ -18,8 +18,12 @@ class PluginHost;
 juce::var makeDevicePreset (Song&, DeviceID);
 juce::var makeTrackPreset (Song&, TrackID);
 
-// A preset file's contents; void for a file that isn't a preset. And writing one, replacing what the file held; true if
-// it did.
+// A preset of a device or a track holds its sounds by their full paths, until it is saved (PresetModel.h:
+// saveDevicePreset()), which names them from the file's folder.
+//
+// A preset file's contents, with the sounds it names from its folder ("Kit Sounds/Boom.wav") as full paths, those inside
+// it (one that leaves it by ".." stays as it is, and isn't taken); void for a file that isn't a preset. And writing one as
+// it is, replacing what the file held; true if it did.
 juce::var readPreset (const juce::File&);
 bool writePreset (const juce::var& preset, const juce::File&);
 

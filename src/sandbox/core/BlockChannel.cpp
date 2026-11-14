@@ -49,6 +49,7 @@ std::unique_ptr<BlockChannel> BlockChannel::make (const std::string& name, const
 
     const auto places = getPlaces (sizeof (Header), limits);
     std::unique_ptr<BlockChannel> channel (new BlockChannel());
+    channel->name = name;
     channel->memory = create ? SharedMemory::create (name, places.size) : SharedMemory::open (name, places.size);
 
     if (channel->memory == nullptr)

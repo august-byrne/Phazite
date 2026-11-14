@@ -863,8 +863,9 @@ inline const juce::Identifier clipTakeLength { "takeLength" };
 // named by its note (0 to 127): "pad36Sound" names one of its factory sounds for the first layer (devices/drums/
 // FactoryDrums.h: "808 Kick"; with none, or a name that is none of theirs, the pad's own in the default kit, and nothing
 // off the default kit's sixteen pads), and "pad36SoundFile" a sound file it plays instead while it is there: a path
-// relative to the project's folder ("Audio/Kick 01.wav"), or in a preset its full path; "pad36Sound2" to "pad36Sound4" and
-// "pad36SoundFile2" to "pad36SoundFile4" the same for its other layers, which play nothing without them.
+// relative to the project's folder ("Audio/Kick 01.wav"), or in a preset's file to the preset's ("Kit Sounds/Kick 01.wav");
+// "pad36Sound2" to "pad36Sound4" and "pad36SoundFile2" to "pad36SoundFile4" the same for its other layers, which play nothing
+// without them.
 inline constexpr int drumPads = 128, drumLayers = 4; // as devices::DrumSampler::numPads and numLayers
 
 // "pad36Sound", or for another layer than the first, "pad36Sound2", after a pad's note and its layer (from 0).
@@ -896,7 +897,7 @@ inline const juce::Identifier& getPadSoundFile (int pad, int layer = 0)
 // oscillators plays: "osc1Wavetable" and "osc2Wavetable" name one of its factory tables (devices/wavetable/
 // FactoryWavetables.h: "Vowels"; with none, or a name that is none of theirs, the first, "Basic Shapes"), and
 // "osc1WavetableFile" and "osc2WavetableFile" a sound file it plays instead while they are there: a path relative to the
-// project's folder ("Audio/Growl.wav"), or in a preset its full path. osc counts from 0.
+// project's folder ("Audio/Growl.wav"), or in a preset's file to the preset's. osc counts from 0.
 inline const juce::Identifier& getOscillatorWavetable (int osc)
 {
     static const juce::Identifier names[] = { "osc1Wavetable", "osc2Wavetable" };
@@ -912,7 +913,7 @@ inline const juce::Identifier& getOscillatorWavetableFile (int osc)
 // Phazite's sampler (devices/sampler/Sampler.h) keeps in its DEVICE's SOUNDS what it plays: "sample" names one of its
 // factory sounds (devices/sampler/FactorySamples.h: "808 Bass"; with none, or a name that is none of theirs, the first),
 // "sampleFile" a sound file it plays instead while it is there: a path relative to the project's folder ("Audio/Vox.wav"),
-// or in a preset its full path; "sampleSlices" the slices put in by hand, which stay whatever slices it, their starts as
+// or in a preset's file to the preset's; "sampleSlices" the slices put in by hand, which stay whatever slices it, their starts as
 // parts of the sound's length from 0 to 1, in order, a space between them ("0.125 0.25"); and "sampleSlicesRemoved" where
 // slices it found were taken away by hand, the same way. None for none.
 inline const juce::Identifier samplerSample { "sample" };
@@ -947,10 +948,12 @@ inline bool isSoundFileProperty (const juce::Identifier& property)
 //       "parameters": { parameter ID: value, ... }, every one of them, its mix too,
 //       "sounds": { what names a file, a factory sound, a table or slices (getPadSound(), getPadSoundFile(),
 //                   getOscillatorWavetable(), getOscillatorWavetableFile(), samplerSample, samplerSampleFile,
-//                   samplerSlices, samplerSlicesRemoved): a file's full path, the factory sound's or table's name, or the
+//                   samplerSlices, samplerSlicesRemoved): a file's path from the preset's folder (the file in a folder
+//                   beside it, named after it: "Kit Sounds/Boom.wav"), the factory sound's or table's name, or the
 //                   slices } }
 //     or a plug-in: { "plugin": { "format", "name", "manufacturer", "identifier", "uid" }, "name", "instrument",
-//       "state": its own settings, in base 64, "program": its program, "mix": 0 to 1 }
+//       "state": its own settings, in base 64, "program": its program, "mix": 0 to 1 }; its identifier the file's name alone
+//       for a plug-in under the user's home folder
 //   CONTAINER: { "name", "mix": 0 to 1, "instrument": true for an instrument container, "split": what containerSplit
 //                names (none for layers), "chains": [ CHAIN, ... ], "macros": [ MACRO, ... ] }
 //   CHAIN: { "name", "volume": in decibels, "pan": -1 to 1, "mute", "solo", "crossover": in hertz (a band's),

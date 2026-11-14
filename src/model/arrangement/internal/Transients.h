@@ -8,6 +8,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -32,11 +33,16 @@ public:
     static std::vector<double> analyse (const juce::File&);
     static constexpr double longestSeconds = 10.0 * 60.0;
 
+    // How many files the thread has analysed: each once, however often it is asked for meanwhile.
+    int getNumAnalysed() const noexcept { return analysed.load(); }
+
 private:
     std::mutex lock;
     std::map<juce::String, std::vector<double>> found; // by getKey()
     std::vector<juce::File> waiting;
+    juce::File analysing; // the one the thread is finding them in now, which isn't queued again meanwhile
     juce::WaitableEvent wake;
+    std::atomic<int> analysed { 0 };
 
     static juce::String getKey (const juce::File&);
     void run() override;

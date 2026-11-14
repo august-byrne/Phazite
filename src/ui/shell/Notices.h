@@ -24,10 +24,10 @@ class Notices : public juce::Component,
 public:
     struct Notice
     {
-        juce::String title, text;
-        bool isProblem = false;       // what went wrong: it stays until it is closed
-        juce::String actionName;      // a button for what to do next, if any
-        std::function<void()> action; // which closes the notice too
+        juce::String title {}, text {};
+        bool isProblem = false;          // what went wrong: it stays until it is closed
+        juce::String actionName {};      // a button for what to do next, if any
+        std::function<void()> action {}; // which closes the notice too
     };
 
     Notices();

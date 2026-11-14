@@ -27,11 +27,12 @@ namespace
         return isMidiState (clipState) ? clipState : juce::ValueTree();
     }
 
-    // A track of the open project's that can hold notes: a track or a return, not a folder or the master.
+    // A track of the open project's that can hold notes, in clips (Schema.h: trackKind): a track, not a folder, a return or
+    // the master.
     bool canHold (const Song& song, TrackID id)
     {
         const auto state = findTrackState (song, id);
-        return state.hasType (schema::TRACK) && ! isFolderState (state);
+        return state.hasType (schema::TRACK) && ! isFolderState (state) && ! isReturnState (state);
     }
 
     NoteClip makeNoteClip (const Song& song, const juce::ValueTree& clipState)
@@ -221,7 +222,6 @@ void nudgeNotes (ProjectContext& context, const std::vector<NoteRef>& refs, Beat
 
 namespace
 {
-    constexpr double shortestNote = 1.0 / 16.0; // a 64th note, in beats
 
     const char* getUndoName (NoteProperty property)
     {
@@ -288,6 +288,16 @@ namespace
 
         const UndoStep step (*song, getUndoName (property));
         const auto range = getRange (notes, property);
+
+        // Starts move together, by as much as the note nearest its clip's start (or where its clip stops playing it) can go,
+        // as a nudge moves them: kept in their clips one by one, notes moved back past it all landed on the clip's start.
+        if (property == NoteProperty::start)
+        {
+            const auto own = getProperty (notes.front(), property);
+            nudgeNotes (*song, refs, BeatDuration::fromBeats (valueOf (range, own) - own));
+            return;
+        }
+
         auto changed = notes;
 
         for (size_t i = 0; i < notes.size(); ++i)
@@ -301,7 +311,7 @@ namespace
                     note.start = BeatPosition::fromBeats (std::max (0.0, value));
                     break;
                 case NoteProperty::length:
-                    note.length = BeatDuration::fromBeats (std::max (shortestNote, value));
+                    note.length = std::max (getMinimumNoteLength(), BeatDuration::fromBeats (value)); // as a drag's
                     break;
                 case NoteProperty::pitch:
                     note.pitch = juce::jlimit (0, 127, (int) std::lround (value));
@@ -349,9 +359,38 @@ void setNotes (ProjectContext& context, const std::vector<NoteData>& notes)
             if (! findNoteState (*song, note.getRef()).isValid())
                 continue;
 
-            moveNote (*song, note.getRef(), note.start, note.pitch);
-            setNoteLength (*song, note.getRef(), note.length);
+            placeNote (*song, note.getRef(), note.start, note.pitch, note.length);
         }
+    }
+}
+
+ClipEnds getClipEnds (const ProjectContext& context, const std::vector<ClipID>& clips)
+{
+    ClipEnds ends;
+
+    for (const auto clip : clips)
+        if (const auto clipState = findMidiClip (context, clip); clipState.isValid())
+            ends.emplace_back (clip, getClipRange (clipState).getEnd());
+
+    return ends;
+}
+
+void restoreClipEnds (ProjectContext& context, const ClipEnds& ends)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return;
+
+    for (const auto& [clip, end] : ends)
+    {
+        const auto clipState = findMidiClip (context, clip);
+
+        if (! clipState.isValid())
+            continue;
+
+        if (const auto range = getClipRange (clipState); range.getEnd() > end && end > range.getStart())
+            setClipPlace (*song, clipState, range.getStart(), end - range.getStart(), getClipOffset (clipState));
     }
 }
 

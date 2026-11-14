@@ -17,6 +17,7 @@
 
 namespace phazite
 {
+class TrackRender;
 class TrackRenderHost;
 
 class ProjectSession : private juce::ChangeListener
@@ -57,16 +58,19 @@ public:
     std::function<void (const juce::File& suggested, std::function<void (const juce::File&)>)> chooseSaveFile;
 
     // Asks whether to save the open project's unsaved changes before it closes (closeThen()), and calls back with the
-    // answer: to save them, to close without them, or to leave the project open. Unset, a dialog asks; tests answer
-    // themselves.
+    // answer: to save them, to close without them, or to leave the project open. After a save that failed (saveFailed says
+    // why: a drive gone, a folder that can't be written), it offers Save As in place of Save, to save them somewhere else
+    // (known bug 88: with Auto Save on, the user could neither quit nor open another project). Unset, a dialog asks; tests
+    // answer themselves.
     enum class UnsavedChanges
     {
         save,
+        saveAs,
         discard,
         cancel
     };
 
-    std::function<void (const juce::File& projectFile, std::function<void (UnsavedChanges)>)> askToSave;
+    std::function<void (const juce::File& projectFile, const juce::String& saveFailed, std::function<void (UnsavedChanges)>)> askToSave;
 
     // Asks whether to restore a project's changes that Phazite saved automatically before it didn't close properly, and
     // calls back with the answer; untitled if the project was never saved. Unset, a dialog asks; tests answer themselves.
@@ -101,7 +105,8 @@ public:
     static juce::File findFileToOpen (const juce::String& commandLine);
 
     // Opens a project, or imports a DAWproject (importDawProject()), asking whether to save the open project first: a file
-    // double-clicked while Phazite runs.
+    // double-clicked while Phazite runs. While a dialog is open, once it has closed, the last file asked for (known bug 113:
+    // it was dropped).
     void openFile (const juce::File&);
 
     void newProject(); // the new-project window
@@ -134,7 +139,7 @@ public:
     juce::File getExportFolder() const;
 
     // Asks whether to save unsaved changes first; with Auto Save on, a project with a file of its own saves them without
-    // asking. Calls back with false if the user cancelled.
+    // asking, unless the save fails, which goes on to ask (askToSave). Calls back with false if the user cancelled.
     void closeThen (std::function<void (bool closed)>);
 
     // Auto Save (File > Auto Save, project.autoSave), as VS Code's: while on, a project with a file of its own saves itself a
@@ -148,7 +153,8 @@ public:
 
     juce::Array<juce::File> getRecentProjects() const { return recent.getProjects(); }
 
-    // The "project." commands, and the versions', whose bounces render in a host (the main window's progress window).
+    // The "project." commands, and the versions', whose bounces render in a host (the main window's progress window), as a
+    // new project's first save copies its folders when they are large (Project::moveTo()).
     void addCommands (CommandRegistry&, TrackRenderHost&);
 
 private:
@@ -160,6 +166,13 @@ private:
     std::unique_ptr<Project> project;
     std::unique_ptr<AutosaveTimer> autosaveTimer;
     std::unique_ptr<juce::FileChooser> fileChooser;
+    TrackRenderHost* renders = nullptr;     // addCommands()'
+    std::unique_ptr<TrackRender> firstSave; // a first save's copy without a host to run it (tests'), until the next
+
+    // A file double-clicked while a dialog was open, opened once none is.
+    juce::File fileWaiting;
+    juce::TimedCallback openWhenNoDialog { [this] { openFileWhenNoDialog(); } };
+    void openFileWhenNoDialog();
     bool autoSave = true;
     void updateAutoSave(); // the timer saves the project, or autosaves it, as Auto Save and the project say
 
@@ -179,7 +192,12 @@ private:
     // Saves the project, asking where first if it is untitled, and calls back with whether it was saved.
     void saveThen (std::function<void (bool saved)>);
     void chooseWhereToSave (const juce::File& suggested, std::function<void (const juce::File&)>);
-    bool moveUntitledTo (const juce::File& chosen);
+    void moveUntitledTo (const juce::File& chosen, std::function<void (bool saved)>);
+
+    // What closing asks when there are unsaved changes, after a save that failed if saveFailed says why; and Save As there,
+    // a copy where the user chooses, which the project closes after.
+    void askWhetherToSave (const juce::String& saveFailed, std::function<void (bool closed)>);
+    void saveCopyThenClose (std::function<void (bool closed)>);
     void showError (const juce::String& title, const juce::String& message);
     void showNotice (const juce::String& title, const juce::String& message);
 

@@ -71,10 +71,13 @@ public:
     void selectNotes (const std::vector<NoteRef>&, bool addToSelection = false); // of the note clips
 
     //==============================================================================
-    // Automation points of one parameter, by their indices: selecting anything else deselects them.
+    // Automation points of one parameter, by their elements in the song (Schema.h: POINT), which stay the same while points
+    // are added or removed around them, moved, or undone and redone around them, so that the selection follows them where
+    // indices would go stale; the elements' order and which are still there are the curve's to say
+    // (automation/internal/Automation.h: getSelectedPoints()). Selecting anything else deselects them.
     const ParameterRef& getPointsParameter() const noexcept { return pointsParameter; } // invalid while none are selected
-    const std::vector<int>& getPoints() const noexcept { return points; }
-    void selectPoints (const ParameterRef&, const std::vector<int>& indices);
+    const std::vector<juce::ValueTree>& getPoints() const noexcept { return points; }   // as selected: some may be gone
+    void selectPoints (const ParameterRef&, const std::vector<juce::ValueTree>& pointStates);
 
 private:
     // A track, a clip or a device by its kind and its ID.
@@ -92,7 +95,7 @@ private:
     std::vector<ClipID> noteClips;
     std::vector<NoteRef> notes;
     ParameterRef pointsParameter;
-    std::vector<int> points;
+    std::vector<juce::ValueTree> points;
 
     bool isThere (Item) const; // whether the song holds it
     bool isThere (SectionID) const;

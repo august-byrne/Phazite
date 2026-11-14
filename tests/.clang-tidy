@@ -1,0 +1,5 @@
+# The tests' clang-tidy: the repository's checks (../.clang-tidy), but for the static analyzer's memory checks, which
+# doctest's CHECK macros trip in doctest's own code (2026-11-14: a "use after release" in its String, and a "leak" of
+# what its expression templates keep).
+InheritParentConfig: true
+Checks: -clang-analyzer-cplusplus.NewDelete,-clang-analyzer-cplusplus.NewDeleteLeaks

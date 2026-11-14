@@ -5,9 +5,12 @@
 // its devices report, a block at least: a delay is silent between its echoes; so many seconds at most, the silence at the
 // end left out), into a WAV file of 32-bit floats, measured as it goes (EBU R128). What each plays is compiled on the message thread as this is made,
 // with the project's plug-ins, which it has alone while it lives (PlaybackSession::lendToRender()); deleting it, on the
-// message thread, cancels what is left, waits for its thread and gives them back. A plug-in that crashes as a job plays,
-// or keeps a block so long that its helper is ended for it (SandboxedProcessor.h), fails the job, which says so: nothing
-// is written without it. Cancelling doesn't wait for a plug-in either.
+// message thread, cancels what is left, waits for its thread and gives them back. A plug-in that had crashed before a job
+// starts, crashes as it plays, or keeps a block so long that its helper is ended for it (SandboxedProcessor.h), fails the
+// job, which says so, naming it: nothing is written without it (one switched off isn't heard, and fails nothing). Its
+// plug-ins are told that they play offline while it renders them (each block of a render says so, and the helper sets
+// them so: host/core/Instance.h), and live again as it gives them back, finished or cancelled
+// (SandboxedInstance::playLive()). Cancelling doesn't wait for a plug-in either.
 #pragma once
 
 #include "SongPlayer.h"
@@ -72,8 +75,9 @@ private:
         Job job;
         std::unique_ptr<SongPlayer> player; // what its plan points at, kept to be let go of on the message thread
         std::unique_ptr<engine::Plan> plan;
-        std::vector<SandboxedProcessor*> plugins; // the plug-ins its plan plays, which its player keeps
-        double pluginTailSeconds = 0.0;           // the longest tail its plug-ins report, asked as it was compiled
+        std::vector<SandboxedProcessor*> plugins {};     // the plug-ins its plan plays, which its player keeps
+        std::vector<const SandboxedProcessor*> heard {}; // those of them switched on as it was compiled
+        double pluginTailSeconds = 0.0;                  // the longest tail its plug-ins report, asked as it was compiled
     };
 
     const Setup setup;

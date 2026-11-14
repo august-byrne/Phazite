@@ -29,6 +29,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <cmath>
+#include <cstring>
 #include <map>
 #include <set>
 
@@ -960,11 +961,13 @@ namespace
         return std::abs (a - b) <= within * std::max (1.0, std::abs (b));
     }
 
+    double readNumber (const juce::XmlElement&, const char* name, double otherwise, double low, double high);
+
     // A DAWproject's tracks, by their elements' ids and in order: those that are the song's (not the master, nor a bounce
-    // Phazite added, nor a folder, whose tracks are among them), and their lanes.
+    // Phazite added, nor a folder, whose tracks are among them, and which are its groups), and their lanes.
     struct ReadTracks
     {
-        std::vector<const juce::XmlElement*> tracks;
+        std::vector<const juce::XmlElement*> tracks, groups;
         std::map<juce::String, const juce::XmlElement*> byID, lanes;
         const juce::XmlElement* master = nullptr;
 
@@ -988,7 +991,10 @@ namespace
                 if (channel != nullptr && channel->getStringAttribute ("role") == "master")
                     master = track;
                 else if (track->getStringAttribute ("contentType").contains ("tracks"))
+                {
+                    groups.push_back (track);
                     collect (*track);
+                }
                 else if (! isBounce (*track))
                     tracks.push_back (track);
 
@@ -998,20 +1004,63 @@ namespace
 
         static bool isBounce (const juce::XmlElement& track) { return track.getStringAttribute ("name").endsWith (" (bounce)"); }
 
-        // A lane's clips, in order: those with notes, or those with audio.
+        // A lane's clips, in order: those with notes, or those that play audio (findAudio()).
         std::vector<const juce::XmlElement*> getClips (const juce::XmlElement& track, bool withNotes) const
         {
             std::vector<const juce::XmlElement*> clips;
-            const auto lane = lanes.find (track.getStringAttribute ("id"));
 
-            if (lane != lanes.end())
-                for (const auto* group : lane->second->getChildWithTagNameIterator ("Clips"))
+            if (const auto* lane = findLane (track))
+                for (const auto* group : lane->getChildWithTagNameIterator ("Clips"))
                     for (const auto* clip : group->getChildWithTagNameIterator ("Clip"))
-                        if ((clip->getChildByName ("Notes") != nullptr) == withNotes
-                            && (withNotes || clip->getChildByName ("Audio") != nullptr))
+                        if ((clip->getChildByName ("Notes") != nullptr) == withNotes && (withNotes || findAudio (*clip).audio != nullptr))
                             clips.push_back (clip);
 
             return clips;
+        }
+
+        const juce::XmlElement* findLane (const juce::XmlElement& track) const
+        {
+            const auto lane = lanes.find (track.getStringAttribute ("id"));
+            return lane != lanes.end() ? lane->second : nullptr;
+        }
+
+        // What an audio clip plays: its Audio, in the clip itself, in its Warps, or in a clip of its own Clips (as Bitwig
+        // Studio writes one, a timeline of audio events of its own), the first there; the clip that holds it (the event, whose
+        // playStart, content's unit and fades apply), its Warps if any, and where the event starts in beats from the clip.
+        struct AudioEvent
+        {
+            const juce::XmlElement *audio = nullptr, *event = nullptr, *warps = nullptr;
+            double offset = 0.0;
+        };
+
+        static AudioEvent findAudio (const juce::XmlElement& clip, int depth = 0)
+        {
+            if (const auto* audio = clip.getChildByName ("Audio"))
+                return { audio, &clip, nullptr, 0.0 };
+
+            if (const auto* warps = clip.getChildByName ("Warps"); warps != nullptr && warps->getChildByName ("Audio") != nullptr)
+                return { warps->getChildByName ("Audio"), &clip, warps, 0.0 };
+
+            if (const auto* inner = clip.getChildByName ("Clips"); inner != nullptr && depth < 4)
+            {
+                for (const auto* event : inner->getChildWithTagNameIterator ("Clip"))
+                {
+                    if (auto found = findAudio (*event, depth + 1); found.audio != nullptr)
+                    {
+                        found.offset += readNumber (*event, "time", 0.0, -maxSongBeats, maxSongBeats)
+                                        - readNumber (clip, "playStart", 0.0, -maxSongBeats, maxSongBeats);
+                        return found;
+                    }
+                }
+            }
+
+            return {};
+        }
+
+        static int countAudioEvents (const juce::XmlElement& clip)
+        {
+            const auto* inner = clip.getChildByName ("Clips");
+            return inner != nullptr ? inner->getNumChildElements() : 1;
         }
     };
 
@@ -1057,6 +1106,10 @@ namespace
             std::set<const juce::XmlElement*> matched;
             std::vector<TrackID> gone;
 
+            // Into a new song, the tempo, the time signature and the markers first: what its clips are placed by.
+            if (isNew)
+                takeTransport();
+
             // Each of the song's tracks, matched by Phazite's id or by its name; a new song's own, none: its tracks are the file's.
             for (const auto* track : ours.tracks)
             {
@@ -1097,12 +1150,59 @@ namespace
                 if (matched.count (track) == 0)
                     addTrack (*track, theirs);
 
-            // The master's fader; and into a new song, the tempo, the time signature and the markers.
+            // The master's fader.
             if (theirs.master != nullptr && ours.master != nullptr)
                 takeFader ({}, theirs.master->getChildByName ("Channel"), ours.master->getChildByName ("Channel"));
 
+            // What a new song has no place for: the groups (their tracks came in on their own), and the master's devices.
             if (isNew)
-                takeTransport();
+            {
+                for (const auto* group : theirs.groups)
+                    notTaken.add (getName (*group) + ": a group, whose tracks came in on their own, without its channel");
+
+                if (theirs.master != nullptr)
+                    tellChannel (*theirs.master, theirs);
+            }
+        }
+
+        static juce::String getName (const juce::XmlElement& track)
+        {
+            const auto name = track.getStringAttribute ("name").trim();
+            return name.isNotEmpty() ? name : juce::String ("A track");
+        }
+
+        // What a track's channel holds that isn't taken: its devices, each by its name, its sends, and its automation.
+        void tellChannel (const juce::XmlElement& track, const ReadTracks& theirs)
+        {
+            const auto* channel = track.getChildByName ("Channel");
+            const auto name = getName (track);
+
+            if (const auto* devices = channel != nullptr ? channel->getChildByName ("Devices") : nullptr;
+                devices != nullptr && devices->getNumChildElements() > 0)
+            {
+                juce::StringArray names;
+
+                for (const auto* device : devices->getChildIterator())
+                    names.add (device->getStringAttribute ("deviceName", device->getStringAttribute ("name", device->getTagName())));
+
+                notTaken.add (name + ": its devices (" + names.joinIntoString (", ") + ")");
+            }
+
+            if (const auto* sends = channel != nullptr ? channel->getChildByName ("Sends") : nullptr;
+                sends != nullptr && sends->getNumChildElements() > 0)
+                notTaken.add (name + ": its sends");
+
+            if (const auto* lane = theirs.findLane (track); lane != nullptr && hasAutomation (*lane))
+                notTaken.add (name + ": its automation");
+        }
+
+        static bool hasAutomation (const juce::XmlElement& lane)
+        {
+            for (const auto* child : lane.getChildIterator())
+                if (child->hasTagName ("Points") || (child->hasTagName ("Lanes") && hasAutomation (*child)))
+                    return true;
+
+            return false;
         }
 
         int getClipCount() const
@@ -1146,7 +1246,7 @@ namespace
                     ourClips.push_back (child);
 
             if (ourClips.size() != clips.size())
-                notTaken.addIfNotAlreadyThere ("clips added or taken away in a track the song has");
+                notTaken.addIfNotAlreadyThere (getTrackName (song, id) + ": its clips added or taken away");
 
             for (size_t i = 0; i < std::min (ourClips.size(), clips.size()); ++i)
             {
@@ -1216,12 +1316,7 @@ namespace
             setChannelVolume (song, id, toDecibels (readValue (channel, "Volume", 1.0)));
             setChannelPan (song, id, (float) juce::jlimit (-1.0, 1.0, readValue (channel, "Pan", 0.5) * 2.0 - 1.0));
             setTrackMuted (song, id, readMute (channel));
-
-            if (channel != nullptr && channel->getChildByName ("Sends") != nullptr)
-                notTaken.addIfNotAlreadyThere ("sends");
-
-            if (channel != nullptr && channel->getChildByName ("Devices") != nullptr)
-                notTaken.addIfNotAlreadyThere ("plug-ins");
+            tellChannel (track, theirs);
 
             for (const auto* clip : theirs.getClips (track, true))
             {
@@ -1246,46 +1341,126 @@ namespace
                     addNoteFrom (clipID, getContentStart (clipState), *note);
             }
 
+            juce::StringArray audioNotTaken;
+
             for (const auto* clip : theirs.getClips (track, false))
-                addAudioClip (id, *clip);
+                if (const auto why = addAudioClip (id, *clip); why.isNotEmpty())
+                    audioNotTaken.addIfNotAlreadyThere (why);
+
+            for (const auto& why : audioNotTaken)
+                notTaken.add (getName (track) + ": " + why);
         }
 
-        // An audio clip: its file copied out of the zip into the song's Audio folder, the part of it the clip plays, its fades.
-        void addAudioClip (TrackID track, const juce::XmlElement& clip)
+        // An audio clip: its file copied out of the zip into the song's Audio folder, once for all the clips that play it, the
+        // part of it the clip plays, its fades; and, where its warps stretch it (as Bitwig Studio's do to fit a loop to the
+        // tempo), following the tempo at the tempo the warps give it. What of it isn't taken, or nothing.
+        juce::String addAudioClip (TrackID track, const juce::XmlElement& clip)
         {
-            const auto* audio = clip.getChildByName ("Audio");
-            const auto* file = audio != nullptr ? audio->getChildByName ("File") : nullptr;
+            const auto found = ReadTracks::findAudio (clip);
+            const auto* file = found.audio != nullptr ? found.audio->getChildByName ("File") : nullptr;
+            const auto* warps = found.warps;
+            const auto& event = *found.event;
 
-            if (file == nullptr || clip.getStringAttribute ("contentTimeUnit", "beats") != "seconds")
+            if (file == nullptr)
+                return "audio clips without a file";
+
+            // Where it is in the file is in seconds: as the clip's content says, or as its warps map it.
+            struct Warp
             {
-                notTaken.addIfNotAlreadyThere ("audio clips that follow the tempo");
-                return;
-            }
+                double time = 0.0, contentTime = 0.0;
+            };
+
+            std::vector<Warp> points;
+
+            if (warps != nullptr && warps->getStringAttribute ("contentTimeUnit") == "seconds"
+                && warps->getStringAttribute ("timeUnit", "beats") == "beats")
+                for (const auto* warp : warps->getChildWithTagNameIterator ("Warp"))
+                    points.push_back ({ readNumber (*warp, "time", 0.0, -maxSongBeats, maxSongBeats),
+                                        readNumber (*warp, "contentTime", 0.0, 0.0, maxSeconds) });
+
+            std::stable_sort (points.begin(), points.end(), [] (const Warp& a, const Warp& b) { return a.time < b.time; });
+            const auto warped =
+                points.size() >= 2 && points.back().time > points.front().time && points.back().contentTime > points.front().contentTime;
+
+            if (! warped && event.getStringAttribute ("contentTimeUnit", "beats") != "seconds")
+                return "audio clips timed in beats without warps";
 
             const auto copied = copyOut (file->getStringAttribute ("path"));
 
             if (copied == juce::File())
-            {
-                notTaken.addIfNotAlreadyThere ("audio files that aren't in it");
-                return;
-            }
+                return "audio clips whose files aren't in it";
 
-            const auto from = readNumber (clip, "playStart", 0.0, 0.0, maxSeconds);
-            const auto to = readNumber (clip, "playStop", readNumber (*audio, "duration", from + 1.0, 0.0, maxSeconds), 0.0, maxSeconds);
+            const auto start = readNumber (clip, "time", 0.0, 0.0, maxSongBeats) + found.offset + (warped ? points.front().time : 0.0);
+            const auto from = warped ? points.front().contentTime : readNumber (event, "playStart", 0.0, 0.0, maxSeconds);
+            const auto to = warped ? points.back().contentTime
+                                   : readNumber (event, "playStop", readNumber (*found.audio, "duration", from + 1.0, 0.0, maxSeconds), 0.0,
+                                                 maxSeconds);
             auto state = makeAudioClipState (song, clip.getStringAttribute ("name", copied.getFileNameWithoutExtension()), copied,
-                                             BeatPosition::fromBeats (readNumber (clip, "time", 0.0, 0.0, maxSongBeats)),
-                                             { from, std::max (from + 0.001, to) });
+                                             BeatPosition::fromBeats (std::max (0.0, start)), { from, std::max (from + 0.001, to) });
 
-            if (clip.getStringAttribute ("fadeTimeUnit", "seconds") == "seconds")
+            // Fades in seconds, or in beats at the song's tempo.
+            if (const auto unit = clip.getStringAttribute ("fadeTimeUnit", "seconds"); unit == "seconds" || unit == "beats")
             {
-                state.setProperty (schema::clipFadeIn, readNumber (clip, "fadeInTime", 0.0, 0.0, maxSeconds), nullptr);
-                state.setProperty (schema::clipFadeOut, readNumber (clip, "fadeOutTime", 0.0, 0.0, maxSeconds), nullptr);
+                const auto toSeconds = unit == "beats" ? 60.0 / getTempo (song) : 1.0;
+                state.setProperty (schema::clipFadeIn, readNumber (clip, "fadeInTime", 0.0, 0.0, maxSeconds) * toSeconds, nullptr);
+                state.setProperty (schema::clipFadeOut, readNumber (clip, "fadeOutTime", 0.0, 0.0, maxSeconds) * toSeconds, nullptr);
             }
 
-            placeClipState (song, state, track);
+            const auto id = placeClipState (song, state, track);
+
+            if (id.isValid() && warped)
+            {
+                setClipFollowsTempo (song, id, true);
+                setClipTempo (song, id,
+                              (points.back().time - points.front().time) * 60.0 / (points.back().contentTime - points.front().contentTime));
+            }
+
+            if (points.size() > 2)
+                return "the warps inside its audio clips (each plays straight from its first to its last)";
+
+            if (ReadTracks::countAudioEvents (clip) > 1)
+                return "the audio events after the first in its audio clips";
+
+            return {};
         }
 
+        // A file of the zip copied into the song's Audio folder: once, however many clips play it; and not at all where the
+        // Audio folder has a file of its name that holds the same (a DAWproject Phazite wrote, coming back).
+        std::map<juce::String, juce::File> unpackedFiles;
+
         juce::File copyOut (const juce::String& path)
+        {
+            if (const auto done = unpackedFiles.find (path); done != unpackedFiles.end())
+                return done->second;
+
+            auto& file = unpackedFiles[path];
+            file = unpack (path);
+            return file;
+        }
+
+        static bool holdsTheSame (juce::ZipFile& zip, int index, const juce::File& file)
+        {
+            const std::unique_ptr<juce::InputStream> entry (zip.createStreamForEntry (index));
+            juce::FileInputStream existing (file);
+
+            if (entry == nullptr || ! existing.openedOk())
+                return false;
+
+            juce::HeapBlock<char> one (1 << 16), other (1 << 16);
+
+            for (;;)
+            {
+                const auto read = existing.read (one, 1 << 16);
+
+                if (read <= 0)
+                    return entry->read (other, 1) <= 0;
+
+                if (entry->read (other, read) != read || std::memcmp (one, other, (size_t) read) != 0)
+                    return false;
+            }
+        }
+
+        juce::File unpack (const juce::String& path)
         {
             juce::ZipFile zip (in.file);
             const auto index = zip.getIndexOfFileName (path);
@@ -1297,8 +1472,14 @@ namespace
             // The entry's name, from its path inside the archive: relative, which a juce::File made from it asserts against.
             const auto entry = juce::File::createFileWithoutCheckingPath (
                 path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false));
-            const auto target = folder.getNonexistentChildFile (juce::File::createLegalFileName (entry.getFileNameWithoutExtension()),
-                                                                entry.getFileExtension(), false);
+            const auto name = juce::File::createLegalFileName (entry.getFileNameWithoutExtension());
+            const auto declared = zip.getEntry (index)->uncompressedSize;
+
+            if (const auto same = folder.getChildFile (name + entry.getFileExtension());
+                same.existsAsFile() && same.getSize() == declared && holdsTheSame (zip, index, same))
+                return same;
+
+            const auto target = folder.getNonexistentChildFile (name, entry.getFileExtension(), false);
             const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (index));
             folder.createDirectory();
 
@@ -1308,8 +1489,6 @@ namespace
             // No more than the entry says it holds, nor, with what came out before it, than an archive of this size can
             // hold (getUnpackLimit()): a hostile archive never fills the disk (entries can share their compressed bytes).
             // One that doesn't fit is refused before anything of it is written.
-            const auto declared = zip.getEntry (index)->uncompressedSize;
-
             if (declared < 0 || declared > getUnpackLimit (in.file) - unpacked)
                 return {};
 

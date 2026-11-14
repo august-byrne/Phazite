@@ -110,60 +110,6 @@ namespace
         return std::nullopt;
     }
 
-    // The major key with a key's notes: its parent, whose scale the key's is a mode of (C major for D dorian or A minor).
-    // Harmonic and melodic minor count as minor.
-    int getParentMajor (const Key& key)
-    {
-        switch (key.scale)
-        {
-            case Scale::major:
-                return key.root;
-            case Scale::dorian:
-                return mod12 (key.root - 2);
-            case Scale::phrygian:
-                return mod12 (key.root - 4);
-            case Scale::lydian:
-                return mod12 (key.root - 5);
-            case Scale::mixolydian:
-                return mod12 (key.root - 7);
-            case Scale::locrian:
-                return mod12 (key.root - 11);
-            case Scale::minor:
-            case Scale::harmonicMinor:
-            case Scale::melodicMinor:
-            default:
-                return mod12 (key.root + 3);
-        }
-    }
-
-    // Notes are spelled by letter: a chord's root with the letter of its step of the scale (so the leading note of D
-    // harmonic minor is C#, not Db), and the key's root as its parent major's signature has it, with flats for F, Bb, Eb,
-    // Ab and Db major.
-    constexpr const char* letterNames = "CDEFGAB";
-    constexpr int letterPitches[] = { 0, 2, 4, 5, 7, 9, 11 };
-
-    int getRootLetter (const Key& key)
-    {
-        const auto parent = getParentMajor (key);
-        const auto flats = parent == 5 || parent == 10 || parent == 3 || parent == 8 || parent == 1;
-        constexpr int sharpLetters[] = { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 }; // C C# D D# E F F# G G# A A# B
-        constexpr int flatLetters[] = { 0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6 };  // C Db D Eb E F Gb G Ab A Bb B
-        return (flats ? flatLetters : sharpLetters)[mod12 (key.root)];
-    }
-
-    juce::String spell (int letter, int pitchClass)
-    {
-        letter = ((letter % 7) + 7) % 7;
-        auto difference = mod12 (pitchClass - letterPitches[letter]);
-
-        if (difference > 6)
-            difference -= 12;
-
-        auto name = juce::String::charToString (letterNames[letter]);
-        name << juce::String::repeatedString (difference > 0 ? "#" : "b", std::abs (difference));
-        return name;
-    }
-
     //==============================================================================
     // Voicing.
 
@@ -255,11 +201,24 @@ namespace
         return best.empty() ? stackFrom (lowestChordNote + classes.front(), classes) : best;
     }
 
-    // Open voicings: the bass note low with its fifth, the other notes an octave higher.
-    std::vector<int> voiceSpread (const std::vector<int>& classes)
+    // Open voicings: the bass note low with the chord's own fifth above it (a diminished chord's flat one, an augmented
+    // chord's sharp one), or its root where the fifth is the bass; the other notes an octave higher.
+    std::vector<int> voiceSpread (const PlacedChord& chord, const std::vector<int>& classes)
     {
         const auto bass = 48 + classes.front(); // C3 to B3
-        std::vector<int> pitches { bass, bass + 7 };
+        const auto root = getRootIn (chord.numeral, chord.key);
+        const auto intervals = getChordIntervals (chord.numeral.type);
+        const juce::String letters (findKind (chord.numeral.type).letters);
+        auto partner = mod12 (root);
+
+        for (int i = 0; i < letters.length() && i < (int) intervals.size(); ++i)
+            if (letters[i] == '4' && mod12 (root + intervals[(size_t) i]) != classes.front())
+                partner = mod12 (root + intervals[(size_t) i]);
+
+        std::vector<int> pitches { bass };
+
+        if (partner != classes.front())
+            pitches.push_back (bass + mod12 (partner - bass));
 
         for (size_t i = 1; i < classes.size(); ++i)
         {
@@ -404,11 +363,13 @@ std::vector<int> getPitchClassesIn (const Numeral& numeral, const Key& key)
 juce::String getChordNameIn (const Numeral& numeral, const Key& key)
 {
     const auto& kind = findKind (numeral.type);
-    const auto rootLetter = getRootLetter (key) + juce::jlimit (1, 7, numeral.degree) - 1;
-    auto name = spell (rootLetter, getRootIn (numeral, key)) + kind.symbol;
+    // Spelled by letter (model/notes/NoteValues.h): the root with the letter of its step of the scale, so that the leading
+    // note of D harmonic minor is C#, not Db, from the key's root as its name spells it.
+    const auto rootLetter = getKeyRootLetter (key) + juce::jlimit (1, 7, numeral.degree) - 1;
+    auto name = spellWithLetter (rootLetter, getRootIn (numeral, key)) + kind.symbol;
 
     if (const auto letters = juce::String (kind.letters); numeral.inversion > 0 && numeral.inversion < letters.length())
-        name << "/" << spell (rootLetter + (letters[numeral.inversion] - '0'), getPitchClassesIn (numeral, key).front());
+        name << "/" << spellWithLetter (rootLetter + (letters[numeral.inversion] - '0'), getPitchClassesIn (numeral, key).front());
 
     return name;
 }
@@ -519,7 +480,8 @@ std::vector<NoteData> makePartNotes (const std::vector<PlacedChord>& chords, Par
             case PartStyle::sustainedTriads:
             case PartStyle::spreadChords:
             {
-                const auto pitches = style == PartStyle::spreadChords ? voiceSpread (classes) : voiceClose (chord, classes, previous);
+                const auto pitches =
+                    style == PartStyle::spreadChords ? voiceSpread (chord, classes) : voiceClose (chord, classes, previous);
 
                 for (const auto pitch : pitches)
                     addNote (notes, clip, pitch, from, to, 88);

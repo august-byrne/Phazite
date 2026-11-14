@@ -46,7 +46,7 @@ struct AppScreen
 
     ~AppScreen()
     {
-        runTimersUntil ([this] { return ! services.library.isIndexing(); }, 10000);
+        runTimersUntil ([this] { return ! services.library.isIndexing(); }, 60000);
     }
 
     TemporaryFolder temp;

@@ -410,16 +410,37 @@ void removeLaneTime (Song& song, BeatRange range)
             setRange (state, { start, r.getEnd() - length }, undo);
     }
 
-    // Key changes in the range go to its start, where what came after them now is; those after it move back.
+    // Key changes: what played after the range plays from its start, as the tempo's changes do (removeTempoMapTime()). The
+    // last one in the range, or one where it ends, moves to its start; the others in it go, so that no two are on one beat;
+    // those after it move back.
+    juce::ValueTree last;
+    std::vector<juce::ValueTree> inRange;
+
     for (auto state : getChildren (lane, schema::CHORDKEY))
     {
         const auto keyStart = getStart (state);
 
-        if (keyStart <= BeatPosition() + margin || keyStart < start)
+        if (keyStart < start - margin)
             continue;
 
-        state.setProperty (schema::chordStart, (keyStart >= end ? keyStart - length : start).inBeats(), undo);
+        if (keyStart > end + margin)
+        {
+            state.setProperty (schema::chordStart, (keyStart - length).inBeats(), undo);
+            continue;
+        }
+
+        inRange.push_back (state);
+
+        if (! last.isValid() || keyStart >= getStart (last))
+            last = state;
     }
+
+    for (const auto& state : inRange)
+        if (state != last)
+            lane.removeChild (state, undo);
+
+    if (last.isValid())
+        last.setProperty (schema::chordStart, start.inBeats(), undo);
 }
 
 void moveLaneTime (Song& song, BeatRange range, BeatPosition destination)

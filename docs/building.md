@@ -40,6 +40,8 @@ git clone https://github.com/august-byrne/Phazite.git C:\src\Phazite
 cd C:\src\Phazite
 ```
 
+Every file comes with LF line endings, on Windows as on Linux, whatever git's `core.autocrlf` says ([.gitattributes](../.gitattributes)); only the `.cmd` and `.bat` files have CRLF. Visual Studio, VS Code, MSVC, CMake, PowerShell and Inno Setup all read LF. A clone made before this rule keeps its files' CRLF endings until git writes them again (git shows nothing changed, and commits LF either way); to have LF everywhere at once, with nothing uncommitted: `git rm -r -q --cached .`, then `git reset -q --hard`.
+
 ### 2. Run the setup script
 
 ```powershell
@@ -99,8 +101,13 @@ Configuring finds the compiler and prepares a build folder, `build\<preset>`; bu
 | `windows-profile` | Playing and everyday testing: as fast as Release, with the debug symbols that make a crash dump readable. |
 | `windows-release` | The optimized app alone, without debug symbols. |
 | `windows-debug` | Stepping through code in a debugger. It plays audio 3 to 20 times slower ([performance audit](archive/performance-audit.md)), so don't judge Phazite's sound or speed by it. |
+| `windows-asan` | A Debug build with MSVC's AddressSanitizer, which stops a program at its first memory error with where it happened: for the code only Windows builds (the plug-in helpers' shared memory and windows, WASAPI, ASIO). It needs Visual Studio's C++ AddressSanitizer component, which the setup script installs. The nightly workflow runs every test file with it. |
 
 Configure has worked when its last line is `-- Build files have been written to: ...`, and the build when its last line is a `Linking CXX executable` line (or `ninja: no work to do.`). Otherwise the first line with `CMake Error` or `error` names the cause: see [Troubleshooting](#troubleshooting). There's no Developer PowerShell or vcvars to run first: [cmake/toolchains/windows-msvc.cmake](../cmake/toolchains/windows-msvc.cmake) finds MSVC by itself.
+
+Each build also makes the folder next to the app what the sources have now (`fonts\`, `presets\`, `licenses\`, `NOTICES.txt` and the plug-ins' helper, `PhaziteHost.exe`; [cmake/SyncAppFolder.cmake](../cmake/SyncAppFolder.cmake)): a preset deleted from `resources\presets` goes from there too, so the installer never packs one.
+
+**Precompiled headers.** JUCE's headers are read once for each of Phazite's libraries rather than again for every file (CMake's precompiled headers, the `PHAZITE_PRECOMPILED_HEADERS` option, on by default): a full `windows-debug` build compiles in about a fifth of the time. CI builds without them, which shows that every file includes what it uses; to check that yourself, configure a folder with `-DPHAZITE_PRECOMPILED_HEADERS=OFF`.
 
 ## Running Phazite
 
@@ -195,6 +202,21 @@ The presets use the system GCC (Ubuntu 24.04: g++ 13) and need CMake 3.28 or new
 | `linux-debug` | Debug | `build/linux-debug/Phazite_artefacts/Debug/Phazite` |
 | `linux-asan` | Debug with AddressSanitizer and UndefinedBehaviorSanitizer (memory errors, undefined behavior) | `build/linux-asan/Phazite_artefacts/Debug/Phazite` |
 | `linux-tsan` | RelWithDebInfo with ThreadSanitizer (data races) | `build/linux-tsan/Phazite_artefacts/RelWithDebInfo/Phazite` |
+| `linux-clang` | Debug with Clang (`clang` and `clang++` on the PATH; `sudo apt install -y clang clang-tidy`), without precompiled headers, for clang-tidy | `build/linux-clang/Phazite_artefacts/Debug/Phazite` |
+
+**clang-tidy.** [.clang-tidy](../.clang-tidy) lists a small set of checks for real bugs, each explained there, which Phazite's own code passes; CI's Clang job runs them over every file of `src/` and `tests/` and fails on any finding. To run them yourself, build `linux-clang`, then:
+
+```bash
+CLANG_TIDY=clang-tidy sh tools/clang-tidy.sh build/linux-clang
+```
+
+On Windows, the clang-tidy of VS Code's C/C++ extension reads an MSVC build's database, configured without precompiled headers (Git Bash, from the repository root; `phazite_data` makes the headers the build generates):
+
+```bash
+cmake --preset windows-debug -B build/windows-tidy -DPHAZITE_PRECOMPILED_HEADERS=OFF
+cmake --build build/windows-tidy --target phazite_data
+CLANG_TIDY="$(ls -d ~/.vscode/extensions/ms-vscode.cpptools-*-win32-x64 | tail -n 1)/LLVM/bin/clang-tidy.exe" sh tools/clang-tidy.sh build/windows-tidy
+```
 
 Run the ThreadSanitizer build under `setarch -R`, which turns off address-space randomization for that one process (Ubuntu 24.04 and WSL2 kernels randomize more than the ThreadSanitizer in GCC 13 and 14 can start with). `TSAN_OPTIONS` passes it the suppressions the `linux-tsan` tests use ([tools/tsan-suppressions.txt](../tools/tsan-suppressions.txt), for known races in code Phazite can't change; none now):
 

@@ -145,7 +145,16 @@ struct Key
 
 const std::vector<Scale>& getKeyScales(); // every scale, in the order menus show them
 juce::String getScaleName (Scale);        // "Major", "Harmonic Minor"
-juce::String describeKey (const Key&);    // "C major"
+juce::String describeKey (const Key&);    // "C major", "Bb major", "F# minor": its root as getKeyRootLetter() spells it
+
+// Notes spelled by letter, as the key's name and the chords' names spell them (chords/ChordValues.h). The major key with a
+// key's notes: its parent, whose scale the key's is a mode of (C major for D dorian or A minor; harmonic and melodic minor
+// count as minor). The letter a key's root is written with (0 for C to 6 for B), as its parent major's signature has it,
+// with flats for F, Bb, Eb, Ab and Db major. And a pitch class written with a letter (any number, taken round the seven),
+// with as many sharps or flats as it takes: "Eb", "D#", "Cb".
+int getParentMajor (const Key&);
+int getKeyRootLetter (const Key&);
+juce::String spellWithLetter (int letter, int pitchClass);
 bool isInKey (int pitch, const Key&);
 
 // The semitones of a scale's seven steps above its root, from 0: { 0, 2, 4, 5, 7, 9, 11 } for major.

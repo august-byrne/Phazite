@@ -141,7 +141,11 @@ sandbox::PluginInfo Instance::describe() const
         described.defaultValue = parameter.getDefaultValue();
         described.value = parameter.getValue();
         described.numSteps = parameter.isDiscrete() ? parameter.getNumSteps() : 0;
-        described.isBoolean = parameter.isBoolean();
+
+        // A switch as the plug-in says, or a parameter of two steps (each with its own text, which Phazite asks the plug-in
+        // for): JUCE's VST3 host says that of a VST3's switch, which VST3 describes as a parameter of one step and no more. JUCE
+        // workaround W33 (docs/juce-workarounds.md).
+        described.isBoolean = parameter.isBoolean() || described.numSteps == 2;
         described.isAutomatable = parameter.isAutomatable();
         info.parameters.push_back (described);
     }
@@ -191,6 +195,41 @@ void Instance::prepare (std::unique_ptr<sandbox::BlockChannel> blockChannel, dou
 {
     stop();
     start (std::move (blockChannel), sampleRate);
+}
+
+void Instance::playLive()
+{
+    offlineWanted = false;
+    tellOffline();
+}
+
+void Instance::tellOffline()
+{
+    // The plug-in told whether it plays offline, as the blocks Phazite hands it say (a render's or live playback's), or as
+    // Phazite says once a render has given it back: not while a block plays, and not by waiting for one to end (a plug-in
+    // that hangs in its block would keep the message thread too, and with it the values that would let it go): tried again
+    // at the next tick (takeNotices()).
+    if (const auto wanted = offlineWanted.load(); wanted != offline.load())
+    {
+        const juce::ScopedTryLock held (plugin->getCallbackLock());
+
+        if (held.isLocked())
+        {
+            setOffline (wanted);
+            offline = wanted;
+        }
+    }
+}
+
+void Instance::setOffline (bool isOffline)
+{
+    // As JUCE's hosts tell a plug-in: set while it isn't prepared, then prepared again, which a VST3 takes its process mode
+    // from (kOffline or kRealtime, as JUCE's VST3 host sets it up).
+    const auto maximumSamples = channel->getLimits().maxSamples;
+    plugin->releaseResources();
+    plugin->setNonRealtime (isOffline);
+    plugin->setRateAndBufferSizeDetails (rate, maximumSamples);
+    plugin->prepareToPlay (rate, maximumSamples);
 }
 
 juce::MemoryBlock Instance::getState()
@@ -299,6 +338,8 @@ void Instance::takeNotices (const std::function<void (sandbox::MessageWriter&)>&
 
     sendGestures (false);
 
+    tellOffline();
+
     if (latencyChanged.exchange (false))
     {
         MessageWriter message (MessageType::latencyChanged, 0);
@@ -331,6 +372,19 @@ void Instance::run()
     {
         if (! channel->waitForBlock (checkForExitNanoseconds))
             continue;
+
+        // A render's block waits for the plug-in to be told that it plays offline, which the message thread tells it (as
+        // JUCE's VST3 host prepares a plug-in only there) within a tick of its timer: so that one that streams from disk
+        // or loads in the background has what it plays in time, and one with a mode of its own for rendering takes it.
+        // A live block after a render's doesn't wait for the plug-in to be told that it plays live again.
+        const auto rendering = channel->getInfo().isRendering != 0;
+        offlineWanted = rendering;
+
+        while (rendering && ! offline.load() && ! threadShouldExit())
+            juce::Thread::sleep (1);
+
+        if (threadShouldExit())
+            break;
 
         {
             const juce::ScopedLock held (plugin->getCallbackLock());

@@ -56,10 +56,17 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 - **A block is one round trip through shared memory.** Phazite's engine hands the helper the block: its audio, its
   sidechain, its MIDI, its parameters' changes at their samples, and where the song is. The helper's thread plays it
   in place and answers. Both sides are real-time safe.
-- **Each block has a deadline of its own length in real time,** so a plug-in that is slow makes its own blocks late
-  and never the song's. A block the helper has not answered in time lets an effect's sound through and is silent for
-  an instrument. The notes of a block that could not be handed over go with the next that is, so that no note that
-  ended sounds on.
+- **Each block has a deadline of its own length in real time,** a millisecond at least (a part of a block the engine
+  cuts short at a loop's end has a round trip's time), so a plug-in that is slow makes its own blocks late and never
+  the song's. A block the helper has not answered in time is silent: an effect's sound fades out over 5 milliseconds
+  (its input, as late as the plug-in would have played it), an instrument's stops, and the plug-in's sound fades in
+  again as it plays again. An effect is not passed through dry: a limiter or a fully wet reverb passed dry is worse
+  than a gap. The notes of a block that could not be handed over go with the next that is, so that no note that ended
+  sounds on.
+- Phazite reads back only what it handed over (the block's channels and samples), never what the helper's side of the
+  shared memory says: a block that says otherwise is as one the helper did not play.
+- A plug-in's switch is a switch: a parameter of two steps, as JUCE's VST3 host tells a VST3's switch, with the
+  plug-in's own texts for its two values.
 - The helper plays a block in pieces between its parameters' changes, so automation and modulation land on their
   samples, and gives the plug-in a playhead with the song's place, time signature and bar.
 
@@ -70,14 +77,20 @@ helper with it, and Phazite, the song and the other plug-ins go on.
 - **A hang:** a helper whose message thread has not answered its heartbeat for 10 seconds, or whose audio thread has
   kept a block for 5 seconds, is ended, and its instances are crashed as a crashed helper's are. Nothing of Phazite's
   waits for it.
-- **What shows:** the plug-in's slot reads "*name* - Crashed" in the danger colour. It plays nothing, and an effect
-  lets its sound through.
+- **What shows:** the plug-in's slot reads "*name* - Crashed" in the danger colour. It plays nothing: an effect's
+  sound fades out, as for a late block.
 - **Reloading:** a click on the slot, or **Reload** in its menu, opens the plug-in again in a new helper with the
   state the song holds for it: the state it was last given or last asked for. Its window makes its editor again.
 - **A plug-in that crashes its helper as it loads stays off,** at the next start too, until it is reloaded by hand,
   so that it can't take time from every project that holds it. The settings keep that list.
 - **A missing plug-in** (not installed on this computer) stays in the song as it was saved, silent, until scanning
   finds it.
+- **Nothing is left behind by a crash of Phazite's own:** on Windows the helpers are in a job of Phazite's that ends
+  them as Phazite ends, however it ends (what a plug-in starts, such as a browser for its manual or a licence manager,
+  is left out of the job and lives on, as it would beside a plug-in in any host); on Linux and macOS each helper watches for
+  Phazite to go and ends a second after, if the pipe's loss hasn't quit it by then (its message thread may be a plug-in's
+  hostage). A channel's shared memory goes with its last user: Windows keeps a mapping only while a process has it, and
+  on Linux and macOS Phazite unlinks its name as soon as the helper has opened it.
 - **A crash of Phazite's own:** if Phazite did not close properly, the next start asks before it opens the project
   that was open: **Open**, **Open with Plug-ins Off**, or **Start a New Project**. With its plug-ins off, the
   project's plug-ins stay as they were saved, unloaded and silent; opening the project again turns them on.
@@ -91,10 +104,18 @@ jumps, and on a reset), it ends each with a note-off of its own. A plug-in need 
 
 ## Renders
 
-An export, a freeze or a bounce waits for a plug-in instead of skipping its block, so the file holds what the
-plug-in plays. It does not wait for ever: a plug-in whose helper goes while the song renders, or that keeps a block
-for 30 seconds, fails the render, which names the plug-in ("*name* crashed while Phazite rendered. Reload the
-plug-in, then render again."). Nothing is written. Cancelling a render does not wait for a plug-in.
+An export, a freeze or a bounce waits for a plug-in instead of skipping its block (a block of live playback the
+plug-in is still on too), so the file holds what the plug-in plays. Plug-ins are told that they play offline (JUCE's
+`setNonRealtime()`, a VST3's process mode) before the render's first block, so that one that streams from disk or
+loads in the background has what it plays in time, and that they play live again as the render gives them back
+(finished or cancelled), so that the first live block doesn't wait for the switch. A render does not wait for ever:
+a plug-in whose helper goes while the song renders, or that keeps a block for 30 seconds, fails the render, which
+names the plug-in ("*name* crashed while Phazite rendered. Reload the plug-in, then render again."); one that had
+crashed before fails it at its start ("*name* has crashed. Reload the plug-in, then render again."), unless it is
+switched off, as it isn't heard then. Nothing is written. Cancelling a render does not wait for a plug-in, not even
+one to be prepared for the engine's rate again while it keeps the render's block: its channel waits for the block
+(the engine skips its blocks meanwhile), and a plug-in that keeps it as long as a hang takes is ended. A crashed
+plug-in keeps the rate the engine last asked of it, which its reload opens it at.
 
 While the open song renders, the render has the song's plug-ins, and playback stops. A song rendered beside the open
 one (an older commit's bounce) gets plug-in instances of its own.
@@ -132,6 +153,7 @@ by the helper, unless **Send All Keys to the Plug-in** is on for that plug-in
 - A hung helper is ended rather than waited for, after 10 seconds without an answer or 5 seconds on one block.
 - A plug-in that crashed as it loaded stays off until the user reloads it, rather than being tried at every start.
 - A render fails, naming the plug-in, rather than writing a file with a silent part.
+- A late, busy or crashed effect fades to silence rather than passing its input through dry (the owner, 2026-11-14).
 - The helper ends notes with note-offs of its own, because plug-ins need not obey "all notes off".
 - Parameters are named by the plug-in's IDs, not their order.
 - Scanning has a time limit for each file, so that one plug-in can't stall the scan.

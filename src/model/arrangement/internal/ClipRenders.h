@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace phazite
 {
@@ -38,7 +39,10 @@ void purgeClipRenders (const Song&);
 // Makes the renders a song's clips need, in the background, while the project context holds it: each one that
 // isn't there yet, a short while after the clips last changed (a drag of a clip's tempo makes no render for each value
 // it passes), two at a time. When one is ready, the engine plays it, so that the clip sounds.
-// One that no clip needs any more stops.
+// One that no clip needs any more stops. One that fails (its source can't be read, or the cache folder written) is
+// remembered and not tried again until its source changes (its date or its size, looked at every two seconds while any
+// failed), or the clip needs another render (other
+// settings, or another cache folder) or needs it again after no clip did: its clips stay silent and say so (hasFailed()).
 class ClipRenders : private juce::ValueTree::Listener,
                     private juce::Timer,
                     private juce::AsyncUpdater
@@ -47,8 +51,12 @@ public:
     explicit ClipRenders (const Song&);
     ~ClipRenders() override;
 
-    // Whether any clip still waits for its render.
+    // Whether any clip still waits for its render: those that failed wait for nothing.
     bool isRendering() const;
+
+    // Whether a render failed and won't be tried again until what it is made from changes; and whether any did.
+    bool hasFailed (const juce::File& render) const;
+    bool hasFailures() const noexcept { return ! failed.empty(); }
 
     // How far the renders being made have come, since none was (for the status bar's bar): how many are being made or wait
     // their turn (clips that play the same render count once), and how much of all their frames is done, from 0 to 1.
@@ -84,11 +92,33 @@ private:
     // The frames of the renders made and being made since none was, those stopped left out, for getProgress().
     juce::int64 framesMade = 0, framesAll = 0;
 
+    // The renders that failed, each with its source as it was then: whether it was there, its date and its size.
+    struct Source
+    {
+        bool exists = false;
+        juce::Time modified;
+        juce::int64 size = 0;
+
+        static Source of (const juce::File&);
+        bool operator== (const Source&) const = default;
+    };
+
+    std::map<juce::File, Source> failed;
+
+    // A job that ended, by the jobs, for the message thread to have played: whether it failed (not stopped, and no render),
+    // and its source as it was when it began.
+    struct Finished
+    {
+        juce::File render;
+        bool failed = false;
+        Source source;
+    };
+
     juce::CriticalSection finishedLock;
-    juce::Array<juce::File> finished; // by the jobs, for the message thread to have played
+    std::vector<Finished> finished;
 
     void update();
-    void jobFinished (const juce::File& render); // on its thread
+    void jobFinished (Finished); // on its thread
 
     void timerCallback() override;
     void handleAsyncUpdate() override;

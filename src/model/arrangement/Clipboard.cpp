@@ -19,13 +19,14 @@ namespace phazite
 {
 namespace
 {
-    // The tracks that hold clips (not folders), in the playlist's order, by which pasted clips keep their tracks' places.
+    // The tracks that hold clips (not folders or returns: Schema.h, trackKind), in the playlist's order, by which pasted
+    // clips keep their tracks' places.
     std::vector<TrackID> getTracksForClips (const Song& song)
     {
         std::vector<TrackID> tracks;
 
         for (const auto& state : getTrackStates (song))
-            if (! isFolderState (state))
+            if (! isFolderState (state) && ! isReturnState (state))
                 tracks.push_back (getTrackID (state));
 
         return tracks;
@@ -154,9 +155,26 @@ namespace
         if (song == nullptr || ! target.isValid())
             return;
 
-        const auto tracks = getTracksForClips (*song);
+        auto tracks = getTracksForClips (*song);
         const auto first = indexOf (tracks, target);
         const auto distance = getPlayheadBeat (*song) - clipboard.range.getStart();
+
+        // Clips from more tracks than there are from the target down: empty tracks are added after the last, as REAPER,
+        // Studio One and Logic Pro add them, rather than leave clips out.
+        auto needed = 0;
+
+        for (const auto& copied : clipboard.clips)
+            needed = std::max (needed, first + copied.trackOffset + 1);
+
+        while (first >= 0 && needed > (int) tracks.size())
+        {
+            const auto added = insertTrack (*song, tracks.back(), nullptr);
+
+            if (! added.isValid())
+                break;
+
+            tracks.push_back (added);
+        }
         const auto isRange = clipboard.kind == Clipboard::Kind::range;
 
         const auto trackAt = [&tracks] (int index)

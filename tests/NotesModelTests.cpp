@@ -2,6 +2,7 @@
 // The song's notes as the piano roll reaches them, by IDs and plain values (src/model/notes/NotesModel.h), and the notes
 // selected, by IDs (SongSelection).
 #include "TestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/base/internal/Schema.h"
@@ -241,4 +242,48 @@ TEST_CASE ("Notes are selected by ID, of the clips an editor shows, and nothing 
     // A shown clip deleted takes its notes out of the selection.
     phazite::deleteClips (song.getSong(), { song.otherClip }, false);
     CHECK (selection.getNotes().empty());
+}
+
+TEST_CASE ("The inspector's start for several notes moves them together, as far as the one nearest its clip's start can go")
+{
+    // In a clip that starts at beat 32, notes at 33 and 34 moved back 3 beats both landed on 32: the amount was kept by the
+    // song's start, then each note by its clip alone (known bug 46).
+    Song song;
+    const auto late = phazite::insertMidiClip (song.getSong(), song.a, { beat (32.0), beat (40.0) }, nullptr);
+    REQUIRE (late.isValid());
+    const auto first = phazite::addNote (song.context, late, 60, beat (33.0), beats (1.0), 100);
+    const auto second = phazite::addNote (song.context, late, 62, beat (34.0), beats (1.0), 100);
+    song.getSong().getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (song.getSong());
+    const auto startOf = [&song] (phazite::NoteRef note) { return phazite::getNote (song.context, note).value().start.inBeats(); };
+
+    undo.check ("moved back 3 beats", [&] { phazite::changeNotes (song.context, { first, second }, phazite::NoteProperty::start, -3.0); });
+    CHECK (startOf (first) == doctest::Approx (32.0));
+    CHECK (startOf (second) == doctest::Approx (33.0));
+
+    undo.check ("moved on 2 beats", [&] { phazite::changeNotes (song.context, { first, second }, phazite::NoteProperty::start, 2.0); });
+    CHECK (startOf (first) == doctest::Approx (34.0));
+    CHECK (startOf (second) == doctest::Approx (35.0));
+
+    undo.check ("the earliest typed as beat 30",
+                [&] { phazite::setNotesTo (song.context, { first, second }, phazite::NoteProperty::start, 30.0); });
+    CHECK (startOf (first) == doctest::Approx (32.0));
+    CHECK (startOf (second) == doctest::Approx (33.0));
+
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("A note's length typed in the inspector goes as short as a drag makes it")
+{
+    // Typed, a length stopped at a sixteenth of a beat; dragged, at a sixty-fourth (known bug 52).
+    Song song;
+    phazite::test::UndoCheck undo (song.getSong());
+    undo.check ("a 64th of a beat typed",
+                [&] { phazite::setNotesTo (song.context, { song.c }, phazite::NoteProperty::length, 1.0 / 64.0); });
+    CHECK (phazite::getNote (song.context, song.c).value().length.inBeats() == doctest::Approx (1.0 / 64.0));
+
+    undo.check ("less than that typed",
+                [&] { phazite::setNotesTo (song.context, { song.c, song.e }, phazite::NoteProperty::length, 0.001); });
+    CHECK (phazite::getNote (song.context, song.e).value().length.inBeats() == doctest::Approx (1.0 / 64.0));
+    undo.walkBackAndForth();
 }

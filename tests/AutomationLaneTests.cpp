@@ -173,7 +173,7 @@ TEST_CASE ("A point's menu types its value in a field over it, in the parameter'
     // Type in value... on a point's right-click.
     LaneScreen screen;
 
-    for (const auto [beat, value] : { std::pair { 0.0, 0.5f }, std::pair { 4.0, 0.6f }, std::pair { 8.0, 0.7f } })
+    for (const auto& [beat, value] : { std::pair { 0.0, 0.5f }, std::pair { 4.0, 0.6f }, std::pair { 8.0, 0.7f } })
         phazite::addAutomationPoint (screen.context, screen.volume, { BeatPosition::fromBeats (beat), value });
 
     phazite::test::dispatchPendingMessages();

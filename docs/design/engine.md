@@ -90,9 +90,12 @@ sends, and the buses and the master they reach.
 The engine is engine-neutral: it knows nothing of the song model. It uses JUCE's core, audio and DSP modules,
 r8brain-free-src and Phazite's devices only.
 
-- **The transport** is driven by the message thread through a lock-free queue, and read back through the engine's
-  playhead. The window reads where the playhead was at its frames' own times, from a clock smoothed over the last
-  blocks.
+- **The transport** is driven by the message thread through the state it last asked for, in atomic values that can't
+  overflow however fast it asks, and read back through the engine's playhead. The window reads where the playhead was
+  at its frames' own times, from a clock smoothed over the last blocks.
+- **Fades at Stop, at a jump and at the loop's end,** as other DAWs make them: a jump while playing fades what sounds
+  out over 3 ms, then in after it; a stop and the loop's end fade out the audio clips they cut, the rest ringing on as
+  its notes end. A song played without them plays as its render does, to the last bit.
 - **Control points.** Automation and modulation move what they move on the song's control points, one every 32
   samples from its start. So a song plays the same at any buffer size
   ([automation-and-modulation.md](automation-and-modulation.md)).
@@ -105,8 +108,9 @@ r8brain-free-src and Phazite's devices only.
   30 seconds, for Capture.
 - **Recording** is the engine's too: it knows the sample a take started on, and copies the armed inputs into buffers
   that a thread of Phazite's writes into files ([recording.md](recording.md)).
-- **The metronome's click** is synthesized, and the master's loudness is measured by EBU R128
-  ([mixer.md](mixer.md)).
+- **The metronome's click** is synthesized, and comes out as late as the song's sound does (its delay
+  compensation), the count-in's too. The master's loudness is measured by EBU R128 ([mixer.md](mixer.md)).
+- **One output channel** (a mono device, or one channel chosen) plays both sides of the mix, each at half.
 - **A commit's bounce** is heard in place of the song by a part of the plan that plays it after the master, in time
   with the playhead ([versions.md](versions.md)).
 
@@ -126,7 +130,7 @@ surroundings:
   ones on the control points;
 - it applies an effect's mix, with the sound coming in delayed as much as the effect delays its own;
 - it plays a mono channel in stereo;
-- it lets a device sleep on silence.
+- it lets a device sleep on silence, but never an instrument while it holds a note or its sustain pedal.
 
 A container of devices plays as one device, its chains each in a buffer of its own. A part of a device's sound can
 play on a mixer channel of its own: a drum sampler's pad on a track of its own.

@@ -390,10 +390,12 @@ struct AudioClipEditor::Waveform : public juce::Component
         {
             g.setColour (p.textMuted);
             g.setFont (juce::FontOptions (TextSize::body));
-            g.drawFittedText (shown.state == AudioState::preparing ? "Preparing the audio. The clip is silent until it is ready."
-                                                                   : "The clip's audio file can't be found: " + shown.fileName,
-                              clipArea.toNearestInt().getIntersection (getLocalBounds()).reduced (Space::s), juce::Justification::centred,
-                              2);
+            g.drawFittedText (
+                shown.state == AudioState::preparing ? juce::String ("Preparing the audio. The clip is silent until it is ready.")
+                : shown.state == AudioState::failed
+                    ? "The audio couldn't be prepared: the clip is silent. Phazite tries again when its file changes."
+                    : "The clip's audio file can't be found: " + shown.fileName,
+                clipArea.toNearestInt().getIntersection (getLocalBounds()).reduced (Space::s), juce::Justification::centred, 2);
         }
     }
 

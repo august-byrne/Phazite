@@ -12,7 +12,22 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <thread>
+
+// Last, so that its macros can't change the headers above.
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+#else
+ #include <csignal>
+ #include <sys/types.h>
+#endif
 
 namespace
 {
@@ -557,4 +572,127 @@ TEST_CASE ("A helper that doesn't connect to its pipe as it starts is ended once
     // The tests' helper starts as before.
     sandbox::Helper helper (phazite::test::getTestHost());
     CHECK (helper.start (30000));
+}
+
+namespace
+{
+constexpr const char* sideVariable = "PHAZITE_TEST_PHAZITE_SIDE";
+constexpr const char* sideLine = "phazite-side";
+
+// Whether a process runs, by its ID; and one ended, by it.
+bool isProcessRunning (std::int64_t id)
+{
+#if JUCE_WINDOWS
+    auto* process = OpenProcess (SYNCHRONIZE, FALSE, (DWORD) id);
+
+    if (process == nullptr)
+        return false;
+
+    const auto running = WaitForSingleObject (process, 0) == WAIT_TIMEOUT;
+    CloseHandle (process);
+    return running;
+#else
+    return ::kill ((pid_t) id, 0) == 0;
+#endif
+}
+
+void endProcess (std::int64_t id)
+{
+#if JUCE_WINDOWS
+    if (auto* process = OpenProcess (PROCESS_TERMINATE, FALSE, (DWORD) id); process != nullptr)
+    {
+        TerminateProcess (process, 1);
+        CloseHandle (process);
+    }
+#else
+    ::kill ((pid_t) id, SIGKILL);
+#endif
+}
+} // namespace
+
+// Phazite's side of a helper, for the case after this one, which runs it in a process of its own: a helper started, a
+// plug-in opened in it (its channel's shared memory made), and the helper's message thread stopped for good (the hang
+// stand-in's Stall), so that the pipe's loss can't quit it; then its process's ID and its channel's name written out,
+// and nothing more until it is ended. Nothing in any other run.
+TEST_CASE ("Phazite's side of a helper in a process of its own (for the case after it)")
+{
+    if (juce::SystemStats::getEnvironmentVariable (sideVariable, {}).isEmpty())
+        return;
+
+    TestHelper helper;
+    auto hanging = helper.open (Kind::hang);
+    hanging->setParameter (indexOf (*hanging, "31"), 1.0f);
+
+    // Stalled once a request goes unanswered (the Stall is set before the helper's message thread takes it).
+    while (hanging->getState (500).has_value())
+        hanging->setParameter (indexOf (*hanging, "31"), 1.0f);
+
+    std::printf ("%s %lld %s\n", sideLine, (long long) helper.get().getProcessID(), hanging->getChannel().getName().c_str());
+    std::fflush (stdout);
+
+    for (;;)
+        juce::Thread::sleep (1000);
+}
+
+TEST_CASE ("Phazite's side ended by force leaves neither a helper nor its shared memory behind, whatever the helper does")
+{
+    // The audit of 2026-11-13: a helper quit only through its message thread as the pipe went, so one that a plug-in kept
+    // outlived a Phazite that crashed, and POSIX shared memory was unlinked only by Phazite as it closed.
+    juce::ChildProcess side;
+    {
+        const EnvironmentVariable variable (sideVariable, "1");
+        const auto program = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName();
+        REQUIRE (side.start (juce::StringArray { program, "--test-case=Phazite's side of a helper in a process of its own*" },
+                             juce::ChildProcess::wantStdOut));
+    }
+
+    const juce::ScopeGuard endedAnyway { [&side] { side.kill(); } }; // however the case ends
+
+    // Its line, read a byte at a time (a read of more waits for all of it), within a minute: past that, the side is ended,
+    // which ends the read.
+    juce::String line;
+    std::atomic<bool> read { false };
+    std::atomic<bool> timedOut { false };
+    JoinedThread minute (read,
+                         [&]
+                         {
+                             const auto until = juce::Time::getMillisecondCounterHiRes() + 60000.0;
+
+                             while (! read && juce::Time::getMillisecondCounterHiRes() < until)
+                                 juce::Thread::sleep (20);
+
+                             if (! read)
+                             {
+                                 timedOut = true;
+                                 side.kill();
+                             }
+                         });
+
+    for (char byte = 0; side.readProcessOutput (&byte, 1) > 0;)
+    {
+        if (byte != '\n')
+            line += juce::String::charToString ((juce::juce_wchar) (unsigned char) byte);
+        else if (line.startsWith (sideLine))
+            break;
+        else
+            line.clear();
+    }
+
+    minute.join();
+    REQUIRE_MESSAGE (! timedOut, "Phazite's side wrote no line within a minute");
+    const auto words = juce::StringArray::fromTokens (line.trim(), " ", "");
+    REQUIRE_MESSAGE (words.size() == 3, "Phazite's side wrote: " << line);
+    const auto helperID = words[1].getLargeIntValue();
+    const auto channelName = words[2].toStdString();
+    REQUIRE (helperID > 0);
+    REQUIRE (isProcessRunning (helperID));
+
+    // Ended by force, as a crash ends it: its helper goes with it, and nothing is left of its channel.
+    REQUIRE (side.kill());
+    const auto gone = waitFor ([helperID] { return ! isProcessRunning (helperID); }, 20000);
+    CHECK (gone);
+    CHECK (sandbox::SharedMemory::open (channelName, 64) == nullptr);
+
+    if (! gone)
+        endProcess (helperID);
 }

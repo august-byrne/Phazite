@@ -85,11 +85,16 @@ std::optional<AudioClipInfo> getAudioClip (const ProjectContext& context, ClipID
     info.tempo = getClipTempo (song, id);
     info.followsTempo = info.tempo > 0.0;
 
-    // A render not made yet is being prepared (ClipRenders.h).
+    // A render not made yet is being prepared, unless it failed (ClipRenders.h).
     if (file.sampleRate <= 0.0)
+    {
         info.state = AudioState::missing;
-    else if (isRendered (song, id) && ! getAudioFileInfo (getPlayedFile (song, clipState)).isValid())
-        info.state = AudioState::preparing;
+    }
+    else if (const auto played = getPlayedFile (song, clipState); isRendered (song, id) && ! getAudioFileInfo (played).isValid())
+    {
+        const auto* renders = getClipRenders (context);
+        info.state = renders != nullptr && renders->hasFailed (played) ? AudioState::failed : AudioState::preparing;
+    }
 
     return info;
 }
@@ -326,9 +331,24 @@ std::map<ClipID, double> getClipsBeingRendered (const ProjectContext& context)
     return clips;
 }
 
+std::vector<ClipID> getClipsWhoseRenderFailed (const ProjectContext& context)
+{
+    std::vector<ClipID> clips;
+    const auto* renders = getClipRenders (context);
+    auto* song = findSong (context);
+
+    if (renders == nullptr || song == nullptr || ! renders->hasFailures())
+        return clips;
+
+    for (const auto clip : getAudioClips (*song))
+        if (isRendered (*song, clip) && renders->hasFailed (getPlayedFile (*song, findClipState (*song, clip))))
+            clips.push_back (clip);
+
+    return clips;
+}
+
 namespace
 {
-    constexpr double shortestClip = 1.0 / 16.0; // a 64th note, in beats
 
     const char* getUndoName (ClipProperty property)
     {
@@ -396,7 +416,7 @@ namespace
                     moveClip (context, clip.id, BeatPosition::fromBeats (std::max (0.0, value)), clip.track);
                     break;
                 case ClipProperty::length:
-                    trimClipEnd (context, clip.id, clip.range.getStart() + BeatDuration::fromBeats (std::max (shortestClip, value)));
+                    trimClipEnd (context, clip.id, clip.range.getStart() + BeatDuration::fromBeats (value)); // as short as a trim makes it
                     break;
                 case ClipProperty::gain:
                     setClipGain (context, clip.id, (float) value);

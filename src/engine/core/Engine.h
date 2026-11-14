@@ -46,15 +46,21 @@ public:
     void dropPlans();
     const Plan* getPlan() const noexcept { return plans.get(); }
 
-    // The transport, as the message thread asks for it: each takes effect at the start of the audio thread's next
-    // block, in the order asked.
+    // The transport, as the message thread asks for it (one thread: the message thread, or a render's): the audio thread
+    // takes the state last asked for as its next block with a plan starts, however much was asked meanwhile. A stop before a
+    // jump, a jump before a start. A jump while the song plays fades what sounds out over fadeSeconds first, and what
+    // follows in; a stop fades the audio clips out (their sound would end in a step), and lets the rest ring on as notes
+    // end; the loop's end fades out the audio clips it cuts. Nothing else fades: a song played without a jump, a stop or
+    // the loop plays as its render does.
     void play (bool countIn = false);                   // from where the playhead is (after a count-in: below)
     void stop();                                        // where the playhead is
     void locate (double beat);                          // the playhead there, playing on from there if it plays
     bool isPlaying() const noexcept { return playing; } // as last asked
+    static constexpr double fadeSeconds = 0.003;
 
     // A count-in: a bar of clicks on the song's beats before the playhead, as long as a bar there, which the song waits
-    // for; live notes and the inputs play meanwhile, and a take starts after it.
+    // for; live notes and the inputs play meanwhile, and a take starts after it. Its clicks and the metronome's come out as
+    // late as the song's sound does (its delay compensation, getOutputLatency()), so that they line up with it.
 
     // Where the playhead is: where the latest block the audio thread played started, moved on by the time since, as far as
     // a block and a half (any thread). Before the first block after a locate, where it was asked to be.
@@ -69,8 +75,16 @@ public:
     // A note or controller played live into a track's instrument (the computer keyboard, a MIDI input, the piano roll's
     // guide notes), from any thread: it plays in the audio thread's next block, as far into it as it came after the last
     // block started, so that live notes keep their timing (at a block's delay). Dropped if 1024 wait already. What is
-    // recordable comes out again as it was played (takePlayed()); the piano roll's guide notes aren't.
+    // recordable comes out again as it was played (takePlayed()); the piano roll's guide notes aren't. While the engine has
+    // no plan to play (a render has the song's plug-ins), what comes is dropped as it comes, but for what lets go (a note's
+    // end, a controller), which plays as a plan comes again.
     void playLive (std::int64_t track, devices::NoteEvent, bool recordable = true) noexcept;
+
+    // Every note held live on a track lets go, each as a note's end that a take and Capture record, and its sustain pedal
+    // if it is held down live (any thread): the track live MIDI plays went to another, or a MIDI input went, and the notes
+    // held on it would get no end. The song's own notes and pedal there play on. Live events don't say which input played
+    // them, so a MIDI input that goes ends what every input and the computer keyboard hold live on the track.
+    void endLive (std::int64_t track) noexcept;
 
     // A note played live, as the engine played it: into a track, at the engine's clock as it came in (getClock()), and
     // where the song was then, or -1 while it was stopped or counting in.
@@ -121,9 +135,9 @@ public:
     // How loud what goes out is (any thread reads it, and resets its integrated loudness and held peak).
     LoudnessMeter& getLoudnessMeter() noexcept { return loudness; }
 
-    // The audio thread: plays a block into the outputs (every channel the same), with what comes into the audio device's
-    // inputs (by their channels, nullptr for one that is closed; the first 64), which the strips that hear them play and a
-    // take records. Real-time safe.
+    // The audio thread: plays a block into the outputs (the song's sound on the first two, or on one alone as the average of
+    // its two sides; the clicks on every one), with what comes into the audio device's inputs (by their channels, nullptr
+    // for one that is closed; the first 64), which the strips that hear them play and a take records. Real-time safe.
     void process (const float* const* inputs, int numInputs, float* const* outputs, int numOutputs, int numSamples) noexcept;
     void process (float* const* outputs, int numOutputs, int numSamples) noexcept { process (nullptr, 0, outputs, numOutputs, numSamples); }
     static constexpr int maximumInputs = 64;
@@ -154,31 +168,25 @@ private:
     int maximumBlockSize = 512;
     Handover<Plan> plans;
 
-    // What the message thread asks for, in a lock-free queue it alone fills and the audio thread alone empties.
-    struct Command
-    {
-        enum class Type
-        {
-            play,
-            stop,
-            locate
-        };
+    // What the message thread asks for, as the state last asked, which can't overflow however much is asked between two
+    // blocks (a queue that did froze the playhead and lost a stop: known bug 79 until 2026-11-14). Whether the song plays,
+    // and from a count-in: playBit and countInBit; and above them how many stops were asked for, so that a stop and a
+    // start between two blocks still start the song afresh.
+    static constexpr std::uint32_t playBit = 1, countInBit = 2;
+    static constexpr int stopsShift = 2;
+    std::atomic<std::uint32_t> askedTransport { 0 };
+    bool playing = false;                                  // the message thread's: as last asked
+    std::uint32_t stopsAsked = 0;                          // the message thread's
+    std::uint32_t stopsTaken = 0;                          // the audio thread's
+    bool isStopAsked (std::uint32_t asked) const noexcept; // while it plays
 
-        Type type = Type::stop;
-        double beat = 0.0;
-        bool countIn = false;
-    };
-
-    static constexpr int maximumCommands = 64;
-    juce::AbstractFifo commandFifo { maximumCommands };
-    std::array<Command, maximumCommands> commands;
-    bool playing = false; // the message thread's: as last asked
-    void push (Command);
-
-    // A locate asked for and not taken yet, whose beat the playhead shows meanwhile.
+    // The last locate asked for, whose beat the playhead shows until it is taken. Written by one thread at a time as a
+    // sequence lock: its count goes up once before the beat is written and once after, odd meanwhile; a locate is asked
+    // for each two, and the audio thread takes the beat only when the count was the same, and even, on both sides of it.
     std::atomic<double> requestedBeat { 0.0 };
-    std::atomic<std::uint32_t> locatesAsked { 0 }, locatesTaken { 0 };
+    std::atomic<std::uint32_t> locateCount { 0 }, locatesTaken { 0 };
     static_assert (std::atomic<double>::is_always_lock_free);
+    std::uint32_t getLocatesAsked() const noexcept { return (locateCount.load() + 1) / 2; }
 
     // The audio thread's transport: where the playhead is, in samples from the song's start, and in beats (to stay on its
     // beat when a plan with another tempo comes); and the plan it last played.
@@ -216,7 +224,31 @@ private:
     Handover<Recording> recordings;
     bool brokeTake = false;
 
-    void takeCommands (const Plan&) noexcept;
+    // The fades (fadeSeconds) at the engine's rate. A jump asked for while the song plays, and not taken yet: what sounds
+    // fades out over the samples left, and then it is taken; and what follows a jump fades in over the samples left. The
+    // audio clips' fade out after a stop: from where they play next up to the sample they are silent from.
+    int fadeLength = 0;
+
+    struct Jump
+    {
+        bool pending = false;
+        double beat = 0.0;
+        std::uint32_t count = 0; // of locates asked, when it is taken
+        int left = 0;
+    } jump;
+
+    int fadingIn = 0;
+
+    struct StopFade
+    {
+        std::int64_t sample = 0, end = 0;
+    } stopFade;
+
+    void takeTransport (const Plan&) noexcept; // the state asked for, as each part with a plan starts
+    void stopTransport (const Plan&) noexcept; // a stop: any jump fading out taken at once
+    void startTransport (const Plan&, bool countIn) noexcept;
+    void takeJump (const Plan&, double beat, std::uint32_t count) noexcept;
+    void fadeMaster (float* const* sides, int numSamples) noexcept; // a jump's fade out, and what follows it fading in
     void expectAudio (const Plan&) noexcept; // tells the audio clips' files where they play next (AudioRegion::expect())
     void playSpan (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
     void playStrips (const Plan&, int offset, int numSamples) noexcept;
@@ -235,6 +267,12 @@ private:
         TempoMap::TimeSignature timeSignature {};
         std::uint64_t pass = 0;
         bool startsEarly = false, flush = false;
+
+        // Where the audio clips play from (while the song plays, where it is; after a stop, as they fade out), and the cut
+        // the transport makes in them (the loop's end, the stop); whether they play.
+        std::int64_t audioSample = 0;
+        AudioRegion::Cut cut {};
+        bool playsAudio = false;
     };
 
     Workers workers;
@@ -279,6 +317,7 @@ private:
         devices::NoteEvent event {};
         double milliseconds = 0.0;
         bool recordable = true;
+        bool endsLive = false; // endLive(): what is held live on the track lets go
     };
 
     EventQueue<LiveEvent, 1024> liveQueue;
@@ -286,6 +325,28 @@ private:
     int numLiveEvents = 0;
     double lastBlockMilliseconds = 0.0;
     void takeLiveEvents (const Plan&, int numSamples, std::int64_t partClock) noexcept;
+
+    // What lets go among the live events that came while there was no plan (a render had the song's plug-ins), each once,
+    // for the next part with a plan.
+    std::array<LiveEvent, 256> endsWaiting {};
+    int numEndsWaiting = 0;
+    void dropLiveEvents() noexcept;
+
+    // What each track holds live (the notes played live into it, each as often as it was started, and whether its pedal is
+    // down), as the audio thread takes them, for endLive(), which ends those alone: never the song's own notes or pedal.
+    // As many tracks at once as fit; one played live past them isn't followed.
+    struct LiveHold
+    {
+        std::int64_t track = 0;
+        std::array<std::uint8_t, 128> notes {};
+        int numNotes = 0;
+        bool pedalDown = false;
+    };
+
+    std::array<LiveHold, 16> liveHolds {};
+    int numLiveHolds = 0;
+    void followLive (const LiveEvent&) noexcept;
+    void addLiveEvent (LiveEvent, std::int64_t loopStart, std::int64_t loopEnd) noexcept; // into the part, and recorded
 
     // The notes played live as they came out (takePlayed()), in a lock-free queue the audio thread alone fills; and the
     // last part played, from whose start the live notes taken in a part came in.
@@ -307,13 +368,28 @@ private:
     std::atomic<int> lateBlocks { 0 }, lastBlockLength { 0 };
     std::atomic<std::uint64_t> blocksPlayed { 0 };
 
-    // The metronome: its two clicks (made in prepare()), and the one playing, where it is.
+    // The metronome: its two clicks (made in prepare()); those to come, each at the engine's clock it starts on, as late as
+    // the song's sound comes out (in the order they come, a ring of them); and the one playing, where it is. A click starts
+    // where the one before was, which it cuts.
+    struct ClickStart
+    {
+        std::int64_t clock = 0;
+        bool accent = false;
+    };
+
     juce::AudioBuffer<float> click, accentClick;
+    std::array<ClickStart, 64> clickStarts {};
+    int firstClickStart = 0, numClickStarts = 0;
     const juce::AudioBuffer<float>* clicking = nullptr;
     int clickPosition = 0;
-    void playClicks (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
-    void playCountIn (float* const* outputs, int numOutputs, int numSamples) noexcept;
-    void continueClick (float* const* outputs, int numOutputs, int offset, int from, int to) noexcept;
+    void findClicks (const Plan&, int offset, int numSamples) noexcept;
+    void findCountInClicks (const Plan&, int numSamples) noexcept;
+    void addClickStart (const Plan&, int start, bool accent) noexcept; // at a sample of the part played
+    void playClicks (float* const* outputs, int numOutputs, int numSamples) noexcept;
+    void continueClick (float* const* outputs, int numOutputs, int from, int to) noexcept;
+
+    // A mono output's two sides, added up there.
+    juce::AudioBuffer<float> monoSides;
 
     // Where the playhead was as each of the last blocks started, for any thread (PlayheadClock.h): stamped by the audio thread
     // with when the block started, on its blocks' smoothed clock, and how long it lasts (milliseconds).

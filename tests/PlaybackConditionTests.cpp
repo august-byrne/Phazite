@@ -177,6 +177,48 @@ TEST_CASE ("At every condition the count-in clicks once on each beat of its bar,
         });
 }
 
+TEST_CASE ("At every condition the metronome and the count-in click as late as the song's sound comes out")
+{
+    // With 1,000 samples of delay compensation on the master (a limiter's look-ahead, a plug-in's latency) the song comes out
+    // 1,000 samples late, and so does each click, from the song's start and after a count-in from bar 2: they clicked at once,
+    // ahead of the song, and notes played to them were recorded early (known bug 76; a take places them by the song's delay,
+    // model/transport/internal/Take.h).
+    constexpr int latency = 1000;
+
+    atEveryCondition (
+        [] (const PlaybackCondition& condition)
+        {
+            const auto length = (int) (6.5 * condition.getBeatSamples());
+            const auto unshifted = expectClicks (condition, length - latency);
+            juce::AudioBuffer<float> expected (2, length);
+            expected.clear();
+
+            for (int channel = 0; channel < 2; ++channel)
+                expected.copyFrom (channel, latency, unshifted, channel, 0, length - latency);
+
+            for (const auto countIn : { false, true })
+            {
+                CAPTURE (countIn);
+                engine::Engine player;
+                player.prepare (condition.getSampleRate(), condition.blockSize);
+                auto plan = makePlan (condition);
+                plan->metronome = true;
+                engine::Plan::Strip master;
+                master.state = std::make_shared<engine::StripState>();
+                master.state->prepare (condition.getSampleRate(), condition.blockSize);
+                master.latency = latency;
+                plan->strips.push_back (std::move (master));
+                player.setPlan (std::move (plan));
+
+                if (countIn)
+                    player.locate (4.0);
+
+                player.play (countIn);
+                checkClicks (condition, playBlocks (player, condition, length), expected);
+            }
+        });
+}
+
 //==============================================================================
 namespace
 {
@@ -491,7 +533,8 @@ TEST_CASE ("At every condition a long audio file plays without a gap from where 
     // block. Stopped at the song's start, the playhead is put at beat 52, further on than was read, and the song played
     // from there a little later: to the loop's end, round it, and half way round again. Every sample is the file's at the
     // song's sample it plays, but for the 48 after playback starts and after each jump back, where what plays fades in (an
-    // audio region fades in over 40 samples rather than click).
+    // audio region fades in over 40 samples rather than click), and those before the loop's end, where it fades out
+    // (engine::Engine::fadeSeconds).
     constexpr int fadeSamples = 48;
 
     atEveryCondition (
@@ -546,12 +589,13 @@ TEST_CASE ("At every condition a long audio file plays without a gap from where 
 
             auto songSample = playFrom;
             auto sinceJump = 0, wrong = 0, jumps = 0, firstWrong = -1;
+            const auto fadeOut = (int) std::lround (engine::Engine::fadeSeconds * rate);
 
             for (int i = 0; i < played.getNumSamples(); ++i)
             {
                 const auto expected = CountingReader::at (songSample), got = played.getSample (0, i);
-                const auto right =
-                    sinceJump < fadeSamples ? got >= 0.0f && got <= expected + 1.0e-6f : std::abs (got - expected) <= 1.0e-6f;
+                const auto right = sinceJump < fadeSamples || songSample >= loopEnd - fadeOut ? got >= 0.0f && got <= expected + 1.0e-6f
+                                                                                              : std::abs (got - expected) <= 1.0e-6f;
 
                 if (! right && wrong++ == 0)
                     firstWrong = i;
@@ -630,5 +674,144 @@ TEST_CASE ("At every condition a song played live sounds as its render does")
                    + differences.joinIntoString ("\n  "))
                       .toStdString());
             CHECK (differences.isEmpty());
+        });
+}
+
+//==============================================================================
+namespace
+{
+// A sine of 997 Hz at half of full scale, mono at the engine's rate, eight seconds long, at its peak on a sample of a test's
+// choosing: where the transport cuts it, so that a cut without a fade is a step as large as the sine.
+struct SineReader final : engine::SampleReader
+{
+    SineReader (double sampleRate, std::int64_t peakAt)
+        : fileRate (sampleRate),
+          peak (peakAt)
+    {
+    }
+
+    static constexpr double frequency = 997.0, amplitude = 0.5;
+
+    int getNumChannels() const override { return 1; }
+    double getSampleRate() const override { return fileRate; }
+    std::int64_t getLength() const override { return (std::int64_t) (8.0 * fileRate); }
+
+    bool read (juce::AudioBuffer<float>& buffer, std::int64_t start, int numSamples) override
+    {
+        for (int i = 0; i < numSamples; ++i)
+            buffer.setSample (
+                0, i,
+                (float) (amplitude * std::cos (juce::MathConstants<double>::twoPi * frequency * (double) (start + i - peak) / fileRate)));
+
+        return true;
+    }
+
+    double fileRate;
+    std::int64_t peak;
+};
+
+// The largest change from one sample to the next, and where, on the first side.
+std::pair<float, int> findLargestStep (const juce::AudioBuffer<float>& played)
+{
+    auto largest = 0.0f;
+    auto at = -1;
+
+    for (int i = 1; i < played.getNumSamples(); ++i)
+        if (const auto step = std::abs (played.getSample (0, i) - played.getSample (0, i - 1)); step > largest)
+        {
+            largest = step;
+            at = i;
+        }
+
+    return { largest, at };
+}
+} // namespace
+
+TEST_CASE ("At every condition a stop, the loop's end and a jump fade what plays rather than cut it")
+{
+    // An audio clip of a sine from the song's start, cut at its peak by the transport: stopped, at the loop's end (beats 1 to
+    // 3), and by a jump to beat 2.5 while it plays. They cut it in a step as large as the sine (the audit's engine finding
+    // 10): now what sounds fades out over a few milliseconds and what follows fades in, as other DAWs do, so that no
+    // sample steps further from the one before than twice the most a sine of its frequency moves.
+    enum class Cut
+    {
+        stop,
+        loop,
+        jump
+    };
+
+    atEveryCondition (
+        [] (const PlaybackCondition& condition)
+        {
+            const auto rate = condition.getSampleRate();
+            const auto blocksIn = (int) std::ceil (0.25 * rate / condition.blockSize);
+            const auto cutAt = (std::int64_t) blocksIn * condition.blockSize;
+            const auto loopEnd = condition.getNearestSampleTo (3);
+            const auto mostASineMoves = (float) (SineReader::amplitude * juce::MathConstants<double>::twoPi * SineReader::frequency / rate);
+
+            for (const auto cut : { Cut::stop, Cut::loop, Cut::jump })
+            {
+                CAPTURE ((int) cut);
+                engine::Engine player;
+                player.prepare (rate, condition.blockSize);
+                player.setPlayingAsRender (true); // the file read as it plays
+                const auto peak = cut == Cut::loop ? loopEnd - 1 : cutAt - 1;
+                auto file = std::make_shared<engine::AudioFile> (std::make_unique<SineReader> (rate, peak), &player.getBlocksPlayed());
+
+                auto plan = makePlan (condition);
+
+                if (cut == Cut::loop)
+                    plan->loop = engine::Plan::BeatRange { 1.0, 3.0 };
+
+                engine::Plan::Strip track, master;
+                track.id = 1;
+
+                for (auto* strip : { &track, &master })
+                {
+                    strip->state = std::make_shared<engine::StripState>();
+                    strip->state->prepare (rate, condition.blockSize);
+                }
+
+                engine::AudioRegion region;
+                region.state = std::make_shared<engine::RegionState> (*file, rate);
+                region.file = file;
+                region.length = file->getLength();
+                track.audio.push_back (std::move (region));
+                master.inputs.push_back ({ 0, nullptr });
+                plan->strips.push_back (std::move (track));
+                plan->strips.push_back (std::move (master));
+                player.setPlan (std::move (plan));
+                player.play();
+
+                const auto before = (int) (cut == Cut::loop ? loopEnd : cutAt);
+                auto played = playBlocks (player, condition, before);
+
+                if (cut == Cut::stop)
+                    player.stop();
+                else if (cut == Cut::jump)
+                    player.locate (2.5);
+
+                const auto after = playBlocks (player, condition, (int) (0.1 * rate));
+                juce::AudioBuffer<float> whole (2, before + after.getNumSamples());
+
+                for (int channel = 0; channel < 2; ++channel)
+                {
+                    whole.copyFrom (channel, 0, played, channel, 0, before);
+                    whole.copyFrom (channel, before, after, channel, 0, after.getNumSamples());
+                }
+
+                const auto largest = findLargestStep (whole);
+                const auto step = largest.first;
+                const auto at = largest.second;
+                CAPTURE (at);
+                CAPTURE (step);
+                CHECK (step <= 2.0f * mostASineMoves);
+
+                // A stop ends it once it has faded out; the loop and the jump play on.
+                if (cut == Cut::stop)
+                    CHECK (after.getMagnitude (0, after.getNumSamples() / 2, after.getNumSamples() / 2) < 1.0e-6f);
+                else
+                    CHECK (after.getMagnitude (0, after.getNumSamples() / 2, after.getNumSamples() / 2) > 0.4f);
+            }
         });
 }

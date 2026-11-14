@@ -44,6 +44,7 @@ std::unique_ptr<RemoteInstance> RemoteInstance::open (Helper& helper, const juce
     write (message, name, limits, sampleRate);
     message.add (descriptionXml).add (state);
     const auto answer = helper.request (message, timeoutMilliseconds);
+    instance->channel->forgetName(); // opened by the helper, or never to be
 
     if (! answer.has_value())
     {
@@ -90,6 +91,7 @@ bool RemoteInstance::prepare (double sampleRate, const BlockChannel::Limits& lim
     message.add (id);
     write (message, name, limits, sampleRate);
     const auto answer = helper.request (message, timeoutMilliseconds);
+    newChannel->forgetName(); // opened by the helper, or never to be
 
     if (! answer.has_value())
         return false;
@@ -178,6 +180,13 @@ void RemoteInstance::setEditorKeys (bool getsEveryKey, const std::vector<std::pa
     for (const auto& [code, modifiers] : keys)
         message.add ((std::int32_t) code).add ((std::int32_t) modifiers);
 
+    helper.post (message);
+}
+
+void RemoteInstance::playLive()
+{
+    MessageWriter message (MessageType::playLive, 0);
+    message.add (id);
     helper.post (message);
 }
 
@@ -294,6 +303,7 @@ void RemoteInstance::handleNotice (MessageType type, MessageReader& notice)
         case MessageType::setParameter:
         case MessageType::placeEditor:
         case MessageType::setEditorKeys:
+        case MessageType::playLive:
         case MessageType::reply:
             break;
     }

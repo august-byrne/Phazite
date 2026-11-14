@@ -2,8 +2,8 @@
 // The long run: a song played through Phazite's engine block by block, as the audio device plays it, for an hour of
 // music, while it is edited as a user edits it, from a sequence of edits drawn from a fixed seed (notes, clips, values set
 // by hand, effects added and removed, Undo and Redo, the loop and the tempo changed, the playhead moved, a save now and
-// then). Along the way it checks that nothing allocates or frees on the audio thread (in Windows Debug builds, where
-// AudioThreadMonitor.h counts), that the process's memory doesn't grow past an allowance, that what plays stays finite and
+// then). Along the way it checks that nothing allocates or frees on the audio thread (where AudioThreadMonitor.h counts:
+// Windows Debug and Linux builds), that the process's memory doesn't grow past an allowance, that what plays stays finite and
 // within reason, and that the song's IDs stay whole (SongIDs.h); at the end, that the song saved and opened again is the
 // same song. Under linux-asan and linux-tsan the same run is watched by the sanitizers.
 //
@@ -83,8 +83,8 @@ juce::String megabytes (std::int64_t bytes)
     return juce::String ((double) bytes / (1024.0 * 1024.0), 1) + " MB";
 }
 
-// The memory the process may gain after the run has warmed up: its undo history keeps every edit (up to the 30,000 steps'
-// worth that Song.cpp keeps), and the sanitizers keep freed memory aside for a while (AddressSanitizer's quarantine,
+// The memory the process may gain after the run has warmed up: its undo history keeps every edit (up to the 1000 steps that
+// a song keeps by default: Song.h), and the sanitizers keep freed memory aside for a while (AddressSanitizer's quarantine,
 // 256 MB by default) and hold their own records of what the program did.
 #if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
 constexpr std::int64_t memoryAllowance = 512LL * 1024 * 1024;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/Tracks.h"
+#include "internal/Clips.h"
 #include "model/automation/internal/Automation.h"
 #include "model/base/Toggles.h"
 #include "model/base/internal/Schema.h"
@@ -1041,6 +1042,8 @@ void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* se
     for (const auto track : outermost)
         if (const auto state = findTrackState (song, track); state.isValid())
             state.getParent().removeChild (state, &song.getUndoManager());
+
+    unlinkLoneClips (song); // a clip linked only to clips of the tracks gone
 
     if (selection != nullptr)
         if (const auto remaining = getTrackIDs (song); ! remaining.empty())

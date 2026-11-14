@@ -24,11 +24,11 @@ public:
     struct Item
     {
         juce::Component* control = nullptr;
-        std::function<int()> getWidth;                    // as wide as it is now (a button's text can change)
-        std::function<void (juce::PopupMenu&)> addToMenu; // what the More menu offers in its place while it doesn't fit
-        int priority = 0;                                 // the least needed (lowest) leaves the row first
-        int gapBefore = 0;                                // room between it and the control before it in the row
-        std::function<bool()> isWanted;                   // whether it belongs in the row now at all; always, if unset
+        std::function<int()> getWidth {};                    // as wide as it is now (a button's text can change)
+        std::function<void (juce::PopupMenu&)> addToMenu {}; // what the More menu offers in its place while it doesn't fit
+        int priority = 0;                                    // the least needed (lowest) leaves the row first
+        int gapBefore = 0;                                   // room between it and the control before it in the row
+        std::function<bool()> isWanted {};                   // whether it belongs in the row now at all; always, if unset
     };
 
     // Adds a control at the row's end; the row shows it and places it.

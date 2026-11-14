@@ -65,7 +65,7 @@ void renameClips (Song&, const std::vector<ClipID>&, const juce::String& name);
 juce::ValueTree copyClipState (Song&, const juce::ValueTree& clipState);
 
 // Puts a clip's element on a track's, or moves it there (in the caller's undo step). Returns its ID, or none if the track
-// isn't there.
+// isn't there or holds no clips (a folder or a return: Schema.h, trackKind).
 ClipID placeClipState (Song&, juce::ValueTree clipState, TrackID);
 
 // Where a clip is, in the caller's undo step: its start, its length, and how far into its notes it starts.
@@ -129,7 +129,8 @@ ClipID addMidiClipAt (Song&, TrackID, BeatPosition, Selection*);
 ClipID placeClip (Song&, TrackID, BeatPosition start, ClipID lastUsed);
 
 // Slips what a clip plays, as the Slip tool does: its content moves later by a distance in seconds (earlier if negative),
-// from the offset it had when the drag began, while the clip stays where it is. Content can't start after the clip does.
+// from the offset it had when the drag began, while the clip stays where it is. Content can't start after the clip does,
+// and an audio clip's part stays inside its file, as long as it is, whichever way it plays.
 void slipClip (Song&, ClipID, double startOffsetSeconds, double distanceSeconds);
 
 // How far into what it plays a clip starts, in seconds (an audio clip's into its file as it plays it, a MIDI clip's into
@@ -151,6 +152,10 @@ std::vector<ClipID> duplicateClips (Song&, const std::vector<ClipID>&, bool asAl
 
 // Turns aliases back into separate clips. A clip left alone in its link group is unlinked too.
 void makeClipsUnique (Song&, const std::vector<ClipID>&);
+
+// Unlinks every clip left alone in its link group (after its tracks went, say), in the caller's undo step. Deleting a
+// clip unlinks the last one of its group itself.
+void unlinkLoneClips (Song&);
 
 // Mutes the clips, or unmutes them if they all are muted already.
 void toggleClipsMuted (Song&, const std::vector<ClipID>&);

@@ -52,8 +52,26 @@ struct RegionState
     int fadingIn = 0;           // samples left of its fade in after a jump
     bool missed = false;        // the last stretch it played wasn't read yet: silence, and the next that is fades in
 
+    // The region it last played as (its file, its start in the song and in the file): another (its clip moved, slipped or
+    // rendered again under the playhead) plays from where the new one is there, as after a jump. Compared, never read.
+    const AudioFile* playedFile = nullptr;
+    std::int64_t playedStart = 0;
+    double playedFileStart = 0.0;
+
     struct Conversion;
     std::unique_ptr<Conversion> conversion; // a file at another rate's, or nullptr
+};
+
+// A cut the transport makes in what plays (a stop, the loop's end): the sound fades out over so many samples before a
+// sample of the song, and is silent from it on, rather than end in a step; none while its length is 0. A region that
+// ends at that sample, or one sample after it (a stretched loop that rounds past the loop's end, which plays on whole
+// into its start again), isn't cut, and plays as it would. A stop's cut plays on only the regions that were playing
+// up to where it starts (continuesOnly): none starts in its fade.
+struct RegionCut
+{
+    std::int64_t at = 0;
+    int length = 0;
+    bool continuesOnly = false;
 };
 
 struct AudioRegion
@@ -68,12 +86,14 @@ struct AudioRegion
 
     std::int64_t getEnd() const noexcept { return start + length; }
 
+    using Cut = RegionCut;
+
     // Audio thread, or a render's (which reads what it needs first): adds what the region plays from a sample of the song,
-    // for so many samples, into two channels (a mono file into both). Scratch holds what it plays before its gain and fades:
-    // at least as many samples as are played, on two channels. A file at another rate than the engine's plays only through
-    // a state made for the two (RegionState's), and otherwise as silence.
+    // for so many samples, into two channels (a mono file into both), cut where the transport cuts it. Scratch holds what
+    // it plays before its gain and fades: at least as many samples as are played, on two channels. A file at another rate
+    // than the engine's plays only through a state made for the two (RegionState's), and otherwise as silence.
     void play (float* const* channels, std::int64_t songSample, int numSamples, double engineRate, bool isRender,
-               juce::AudioBuffer<float>& scratch) const noexcept;
+               juce::AudioBuffer<float>& scratch, Cut = {}) const noexcept;
 
     // Audio thread: a sample of the song it will play from next if it plays there, though the song doesn't play there now
     // (where playback will start, the loop's start): its file reads ahead of there too (AudioFile::expect()).

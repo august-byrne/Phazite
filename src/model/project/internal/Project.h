@@ -11,6 +11,8 @@
 
 namespace phazite
 {
+class TrackRender;
+
 // A new song, as a new project's starts: its tempo map, its master and one empty track, numbered by the song itself
 // (Schema.h).
 juce::ValueTree makeNewSong();
@@ -73,8 +75,10 @@ public:
                                             const std::function<void (Song&)>& addContent = {});
 
     // Opens a saved project. With restoreAutosave it opens the autosaved changes instead (see hasNewerAutosave()); saving
-    // then still writes to the project file.
-    static std::unique_ptr<Project> open (const juce::File& projectFile, bool restoreAutosave, juce::String& error);
+    // then still writes to the project file. An autosave that can't be read gives way to the project file, as it was last
+    // saved, and notRestored, if given, says so (known bug 87: the project's own file wasn't even tried).
+    static std::unique_ptr<Project> open (const juce::File& projectFile, bool restoreAutosave, juce::String& error,
+                                          juce::String* notRestored = nullptr);
 
     // Opens a project whose file can't be read with a song from elsewhere (its newest backup that reads, or its branch's last
     // commit: model/versions/internal/VersionHistory.h, readLastCommitSong()), as the project's, which a save then writes
@@ -119,6 +123,10 @@ public:
     // first, as its own undo step (model/commands/internal/Undo.h: Trial).
     juce::Result save();
 
+    // Told, on the message thread, when a save (save(), or Auto Save's) couldn't make its backup, which the save goes on
+    // without: once, until a backup is made again (known bug 40).
+    std::function<void (const juce::String& message)> onBackupFailed;
+
     // Writes the autosave if anything changed since the last save or autosave.
     juce::Result autosave();
 
@@ -155,12 +163,20 @@ public:
     // File (if that folder exists, for example).
     juce::File saveCopyAs (const juce::File& parentFolder, const juce::String& name, juce::String& error);
 
-    // Saves the project, unsaved changes included, as <parentFolder>/<name> with copies of its Audio, Generated and
-    // Renders folders, and goes on there with its undo history: the first save of a project kept with the unsaved ones
-    // until then (model/project/internal/UnsavedProjects.h), which asks where it goes. The folder it was in stays as it is, for
-    // its owner to delete once the project has closed (files in it may be open until then). Fails, changing nothing, if
-    // that folder exists or can't be written.
-    juce::Result moveTo (const juce::File& parentFolder, const juce::String& name);
+    // Saves the project, unsaved changes included, as <parentFolder>/<name> with copies of its Audio, Generated, Renders and
+    // Cache folders and its versions, and goes on there with its undo history: the first save of a project kept with the
+    // unsaved ones until then (model/project/internal/UnsavedProjects.h), which asks where it goes. The folders are copied
+    // into "<name> (saving)" beside, which takes the project's folder's name once it is whole, and only then does the project
+    // move there and save: until then it stays where it was, and nothing that looks like a project is left half made. The
+    // folder it was in stays as it is, for its owner to delete once the project has closed (files in it may be open until
+    // then). It calls back with what came of it, on the message thread, once: a failure changes nothing (that folder exists,
+    // or something can't be written). What copies in no more than copyAtOnceBytes is done before this returns, which then
+    // returns nothing; more is copied on a background thread (known bug 90: the message thread copied gigabytes of
+    // recordings), which this returns as a TrackRender: its progress window's, whose deletion cancels it, leaving nothing
+    // behind and without calling back. Message thread; the project must outlive what it returns.
+    std::unique_ptr<TrackRender> moveTo (const juce::File& parentFolder, const juce::String& name,
+                                         std::function<void (const juce::Result&)> onFinished);
+    static constexpr juce::int64 copyAtOnceBytes = (juce::int64) 8 << 20;
 
 private:
     Project (Song::Ptr, const juce::File&);
@@ -194,12 +210,17 @@ private:
     bool compareAll = false;
 
     // Makes the folder <parentFolder>/<name> with copies of the project's Audio, Generated, Renders and Cache folders, and
-    // of its Versions if it keeps any, and returns the project file that goes in it. If the name is empty, the folder exists or something can't be written, sets
-    // error and returns nothing, leaving nothing behind.
+    // of its Versions if it keeps any, as moveTo() does, and returns the project file that goes in it. If the name is empty,
+    // the folder exists or something can't be written, sets error and returns nothing, leaving nothing behind.
     juce::File makeFolderWithFiles (const juce::File& parentFolder, const juce::String& name, juce::String& error) const;
     void setFile (const juce::File&); // the project file from now on, the song's too
 
+    // The end of moveTo(): its copy put in the folder's place, and the project saved there.
+    class FolderCopy;
+    juce::Result finishMoveTo (const juce::File& copy, const juce::File& folder);
+
     void backUpProjectFile();
+    bool backupFailed = false; // told until a backup is made again
     void rememberSavedState();
     void forgetSavedState(); // the project file doesn't hold the song: unsaved until a save
     void compareWithSavedState();

@@ -2,6 +2,8 @@
 #include "Workers.h"
 #include "devices/core/AudioThreads.h"
 
+#include <juce_audio_basics/juce_audio_basics.h>
+
 #include <algorithm>
 #include <chrono>
 #include <thread>
@@ -38,6 +40,10 @@ private:
 
     void run() override
     {
+        // As the audio thread plays (Engine::process()): numbers too small to hear are zero, so that what dies away (a
+        // container's crossover, a modulator's follower) doesn't slow down, and plays the same on any thread. A device's own
+        // guard puts this back as it returns.
+        const juce::ScopedNoDenormals noDenormals;
         const devices::ProAudioTask proAudio;
         auto seen = workers.generation.load (std::memory_order_acquire);
 

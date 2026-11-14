@@ -312,8 +312,8 @@ void Playlist::AutomationLaneView::typeValue (int index)
     { return in.getLocalArea (this, juce::Rectangle<int> (TypedField::getMinimumWidth(), controlHeight).withCentre (centre)); };
     valueField->getTexts = [this]
     {
-        const auto range = handle.getRange();
-        return juce::StringArray { getValueText ((float) range.start), getValueText ((float) range.end) };
+        const auto values = handle.getRange();
+        return juce::StringArray { getValueText ((float) values.start), getValueText ((float) values.end) };
     };
     valueField->onApply = [this, indices] (const juce::String& text)
     {

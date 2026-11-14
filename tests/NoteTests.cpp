@@ -280,6 +280,32 @@ TEST_CASE ("Legato and chop")
     CHECK (pieces[4].velocity == 90);
 }
 
+TEST_CASE ("Chop and Arpeggiate keep all of a note too long for their most pieces, and Quantize takes the nearest swung line")
+{
+    // Past 256 pieces, the rest of a long note was deleted; and Quantize took the nearest line before swing, then swung it
+    // away from a nearer one (known bug 52).
+    using phazite::NoteData;
+    const auto pieces = phazite::chop ({ noteData (60, 4.0, 100.0, 90) }, 0.25);
+    REQUIRE (pieces.size() == 256);
+    CHECK (pieces[254].length.inBeats() == doctest::Approx (0.25));
+    CHECK (pieces.back().start.inBeats() == doctest::Approx (4.0 + 255 * 0.25));
+    CHECK (pieces.back().getEnd().inBeats() == doctest::Approx (104.0));
+
+    const std::vector<NoteData> chord { noteData (60, 0.0, 300.0, 100), noteData (64, 0.0, 300.0, 100), noteData (67, 0.0, 300.0, 100) };
+    const auto arpeggio = phazite::arpeggiate (chord, { .stepBeats = 0.25 });
+    REQUIRE (arpeggio.size() == 256 * 3);
+    CHECK (arpeggio.back().getEnd().inBeats() == doctest::Approx (300.0));
+
+    // A grid of half a beat at full swing: lines at 0, 2/3, 1 and 5/3. A note at 0.3 is nearest the one at 0, not the swung
+    // one the unswung line at a half becomes.
+    phazite::QuantizeSettings settings;
+    settings.gridBeats = 0.5;
+    settings.swing = 1.0f;
+    const auto quantized = phazite::quantize ({ noteData (60, 0.3, 0.25, 100), noteData (62, 0.9, 0.25, 100) }, settings);
+    CHECK (quantized[0].start.inBeats() == doctest::Approx (0.0));
+    CHECK (quantized[1].start.inBeats() == doctest::Approx (1.0));
+}
+
 TEST_CASE ("Quantize counts the grid from the piano roll's bar 1, as its snapping does")
 {
     // A clip that starts a third of a beat into the song: the grid's lines are a beat apart from there.

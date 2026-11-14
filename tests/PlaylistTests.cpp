@@ -3,6 +3,7 @@
 #include "EnginePlayback.h"
 #include "TestClips.h"
 #include "UiTestHelpers.h"
+#include "model/arrangement/AudioClipModel.h"
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
@@ -2112,6 +2113,70 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
     CHECK (progress >= 0.0);
     CHECK (progress < 1.0);
     CHECK (phazite::test::dispatchMessagesUntil ([&shownRendering] { return ! shownRendering().value_or (0.0).has_value(); }, 120000));
+}
+
+TEST_CASE ("An audio clip whose render fails says so in place of waiting, and the render is tried again only once its file changes")
+{
+    // A cache folder that can't be written: where it should be, a file. The render failed, was taken off the list and
+    // queued again, for ever (known bug 86).
+    PlaylistScreen screen;
+    phazite::test::TemporaryFolder temp;
+    const auto cache = temp.folder.getChildFile ("Cache");
+    REQUIRE (cache.replaceWithText ("not a folder"));
+    screen.getSong().setCacheFolder (cache);
+
+    const auto source = phazite::test::writeClicks (temp.folder.getChildFile ("Loop"), 8, 120.0);
+    const auto id = phazite::importFile (screen.getSong(), screen.tracks[0], source, beats (0.0));
+    REQUIRE (phazite::isAudioState (phazite::findClipState (screen.getSong(), id)));
+    phazite::test::dispatchPendingMessages();
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker> ticker;
+
+    const auto findComponent = [&screen, &ticker, id]() -> phazite::ui::ClipComponent*
+    {
+        ticker->tickNow();
+
+        for (auto* component : phazite::test::findAll<phazite::ui::ClipComponent> (screen.playlist))
+            if (component->getClip() == id)
+                return component;
+
+        return nullptr;
+    };
+
+    const auto stateOf = [&screen, id] { return phazite::getAudioClip (screen.context, id).value().state; };
+
+    // Slower, it needs a render, which fails: the clip says so, and nothing is being made any more.
+    phazite::setTempo (screen.getSong(), 100.0);
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&findComponent]
+        {
+            auto* component = findComponent();
+            return component != nullptr && component->hasRenderFailed();
+        },
+        20000));
+    CHECK_FALSE (findComponent()->getRendering().has_value());
+    CHECK (stateOf() == phazite::AudioState::failed);
+    CHECK (phazite::getClipsWhoseRenderFailed (screen.context) == std::vector { id });
+
+    // It isn't tried again while nothing changed: through as many rounds of messages as made it fail.
+    for (int round = 0; round < 50; ++round)
+    {
+        phazite::test::dispatchPendingMessages();
+        REQUIRE (phazite::getClipRenderProgress (screen.context).renders == 0);
+        REQUIRE (stateOf() == phazite::AudioState::failed);
+    }
+
+    // The cache can be written now; once the file changes, the render is made and played, and the clip no longer says so.
+    REQUIRE (cache.deleteFile());
+    REQUIRE (cache.createDirectory());
+    REQUIRE (source.setLastModificationTime (source.getLastModificationTime() + juce::RelativeTime::seconds (10.0)));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&findComponent, &stateOf]
+        {
+            auto* component = findComponent();
+            return component != nullptr && ! component->hasRenderFailed() && stateOf() == phazite::AudioState::ready;
+        },
+        60000));
+    CHECK (phazite::getClipsWhoseRenderFailed (screen.context).empty());
 }
 
 TEST_CASE ("A track without an instrument has an arm switch: with an input, a click arms it, and its header says what it records")

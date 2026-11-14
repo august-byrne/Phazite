@@ -21,6 +21,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <optional>
 #include <vector>
@@ -602,6 +603,172 @@ namespace
             else if (! saved[keys::sounds].hasProperty (property))
                 setDeviceSound (song, id, property, {}); // its own sound again
     }
+
+    //==============================================================================
+    // A preset's sound files on the disk (known bug 107): beside it, in a folder named after it ("Kit Sounds"), each named by
+    // its path from the preset's folder ("Kit Sounds/Boom.wav"). So a preset works wherever it is copied with that folder,
+    // as a patch's samples go with it in a folder beside it, and it holds no path of this computer's (the user's name is in
+    // most). Read, each is a full path again, which a project then copies in (copyDeviceFilesInto()).
+    void forEachObject (const juce::var& value, const std::function<void (juce::DynamicObject&)>& visit)
+    {
+        if (auto* object = value.getDynamicObject())
+        {
+            visit (*object);
+
+            for (const auto& property : object->getProperties())
+                forEachObject (property.value, visit);
+        }
+        else if (const auto* array = value.getArray())
+        {
+            for (const auto& child : *array)
+                forEachObject (child, visit);
+        }
+    }
+
+    // What of a device's "sounds" names a file, by its names.
+    std::vector<juce::Identifier> getSoundFileNames (const juce::DynamicObject& sounds)
+    {
+        std::vector<juce::Identifier> names;
+
+        for (const auto& property : sounds.getProperties())
+            if (schema::isSoundFileProperty (property.name))
+                names.push_back (property.name);
+
+        return names;
+    }
+
+    juce::File getSoundsFolder (const juce::File& presetFile)
+    {
+        return presetFile.getSiblingFile (presetFile.getFileNameWithoutExtension() + " Sounds");
+    }
+
+    bool haveSameBytes (const juce::File& a, const juce::File& b)
+    {
+        if (a.getSize() != b.getSize())
+            return false;
+
+        juce::FileInputStream first (a), second (b);
+
+        if (! first.openedOk() || ! second.openedOk())
+            return false;
+
+        juce::HeapBlock<char> one (1 << 16), other (1 << 16);
+
+        for (;;)
+        {
+            const auto read = first.read (one, 1 << 16);
+
+            if (read <= 0)
+                return true;
+
+            if (second.read (other, read) != read || std::memcmp (one, other, (size_t) read) != 0)
+                return false;
+        }
+    }
+
+    // A sound copied into the preset's folder of sounds, or the file there that is the same, or none if it couldn't be.
+    juce::File copyBeside (const juce::File& source, const juce::File& folder)
+    {
+        if (source.isAChildOf (folder))
+            return source;
+
+        if (! folder.createDirectory())
+            return {};
+
+        auto target = folder.getChildFile (source.getFileName());
+
+        if (target.existsAsFile())
+        {
+            if (haveSameBytes (source, target))
+                return target;
+
+            target = folder.getNonexistentChildFile (source.getFileNameWithoutExtension(), source.getFileExtension(), false);
+        }
+
+        return source.copyFileTo (target) ? target : juce::File();
+    }
+
+    // A preset made by makeDevicePreset() or makeTrackPreset() as its file keeps it: its sounds copied beside it and named
+    // from there, those that can't be taken left out; and a plug-in installed for the user alone (its file under their home
+    // folder) named by its file's name, which finds it as its ID, maker and name do (findKnownPlugin()).
+    void prepareForFile (const juce::var& preset, const juce::File& presetFile)
+    {
+        const auto folder = getSoundsFolder (presetFile);
+        const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+
+        forEachObject (preset,
+                       [&] (juce::DynamicObject& object)
+                       {
+                           if (const auto identifier = object.getProperty (keys::identifier).toString();
+                               juce::File::isAbsolutePath (identifier) && juce::File (identifier).isAChildOf (home))
+                               object.setProperty (keys::identifier, juce::File (identifier).getFileName());
+
+                           auto* sounds = object.getProperty (keys::sounds).getDynamicObject();
+
+                           if (sounds == nullptr)
+                               return;
+
+                           for (const auto& name : getSoundFileNames (*sounds))
+                           {
+                               const auto path = sounds->getProperty (name).toString();
+                               const auto copied = isSoundFileToTake (path) ? copyBeside (juce::File (path), folder) : juce::File();
+
+                               if (copied == juce::File())
+                                   sounds->removeProperty (name);
+                               else
+                                   sounds->setProperty (
+                                       name, copied.getRelativePathFrom (presetFile.getParentDirectory()).replaceCharacter ('\\', '/'));
+                           }
+                       });
+    }
+
+    // A preset's sounds named from its folder as full paths, as the model takes them; one that would leave the folder (by
+    // "..") stays as it is, and isn't taken.
+    void findSoundsBeside (const juce::var& preset, const juce::File& presetFile)
+    {
+        const auto folder = presetFile.getParentDirectory();
+
+        forEachObject (preset,
+                       [&folder] (juce::DynamicObject& object)
+                       {
+                           if (auto* sounds = object.getProperty (keys::sounds).getDynamicObject())
+                               for (const auto& name : getSoundFileNames (*sounds))
+                                   if (const auto path = sounds->getProperty (name).toString();
+                                       path.isNotEmpty() && ! juce::File::isAbsolutePath (path))
+                                       if (const auto file = folder.getChildFile (path); file.isAChildOf (folder))
+                                           sounds->setProperty (name, file.getFullPathName());
+                       });
+    }
+
+    // The sounds a preset names that a project won't take, each by its file's name and why.
+    juce::StringArray findSoundsNotTaken (const juce::var& preset)
+    {
+        juce::StringArray notTaken;
+
+        forEachObject (preset,
+                       [&notTaken] (juce::DynamicObject& object)
+                       {
+                           if (const auto* sounds = object.getProperty (keys::sounds).getDynamicObject())
+                               for (const auto& name : getSoundFileNames (*sounds))
+                                   if (const auto path = sounds->getProperty (name).toString(); path.isNotEmpty())
+                                       if (const auto why = getWhySoundNotTaken (path); why.isNotEmpty())
+                                           notTaken.addIfNotAlreadyThere (
+                                               path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false)
+                                               + " (" + why + ")");
+                       });
+
+        return notTaken;
+    }
+
+    // What a preset loaded without, told as a problem with the song (the app shows it: model/project/internal/
+    // ProjectContext.h, reportProblem()).
+    void tellSoundsNotTaken (const ProjectContext& context, const juce::File& file, const juce::StringArray& notTaken)
+    {
+        if (! notTaken.isEmpty())
+            reportProblem (context, "Some of a preset's sounds weren't taken",
+                           "\"" + file.getFileNameWithoutExtension() + "\" plays its devices' own sounds in place of "
+                               + notTaken.joinIntoString (", ") + ".");
+    }
 } // namespace
 
 //==============================================================================
@@ -793,6 +960,7 @@ juce::var readPreset (const juce::File& file)
     if (! preset.isObject() || ! findKind (preset[keys::kind].toString()).has_value())
         return {};
 
+    findSoundsBeside (preset, file);
     return preset;
 }
 
@@ -1012,7 +1180,13 @@ juce::String getPresetFolderName (const ProjectContext& context, DeviceID id)
 bool saveDevicePreset (const ProjectContext& context, DeviceID id, const juce::File& file)
 {
     auto* song = findSong (context);
-    return song != nullptr && id.isValid() && findDeviceState (*song, id).isValid() && writePreset (makeDevicePreset (*song, id), file);
+
+    if (song == nullptr || ! id.isValid() || ! findDeviceState (*song, id).isValid())
+        return false;
+
+    const auto preset = makeDevicePreset (*song, id);
+    prepareForFile (preset, file);
+    return writePreset (preset, file);
 }
 
 bool saveTrackPreset (const ProjectContext& context, TrackID id, const juce::File& file)
@@ -1020,8 +1194,12 @@ bool saveTrackPreset (const ProjectContext& context, TrackID id, const juce::Fil
     // A track that holds clips: not a folder, a return or the master.
     auto* song = findSong (context);
     const auto state = song != nullptr && id.isValid() ? findTrackState (*song, id) : juce::ValueTree();
-    return state.hasType (schema::TRACK) && ! isFolderState (state) && ! isReturnState (state)
-           && writePreset (makeTrackPreset (*song, id), file);
+    if (! state.hasType (schema::TRACK) || isFolderState (state) || isReturnState (state))
+        return false;
+
+    const auto preset = makeTrackPreset (*song, id);
+    prepareForFile (preset, file);
+    return writePreset (preset, file);
 }
 
 bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target)
@@ -1033,20 +1211,34 @@ bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target
         return false;
 
     const auto name = file.getFileNameWithoutExtension();
-    const UndoStep step (*song, "Add " + name);
+    const auto notTaken = findSoundsNotTaken (preset);
     auto& selection = getSelection (context);
     const auto& host = getPluginHost (getEngineContext (context));
+    auto added = false;
 
-    if (findKind (preset[keys::kind].toString()) == PresetKind::track)
-        return addTrackFromPreset (*song, host, target, preset, &selection).isValid();
+    {
+        const UndoStep step (*song, "Add " + name);
 
-    // A container is named after its preset.
-    const auto device = addDeviceFromPreset (*song, host, target, preset, &selection);
+        if (findKind (preset[keys::kind].toString()) == PresetKind::track)
+        {
+            added = addTrackFromPreset (*song, host, target, preset, &selection).isValid();
+        }
+        else
+        {
+            // A container is named after its preset.
+            const auto device = addDeviceFromPreset (*song, host, target, preset, &selection);
 
-    if (device.isValid() && isContainer (*song, device))
-        setContainerName (*song, device, name);
+            if (device.isValid() && isContainer (*song, device))
+                setContainerName (*song, device, name);
 
-    return device.isValid();
+            added = device.isValid();
+        }
+    }
+
+    if (added)
+        tellSoundsNotTaken (context, file, notTaken);
+
+    return added;
 }
 
 bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& file)
@@ -1066,8 +1258,12 @@ bool loadPresetInto (ProjectContext& context, DeviceID id, const juce::File& fil
         if (saved[keys::type].toString() != toString (own->typeID))
             return false;
 
-        const UndoStep step (*song, stepName);
-        loadInto (*song, id, *own, saved);
+        {
+            const UndoStep step (*song, stepName);
+            loadInto (*song, id, *own, saved);
+        }
+
+        tellSoundsNotTaken (context, file, findSoundsNotTaken (preset));
         return true;
     }
 

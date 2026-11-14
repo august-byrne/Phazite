@@ -627,7 +627,7 @@ namespace
                 return juce::Result::fail ("Phazite couldn't read the bounced file back.");
 
             // One undo step: the new track under the original, with the original's color and mixer settings, and the
-            // original muted and collapsed.
+            // original muted.
             auto& bouncedSong = *song;
             const UndoStep step (bouncedSong, "Bounce in Place");
             const auto bounced = insertPlainTrack (bouncedSong, track);
@@ -664,8 +664,9 @@ namespace
                       .isValid())
                 return juce::Result::fail ("Phazite couldn't put the bounced file on its track.");
 
+            // Muted in the step, and shown as it was: collapsing it, view state, would be outside the step, and Undo would
+            // leave it collapsed (as Live, Logic Pro and REAPER mute the original and leave its look alone).
             setTrackMuted (bouncedSong, track, true, &bouncedSong.getUndoManager());
-            setCollapsed (bouncedSong, track, true);
             getSelection (context).selectOnly (bounced);
             return juce::Result::ok();
         }

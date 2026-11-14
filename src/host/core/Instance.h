@@ -9,7 +9,10 @@
 // (devices/core/AudioThreads.h), and rounds denormal numbers to zero, as a plug-in's host does. It keeps which notes it
 // gave the plug-in that haven't ended, and ends each with a note-off of its own where every note is to end (all notes off
 // or all sound off, as playback stops or jumps, and a reset): a plug-in needn't take those controllers (JUCE's VST3 host
-// hands one on only to a plug-in that maps it to a parameter), and a note-off it always takes.
+// hands one on only to a plug-in that maps it to a parameter), and a note-off it always takes. A render's blocks say so,
+// and the plug-in is told that it plays offline before it plays the first (JUCE's setNonRealtime(), which a VST3 has as
+// its process mode), and that it plays live again as Phazite gives it back from the render (playLive()), or failing that
+// once live blocks come; told on the message thread, as JUCE's VST3 host prepares a plug-in only there.
 #pragma once
 
 #include "sandbox/core/BlockChannel.h"
@@ -46,10 +49,12 @@ public:
     void setState (const juce::MemoryBlock&);
     void setProgram (int index);
     void setParameter (int index, float value);
+    void playLive(); // a render has given it back: told now that it plays live again
     juce::String getParameterText (int index, float value) const;
     float getParameterValue (int index, const juce::String& text) const; // as the plug-in reads text ("-6 dB"), from 0 to 1
 
-    // What the plug-in changed itself since the last call, as messages to Phazite (on the message thread).
+    // What the plug-in changed itself since the last call, as messages to Phazite (on the message thread); and the plug-in
+    // told whether it plays offline, where the blocks it was handed since say otherwise.
     void takeNotices (const std::function<void (sandbox::MessageWriter&)>& send);
 
 private:
@@ -79,12 +84,18 @@ private:
     std::vector<std::pair<int, bool>> gestures;
     std::atomic<bool> latencyChanged { false }, stateChanged { false }, parametersChanged { false };
 
+    // Whether the blocks Phazite hands it now are a render's (the audio thread's to say), and whether the plug-in has been
+    // told that it plays offline (the message thread's to tell it: setOffline()).
+    std::atomic<bool> offlineWanted { false }, offline { false };
+
     // A VST3's class ID, as its own preset file writes it, which its state's preset file is written with; none for
     // another format.
     juce::String vst3ClassID;
 
     void start (std::unique_ptr<sandbox::BlockChannel>, double sampleRate);
     void stop();
+    void setOffline (bool); // message thread, no block playing
+    void tellOffline();     // message thread: setOffline() where offlineWanted says otherwise than it was told
     void run() override;
     void play() noexcept;
     void playPiece (int start, int numSamples) noexcept;

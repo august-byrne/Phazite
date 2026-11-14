@@ -205,8 +205,6 @@ plays, a modulator's how bright it makes what it bends.
 - The filter is linear: it doesn't self-oscillate and has no drive.
 - When several notes each take a busy voice on the same sample, only the last taken fades out; the others stop at once
   and can click.
-- A held note that is silent for longer than the synth's tail lets the synth sleep (known bug 37 in
-  [known-bugs.md](../../known-bugs.md)).
 - An operator's settings can't be copied onto another, and there is no randomizer.
 - The editor shows three of the four groups of operator controls only behind their tabs, and draws the LFO's Random
   shape as four steps a cycle, though it holds one value for a whole cycle.

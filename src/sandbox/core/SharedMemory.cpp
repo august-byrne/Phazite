@@ -147,8 +147,17 @@ SharedMemory::~SharedMemory()
     if (data != nullptr)
         munmap (data, size);
 
+    forgetName();
+#endif
+}
+
+void SharedMemory::forgetName() noexcept
+{
+#if ! defined(_WIN32)
     if (! unlinkName.empty())
         shm_unlink (unlinkName.c_str());
+
+    unlinkName.clear();
 #endif
 }
 

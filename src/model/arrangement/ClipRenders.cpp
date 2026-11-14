@@ -10,8 +10,9 @@ namespace phazite
 {
 namespace
 {
-    // How long the clips must stay as they are before renders start.
-    constexpr int quietMilliseconds = 300;
+    // How long the clips must stay as they are before renders start; and how often the sources of renders that failed are
+    // looked at.
+    constexpr int quietMilliseconds = 300, failedCheckMilliseconds = 2000;
 
     // What a render is made from.
     struct Recipe
@@ -154,10 +155,20 @@ ClipRenders::~ClipRenders()
 bool ClipRenders::isRendering() const
 {
     for (const auto& [render, recipe] : getNeededRenders (song))
-        if (! render.existsAsFile())
+        if (! render.existsAsFile() && ! hasFailed (render))
             return true;
 
     return false;
+}
+
+bool ClipRenders::hasFailed (const juce::File& render) const
+{
+    return failed.find (render) != failed.end();
+}
+
+ClipRenders::Source ClipRenders::Source::of (const juce::File& file)
+{
+    return { file.existsAsFile(), file.getLastModificationTime(), file.getSize() };
 }
 
 ClipRenders::Progress ClipRenders::getProgress() const
@@ -204,10 +215,23 @@ void ClipRenders::update()
         }
     }
 
+    // Failures no clip needs are forgotten: a clip that needs one again (by Undo) tries it again.
+    for (auto i = failed.begin(); i != failed.end();)
+        i = needed.find (i->first) == needed.end() ? failed.erase (i) : std::next (i);
+
     for (const auto& [render, recipe] : needed)
     {
         if (render.existsAsFile() || running.find (render) != running.end())
             continue;
+
+        // One that failed waits for its source to change.
+        if (const auto found = failed.find (render); found != failed.end())
+        {
+            if (Source::of (recipe.source) == found->second)
+                continue;
+
+            failed.erase (found);
+        }
 
         auto made = std::make_shared<Render>();
         made->length =
@@ -217,18 +241,19 @@ void ClipRenders::update()
         jobs.add (
             [this, toMake = recipe, file = render, shared = std::move (made)] (const BackgroundJobs::ShouldStop& shouldStop)
             {
-                renderClipAudio (
-                    toMake.source, toMake.settings, file, [&] { return shouldStop() || shared->stopped.load(); }, &shared->written);
-                jobFinished (file);
+                const auto source = Source::of (toMake.source);
+                const auto stopping = [&] { return shouldStop() || shared->stopped.load(); };
+                const auto rendered = renderClipAudio (toMake.source, toMake.settings, file, stopping, &shared->written);
+                jobFinished ({ file, ! rendered && ! stopping(), source });
             });
     }
 }
 
-void ClipRenders::jobFinished (const juce::File& render)
+void ClipRenders::jobFinished (Finished job)
 {
     {
         const juce::ScopedLock sl (finishedLock);
-        finished.add (render);
+        finished.push_back (std::move (job));
     }
 
     triggerAsyncUpdate();
@@ -238,20 +263,25 @@ void ClipRenders::timerCallback()
 {
     stopTimer();
     update();
+
+    // While some failed, their sources are looked at now and then: one that changed is tried again.
+    if (! failed.empty())
+        startTimer (failedCheckMilliseconds);
 }
 
 void ClipRenders::handleAsyncUpdate()
 {
-    juce::Array<juce::File> done, made;
+    std::vector<Finished> done;
+    juce::Array<juce::File> made;
 
     {
         const juce::ScopedLock sl (finishedLock);
-        done.swapWith (finished);
+        done.swap (finished);
     }
 
-    for (const auto& render : done)
+    for (const auto& job : done)
     {
-        if (const auto found = running.find (render); found != running.end())
+        if (const auto found = running.find (job.render); found != running.end())
         {
             if (! found->second->stopped.load())
                 framesMade += found->second->length;
@@ -259,12 +289,17 @@ void ClipRenders::handleAsyncUpdate()
             running.erase (found);
         }
 
-        if (render.existsAsFile())
-            made.add (render);
+        if (job.render.existsAsFile())
+            made.add (job.render);
+        else if (job.failed)
+            failed[job.render] = job.source; // not tried again until its source changes
     }
 
     announce (song, made);
     update(); // starts what waited for one that stopped
+
+    if (! failed.empty() && ! isTimerRunning())
+        startTimer (failedCheckMilliseconds);
 
     // None being made: the next progress starts over.
     if (running.empty())

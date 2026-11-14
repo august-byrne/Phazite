@@ -69,6 +69,7 @@ $WG_REBOOT_INITIATED            = 0x8A15010B
 $VsComponents = @(
     'Microsoft.VisualStudio.Workload.VCTools',             # "Desktop development with C++" (required parts)
     'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',   # MSVC compiler, latest version
+    'Microsoft.VisualStudio.Component.VC.ASAN',            # AddressSanitizer's runtime, for the windows-asan preset
     'Microsoft.VisualStudio.Component.Windows11SDK.26100'  # Windows 11 SDK
 )
 $VsCodeExtensions = @('ms-vscode.cpptools', 'ms-vscode.cmake-tools')

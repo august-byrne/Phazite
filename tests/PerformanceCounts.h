@@ -38,7 +38,7 @@ private:
 };
 
 // The heap allocations (and reallocations) made on the calling thread while a function runs; nothing where they can't be
-// counted: only Windows Debug builds can (AudioThreadMonitor.h). The same work allocates the same every time, whatever the
-// machine, so counts compare across runs; but another compiler or standard library counts differently.
+// counted (AudioThreadMonitor.h: Windows Debug and Linux builds count them). The same work allocates the same every time,
+// whatever the machine, so counts compare across runs; but another compiler or standard library counts differently.
 std::optional<int> countAllocations (const std::function<void()>&);
 } // namespace phazite::test

@@ -1438,14 +1438,18 @@ TEST_CASE ("Playback started or jumping starts from silence: a tail rings on aft
     player.prepare (rate, blockSize);
     player.setPlan (std::move (plan));
 
-    // The note at the song's start sets it ringing; a jump while playing cuts it off, where no note is.
+    // The note at the song's start sets it ringing; a jump while playing cuts it off, where no note is, once what sounded
+    // has faded out (engine::Engine::fadeSeconds).
+    const auto fade = (int) std::lround (engine::Engine::fadeSeconds * rate);
     CHECK (player.render (blockSize).getSample (0, blockSize - 1) == 0.25f);
     player.locate (8.0);
-    CHECK (player.render (blockSize).getMagnitude (0, 0, blockSize) == 0.0f);
+    const auto jumped = player.render (blockSize);
+    CHECK (jumped.getMagnitude (0, 0, fade) < 0.25f);
+    CHECK (jumped.getMagnitude (0, fade, blockSize - fade) == 0.0f);
 
-    // Back to the note, it rings again, and on after a stop.
+    // Back to the note, it rings again (once what follows the jump has faded in), and on after a stop.
     player.locate (0.0);
-    CHECK (player.render (blockSize).getSample (0, blockSize - 1) == 0.25f);
+    CHECK (player.render (2 * blockSize).getSample (0, 2 * blockSize - 1) == 0.25f);
     player.stop();
     juce::AudioBuffer<float> stopped (2, blockSize);
     float* channels[] = { stopped.getWritePointer (0), stopped.getWritePointer (1) };
@@ -2109,15 +2113,19 @@ TEST_CASE ("A long audio file plays from where the playhead was put and from the
     const auto played = play (1500); // to the loop's end, round it, and most of the way round again
 
     // Each sample the file's at the song's sample it plays, fading in over 40 samples where playback starts and after each
-    // jump back to the loop's start.
+    // jump back to the loop's start, and out before the loop's end, which cuts it (engine::Engine::fadeSeconds).
     auto songSample = playFrom;
     auto sinceJump = 0;
     auto wrong = 0, jumps = 0;
     std::int64_t firstWrong = -1;
+    const auto fadeOut = std::lround (engine::Engine::fadeSeconds * sampleRate);
 
     for (size_t i = 0; i < played.size(); ++i)
     {
-        const auto fade = sinceJump < 40 ? (float) (sinceJump + 1) / 40.0f : 1.0f;
+        auto fade = sinceJump < 40 ? (float) (sinceJump + 1) / 40.0f : 1.0f;
+
+        if (songSample >= loopEnd - fadeOut)
+            fade *= (float) (loopEnd - songSample) / (float) (fadeOut + 1);
 
         if (std::abs (played[i] - MemoryReader::at (0, songSample) * fade) > 1.0e-6f)
         {

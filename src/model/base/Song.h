@@ -25,9 +25,14 @@ public:
 
     juce::ValueTree getState() const noexcept { return state; }
 
-    // Its undo history: 30 steps at least.
+    // Its undo history, which keeps the last steps up to the number set for songs made from then on (as the app starts, from
+    // its settings: services/Settings.h, undoSteps), however much each step holds.
     juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     const juce::UndoManager& getUndoManager() const noexcept { return undoManager; }
+
+    static constexpr int defaultUndoSteps = 1000, minimumUndoSteps = 10, maximumUndoSteps = 100000;
+    static void setUndoSteps (int steps); // limited to the range above. Message thread
+    static int getUndoSteps();
 
     // Where its files are: its project file, which the paths it keeps of the files it plays start from (none for a song
     // outside a project, which keeps whole paths); and the folder of what Phazite makes for it and can make again (renders

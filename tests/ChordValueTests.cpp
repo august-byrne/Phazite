@@ -157,6 +157,30 @@ TEST_CASE ("Numerals in a key: roots, notes and names, with the key's flats or s
     CHECK (phazite::toNumeral (10, ChordType::major, 0, aMinor) == parse ("bII"));
 }
 
+TEST_CASE ("A key is named with its root spelled as its chords are, with the flats or sharps of its signature")
+{
+    // Keys were named with JUCE's sharps: "A# major" beside its chords spelled "Eb" (known bug 50).
+    CHECK (phazite::describeKey ({ 10, Scale::major }) == juce::String ("Bb major"));
+    CHECK (nameIn ("I", { 10, Scale::major }) == juce::String ("Bb"));
+    CHECK (nameIn ("IV", { 10, Scale::major }) == juce::String ("Eb"));
+    CHECK (phazite::describeKey ({ 3, Scale::major }) == juce::String ("Eb major"));
+    CHECK (phazite::describeKey ({ 8, Scale::major }) == juce::String ("Ab major"));
+    CHECK (phazite::describeKey ({ 1, Scale::major }) == juce::String ("Db major"));
+    CHECK (phazite::describeKey ({ 6, Scale::major }) == juce::String ("F# major"));
+    CHECK (phazite::describeKey ({ 5, Scale::minor }) == juce::String ("F minor"));    // A flat major's
+    CHECK (phazite::describeKey ({ 10, Scale::minor }) == juce::String ("Bb minor"));  // D flat major's
+    CHECK (phazite::describeKey ({ 1, Scale::minor }) == juce::String ("C# minor"));   // E major's
+    CHECK (phazite::describeKey ({ 3, Scale::dorian }) == juce::String ("Eb dorian")); // D flat major's
+    CHECK (phazite::describeKey (cMajor) == juce::String ("C major"));
+    CHECK (phazite::describeKey (aMinor) == juce::String ("A minor"));
+
+    // Every key's name begins with its I chord's root, as the chord lane spells it.
+    for (const auto scale : { Scale::major, Scale::minor })
+        for (int root = 0; root < 12; ++root)
+            CHECK (phazite::describeKey ({ root, scale })
+                       .startsWith (nameIn (scale == Scale::major ? "I" : "i", { root, scale }).trimCharactersAtEnd ("m") + " "));
+}
+
 TEST_CASE ("The chords of a key's scale, and the key a progression plays in")
 {
     const auto describeAll = [] (const Key& key)
@@ -240,6 +264,25 @@ TEST_CASE ("Chords written as notes: held chords that move little, around middle
     // Spread chords: the root low, with its fifth, and the rest an octave above (the fifth again among them).
     const auto spread = getPitches (phazite::makePartNotes (bars ({ "I" }), PartStyle::spreadChords, { beat (0.0), beat (4.0) }, clip));
     CHECK (spread == std::vector<int> { 48, 55, 64, 67 });
+
+    // Every chord with its own notes only: a perfect fifth over the bass whatever the chord gave a diminished or augmented
+    // chord a note it doesn't hold, and an inverted one a fifth over its third (known bug 51).
+    const auto spreadOf = [clip] (const char* numeral)
+    {
+        const auto chord = bars ({ numeral });
+        const auto notes = phazite::makePartNotes (chord, PartStyle::spreadChords, { beat (0.0), beat (4.0) }, clip);
+        const auto classes = phazite::getPitchClassesIn (chord.front().numeral, cMajor);
+        INFO (numeral);
+        REQUIRE (! notes.empty());
+        CHECK (getPitchClasses (notes) == std::set<int> (classes.begin(), classes.end()));
+        CHECK (notes.front().pitch % 12 == classes.front()); // the bass lowest
+        return getPitches (notes);
+    };
+
+    CHECK (spreadOf ("viio") == std::vector<int> { 59, 65, 74, 77 }); // B dim: B with its flat fifth, F
+    CHECK (spreadOf ("III+") == std::vector<int> { 52, 60, 68, 72 }); // E aug: E with its sharp fifth, C
+    CHECK (spreadOf ("I/1") == std::vector<int> { 52, 55, 67, 72 });  // C over E: E with the fifth, G
+    CHECK (spreadOf ("I/2") == std::vector<int> { 55, 60, 72, 76 });  // C over G: G with the root, C
 }
 
 TEST_CASE ("Chords written as notes: offbeat stabs and roots, cut at the range's edges")

@@ -9,7 +9,7 @@ the model compiles the song into what it plays (`src/model/playback/internal/Son
 
 | File | What it holds |
 |---|---|
-| `Engine.h` | The engine: it plays a plan, handed to it whole, and its transport, which the message thread drives through a lock-free queue and reads back through its playhead. Live, the model's playback host calls it from the audio device's callback; a render makes an engine of its own. |
+| `Engine.h` | The engine: it plays a plan, handed to it whole, and its transport, which the message thread drives through the state it last asked for (atomic values) and reads back through its playhead, with fades at a stop, a jump and the loop's end. Live, the model's playback host calls it from the audio device's callback; a render makes an engine of its own. |
 | `Plan.h` | What the engine plays, built on the message thread from the song and never changed once built. What sounds on from one plan to the next (a device's voices, a reverb's tail, a channel's fader) is pointed at, kept by the song's IDs. |
 | `Handover.h` | How the audio thread is handed what it plays, whole, and frees nothing: what it replaces is freed on the message thread. |
 | `Workers.h` | The threads that help the engine play a block, each strip a task. |

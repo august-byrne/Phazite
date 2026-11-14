@@ -2,6 +2,7 @@
 #include "ProjectSession.h"
 #include "model/engine/internal/EngineContext.h"
 #include "model/engine/internal/LiveInput.h"
+#include "model/mixer/FreezeModel.h"
 #include "model/plugins/internal/PluginHost.h"
 #include "model/project/ExampleSongs.h"
 #include "model/project/UnusedAudio.h"
@@ -17,6 +18,7 @@
 #include "ui/theme/LookAndFeel.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace phazite
 {
@@ -202,10 +204,13 @@ void ProjectSession::restoreUntitled (const juce::File& file, bool restore)
     // Restored, it goes on untitled in its folder; discarded, the folder goes.
     if (auto folder = UnsavedFolder::takeOver (file); folder != nullptr && restore)
     {
-        juce::String error;
+        juce::String error, notRestored;
 
-        if (auto restored = Project::open (file, true, error))
+        if (auto restored = Project::open (file, true, error, &notRestored))
         {
+            if (notRestored.isNotEmpty())
+                showError ("Phazite couldn't restore the unsaved changes", notRestored);
+
             // Recordings made after the last autosave, which a crash left out of the song, come back on tracks of their own.
             const auto recovered = UnsavedFolder::recoverUnusedAudio (restored->getSong());
             setProject (std::move (restored), std::move (folder));
@@ -368,10 +373,27 @@ juce::File ProjectSession::findFileToOpen (const juce::String& commandLine)
 
 void ProjectSession::openFile (const juce::File& file)
 {
+    // Not under a dialog's question, which may be about the project open now: once it has gone.
+    if (juce::Component::getCurrentlyModalComponent() != nullptr)
+    {
+        fileWaiting = file;
+        openWhenNoDialog.startTimer (100);
+        return;
+    }
+
     if (file.hasFileExtension (dawProjectExtension))
         importDawProject (file); // which asks whether to save the open project, if it replaces it
     else if (project == nullptr || file != project->getFile())
         openProject (file);
+}
+
+void ProjectSession::openFileWhenNoDialog()
+{
+    if (juce::Component::getCurrentlyModalComponent() != nullptr)
+        return;
+
+    openWhenNoDialog.stopTimer();
+    openFile (std::exchange (fileWaiting, {}));
 }
 
 void ProjectSession::chooseRecentProject()
@@ -457,7 +479,13 @@ void ProjectSession::saveThen (std::function<void (bool saved)> callback)
     {
         const auto name = project->getFile().getFileNameWithoutExtension();
         chooseWhereToSave (projectsFolder.getChildFile (suggestName (projectsFolder, name)),
-                           [this, callback] (const juce::File& chosen) { callback (chosen != juce::File() && moveUntitledTo (chosen)); });
+                           [this, callback] (const juce::File& chosen)
+                           {
+                               if (chosen == juce::File())
+                                   callback (false);
+                               else
+                                   moveUntitledTo (chosen, callback);
+                           });
         return;
     }
 
@@ -472,28 +500,57 @@ void ProjectSession::saveThen (std::function<void (bool saved)> callback)
     callback (result.wasOk());
 }
 
-bool ProjectSession::moveUntitledTo (const juce::File& chosen)
+void ProjectSession::moveUntitledTo (const juce::File& chosen, std::function<void (bool saved)> callback)
 {
     if (! isUntitled())
-        return false;
+    {
+        callback (false);
+        return;
+    }
 
     // Its versions move with it, whole: the initial commit is written on the history's thread as a new project opens.
     waitForVersionsWritten (context);
 
-    if (const auto result = project->moveTo (chosen.getParentDirectory(), getChosenName (chosen)); result.failed())
-    {
-        showError ("Phazite couldn't save the project", result.getErrorMessage());
-        return false;
-    }
+    // A large copy runs in the host's progress window, which tells a failure itself.
+    firstSave = nullptr;
+    const auto inWindow = std::make_shared<bool> (false);
+    const auto title = "Saving " + juce::File::createLegalFileName (getChosenName (chosen).trim());
 
-    // Its folder from now on; the untitled one goes when the project closes. It saves itself from now on, with Auto Save.
-    recent.add (project->getFile());
-    updateAutoSave();
+    auto copying = project->moveTo (chosen.getParentDirectory(), getChosenName (chosen),
+                                    [this, callback, inWindow, title] (const juce::Result& result)
+                                    {
+                                        // The host deletes the copy, and this with it: what comes after takes copies.
+                                        const auto then = callback;
+                                        const auto saved = result.wasOk();
 
-    if (onProjectChanged != nullptr)
-        onProjectChanged();
+                                        if (saved)
+                                        {
+                                            // Its folder from now on; the untitled one goes when the project closes. It
+                                            // saves itself from now on, with Auto Save.
+                                            recent.add (project->getFile());
+                                            updateAutoSave();
 
-    return true;
+                                            if (onProjectChanged != nullptr)
+                                                onProjectChanged();
+                                        }
+
+                                        if (*inWindow && renders != nullptr)
+                                            renders->renderFinished (title, result);
+                                        else if (! saved)
+                                            showError ("Phazite couldn't save the project", result.getErrorMessage());
+
+                                        then (saved);
+                                    });
+
+    if (copying == nullptr)
+        return; // done, and called back
+
+    *inWindow = true;
+
+    if (renders != nullptr)
+        renders->runRender (std::move (copying));
+    else
+        firstSave = std::move (copying);
 }
 
 void ProjectSession::chooseWhereToSave (const juce::File& suggested, std::function<void (const juce::File&)> callback)
@@ -547,48 +604,116 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
         return;
     }
 
-    // With Auto Save, as in VS Code: the changes saved, nothing asked.
+    // With Auto Save, as in VS Code: the changes saved, nothing asked; unless the save fails, which goes on to ask.
     if (autoSave && ! isUntitled())
     {
-        const auto result = project->save();
+        if (const auto result = project->save(); result.failed())
+            askWhetherToSave (result.getErrorMessage(), std::move (callback));
+        else
+            callback (true);
 
-        if (result.failed())
-            showError ("Phazite couldn't save the project", result.getErrorMessage());
-
-        callback (result.wasOk());
         return;
     }
 
-    // A save that fails, or an untitled project's save dialog cancelled, leaves the project open.
+    askWhetherToSave ({}, std::move (callback));
+}
+
+void ProjectSession::askWhetherToSave (const juce::String& saveFailed, std::function<void (bool closed)> callback)
+{
+    // A save that fails asks again, offering Save As; an untitled project's save dialog cancelled leaves it open.
     const auto answer = [this, callback] (UnsavedChanges choice)
     {
-        if (choice == UnsavedChanges::save)
+        if (project == nullptr)
+        {
+            callback (true);
+            return;
+        }
+
+        if (choice == UnsavedChanges::save && ! isUntitled())
+        {
+            const auto result = project->save();
+
+            if (onProjectChanged != nullptr)
+                onProjectChanged();
+
+            if (result.failed())
+                askWhetherToSave (result.getErrorMessage(), callback);
+            else
+                callback (true);
+        }
+        else if (choice == UnsavedChanges::save)
+        {
             saveThen (callback);
+        }
+        else if (choice == UnsavedChanges::saveAs)
+        {
+            saveCopyThenClose (callback);
+        }
         else
+        {
             callback (choice == UnsavedChanges::discard); // "Don't save" closes; "Cancel" doesn't
+        }
     };
 
     if (askToSave != nullptr)
     {
-        askToSave (project->getFile(), answer);
+        askToSave (project->getFile(), saveFailed, answer);
         return;
     }
 
-    const auto options = juce::MessageBoxOptions()
-                             .withIconType (juce::MessageBoxIconType::QuestionIcon)
-                             .withTitle ("Save changes?")
-                             .withMessage ("Save the changes to \"" + project->getFile().getFileNameWithoutExtension() + "\" first?")
-                             .withButton ("Save", 1)
-                             .withButton ("Don't save", 2)
-                             .withButton ("Cancel", 0)
-                             .withAssociatedComponent (dialogParent);
+    const auto name = "\"" + project->getFile().getFileNameWithoutExtension() + "\"";
+    auto options = juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::QuestionIcon).withAssociatedComponent (dialogParent);
+
+    if (saveFailed.isEmpty())
+        options = options.withTitle ("Save changes?").withMessage ("Save the changes to " + name + " first?").withButton ("Save", 1);
+    else
+        options = options.withIconType (juce::MessageBoxIconType::WarningIcon)
+                      .withTitle ("Phazite couldn't save the project")
+                      .withMessage (saveFailed + "\n\nSave the changes to " + name + " somewhere else, or close it without them?")
+                      .withButton ("Save As...", 3);
 
     // Escape, or closing the window, answers 0, as Cancel does.
-    juce::AlertWindow::showAsync (
-        options, [answer] (int result)
-        { answer (result == 1   ? UnsavedChanges::save
-                  : result == 2 ? UnsavedChanges::discard
-                                : UnsavedChanges::cancel); });
+    juce::AlertWindow::showAsync (options.withButton ("Don't Save", 2).withButton ("Cancel", 0),
+                                  [answer] (int result)
+                                  {
+                                      answer (result == 1   ? UnsavedChanges::save
+                                              : result == 3 ? UnsavedChanges::saveAs
+                                              : result == 2 ? UnsavedChanges::discard
+                                                            : UnsavedChanges::cancel);
+                                  });
+}
+
+void ProjectSession::saveCopyThenClose (std::function<void (bool closed)> callback)
+{
+    if (project == nullptr || isUntitled())
+    {
+        saveThen (std::move (callback)); // an untitled project's first save asks where it goes anyway
+        return;
+    }
+
+    // Next to the projects at first, as the drive the project was on may be the one gone.
+    chooseWhereToSave (projectsFolder.getChildFile (suggestName (projectsFolder, project->getFile().getFileNameWithoutExtension())),
+                       [this, callback] (const juce::File& chosen)
+                       {
+                           if (chosen == juce::File() || project == nullptr)
+                           {
+                               callback (false);
+                               return;
+                           }
+
+                           juce::String error;
+                           waitForVersionsWritten (context); // the copy takes them whole
+                           const auto newFile = project->saveCopyAs (chosen.getParentDirectory(), getChosenName (chosen), error);
+
+                           if (newFile == juce::File())
+                           {
+                               askWhetherToSave (error, callback);
+                               return;
+                           }
+
+                           recent.add (newFile); // where the changes are now
+                           callback (true);
+                       });
 }
 
 void ProjectSession::openWithRestoreQuestion (const juce::File& file)
@@ -624,11 +749,15 @@ void ProjectSession::askWhetherToRestore (const juce::File& file, bool untitled,
 
 void ProjectSession::open (const juce::File& file, bool restoreAutosave)
 {
-    juce::String error;
+    juce::String error, notRestored;
 
-    if (auto opened = Project::open (file, restoreAutosave, error))
+    if (auto opened = Project::open (file, restoreAutosave, error, &notRestored))
     {
         setProject (std::move (opened));
+
+        if (notRestored.isNotEmpty())
+            showError ("Phazite couldn't restore the unsaved changes", notRestored);
+
         return;
     }
 
@@ -740,6 +869,7 @@ void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::uniqu
 
     if (project != nullptr)
     {
+        project->onBackupFailed = [this] (const juce::String& message) { showError ("No backup was made", message); };
         autosaveTimer = std::make_unique<AutosaveTimer> (*project);
         autosaveTimer->onRepeatedFailures = [this]
         {
@@ -796,8 +926,10 @@ void ProjectSession::showError (const juce::String& title, const juce::String& m
                                   static_cast<juce::ModalComponentManager::Callback*> (nullptr));
 }
 
-void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& renders)
+void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& host)
 {
+    renders = &host;
+
     // Help > Example Songs, each as a new untitled project.
     for (const auto& song : getExampleSongs())
     {
@@ -861,7 +993,7 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& re
 
     // Save Version: the project saved first, asking where for an untitled one, then a version of its song; a switch to
     // another branch saves it after (model/versions/VersionsModel.h).
-    addVersionCommands (registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, renders);
+    addVersionCommands (registry, context, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, host);
 
     registry.add ({ .id = "project.export",
                     .name = "Export Song",
@@ -875,8 +1007,8 @@ void ProjectSession::addCommands (CommandRegistry& registry, TrackRenderHost& re
     registry.add ({ .id = "project.cleanUpAudio",
                     .name = "Clean Up Unused Audio...",
                     .category = "Project",
-                    .description = "Lists the audio files in the project's folder that neither the song, nor a commit, nor a branch "
-                                   "plays, to move those you tick to the recycle bin.",
+                    .description = "Lists the audio files in the project's folder that neither the song, nor its saved file or "
+                                   "backups, nor a commit, nor a branch plays, to move those you tick to the recycle bin.",
                     .synonyms = { "unused", "delete", "free space", "takes", "recordings", "tidy", "purge" },
                     .perform = [this] { cleanUpAudio(); },
                     .isEnabled = [this] { return canCleanUpAudio (context) && ! isUntitled(); } });
@@ -928,7 +1060,7 @@ void ProjectSession::importDawProject (const juce::File& file)
         if (importDawProjectAsBranch (context, *read, [this] (std::function<void (bool)> then) { saveThen (std::move (then)); }, said))
             showNotice ("Imported " + file.getFileName(),
                         "It came back as a new branch from the commit it was exported from."
-                            + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString (", ") + "."));
+                            + (said.isEmpty() ? juce::String() : " Left out: " + said.joinIntoString ("; ") + "."));
         else
             showError ("Phazite couldn't import " + file.getFileName(), said.joinIntoString (" "));
 
@@ -942,10 +1074,15 @@ void ProjectSession::importDawProject (const juce::File& file)
             if (! closed)
                 return;
 
-            if (const auto result =
-                    createUntitled (file.getFileNameWithoutExtension(), [read] (Song& song) { takeDawProject (song, *read); });
+            // What it couldn't bring in, told by track (known bug 91: it was said nowhere).
+            auto said = std::make_shared<juce::StringArray>();
+
+            if (const auto result = createUntitled (file.getFileNameWithoutExtension(),
+                                                    [read, said] (Song& song) { *said = takeDawProject (song, *read); });
                 result.failed())
                 showError ("Phazite couldn't import " + file.getFileName(), result.getErrorMessage());
+            else if (! said->isEmpty())
+                showNotice ("Imported " + file.getFileName(), "Left out: " + said->joinIntoString ("; ") + ".");
         });
 }
 } // namespace phazite

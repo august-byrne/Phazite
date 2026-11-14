@@ -65,7 +65,8 @@ the track itself is kept, muted, with its notes and clips, so the other DAW has 
 left out.
 
 **File > Import DAWproject...** opens a DAWproject file as a new project. A file exported from a commit of the open
-project comes back as a branch from that commit ([Source control](source-control.md)).
+project comes back as a branch from that commit ([Source control](source-control.md)). A notice then says what it
+couldn't bring in, track by track: plug-ins and devices by name, sends, automation and groups.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH.
 

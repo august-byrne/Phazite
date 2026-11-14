@@ -4,10 +4,12 @@
 # - the fuzzer of the file readers, with many rounds, under AddressSanitizer;
 # - the benchmark gates (tests/BenchmarkGates.cpp): each device's cost against a fixed reference workload, and the engine
 #   and the model with 100 tracks against 10, from windows-profile (an optimised build with symbols), against bounds
-#   stored in the test.
+#   stored in the test;
+# - every test file under MSVC's AddressSanitizer (windows-asan).
 # Jobs are set up as CI's (.github/workflows/ci.yml): actions pinned to full commit hashes, read-only permissions, the
 # compiler cache, the problem matchers. They take the compiler cache CI keeps for each preset and save none, so that CI's
-# caches stay CI's; they configure as CI does (warnings as errors), so that the cache's entries match.
+# caches stay CI's (windows-asan, which no CI job builds, keeps its own); they configure as CI does (warnings as errors, no
+# precompiled headers), so that the cache's entries match.
 name: Nightly
 
 on:
@@ -88,7 +90,7 @@ jobs:
               libfontconfig-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DPHAZITE_PRECOMPILED_HEADERS=OFF
 
       - name: Build the tests
         run: |
@@ -171,7 +173,7 @@ jobs:
           & "$env:RUNNER_TEMP\ccache-4.14.2-windows-x86_64\ccache.exe" --dir "$env:RUNNER_TEMP\ccache" --zero-stats
 
       - name: Configure
-        run: cmake --preset windows-profile -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_LINK_WARNING_AS_ERROR=ON
+        run: cmake --preset windows-profile -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_LINK_WARNING_AS_ERROR=ON -DPHAZITE_PRECOMPILED_HEADERS=OFF
 
       - name: Build the tests
         run: |
@@ -194,3 +196,69 @@ jobs:
         run: |
           build\windows-profile\phazite_tests_artefacts\RelWithDebInfo\phazite_tests.exe --test-suite=benchmark --no-skip --duration=true
           if ($LASTEXITCODE -ne 0) { throw "A benchmark failed." }
+
+  # MSVC's AddressSanitizer over every test file (the windows-asan preset): memory errors in the code that only Windows builds
+  # (the sandbox's shared memory and bells, the helper's windows, WASAPI and ASIO), which linux-asan never compiles. Here
+  # rather than in CI: a Debug build with the sanitizer, and its tests several times slower, would pass CI's limit. Its
+  # compiler cache is its own (no CI job builds the preset), kept from night to night.
+  windows-asan:
+    name: Windows ASan (windows-asan)
+    runs-on: windows-2025-vs2026 # Visual Studio 2026, which cmake/toolchains/windows-msvc.cmake requires
+    timeout-minutes: 300
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CCACHE_DEPEND: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-windows-asan-${{ github.run_id }}
+          restore-keys: ccache-windows-asan-
+
+      - name: Compiler cache (ccache 4.14.2)
+        run: |
+          $zip = "$env:RUNNER_TEMP\ccache.zip"
+          Invoke-WebRequest https://github.com/ccache/ccache/releases/download/v4.14.2/ccache-4.14.2-windows-x86_64.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne "6993ce645e53192cec592ee23186200b574ac4c59097ecde8d9cfd681b47ae84") {
+              throw "The ccache download doesn't have the SHA-256 it should."
+          }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\ccache-4.14.2-windows-x86_64" >> $env:GITHUB_PATH
+          "CCACHE_DIR=$env:RUNNER_TEMP\ccache" >> $env:GITHUB_ENV
+          "PHAZITE_CCACHE_START=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" >> $env:GITHUB_ENV
+          & "$env:RUNNER_TEMP\ccache-4.14.2-windows-x86_64\ccache.exe" --dir "$env:RUNNER_TEMP\ccache" --zero-stats
+
+      # As CI configures: warnings as errors, and no precompiled headers, which the compiler cache doesn't serve.
+      - name: Configure
+        run: cmake --preset windows-asan -DCMAKE_COMPILE_WARNING_AS_ERROR=ON -DCMAKE_LINK_WARNING_AS_ERROR=ON -DPHAZITE_PRECOMPILED_HEADERS=OFF
+
+      - name: Build
+        run: |
+          echo "::add-matcher::.github/problem-matchers/msvc.json"
+          cmake --build --preset windows-asan -- -k 0
+
+      - name: Compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: |
+          ccache --evict-older-than "$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long] $env:PHAZITE_CCACHE_START)s"
+          ccache --show-stats
+
+      - name: Save the compiler cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-windows-asan-${{ github.run_id }}
+
+      # Every test file, as ctest runs them; an AddressSanitizer report ends its test program with the report and its stack,
+      # which the test's output shows.
+      - name: Test
+        run: |
+          echo "::add-matcher::.github/problem-matchers/tests.json"
+          ctest --preset windows-asan

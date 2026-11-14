@@ -222,12 +222,21 @@ private:
     // Asleep: once what comes in and what it plays have been silent for sleepAfterSeconds (and longer than its latency,
     // and as long as the tail it reports then: devices::Processor::getTailSeconds()), with nothing to play, it skips its
     // work until sound, a note or an event comes in, or something waits in the device to play
-    // (devices::Processor::isWaitingToPlay(): a pad its editor played). Never in a render.
+    // (devices::Processor::isWaitingToPlay(): a pad its editor played). Never in a render, nor an instrument while it holds
+    // a note or its sustain pedal is down: a held note can be silent for a while and sound again (a slow LFO on its filter,
+    // a sample with a gap), and asleep it would stay silent (known bug 37 until 2026-11-14).
     static constexpr float silence = 1.0e-6f; // -120 dBFS
     static constexpr double sleepAfterSeconds = 0.25;
     static constexpr int maximumSilentSamples = 1 << 30; // counted no further: longer than any tail
     int silentSamples = 0, sleepAfterSamples = 0;
     bool asleep = false;
+    // How many times it holds each note (the song's and a key played live can hold the same one), how many in all, and
+    // whether its pedal is down.
+    std::array<std::uint8_t, 128> held {};
+    int numHeld = 0;
+    bool pedalDown = false;
+    void followNotes (std::span<const devices::NoteEvent>) noexcept;
+    void letGoOfNotes() noexcept;
 
     DeviceRunner (const DeviceRunner&) = delete;
     DeviceRunner& operator= (const DeviceRunner&) = delete;

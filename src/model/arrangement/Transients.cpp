@@ -35,7 +35,8 @@ std::optional<std::vector<double>> Transients::find (const juce::File& file)
         if (const auto hit = found.find (getKey (file)); hit != found.end())
             return hit->second;
 
-        if (std::find (waiting.begin(), waiting.end(), file) == waiting.end())
+        // Once: not again while it waits, nor while it is being analysed.
+        if (file != analysing && std::find (waiting.begin(), waiting.end(), file) == waiting.end())
             waiting.push_back (file);
     }
 
@@ -98,6 +99,8 @@ void Transients::run()
                 next = waiting.front();
                 waiting.erase (waiting.begin());
             }
+
+            analysing = next;
         }
 
         if (next == juce::File())
@@ -107,8 +110,10 @@ void Transients::run()
         }
 
         auto hits = analyse (next);
+        ++analysed;
         const std::scoped_lock scoped (lock);
         found[getKey (next)] = std::move (hits);
+        analysing = juce::File();
     }
 }
 } // namespace phazite

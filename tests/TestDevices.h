@@ -173,22 +173,32 @@ struct TestSidechain final : devices::Processor
 };
 
 // Takes a fifth of the time of what it plays, as a device busy working out its sound would, and leaves the sound as it
-// is; it never sleeps on silence. For the CPU meters.
+// is; it never sleeps on silence. For the CPU meters. It notes the longest share of a block's time one of its blocks
+// really took (longestShare, which a test sets to 0 first): more than a fifth when the system took its thread away while
+// it worked, which the engine's meter then measures too.
 struct TestBusy final : devices::Processor
 {
     static constexpr const char* typeID = "phaziteTestBusy";
     static constexpr double share = 0.2;
     static constexpr devices::DeviceInfo info { .typeID = typeID, .name = "Test Busy", .kind = devices::DeviceKind::effect };
+    static inline std::atomic<double> longestShare { 0.0 };
 
     void prepare (double rate, int) override { sampleRate = rate; }
     void reset() override {}
 
     void process (const devices::ProcessContext& block) override
     {
-        const auto until =
-            juce::Time::getHighResolutionTicks() + juce::Time::secondsToHighResolutionTicks (share * block.numSamples / sampleRate);
+        const auto blockSeconds = block.numSamples / sampleRate;
+        const auto began = juce::Time::getHighResolutionTicks();
+        const auto until = began + juce::Time::secondsToHighResolutionTicks (share * blockSeconds);
+        auto now = began;
 
-        while (juce::Time::getHighResolutionTicks() < until)
+        while (now < until)
+            now = juce::Time::getHighResolutionTicks();
+
+        const auto taken = juce::Time::highResolutionTicksToSeconds (now - began) / blockSeconds;
+
+        for (auto longest = longestShare.load(); taken > longest && ! longestShare.compare_exchange_weak (longest, taken);)
         {
         }
     }

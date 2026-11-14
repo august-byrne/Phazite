@@ -695,6 +695,7 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
             lanes->repaint();
             break;
 
+        case Gesture::Kind::pan:
         case Gesture::Kind::pending:
         default:
             break;
@@ -728,6 +729,18 @@ juce::String Playlist::describeDrag() const
         case Gesture::Kind::trimEnd:
             return "Ends at " + describePlace (end) + ", " + describeLength (start, end);
 
+        case Gesture::Kind::pending:
+        case Gesture::Kind::fadeIn:
+        case Gesture::Kind::fadeOut:
+        case Gesture::Kind::selectRange:
+        case Gesture::Kind::crossfade:
+        case Gesture::Kind::slip:
+        case Gesture::Kind::paint:
+        case Gesture::Kind::mute:
+        case Gesture::Kind::erase:
+        case Gesture::Kind::select:
+        case Gesture::Kind::zoom:
+        case Gesture::Kind::pan:
         default:
             return {};
     }

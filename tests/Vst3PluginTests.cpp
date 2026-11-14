@@ -265,7 +265,17 @@ TEST_CASE ("A VST3 effect's parameters are found by the VST3's own IDs, set by h
     const auto& gainInfo = instance.getParameterInfos()[(size_t) instance.findParameter (gainID)];
     CHECK (gainInfo.name == "Gain");
     CHECK (gainInfo.defaultValue == doctest::Approx (1.0f));
-    CHECK (instance.getParameterInfos()[(size_t) instance.findParameter (invertID)].numSteps == 2); // a VST3's switch: two steps
+    CHECK_FALSE (gainInfo.isBoolean);
+
+    // Its Invert, which JUCE's VST3 host tells as a parameter of two steps (a VST3's switch has one step): a switch, with
+    // the plug-in's own texts for its two values.
+    const auto invert = instance.findParameter (invertID);
+    const auto& invertInfo = instance.getParameterInfos()[(size_t) invert];
+    CHECK (invertInfo.numSteps == 2);
+    CHECK (invertInfo.isBoolean);
+    CHECK (instance.getParameters()[invert]->isBoolean());
+    CHECK (instance.describeValue (invert, 0.0f) == "Off");
+    CHECK (instance.describeValue (invert, 1.0f) == "On");
 
     // Set by hand to half, and automated from 1 down to 0 over two seconds (four beats at 120): on its curve as it plays.
     const phazite::ParameterRef gain { effect, gainID };

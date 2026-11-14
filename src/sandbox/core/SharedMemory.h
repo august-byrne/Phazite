@@ -25,6 +25,11 @@ public:
     void* getData() const noexcept { return data; }
     std::size_t getSize() const noexcept { return size; }
 
+    // The maker's, once the other side has opened it (or won't): its name let go of, so that nothing is left of it once
+    // both have gone, however they go. On Windows nothing is (the system keeps a mapping only while a process has it); on
+    // Linux and macOS the name is unlinked, the memory staying mapped for both.
+    void forgetName() noexcept;
+
     SharedMemory (const SharedMemory&) = delete;
     SharedMemory& operator= (const SharedMemory&) = delete;
 
@@ -34,7 +39,7 @@ private:
     void* data = nullptr;
     std::size_t size = 0;
     void* handle = nullptr; // Windows' mapping
-    std::string unlinkName; // elsewhere, the maker's name, unlinked as it goes
+    std::string unlinkName; // elsewhere, the maker's name, until it is unlinked (forgetName(), or as it goes)
 };
 
 // A counter in shared memory, and whether its waiter sleeps (so that a ring wakes it only then).

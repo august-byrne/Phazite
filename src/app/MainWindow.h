@@ -22,6 +22,16 @@ namespace phazite
 // Phazite's one window: the AppShell, whose title bar shows this window's menus. It also owns the dialogs, the devices'
 // windows, and the computer keyboard, which plays notes while this window has the keyboard focus. Freezes and bounces
 // render in a progress window over it (TrackRenderHost).
+// How the main window meets the system: by default as the app runs, on the screen and in JUCE's application. The tests
+// (tests/MainWindowTests.cpp) build it with neither: they put it on the desktop themselves, as a window on no screen, open
+// its dialogs the same way, and say what quitting does.
+struct MainWindowSurroundings
+{
+    bool addToDesktop = true; // false: whoever made it adds it, once it is made
+    std::function<juce::DialogWindow*(juce::DialogWindow::LaunchOptions&)> launchDialog {}; // null: launchAsync()
+    std::function<void()> quit {}; // null: the application's systemRequestedQuit(), which asks to save first (Main.cpp)
+};
+
 class MainWindow : public juce::DocumentWindow,
                    public TrackRenderHost,
                    private juce::MenuBarModel,
@@ -30,15 +40,9 @@ class MainWindow : public juce::DocumentWindow,
                    private juce::Timer
 {
 public:
-    // How the window meets the system: by default as the app runs, on the screen and in JUCE's application. The tests
-    // (tests/MainWindowTests.cpp) build it with neither: they put it on the desktop themselves, as a window on no screen,
-    // open its dialogs the same way, and say what quitting does.
-    struct Surroundings
-    {
-        bool addToDesktop = true; // false: whoever made it adds it, once it is made
-        std::function<juce::DialogWindow*(juce::DialogWindow::LaunchOptions&)> launchDialog; // null: launchAsync()
-        std::function<void()> quit; // null: the application's systemRequestedQuit(), which asks to save first (Main.cpp)
-    };
+    // How the window meets the system (MainWindowSurroundings, above: outside the class, as a default argument can't be
+    // made of a class's own struct with default member initializers while the class is still being defined).
+    using Surroundings = MainWindowSurroundings;
 
     MainWindow (ui::CommandBridge&, ProjectSession&, ui::LookAndFeel&, AppServices&, Surroundings = {});
     ~MainWindow() override;

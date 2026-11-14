@@ -244,8 +244,16 @@ void RandomEdits::edit()
             break;
 
         case 12:
-            groupIntoFolder (song, track == other ? std::vector { track } : std::vector { track, other }, nullptr);
+        {
+            // Built without a braced list in each branch of a ?:, which GCC's optimised builds misread as dangling.
+            auto grouped = std::vector { track };
+
+            if (other != track)
+                grouped.push_back (other);
+
+            groupIntoFolder (song, grouped, nullptr);
             break;
+        }
 
         case 13:
             ungroupFolder (song, track); // if it is a folder

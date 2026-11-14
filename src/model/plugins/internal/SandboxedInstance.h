@@ -28,7 +28,8 @@ namespace phazite
 {
 class SandboxedInstance final : public juce::AudioPluginInstance,
                                 private sandbox::RemoteInstance::Listener,
-                                private juce::AsyncUpdater
+                                private juce::AsyncUpdater,
+                                private juce::Timer
 {
 public:
     // The instance opened in a helper, which this owns from now on, as the plug-in described, from a state (the one it has
@@ -52,14 +53,43 @@ public:
     void helperLost();
     std::function<void()> onLost;
 
-    // Its plug-in opened again in another helper, in place of the one whose helper went, with what keeps that helper and
-    // what it calls as it goes: the song's instances, what the engine plays and its window keep this instance (the plug-in
-    // host's reload()). The engine skips its blocks meanwhile. What it reopens from: its plug-in, the state it last had, its
-    // program and its sample rate.
-    void replaceRemote (std::unique_ptr<sandbox::RemoteInstance>, std::shared_ptr<void> keepHelper, std::function<void()> onGone);
+    // Its plug-in opened again in another helper (at a sample rate, for its channel's limits), in place of the one whose
+    // helper went, with what keeps that helper and what it calls as it goes: the song's instances, what the engine plays and
+    // its window keep this instance (the plug-in host's reload()). The engine skips its blocks meanwhile. What it reopens
+    // from: its plug-in, the state it last had, its program, and the sample rate and longest block it was last prepared for
+    // (none before it was), which a crashed one keeps too, so that one that went in a render at another rate comes back at
+    // the rate it plays at now.
+    void replaceRemote (std::unique_ptr<sandbox::RemoteInstance>, double openedAtRate, std::shared_ptr<void> keepHelper,
+                        std::function<void()> onGone);
     const juce::PluginDescription& getDescription() const noexcept { return description; }
     const juce::MemoryBlock& getLastState() const noexcept { return lastState; }
-    double getPreparedRate() const noexcept { return preparedRate; }
+    double getPreparedRate() const noexcept { return preparedRate.load (std::memory_order_relaxed); }
+    int getPreparedBlockSize() const noexcept { return preparedBlockSize.load (std::memory_order_relaxed); }
+
+    // Whether its helper still keeps the block it was handed when it was last prepared, so that its channel for the rate
+    // asked waits for that block to come back (any thread): the engine skips its blocks meanwhile, and a render (the channel
+    // held, the block back) prepares it itself (finishPreparing()). The message thread looks a hundred times a second, and
+    // ends its helper once the block has been kept as long as a hang takes. Nothing waits for the plug-in so: cancelling a
+    // render that it keeps a block of doesn't wait for the helper, which can't prepare it until it gives the block back.
+    bool isPreparing() const noexcept { return preparing.load (std::memory_order_acquire); }
+    void finishPreparing();
+
+    // A render has given it back (message thread): the plug-in told now that it plays live again, not as the first live block
+    // comes, which the switch would make late (a post: nothing waits for the helper).
+    void playLive();
+
+    // The block handed over last waited for, a little at a time, from a thread that may wait (a render's, or JUCE's
+    // processBlock()), the channel held: until the helper answers it (played), its helper has gone (gone), it has kept
+    // it so long that it hangs (hung: its helper is then ended for it, told without waiting), or cancelled is set.
+    enum class Answer
+    {
+        played,
+        gone,
+        hung,
+        cancelled
+    };
+
+    Answer waitForAnswer (std::int64_t limitNanoseconds, const std::atomic<bool>* cancelled = nullptr) noexcept;
 
     // The values set since the last block, as the block's changes at its start (on the thread that plays it, the channel
     // held).
@@ -96,8 +126,10 @@ public:
     std::function<void (int width, int height)> onEditorResized;
     std::function<void (bool isDown, int keyCode, int modifiers)> onEditorKey;
 
-    // How long a block may take in real time before it is late: as long as it lasts.
-    static std::int64_t getDeadlineNanoseconds (int numSamples, double sampleRate) noexcept;
+    // How long a block of so many samples may take in real time before it is late: as long as it lasts, but a millisecond
+    // at least (or as long as the longest block of the device's, where that is shorter), so that a block the engine cut
+    // short (at a loop's end, after a count-in) isn't late for the round trip to the helper alone.
+    static std::int64_t getDeadlineNanoseconds (int numSamples, int maximumBlockSize, double sampleRate) noexcept;
 
     //==============================================================================
     void fillInPluginDescription (juce::PluginDescription&) const override;
@@ -149,8 +181,15 @@ private:
     std::vector<Parameter*> parameters;
     std::unordered_map<juce::String, int> places; // each parameter's, by its own ID
     std::vector<int> movedByEngine;
-    double preparedRate = 0.0;
-    int preparedBlockSize = 0;
+
+    // The sample rate and longest block it was last prepared for (asked of it on the message thread), and the rate its
+    // channel is for (changed with the channel held); whether that channel waits for the helper's block, and since when (in
+    // getNanoseconds()).
+    std::atomic<double> preparedRate { 0.0 };
+    std::atomic<int> preparedBlockSize { 0 };
+    double channelRate = 0.0;
+    std::atomic<bool> preparing { false };
+    std::int64_t preparingSince = 0;
 
     // What came from the helper, for the message thread.
     juce::CriticalSection lock;
@@ -193,7 +232,10 @@ private:
     void editorResized (int width, int height) override;
     void editorKey (bool isDown, int keyCode, int modifiers) override;
     void handleAsyncUpdate() override;
+    void timerCallback() override; // a channel that waits for the helper's block
 
+    bool isPrepared() noexcept; // its channel for the rate and block asked (held)
+    void prepareNow();          // its channel made for them (held, the helper's block back)
     void playBlock (juce::AudioBuffer<float>&, const juce::MidiBuffer&);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SandboxedInstance)

@@ -492,6 +492,7 @@ namespace
             playing = position->getIsPlaying();
             barStart = position->getPpqPositionOfLastBarStart().orFallback (-1.0);
             barCount = position->getBarCount().orFallback (-1);
+            playedOffline = isNonRealtime();
         }
 
         void getStateInformation (juce::MemoryBlock& data) override
@@ -505,6 +506,8 @@ namespace
             out.writeBool (playing.load());
             out.writeDouble (barStart.load());
             out.writeInt64 (barCount.load());
+            out.writeBool (playedOffline.load());
+            out.writeBool (isNonRealtime());
         }
 
         void setStateInformation (const void*, int) override {}
@@ -513,7 +516,7 @@ namespace
         std::atomic<double> ppq { -1.0 }, bpm { -1.0 }, barStart { -1.0 };
         std::atomic<juce::int64> sample { -1 }, barCount { -1 };
         std::atomic<int> numerator { 0 }, denominator { 0 };
-        std::atomic<bool> playing { false };
+        std::atomic<bool> playing { false }, playedOffline { false };
     };
 
     // Each kind's name, its "file" in the format, and its number.
@@ -669,6 +672,8 @@ TestPlugins::Playhead TestPlugins::Playhead::read (const juce::MemoryBlock& stat
     heard.playing = in.readBool();
     heard.barStart = in.readDouble();
     heard.barCount = in.readInt64();
+    heard.playedOffline = in.readBool();
+    heard.offline = in.readBool();
     return heard;
 }
 

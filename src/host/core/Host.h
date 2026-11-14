@@ -37,6 +37,7 @@ private:
     std::unique_ptr<Pipe> pipe;
     std::map<std::int64_t, std::unique_ptr<Instance>> instances;
     std::map<std::int64_t, std::unique_ptr<Editor>> editors; // by their instances' IDs: each goes before its instance
+    std::shared_ptr<void> endsWithPhazite;                   // endWithPhazite()'s, while connected
 
     void received (const juce::MemoryBlock&);
     void handle (const juce::MemoryBlock&); // on the message thread
@@ -53,10 +54,24 @@ private:
 };
 
 // The helper process ends at once when a plug-in crashes it, rather than with the operating system's dialog. Its CPU
-// time so far, in seconds, and its memory: what of it is in memory and no other process's, in bytes.
+// time so far, in seconds, and its memory: what of it is in memory and no other process's, in bytes. Its ID, which it
+// tells Phazite as it starts.
 void endQuietlyOnCrashes();
 double getProcessCpuSeconds();
 std::int64_t getProcessMemoryBytes();
+std::int64_t getProcessID();
+
+// The helper ends as Phazite does, however Phazite ends (a crash, or ended from outside), whatever its own message
+// thread is doing (the pipe's loss quits it through that thread, which a plug-in may keep). On Windows Phazite has put it
+// in a job that ends it (sandbox/client/Helper.cpp): nothing to do. On Linux and macOS a thread watches for its parent to
+// go (its parent's ID changes as it is orphaned), four times a second, and ends the process a second after unless it has
+// quit by then (Linux's PR_SET_PDEATHSIG would end it as the thread that started it ends, which needn't be Phazite's
+// end). Kept while connected: what is returned stops the watching as it goes.
+std::shared_ptr<void> endWithPhazite();
+
+// Built with a sanitizer on Linux and macOS: what the helper writes to stderr goes to the copy of Phazite's that its
+// command line names ("--PhaziteSandboxErrors:<descriptor>"), first thing as it starts. Nothing without that argument.
+void writeErrorsTo (const juce::String& commandLine);
 
 // A channel's limits as a request carries them.
 sandbox::BlockChannel::Limits readLimits (sandbox::MessageReader&);

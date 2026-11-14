@@ -64,6 +64,7 @@ Host::~Host()
     editors.clear();   // before their plug-ins
     instances.clear(); // their threads stopped, before the pipe goes
     pipe = nullptr;
+    endsWithPhazite = nullptr;
 }
 
 bool Host::connect (const juce::String& commandLine)
@@ -81,6 +82,7 @@ bool Host::connect (const juce::String& commandLine)
     if (! pipe->connectToPipe (argument, -1))
         return false;
 
+    endsWithPhazite = endWithPhazite();
     startTimerHz (noticesPerSecond);
     return true;
 }
@@ -106,7 +108,9 @@ void Host::handle (const juce::MemoryBlock& message)
     {
         case MessageType::hello:
             reader.readInt();
-            answer.add (sandbox::protocolVersion);
+            // Its version, and its process's ID, by which Phazite ends it as it ends (JUCE's ChildProcess keeps its handle of the
+            // process to itself). JUCE workaround W32 (docs/juce-workarounds.md).
+            answer.add (sandbox::protocolVersion).add (getProcessID());
             break;
 
         case MessageType::heartbeat:
@@ -190,6 +194,11 @@ void Host::handle (const juce::MemoryBlock& message)
 
         case MessageType::setEditorKeys:
             setEditorKeys (reader);
+            return;
+
+        case MessageType::playLive:
+            if (auto* instance = findInstance (reader.readInt64()))
+                instance->playLive();
             return;
 
         case MessageType::quit:

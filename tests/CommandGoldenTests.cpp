@@ -701,7 +701,7 @@ TEST_SUITE ("golden")
                      REQUIRE (volume.isValid());
                      phazite::addPoint (s.song, volume, { beats (0.0), 0.5f, 0.0f });
                      phazite::addPoint (s.song, volume, { beats (4.0), 0.625f, 0.0f });
-                     s.selection.selectPoints (volume, { 0, 1 });
+                     phazite::selectPoints (s.selection, volume, { 0, 1 });
                  });
 
         s.run ({ "automation.raisePoints", "automation.lowerPoints", "automation.raisePointsMore", "automation.lowerPointsMore" });

@@ -496,11 +496,19 @@ TEST_CASE ("A project's first save moves it to a folder of its own, where it goe
     // A folder of that name is there already: nothing changes.
     const auto projects = temp.folder.getChildFile ("Projects");
     REQUIRE (projects.getChildFile ("Taken").createDirectory().wasOk());
-    CHECK (project->moveTo (projects, "Taken").failed());
+    std::optional<juce::Result> moved;
+    const auto keep = [&moved] (const juce::Result& result) { moved = result; };
+    CHECK (project->moveTo (projects, "Taken", keep) == nullptr); // small: done at once
+    REQUIRE (moved.has_value());
+    CHECK (moved->failed());
     CHECK (project->getFile() == oldFile);
     CHECK (project->hasUnsavedChanges());
 
-    REQUIRE (project->moveTo (projects, "Beat").wasOk());
+    moved.reset();
+    CHECK (project->moveTo (projects, "Beat", keep) == nullptr);
+    REQUIRE (moved.has_value());
+    REQUIRE (moved->wasOk());
+    CHECK (projects.findChildFiles (juce::File::findDirectories, false).size() == 2); // Taken and Beat, nothing half made
     const auto newFile = projects.getChildFile ("Beat").getChildFile ("Beat.phazite");
     CHECK (project->getFile() == newFile);
     CHECK (newFile.existsAsFile());

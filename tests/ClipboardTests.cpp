@@ -4,6 +4,7 @@
 // clips going back onto their own tracks.
 #include "TestClips.h"
 #include "TestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/internal/Clipboard.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
@@ -120,6 +121,48 @@ TEST_CASE ("Copied clips paste at the playhead on the selected track, as copies,
 
     phazite::undo (song.getSong());
     CHECK (song.clipsOf (1).empty());
+}
+
+TEST_CASE ("Clips copied from more tracks than there are below the selected one paste onto tracks added for them, never a return")
+{
+    // Clips from two tracks pasted with the last track selected: the second went onto a return, where it neither showed nor
+    // played, yet counted towards the song's end (known bug 48).
+    Song song;
+    const auto reverb = phazite::insertReturnTrack (song.getSong(), "Reverb", nullptr);
+    REQUIRE (reverb.isValid());
+    const auto second = phazite::insertMidiClip (song.getSong(), song.tracks[1], { at (0.0), at (2.0) }, nullptr);
+    REQUIRE (second.isValid());
+    song.getSong().getUndoManager().clearUndoHistory();
+    auto& selection = getSelection (song.context);
+    selection.selectOnly (song.clip);
+    selection.addToSelection (second);
+    REQUIRE (song.registry.invoke ("edit.copy"));
+
+    selection.selectOnly (song.tracks[1]);
+    song.playheadAt (8.0);
+    const auto tracksBefore = phazite::getTrackIDs (song.getSong());
+    phazite::test::UndoCheck undo (song.getSong());
+    undo.command (song.registry, "edit.paste");
+
+    // The first on the selected track, the second on a track added after it; the return holds none.
+    CHECK (phazite::getClips (song.getSong(), reverb).empty());
+    REQUIRE (song.clipsOf (1).size() == 2);
+    CHECK (song.rangeOf (song.clipsOf (1)[1]).getStart().inBeats() == doctest::Approx (8.0));
+
+    const auto tracksAfter = phazite::getTrackIDs (song.getSong());
+    REQUIRE (tracksAfter.size() == tracksBefore.size() + 1);
+    std::vector<phazite::TrackID> added;
+    std::copy_if (tracksAfter.begin(), tracksAfter.end(), std::back_inserter (added), [&tracksBefore] (phazite::TrackID id)
+                  { return std::find (tracksBefore.begin(), tracksBefore.end(), id) == tracksBefore.end(); });
+    REQUIRE (added.size() == 1);
+    CHECK_FALSE (phazite::isReturnTrack (song.getSong(), added[0]));
+    REQUIRE (phazite::getClips (song.getSong(), added[0]).size() == 1);
+    CHECK (song.rangeOf (phazite::getClips (song.getSong(), added[0])[0]).getStart().inBeats() == doctest::Approx (8.0));
+
+    // Nor can a clip be moved onto a return.
+    phazite::moveClip (song.getSong(), second, at (16.0), reverb);
+    CHECK (phazite::getClips (song.getSong(), reverb).empty());
+    undo.walkBackAndForth();
 }
 
 TEST_CASE ("Cut clips paste back onto their own track with the automation that was under them, in place of what is there")

@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace phazite
@@ -39,8 +40,8 @@ struct NoteClip
 std::vector<NoteClip> getNoteClips (const ProjectContext&, const std::vector<ClipID>&);
 std::optional<NoteClip> getNoteClip (const ProjectContext&, ClipID);
 
-// Whether a track can hold MIDI clips (not a folder); and whether it holds audio clips, since audio and notes don't share
-// a track (docs/design.md, section 5).
+// Whether a track can hold MIDI clips (not a folder or a return); and whether it holds audio clips, since audio and notes
+// don't share a track (docs/design.md, section 5).
 bool canHoldNotes (const ProjectContext&, TrackID);
 bool hasAudioClips (const ProjectContext&, TrackID);
 
@@ -84,6 +85,13 @@ void nudgeNotes (ProjectContext&, const std::vector<NoteRef>&, BeatDuration);
 // pointer moves. No note starts before its clip, and the clip grows to hold them, as Notes.h's moveNote() says.
 void setNotes (ProjectContext&, const std::vector<NoteData>&);
 
+// The ends of clips as a drag of their notes began, which each step of the drag puts back first (a clip that grew since
+// ends there again; one moved or shortened meanwhile is left as it is), so that a clip grows only as far as the notes are
+// now: a note dragged past its clip's end and back leaves the clip as it was. Joins the caller's undo step.
+using ClipEnds = std::vector<std::pair<ClipID, BeatPosition>>;
+ClipEnds getClipEnds (const ProjectContext&, const std::vector<ClipID>&);
+void restoreClipEnds (ProjectContext&, const ClipEnds&);
+
 // Replaces notes with others, such as a transform's result, as Notes.h's replaceNotes() does; returns the new notes.
 std::vector<NoteRef> replaceNotes (ProjectContext&, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements);
 
@@ -96,9 +104,10 @@ void changeNoteVelocities (ProjectContext&, const std::vector<NoteRef>&, int cha
 // The inspector's edits of notes (docs/design.md, section 4), as Logic Pro's and Bitwig's inspectors edit several at once.
 // Each is a step of its own ("Move Notes", "Change Note Length", "Transpose Notes", "Change Velocity"), unless a gesture
 // is open (a field's drag: SongGesture.h), whose one step it joins. Changed by an amount (dragged, scrolled or stepped),
-// every note changes by it: notes moved or transposed together by as much as all of them can go, so that a chord keeps
-// its shape, and each length (at least a 64th note) and velocity (1 to 127) kept in range. Set to a value (typed), each
-// length and velocity becomes it, and the earliest start and the lowest pitch move to it, the others with them.
+// every note changes by it: notes moved (no earlier than each one's clip lets it) or transposed together by as much as
+// all of them can go, so that a chord keeps its shape, and each length (at least getMinimumNoteLength(), as a drag keeps
+// it) and velocity (1 to 127) kept in range. Set to a value (typed), each length and velocity becomes it, and the
+// earliest start and the lowest pitch move to it, the others with them.
 enum class NoteProperty
 {
     start,

@@ -36,7 +36,14 @@ When Phazite starts after it didn't close properly, it says which project was op
 - **Open with Plug-ins Off**, if a plug-in in it may have crashed Phazite: they stay as they were, silent, until the project opens again.
 - **Start a New Project**.
 
-If Auto Save had kept changes you hadn't saved yourself, Phazite asks whether to restore them.
+If Auto Save had kept changes you hadn't saved yourself, Phazite asks whether to restore them. If they can't be read,
+the project opens as it was last saved, and Phazite says so.
+
+## A save that fails
+
+If the project's folder can't be written (a drive unplugged, a network share gone), Save says why. Closing the
+project, opening another or quitting then asks what to do: **Save As...** puts your changes in a new project folder
+where you choose, **Don't Save** closes without them, and **Cancel** keeps the project open.
 
 ## Reporting a bug
 

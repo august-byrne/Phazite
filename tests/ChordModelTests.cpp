@@ -3,6 +3,7 @@
 // song, each edit one undo step, chords that go with the song's time, Delete All Chords, where a progression goes, the
 // lane saved and read back, and a progression written out for the previewer.
 #include "TestHelpers.h"
+#include "UndoCheck.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/Arrangement.h"
 #include "model/arrangement/internal/Clips.h"
@@ -228,6 +229,50 @@ TEST_CASE ("The chord lane: chords go with the song's time, as sections do")
 
     // The time line reaches the end of the last chord.
     CHECK (phazite::getTimelineEnd (song.context) >= beat (24.0));
+}
+
+TEST_CASE ("Removed time keeps one key change where it was, the last in it, as removed time keeps the tempo's last")
+{
+    // Every key change in the range went to its start and none was removed, so that two lay on one beat, and which held
+    // depended on the order they were made in (known bug 49).
+    Song song;
+    phazite::setLaneKey (song.context, beat (4.0), { 2, Scale::major });  // D, before the range
+    phazite::setLaneKey (song.context, beat (12.0), { 7, Scale::major }); // G, made first
+    phazite::setLaneKey (song.context, beat (10.0), { 5, Scale::minor }); // F minor, made later, earlier in the range
+    phazite::setLaneKey (song.context, beat (20.0), { 0, Scale::major }); // C, after the range
+    REQUIRE (phazite::getLaneKeyChanges (song.context).size() == 5);
+    song.getSong().getUndoManager().clearUndoHistory();
+    phazite::test::UndoCheck undo (song.getSong());
+
+    undo.check ("Remove Time",
+                [&]
+                {
+                    const phazite::UndoStep step (song.getSong(), "Remove Time");
+                    phazite::removeTime (song.getSong(), beats (8.0, 16.0));
+                });
+
+    // What played as the range ended (G) plays from its start; the others in it are gone; the one after it moved back.
+    const auto keys = phazite::getLaneKeyChanges (song.context);
+    REQUIRE (keys.size() == 4);
+    CHECK (keys[1].start == beat (4.0));
+    CHECK (keys[2].start == beat (8.0));
+    CHECK (keys[2].key == Key { 7, Scale::major });
+    CHECK (keys[3].start == beat (12.0));
+    CHECK (keys[3].key == Key { 0, Scale::major });
+
+    // From the song's start, one at its end takes the song's start: its key is the song's.
+    undo.check ("Remove Time from the start",
+                [&]
+                {
+                    const phazite::UndoStep step (song.getSong(), "Remove Time");
+                    phazite::removeTime (song.getSong(), beats (0.0, 8.0));
+                });
+    const auto fromStart = phazite::getLaneKeyChanges (song.context);
+    REQUIRE (fromStart.size() == 2);
+    CHECK (fromStart[0].start == beat (0.0));
+    CHECK (fromStart[0].key == Key { 7, Scale::major });
+    CHECK (fromStart[1].start == beat (4.0));
+    undo.walkBackAndForth();
 }
 
 TEST_CASE ("Delete All Chords takes every chord and the key changes after the song's start away, as one undo step")

@@ -26,49 +26,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 - **20. Duplicate and Paste make fewer notes than they say** where some would land past a clip that the next clip keeps
   from growing: no note is made where it wouldn't play, but the undo step is still named for all of them ("Duplicate 6
   Notes" for 2). Fix: name the step for what was made, or say in the hint bar that some didn't fit.
-- **44. A note dragged past its clip's end and back leaves the clip longer for good.** A clip of bars 1 to 4 whose note
-  is dragged to beat 9 and back to beat 3 ends at beat 12 after the release, so the song's end and the loop move; drags
-  that paint or copy notes do the same. Why: each step of the drag sets the notes, and `growToHold()`
-  (`src/model/notes/Notes.cpp`) only lengthens (`src/ui/pianoroll/PianoRollNoteTools.cpp`). Fix: keep each shown clip's
-  length from the press and restore it before each step, or grow once at the release. Confirmed by a second reading
-  (ui-timeline-editors 1).
-- **46. A start typed or dragged in the inspector for several notes can put them all on their clip's start.** In a clip
-  that starts at beat 32, notes at 33 and 34 moved back 3 beats both land on 32. Why: `changeNotes()` and
-  `setNotesTo()` (`src/model/notes/NotesModel.cpp`) limit the move by the song's start, not the clip's, and each note is
-  then kept in its clip on its own. Fix: limit the shared amount by each note's clip, as `nudgeNotes()` does. Not yet
-  checked (model-arrangement 10).
-- **47. Slipping a reversed audio clip shrinks it, and can leave it with no length.** Forwards, the part can run past
-  the file's end into silence. Why: `slipClip()` (`src/model/arrangement/Clips.cpp`) only keeps the offset above 0, and
-  `setAudioPart()` (`src/model/arrangement/AudioClips.cpp`) then cuts the part at the file's start. Fix: keep the
-  offset within the file's length less the part's, both ways, and take the length from the drag's start. Not yet checked
-  (model-arrangement 6).
-- **48. Paste can put clips on a return track, where they neither show nor play** yet count towards the song's end:
-  clips copied from two tracks, pasted with the last track selected. Why: `getTracksForClips()`
-  (`src/model/arrangement/Clipboard.cpp`) leaves out folders only. Fix: leave out returns too, and add tracks, or say
-  so, when a paste runs out of them. Not yet checked (model-arrangement 7).
-- **49. Remove Time and deleting a section can leave two key changes on one beat,** and which holds depends on the
-  order they were made in. Why: every key change in the range is moved to its start and none is removed
-  (`src/model/chords/Chords.cpp`). Fix: keep the last one and remove the others, as `removeTempoMapTime()` does for the
-  tempo. Not yet checked (model-arrangement 8).
-- **50. Keys are always named with sharps,** "A# major" beside chords spelled "Eb", in the piano roll's key button, the
-  inspector and the chord lane's menus. Why: `describeKey()` (`src/model/notes/Notes.cpp`) takes JUCE's note names,
-  while the chords take `getRootLetter()` (`src/model/chords/ChordValues.cpp`). Fix: one function spells both. Not yet
-  checked (model-arrangement 13).
-- **51. The Spread voicing adds a perfect fifth over the bass whatever the chord,** so a diminished or augmented chord
-  gets a note it doesn't hold, and an inverted one a fifth over its third. Why: `voiceSpread()`
-  (`src/model/chords/ChordValues.cpp`) starts every chord with its bass and seven semitones above. Fix: take the fifth
-  from the chord's own notes. Not yet checked (model-arrangement 14).
-- **52. Small ones in the notes and clips.** Chop and Arpeggiate stop after 256 pieces and delete the rest of a long
-  note; the last clip of a group of linked clips still shows as linked after the others are deleted; a file is analysed
-  for its hits twice when it is asked for again meanwhile; a length typed stops at a sixteenth of a beat and one
-  dragged at a sixty-fourth; Quantize picks the nearest line before swing, then swings it
-  (`src/model/notes/Notes.cpp`, `src/model/arrangement/Clips.cpp`, `src/model/arrangement/Transients.cpp`). Not yet
-  checked (model-arrangement 15).
-- **53. Selected automation points are kept by their indices, which go stale.** With points 3 and 4 selected, undoing
-  an earlier point's addition leaves the selection on what were points 4 and 5, and Delete or a drag acts on those.
-  Why: `Selection` keeps `int`s and only checks them against the curve's count (`src/model/base/Selection.cpp`). Fix:
-  clear or remap the selection when a curve's points change by undo, redo or automation writing, or give points IDs.
-  Not yet checked (model-project-services 5).
 - **54. Shift or Ctrl and a click on a distant track scrolls the playlist back to the first selected track,** hiding
   what was clicked. Why: every change of the selection ends in `scrollToShow()` of the first selected track's row
   (`src/ui/playlist/Playlist.cpp`). Fix: scroll for selections made by keys and commands only, to the track that
@@ -82,11 +39,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   deletes it: two undo steps for nothing. Draw places the clip selected first, where the code's comment says last.
   Shift pressed in the middle of a point's drag makes its value jump (`src/ui/playlist/PlaylistAutomation.cpp`,
   `src/ui/playlist/Playlist.cpp`). Not yet checked (ui-timeline-editors 12).
-- **57. In the inspector, typing the lowest of several items' values does nothing.** With notes of velocities 64 and
-  100 selected ("64 to 100"), typing 64 leaves them as they are; the same for clips' lengths and gains. Why: the
-  field's value is the lowest item's, and JUCE's slider skips a typed value equal to its own
-  (`src/ui/mixer/Inspector.cpp`). Fix: apply what was typed whether or not it equals the shown value. Not yet checked
-  (ui-core-mixer-app 5).
 
 ## Versions
 
@@ -134,34 +86,10 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Plug-ins
 
-- **27. A plug-in that crashed during an export at another sample rate is reloaded at the export's rate.** Why:
-  `SandboxedInstance::prepareToPlay()` returns early for a crashed instance without keeping the rate asked for.
-- **28. A plug-in that had crashed before a render started renders silent, or dry, without a word.** Only a crash or a
-  hang during the render fails it. Fix: fail the render at its start, naming the plug-in.
-- **29. A render's first block is skipped if the plug-in's channel is still busy with a late block of live playback.**
-- **30. Cancelling a render can take up to 10 seconds** when a plug-in that hangs must also be prepared for another
-  sample rate: the helper can't prepare it while it keeps the block, and Phazite waits the prepare's time limit out.
-- **31. `SandboxedInstance::playBlock()` (JUCE's `processBlock` path) notices a helper that has gone only at the hang
-  limit,** not at once as the engine's path does.
-
 - **42. A render ends a plug-in's helper that keeps one block for 30 seconds,** though the plug-in may only be slow (six
   times the live hang limit: `renderHangFactor` in `src/model/plugins/internal/SandboxedProcessor.h`). Before 2026-11-13
   a render waited without end, which hung Phazite on a real hang. Not seen with a real plug-in. Fix, if one needs it: a
   setting, or a question to the user once the limit is reached.
-- **64. A block's deadline has no floor.** The engine cuts a block at a loop's end and after a count-in, so a part can
-  be 1 to 5 samples long, and a plug-in gets 21 to 104 microseconds for it at 48 kHz, less than a round trip to its
-  helper takes: the effect passes its input dry, an instrument is silent, and the next part may find the channel busy.
-  Why: `SandboxedInstance::getDeadlineNanoseconds()` (`src/model/plugins/SandboxedInstance.cpp`) is the part's length.
-  Fix: take the deadline from the device's block, with a floor near a millisecond. Not measured. Partly confirmed by a
-  second reading (plugin-hosting 5).
-- **66. Phazite trusts the channel count a helper writes into shared memory.** After a block,
-  `SandboxedProcessor::collect()` (`src/model/plugins/SandboxedProcessor.cpp`) copies as many channels as the shared
-  memory's header says, read again from memory the helper writes, so a helper gone wrong can make Phazite read and
-  write out of bounds on the audio thread. The helper's messages are safe since 2026-11-14: their counts are capped by
-  the bytes left (`MessageReader::getNumBytesLeft()`, `src/sandbox/core/Messages.h`), and a plug-in's latency, tail and
-  channel counts are clamped (`readPluginInfo()`, `keepLatency()`, `src/sandbox/core/PluginInfo.cpp`); the fuzzer
-  feeds them damaged messages (`tests/FuzzTests.cpp`). Fix: use the count Phazite handed over, and take a header that
-  says another for a lost helper. Not yet checked (plugin-hosting 9).
 - **68. A plug-in's editor has the wrong size whenever Interface Size isn't 100 %:** cropped below it, with black
   margins above it, and a resizable editor is made larger at each opening. Why: `SandboxedEditor`
   (`src/app/SandboxedEditor.cpp`) takes the plug-in's size in pixels for its own size in the scaled window, and the
@@ -190,8 +118,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 - **35. Sampler and drum sampler sounds read from float files aren't checked for values that aren't numbers.**
 - **36. A jump while playing into a part of a long audio file that isn't read yet is silent until it is read** (it fades
   in then). Play from a stop and the loop's start are read ahead; a jump needs pre-roll.
-- **37. A held instrument note that is silent for longer than the instrument's tail lets the instrument sleep.** Fix: ask
-  the device whether it has voices sounding.
 - **38. The playhead moved while recording:** the new take starts when the engine first sees it, so the tens of
   milliseconds after the jump aren't recorded; and dragging the top bar's place or time field while recording makes a
   take at every step (only the ruler takes its press alone).
@@ -228,59 +154,16 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   detunes a comb made with the delay. Why: they read their delay lines before they push the new sample, and don't take
   the one sample off as the chorus does (`src/devices/delay/Delay.cpp`, `src/devices/reverb/Reverb.cpp`). Fix: read one
   sample less. Not yet checked (devices-effects 12).
-- **76. The metronome and the count-in aren't compensated for the song's latency.** With a device of 4096 samples'
-  latency on the master the click comes 85 ms before the music at 48 kHz; notes played to the click land early by as
-  much, and the count-in's bar and the song's first beat part the same way. Why: `playClicks()` and `playCountIn()`
-  (`src/engine/core/Engine.cpp`) add the clicks straight to the outputs, while the song leaves the master its latency
-  later. Fix: play the clicks through a delay of the plan's output latency. Confirmed by a second reading (engine 3,
-  model-playback 3).
-- **77. An audio clip moved, slipped or rendered again while the playhead is in it plays on from its old place** until
-  the next stop, jump or time round the loop. Why: a region's state is kept by its clip's ID from plan to plan and
-  works its place in the file out again only after a jump (`src/engine/audio/AudioRegion.cpp`). Fix: keep the clip's
-  start, its start in the file and the file in the state, and take a change of them for a jump. Not yet checked
-  (engine 5).
 - **78. A track unmuted, or no longer silenced by a solo, in the middle of a note stays silent until its next note.**
   Why: a silenced strip throws its notes away but still counts them as sounding, so nothing starts them again
   (`src/engine/core/Engine.cpp`). Fix: start held notes again as the strip is heard again; or, as planned, let mute and
   solo silence a strip's output only, its instrument playing on. Not yet checked (engine 6).
-- **79. A transport queue that fills freezes the shown playhead for good, and can lose a Stop.** It takes 64 commands
-  within one block: a fast drag of the playhead at 4096 samples, or an output that stalls. Why: a command is dropped
-  once 64 wait, after the count of jumps asked for has gone up, which the count of jumps taken then never reaches
-  (`src/engine/core/Engine.cpp`). Fix: carry the last jump and the play state in atomics, so that nothing can
-  overflow. Not yet checked (engine 7).
-- **80. During an export, a freeze or a bounce the engine takes neither live notes nor transport commands.** MIDI
-  played meanwhile sounds as one burst when the song's plan comes back, note-offs past 1,024 events are lost, and past
-  63 commands the playhead freezes as in 79. Why: the engine takes them only while it has a plan, and a render borrows
-  it (`src/engine/core/Engine.cpp`, `src/model/playback/PlaybackSession.cpp`). Fix: take and drop live events, and
-  keep the last state asked for, in every block without a plan. Not yet checked (tests-audio 4).
-- **81. The engine's worker threads don't flush denormals to zero.** What the engine itself plays on them (a
-  container's crossover filters, the modulators' followers) slows down as its input dies away, and can differ by the
-  thread that played the strip. Why: `juce::ScopedNoDenormals` is set in `Engine::process()` alone, not in the workers
-  (`src/engine/core/Workers.cpp`). Fix: set it as a worker starts. Not yet checked (engine 8).
-- **82. With one output channel open, only the left side of the mix plays,** and what is panned right is gone. Why:
-  the master's channels go to the outputs one to one (`src/engine/core/Engine.cpp`). Fix: with one output, play half
-  the sum of both sides. Not yet checked (engine 9).
-- **83. The plans an engine played are freed half a second after a session lets go of them, though a block may still
-  play one:** a block held longer (a debugger, a suspended machine, a driver that stalls) goes on with freed memory.
-  Why: `letGoOfPlans()` (`src/model/playback/PlaybackHost.cpp`) waits for two blocks or 500 ms, then frees. Fix: after
-  the wait, leave the plans to the handover's own count. Not yet checked (tests-audio 12, model-playback 14).
-- **84. Held live notes stick when the live track changes or a MIDI input is unplugged.** Hold a key, click another
-  instrument's track, let go: the note-off goes to the new track. Why: `PlaybackSession::setLiveTrack()`
-  (`src/model/playback/PlaybackSession.cpp`) only notes the new track, and an input that goes ends no notes
-  (`src/model/engine/AudioIO.cpp`). Fix: end every note, and the pedal, on the track that was live. Not yet checked
-  (model-playback 9).
 - **85. A loop's wrap and a jump put their work into one block, and the message thread can wait for the disk.** The
   wrap looks through every note before the playhead on every track, starts each resampled clip's resampler from
   nothing, and a jump resets every device, in one block (`src/engine/core/Engine.cpp`,
   `src/engine/audio/AudioRegion.cpp`). And the reading thread holds a file's lock across its read, which the message
   thread takes at every new plan (`src/engine/audio/AudioFile.cpp`). Fix: an index of the notes sounding, resamplers
   started on the reading thread, and reads outside the lock. Not measured. Not yet checked (engine 13).
-- **86. A clip's render that fails starts again for ever.** A reversed, pitched or tempo-following clip whose file is
-  missing, or a Cache folder that can't be written: the render fails, is taken off the list and queued again, the
-  message thread and a job at full speed for as long as the project is open. Why: nothing remembers a render that
-  failed (`src/model/arrangement/ClipRenders.cpp`). Fix: remember it by its file and its source's date, try again only
-  when the clip, the source or the cache changes, and show the failure on the clip. Confirmed by a second reading
-  (model-arrangement 1).
 
 - **134. The Synth, the Phaser, the Flanger and the Chorus count their control steps from where each block starts, and
   the EQ glides its bands over each block,** so what they play depends a little on how the same samples are cut into
@@ -297,49 +180,20 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Play,** so a song with one never plays live as it exports, where it starts afresh. The golden songs with one say so
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
-- **138. Bounce in Place collapses the original track outside its undo step** (view state), so Undo leaves it collapsed.
 
 - **140. Escape doesn't take a drag back** in the chord lane, the sections strip, the ruler's loop and playhead drags,
   the devices' graphs or the mixer's controls. It does in the playlist, its automation and tempo lanes, the piano roll
   and the audio clip editor (`TimelineEditor::cancelDrag()`); and no key runs a command that changes the song while a
   mouse button is down, anywhere.
-- **141. JUCE's VST3 host describes a VST3's switch as a parameter of two steps, not as a switch,** so
-  `ParameterInfo::isBoolean` is false for every VST3 switch and Phazite shows it as a knob.
-- **142. The CPU meter's test checks against the wall clock** (`tests/MixerModelTests.cpp`), as the real-time checks
-  did before they waited for blocks played.
 
 ## Saving
 
-- **40. A backup that can't be copied fails without a word** (`Project::backUpProjectFile()` ignores `copyFileTo()`'s
-  result). The save itself goes on, rightly; the user should be told that no backup was made.
-- **41. The library's facts file and the run marker are still written with JUCE's `replaceWithText()`,** which doesn't
-  check its write (W30 in [juce-workarounds.md](juce-workarounds.md)). Neither holds the user's work: a facts file cut
-  short is read again from the sounds, and a missing marker only skips the crash check once.
-- **87. An autosave that can't be read keeps the project's own file from opening.** With Restore chosen, only the
-  autosave is read; if it doesn't parse, Phazite offers the newest backup or the last commit in its place, though the
-  project's file is whole and newer than both. Why: `Project::open()` (`src/model/project/Project.cpp`) and what
-  `ProjectSession` offers after it (`src/app/ProjectSession.cpp`). Fix: fall back to the project's file, and say that
-  the autosave couldn't be restored. Not yet checked (model-project-services 9).
-- **88. With Auto Save on, a save that fails keeps the user from quitting, New and Open.** Where the project's folder
-  is gone or can't be written (a drive unplugged, a network share), each of them shows the same error again; the only
-  way out is to turn Auto Save off, which nothing says. Why: `closeThen()` (`src/app/ProjectSession.cpp`) gives up when
-  the save fails. Fix: go on to the question that offers Save As, Don't Save and Cancel. Not yet checked
-  (ui-core-mixer-app 3).
 - **89. Auto Save asks every plug-in for its whole state on the message thread, a second after each change, and saves
   an old state where a plug-in doesn't answer.** Each request waits up to 10 seconds, for plug-ins that changed and
   those that didn't; one that times out gives the state before, and the save says it worked. Why:
   `saveInBackground()` stores the devices' states first, on the message thread (`src/model/project/Project.cpp`,
   `src/model/plugins/PluginInstances.cpp`). Fix: ask only the plug-ins that reported a change, without waiting on the
   message thread, and count a time-out as a save that failed. Confirmed by a second reading (model-project-services 3).
-- **90. A new project's first save copies its Audio, Cache and Versions folders on the message thread.** With
-  gigabytes of recordings the window stands still for the copy, which needs the space twice and can't be cancelled.
-  Why: `moveTo()` copies each folder before it returns (`src/model/project/Project.cpp`). Fix: copy as a background
-  job with its progress, or move the files where both folders are on one drive. Not yet checked
-  (model-project-services 8).
-- **91. Opening a DAWproject writes a copy of an audio file for every clip that plays it:** a loop in 32 clips becomes
-  32 files. Why: `addAudioClip()` unpacks the file for each clip into a name that isn't taken
-  (`src/model/project/DawProject.cpp`). Fix: unpack each file of the archive once, and use a file of the Audio folder
-  that is the same. Not yet checked (tests-model 11, model-project-services 4).
 
 ## Recording
 
@@ -439,16 +293,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   fuzzed. Fix:
   find the casts (`(int)` and `static_cast<int>` of a float or a double in `src/model/`) and make each safe, or keep its
   input finite where it comes from; UBSan in `linux-asan` reports one that runs.
-- **107. A saved preset holds the full paths of its sound files, the user's name in them,** and its sounds don't go
-  with it. Why: saving a preset turns each path in the project into the file's full path
-  (`src/model/presets/Presets.cpp`, `src/model/devices/DeviceFiles.cpp`). The privacy page promises that for project
-  files only. Fix: copy a preset's samples beside it and keep their paths from the preset; until then, say it on the
-  privacy page. Not yet checked (docs 8).
-
-- **151. A preset's sound on a network path is left out without a word.** A preset whose pad's or sampler's file is on
-  a share (`\NAS\Samples\...`) loads with the device's own sound and no message, since such a path is refused without
-  being touched (`isSoundFileToTake()`, `src/model/devices/DeviceFiles.cpp`); a mapped drive letter still works. Fix:
-  a notice that names the sounds that weren't taken.
 
 ## Window, shell and keys
 
@@ -477,15 +321,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   on German and French layouts, so Zoom In and its like never match. Why: the note keys are characters, mapped through
   the layout in use (`src/ui/input/ComputerKeyboard.cpp`, `resources/keymaps/phazite.json`). Fix: map the musical
   keyboard by the keys' places; bind zooming to "+" too. Not yet checked (ui-core-mixer-app 8).
-- **113. A project double-clicked while any dialog is open is dropped without a word.** Why:
-  `anotherInstanceStarted()` (`src/app/Main.cpp`) brings the dialog forward and returns; nothing keeps the file to open
-  it afterwards, as its comment says. Fix: keep it and open it once the dialog has gone, or say why it didn't open.
-  Not yet checked (ui-core-mixer-app 11).
-- **114. The library's indexer follows folder loops, and looking for favourites that moved reads files on the message
-  thread.** A link that loops in a sound folder is followed to the path's limit and can fill the index of 50,000 files
-  with repeats; and each listing of Favorites hashes up to 64 files of the same size for every member that is missing,
-  again each time (`findMovedMembers()`, `src/services/Library.cpp`). Fix: don't follow loops; look for moved members
-  on the indexer's thread, once for each index. Not yet checked (model-project-services 11).
 - **146. Thirteen controls have no tooltip,** so the hint bar says nothing over them: the Project view's Notes field,
   the header of Source Control's Graph, seven of the EQ editor's band controls (Band On, Band Shape, Slope, Frequency,
   Gain, Q, Output), and the Low Cut and High Cut knobs of the Vinyl and of the Delay (`src/ui/project/ProjectView.cpp`,
@@ -594,20 +429,20 @@ its fix.
 
 ## Tests
 
-- **152. In a sanitizer build, closing a helper waits for its error output to end** (`Relay` in
-  `src/sandbox/client/Helper.cpp`): a plug-in that started a process of its own, which inherited that pipe, would keep
-  Phazite's message thread waiting. Only builds with a sanitizer pipe the helper's output; the others start it as before.
+- **154. Two more tests fail when every test file runs in one process, though each passes alone and under ctest**
+  (found 2026-11-14, with known bug 147 fixed). "A live note sounds at once, and waits only for devices that are switched
+  on and look ahead" (`tests/LiveInputTests.cpp`) waited 120 s and never heard the note where it should; and "While the
+  mouse drags in the playlist or the piano roll, no command ... changes ... its files" (`tests/EditorDragTests.cpp`) saw
+  the versions' files change under it (`Versions/current_temp...`, a branch's log), which is the version history's
+  thread finishing its first commit while the test compares the folder. Why the first fails: not traced (something an
+  earlier test file leaves in the shared engine context, as bug 147 was). Fix: as for 147, run the files in one process
+  in halves to find the one that leaves it; for the second, wait for the history to be idle before taking the folder's
+  files.
 - **153. In a Debug build an assertion that fires on the audio thread writes to the log** (`JUCE_LOG_ASSERTIONS`, which
   the tests' assertion net needs): a string made and a file written there, which the real-time audit then counts. No
   assertion fires on the audio thread in the audit's scenarios today; one that did would show as an allocation as well
   as a failed test.
 
-- **147. Two tests fail when most test files run in one process, though each passes alone and under ctest.** The
-  command script's golden (`tests/CommandGoldenTests.cpp`) comes out with another `nextID`, and the Capture check of
-  "Capture in 6/8 makes a clip of whole bars..." (`tests/TempoTests.cpp`) fails. ctest runs a process for each test
-  file, so CI doesn't see it. Why: something one test file leaves behind in the process (the shared engine context,
-  settings, a static) changes what a later one makes; not traced. Fix: run the files in one process in another order to
-  find which file leaves it, and make that test clean up, or make the two tests start from nothing.
 - **149. JUCE asserts on a date that is no date in a damaged zip** (`juce_core/time/juce_Time.cpp`, in Debug builds) as
   `juce::ZipFile` reads an entry. Phazite never uses an entry's date, so a damaged DAWproject only raises the assertion;
   the DAWproject fuzz case declares it (`ExpectedAssertion` in `tests/FuzzTests.cpp`). Whether Phazite reads the zip's
@@ -619,13 +454,3 @@ its fix.
   compiled for Windows alone, as the window reads its theme and the screens from the system, which Linux CI can't
   without a display server. Fix: a full-screen case in a real window, as the devices' windows in that file are; on
   Linux, a virtual display (Xvfb) in CI, or the window's theme and screens taken through `MainWindow::Surroundings`.
-
-- **132. The folder beside the app goes stale, and the installer packs it.** Presets deleted from `resources/presets`
-  stay next to the app, and an older `PhaziteHost` can: the copies are steps after the app's link, which run only when
-  the app links again, and copying a folder never deletes (`CMakeLists.txt`, `packaging/windows/Phazite.iss`). The
-  tests read `resources/presets`, so nothing catches it. Fix: make the folder anew from a target with real
-  dependencies, and build releases from clean trees only. Partly confirmed by a second reading (build-ci-tools 0).
-- **133. One working tree holds both kinds of line endings.** `* text=auto` in `.gitattributes` names no ending, so a
-  file has the ending of whatever wrote it last, and those bytes are compiled in (the JSON) or shipped (the presets).
-  Fix: `* text=auto eol=lf`, with `*.cmd` and `*.bat` kept as they are, and the files normalized once. Not yet checked
-  (build-ci-tools 8).

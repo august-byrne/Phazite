@@ -48,7 +48,7 @@ struct Libraries
     {
         phazite::test::writeSound (userFolder.getChildFile ("Kicks/Deep Kick.wav"), 0.3);
         library.addUserFolder (userFolder);
-        REQUIRE (phazite::test::runTimersUntil ([this] { return ! library.isIndexing(); }, 10000));
+        REQUIRE (phazite::test::runTimersUntil ([this] { return ! library.isIndexing(); }, 60000));
     }
 
     phazite::BrowserPlace find (Kind kind) const

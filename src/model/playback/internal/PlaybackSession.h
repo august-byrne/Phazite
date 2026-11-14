@@ -113,7 +113,8 @@ public:
     bool recordsLiveTrack() const noexcept { return liveTrackRecords; }
     void setRecordsLiveTrack (bool records) noexcept { liveTrackRecords = records; }
 
-    // The piano roll's guide notes into a track; and their ends.
+    // The piano roll's guide notes into a track, and a preset's tried in the browser; and their ends. Neither Capture nor a
+    // take records them (Engine::playLive()'s recordable).
     void playGuideNotes (std::int64_t track, const std::vector<int>& pitches, int velocity);
     void stopGuideNotes (std::int64_t track);
 
@@ -122,7 +123,8 @@ public:
 
     // While a render plays the project's plug-ins (an export, model/project/Export.h), the engine plays nothing of the
     // project, so that the render has them alone; once it is done, what plays them is made anew, prepared again for the
-    // device, and the engine plays the project again. Message thread.
+    // device, and the engine plays the project again. Lent, it waits for a block the audio thread is still in, however long
+    // it takes (a debugger, a driver that stalls): a render never plays the plug-ins beside it. Message thread.
     void lendToRender (bool);
     bool isLentToRender() const noexcept { return lentToRender; }
 

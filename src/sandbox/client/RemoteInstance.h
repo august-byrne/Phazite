@@ -76,6 +76,9 @@ public:
     void closeEditor (int timeoutMilliseconds);
     void setEditorKeys (bool getsEveryKey, const std::vector<std::pair<int, int>>& keys);
 
+    // Told that a render has given it back: it plays live from now on (Phazite doesn't wait for it).
+    void playLive();
+
     // A value set by hand, from 0 to 1 (Phazite doesn't wait for it), how the plug-in writes a value of a parameter, and the
     // value it reads text as ("-6 dB"), from 0 to 1.
     void setParameter (int index, float value);

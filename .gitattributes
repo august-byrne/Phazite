@@ -1,21 +1,27 @@
-# Normalise line endings in the repository (LF) and check out with each platform's default.
-* text=auto
+# Line endings: every text file is stored with LF, and checked out with LF on every system, whatever git's core.autocrlf
+# says, so that the files the build compiles in (the JSON, the icons) and ships (the presets) are the same bytes on Windows
+# and Linux, and a file has the same endings whether git or a tool wrote it last. Git decides what is text (text=auto);
+# everything it stores as text is LF already. Visual Studio, VS Code, MSVC, CMake, PowerShell and Inno Setup all read LF.
+* text=auto eol=lf
 
-# Windows batch files must keep CRLF; shell scripts must keep LF.
+# Windows batch files must keep CRLF (cmd.exe misreads labels and long lines without it).
 *.cmd text eol=crlf
 *.bat text eol=crlf
+
+# Shell scripts must keep LF: git runs the hooks with sh, on Windows too, and they have no extension.
 *.sh  text eol=lf
+.githooks/* text eol=lf
 # tools/check-architecture.sh --update rewrites the budget file with LF endings.
 tools/architecture-budget.txt text eol=lf
-# Git hooks are shell scripts without an extension (git runs them with sh, on Windows too).
-.githooks/* text eol=lf
 # Golden files: LF on every OS, so the tests and diffs see the same bytes.
 tests/golden/** text eol=lf
 # But a pack of the versions' test vectors is binary: its bytes are hashed and read as they are.
 tests/golden/format/*.pack binary
 
-# Fonts, sounds and other binary data: never convert line endings.
+# Fonts, sounds, pictures, MIDI files and other binary data: never convert line endings.
 *.ttf binary
 *.flac binary
 *.ogg binary
 *.wav binary
+*.png binary
+*.mid binary

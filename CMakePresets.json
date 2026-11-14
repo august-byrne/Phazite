@@ -42,6 +42,13 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
     },
     {
+      "name": "windows-asan",
+      "displayName": "Windows ASan (MSVC, Debug)",
+      "description": "MSVC's AddressSanitizer over a Debug build: memory errors in the code only Windows builds (the sandbox's shared memory, the helper's windows, WASAPI and ASIO). Needs Visual Studio's C++ AddressSanitizer component (tools/setup-windows.cmd adds it). CMakeLists.txt puts the sanitizer's runtime next to each program.",
+      "inherits": "windows-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "PHAZITE_ADDRESS_SANITIZER": true }
+    },
+    {
       "name": "linux-base",
       "hidden": true,
       "inherits": "base",
@@ -81,6 +88,18 @@
         "CMAKE_C_FLAGS": "-fsanitize=thread -Wno-tsan",
         "CMAKE_CXX_FLAGS": "-fsanitize=thread -Wno-tsan"
       }
+    },
+    {
+      "name": "linux-clang",
+      "displayName": "Linux Debug (Clang + Ninja), for clang-tidy",
+      "description": "Clang in place of GCC (the clang and clang++ on the PATH; Ubuntu 24.04: 18), so that a second compiler sees the code macOS will build with; and the build folder that tools/clang-tidy.sh analyses, so without precompiled headers, which clang-tidy can't read.",
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "PHAZITE_PRECOMPILED_HEADERS": false
+      }
     }
   ],
   "buildPresets": [
@@ -97,10 +116,12 @@
     { "name": "windows-debug",   "inherits": "windows-build-base", "configurePreset": "windows-debug" },
     { "name": "windows-release", "inherits": "windows-build-base", "configurePreset": "windows-release" },
     { "name": "windows-profile", "inherits": "windows-build-base", "configurePreset": "windows-profile" },
+    { "name": "windows-asan",    "inherits": "windows-build-base", "configurePreset": "windows-asan" },
     { "name": "linux-debug",     "inherits": "linux-build-base",   "configurePreset": "linux-debug" },
     { "name": "linux-release",   "inherits": "linux-build-base",   "configurePreset": "linux-release" },
     { "name": "linux-asan",      "inherits": "linux-build-base",   "configurePreset": "linux-asan" },
-    { "name": "linux-tsan",      "inherits": "linux-build-base",   "configurePreset": "linux-tsan" }
+    { "name": "linux-tsan",      "inherits": "linux-build-base",   "configurePreset": "linux-tsan" },
+    { "name": "linux-clang",     "inherits": "linux-build-base",   "configurePreset": "linux-clang" }
   ],
   "testPresets": [
     {
@@ -125,6 +146,7 @@
     { "name": "windows-debug",   "inherits": "windows-test-base", "configurePreset": "windows-debug" },
     { "name": "windows-release", "inherits": "windows-test-base", "configurePreset": "windows-release" },
     { "name": "windows-profile", "inherits": "windows-test-base", "configurePreset": "windows-profile" },
+    { "name": "windows-asan",    "inherits": "windows-test-base", "configurePreset": "windows-asan" },
     { "name": "linux-debug",     "inherits": "linux-test-base",   "configurePreset": "linux-debug" },
     { "name": "linux-release",   "inherits": "linux-test-base",   "configurePreset": "linux-release" },
     {
@@ -144,6 +166,7 @@
       "configurePreset": "linux-tsan",
       "description": "Known data races in JUCE, which Phazite can't change, would be suppressed in tools/tsan-suppressions.txt (none now). A crash is reported by ThreadSanitizer, with its stack, not by doctest's signal handler (allow_user_segv_handler=0).",
       "environment": { "TSAN_OPTIONS": "suppressions=${sourceDir}/tools/tsan-suppressions.txt:allow_user_segv_handler=0" }
-    }
+    },
+    { "name": "linux-clang",     "inherits": "linux-test-base",   "configurePreset": "linux-clang" }
   ]
 }

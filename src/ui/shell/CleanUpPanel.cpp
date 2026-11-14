@@ -23,8 +23,8 @@ CleanUpPanel::CleanUpPanel (ProjectContext& c, Removal r)
     list.setTitle (list.getName());
     list.setRowHeight (controlHeight);
     list.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
-    list.setTooltip ("Files in the project's Audio and Generated folders that neither the song, nor a version, nor a branch "
-                     "plays. Click one to keep it");
+    list.setTooltip ("Files in the project's Audio and Generated folders that neither the song, nor its file as saved, nor a "
+                     "backup, nor a version, nor a branch plays. Click one to keep it");
     deleteButton.setTooltip ("Moves the ticked files to the recycle bin");
     deleteButton.onClick = [this] { deleteTicked(); };
     cancelButton.onClick = [this] { close(); };
@@ -83,8 +83,8 @@ void CleanUpPanel::refreshSummary (const juce::String& done)
         }
     }
 
-    const auto said = files.empty() ? juce::String ("No unused audio: the song, its versions or its branches play every file in the "
-                                                    "project's Audio and Generated folders.")
+    const auto said = files.empty() ? juce::String ("No unused audio: the song, its saved files, its versions or its branches play "
+                                                    "every file in the project's Audio and Generated folders.")
                                     : juce::String (count) + " of " + juce::String ((int) files.size()) + " ticked, taking "
                                           + juce::File::descriptionOfSizeInBytes (size)
                                           + ". Undo doesn't bring deleted files back; the recycle bin keeps them.";

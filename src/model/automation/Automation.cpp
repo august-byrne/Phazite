@@ -1235,7 +1235,15 @@ std::optional<PointSelection> getSelectedPoints (const Selection& selection)
     if (song == nullptr || ! locateParameter (*song, parameter).has_value())
         return {};
 
-    auto indices = getValidIndices (findCurveState (*song, parameter).getNumChildren(), selection.getPoints());
+    // Where each selected point is in its curve now: one that is gone (removed, or its curve with it) is left out.
+    const auto curve = findCurveState (*song, parameter);
+    std::vector<int> indices;
+
+    for (const auto& point : selection.getPoints())
+        if (const auto index = curve.indexOf (point); index >= 0)
+            indices.push_back (index);
+
+    std::sort (indices.begin(), indices.end());
 
     if (indices.empty())
         return {};
@@ -1245,8 +1253,18 @@ std::optional<PointSelection> getSelectedPoints (const Selection& selection)
 
 void selectPoints (Selection& selection, const ParameterRef& parameter, const std::vector<int>& indices)
 {
-    if (auto* song = selection.getSong())
-        selection.selectPoints (parameter, getValidIndices (findCurveState (*song, parameter).getNumChildren(), indices));
+    auto* song = selection.getSong();
+
+    if (song == nullptr)
+        return;
+
+    const auto curve = findCurveState (*song, parameter);
+    std::vector<juce::ValueTree> points;
+
+    for (const auto index : getValidIndices (curve.getNumChildren(), indices))
+        points.push_back (curve.getChild (index));
+
+    selection.selectPoints (parameter, points);
 }
 
 //==============================================================================

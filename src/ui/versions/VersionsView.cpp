@@ -1860,7 +1860,7 @@ void VersionsView::resized()
 
     // Undo History at the foot and Local History above it, each one's rows (while open) up to a third of what is left, then the
     // graph above them.
-    const auto placeAtFoot = [&area] (SectionHeader& section, juce::ListBox& list, int rows)
+    const auto placeAtFoot = [&area] (SectionHeader& section, juce::ListBox& list, int numRows)
     {
         if (! section.isVisible())
         {
@@ -1869,7 +1869,7 @@ void VersionsView::resized()
             return;
         }
 
-        const auto shown = section.getToggleState() ? rows : 0;
+        const auto shown = section.getToggleState() ? numRows : 0;
         const auto height =
             shown == 0 ? 0 : juce::jmin (juce::jmax (History::changeRowHeight, area.getHeight() / 3), shown * History::changeRowHeight);
         list.setBounds (shown == 0 ? juce::Rectangle<int>() : area.removeFromBottom (height));

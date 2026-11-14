@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What the helper process asks of the operating system (Host.h): to end quietly when a plug-in crashes it, and its CPU
-// time and memory, which the sandbox's benchmarks read (MessageType::stats).
+// What the helper process asks of the operating system (Host.h): to end quietly when a plug-in crashes it, to end with
+// Phazite, its errors in a build with a sanitizer, its ID, and its CPU time and memory, which the sandbox's benchmarks read
+// (MessageType::stats).
 #include "Host.h"
+
+#include <cstdlib>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -28,6 +31,87 @@ void endQuietlyOnCrashes()
     // No dialog of Windows' for a crash (a plug-in's), which would keep the helper waiting for a click: it ends, and
     // Phazite says so in the plug-in's slot.
     SetErrorMode (SetErrorMode (0) | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+#endif
+}
+
+std::int64_t getProcessID()
+{
+#if defined(_WIN32)
+    return (std::int64_t) GetCurrentProcessId();
+#else
+    return (std::int64_t) getpid();
+#endif
+}
+
+#if ! defined(_WIN32)
+namespace
+{
+    class ParentWatch final : private juce::Thread
+    {
+    public:
+        ParentWatch()
+            : juce::Thread ("Phazite parent watch"),
+              parent (getppid())
+        {
+            startThread (juce::Thread::Priority::low);
+        }
+
+        // Woken, and waited for: never ended by force.
+        ~ParentWatch() override
+        {
+            signalThreadShouldExit();
+            notify();
+            stopThread (-1);
+        }
+
+    private:
+        const pid_t parent;
+
+        void run() override
+        {
+            while (! threadShouldExit())
+            {
+                if (getppid() != parent)
+                {
+                    // Phazite gone: the pipe's loss quits the helper through its message thread; one that can't (a plug-in
+                    // keeps it) ends here, as nothing it holds is anyone's now.
+                    wait (1000);
+
+                    if (! threadShouldExit())
+                        std::_Exit (0);
+
+                    return;
+                }
+
+                wait (250);
+            }
+        }
+    };
+} // namespace
+#endif
+
+std::shared_ptr<void> endWithPhazite()
+{
+#if defined(_WIN32)
+    return nullptr;
+#else
+    return std::make_shared<ParentWatch>();
+#endif
+}
+
+void writeErrorsTo ([[maybe_unused]] const juce::String& commandLine)
+{
+#if ! defined(_WIN32)
+    const auto prefix = juce::String ("--") + sandbox::helperErrorsID + ":";
+
+    if (! commandLine.contains (prefix))
+        return;
+
+    if (const auto errors = commandLine.fromFirstOccurrenceOf (prefix, false, false).getIntValue(); errors > STDERR_FILENO)
+    {
+        dup2 (errors, STDERR_FILENO);
+        close (errors);
+    }
 #endif
 }
 

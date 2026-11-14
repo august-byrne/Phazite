@@ -460,7 +460,7 @@ TEST_CASE ("A DAWproject whose files share their compressed bytes unpacks no mor
 
     CHECK (unpacked <= phazite::getUnpackLimit (file));
     CHECK (unpacked >= 3 * sharedSize); // the first files, whole, until the limit
-    CHECK (said.contains ("audio files that aren't in it"));
+    CHECK (said.joinIntoString ("\n").contains ("audio clips whose files aren't in it"));
     checkSong (*song);
 }
 

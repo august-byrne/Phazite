@@ -189,7 +189,9 @@ Ctrl+X, Ctrl+C and Ctrl+V in every keymap, in the Edit menu, and in the clips', 
 - **Cut** copies and then deletes as Delete does.
 - **Paste** puts clips at the playhead, from the selected track down (else the first selected clip's track, else
   where they came from), each in place of what lies under it, so that nothing plays twice. They are copies, not
-  aliases. The automation comes with them when they go back onto their own tracks
+  aliases, never on a return or a folder; clips from more tracks than there are from the selected one down get empty
+  tracks added after the last, as REAPER, Studio One and Logic Pro add them. The automation comes with them when they
+  go back onto their own tracks
   ([automation-and-modulation.md](automation-and-modulation.md)).
 - **Notes** go into the clip the piano roll shows at the playhead, or, with none of them there, into its first clip
   as far in as they were in theirs, so that a part copies from one pattern to another.

@@ -68,7 +68,8 @@ TEST_CASE ("The playlist's Slice tool splits a clip on the grid where it is clic
 TEST_CASE ("The playlist's Slip tool moves the audio inside a clip by the grid's steps, the clip staying where it is")
 {
     PlaylistScreen screen;
-    const auto clip = screen.addAudioClip (2, 2.0); // 4 seconds: beats 2 to 10
+    const auto clip = screen.addAudioClip (2, 2.0);            // 4 seconds: beats 2 to 10
+    phazite::trimClipEnd (screen.context, clip, beatAt (8.0)); // its file's first 3 seconds: a slip keeps it in the file
     phazite::test::dispatchPendingMessages();
     screen.getSong().getUndoManager().clearUndoHistory();
     screen.playlist.setTool (Tool::slip);
@@ -718,6 +719,94 @@ TEST_CASE ("A note dragged out of the piano roll's view and back lands where the
 
     CHECK (screen.get (note).start.inBeats() == doctest::Approx (0.0));
     CHECK (screen.pianoRoll.getDragReadout().isEmpty());
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("A note dragged past its clip's end and back leaves the clip as it was; let go past it, the clip grows to hold it")
+{
+    // The clip grew at each step of the drag, and never shrank again: let go back inside, it stayed a bar longer, and the
+    // song's end with it (known bug 44).
+    PianoRollScreen screen;
+    screen.pianoRoll.zoomTo ({ beatAt (0.0), beatAt (16.0) });
+    phazite::test::deliverChanges();
+    const auto note = screen.addNote (6.0);
+    screen.getSong().getUndoManager().clearUndoHistory();
+    Mouse mouse (*screen.notes);
+    UndoCheck undo (screen.getSong());
+    const auto clipEnd = [&screen] { return phazite::getClip (screen.context, screen.clip).value().range.getEnd().inBeats(); };
+    REQUIRE (clipEnd() == doctest::Approx (8.0));
+
+    SUBCASE ("Moved")
+    {
+        undo.check ("past the end and back",
+                    [&]
+                    {
+                        const auto from = screen.middleOf (note);
+                        mouse.press (from);
+                        mouse.dragTo (from.translated (screen.widthOf (4.0), 0));
+                        phazite::test::deliverChanges();
+                        CHECK (clipEnd() == doctest::Approx (12.0)); // to the end of the note's bar, while it is there
+                        mouse.dragTo (from.translated (-screen.widthOf (3.0), 0));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        phazite::test::deliverChanges();
+
+        CHECK (screen.get (note).start.inBeats() == doctest::Approx (3.0));
+        CHECK (clipEnd() == doctest::Approx (8.0));
+
+        // Let go past it, the clip holds it.
+        undo.check ("past the end",
+                    [&]
+                    {
+                        const auto from = screen.middleOf (note);
+                        mouse.press (from);
+                        mouse.dragTo (from.translated (screen.widthOf (6.0), 0));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        CHECK (screen.get (note).start.inBeats() == doctest::Approx (9.0));
+        CHECK (clipEnd() == doctest::Approx (12.0));
+    }
+
+    SUBCASE ("Copied")
+    {
+        undo.check ("a copy past the end and back",
+                    [&]
+                    {
+                        const auto from = screen.middleOf (note);
+                        mouse.press (from, ctrl);
+                        mouse.dragTo (from.translated (screen.widthOf (4.0), 0));
+                        phazite::test::deliverChanges();
+                        mouse.dragTo (from.translated (-screen.widthOf (2.0), 0));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        phazite::test::deliverChanges();
+
+        CHECK (screen.getAll().size() == 2);
+        CHECK (clipEnd() == doctest::Approx (8.0));
+    }
+
+    SUBCASE ("Made longer")
+    {
+        undo.check ("its end past the clip's and back",
+                    [&]
+                    {
+                        const auto end = juce::Point<int> (screen.xOf (7.0) - 2, screen.yOf (screen.get (note).pitch));
+                        mouse.press (end);
+                        mouse.dragTo (end.translated (screen.widthOf (4.0), 0));
+                        phazite::test::deliverChanges();
+                        mouse.dragTo (end.translated (screen.widthOf (1.0), 0));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        phazite::test::deliverChanges();
+
+        CHECK (screen.get (note).length.inBeats() == doctest::Approx (2.0)); // to the clip's end
+        CHECK (clipEnd() == doctest::Approx (8.0));
+    }
+
     undo.walkBackAndForth();
 }
 

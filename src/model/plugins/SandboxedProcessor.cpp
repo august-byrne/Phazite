@@ -55,8 +55,7 @@ namespace
         return 0;
     }
 
-    constexpr size_t maximumWaiting = 1024;                    // the events kept for the next block at most
-    constexpr std::int64_t renderWaitNanoseconds = 50'000'000; // how long a render waits before it looks whether to go on
+    constexpr size_t maximumWaiting = 1024; // the events kept for the next block at most
 
     // Whether every sample is a number: none an infinity or a NaN, whose exponents' bits are all set.
     bool areNumbers (const float* samples, int numSamples) noexcept
@@ -84,8 +83,7 @@ SandboxedProcessor::SandboxedProcessor (std::shared_ptr<SandboxedInstance> sandb
     : kept (std::move (sandboxed)),
       instance (*kept),
       typeID ("plugin"),
-      name (instance.getDescription().name.toStdString()),
-      wasCrashed (instance.hasCrashed())
+      name (instance.getDescription().name.toStdString())
 {
     // An instrument as its description says, which the song files it by: not by its buses, as an instrument may take sound
     // in too (a vocoder's, or a sidechain as its main input).
@@ -121,14 +119,27 @@ int SandboxedProcessor::findParameter (const juce::String& ownID) const
 void SandboxedProcessor::prepare (double sampleRate, int maximumBlockSize)
 {
     rate = sampleRate;
+    maximumBlock = std::max (1, maximumBlockSize);
     instance.prepareToPlay (sampleRate, maximumBlockSize);
+    fadeStep = 1.0f / (float) std::max (1, juce::roundToInt (fadeSeconds * sampleRate));
+    heard = instance.hasCrashed() ? 0.0f : 1.0f; // nothing to fade out of one that plays nothing from the start
+
+    // An effect's input, for as long as it delays its sound and a block more, to fade out from.
+    if (info.kind == devices::DeviceKind::effect)
+    {
+        latency = std::max (0, getLatencySamples());
+        history.setSize (2, latency + std::max (maximumBlock, 512) + 1);
+        history.clear();
+        historyAt = 0;
+    }
 }
 
 void SandboxedProcessor::reset()
 {
-    // What waited for a block was of the sound before, which the plug-in, reset, plays no more of.
+    // What waited for a block was of the sound before, which the plug-in, reset, plays no more of; nor fades out from.
     resetWanted = true;
     waiting.clear();
+    history.clear();
 }
 
 void SandboxedProcessor::start (const devices::ProcessContext& context)
@@ -149,16 +160,91 @@ void SandboxedProcessor::process (const devices::ProcessContext& context)
         return;
     }
 
+    remember (context);
+
     if (handOver (context))
         collect (context, juce::Time::getHighResolutionTicks());
 }
 
-void SandboxedProcessor::silence (const devices::ProcessContext& context) const noexcept
+void SandboxedProcessor::remember (const devices::ProcessContext& context) noexcept
 {
-    // An instrument plays nothing; an effect lets its sound through.
-    if (info.kind == devices::DeviceKind::instrument)
-        for (int i = 0; i < context.numChannels; ++i)
-            juce::FloatVectorOperations::clear (context.channels[i], context.numSamples);
+    const auto size = history.getNumSamples();
+
+    if (size == 0 || context.numChannels <= 0)
+        return;
+
+    const auto numSamples = std::min (context.numSamples, size);
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        const auto* input = context.channels[std::min (channel, context.numChannels - 1)];
+        auto* remembered = history.getWritePointer (channel);
+
+        for (int i = 0; i < numSamples; ++i)
+            remembered[(historyAt + i) % size] = input[i];
+    }
+
+    historyAt = (historyAt + numSamples) % size;
+}
+
+void SandboxedProcessor::silence (const devices::ProcessContext& context) noexcept
+{
+    // An instrument plays nothing. An effect's input, as late as the plug-in would have played it (where its delay of it
+    // would leave it), faded out from as much of the plug-in's sound as was heard, then nothing: never what came in, dry.
+    const auto size = history.getNumSamples();
+    const auto numSamples = std::min (context.numSamples, size);
+    auto level = heard;
+
+    for (int channel = 0; channel < context.numChannels; ++channel)
+    {
+        auto* samples = context.channels[channel];
+        level = heard;
+
+        if (info.kind == devices::DeviceKind::effect && size > 0 && level > 0.0f)
+        {
+            const auto* remembered = history.getReadPointer (std::min (channel, 1));
+            const auto delayed = std::min (latency, size - numSamples);
+            const auto first = historyAt - numSamples - delayed + 2 * size; // remember() has had this block
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                level = std::max (0.0f, level - fadeStep);
+                samples[i] = remembered[(first + i) % size] * level;
+            }
+
+            juce::FloatVectorOperations::clear (samples + numSamples, context.numSamples - numSamples);
+        }
+        else
+        {
+            level = 0.0f;
+            juce::FloatVectorOperations::clear (samples, context.numSamples);
+        }
+    }
+
+    heard = context.numChannels > 0 ? level : 0.0f;
+}
+
+void SandboxedProcessor::fadeIn (const devices::ProcessContext& context) noexcept
+{
+    if (heard >= 1.0f)
+        return;
+
+    auto level = heard;
+
+    for (int channel = 0; channel < context.numChannels; ++channel)
+    {
+        auto* samples = context.channels[channel];
+        level = heard;
+
+        for (int i = 0; i < context.numSamples && level < 1.0f; ++i)
+        {
+            level = std::min (1.0f, level + fadeStep);
+            samples[i] *= level;
+        }
+    }
+
+    if (context.numChannels > 0)
+        heard = level;
 }
 
 void SandboxedProcessor::skip (const devices::ProcessContext& context) noexcept
@@ -208,30 +294,21 @@ void SandboxedProcessor::keep (std::span<const devices::NoteEvent> events) noexc
     }
 }
 
-bool SandboxedProcessor::waitInRender (sandbox::BlockChannel& channel) noexcept
+bool SandboxedProcessor::waitInRender() noexcept
 {
     // For as long as the plug-in takes, a little at a time: until its helper has gone, or it has kept the block so long
     // that it hangs, which its helper is ended for, or the render is cancelled.
-    auto& helper = instance.getRemote().getHelper();
-    const auto limit = (std::int64_t) helper.getAudioHangMilliseconds() * renderHangFactor * 1'000'000;
-    const auto since = sandbox::getNanoseconds();
+    const auto limit = (std::int64_t) instance.getRemote().getHelper().getAudioHangMilliseconds() * renderHangFactor * 1'000'000;
 
-    for (;;)
+    switch (instance.waitForAnswer (limit, &renderCancelled))
     {
-        if (channel.waitForAnswer (0, renderWaitNanoseconds) == sandbox::BlockChannel::Played::done)
+        case SandboxedInstance::Answer::played:
             return true;
-
-        if (renderCancelled.load (std::memory_order_acquire))
+        case SandboxedInstance::Answer::cancelled:
             return false;
-
-        if (instance.hasCrashed())
+        case SandboxedInstance::Answer::gone:
+        case SandboxedInstance::Answer::hung:
             break;
-
-        if (sandbox::getNanoseconds() - since > limit)
-        {
-            helper.reportHung();
-            break;
-        }
     }
 
     failedInRender.store (true, std::memory_order_release);
@@ -245,33 +322,39 @@ void SandboxedProcessor::collect (const devices::ProcessContext& context, std::i
 
     if (context.isRendering)
     {
-        played = waitInRender (channel);
+        played = waitInRender();
     }
     else
     {
-        // As long as a block's own length in real time from when it was handed over.
+        // As long as a block's own length in real time from when it was handed over (a millisecond at least).
         const auto waited =
             (std::int64_t) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - since) * 1.0e9);
-        const auto deadline = std::max<std::int64_t> (0, SandboxedInstance::getDeadlineNanoseconds (context.numSamples, rate) - waited);
+        const auto deadline =
+            std::max<std::int64_t> (0, SandboxedInstance::getDeadlineNanoseconds (context.numSamples, maximumBlock, rate) - waited);
         played = channel.waitForAnswer (0, deadline) == sandbox::BlockChannel::Played::done;
     }
 
-    // What it played, unless some of it isn't a number, which every device after it would keep: such a block is as one it
-    // didn't play.
+    // What it played, as it was handed over: by the channels and samples Phazite handed it, never by what the helper's side
+    // of the memory says now, which a helper gone wrong could have left anything in (a block that says otherwise is as one
+    // it didn't play); unless some of it isn't a number, which every device after it would keep, which is as one it didn't
+    // play too.
     if (played)
     {
-        const auto numChannels = channel.getInfo().numChannels;
+        const auto& block = channel.getInfo();
+        played = block.numChannels == handedChannels && block.numSamples == context.numSamples;
 
-        for (int i = 0; i < numChannels && played; ++i)
+        for (int i = 0; i < handedChannels && played; ++i)
             played = areNumbers (channel.getChannel (i), context.numSamples);
 
-        for (int i = 0; i < numChannels && played; ++i)
+        for (int i = 0; i < handedChannels && played; ++i)
             juce::FloatVectorOperations::copy (context.channels[i], channel.getChannel (i), context.numSamples);
     }
 
     instance.let();
 
-    if (! played)
+    if (played)
+        fadeIn (context);
+    else
         silence (context);
 }
 
@@ -281,6 +364,17 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
     if (context.isRendering)
     {
         instance.hold();
+
+        // A block of live playback the helper is still on (late) is waited for, as a render's own would be; then the
+        // channel prepared for the rate the render plays at, where it waited for that block to be.
+        if (instance.getRemote().getChannel().isBusy() && ! instance.hasCrashed() && ! waitInRender())
+        {
+            instance.let();
+            skip (context);
+            return false;
+        }
+
+        instance.finishPreparing();
     }
     else if (! instance.tryHold())
     {
@@ -307,10 +401,10 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
         busySince = 0;
     }
 
-    // Its helper gone: it plays nothing more, so nothing waits for it; a render it went in says so.
+    // Its helper gone: it plays nothing more, so nothing waits for it; a render it is in says so.
     if (instance.hasCrashed())
     {
-        if (context.isRendering && ! wasCrashed)
+        if (context.isRendering)
             failedInRender.store (true, std::memory_order_release);
 
         instance.let();
@@ -319,7 +413,9 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
         return false;
     }
 
-    if (channel.isBusy() || context.numSamples > limits.maxSamples)
+    // Still on a block, too long a block for its channel, or its channel waiting for the helper to give a block back before
+    // it is prepared for another rate.
+    if (channel.isBusy() || context.numSamples > limits.maxSamples || instance.isPreparing())
     {
         instance.let();
         skip (context);
@@ -327,11 +423,12 @@ bool SandboxedProcessor::handOver (const devices::ProcessContext& context) noexc
     }
 
     auto& block = channel.getInfo();
+    handedChannels = std::min (context.numChannels, limits.maxChannels);
     block.numSamples = context.numSamples;
-    block.numChannels = std::min (context.numChannels, limits.maxChannels);
+    block.numChannels = handedChannels;
     block.numSidechainChannels = 0;
 
-    for (int i = 0; i < block.numChannels; ++i)
+    for (int i = 0; i < handedChannels; ++i)
         juce::FloatVectorOperations::copy (channel.getChannel (i), context.channels[i], context.numSamples);
 
     if (context.sidechain != nullptr && instance.getRemote().getInfo().hasSidechain)

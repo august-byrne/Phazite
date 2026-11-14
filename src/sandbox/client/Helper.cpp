@@ -2,7 +2,18 @@
 #include "Helper.h"
 
 #include <algorithm>
-#include <cstdio>
+
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+#else
+ #include <unistd.h>
+#endif
 
 // Built with a sanitizer (the linux-asan and linux-tsan presets): GCC says so by these, Clang by __has_feature.
 #if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
@@ -29,43 +40,68 @@ namespace
     constexpr int watchMilliseconds = 200;
     constexpr double heartbeatMilliseconds = 1000.0; // how often the message thread is asked whether it answers
 
-    // What a helper writes to stderr. Built with a sanitizer, the helper's reports (a race, a leak, undefined behaviour,
-    // a bad access) are written there, and kept: passed on whole to Phazite's own stderr, where the tests' output shows
-    // them as it shows the tests' own (tools/ci-sanitizer-reports.sh). Otherwise it goes nowhere, as JUCE's ChildProcess
-    // sends what it isn't asked to read: a reader of the helper's output would wait on a pipe that a process the plug-in
-    // started could hold open after the helper went.
-    constexpr int helperStreams = PHAZITE_SANITIZED ? juce::ChildProcess::wantStdErr : 0;
-} // namespace
-
-// Reads what the helper writes to stderr until it goes (the pipe's end), and passes it on to this process's.
-class Helper::Relay final : private juce::Thread
-{
-public:
-    explicit Relay (juce::ChildProcess& p)
-        : juce::Thread ("Phazite helper output"),
-          process (p)
+    // The program's arguments: the pipe it connects to; and, built with a sanitizer on Linux and macOS, a copy of this
+    // process's stderr, which it inherits (JUCE's ChildProcess keeps what isn't closed on exec) and writes its own to, so
+    // that its reports (a race, a leak, undefined behaviour, a bad access) reach the tests' output as the tests' own do
+    // (tools/ci-sanitizer-reports.sh). Nothing of Phazite's reads the helper's output: a reader would wait on a pipe that
+    // a process the plug-in started could hold open after the helper went. Otherwise its output goes nowhere (JUCE's
+    // ChildProcess sends what it isn't asked to read there). JUCE workaround W31 (docs/juce-workarounds.md).
+    juce::StringArray getArguments (const juce::File& program, const juce::String& pipeName)
     {
-        startThread (juce::Thread::Priority::low);
+        juce::StringArray arguments { program.getFullPathName(), juce::String ("--") + helperProcessID + ":" + pipeName };
+
+#if PHAZITE_SANITIZED && ! JUCE_WINDOWS
+        static const int errors = ::dup (STDERR_FILENO);
+
+        if (errors >= 0)
+            arguments.add (juce::String ("--") + helperErrorsID + ":" + juce::String (errors));
+#endif
+
+        return arguments;
     }
 
-    // Waits for the end of the helper's output, which comes as the helper goes: called once it has.
-    ~Relay() override { stopThread (-1); }
-
-private:
-    juce::ChildProcess& process;
-
-    void run() override
+#if JUCE_WINDOWS
+    // The job the helpers are in, which ends them as this process ends however it ends (a crash, or ended from outside),
+    // as the system closes the job's last handle then: made once, its handle never closed nor inherited. What a helper
+    // starts (a plug-in's browser for its manual, a licence manager) isn't put in it, and outlives Phazite as it would
+    // have outlived a plug-in hosted in Phazite's own process.
+    HANDLE getHelpersJob()
     {
-        // One byte at a time, as it comes (a read of more waits for all of it): a report is a few kilobytes, once.
-        for (char byte = 0; process.readProcessOutput (&byte, 1) > 0;)
+        static const HANDLE job = []
         {
-            std::fputc (byte, stderr);
+            auto* made = CreateJobObjectW (nullptr, nullptr);
 
-            if (byte == '\n')
-                std::fflush (stderr);
-        }
+            if (made != nullptr)
+            {
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits {};
+                limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+                SetInformationJobObject (made, JobObjectExtendedLimitInformation, &limits, sizeof (limits));
+            }
+
+            return made;
+        }();
+
+        return job;
     }
-};
+#endif
+
+    // A helper put where it ends as Phazite does: on Windows, in the helpers' job; on Linux and macOS it watches for its
+    // parent to go itself (host/core/Host.h). By the process ID the helper tells as it starts, as JUCE's ChildProcess
+    // keeps its handle of the process to itself: JUCE workaround W32 (docs/juce-workarounds.md).
+    void endWithThisProcess ([[maybe_unused]] std::int64_t processID)
+    {
+#if JUCE_WINDOWS
+        if (auto* job = getHelpersJob(); job != nullptr)
+        {
+            if (auto* process = OpenProcess (PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE, (DWORD) processID); process != nullptr)
+            {
+                AssignProcessToJobObject (job, process);
+                CloseHandle (process);
+            }
+        }
+#endif
+    }
+} // namespace
 
 class Helper::Pipe final : public juce::InterprocessConnection
 {
@@ -194,7 +230,6 @@ Helper::~Helper()
             process.kill();
     }
 
-    relay = nullptr; // what it wrote to the end, now that it has gone
     closePipe();
     watch = nullptr;
     pipe = nullptr;
@@ -226,13 +261,9 @@ bool Helper::start (int timeoutMilliseconds)
     {
         const juce::ScopedLock held (processLock);
 
-        if (! process.start (juce::StringArray { program.getFullPathName(), juce::String ("--") + helperProcessID + ":" + pipeName },
-                             helperStreams))
+        if (! process.start (getArguments (program, pipeName), 0))
             return false;
     }
-
-    if (helperStreams != 0)
-        relay = std::make_unique<Relay> (process);
 
     // Until it has answered, a loss isn't told (a start that fails says so itself), and the watching thread ends a helper
     // that doesn't answer in time: one that never connects to the pipe would keep the hello's write waiting for ever.
@@ -251,6 +282,8 @@ bool Helper::start (int timeoutMilliseconds)
 
         if (reader.readInt() == protocolVersion)
         {
+            processID = reader.readInt64();
+            endWithThisProcess (processID);
             lost = false; // from now on a loss is told
 
             if (running)
@@ -263,7 +296,6 @@ bool Helper::start (int timeoutMilliseconds)
     killProcess();
     closePipe();
     watch = nullptr;
-    relay = nullptr; // the helper's output to its end, which comes as it goes
     return false;
 }
 

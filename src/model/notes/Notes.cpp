@@ -599,6 +599,27 @@ void setNoteLength (Song& song, const NoteRef& ref, BeatDuration length)
                 [length] (juce::ValueTree& n, juce::UndoManager* undo) { n.setProperty (schema::noteLength, length.inBeats(), undo); });
 }
 
+void placeNote (Song& song, const NoteRef& ref, BeatPosition start, int pitch, BeatDuration length)
+{
+    const auto clipState = findMidiClipState (song, ref.clip);
+    const auto note = getNoteData (song, ref);
+
+    if (! note.has_value())
+        return;
+
+    start = keepPlayed (song, clipState, note->start, start);
+    length = std::max (length, getMinimumNoteLength());
+    growToHold (song, clipState, start + length);
+    const auto clipBeat = toClipBeat (clipState, start);
+    changeNote (song, ref,
+                [clipBeat, pitch, length] (juce::ValueTree& n, juce::UndoManager* undo)
+                {
+                    n.setProperty (schema::noteStart, clipBeat.inBeats(), undo);
+                    n.setProperty (schema::notePitch, clampPitch (pitch), undo);
+                    n.setProperty (schema::noteLength, length.inBeats(), undo);
+                });
+}
+
 void deleteNotes (Song& song, const std::vector<NoteRef>& notes)
 {
     // Each by its ID, all found before any goes; a note's copies in its clip's aliases go with it.
@@ -872,13 +893,19 @@ std::vector<NoteData> quantize (std::vector<NoteData> notes, const QuantizeSetti
     // triplet.
     const auto origin = settings.origin.inBeats();
 
+    const auto lineAt = [=] (double index)
+    { return origin + index * grid + (std::fmod (std::abs (index), 2.0) > 0.5 ? swing * grid / 3.0 : 0.0); };
+
+    // The nearest of the lines as they are swung: of the unswung lines' nearest, the swung one could be farther than its
+    // neighbour.
     const auto quantizeBeat = [=] (double beat)
     {
-        const auto index = std::round ((beat - origin) / grid);
-        auto target = origin + index * grid;
+        const auto nearest = std::round ((beat - origin) / grid);
+        auto target = lineAt (nearest);
 
-        if (std::fmod (std::abs (index), 2.0) > 0.5)
-            target += swing * grid / 3.0;
+        for (const auto index : { nearest - 1.0, nearest + 1.0 })
+            if (std::abs (lineAt (index) - beat) < std::abs (target - beat))
+                target = lineAt (index);
 
         return std::max (0.0, beat + (target - beat) * strength);
     };
@@ -942,7 +969,10 @@ std::vector<NoteData> chop (std::vector<NoteData> notes, double pieceBeats)
         {
             auto piece = note; // the first piece replaces the note (replaceNotes() keeps its ID), and the rest are new
             piece.start = note.start + BeatDuration::fromBeats (offset);
-            piece.length = BeatDuration::fromBeats (std::min (pieceBeats, length - offset));
+
+            // The last there may be holds the rest of a note too long for that many, which would be lost.
+            const auto last = i == maxPiecesPerNote - 1;
+            piece.length = BeatDuration::fromBeats (last ? length - offset : std::min (pieceBeats, length - offset));
             pieces.push_back (piece);
         }
     }
@@ -1043,9 +1073,12 @@ std::vector<NoteData> arpeggiate (std::vector<NoteData> notes, const ArpeggioSet
             if ((chordEnd - start).inBeats() < 1.0e-6)
                 break;
 
+            // The last step there may be holds the rest of a chord too long for that many, which would be lost.
             auto piece = notes[chord[order[(size_t) i % order.size()]]];
             piece.start = start;
-            piece.length = std::max (getMinimumNoteLength(), std::min (BeatDuration::fromBeats (step * gate), chordEnd - start));
+            piece.length = i == maxSteps - 1
+                               ? std::max (getMinimumNoteLength(), chordEnd - start)
+                               : std::max (getMinimumNoteLength(), std::min (BeatDuration::fromBeats (step * gate), chordEnd - start));
             result.push_back (piece);
         }
     }
@@ -1090,7 +1123,59 @@ juce::String getScaleName (Scale scale)
 
 juce::String describeKey (const Key& key)
 {
-    return juce::MidiMessage::getMidiNoteName (key.root, true, false, 0) + " " + getScaleName (key.scale).toLowerCase();
+    return spellWithLetter (getKeyRootLetter (key), key.root) + " " + getScaleName (key.scale).toLowerCase();
+}
+
+int getParentMajor (const Key& key)
+{
+    switch (key.scale)
+    {
+        case Scale::major:
+            return floorModulo (key.root, 12);
+        case Scale::dorian:
+            return floorModulo (key.root - 2, 12);
+        case Scale::phrygian:
+            return floorModulo (key.root - 4, 12);
+        case Scale::lydian:
+            return floorModulo (key.root - 5, 12);
+        case Scale::mixolydian:
+            return floorModulo (key.root - 7, 12);
+        case Scale::locrian:
+            return floorModulo (key.root - 11, 12);
+        case Scale::minor:
+        case Scale::harmonicMinor:
+        case Scale::melodicMinor:
+        default:
+            return floorModulo (key.root + 3, 12);
+    }
+}
+
+namespace
+{
+    constexpr const char* letterNames = "CDEFGAB";
+    constexpr int letterPitches[] = { 0, 2, 4, 5, 7, 9, 11 };
+} // namespace
+
+int getKeyRootLetter (const Key& key)
+{
+    const auto parent = getParentMajor (key);
+    const auto flats = parent == 5 || parent == 10 || parent == 3 || parent == 8 || parent == 1;
+    constexpr int sharpLetters[] = { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 }; // C C# D D# E F F# G G# A A# B
+    constexpr int flatLetters[] = { 0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6 };  // C Db D Eb E F Gb G Ab A Bb B
+    return (flats ? flatLetters : sharpLetters)[floorModulo (key.root, 12)];
+}
+
+juce::String spellWithLetter (int letter, int pitchClass)
+{
+    letter = floorModulo (letter, 7);
+    auto difference = floorModulo (pitchClass - letterPitches[letter], 12);
+
+    if (difference > 6)
+        difference -= 12;
+
+    auto name = juce::String::charToString (letterNames[letter]);
+    name << juce::String::repeatedString (difference > 0 ? "#" : "b", std::abs (difference));
+    return name;
 }
 
 std::vector<int> getScaleSteps (Scale scale)

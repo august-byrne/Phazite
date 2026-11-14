@@ -417,14 +417,16 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     CHECK (phazite::getSendTarget (model, sends[0]) == song.reverb);
     CHECK (phazite::getDevices (model, bounced).empty());
 
-    // The original, muted and collapsed; one undo step, which takes it all back, mute included, though a mute alone is no
-    // undo step; Redo brings it back.
+    // The original muted, and shown as it was: collapsing it was view state, outside the step, which Undo left collapsed
+    // (known bug 138). One undo step, which takes it all back, mute included, though a mute alone is no undo step; Redo
+    // brings it back.
     CHECK (phazite::isTrackMuted (model, song.bass, false));
-    CHECK (phazite::isCollapsed (model, song.bass));
+    CHECK_FALSE (phazite::isCollapsed (model, song.bass));
     CHECK (phazite::describeUndo (&model) == juce::String ("Undo Bounce in Place"));
     phazite::undo (model);
     CHECK (phazite::getTrackIDs (model).size() == 2);
     CHECK_FALSE (phazite::isTrackMuted (model, song.bass, false));
+    CHECK_FALSE (phazite::isCollapsed (model, song.bass));
     REQUIRE (phazite::canRedo (model));
     phazite::redo (model);
     CHECK (phazite::getTrackIDs (model).size() == 3);

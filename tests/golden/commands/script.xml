@@ -222,7 +222,7 @@
                 parameter="volume"/>
         </LANES>
       </TRACK>
-      <TRACK collapsed="1"
+      <TRACK collapsed="0"
              colour="ff56b4e9"
              fader="6"
              height="64"
