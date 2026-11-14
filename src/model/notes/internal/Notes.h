@@ -27,9 +27,22 @@ std::optional<NoteData> getNoteData (const Song&, const NoteRef&);
 std::vector<NoteData> getNoteData (const Song&, const std::vector<NoteRef>&); // those there
 std::vector<NoteData> getClipNotes (const Song&, ClipID);                     // in the order the clip holds them
 
+// The notes of a clip that play: those in the part of the song the clip covers, one that an edge of the clip cuts too
+// (which plays from the clip's start, or to its end, as model/playback/internal/SongPlayer.h plays it). A split or a trim
+// leaves the others in the clip, as they are, until the clip covers them again: no editor shows them, and no edit of
+// what is shown selects or changes them. And whether a note is one that plays, and whether a new note starting at a song
+// beat would be: in the clip, or in the room it can grow into (addNote()).
+std::vector<NoteData> getClipNotesPlayed (const Song&, ClipID);
+bool isNotePlayed (const Song&, const NoteRef&);
+bool canPlayNoteAt (const Song&, ClipID, BeatPosition start);
+
+// The latest a note of a clip can start and still play: the shortest note before where the clip can grow to, the start of
+// the next clip on its track. None while nothing keeps the clip from growing to hold the note.
+std::optional<BeatPosition> getLatestNoteStart (const Song&, ClipID);
+
 //==============================================================================
-// The selected notes still there, of the clips the piano roll shows (Selection: getNotes()); and selecting notes (of those
-// clips), deselecting anything else.
+// The selected notes still there that play (getClipNotesPlayed()), of the clips the piano roll shows (Selection:
+// getNotes()); and selecting notes (of those clips), deselecting anything else.
 std::vector<NoteRef> getSelectedNotes (const Selection&);
 bool hasSelectedNotes (const Selection&);
 void selectNotes (Selection&, const std::vector<NoteRef>&);
@@ -43,8 +56,10 @@ void selectNotes (Selection&, const std::vector<NoteRef>&);
 // playing, as outside a trimmed clip. Returns it, or none for a clip that isn't a MIDI clip of the song's.
 NoteRef addNote (Song&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity);
 
-// Moves a note to a song beat and a pitch. It can't start before its clip's content does; the clip grows to hold it,
-// as addNote() says.
+// Moves a note to a song beat and a pitch. It can't go to before its clip's start (one that starts before it already,
+// which a split or a trim cut, goes no earlier than it is); the clip grows to hold it, as addNote() says, and where the
+// clip can't grow it goes no later than getLatestNoteStart() (nor than it is, if it is later already): a move never
+// takes a note that plays to where its clip doesn't play it.
 void moveNote (Song&, const NoteRef&, BeatPosition start, int pitch);
 
 // Sets a note's length (at least getMinimumNoteLength()); the clip grows to hold it, as addNote() says.
@@ -55,7 +70,8 @@ void deleteNotes (Song&, const std::vector<NoteRef>&);
 // Transposes the notes by semitones, all by the same amount and none beyond the MIDI range.
 void transposeNotes (Song&, const std::vector<NoteRef>&, int semitones);
 
-// Moves the notes in time, all by the same amount and none before its clip's content.
+// Moves the notes in time, all by the same amount and none to before its clip's start or to where its clip doesn't play
+// it, as moveNote() says.
 void nudgeNotes (Song&, const std::vector<NoteRef>&, BeatDuration);
 
 // Makes the notes longer or shorter by the same amount, each at least getMinimumNoteLength().
@@ -75,7 +91,7 @@ void toggleNotesPortamento (Song&, const std::vector<NoteRef>&);
 void changeNoteVelocities (Song&, const std::vector<NoteRef>&, int change);
 
 // Copies the notes right after them, as FL Studio's Ctrl+B does, each into its original's clip, which grows as
-// addNote() says. Returns the copies.
+// addNote() says; a copy that wouldn't play, past its clip where the clip can't grow, isn't made. Returns the copies.
 std::vector<NoteRef> duplicateNotes (Song&, const std::vector<NoteRef>&);
 
 // Puts these notes in a clip, and in its aliases, in place of all it holds, without growing it: the notes the chord lane
@@ -83,7 +99,10 @@ std::vector<NoteRef> duplicateNotes (Song&, const std::vector<NoteRef>&);
 void setClipNotes (Song&, ClipID, const std::vector<NoteData>&);
 
 // Replaces notes with others, such as a transform's result: the old ones go, and the new ones are added to the clips
-// they name. Returns the new notes.
+// they name. One that replaces an old one (it has its ID, which it keeps) stays where its clip plays it, as a moved note
+// does (moveNote()); the others that come of an old one (a chopped note's later pieces, which have its ID too) go where
+// they are given, past the clip's end too, where the old note reached; and one that comes of none (a copy, a pasted note)
+// is added only where it plays (getClipNotesPlayed()). Returns the new notes.
 std::vector<NoteRef> replaceNotes (Song&, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements);
 
 // The same, as one undo step with the name given (a transform's, such as "Quantize Notes").

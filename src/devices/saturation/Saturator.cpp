@@ -64,6 +64,11 @@ void Saturator::prepare (double newSampleRate, int maximumBlockSize)
     oversampling->initProcessing ((size_t) std::max (1, maximumBlockSize));
     latency = (int) std::lround (oversampling->getLatencyInSamples()) + dsp::AntialiasedCurve::delay / 2;
 
+    // The same again for the copy of what came in, which its mix blends with the sound.
+    dryOversampling =
+        std::make_unique<juce::dsp::Oversampling<float>> (2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, true);
+    dryOversampling->initProcessing ((size_t) std::max (1, maximumBlockSize));
+
     const auto rate = 2.0 * sampleRate;
     smoothing = (float) (1.0 - std::exp (-1.0 / (gainSeconds * rate)));
     reset();
@@ -71,11 +76,16 @@ void Saturator::prepare (double newSampleRate, int maximumBlockSize)
 
 void Saturator::reset()
 {
-    if (oversampling != nullptr)
-        oversampling->reset();
+    for (auto* filters : { &oversampling, &dryOversampling })
+        if (*filters != nullptr)
+            (*filters)->reset();
 
-    for (auto& curve : curves)
-        curve.reset();
+    for (auto* both : { &curves, &dryCurves })
+        for (auto& curve : *both)
+            curve.reset();
+
+    lastMix = 1.0f;
+    dryInStep = false;
 
     for (auto* filters : { &dcBlockers, &lowTilts, &highTilts })
         for (auto& filter : *filters)
@@ -87,6 +97,7 @@ void Saturator::reset()
 void Saturator::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
     const auto& values = block.parameters;
     const auto numChannels = std::min (block.numChannels, 2);
 
@@ -167,5 +178,37 @@ void Saturator::process (const ProcessContext& block)
     }
 
     oversampling->processSamplesDown (audio);
+
+    // What came in, for the mix: through the same filters, as late as the sound and its phase turned alike, a straight line
+    // in the curve's place. Only while the mix uses it (it starts from silence then, as the mix leaves 100 %): with the mix
+    // all the saturator's own sound, nothing reads it.
+    const auto usesDry = block.dry != nullptr && (values[mix] < 1.0f || lastMix < 1.0f);
+    lastMix = values[mix];
+
+    if (usesDry)
+    {
+        if (! dryInStep)
+        {
+            dryOversampling->reset();
+
+            for (auto& straight : dryCurves)
+                straight.reset();
+        }
+
+        juce::dsp::AudioBlock<float> came (block.dry, (size_t) numChannels, (size_t) block.numSamples);
+        auto fastDry = dryOversampling->processSamplesUp (came);
+
+        for (size_t channel = 0; channel < fastDry.getNumChannels(); ++channel)
+        {
+            auto* samples = fastDry.getChannelPointer (channel);
+
+            for (size_t i = 0; i < fastDry.getNumSamples(); ++i)
+                samples[i] = dryCurves[channel].process (samples[i], dsp::StraightCurve {});
+        }
+
+        dryOversampling->processSamplesDown (came);
+    }
+
+    dryInStep = usesDry;
 }
 } // namespace phazite::devices

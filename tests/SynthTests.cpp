@@ -912,6 +912,53 @@ TEST_CASE ("The synth's LFO moves the pulse width, and comes in over its fade af
     CHECK (measureFrequency (heard, 26400, 33600) == doctest::Approx (440.0 * std::exp2 (-1.0 / 12.0)).epsilon (0.003));
 }
 
+TEST_CASE ("A narrow pulse plays around the middle: no offset for the envelope to thump with, or the LFO to swing")
+{
+    // A pulse an eighth wide, the filter off, held: its mean over whole cycles (100 Hz is 480 samples) is nothing, where the
+    // pulse's own offset of -0.75 came out at the note's level.
+    auto values = getSineValues();
+    values[Synth::osc1Wave] = 3.0f; // square
+    values[Synth::pulseWidth] = 0.125f;
+    values[Synth::filterOn] = 0.0f;
+    const auto meanOf = [] (const std::vector<float>& sound, size_t from, size_t to)
+    {
+        auto sum = 0.0;
+
+        for (auto i = from; i < to; ++i)
+            sum += sound[i];
+
+        return sum / (double) (to - from);
+    };
+
+    Synth synth;
+    synth.prepare (testRate, testBlockSize);
+    const auto note = 69.0 + 12.0 * std::log2 (100.0 / 440.0); // 100 Hz, between two keys: bent there
+    values[Synth::bendRange] = 12.0f;
+    const auto bend = (float) ((note - std::floor (note)) / 12.0);
+    const auto played =
+        play (synth, values, 48000, { NoteEvent { NoteEvent::Type::pitchBend, 0, 0, bend }, noteOn (0, (int) std::floor (note)) });
+    REQUIRE (measureFrequency (played, 24000, 48000) == doctest::Approx (100.0).epsilon (0.001));
+    CHECK (measureLevelAt (played, 24000, 48000, 100.0) > 0.1);
+    CHECK (std::abs (meanOf (played, 24000, 48000)) < 0.005);
+
+    // Its width swept by the LFO, the mean stays where it is rather than follow the width.
+    values[Synth::lfoOn] = 1.0f;
+    values[Synth::lfoTarget] = 3.0f; // pulse width
+    values[Synth::lfoRate] = 2.0f;
+    values[Synth::lfoDepth] = 1.0f;
+    values[Synth::pulseWidth] = 0.5f;
+    Synth swept;
+    swept.prepare (testRate, testBlockSize);
+    const auto moving =
+        play (swept, values, 48000, { NoteEvent { NoteEvent::Type::pitchBend, 0, 0, bend }, noteOn (0, (int) std::floor (note)) });
+
+    for (size_t from = 4800; from + 4800 <= moving.size(); from += 4800)
+    {
+        CAPTURE (from);
+        CHECK (std::abs (meanOf (moving, from, from + 4800)) < 0.02);
+    }
+}
+
 TEST_CASE ("Drift lets each voice's pitch wander a few cents, the same every time")
 {
     auto values = getSineValues();

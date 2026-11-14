@@ -511,6 +511,11 @@ void TimelineRuler::mouseDrag (const juce::MouseEvent& e)
 
     if (draggingPlayhead)
     {
+        // While a take records, the press alone took the playhead there: each move ends the take where it is and starts
+        // another (phazite::movePlayhead()), which a drag would do at every line of the grid it crosses.
+        if (isRecording (editor.getContext()))
+            return;
+
         editor.autoScroll (e, shown, TimelineEditor::ScrollDirections::sideways);
         movePlayhead (e);
         return;
@@ -1265,6 +1270,14 @@ BeatPosition TimelineEditor::snapDown (BeatPosition beat, juce::ModifierKeys mod
 
     const auto origin = fromSongStart (timeOrigin);
     return snapDownToGrid (timelineContext, std::max (BeatPosition(), beat - origin), getGridStep()) + origin;
+}
+
+BeatDuration TimelineEditor::snapMove (BeatPosition from, BeatDuration distance, juce::ModifierKeys mods) const
+{
+    // As the line at or before it would move, which is on the grid before and after: the grid's steps there, whatever the
+    // grid counts them from (a bar's start, for steps that don't fill a bar).
+    const auto line = snapDown (from, mods);
+    return snap (line + distance, mods) - line;
 }
 
 void TimelineEditor::setGrid (const GridSettings& newGrid)

@@ -101,11 +101,22 @@ void DeviceRunner::reset()
 
 namespace
 {
+    // Whether samples are silent: every one a number, and none louder than silence. What isn't a number isn't silence: a
+    // device asleep doesn't look at what comes in, so one that slept through it would let it by.
+    bool isQuiet (const float* samples, int numSamples, float silence) noexcept
+    {
+        for (int i = 0; i < numSamples; ++i)
+            if (! (std::abs (samples[i]) <= silence))
+                return false;
+
+        return true;
+    }
+
     // Whether a buffer's channels are silent there.
     bool isQuiet (const juce::AudioBuffer<float>& buffer, int start, int numSamples, int firstChannel, int numChannels, float silence)
     {
         for (int channel = firstChannel; channel < firstChannel + numChannels; ++channel)
-            if (buffer.getMagnitude (channel, start, numSamples) > silence)
+            if (! isQuiet (buffer.getReadPointer (channel, start), numSamples, silence))
                 return false;
 
         return true;
@@ -117,10 +128,8 @@ namespace
     {
         for (const auto& part : parts)
             for (const auto* channel : part.channels)
-                if (channel != nullptr)
-                    if (const auto range = juce::FloatVectorOperations::findMinAndMax (channel + start, numSamples);
-                        range.getEnd() > silence || range.getStart() < -silence)
-                        return false;
+                if (channel != nullptr && ! isQuiet (channel + start, numSamples, silence))
+                    return false;
 
         return true;
     }
@@ -235,12 +244,14 @@ void DeviceRunner::end (juce::AudioBuffer<float>& buffer, int start, int numSamp
         keepValues();
 
     // Silent in and out long enough, its parts' own outputs too (a pad on a track of its own rings on after the sampler's
-    // own sound has ended): asleep from the next block.
+    // own sound has ended): asleep from the next block. Long enough is as long as the tail it reports, as it is now, too:
+    // a delay is silent between its echoes, and asleep it would never play the next.
     if (begun.quietIn && isQuiet (buffer, start, numSamples, 0, std::min (2, buffer.getNumChannels()), silence)
         && arePartsQuiet (in.partOutputs, in.outputOffset, numSamples, silence))
     {
-        silentSamples = std::min (silentSamples + numSamples, sleepAfterSamples);
-        asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence();
+        silentSamples = (int) std::min<std::int64_t> ((std::int64_t) silentSamples + numSamples, maximumSilentSamples);
+        asleep = silentSamples >= sleepAfterSamples && ! in.isRendering && processor->sleepsOnSilence()
+                 && (double) silentSamples >= processor->getTailSeconds() * sampleRate;
     }
     else
     {
@@ -614,8 +625,9 @@ int DeviceRunner::gatherChanges (const Block& in, bool automationMoves, bool isM
 
 void DeviceRunner::mixWithDry (float* const* wet, int dryStart, int length, float targetMix)
 {
-    // The dry sound, delayed as much as the effect delays its own, so that the two line up.
-    if (latencySamples > 0)
+    // The dry sound, delayed as much as the effect delays its own, so that the two line up; unless the effect has delayed it
+    // itself, through the filters that delay its own (devices::Processor::delaysDry()).
+    if (latencySamples > 0 && ! processor->delaysDry())
     {
         for (int channel = 0; channel < 2; ++channel)
         {

@@ -4,7 +4,9 @@
 // its stems (step 2.11): a file for each channel that reaches the master, lined up, into a folder written whole or not
 // at all.
 #include "TestClips.h"
+#include "TestSong.h"
 #include "UiTestHelpers.h"
+#include "devices/delay/Delay.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/engine/AudioFiles.h"
 #include "model/engine/internal/EngineContext.h"
@@ -186,6 +188,43 @@ TEST_CASE ("A song exports to a WAV file that plays it")
     CHECK (report.integratedLufs < -14.0);
     CHECK (report.truePeakDb < -12.0);
     CHECK (getFileNames (sine.renders) == juce::StringArray { "Song.wav" });
+}
+
+TEST_CASE ("An export plays a delay's echoes out past the song's end, through the silence between them")
+{
+    // At 120 BPM, a click on the last beat of the song's one bar, at 1.5 s, through a delay of a second, its echoes alone,
+    // each 0.3 of the one before: the song ends at 2 s in silence, and the echoes come at 2.5 s, 3.5 s and on. Until
+    // 2026-11-13 the tail ended with its first silent block, the song's last: no echo was written.
+    phazite::test::TestSong song;
+    song.setTempo (120.0);
+    song.addAudioClip (song.firstTrack, phazite::test::writeClicks (song.getSoundsFolder(), 1, 120.0), 3.0);
+    const auto delay = song.addEffect (song.firstTrack, phazite::devices::Delay::typeID);
+    song.setParameter (delay, "sync", 0.0f);
+    song.setParameter (delay, "milliseconds", 1000.0f);
+    song.setParameter (delay, "feedback", 0.3f);
+    song.setParameter (delay, "mix", 1.0f);
+    phazite::test::dispatchPendingMessages();
+
+    const auto file = song.getSoundsFolder().getChildFile ("Renders").getChildFile ("Echoes.wav");
+    const auto report = exportAndWait (*phazite::findSong (song.context), file, {});
+    REQUIRE (report.result.wasOk());
+
+    // Both echoes and those after them, down to those too quiet to hear, and no more than the tail may last (ten seconds).
+    CHECK (report.seconds > 4.5);
+    CHECK (report.seconds <= 12.0 + 0.001);
+
+    const auto reader = openFile (file);
+    REQUIRE (reader != nullptr);
+    juce::AudioBuffer<float> audio (2, (int) reader->lengthInSamples);
+    REQUIRE (reader->read (&audio, 0, audio.getNumSamples(), 0, true, true));
+    const auto loudest = [&audio] (double start, double end)
+    { return audio.getMagnitude (0, juce::roundToInt (start * 44100.0), juce::roundToInt ((end - start) * 44100.0)); };
+
+    CHECK (loudest (1.6, 2.45) < 1.0e-4f); // the click's echoes alone are heard
+    CHECK (loudest (2.45, 2.6) > 0.05f);
+    CHECK (loudest (2.6, 3.45) < 1.0e-4f);
+    CHECK (loudest (3.45, 3.6) > 0.005f);
+    CHECK (loudest (3.45, 3.6) < loudest (2.45, 2.6));
 }
 
 TEST_CASE ("An export meets the loudness target it was given")

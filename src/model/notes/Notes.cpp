@@ -428,6 +428,83 @@ std::vector<NoteData> getClipNotes (const Song& song, ClipID clip)
     return data;
 }
 
+namespace
+{
+    // Whether a clip plays a note: some of it is in the part of the song the clip covers.
+    bool plays (const juce::ValueTree& clipState, const NoteData& note)
+    {
+        const auto range = getClipRange (clipState);
+        return note.getEnd() > range.getStart() + tinyBeats && note.start < range.getEnd() - tinyBeats;
+    }
+
+    // How far back a note's start can go: to its clip's start, and not at all if it starts before it already.
+    BeatPosition getEarliestStart (const juce::ValueTree& clipState, BeatPosition startNow)
+    {
+        return std::min (startNow, getClipRange (clipState).getStart());
+    }
+
+    // The latest a note of a clip can start and still play: the shortest note before where the clip can grow to, the next
+    // clip on its track (growToHold()). None while nothing keeps the clip from growing to hold the note.
+    std::optional<BeatPosition> findLatestStart (const Song& song, const juce::ValueTree& clipState)
+    {
+        if (const auto roomEnd = findRoomEnd (song, clipState))
+            return std::max (*roomEnd, getClipRange (clipState).getEnd()) - getMinimumNoteLength();
+
+        return std::nullopt;
+    }
+
+    // Where an edit puts a note's start, kept where its clip plays the note: no earlier than getEarliestStart() and no later
+    // than findLatestStart(), nor than it is if it is later already. An edit of a note that plays never leaves it in its
+    // clip without playing, where no editor would show it.
+    BeatPosition keepPlayed (const Song& song, const juce::ValueTree& clipState, BeatPosition startNow, BeatPosition wanted)
+    {
+        if (const auto latest = findLatestStart (song, clipState))
+            wanted = std::min (wanted, std::max (startNow, *latest));
+
+        return std::max (wanted, getEarliestStart (clipState, startNow));
+    }
+} // namespace
+
+std::optional<BeatPosition> getLatestNoteStart (const Song& song, ClipID clip)
+{
+    const auto clipState = findMidiClipState (song, clip);
+    return clipState.isValid() ? findLatestStart (song, clipState) : std::nullopt;
+}
+
+std::vector<NoteData> getClipNotesPlayed (const Song& song, ClipID clip)
+{
+    std::vector<NoteData> data;
+    const auto clipState = findMidiClipState (song, clip);
+
+    for (const auto& child : clipState)
+        if (child.hasType (schema::NOTE))
+            if (const auto note = readNote (clipState, child); plays (clipState, note))
+                data.push_back (note);
+
+    return data;
+}
+
+bool isNotePlayed (const Song& song, const NoteRef& ref)
+{
+    const auto note = getNoteData (song, ref);
+    return note.has_value() && plays (findMidiClipState (song, ref.clip), *note);
+}
+
+bool canPlayNoteAt (const Song& song, ClipID clip, BeatPosition start)
+{
+    const auto clipState = findMidiClipState (song, clip);
+
+    if (! clipState.isValid())
+        return false;
+
+    // In the clip, or after it where it can grow to hold the note (growToHold()): before the next clip on its track.
+    if (start < getClipRange (clipState).getEnd() - tinyBeats)
+        return true;
+
+    const auto roomEnd = findRoomEnd (song, clipState);
+    return ! roomEnd.has_value() || start < *roomEnd - tinyBeats;
+}
+
 BeatDuration getMinimumNoteLength()
 {
     return BeatDuration::fromBeats (1.0 / 64.0);
@@ -442,10 +519,11 @@ std::vector<NoteRef> getSelectedNotes (const Selection& selection)
     if (song == nullptr || selection.getNotes().empty())
         return notes;
 
-    // Those still there, of the note clips, in the order they were selected.
+    // Those still there that play (not one a trim has left outside its clip since it was selected), of the note clips, in
+    // the order they were selected.
     for (const auto& ref : selection.getNotes())
         if (std::find (selection.getNoteClips().begin(), selection.getNoteClips().end(), ref.clip) != selection.getNoteClips().end())
-            if (findNoteState (*song, ref).isValid())
+            if (isNotePlayed (*song, ref))
                 notes.push_back (ref);
 
     return notes;
@@ -464,16 +542,18 @@ bool hasSelectedNotes (const Selection& selection)
 //==============================================================================
 namespace
 {
-    // Adds a note at a song beat, as addNote() says, with its flags, with the ID wanted if no note of the clip has it.
+    // Adds a note at a song beat, as addNote() says, with its flags, with the ID wanted if no note of the clip has it. It
+    // starts no earlier than its clip, or than the earliest start given: where the note it replaces started, if that was
+    // before the clip's start (moveNote()); and no later than the latest given, if any.
     NoteRef addNoteTo (Song& song, ClipID clip, NoteID wanted, int pitch, BeatPosition start, BeatDuration length, int velocity,
-                       NoteFlags flags)
+                       NoteFlags flags, std::optional<BeatPosition> earliest = {}, std::optional<BeatPosition> latest = {})
     {
         const auto clipState = findMidiClipState (song, clip);
 
         if (! clipState.isValid())
             return {};
 
-        start = std::max (start, getClipRange (clipState).getStart());
+        start = std::max (std::min (start, latest.value_or (start)), earliest.value_or (getClipRange (clipState).getStart()));
         length = std::max (length, getMinimumNoteLength());
         growToHold (song, clipState, start + length);
         const auto id = addNoteState (song, clipState, wanted, clampPitch (pitch), toClipBeat (clipState, start), length,
@@ -495,7 +575,7 @@ void moveNote (Song& song, const NoteRef& ref, BeatPosition start, int pitch)
     if (! note.has_value())
         return;
 
-    start = std::max (start, getClipRange (clipState).getStart());
+    start = keepPlayed (song, clipState, note->start, start);
     growToHold (song, clipState, start + note->length);
     const auto clipBeat = toClipBeat (clipState, start);
     changeNote (song, ref,
@@ -549,9 +629,13 @@ void nudgeNotes (Song& song, const std::vector<NoteRef>& notes, BeatDuration amo
 {
     const auto unique = getNoteData (song, withoutAliasCopies (song, notes));
 
-    // The note nearest its clip's start decides how far back they can go.
+    // The note nearest its clip's start decides how far back they can go: none at all with one that starts before it. And
+    // the one nearest where its clip stops playing it, how far on (keepPlayed()).
     for (const auto& note : unique)
-        amount = std::max (amount, getClipRange (findMidiClipState (song, note.clip)).getStart() - note.start);
+    {
+        const auto clipState = findMidiClipState (song, note.clip);
+        amount = keepPlayed (song, clipState, note.start, note.start + amount) - note.start;
+    }
 
     for (const auto& note : unique)
         moveNote (song, { note.clip, note.id }, note.start + amount, note.pitch);
@@ -700,15 +784,47 @@ void setClipNotes (Song& song, ClipID clip, const std::vector<NoteData>& notes)
 
 std::vector<NoteRef> replaceNotes (Song& song, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements)
 {
+    // Where the old ones started: what comes of one that started before its clip did (a note a split or a trim cut) goes no
+    // earlier, rather than to its clip's start.
+    std::unordered_map<NoteRef, BeatPosition> oldStarts;
+
+    for (const auto& note : getNoteData (song, old))
+        oldStarts[note.getRef()] = note.start;
+
     deleteNotes (song, old);
     std::vector<NoteRef> added;
 
     // A note that replaces one of the old ones (a quantized or transposed note, a chopped note's first piece) keeps that one's
-    // ID, if no other note of the clip has it now; a copy, whose original is still there, gets its own.
+    // ID, if no other note of the clip has it now, and stays where its clip plays it, as a moved note does (keepPlayed()). The
+    // others that come of an old one (a chopped note's later pieces, with its ID, which they can't keep) go where they are
+    // given, past the clip too, where the old note reached: nothing of it is lost, and the clip plays them once it covers
+    // them. A new one (a copy, a pasted note), whose original is still there, gets an ID of its own and is added only where
+    // it plays: none before its clip, or after it where the clip can't grow to hold it, where no editor would show it.
     for (const auto& data : replacements)
-        if (const auto note = addNoteTo (song, data.clip, data.id, data.pitch, data.start, data.length, data.velocity, getFlags (data));
+    {
+        const auto clipState = findMidiClipState (song, data.clip);
+        const auto oldStart = oldStarts.find (data.getRef());
+        const auto comesOfOne = oldStart != oldStarts.end();
+        const auto replacesOne = comesOfOne && ! findNoteState (song, data.getRef()).isValid();
+
+        if (! comesOfOne
+            && (data.getEnd() <= getClipRange (clipState).getStart() + tinyBeats || ! canPlayNoteAt (song, data.clip, data.start)))
+            continue;
+
+        std::optional<BeatPosition> earliest, latest;
+
+        if (comesOfOne && clipState.isValid())
+            earliest = getEarliestStart (clipState, oldStart->second);
+
+        if (replacesOne && clipState.isValid())
+            if (const auto latestPlayed = findLatestStart (song, clipState))
+                latest = std::max (oldStart->second, *latestPlayed);
+
+        if (const auto note =
+                addNoteTo (song, data.clip, data.id, data.pitch, data.start, data.length, data.velocity, getFlags (data), earliest, latest);
             note.clip.isValid())
             added.push_back (note);
+    }
 
     return added;
 }
@@ -1199,7 +1315,7 @@ std::vector<int> getNoteNumbersPlayed (const Song& song, const std::vector<ClipI
     std::set<int> played;
 
     for (const auto clip : clips)
-        for (const auto& note : getClipNotes (song, clip))
+        for (const auto& note : getClipNotesPlayed (song, clip))
             played.insert (note.pitch);
 
     return std::vector<int> (played.begin(), played.end());

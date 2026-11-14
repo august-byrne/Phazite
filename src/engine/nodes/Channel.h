@@ -44,6 +44,12 @@ public:
     float getPan() const noexcept { return pan.load (std::memory_order_relaxed); }
     bool isAudible() const noexcept { return audible.load (std::memory_order_relaxed); }
 
+    // Message thread: whether the channel plays on while it isn't heard, for what takes its sound without its mute and is
+    // heard without it: a send to a return that is soloed while the channel is soloed out (the model works it out, and cuts
+    // its other sends: SendLevel). Any thread reads it.
+    void setPlaysOnUnheard (bool playsOn) noexcept { playsOnUnheard.store (playsOn, std::memory_order_relaxed); }
+    bool isPlayingOnUnheard() const noexcept { return playsOnUnheard.load (std::memory_order_relaxed); }
+
     // Before playback (it may allocate nothing, but must be told the rate).
     void prepare (double sampleRate) noexcept;
 
@@ -85,7 +91,7 @@ public:
     // Audio thread: turns two channels (or one, the same on both sides) by the fader, easing to a new volume or pan set
     // by hand over 15 ms, following its automation, and fading in or out over 5 ms as the channel is heard or not; then
     // measures what comes out. What the fader gives before the mute goes to two more channels too, if given (a sidechain
-    // hears a muted track).
+    // hears a muted track, and a send after the fader is taken from there: its own cut decides whether it sends).
     void process (float* const* channels, int numChannels, int numSamples, const Automation&, float* const* beforeMute = nullptr) noexcept;
 
     LevelMeter& getMeter() noexcept { return meter; }
@@ -93,7 +99,7 @@ public:
 private:
     std::atomic<float> volume { 0.0f }, pan { 0.0f }, playedVolume { 0.0f }, playedPan { 0.0f }, playedBaseVolume { 0.0f },
         playedBasePan { 0.0f };
-    std::atomic<bool> audible { true }, volumeWriting { false }, panWriting { false };
+    std::atomic<bool> audible { true }, playsOnUnheard { false }, volumeWriting { false }, panWriting { false };
 
     // The audio thread's: each side's gain now and where it eases to, how many samples are left to get there and how much it
     // moves in each; and the mute's fade, likewise.

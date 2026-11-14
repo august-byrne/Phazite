@@ -41,8 +41,14 @@ class Take
 {
 public:
     // Starts one, giving the session's engine what it records from its next block on; nothing if nothing would record
-    // (no track for live MIDI to play, and none armed with an input the audio device has).
-    static std::unique_ptr<Take> start (PlaybackSession&);
+    // (no track for live MIDI to play, and none armed with an input the audio device has). One that goes on from another
+    // after a jump (PlaybackSession::locateWhileRecording()) records the inputs of the armed tracks that one recorded, no
+    // others: a track armed since waits for Stop, as it did before the jump, when the audio device's inputs are opened for
+    // it (AudioRecorder::update()), and until then its input isn't open to record.
+    static std::unique_ptr<Take> start (PlaybackSession&, const std::vector<TrackID>* inputsOf = nullptr);
+
+    // The armed tracks whose inputs it records.
+    std::vector<TrackID> getInputTracks() const;
 
     // One not finished keeps nothing: its files go.
     ~Take();

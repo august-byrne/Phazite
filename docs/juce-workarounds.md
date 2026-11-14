@@ -33,6 +33,8 @@ How to keep it:
 
 ### The song
 
+**W30. Files written whole by Phazite, not `File::replaceWithData()` or `replaceWithText()`.** JUCE's two functions don't look at the result of their own write before they move what was written into the file's place, and return true (`juce_core/files/juce_File.cpp`); and a `FileOutputStream` that closes doesn't ask for its bytes to reach the disk. On a full disk that left a project file cut short where a whole one was, and Save said it worked. `writeWholeFile()` (`src/model/base/WholeFile.h`) checks every write and the stream's status, flushes, compares the size on the disk, then replaces the file; the project file, the autosave, the versions' files and presets are written with it. It would go if JUCE's functions failed on a failed write and flushed.
+
 **W8. A property set without an undo step only when its value changes.** Without an `UndoManager`, `ValueTree::setProperty()` compares the value's type too (`NamedValueSet::set()`, `juce_core/containers/juce_NamedValueSet.cpp`; `juce_data_structures/values/juce_ValueTree.cpp`), so the number 5 over the text "5" read from a file is a change its listeners hear; with one, it compares values alone. The two stores that write without one compare first (`storeProperty()`, `src/model/plugins/PluginInstances.cpp`; `store()`, `src/model/mixer/Mixer.cpp`); they could be one function.
 
 ### Audio devices and the app

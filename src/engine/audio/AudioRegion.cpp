@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 namespace phazite::engine
@@ -18,10 +19,13 @@ namespace
         return engineRate <= 0.0 || std::abs (fileRate / engineRate - 1.0) < 1.0e-9;
     }
 
-    // A channel of a file from a sample on into a destination, silence where nothing is read yet or the file has none.
+    // A channel of a file from a sample on into a destination, silence where nothing is read yet or the file has none;
+    // whether all of it that the file has was read.
     template <typename Sample>
-    void readFile (AudioFile& file, int channel, std::int64_t position, Sample* destination, int numSamples) noexcept
+    bool readFile (AudioFile& file, int channel, std::int64_t position, Sample* destination, int numSamples) noexcept
     {
+        auto allRead = true;
+
         for (int done = 0; done < numSamples;)
         {
             const auto at = position + done;
@@ -37,12 +41,19 @@ namespace
             auto count = numSamples - done;
 
             if (const auto* samples = file.getSamples (channel, at, count))
+            {
                 std::copy (samples, samples + count, destination + done);
+            }
             else
+            {
                 std::fill (destination + done, destination + done + count, Sample());
+                allRead = false;
+            }
 
             done += count;
         }
+
+        return allRead;
     }
 
     void copyToFloat (const double* source, int numSamples, float* destination) noexcept
@@ -86,12 +97,13 @@ struct RegionState::Conversion
         nextInput = fileSample;
     }
 
-    // Fills a destination for each of its channels with so many samples at the engine's rate, from where it is. A render
-    // reads each part of the file first.
-    void convert (AudioFile& file, float* const* destinations, int count, bool isRender) noexcept
+    // Fills a destination for each of its channels with so many samples at the engine's rate, from where it is; whether
+    // all it took of the file was read. A render reads each part of the file first.
+    bool convert (AudioFile& file, float* const* destinations, int count, bool isRender) noexcept
     {
         const auto numChannels = (int) resamplers.size();
         auto done = 0;
+        auto allRead = true;
 
         if (numLeft > 0)
         {
@@ -120,7 +132,7 @@ struct RegionState::Conversion
 
             for (int channel = 0; channel < numChannels; ++channel)
             {
-                readFile (file, channel, nextInput, input.data(), numInput);
+                allRead = readFile (file, channel, nextInput, input.data(), numInput) && allRead;
                 const double* output = nullptr;
                 given = resamplers[(size_t) channel]->process (input.data(), numInput, output);
                 const auto used = std::min (given, wanted);
@@ -135,6 +147,8 @@ struct RegionState::Conversion
 
         for (int channel = 0; channel < numChannels; ++channel)
             std::fill (destinations[channel] + done, destinations[channel] + count, 0.0f);
+
+        return allRead;
     }
 
     std::vector<std::unique_ptr<Resampler>> resamplers;
@@ -191,6 +205,12 @@ float getFadeGain (FadeCurve curve, float along) noexcept
     return (1.0f - amount) * alpha + amount * bent;
 }
 
+void AudioRegion::expect (std::int64_t songSample, double engineRate) const noexcept
+{
+    if (file != nullptr && songSample >= start && songSample < getEnd())
+        file->expect ((std::int64_t) (fileStart + (double) (songSample - start) * file->getSampleRate() / engineRate));
+}
+
 void AudioRegion::play (float* const* channels, std::int64_t songSample, int numSamples, double engineRate, bool isRender,
                         juce::AudioBuffer<float>& scratch) const noexcept
 {
@@ -213,6 +233,7 @@ void AudioRegion::play (float* const* channels, std::int64_t songSample, int num
     if (playing.playedTo != from)
     {
         playing.fadingIn = from != start ? jumpFade : 0;
+        playing.missed = false; // what it missed was somewhere else
         playing.filePosition = fileStart + (double) (from - start) * file->getSampleRate() / engineRate;
 
         if (playing.conversion != nullptr)
@@ -224,6 +245,7 @@ void AudioRegion::play (float* const* channels, std::int64_t songSample, int num
     // What the file plays here, on two channels (a mono file's on both).
     float* sound[] = { scratch.getWritePointer (0), scratch.getWritePointer (1) };
     const auto fileChannels = file->getNumChannels();
+    auto allRead = true;
 
     if (playing.conversion == nullptr)
     {
@@ -233,18 +255,29 @@ void AudioRegion::play (float* const* channels, std::int64_t songSample, int num
             file->readNow (first, count);
 
         for (int channel = 0; channel < 2; ++channel)
-            readFile (*file, std::min (channel, fileChannels - 1), first, sound[channel], count);
+            allRead = readFile (*file, std::min (channel, fileChannels - 1), first, sound[channel], count) && allRead;
 
         playing.filePosition += count;
     }
     else
     {
-        playing.conversion->convert (*file, sound, count, isRender);
+        allRead = playing.conversion->convert (*file, sound, count, isRender);
         playing.filePosition = (double) playing.conversion->nextInput;
 
         if (fileChannels < 2)
             std::copy (sound[0], sound[0] + count, sound[1]);
     }
+
+    // A part of the file not read yet (a jump the reading thread couldn't see coming): the whole stretch is silent, and the
+    // first that is all there fades in as after a jump, rather than cut in.
+    if (! allRead)
+    {
+        playing.missed = true;
+        return;
+    }
+
+    if (std::exchange (playing.missed, false))
+        playing.fadingIn = jumpFade;
 
     // At its gain, through its fades, and fading in after a jump.
     const auto plain = fadeIn <= (from - start) && (to - start) <= length - fadeOut && playing.fadingIn == 0;

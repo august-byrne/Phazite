@@ -29,6 +29,10 @@ struct NoteClip
     BeatRange range {};           // where it is in the song
     BeatPosition contentStart {}; // where its notes count from: bar 1 while the piano roll shows it
     juce::Colour colour {};       // its notes' color: its track's, as the playlist shows it
+
+    // The latest a note of it can start and still play, where the next clip on its track keeps it from growing to hold
+    // the note; none while it can grow. The edits keep a note that plays no later (Notes.h: moveNote()), and a drag does too.
+    std::optional<BeatPosition> latestNoteStart {};
 };
 
 // The MIDI clips among these that are still in the song, in the order given.
@@ -54,15 +58,20 @@ std::optional<double> getLinkedPlayBeat (const ProjectContext&, const std::vecto
 //==============================================================================
 // Notes.
 
-// The notes of these clips, clip by clip, in song beats.
+// The notes of these clips, clip by clip, in song beats: all each clip holds; and those of them that play, which are what
+// an editor shows, selects and edits: the notes in the part of the song their clip covers, one cut by an edge of its clip
+// too. A split or a trim leaves the others in the clip, as they are, until the clip covers them again.
 std::vector<NoteData> getNotes (const ProjectContext&, const std::vector<ClipID>&);
+std::vector<NoteData> getNotesPlayed (const ProjectContext&, const std::vector<ClipID>&);
 std::optional<NoteData> getNote (const ProjectContext&, NoteRef);
 
-// The notes of the MIDI clips on other tracks than these that overlap a range of the song: the piano roll's ghost notes.
+// The notes that play of the MIDI clips on other tracks than these that overlap a range of the song: the piano roll's ghost
+// notes.
 std::vector<NoteData> getNotesOfOtherTracks (const ProjectContext&, const std::vector<TrackID>& shown, BeatRange);
 
 // Edits (Notes.h), which join the caller's undo step: a note added at a song beat (Notes.h: addNote() says how its clip
-// grows), moved, made longer or shorter, deleted, muted, given a velocity, or moved in time with others.
+// grows; none is added where it wouldn't play, after its clip where the clip can't grow to hold it), moved, made longer or
+// shorter, deleted, muted, given a velocity, or moved in time with others.
 NoteRef addNote (ProjectContext&, ClipID, int pitch, BeatPosition start, BeatDuration, int velocity);
 void moveNote (ProjectContext&, NoteRef, BeatPosition start, int pitch);
 void setNoteLength (ProjectContext&, NoteRef, BeatDuration);

@@ -219,7 +219,7 @@ std::unique_ptr<SandboxedInstance> PluginHost::createInstance (const juce::Plugi
         return nullptr;
 
     const auto id = remote->getID();
-    auto instance = std::make_unique<SandboxedInstance> (std::move (remote), description, running, running->unlist (id));
+    auto instance = std::make_unique<SandboxedInstance> (std::move (remote), description, state, running, running->unlist (id));
     track (*running, id, *instance);
     return instance;
 }

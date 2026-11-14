@@ -291,6 +291,12 @@ bool isRecordingOnto (const ProjectContext& context, TrackID id)
     return take != nullptr && take->recordsOnto (id);
 }
 
+bool isRecording (const ProjectContext& context)
+{
+    const auto* session = getSession (context);
+    return session != nullptr && session->isRecording();
+}
+
 TrackID addTrackForInput (ProjectContext& context, const juce::String& inputID)
 {
     auto* song = findSong (context);

@@ -83,10 +83,17 @@ void FilterEffect::prepare (double newSampleRate, int maximumBlockSize)
     oversampling->initProcessing ((size_t) std::max (1, maximumBlockSize));
     latency = (int) std::lround (oversampling->getLatencyInSamples()) + dsp::AntialiasedCurve::delay / 2;
 
+    // The same again for the copy of what came in, which its mix blends with the sound.
+    dryOversampling =
+        std::make_unique<juce::dsp::Oversampling<float>> (2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, true);
+    dryOversampling->initProcessing ((size_t) std::max (1, maximumBlockSize));
+
     for (size_t channel = 0; channel < 2; ++channel)
     {
         undriven[channel].prepare (latency);
         undrivenOut[channel].assign ((size_t) std::max (1, maximumBlockSize), 0.0f);
+        dryUndriven[channel].prepare (latency);
+        dryUndrivenOut[channel].assign ((size_t) std::max (1, maximumBlockSize), 0.0f);
     }
 
     for (auto& filter : filters)
@@ -97,18 +104,23 @@ void FilterEffect::prepare (double newSampleRate, int maximumBlockSize)
 
 void FilterEffect::reset()
 {
-    if (oversampling != nullptr)
-        oversampling->reset();
+    for (auto* halfBands : { &oversampling, &dryOversampling })
+        if (*halfBands != nullptr)
+            (*halfBands)->reset();
 
-    for (auto& curve : curves)
-        curve.reset();
+    for (auto* both : { &curves, &dryCurves })
+        for (auto& curve : *both)
+            curve.reset();
 
     for (auto& filter : filters)
         filter.reset();
 
-    for (auto& line : undriven)
-        line.reset();
+    for (auto* lines : { &undriven, &dryUndriven })
+        for (auto& line : *lines)
+            line.reset();
 
+    lastMix = 1.0f;
+    dryInStep = false;
     isFirstBlock = true;
     wasDriven = false;
     driveBlend = 0.0f;
@@ -138,6 +150,7 @@ void FilterEffect::driveBlock (const ProcessContext& block, int numChannels, flo
             std::copy (undrivenOut[(size_t) channel].begin(), undrivenOut[(size_t) channel].begin() + numSamples, block.channels[channel]);
 
         driveGain = targetDrive;
+        dryBlock (block, numChannels, numSamples, false, 0.0f, 0.0f);
         return;
     }
 
@@ -193,7 +206,73 @@ void FilterEffect::driveBlock (const ProcessContext& block, int numChannels, flo
         }
     }
 
+    dryBlock (block, numChannels, numSamples, true, driveBlend, blendTarget);
     driveBlend = blend;
+}
+
+void FilterEffect::dryBlock (const ProcessContext& block, int numChannels, int numSamples, bool throughDrive, float blendFrom,
+                             float blendTarget) noexcept
+{
+    if (block.dry == nullptr)
+        return;
+
+    // As late as the sound.
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        auto& line = dryUndriven[(size_t) channel];
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            line.push (block.dry[channel][i]);
+            dryUndrivenOut[(size_t) channel][(size_t) i] = line.read (latency);
+        }
+    }
+
+    // Through the drive's filters with the sound, only while the mix uses it (from silence then, as the mix leaves 100 %).
+    const auto mixNow = block.parameters[mix];
+    const auto turned = throughDrive && (mixNow < 1.0f || lastMix < 1.0f);
+    lastMix = mixNow;
+
+    if (turned)
+    {
+        if (! dryInStep)
+        {
+            dryOversampling->reset();
+
+            for (auto& straight : dryCurves)
+                straight.reset();
+        }
+
+        juce::dsp::AudioBlock<float> came (block.dry, (size_t) numChannels, (size_t) numSamples);
+        auto fast = dryOversampling->processSamplesUp (came);
+
+        for (size_t channel = 0; channel < fast.getNumChannels(); ++channel)
+        {
+            auto* samples = fast.getChannelPointer (channel);
+
+            for (size_t i = 0; i < fast.getNumSamples(); ++i)
+                samples[i] = dryCurves[channel].process (samples[i], dsp::StraightCurve {});
+        }
+
+        dryOversampling->processSamplesDown (came);
+    }
+
+    // Faded as the sound is between the plain delay and the drive.
+    constexpr auto blendStep = 1.0f / 64.0f;
+    auto blend = blendFrom;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        blend += std::clamp (blendTarget - blend, -blendStep, blendStep);
+
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            const auto plain = dryUndrivenOut[(size_t) channel][(size_t) i];
+            block.dry[channel][i] = turned ? plain + blend * (block.dry[channel][i] - plain) : plain;
+        }
+    }
+
+    dryInStep = turned;
 }
 
 double FilterEffect::getTailSeconds() const
@@ -204,6 +283,7 @@ double FilterEffect::getTailSeconds() const
 void FilterEffect::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
     const auto& values = block.parameters;
     const auto numChannels = std::min (block.numChannels, 2);
     const auto targetOctaves = toOctaves (values[cutoff]);

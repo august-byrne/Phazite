@@ -142,19 +142,32 @@ namespace
     }
 
     // Drive's curve, the odd harmonics' tanh with some of the even harmonics' tanh squared: f (x) = tanh x + e tanh^2 x, and
-    // its antiderivative, F (x) = ln cosh x + e (x - tanh x), written so that cosh never overflows.
-    float drivenCurve (float x, float even) noexcept
+    // its antiderivative, F (x) = ln cosh x + e (x - tanh x), written so that cosh never overflows (dsp/Saturation.h plays a
+    // curve that has these two).
+    struct DriveCurve
     {
-        const auto t = std::tanh (x);
-        return t + even * t * t;
-    }
+        float even = 0.0f;
 
-    double drivenIntegral (double x, double even) noexcept
-    {
-        const auto a = std::abs (x);
-        return a + std::log1p (std::exp (-2.0 * a)) - 0.69314718055994531 + even * (x - std::tanh (x));
-    }
+        float value (float x) const noexcept
+        {
+            const auto t = std::tanh (x);
+            return t + even * t * t;
+        }
+
+        double integral (double x) const noexcept
+        {
+            const auto a = std::abs (x);
+            return a + std::log1p (std::exp (-2.0 * a)) - 0.69314718055994531 + (double) even * (x - std::tanh (x));
+        }
+    };
+
+    constexpr float driveBlendStep = 1.0f / 64.0f; // of the way between the plain delay and the drive, each sample
 } // namespace
+
+int Compressor::getDriveLatency()
+{
+    return (int) std::lround (dsp::AntialiasedShaper::getLatencySamples());
+}
 
 const DeviceInfo Compressor::info { .typeID = typeID,
                                     .name = "Compressor",
@@ -172,11 +185,15 @@ void Compressor::prepare (double newSampleRate, int)
     memoryRise = (float) (1.0 - std::exp (-1.0 / (memoryRiseSeconds * sampleRate)));
     memoryFall = (float) (1.0 - std::exp (-1.0 / (memoryFallSeconds * sampleRate)));
     samplesPerPeak = std::max (1, (int) std::lround (sampleRate * 0.001));
-    latency = ducksAsPrepared ? (int) std::lround (duckLookaheadSeconds * sampleRate) : 0;
+    driveLatency = getDriveLatency();
+    latency = ducksAsPrepared ? std::max (driveLatency, (int) std::lround (duckLookaheadSeconds * sampleRate)) : driveLatency;
 
-    for (auto* delays : { &soundDelays, &keyDelays })
+    for (auto* delays : { &soundDelays, &keyDelays, &dryDelays })
         for (auto& delay : *delays)
             delay.prepare (std::max (1, latency));
+
+    for (auto& delay : undriven)
+        delay.prepare (std::max (1, driveLatency));
 
     gainDelay.prepare (std::max (1, latency));
     reset();
@@ -185,7 +202,7 @@ void Compressor::prepare (double newSampleRate, int)
 int Compressor::getLatencySamplesFor (std::span<const float> values) const
 {
     const auto ducks = values.size() > (size_t) mode && getMode (values[(size_t) mode]) == Mode::duck;
-    return ducks ? (int) std::lround (duckLookaheadSeconds * sampleRate) : 0;
+    return ducks ? std::max (getDriveLatency(), (int) std::lround (duckLookaheadSeconds * sampleRate)) : getDriveLatency();
 }
 
 void Compressor::takeValuesBeforePrepare (std::span<const float> values)
@@ -224,10 +241,17 @@ void Compressor::reset()
     for (auto& filter : dcBlockers)
         filter.reset();
 
-    for (auto* delays : { &soundDelays, &keyDelays })
+    for (auto* delays : { &soundDelays, &keyDelays, &dryDelays, &undriven })
         for (auto& delay : *delays)
             delay.reset();
 
+    for (auto* shapers : { &drives, &dryDrives })
+        for (auto& shaper : *shapers)
+            shaper.reset();
+
+    driveBlend = 0.0f;
+    lastMix = 1.0f;
+    dryInStep = false;
     gainDelay.reset();
     isFirstBlock = true;
     keyShare = 0.0f;
@@ -238,13 +262,12 @@ void Compressor::reset()
     lastWanted = 0.0f;
     lastMost = 0.0f;
     wasDriven = false;
-    lastDriven = {};
-    lastIntegral = {};
 }
 
 void Compressor::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
 
     if (getMode (block.parameters[mode]) == Mode::duck)
         duck (block);
@@ -286,6 +309,36 @@ void Compressor::compress (const ProcessContext& block)
         driveAmount = targetDrive;
         isFirstBlock = false;
     }
+
+    // Whether the sound goes through the drive: while its knob is up or the character has a colour of its own, whether or not
+    // that colours the sound now (a straight line in the curve's place meanwhile), and until a drive turned off has faded out.
+    // Coming on, it starts from silence, faded in.
+    const auto shaped = values[drive] > 0.0f || colourShares[(size_t) type] > 0.0f || driveAmount > 1.0e-4f;
+    const DriveCurve curve { even };
+
+    if (shaped && driveBlend <= 0.0f)
+        for (auto& shaper : drives)
+            shaper.reset();
+
+    if (! juce::exactlyEqual (even, lastEven)) // another curve: its averaging starts again
+    {
+        for (auto& shaper : drives)
+            shaper.restartAveraging();
+
+        lastEven = even;
+    }
+
+    // The copy of what came in for the mix goes through filters like the drive's with the sound, while the mix uses it (from
+    // silence then, as the mix leaves 100 %); not where the sound takes Duck's latency, the drive's and a delay for the rest.
+    const auto rest = latency - driveLatency;
+    const auto turnsDry = block.dry != nullptr && rest <= 0 && (shaped || driveBlend > 0.0f) && (values[mix] < 1.0f || lastMix < 1.0f);
+    lastMix = values[mix];
+
+    if (turnsDry && ! dryInStep)
+        for (auto& shaper : dryDrives)
+            shaper.reset();
+
+    dryInStep = turnsDry;
 
     // The gain is worked out again only when it changes (docs/performance-audit.md, A5).
     auto loudestPeak = 0.0f, most = 0.0f, least = 0.0f;
@@ -361,61 +414,93 @@ void Compressor::compress (const ProcessContext& block)
         keyShare += std::clamp (keyWanted - keyShare, -keyStep, keyStep);
         const auto driven = driveAmount > 1.0e-4f;
 
+        // Duck's gain, which it plays late, is none for what goes through now: should automation have it duck next, it turns
+        // what is still on its way no further down.
+        gainDelay.push (1.0f);
+
         if (driven && ! juce::exactlyEqual (driveAmount, lastDriveAmount))
         {
             lastDriveAmount = driveAmount;
             driveGain = dsp::decibelsToGain (driveAmount * mostDrive);
         }
 
-        if (driven && ! juce::exactlyEqual (makeupDecibels, lastMakeupDecibels))
+        driveBlend += std::clamp ((shaped ? 1.0f : 0.0f) - driveBlend, -driveBlendStep, driveBlendStep);
+        const auto throughDrive = driveBlend > 0.0f;
+
+        if (throughDrive && ! juce::exactlyEqual (makeupDecibels, lastMakeupDecibels))
         {
             lastMakeupDecibels = makeupDecibels;
             makeupGain = dsp::decibelsToGain (makeupDecibels);
         }
 
+        // Between the curve and a straight line, the averaging starts again.
+        if (driven != wasDriven)
+        {
+            for (auto& shaper : drives)
+                shaper.restartAveraging();
+
+            wasDriven = driven;
+        }
+
         for (int channel = 0; channel < numChannels; ++channel)
         {
-            auto turnedDown = block.channels[channel][i] * lastInput * lastGain;
+            // The sound, turned down, as late as the drive plays it.
+            const auto c = (size_t) channel;
+            const auto turnedDown = block.channels[channel][i] * lastInput * lastGain;
+            undriven[c].push (turnedDown);
+            auto sound = undriven[c].read (driveLatency);
 
-            if (driven)
+            if (throughDrive)
             {
-                // Without the makeup, into the curve and back out at the level it came in at; then the makeup. Driven again
-                // after a rest, it starts from where it is, so that it doesn't click.
-                const auto c = (size_t) channel;
-                const auto x = turnedDown / makeupGain * driveGain;
-                const auto integral = (float) drivenIntegral ((double) x, (double) even);
+                // Without the makeup, into the curve and back out at the level it came in at; then the makeup. While
+                // nothing drives it, a straight line through the same filters.
+                const auto plain = turnedDown / makeupGain;
+                auto y = 0.0f;
 
-                if (! wasDriven)
+                if (driven)
                 {
-                    lastDriven[c] = x;
-                    lastIntegral[c] = integral;
+                    y = drives[c].process (plain * driveGain, curve);
+
+                    if (even > 0.0f)
+                        y = dcBlockers[c].process (y, dcBlocker);
+
+                    y /= driveGain;
+                }
+                else
+                {
+                    y = drives[c].process (plain, dsp::StraightCurve {});
                 }
 
-                auto y = std::abs (x - lastDriven[c]) > 1.0e-4f ? (integral - lastIntegral[c]) / (x - lastDriven[c])
-                                                                : drivenCurve (0.5f * (x + lastDriven[c]), even);
-                lastDriven[c] = x;
-                lastIntegral[c] = integral;
-
-                if (even > 0.0f)
-                    y = dcBlockers[c].process (y, dcBlocker);
-
-                turnedDown = y / driveGain * makeupGain;
+                sound += driveBlend * (y * makeupGain - sound);
             }
 
-            auto out = turnedDown + keyShare * (key[(size_t) std::min (channel, numHeard - 1)] - turnedDown);
+            // What it hears, as late, to listen to.
+            keyDelays[c].push (key[(size_t) std::min (channel, numHeard - 1)]);
+            auto out = sound + keyShare * (keyDelays[c].read (driveLatency) - sound);
 
-            // As late as its latency says, when it has one (Duck's, while automation has it compress).
-            if (latency > 0)
+            // As late as its latency says, when that is Duck's (while automation has it compress).
+            if (rest > 0)
             {
-                auto& delay = soundDelays[(size_t) channel];
+                auto& delay = soundDelays[c];
                 delay.push (out);
-                out = delay.read (latency);
+                out = delay.read (rest);
             }
 
             block.channels[channel][i] = out;
-        }
 
-        wasDriven = driven;
+            // The copy of what came in, as late; and turned as the drive's filters turn the sound.
+            if (block.dry != nullptr)
+            {
+                auto& came = block.dry[channel][i];
+                dryDelays[c].push (came);
+                auto late = dryDelays[c].read (latency);
+
+                if (turnsDry)
+                    late += driveBlend * (dryDrives[c].process (came, dsp::StraightCurve {}) - late);
+
+                came = late;
+            }
+        }
 
         loudestPeak = std::max (loudestPeak, level);
         most = std::max (most, amount);
@@ -460,16 +545,20 @@ void Compressor::duck (const ProcessContext& block)
     // whole look-ahead if the attack is longer, so that it is down as the hit plays; its hold, counted from the key's hit, is
     // as much longer, and it lets go only once the key has been under its threshold as long, so that in what is heard it
     // still holds from the hit and while the key is over.
-    const auto ahead = std::clamp ((int) std::ceil (attackSamples), 0, latency);
+    // (Prepared to compress, a mode that automation changed, it doesn't look ahead: its sound and its gain as late alike.)
+    const auto ahead = std::clamp ((int) std::ceil (attackSamples), 0, ducksAsPrepared ? latency : 0);
     const auto gainLate = latency - ahead;
+    const auto rest = latency - driveLatency; // what the sound is late by after the drive's own delay
     const auto holdSamples =
         (int) std::min ((double) mostSinceHit, std::max (0.0, (double) values[hold] * 0.001 * sampleRate) + (double) ahead);
     const auto releaseStep = 1.0 / std::max (1.0, (double) values[release] * 0.001 * sampleRate);
     const auto curve = (double) juce::jlimit (-1.0f, 1.0f, values[releaseCurve]);
     const auto thresholdDecibels = values[Compressor::threshold];
 
-    // Compress's drive starts again from where the sound is when it compresses again.
+    // Compress's drive starts again, from silence, when it compresses again.
     wasDriven = false;
+    driveBlend = 0.0f;
+    dryInStep = false;
     auto loudestKey = 0.0f, most = 0.0f;
 
     for (int i = 0; i < block.numSamples; ++i)
@@ -481,7 +570,7 @@ void Compressor::duck (const ProcessContext& block)
         for (int channel = 0; channel < numHeard; ++channel)
         {
             auto& cut = highCuts[(size_t) channel];
-            auto x = lowCuts[(size_t) channel].process (heard[channel][i], lowCut);
+            auto x = lowCuts[(size_t) channel].process (soundOf (heard[channel][i]), lowCut);
 
             if (cutsHigh)
                 x = cut[1].process (cut[0].process (x, highCut[0]), highCut[1]);
@@ -567,21 +656,30 @@ void Compressor::duck (const ProcessContext& block)
 
         for (int channel = 0; channel < numChannels; ++channel)
         {
-            auto sound = block.channels[channel][i];
-            auto keyHeard = key[(size_t) std::min (channel, numHeard - 1)];
+            // The sound through the delays Compress sends it through, the drive's and then one for the rest of the latency, so
+            // that a change of mode plays on what is on its way through them: nothing lost, nothing played again.
+            const auto c = (size_t) channel;
+            undriven[c].push (block.channels[channel][i]);
+            auto sound = undriven[c].read (driveLatency);
 
-            if (latency > 0)
+            if (rest > 0)
             {
-                auto& soundDelay = soundDelays[(size_t) channel];
-                auto& keyDelay = keyDelays[(size_t) channel];
-                soundDelay.push (sound);
-                keyDelay.push (keyHeard);
-                sound = soundDelay.read (latency);
-                keyHeard = keyDelay.read (latency);
+                soundDelays[c].push (sound);
+                sound = soundDelays[c].read (rest);
             }
 
+            keyDelays[c].push (key[(size_t) std::min (channel, numHeard - 1)]);
+            const auto keyHeard = keyDelays[c].read (latency);
             const auto turnedDown = sound * gain;
             block.channels[channel][i] = turnedDown + keyShare * (keyHeard - turnedDown);
+
+            // The copy of what came in for the mix, as late as the sound.
+            if (block.dry != nullptr)
+            {
+                auto& delay = dryDelays[(size_t) channel];
+                delay.push (block.dry[channel][i]);
+                block.dry[channel][i] = delay.read (latency);
+            }
         }
 
         loudestKey = std::max (loudestKey, lastKeyPeak);

@@ -9,6 +9,7 @@
 #include "devices/wavetable/Wavetable.h"
 #include "devices/wavetable/WavetableSynth.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <set>
@@ -923,6 +924,45 @@ TEST_CASE ("A stack chosen and a drift turned up while a note sounds leave no st
 
     for (size_t i = 4800; i < sound.size(); ++i)
         REQUIRE (std::abs (sound[i] - sound[i - 1]) < 1.1f * steepest);
+}
+
+TEST_CASE ("Unison voices added while a note sounds play from the synth's next control step, wherever a block ends")
+{
+    // 441 samples a block at 44.1 kHz, as Windows' shared mode hands them: a block ends 9 samples into a control step of 16.
+    // Unison Voices raised there, the rest of that step still plays the voices the step set up, and the new ones start with
+    // the next (they were read at once, from readers no step had set: no table, and a crash).
+    constexpr int blockSize = 441;
+
+    for (const auto warp : { WavetableSynth::Warp::none, WavetableSynth::Warp::fm })
+    {
+        INFO ("warp " << (int) warp);
+        WavetableSynth synth;
+        synth.prepare (44100.0, blockSize);
+        auto values = getPlainValues (0.0f);
+        values[WavetableSynth::osc2On] = 1.0f;
+        values[WavetableSynth::osc1Warp] = (float) warp;
+        values[WavetableSynth::osc1WarpAmount] = 0.25f;
+        values[WavetableSynth::unisonDetune] = 20.0f;
+        auto sound = play (synth, values, blockSize, { noteOn (0, 57) }, blockSize);
+
+        for (const auto voices : { 8, 1, 5, 2, 8 })
+        {
+            values[WavetableSynth::unisonVoices] = (float) (voices - 1);
+            const auto more = play (synth, values, 3 * blockSize, {}, blockSize);
+            sound.left.insert (sound.left.end(), more.left.begin(), more.left.end());
+            sound.right.insert (sound.right.end(), more.right.begin(), more.right.end());
+        }
+
+        // The note goes on, on both sides, at about the level it had: two oscillators at full level, however many voices.
+        for (const auto* side : { &sound.left, &sound.right })
+        {
+            CHECK (std::all_of (side->begin(), side->end(), [] (float sample) { return std::isfinite (sample); }));
+            CHECK (peakOf (*side, 0, side->size()) < 3.0f);
+
+            for (size_t from = blockSize; from + blockSize <= side->size(); from += blockSize)
+                CHECK (peakOf (*side, from, from + blockSize) > 0.2f);
+        }
+    }
 }
 
 TEST_CASE ("The wavetable synth's filter darkens its saw, and the default patch opens it with each note")

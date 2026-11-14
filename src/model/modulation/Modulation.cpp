@@ -492,4 +492,42 @@ void copyModulations (Song& song, const std::map<std::uint64_t, std::uint64_t>& 
             modulator.appendChild (copy, getUndo (song));
     }
 }
+
+void copyModulators (Song& song, TrackID from, TrackID to, const std::map<std::uint64_t, std::uint64_t>& copied)
+{
+    auto target = to.isValid() ? findChainState (song, to) : juce::ValueTree();
+    std::vector<juce::ValueTree> copies;
+
+    for (const auto& modulator : from.isValid() ? findChainState (song, from) : juce::ValueTree())
+    {
+        if (! (modulator.hasType (schema::MODULATOR) && canHoldModulators (target))
+            && ! (modulator.hasType (schema::MACRO) && canHoldMacros (target)))
+            continue;
+
+        // As it is set, with what it modulates of the originals alone, which its copy modulates of their copies.
+        auto copy = modulator.createCopy();
+
+        for (auto i = copy.getNumChildren(); --i >= 0;)
+        {
+            auto child = copy.getChild (i);
+
+            if (! child.hasType (schema::MODULATES))
+                continue;
+
+            if (const auto found = copied.find (getModulatedParameter (child).device.getRaw()); found != copied.end())
+                child.setProperty (schema::modulatesDevice, juce::String ((juce::int64) found->second), nullptr);
+            else
+                copy.removeChild (i, nullptr);
+        }
+
+        if (copy.getChildWithName (schema::MODULATES).isValid())
+        {
+            copy.setProperty (schema::modulatorID, (juce::int64) song.makeID(), nullptr);
+            copies.push_back (copy);
+        }
+    }
+
+    for (const auto& copy : copies)
+        target.appendChild (copy, getUndo (song));
+}
 } // namespace phazite

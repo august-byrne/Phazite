@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/VersionStore.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 
 #include <juce_cryptography/juce_cryptography.h>
@@ -23,12 +24,12 @@ namespace
         return false;
     }
 
-    // A small file replaced whole: written beside it first, then put in its place.
+    // A small file replaced whole: written beside it first and flushed to the disk, then put in its place
+    // (model/base/WholeFile.h).
     bool replaceFile (const juce::File& file, const juce::String& text)
     {
-        file.getParentDirectory().createDirectory();
-        juce::TemporaryFile temporary (file);
-        return temporary.getFile().replaceWithText (text, false, false, "\n") && temporary.overwriteTargetFileWithTemporary();
+        return file.getParentDirectory().createDirectory().wasOk()
+               && writeWholeFile (file, [&text] (juce::OutputStream& out) { return out.writeText (text, false, false, "\n"); }).wasOk();
     }
 
     juce::String toText (const juce::ValueTree& element)

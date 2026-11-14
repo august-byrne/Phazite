@@ -24,6 +24,7 @@
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/plugins/internal/SandboxedInstance.h"
+#include "model/plugins/internal/SandboxedProcessor.h"
 #include "model/presets/PresetModel.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -85,6 +86,7 @@ phazite::SandboxedInstance& getSandboxed (TestSong& song, phazite::DeviceID devi
 constexpr const char* effectGain = "1";
 constexpr const char* synthLevel = "10";
 constexpr const char* crashCrash = "20";
+constexpr const char* crashNaN = "21";
 constexpr const char* hangHang = "30";
 constexpr const char* hangStall = "31";
 } // namespace
@@ -796,4 +798,245 @@ TEST_CASE ("A plug-in that crashes in its helper leaves Phazite playing: an effe
     const auto savedAt = juce::Time::getMillisecondCounterHiRes();
     REQUIRE (song.getProject().save().wasOk());
     CHECK (juce::Time::getMillisecondCounterHiRes() - savedAt < 2000.0);
+}
+
+TEST_CASE ("A plug-in opened from its project keeps the settings the project holds when it crashes: saved again, and reloaded")
+{
+    // The audit of 2026-11-13: only a state taken or given since the plug-in opened was kept, so one that crashed before
+    // any was lost what the project held of it at the next save, and reloaded as new.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    const auto effect = song.addEffect (song.firstTrack, "PhaziteTestEffect");
+    song.setParameter (effect, effectGain, 0.5f);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 200);
+
+    // Saved and opened again: the plug-in opens from the settings the project holds, its Gain at half.
+    song.reopen();
+    const auto getStored = [&song, effect]
+    { return phazite::findDeviceState (getSong (song), effect)[phazite::schema::pluginState].toString(); };
+    const auto stored = getStored();
+    REQUIRE (stored.isNotEmpty());
+    auto& instance = getSandboxed (song, effect);
+    CHECK (instance.getParameterValue (instance.findParameter (effectGain)) == doctest::Approx (0.5f));
+
+    // Its helper goes, as one that crashes or is ended for a hang.
+    instance.getRemote().getHelper().kill();
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&instance] { return instance.hasCrashed(); }, 20000));
+
+    // Saved while it is crashed, the project holds its settings still.
+    REQUIRE (song.getProject().save().wasOk());
+    CHECK (getStored() == stored);
+
+    // Reloaded, it has them: its Gain at half, as the plug-in in its new helper says.
+    CHECK_FALSE (phazite::reloadDevice (song.context, effect).has_value());
+    REQUIRE_FALSE (instance.hasCrashed());
+    const auto state = instance.getRemote().getState (10000);
+    REQUIRE (state.has_value());
+    REQUIRE (state->getSize() == 8);
+    CHECK (juce::MemoryInputStream (*state, false).readFloat() == doctest::Approx (0.5f));
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getParameter (song.context, { effect, effectGain }).getValue() == doctest::Approx (0.5f));
+    REQUIRE (song.getProject().save().wasOk());
+    CHECK (getStored() == stored);
+}
+
+TEST_CASE ("A plug-in that crashes or hangs as its track is frozen fails the render, which says so, and Phazite goes on")
+{
+    // The audit of 2026-11-13: a render waited for a plug-in's block without end, so one that crashed or hung in it kept
+    // the render's thread for ever, and then Phazite's window, which waits for that thread as the render is cancelled.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    auto crashes = false;
+
+    SUBCASE ("one that crashes")
+    {
+        crashes = true;
+    }
+
+    SUBCASE ("one that hangs, which is ended for it")
+    {
+    }
+
+    const auto effect = song.addEffect (track, crashes ? "PhaziteTestCrash" : "PhaziteTestHang");
+    song.setParameter (effect, crashes ? crashCrash : hangHang, 1.0f);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 200); // its helper has it before the render's first block
+
+    phazite::test::RenderHost host;
+    song.context.getSongSelection().selectOnly (track);
+    phazite::toggleFreeze (song.context, host);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&host] { return ! host.finished.isEmpty(); }, 60000));
+    REQUIRE (host.finished.size() == 1);
+    CHECK (host.finished[0].contains (juce::String (crashes ? "Test Crash" : "Test Hang") + " crashed while Phazite rendered"));
+    CHECK_FALSE (phazite::isFrozen (song.context, track));
+
+    // Its slot says it crashed, and the song plays on without it, the tone through.
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return getSandboxed (song, effect).hasCrashed(); }, 20000));
+    phazite::test::dispatchPendingMessages();
+    CHECK (phazite::getEffects (song.context, track)[0].crashed);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("A render cancelled while a plug-in keeps its block doesn't wait for the plug-in")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    const auto hanging = song.addEffect (track, "PhaziteTestHang");
+    song.setParameter (hanging, hangHang, 1.0f);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 200);
+
+    // The engine at the rate a freeze renders at, as the app's is (its audio device's), so that the plug-in needn't be
+    // prepared for another rate as the render goes: its helper can't prepare it while it keeps a block, and Phazite gives
+    // that ten seconds.
+    phazite::getPlaybackHost (phazite::test::getEngineContext()).prepare (44100.0, EnginePlayback::blockSize);
+
+    // The freeze waits for the plug-in, which keeps the render's first block.
+    phazite::test::RenderHost host;
+    song.context.getSongSelection().selectOnly (track);
+    phazite::toggleFreeze (song.context, host);
+    REQUIRE (host.render != nullptr);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 500);
+    REQUIRE (host.finished.isEmpty());
+
+    // Cancelled, as its window's Cancel and quitting do: at once, not once the plug-in is taken for hung.
+    const auto cancelledAt = juce::Time::getMillisecondCounterHiRes();
+    host.render = nullptr;
+    // (the plug-in would be taken for hung some five seconds on: three tell the two apart on a busy machine too)
+    CHECK (juce::Time::getMillisecondCounterHiRes() - cancelledAt < 3000.0);
+    CHECK (host.finished.isEmpty());
+    CHECK_FALSE (phazite::isFrozen (song.context, track));
+
+    // The plug-in lets go of the block (its Hang off), and plays on.
+    song.setParameter (hanging, hangHang, 0.0f);
+    phazite::test::dispatchMessagesUntil ([] { return false; }, 200);
+    CHECK_FALSE (getSandboxed (song, hanging).hasCrashed());
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("A plug-in instrument with an input bus is its track's instrument: it plays its notes")
+{
+    // The audit of 2026-11-13: a plug-in with an input was played as an effect, whatever it was, and got no notes.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto synth = song.setInstrument (song.firstTrack, "PhaziteTestSynthWithInput");
+    REQUIRE (getSandboxed (song, synth).getRemote().getInfo().numInputChannels == 2);
+    song.addNote (song.addMidiClip (song.firstTrack, 0.0, 8.0), 69, 0.0, 2.0);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    CHECK (levelOf (playback.play (1.0), 0, 0.1, 0.9) == doctest::Approx (toneLevel).epsilon (0.002));
+}
+
+TEST_CASE ("Stop ends the notes a plug-in instrument holds, though the plug-in takes no all notes off")
+{
+    // The audit of 2026-11-13: Stop sent a plug-in nothing but controller 123, which JUCE's VST3 host hands on only to a
+    // plug-in that maps it to a parameter. The stand-in takes no controller.
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    song.setInstrument (song.firstTrack, "PhaziteTestSynth");
+    song.addNote (song.addMidiClip (song.firstTrack, 0.0, 16.0), 69, 0.0, 16.0);
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    CHECK (levelOf (playback.play (0.5), 0, 0.1, 0.4) == doctest::Approx (toneLevel).epsilon (0.002));
+
+    // Stopped while the note sounds: it ends with the first block after.
+    song.run ("transport.playStop");
+    const auto audio = playback.play (0.4);
+    CHECK (audio.getMagnitude (0, 4800, audio.getNumSamples() - 4800) == 0.0f);
+}
+
+TEST_CASE ("The notes of a block a plug-in couldn't be handed go with the next: a note that ended then doesn't sound on")
+{
+    // The audit of 2026-11-13: a block that found the plug-in's channel held or still on the block before was skipped, its
+    // notes with it; a note that ended in it sounded on.
+    using phazite::test::TestPlugins;
+    using Type = phazite::devices::NoteEvent::Type;
+    SandboxedPlugins sandboxed;
+    juce::String error;
+    const std::shared_ptr<phazite::SandboxedInstance> instance =
+        SandboxedPlugins::getHost().createInstance (TestPlugins::getDescription (TestPlugins::Kind::synth), {}, 48000.0, 256, error);
+    REQUIRE_MESSAGE (instance != nullptr, error);
+    phazite::SandboxedProcessor processor (instance);
+    processor.prepare (48000.0, 256);
+    juce::AudioBuffer<float> buffer (2, 256);
+
+    // A block with its events, as a render plays it (waiting for the plug-in, however busy the machine is) or as the audio
+    // device does (never waiting for its channel); how loud it came back.
+    const auto play = [&] (std::vector<phazite::devices::NoteEvent> events, bool asRender = true)
+    {
+        buffer.clear();
+        phazite::devices::ProcessContext context;
+        context.channels = buffer.getArrayOfWritePointers();
+        context.numChannels = 2;
+        context.numSamples = buffer.getNumSamples();
+        context.events = events;
+        context.isRendering = asRender;
+        processor.process (context);
+        return buffer.getMagnitude (0, 0, buffer.getNumSamples());
+    };
+
+    // A note begins, and sounds on.
+    CHECK (play ({ { Type::noteOn, 0, 69, 0.8f } }) > 0.1f);
+    CHECK (play ({}) > 0.1f);
+
+    // It ends in a block that finds the channel held (as a render, or the plug-in being prepared, holds it): nothing plays.
+    REQUIRE (instance->tryHold());
+    CHECK (play ({ { Type::noteOff, 10, 69, 0.0f } }, false) == 0.0f);
+    instance->let();
+
+    // The next block takes the note's end with it, at its start.
+    CHECK (play ({}) == 0.0f);
+    CHECK (play ({}) == 0.0f);
+
+    // Of two notes that begin in such blocks, the one that ends in them too isn't played, and the one still held is, from
+    // the next block on, until it ends.
+    REQUIRE (instance->tryHold());
+    play ({ { Type::noteOn, 0, 60, 0.8f }, { Type::noteOn, 0, 64, 0.8f } }, false);
+    play ({ { Type::noteOff, 0, 64, 0.0f } }, false);
+    instance->let();
+    CHECK (play ({}) > 0.1f);
+    play ({ { Type::noteOff, 0, 60, 0.0f } });
+    CHECK (play ({}) == 0.0f);
+
+    // Playback starting again (a reset) forgets what waited: a note from before it doesn't begin after it.
+    REQUIRE (instance->tryHold());
+    play ({ { Type::noteOn, 0, 72, 0.8f } }, false);
+    instance->let();
+    processor.reset();
+    CHECK (play ({}) == 0.0f);
+}
+
+TEST_CASE ("What a plug-in plays that isn't a number never reaches the mix: its block is as one it didn't play")
+{
+    SandboxedPlugins sandboxed;
+    TestSong song;
+    song.setTempo (120.0);
+    const auto track = addToneTrack (song, song.firstTrack, "Tone");
+    const auto effect = song.addEffect (track, "PhaziteTestCrash");
+    EnginePlayback playback (EnginePlayback::Input::silence, EnginePlayback::Timing::asRender);
+    song.run ("transport.playStop");
+    CHECK (levelOf (playback.play (0.4), 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
+
+    // Its NaN on (its helper has it before the next block, as its state, its Crash then its NaN, says): every block it plays
+    // is NaN, and the tone goes through as it came.
+    song.setParameter (effect, crashNaN, 1.0f);
+    phazite::test::dispatchPendingMessages();
+    const auto state = getSandboxed (song, effect).getRemote().getState (10000);
+    REQUIRE (state.has_value());
+    REQUIRE (state->getSize() == 8);
+    juce::MemoryInputStream values (*state, false);
+    CHECK (values.readFloat() == 0.0f);
+    REQUIRE (values.readFloat() == 1.0f);
+    const auto audio = playback.play (0.4);
+    const auto* samples = audio.getReadPointer (0);
+    CHECK (std::all_of (samples, samples + audio.getNumSamples(), [] (float sample) { return std::isfinite (sample); }));
+    CHECK (levelOf (audio, 0, 0.1, 0.3) == doctest::Approx (toneLevel).epsilon (0.002));
 }

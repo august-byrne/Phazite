@@ -139,6 +139,32 @@ std::unique_ptr<Take> PlaybackSession::releaseTake()
     return released;
 }
 
+void PlaybackSession::locateWhileRecording (BeatPosition beat, const std::function<void (Take&)>& finish)
+{
+    // The jump first: the engine ends what it records as it takes it, and what it is given to record after starts where
+    // the playhead lands, in the same block or a later one.
+    locate (beat);
+
+    if (take == nullptr)
+        return;
+
+    // The take's clips, and the song with them, which the engine loops as the take looped it still (the song's own loop
+    // would take a playhead past the song's end back to its start). Then the take goes, finished or else dropped, before
+    // the next is given to the engine, whose loop the engine plays from then. The next records the inputs that one did: the
+    // audio device's inputs stay as they are while a take records (AudioRecorder::update()), so a track armed meanwhile has
+    // none open, and waits for Stop as it did before the jump.
+    finish (*take);
+    update();
+    const auto inputTracks = take->getInputTracks();
+    take.reset();
+    take = Take::start (*this, &inputTracks);
+    update();
+
+    // Nothing records any more: the inputs as the tracks need them now, which the take that ended left to the next.
+    if (take == nullptr)
+        recorder->update();
+}
+
 int PlaybackSession::getNumInputs() const noexcept
 {
     return host.getNumInputs();

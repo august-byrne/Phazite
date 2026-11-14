@@ -460,6 +460,7 @@ inline void Reverb::putOut (float& left, float& right, const Output& output, flo
 void Reverb::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
     const auto& values = block.parameters;
     const auto numChannels = std::min (block.numChannels, 2);
 

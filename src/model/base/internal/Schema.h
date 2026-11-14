@@ -223,14 +223,21 @@ inline const juce::Identifier drumOrder { "drumOrder" };
 inline const juce::Identifier drumHidden { "drumHidden" };
 
 // Child of PHAZITE, which every project has: the master channel's own element, with its write mode
-// (trackAutomationMode), its volume and pan (channelVolume, channelPan), its devices, and its automation lanes (LANE, view),
-// with an ID of the song's (trackID) like a track's. song, but for its lanes
+// (trackAutomationMode), its volume and pan (channelVolume, channelPan), its devices, and its automation lanes (LANES,
+// view), with an ID of the song's (trackID) like a track's. song, but for its lanes
 inline const juce::Identifier MASTER { "MASTER" };
 
-// Child of TRACK and of MASTER, one for each automation lane the playlist shows under the track, in their order
-// (docs/design.md, section 10): the automation of a parameter of one of the track's devices, its volume and pan included.
-// A lane of a device that isn't on the track any more is ignored, and a parameter with automation but no lane here shows
-// one after these. view
+// Child of TRACK and of MASTER, once the track has kept a lane: its automation lanes (LANE), in an element of their own.
+// Lanes are view state, added and removed outside the undo history, which finds a track's other elements (its clips,
+// sends, devices and modulators) by their places among the track's elements: a lane added or removed among them would
+// make an undo or a redo take the wrong one. So LANES is added after the track's elements, once, and stays while the song
+// is open, empty or not. view
+inline const juce::Identifier LANES { "LANES" };
+
+// Child of LANES, one for each automation lane the playlist shows under the track, in their order (docs/design.md,
+// section 10): the automation of a parameter of one of the track's devices, its volume and pan included. A lane of a
+// device that isn't on the track any more is ignored, and a parameter with automation but no lane here shows one after
+// these. view
 inline const juce::Identifier LANE { "LANE" };
 
 // On LANE: the device, by its ID (DeviceID: "1042").
@@ -429,7 +436,7 @@ inline const juce::Identifier pointCurve { "curve" };
 // View settings: saved, written without undo steps, and not unsaved changes (decision 4; isUncountedProperty() and
 // isUncountedElement(), below): on tracks and the master (whose row Collapse All collapses), their heights, collapsed and
 // pinned, drum mode and rows, and their automation lanes; on PHAZITE, the playlist's grid; on devices (DEVICE), where their
-// windows were. PIANOROLL and LANE hold view settings only. Keep these lists exact: anything else a project holds is song
+// windows were. PIANOROLL and LANES hold view settings only. Keep these lists exact: anything else a project holds is song
 // or state.
 using IdentifierList = std::vector<const juce::Identifier*>;
 
@@ -472,7 +479,7 @@ inline bool isDeviceViewProperty (const juce::Identifier& p)
 
 inline bool isTrackViewElement (const juce::ValueTree& element)
 {
-    return element.hasType (LANE);
+    return element.hasType (LANES);
 }
 
 // What a project saves that is no change to it: view state (above); how the song plays rather than the song (design question

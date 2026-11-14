@@ -6,6 +6,7 @@
 
 #include "FallingValue.h"
 
+#include <cmath>
 #include <cstdint>
 #include <span>
 
@@ -61,8 +62,9 @@ struct ProcessContext
 
     // For an effect whose runner mixes what came in back in with what it plays (its mix, DeviceInfo.h): a copy of what came
     // in, on as many channels, which an effect that turns the phase of its whole sound turns the same, in place, so that the
-    // two stay in phase at any mix (Safe Bass's split, whose bands add up to an all-pass: devices/motion/SafeBass.h); most
-    // leave it alone. None where nothing mixes it back in.
+    // two stay in phase at any mix (Safe Bass's split, whose bands add up to an all-pass: devices/motion/SafeBass.h); one
+    // whose filters delay the sound as they turn it delays the copy as much with them (Processor::delaysDry()); most leave
+    // it alone. None where nothing mixes it back in.
     float* const* dry = nullptr;
 
     // A sidechain's audio, for a device that has one and a source feeding it; otherwise none.
@@ -120,7 +122,8 @@ public:
     virtual int getLatencySamplesFor (std::span<const float> /* valuesSetByHand */) const { return -1; }
     virtual void takeValuesBeforePrepare (std::span<const float> /* valuesSetByHand */) {}
 
-    // How long its sound goes on after its input stops, in seconds (a reverb's tail).
+    // How long its sound goes on after its input stops, in seconds (a reverb's tail), with its values as they are now.
+    // Any thread, the audio thread too (its runner asks before it lets it sleep): no allocation, no lock.
     virtual double getTailSeconds() const { return 0.0; }
 
     // Whether its runner may let it sleep once what comes in and what it plays have been silent a while: not a plug-in,
@@ -147,6 +150,12 @@ public:
     // then passes what it plays on whole, whatever its mix. Real-time safe.
     virtual bool overridesMix() const noexcept { return false; }
 
+    // Whether it delays the copy of what came in for its mix (ProcessContext::dry) itself, as much as it delays its own
+    // sound, rather than leave that to its runner: an effect that plays at twice the rate, whose filters there and back
+    // turn the phase of the top octave as they delay the sound, passes the copy through the same filters, so that the two
+    // meet in phase at any mix (merely delayed, the copy cancelled the highs: 10 dB down at 18 kHz, half and half).
+    virtual bool delaysDry() const noexcept { return false; }
+
     // How far it turns the sound down now, in decibels (0 or more), for what shows it besides its editor, such as its slot
     // in the mixer (FallingValue.h: any number of readers); nullptr for a device that doesn't turn the sound down.
     virtual const FallingValue* getGainReduction() const noexcept { return nullptr; }
@@ -154,4 +163,30 @@ public:
 
 // How fast a gain reduction shown outside a device's editor falls back, as the editors' meters do: 15 dB a second.
 inline constexpr float reductionFallPerSecond = 15.0f;
+
+// What an effect takes in as sound: a sample as it is, or silence in place of one that isn't sound, not a number, infinite or
+// beyond any level sound has (a plug-in gone wrong, a stray value in a float file). An effect's filters and delay lines would
+// keep such a sample, and pass it on, until they are reset (a filter that holds a NaN plays nothing else again), and one squared
+// or looked up in a table takes the effect down with it. Real-time safe.
+inline constexpr float loudestSound = 1.0e6f; // 120 dB over full scale
+
+inline float soundOf (float sample) noexcept
+{
+    return std::abs (sample) <= loudestSound ? sample : 0.0f; // false for what isn't a number
+}
+
+// The same for a block, in place: its channels and the copy of them for its mix. An effect's first step. Its sidechain isn't
+// its own to change: it reads that through soundOf().
+inline void silenceWhatIsNotSound (const ProcessContext& block) noexcept
+{
+    for (float* const* channels : { block.channels, block.dry })
+    {
+        if (channels == nullptr)
+            continue;
+
+        for (int channel = 0; channel < block.numChannels; ++channel)
+            for (int i = 0; i < block.numSamples; ++i)
+                channels[channel][i] = soundOf (channels[channel][i]);
+    }
+}
 } // namespace phazite::devices

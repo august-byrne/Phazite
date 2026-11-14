@@ -75,13 +75,18 @@ float steady (int time, float decibels)
 }
 
 // Plays the compressor in blocks and returns what comes out of each channel: input (time in samples, channel) gives
-// the sound and, when given, sidechain gives the sidechain's.
+// the sound and, when given, sidechain gives the sidechain's. What comes out is lined up with what went in: the compressor
+// plays as many samples more as its latency (an even number of them, so that steady()'s wave goes on unbroken into the next
+// call), and as many as the latency are left out at the start, so that a sample out is the one that went in at its time (and
+// the next call's start with its own).
 template <typename Input, typename Sidechain = std::nullptr_t>
 std::array<std::vector<float>, 2> play (Compressor& compressor, const std::vector<float>& values, int numSamples, Input input,
                                         [[maybe_unused]] Sidechain sidechain = nullptr)
 {
     juce::AudioBuffer<float> buffer (2, testBlockSize), side (2, testBlockSize);
     std::array<std::vector<float>, 2> played;
+    const auto latency = compressor.getLatencySamples(), wanted = numSamples;
+    numSamples += latency + latency % 2;
 
     for (int done = 0; done < numSamples; done += testBlockSize)
     {
@@ -119,7 +124,28 @@ std::array<std::vector<float>, 2> play (Compressor& compressor, const std::vecto
                 played[(size_t) channel].push_back (buffer.getSample (channel, i));
     }
 
+    for (auto& channel : played)
+    {
+        channel.erase (channel.begin(), channel.begin() + latency);
+        channel.resize ((size_t) wanted);
+    }
+
     return played;
+}
+
+// A tone's level in a stretch of a sound, as an amplitude: the sine at its frequency that fits the stretch best.
+double getToneLevel (const std::vector<float>& sound, size_t from, size_t to, double hertz, double rate)
+{
+    auto re = 0.0, im = 0.0;
+
+    for (auto i = from; i < to; ++i)
+    {
+        const auto angle = juce::MathConstants<double>::twoPi * hertz * (double) i / rate;
+        re += sound[i] * std::cos (angle);
+        im += sound[i] * std::sin (angle);
+    }
+
+    return 2.0 * std::sqrt (re * re + im * im) / (double) (to - from);
 }
 
 // The gain at a time, in decibels, for a steady input at a level.
@@ -863,7 +889,7 @@ TEST_CASE ("Ducking, the compressor looks ahead: a note that starts with the hit
 {
     // The owner heard a click under each kick in Exodus (2026-11-12): notes that start with the kick played their first
     // milliseconds at full level before the attack caught them. Given Duck before it is prepared, it delays its sound by its
-    // look-ahead, its attack ending at the hit; compressing, it has no latency.
+    // look-ahead, its attack ending at the hit; compressing, it is only as late as its drive plays, a few samples.
     auto values = getDuckValues();
     values[Compressor::hold] = 100.0f; // 4800 samples
     auto compressing = values;
@@ -876,15 +902,18 @@ TEST_CASE ("Ducking, the compressor looks ahead: a note that starts with the hit
     REQUIRE (latency == 480);
     CHECK (compressor.getLatencySamples() == latency);
     CHECK (compressor.getLatencySamplesFor (values) == latency);
-    CHECK (compressor.getLatencySamplesFor (compressing) == 0);
+    CHECK (compressor.getLatencySamplesFor (compressing) == Compressor::getDriveLatency());
+    CHECK (Compressor::getDriveLatency() > 0);
+    CHECK (Compressor::getDriveLatency() < 0.0005 * testRate); // well under what Low Latency leaves out (a millisecond)
 
     {
         Compressor plain;
         plain.prepare (testRate, testBlockSize);
-        CHECK (plain.getLatencySamples() == 0);
+        CHECK (plain.getLatencySamples() == Compressor::getDriveLatency());
     }
 
-    // A note that starts with the hit, at 4800, and a key loud for 5 ms from then: what comes out is as late as the latency.
+    // A note that starts with the hit, at 4800, and a key loud for 5 ms from then: what comes out is as late as the latency,
+    // which play() lines up with what went in again.
     constexpr int hit = 4800;
     const auto played = play (
         compressor, values, 24000, [] (int t, int) { return t >= hit ? steady (t, duckSound) : 0.0f; },
@@ -892,10 +921,147 @@ TEST_CASE ("Ducking, the compressor looks ahead: a note that starts with the hit
     const auto ducked = getDucked (played[0]);
 
     // Its first sample is down by the whole depth already, and stays down for the hold from the hit.
-    CHECK (juce::exactlyEqual (played[0][(size_t) (hit + latency - 1)], 0.0f));
-    CHECK (ducked[(size_t) (hit + latency)] == doctest::Approx (15.0f).epsilon (0.001));
-    CHECK (ducked[(size_t) (hit + latency + 4799)] == doctest::Approx (15.0f).epsilon (0.001));
+    CHECK (juce::exactlyEqual (played[0][(size_t) (hit - 1)], 0.0f));
+    CHECK (ducked[(size_t) hit] == doctest::Approx (15.0f).epsilon (0.001));
+    CHECK (ducked[(size_t) (hit + 4799)] == doctest::Approx (15.0f).epsilon (0.001));
 
     // Then it lets go over its release, half way 20 ms on.
-    CHECK (ducked[(size_t) (hit + latency + 4800 + duckReleaseSamples / 2)] == doctest::Approx (7.5f).epsilon (0.01));
+    CHECK (ducked[(size_t) (hit + 4800 + duckReleaseSamples / 2)] == doctest::Approx (7.5f).epsilon (0.01));
+}
+
+TEST_CASE ("A switch between Compress and Duck by automation plays on what is on its way through: nothing lost or played again")
+{
+    // With nothing compressed, driven or ducked, what comes out in either mode is what went in, as late as the latency it
+    // was prepared with (the drive's few samples, or Duck's look-ahead). Automation that changes the mode keeps it so: each
+    // mode had delayed the sound in lines of its own, so that a switch played what the other had left in them (silence the
+    // first time) and dropped what was on its way.
+    auto compressing = getDefaults();
+    setCurve (compressing, curves::findShape ("No Compression")->points);
+    auto ducking = compressing;
+    ducking[Compressor::mode] = (float) Compressor::Mode::duck;
+    ducking[Compressor::depth] = 0.0f;
+    const auto tone = [] (int time) { return 0.25f * (float) std::sin (juce::MathConstants<double>::twoPi * 997.0 * time / testRate); };
+
+    for (const auto preparedToDuck : { false, true })
+    {
+        for (const auto startsDucking : { false, true })
+        {
+            for (const auto blocksPerMode : { 1, 3 }) // shorter than Duck's look-ahead, and longer
+            {
+                Compressor compressor;
+
+                if (preparedToDuck)
+                    compressor.takeValuesBeforePrepare (ducking);
+
+                compressor.prepare (testRate, testBlockSize);
+                const auto latency = compressor.getLatencySamples();
+                REQUIRE (latency == (preparedToDuck ? 480 : Compressor::getDriveLatency()));
+                juce::AudioBuffer<float> buffer (2, testBlockSize);
+                std::vector<float> played;
+
+                for (int block = 0; block < 8 * blocksPerMode; ++block)
+                {
+                    for (int i = 0; i < testBlockSize; ++i)
+                        for (int channel = 0; channel < 2; ++channel)
+                            buffer.setSample (channel, i, tone (block * testBlockSize + i));
+
+                    const auto ducks = ((block / blocksPerMode) % 2 == 0) == startsDucking;
+                    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+                    devices::ProcessContext context;
+                    context.channels = channels;
+                    context.numChannels = 2;
+                    context.numSamples = testBlockSize;
+                    context.parameters = ducks ? ducking : compressing;
+                    compressor.process (context);
+                    played.insert (played.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + testBlockSize);
+                }
+
+                auto wrong = 0, firstWrong = -1;
+
+                for (int time = 0; time < (int) played.size(); ++time)
+                {
+                    const auto expected = time >= latency ? tone (time - latency) : 0.0f;
+
+                    if (std::abs (played[(size_t) time] - expected) > 1.0e-4f)
+                    {
+                        firstWrong = wrong == 0 ? time : firstWrong;
+                        ++wrong;
+                    }
+                }
+
+                INFO ("prepared to " << std::string (preparedToDuck ? "duck" : "compress") << ", starting "
+                                     << std::string (startsDucking ? "ducking" : "compressing") << ", " << blocksPerMode
+                                     << " blocks a mode: the first sample wrong is " << firstWrong);
+                CHECK (wrong == 0);
+            }
+        }
+    }
+}
+
+TEST_CASE ("The compressor's drive, and FET's and Tube's colour, leave the treble as loud as the rest, to 20 kHz")
+{
+    // Played by its antiderivative at the sound's own rate, the drive averaged each sample with the one before: 2 dB down at
+    // 10 kHz, 5 dB at 15 kHz and 12 dB at 20 kHz, of the whole sound, from the moment it engaged (and FET and Tube engage it as
+    // soon as they turn the sound down at all). At twice the rate, with the averaging made up for, it is level.
+    constexpr int numSamples = 19200;
+
+    // Driven, with nothing turned down: a quiet tone, which the curve leaves straight, comes out as loud as it went in.
+    for (const auto rate : { 44100.0, 48000.0 })
+    {
+        for (const auto character : { Compressor::Character::clean, Compressor::Character::vca, Compressor::Character::fet,
+                                      Compressor::Character::opto, Compressor::Character::tube })
+        {
+            for (const auto driven : { 0.25f, 1.0f })
+            {
+                for (const auto hertz : { 1000.0, 10000.0, 15000.0, 20000.0 })
+                {
+                    Compressor compressor;
+                    compressor.prepare (rate, testBlockSize);
+                    auto values = getDefaults();
+                    values[Compressor::character] = (float) character;
+                    setCurve (values, curves::findShape ("No Compression")->points);
+                    values[Compressor::drive] = driven;
+                    const auto tone = [hertz, rate] (int time, int)
+                    { return 0.001f * (float) std::sin (juce::MathConstants<double>::twoPi * hertz * time / rate); };
+                    const auto played = play (compressor, values, numSamples, tone)[0];
+                    const auto decibels = 20.0 * std::log10 (getToneLevel (played, numSamples / 2, numSamples, hertz, rate) / 0.001);
+
+                    INFO ("character " << (int) character << ", drive " << driven << ", " << hertz << " Hz at " << rate << ": " << decibels
+                                       << " dB");
+                    CHECK (std::abs (decibels) < 0.5);
+                }
+            }
+        }
+    }
+
+    // FET and Tube, turning a loud 200 Hz tone 15 dB down, which brings their colour in: a quiet tone beside it comes out as
+    // loud at 10, 15 and 20 kHz as at 1 kHz (what the low tone's wave does to it, it does at any frequency).
+    for (const auto character : { Compressor::Character::fet, Compressor::Character::tube })
+    {
+        const auto levelOf = [character] (double hertz)
+        {
+            Compressor compressor;
+            compressor.prepare (testRate, testBlockSize);
+            auto values = getTestValues();
+            values[Compressor::character] = (float) character;
+            values[Compressor::release] = 500.0f;
+            const auto sound = [hertz] (int time, int)
+            {
+                const auto at = juce::MathConstants<double>::twoPi * time / testRate;
+                return toGain (-6.0f) * (float) std::sin (200.0 * at) + toGain (-46.0f) * (float) std::sin (hertz * at);
+            };
+            const auto played = play (compressor, values, 48000, sound)[0];
+            CHECK (compressor.getReductionMeter().take() > 12.0f);
+            return 20.0 * std::log10 (getToneLevel (played, 24000, 48000, hertz, testRate));
+        };
+
+        const auto reference = levelOf (1130.0);
+
+        for (const auto hertz : { 10130.0, 15130.0, 19930.0 })
+        {
+            const auto decibels = levelOf (hertz) - reference;
+            INFO ("character " << (int) character << ", " << hertz << " Hz: " << decibels << " dB against 1130 Hz");
+            CHECK (std::abs (decibels) < 0.5);
+        }
+    }
 }

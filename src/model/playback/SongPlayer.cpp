@@ -320,9 +320,12 @@ std::unique_ptr<engine::Plan> SongPlayer::compile (double sampleRate, int maximu
             {
                 if (getID (send, schema::sendTo) == channel.id)
                 {
+                    // After the fader, the track's sound before its mute: the send's cut says whether it sends
+                    // (updateAudibility()), so that a track soloed out still sends to a return that is soloed.
                     const auto beforeFader = (bool) send[schema::sendPreFader];
-                    inputs.push_back ({ places[other.id], nullptr, beforeFader, getSendLevel (send) });
+                    inputs.push_back ({ places[other.id], nullptr, beforeFader, getSendLevel (send), nullptr, ! beforeFader });
                     plan->strips[(size_t) places[other.id]].feedsBeforeFader |= beforeFader;
+                    plan->strips[(size_t) places[other.id]].feedsBeforeMute |= ! beforeFader;
                 }
             }
         }
@@ -1265,15 +1268,21 @@ void SongPlayer::updateAudibility()
         return findTrackState (song, getDeviceChannel (song, DeviceID::fromRaw ((std::uint64_t) getID (padState, schema::trackPadDevice))));
     };
 
-    const auto isHeard = [&] (const juce::ValueTree& state)
+    // Whether a track is muted or soloed, by its own switches or a folder's it is in.
+    struct Switches
     {
-        auto muted = false, soloed = false;
-        const auto addFrom = [&muted, &soloed] (const juce::ValueTree& from)
+        bool muted = false, soloed = false;
+    };
+
+    const auto getSwitches = [&] (const juce::ValueTree& state)
+    {
+        Switches switches;
+        const auto addFrom = [&switches] (const juce::ValueTree& from)
         {
             for (auto track = from; track.hasType (schema::TRACK); track = track.getParent())
             {
-                muted = muted || (bool) track[schema::trackMute];
-                soloed = soloed || (bool) track[schema::trackSolo];
+                switches.muted = switches.muted || (bool) track[schema::trackMute];
+                switches.soloed = switches.soloed || (bool) track[schema::trackSolo];
             }
         };
 
@@ -1282,9 +1291,23 @@ void SongPlayer::updateAudibility()
         if (state.hasProperty (schema::trackPad))
             addFrom (getSamplerTrack (state));
 
-        soloed = soloed || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
+        return switches;
+    };
+
+    const auto isHeard = [&] (const juce::ValueTree& state)
+    {
+        const auto [muted, soloedItself] = getSwitches (state);
+        const auto soloed = soloedItself || (isFolderState (state) && holdsSoloed (state, holdsSoloed));
         const auto isRendered = beforeFader && getID (state, schema::trackID) == rendered->channel;
         return isRendered || (! muted && (! anySoloed || soloed || isReturnState (state)));
+    };
+
+    // A return that is soloed hears what is sent to it, from tracks its solo silences too, as a soloed return does in
+    // Ableton Live, Logic Pro and Cubase: else soloing a return, to hear an effect alone, would play silence.
+    const auto isSoloedReturn = [&] (std::int64_t id)
+    {
+        const auto target = findTrackState (song, TrackID::fromRaw ((std::uint64_t) id));
+        return isReturnState (target) && getSwitches (target).soloed && isHeard (target);
     };
 
     // Whether a track, or a folder it is in, is muted below a bus: the bus's own mute, and its folders', don't count.
@@ -1320,13 +1343,27 @@ void SongPlayer::updateAudibility()
             continue;
 
         const auto heard = isHeard (state);
-        strip->getChannel().setAudible (heard || playsForKey (state));
 
-        // What isn't heard sends nothing, also while it plays on for a sidechain.
+        // What isn't heard sends nothing, also while it plays on for a sidechain; but a track that only a solo silences
+        // (not its mute) still sends to a return that is soloed, and plays on for that send, itself unheard.
+        const auto soloedOut = ! heard && ! getSwitches (state).muted;
+        auto sendsUnheard = false;
+
         for (const auto& child : state)
-            if (child.hasType (schema::SEND))
-                if (const auto found = sendLevels.find (getID (child, schema::sendID)); found != sendLevels.end())
-                    found->second->setCut (! heard);
+        {
+            if (! child.hasType (schema::SEND))
+                continue;
+
+            const auto reachesSoloedReturn = soloedOut && isSoloedReturn (getID (child, schema::sendTo));
+            sendsUnheard = sendsUnheard || reachesSoloedReturn;
+
+            if (const auto found = sendLevels.find (getID (child, schema::sendID)); found != sendLevels.end())
+                found->second->setCut (! heard && ! reachesSoloedReturn);
+        }
+
+        // Last, so that the audio thread never finds the track silenced while it doesn't yet know to play on for a send.
+        strip->getChannel().setPlaysOnUnheard (sendsUnheard);
+        strip->getChannel().setAudible (heard || playsForKey (state));
     }
 }
 

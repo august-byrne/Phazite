@@ -2,6 +2,7 @@
 #include "internal/OfflineRender.h"
 #include "engine/core/Engine.h"
 #include "internal/PlaybackSession.h"
+#include "model/plugins/internal/SandboxedProcessor.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,6 +14,21 @@ namespace
 {
     constexpr float silence = 0.000316f; // -70 dB, under which a tail's block is silent
     constexpr int partSamples = 8192;    // rendered and written at a time
+
+    // The longest tail a plan's devices report, in seconds: its plug-ins' (the devices that take their blocks whole), which
+    // say theirs as they open, asked on the message thread, where a plug-in is made anew; or Phazite's own devices', which
+    // say theirs as they play, with their values as they are then, asked on the thread that plays them.
+    double getLongestTail (const engine::Plan& plan, bool ofPlugins)
+    {
+        auto longest = 0.0;
+
+        for (const auto& strip : plan.strips)
+            for (const auto& device : strip.devices)
+                if (const auto& runner = device.node->getRunner(); runner.getProcessor().takesWholeBlocks() == ofPlugins)
+                    longest = std::max (longest, runner.getTailSeconds());
+
+        return longest;
+    }
 
     std::unique_ptr<juce::AudioFormatWriter> makeFloatWriter (const juce::File& file, double sampleRate)
     {
@@ -48,6 +64,13 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
     {
         Compiled compiled { job, setup.makePlayer(), nullptr };
         compiled.plan = compiled.player->compile (setup.sampleRate, setup.blockSize, std::nullopt, job.of);
+        compiled.pluginTailSeconds = getLongestTail (*compiled.plan, true);
+
+        for (const auto& strip : compiled.plan->strips)
+            for (const auto& device : strip.devices)
+                if (auto* plugin = dynamic_cast<SandboxedProcessor*> (&device.node->getRunner().getProcessor()))
+                    compiled.plugins.push_back (plugin);
+
         jobs.push_back (std::move (compiled));
     }
 
@@ -57,7 +80,14 @@ OfflineRender::OfflineRender (Setup s, const std::vector<Job>& toRender, Rendere
 OfflineRender::~OfflineRender()
 {
     JUCE_ASSERT_MESSAGE_THREAD
-    // It looks at threadShouldExit() between blocks: never ended by force, which can leave a lock it held held for ever.
+    // It looks at threadShouldExit() between blocks, and waits no longer for a plug-in to play the one it is in: never
+    // ended by force, which can leave a lock it held held for ever.
+    signalThreadShouldExit();
+
+    for (const auto& job : jobs)
+        for (auto* plugin : job.plugins)
+            plugin->cancelRender();
+
     stopThread (-1);
     jobs.clear(); // what the renders played, before the project's engine plays the plug-ins again
 
@@ -108,22 +138,85 @@ juce::Result OfflineRender::play (Compiled& compiled, int index)
     std::int64_t done = 0;
     engine.beginRender();
 
-    // The song, then its tails a block at a time, until one falls silent.
-    while (! threadShouldExit() && done < lastSample)
+    const auto write = [&writer, &meter, &done] (const juce::AudioBuffer<float>& audio, int length)
     {
-        const auto inSong = done < endSample;
-        const auto length = inSong ? (int) std::min<std::int64_t> (partSamples, endSample - done) : setup.blockSize;
+        if (! writer->writeFromAudioSampleBuffer (audio, 0, length))
+            return false;
+
+        meter.process (audio.getArrayOfReadPointers(), 2, length);
+        done += length;
+        return true;
+    };
+
+    // A plug-in that went as it played, or was ended for hanging: nothing is written without it.
+    const auto findFailedPlugin = [this, &compiled]() -> const SandboxedProcessor*
+    {
+        if (! threadShouldExit())
+            for (const auto* plugin : compiled.plugins)
+                if (plugin->hasFailedInRender())
+                    return plugin;
+
+        return nullptr;
+    };
+
+    const auto failedFor = [] (const SandboxedProcessor& plugin)
+    {
+        return juce::Result::fail (plugin.getInstance().getDescription().name
+                                   + " crashed while Phazite rendered. Reload the plug-in, then render again.");
+    };
+
+    // The song.
+    while (! threadShouldExit() && done < endSample)
+    {
+        const auto length = (int) std::min<std::int64_t> (partSamples, endSample - done);
         engine.renderPart (part.getArrayOfWritePointers(), length);
 
-        if (! inSong && part.getMagnitude (0, length) < silence)
-            break;
+        if (const auto* plugin = findFailedPlugin())
+            return failedFor (*plugin);
 
-        if (! writer->writeFromAudioSampleBuffer (part, 0, length))
+        if (! write (part, length))
             return failed;
 
-        meter.process (part.getArrayOfReadPointers(), 2, length);
-        done += length;
         setProgress (index, setup.playedShare * (double) done / (double) std::max<std::int64_t> (1, endSample));
+    }
+
+    // Then its tails, a block at a time, until they have been silent for as long as the longest tail the devices played
+    // report, with their values as they are then: a delay is silent between its echoes, and a block of silence isn't the
+    // tail's end. The silence it ends with isn't written: what is silent waits here until sound follows it.
+    const auto* plan = engine.getPlan();
+    const auto blockLength = std::min (setup.blockSize, partSamples);
+    juce::AudioBuffer<float> quiet;
+    auto numQuiet = 0;
+
+    for (auto played = done; ! threadShouldExit() && played < lastSample; played += blockLength)
+    {
+        engine.renderPart (part.getArrayOfWritePointers(), blockLength);
+
+        if (const auto* plugin = findFailedPlugin())
+            return failedFor (*plugin);
+
+        if (part.getMagnitude (0, blockLength) >= silence)
+        {
+            if ((numQuiet > 0 && ! write (quiet, numQuiet)) || ! write (part, blockLength))
+                return failed;
+
+            numQuiet = 0;
+            continue;
+        }
+
+        const auto tailSeconds = plan != nullptr ? std::max (compiled.pluginTailSeconds, getLongestTail (*plan, false)) : 0.0;
+        const auto hold = (std::int64_t) std::llround (std::min (tailSeconds, job.tailSeconds) * setup.sampleRate);
+
+        if (numQuiet + blockLength >= hold)
+            break;
+
+        if (quiet.getNumSamples() == 0)
+            quiet.setSize (2, (int) (lastSample - endSample) + blockLength);
+
+        for (int channel = 0; channel < 2; ++channel)
+            quiet.copyFrom (channel, numQuiet, part, channel, 0, blockLength);
+
+        numQuiet += blockLength;
     }
 
     engine.endRender();

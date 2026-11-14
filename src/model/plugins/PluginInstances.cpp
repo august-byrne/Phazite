@@ -313,13 +313,14 @@ void PluginInstances::store (DeviceID id)
     const juce::ScopedValueSetter<bool> writing (storing, true);
     auto& instance = *found->second.instance;
 
-    // Its settings, as it gives them now (or as it last had them, if its helper went); and its program.
+    // Its settings, as it gives them now, or as it last had them, if its helper went or didn't give them in time: then the
+    // song keeps what it holds rather than nothing. And its program.
     juce::MemoryBlock block;
-    instance.getStateInformation (block);
+    const auto isNow = instance.takeState (block);
 
     if (block.getSize() > 0)
         storeProperty (device, schema::pluginState, writeBytes (block));
-    else
+    else if (isNow)
         device.removeProperty (schema::pluginState, nullptr);
 
     // With it, the plug-in's ID in its format (a VST3's class ID, from its preset file), and the version of the plug-in that

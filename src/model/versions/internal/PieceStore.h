@@ -32,7 +32,9 @@ public:
     bool has (const juce::String& name) const;
     std::optional<juce::MemoryBlock> read (const juce::String& name) const;
 
-    // Writes those of the pieces that it doesn't hold yet into a new pack, whole or not at all (nothing for none).
+    // Writes those of the pieces that it doesn't hold yet into a new pack, whole or not at all (nothing for none). True
+    // only once it holds every one of them: the pack is on the disk and was read back. False, with nothing changed, if it
+    // couldn't be written.
     bool write (const std::map<juce::String, juce::MemoryBlock>& pieces);
 
     // How many bytes its packs take, how many pieces they hold, and their names (in no particular order).

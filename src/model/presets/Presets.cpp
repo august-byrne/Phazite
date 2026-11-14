@@ -2,6 +2,7 @@
 #include "internal/Presets.h"
 #include "PresetModel.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DeviceFiles.h"
@@ -797,8 +798,12 @@ juce::var readPreset (const juce::File& file)
 
 bool writePreset (const juce::var& preset, const juce::File& file)
 {
-    return preset.isObject() && file.getParentDirectory().createDirectory()
-           && file.replaceWithText (juce::JSON::toString (preset, false) + "\n", false, false, "\n");
+    if (! preset.isObject() || ! file.getParentDirectory().createDirectory())
+        return false;
+
+    // Whole or not at all, as the project file: a preset that couldn't be written isn't said to be saved.
+    const auto text = (juce::JSON::toString (preset, false) + "\n").replace ("\r\n", "\n");
+    return writeWholeFile (file, text.toRawUTF8(), text.getNumBytesAsUTF8()).wasOk();
 }
 
 juce::ValueTree makeDeviceFromPreset (Song& song, const PluginHost& host, const juce::var& preset)

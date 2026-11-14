@@ -324,6 +324,7 @@ void PianoRoll::NoteGrid::paintAt (const juce::MouseEvent& e)
 //==============================================================================
 void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
 {
+    gesture->waitedForClick = gesture->clickOnMouseUp;
     gesture->clickOnMouseUp = false;
     gesture->kind = Gesture::Kind::none; // unless what follows finds something to drag
 
@@ -351,67 +352,95 @@ void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
     if (! roll.getSelectedNoteRefs().contains (gesture->note))
         roll.selectNotes ({ gesture->note }, true);
 
-    auto notes = roll.getSelectedNotesHere();
-    const auto copy = gesture->zone == Zone::body && e.mods.isCommandDown();
+    // Ctrl+drag moves copies of the notes, as the playlist copies clips (Phazite's one meaning for Ctrl): made once the drag
+    // moves them (copyDraggedNotes()), so that a Ctrl+click whose pointer slipped a few pixels leaves no copies on the notes.
+    gesture->pressed = gesture->note;
+    gesture->copies = gesture->zone == Zone::body && e.mods.isCommandDown();
 
     // A note added by this click and the drag that moves it are one step, the click's.
-    gesture->beginStep (roll.context, gesture->zone != Zone::body ? "Resize Notes" : (copy ? "Copy Notes" : "Move Notes"));
-
-    // Ctrl+drag copies the notes first, as the playlist copies clips (Phazite's one meaning for Ctrl), and the copies move.
-    if (copy)
-    {
-        const auto anchorIndex =
-            std::find_if (notes.begin(), notes.end(), [this] (const NoteData& n) { return n.getRef() == gesture->note; }) - notes.begin();
-        const auto copies = replaceNotes (roll.context, {}, notes);
-        roll.selectNotes (copies, false);
-
-        if (juce::isPositiveAndBelow ((int) anchorIndex, (int) copies.size()))
-            gesture->note = copies[(size_t) anchorIndex];
-
-        notes.clear();
-
-        for (const auto& ref : copies)
-            if (const auto note = getNote (roll.context, ref))
-                notes.push_back (*note);
-    }
-
-    // Where each note's clip starts: no note goes before it.
-    const auto shownClips = roll.getShownClips();
-
-    for (const auto& n : notes)
-    {
-        const auto clip = std::find_if (shownClips.begin(), shownClips.end(), [&n] (const NoteClip& c) { return c.id == n.clip; });
-        const Gesture::Original original { n.getRef(), n.start, n.length, n.pitch,
-                                           clip != shownClips.end() ? clip->range.getStart() : BeatPosition() };
-        gesture->originals.push_back (original);
-
-        if (n.getRef() == gesture->note)
-            gesture->anchor = original;
-    }
+    gesture->stepIsTheDrags = ! gesture->hasStep();
+    gesture->beginStep (roll.context, gesture->zone != Zone::body ? "Resize Notes" : (gesture->copies ? "Copy Notes" : "Move Notes"));
+    setDraggedNotes (roll.getSelectedNotesHere());
 
     if (gesture->anchor.note.isValid())
         gesture->kind = gesture->zone == Zone::body ? Gesture::Kind::move
                                                     : (gesture->zone == Zone::end ? Gesture::Kind::resizeEnd : Gesture::Kind::resizeStart);
 }
 
+void PianoRoll::NoteGrid::setDraggedNotes (const std::vector<NoteData>& notes)
+{
+    // Where each note's clip starts: no note goes before it.
+    const auto shownClips = roll.getShownClips();
+    gesture->originals.clear();
+    gesture->anchor = {};
+
+    for (const auto& n : notes)
+    {
+        const auto clip = std::find_if (shownClips.begin(), shownClips.end(), [&n] (const NoteClip& c) { return c.id == n.clip; });
+        const Gesture::Original original { n.getRef(),
+                                           n.start,
+                                           n.length,
+                                           n.pitch,
+                                           clip != shownClips.end() ? clip->range.getStart() : BeatPosition(),
+                                           clip != shownClips.end() ? clip->latestNoteStart : std::nullopt };
+        gesture->originals.push_back (original);
+
+        if (n.getRef() == gesture->note)
+            gesture->anchor = original;
+    }
+}
+
+void PianoRoll::NoteGrid::copyDraggedNotes()
+{
+    // Copies of the notes as they are, where they are, which are what is selected and moves from here on.
+    std::vector<NoteData> notes;
+
+    for (const auto& original : gesture->originals)
+        if (const auto note = getNote (roll.context, original.note))
+            notes.push_back (*note);
+
+    const auto anchorIndex =
+        std::find_if (notes.begin(), notes.end(), [this] (const NoteData& n) { return n.getRef() == gesture->note; }) - notes.begin();
+    gesture->selectionBeforeCopies = roll.getSelectedRefsHere();
+    gesture->copied = replaceNotes (roll.context, {}, notes);
+    roll.selectNotes (gesture->copied, false);
+
+    if (juce::isPositiveAndBelow ((int) anchorIndex, (int) gesture->copied.size()))
+        gesture->note = gesture->copied[(size_t) anchorIndex];
+
+    notes.clear();
+
+    for (const auto& ref : gesture->copied)
+        if (const auto note = getNote (roll.context, ref))
+            notes.push_back (*note);
+
+    setDraggedNotes (notes);
+}
+
 void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
 {
     const auto beat = roll.getView().xToBeat (e.position.x);
     const auto snapped = [this, &e] (BeatPosition b) { return roll.snap (b, e.mods); };
-    const auto& anchor = gesture->anchor;
-    std::vector<NoteData> moved; // where the drag puts each note
+    const auto& anchor = gesture->anchor; // the note under the mouse, or its copy once copies move
+    std::vector<NoteData> moved;          // where the drag puts each note
 
     const auto add = [&moved] (const Gesture::Original& original, BeatPosition start, BeatDuration length, int pitch)
     { moved.push_back ({ .clip = original.note.clip, .id = original.note.note, .pitch = pitch, .start = start, .length = length }); };
 
     if (gesture->kind == Gesture::Kind::move)
     {
-        // The note under the mouse snaps to the grid, and the others keep their distance from it; none goes
-        // before its clip's start.
-        auto delta = snapped (anchor.start + (beat - gesture->startBeat)) - anchor.start;
+        // The notes move by the grid's steps from where they were, so that a note off the grid stays as far off it, and a
+        // drag up or down alone moves none in time (TimelineEditor::snapMove()); none goes before its clip's start, or on to
+        // where its clip doesn't play it.
+        auto delta = roll.snapMove (anchor.start, beat - gesture->startBeat, e.mods);
 
         for (const auto& original : gesture->originals)
-            delta = std::max (delta, original.clipStart - original.start);
+        {
+            delta = std::max (delta, original.getRoomBefore());
+
+            if (const auto room = original.getRoomAfter())
+                delta = std::min (delta, *room);
+        }
 
         // Up or down by rows, as far as every note stays on one. Past an edge, the row there counts (the rows
         // scroll along).
@@ -422,6 +451,24 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
         for (const auto& original : gesture->originals)
             if (const auto row = roll.getRowForPitch (original.pitch); row >= 0)
                 rowDelta = juce::jlimit (-row, roll.getNumRows() - 1 - row, rowDelta);
+
+        // Copies are made as the drag first takes them somewhere: until then, nothing changes.
+        if (gesture->copies && gesture->copied.empty())
+        {
+            if (delta == BeatDuration() && rowDelta == 0)
+                return;
+
+            copyDraggedNotes();
+
+            if (! anchor.note.isValid())
+            {
+                gesture->kind = Gesture::Kind::none;
+                return;
+            }
+        }
+
+        gesture->movedBy = delta;
+        gesture->movedRows = rowDelta;
 
         for (const auto& original : gesture->originals)
         {
@@ -474,7 +521,10 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
         for (const auto& original : gesture->originals)
         {
             change = std::min (change, original.length - getMinimumNoteLength());
-            change = std::max (change, original.clipStart - original.start);
+            change = std::max (change, original.getRoomBefore());
+
+            if (const auto room = original.getRoomAfter())
+                change = std::min (change, *room);
         }
 
         for (const auto& original : gesture->originals)
@@ -594,26 +644,23 @@ void PianoRoll::NoteGrid::mouseUp (const juce::MouseEvent& e)
         }
         else if (noteIsThere && gesture->clickOnMouseUp)
         {
-            // A Ctrl+click or Shift+click toggles the note; a click on a selected note selects it alone.
-            if (e.mods.isCommandDown() || e.mods.isShiftDown())
-            {
-                auto notes = roll.getSelectedRefsHere();
-                const auto wasSelected = std::find (notes.begin(), notes.end(), note) != notes.end();
-                notes.erase (std::remove (notes.begin(), notes.end(), note), notes.end());
-
-                if (! wasSelected)
-                    notes.push_back (note);
-
-                roll.selectNotes (notes, false);
-            }
-            else
-            {
-                roll.selectNotes ({ note }, false);
-            }
+            clickNote (note, e.mods);
         }
         else if (roll.getTool() == Tool::select && ! note.isValid() && ! e.mods.isCommandDown())
         {
             roll.selectNotes ({}, false);
+        }
+    }
+    else if (gesture->kind == Gesture::Kind::move && endMoveThatWentNowhere())
+    {
+        // A Ctrl+click or a Shift+click whose pointer slipped still toggles the note, as its click would. A plain press on a
+        // selected note that became a drag leaves the selection as it was: a drag by less than half a grid step moves
+        // nothing, and isn't a click that selects the note alone.
+        if (gesture->waitedForClick && (e.mods.isCommandDown() || e.mods.isShiftDown())
+            && getNote (roll.context, gesture->pressed).has_value())
+        {
+            roll.selectNotes (gesture->selectionBefore, false);
+            clickNote (gesture->pressed, e.mods);
         }
     }
     else if (gesture->kind == Gesture::Kind::erase && gesture->deselectIfNothingDeleted && ! gesture->hasDoneAny())
@@ -634,6 +681,43 @@ void PianoRoll::NoteGrid::mouseUp (const juce::MouseEvent& e)
     }
 
     updateHint (e.position);
+}
+
+void PianoRoll::NoteGrid::clickNote (NoteRef note, juce::ModifierKeys mods)
+{
+    // A Ctrl+click or Shift+click toggles the note; a click on a selected note selects it alone.
+    if (! (mods.isCommandDown() || mods.isShiftDown()))
+    {
+        roll.selectNotes ({ note }, false);
+        return;
+    }
+
+    auto notes = roll.getSelectedRefsHere();
+    const auto wasSelected = std::find (notes.begin(), notes.end(), note) != notes.end();
+    notes.erase (std::remove (notes.begin(), notes.end(), note), notes.end());
+
+    if (! wasSelected)
+        notes.push_back (note);
+
+    roll.selectNotes (notes, false);
+}
+
+bool PianoRoll::NoteGrid::endMoveThatWentNowhere()
+{
+    if (gesture->movedBy != BeatDuration() || gesture->movedRows != 0)
+        return false;
+
+    // The notes are where they began: a step the drag began is taken back, leaving nothing to undo or redo, and copies made
+    // on the way go, which would lie on their originals, unseen and playing twice.
+    if (gesture->stepIsTheDrags)
+        gesture->rollBack();
+    else if (! gesture->copied.empty())
+        deleteNotes (roll.context, gesture->copied);
+
+    if (! gesture->copied.empty())
+        roll.selectNotes (gesture->selectionBeforeCopies, false);
+
+    return true;
 }
 
 juce::Point<int> PianoRoll::NoteGrid::getGestureStart() const

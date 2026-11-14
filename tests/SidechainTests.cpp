@@ -605,10 +605,11 @@ TEST_CASE ("A multiband's band whose Key is on ducks under another track through
     CHECK (play() == doctest::Approx (alone).epsilon (0.02));
 }
 
-TEST_CASE ("Phazite's compressor's sound comes as late as its look-ahead while it ducks, and as it goes in while it compresses")
+TEST_CASE ("Phazite's compressor's sound comes as late as its look-ahead while it ducks, and only as late as its drive while it compresses")
 {
     // Its latency follows its mode, which makes it anew in a new plan (model/playback/internal/SongPlayer.h), so that the
-    // engine lines the other tracks up with it (devices/dynamics/Compressor.h: duckLookaheadSeconds).
+    // engine lines the other tracks up with it (devices/dynamics/Compressor.h: duckLookaheadSeconds; compressing, the few
+    // samples its drive plays the sound late by, far under what Low Latency leaves out).
     phazite::test::TestSong song;
     auto& context = song.context;
     auto& model = *phazite::findSong (context);
@@ -622,15 +623,16 @@ TEST_CASE ("Phazite's compressor's sound comes as late as its look-ahead while i
         phazite::setValueSetByHand (model, phazite::ParameterRef { compressor, "mode" }, (float) mode);
     };
 
+    const auto isDrivesAlone = [&latency] { return latency() > 0.0 && latency() < 0.0005; };
     phazite::test::dispatchPendingMessages();
-    CHECK (juce::exactlyEqual (latency(), 0.0));
+    CHECK (isDrivesAlone());
 
     setMode (phazite::devices::Compressor::Mode::duck);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return latency() > 0.0; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return latency() > 0.005; }));
     CHECK (latency() == doctest::Approx (phazite::devices::Compressor::duckLookaheadSeconds).epsilon (0.01));
 
     setMode (phazite::devices::Compressor::Mode::compress);
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&latency] { return juce::exactlyEqual (latency(), 0.0); }));
+    REQUIRE (phazite::test::dispatchMessagesUntil (isDrivesAlone));
 }
 
 TEST_CASE ("A sidechain's key reaches its device while the device's track is soloed, a bus's too, whose tracks send nothing meanwhile")
@@ -781,5 +783,58 @@ TEST_CASE ("A drum pad on a track of its own in a bus that is a key feeds the ke
     CHECK (renderPeak (model) < 1.0e-4f);
     phazite::setTrackSoloed (model, song.bass, false);
     phazite::setTrackMuted (model, drums, true);
+    CHECK (renderPeak (model) < 1.0e-4f);
+}
+
+TEST_CASE ("A soloed return hears what is sent to it, from tracks its solo silences, but not from muted ones")
+{
+    // Soloing a return, to hear an effect alone, played silence: every track the solo silenced had its sends cut. A soloed
+    // return hears what arrives through sends, as in Ableton Live, Logic Pro and Cubase; the tracks' own sound isn't heard, nor
+    // what they send to returns that aren't soloed.
+    Song song;
+    auto& model = *song.song;
+    using phazite::test::at, phazite::test::lasting;
+    song.add (song.kick, TestTone::typeID);
+    const auto clip = phazite::test::addMidiClip (model, song.kick, { at (0.0), at (4.0) }, "Notes");
+    REQUIRE (clip.isValid());
+    phazite::test::addMidiNote (model, clip, 60, at (0.0), lasting (4.0), 64);
+    const auto kickAlone = renderPeak (model);
+    REQUIRE (kickAlone > 0.1f);
+
+    const auto reverb = phazite::addReturnTrack (model, "Reverb", nullptr);
+    const auto delay = phazite::addReturnTrack (model, "Delay", nullptr);
+    REQUIRE (reverb.isValid());
+    REQUIRE (delay.isValid());
+    const auto toReverb = phazite::addSend (model, song.kick, reverb, false);
+    const auto toDelay = phazite::addSend (model, song.kick, delay, false);
+    REQUIRE (toReverb.isValid());
+    REQUIRE (toDelay.isValid());
+    phazite::setSendLevel (model, toReverb, 0.0f);
+    phazite::setSendLevel (model, toDelay, 0.0f);
+    CHECK (renderPeak (model) == doctest::Approx (3.0f * kickAlone).epsilon (0.01)); // the kick and both returns
+
+    for (const auto preFader : { false, true })
+    {
+        CAPTURE (preFader);
+        phazite::setPreFader (model, toReverb, preFader);
+
+        // The reverb soloed: what the kick sends to it, alone.
+        phazite::setTrackSoloed (model, reverb, true);
+        CHECK (renderPeak (model) == doctest::Approx (kickAlone).epsilon (0.01));
+
+        // The kick soloed too: itself, and what it sends to both returns, which no solo silences.
+        phazite::setTrackSoloed (model, song.kick, true);
+        CHECK (renderPeak (model) == doctest::Approx (3.0f * kickAlone).epsilon (0.01));
+        phazite::setTrackSoloed (model, song.kick, false);
+
+        // Muted, the kick sends nothing, to a soloed return either.
+        phazite::setTrackMuted (model, song.kick, true);
+        CHECK (renderPeak (model) < 1.0e-4f);
+        phazite::setTrackMuted (model, song.kick, false);
+        phazite::setTrackSoloed (model, reverb, false);
+    }
+
+    // Another track soloed: the kick is heard nowhere, as before.
+    phazite::setTrackSoloed (model, song.bass, true);
     CHECK (renderPeak (model) < 1.0e-4f);
 }

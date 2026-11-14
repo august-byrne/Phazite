@@ -2,16 +2,23 @@
 // The devices of roadmap step 2.10, as DSP (src/devices/): the delay's timing and ping-pong, the saturator's curves and
 // level, the filter's response and the synth's unison. The stereo expander's have a file of their own (StereoExpanderTests.cpp),
 // as the phaser's and the flanger's do (MotionEffectTests.cpp), and the multiband's (MultibandTests.cpp).
+#include "MotionTestHelpers.h"
 #include "TestHelpers.h"
 #include "devices/delay/Delay.h"
+#include "devices/dynamics/Compressor.h"
 #include "devices/dynamics/Multiband.h"
 #include "devices/filter/FilterEffect.h"
 #include "devices/saturation/Saturator.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
+#include "model/devices/internal/Devices.h"
 
 #include <cmath>
+#include <limits>
 #include <set>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -425,4 +432,166 @@ TEST_CASE ("The synth's unison: one voice the same on both sides; seven spread a
     // About as loud: within 6 dB.
     const auto oneLevel = toDecibels (getRms (one.left, 4800, 24000)), sevenLevel = toDecibels (getRms (seven.left, 4800, 24000));
     CHECK (std::abs (oneLevel - sevenLevel) < 6.0f);
+}
+
+TEST_CASE ("An effect handed what isn't sound plays on as if it had been silence: not a number, infinite, or beyond any level")
+{
+    // A plug-in gone wrong or a stray value in a float file can hand an effect a sample that isn't sound. Its filters and delay
+    // lines would keep it, and pass it on, until they are reset (a NaN in a filter stays there), and the multiband read its
+    // curve's table far outside itself and crashed. Each effect takes silence in its place: a block of it on the left, then
+    // sound again, plays exactly as that block of silence does. The same in the sidechain of those that hear one.
+    constexpr int numBlocks = 60, badBlock = 12;
+    const auto soundAt = [] (int t)
+    { return 0.25f * (float) (std::sin (twoPi * 220.0 * t / testRate) + 0.5 * std::sin (twoPi * 3100.0 * t / testRate)); };
+    const auto keyAt = [] (int t) { return 0.5f * (float) std::sin (twoPi * 110.0 * t / testRate); };
+
+    for (const auto* info : phazite::getOwnDevices())
+    {
+        if (info->kind != devices::DeviceKind::effect)
+            continue;
+
+        for (const auto inKey : { false, true })
+        {
+            if (inKey && ! info->hasSidechain)
+                continue;
+
+            // With a sidechain, set to hear it.
+            auto values = getDefaults (*info);
+
+            if (info->typeID == std::string_view (devices::Compressor::typeID))
+                set (values, *info, "mode", (float) devices::Compressor::Mode::duck);
+            else if (info->typeID == std::string_view (devices::Multiband::typeID))
+                set (values, *info, "midKey", 1.0f);
+            else if (info->hasSidechain)
+                set (values, *info, "carrier", 3.0f); // the vocoder's: the track its sidechain hears
+
+            // What it plays when the bad block's left samples (of its sound, or of its key) are this.
+            const auto playWith = [&] (float inBadBlock)
+            {
+                auto processor = phazite::createOwnDevice (info->typeID);
+                REQUIRE (processor != nullptr);
+                processor->prepare (testRate, testBlockSize);
+                juce::AudioBuffer<float> buffer (2, testBlockSize), key (2, testBlockSize);
+                Stereo played;
+
+                for (int block = 0; block < numBlocks; ++block)
+                {
+                    for (int i = 0; i < testBlockSize; ++i)
+                    {
+                        const auto t = block * testBlockSize + i;
+                        const auto bad = block == badBlock;
+                        buffer.setSample (0, i, bad && ! inKey ? inBadBlock : soundAt (t));
+                        buffer.setSample (1, i, soundAt (t));
+                        key.setSample (0, i, bad && inKey ? inBadBlock : keyAt (t));
+                        key.setSample (1, i, keyAt (t));
+                    }
+
+                    float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+                    const float* keys[] = { key.getReadPointer (0), key.getReadPointer (1) };
+                    devices::ProcessContext context;
+                    context.channels = channels;
+                    context.numChannels = 2;
+                    context.numSamples = testBlockSize;
+                    context.parameters = values;
+
+                    if (info->hasSidechain)
+                    {
+                        context.sidechain = keys;
+                        context.numSidechainChannels = 2;
+                    }
+
+                    processor->process (context);
+                    played.left.insert (played.left.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + testBlockSize);
+                    played.right.insert (played.right.end(), buffer.getReadPointer (1), buffer.getReadPointer (1) + testBlockSize);
+                }
+
+                return played;
+            };
+
+            const auto expected = playWith (0.0f);
+            CHECK (getPeak (expected.left, (size_t) ((badBlock + 2) * testBlockSize), expected.left.size()) > 1.0e-3f);
+
+            for (const auto bad : { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+                                    -std::numeric_limits<float>::infinity(), 1.0e30f })
+            {
+                INFO (std::string (info->typeID) << std::string (inKey ? ", in its key: " : ": ") << bad);
+                const auto played = playWith (bad);
+                auto unsound = 0, different = 0;
+
+                for (size_t i = 0; i < played.left.size(); ++i)
+                {
+                    unsound += std::isfinite (played.left[i]) && std::isfinite (played.right[i]) ? 0 : 1;
+                    different +=
+                        juce::exactlyEqual (played.left[i], expected.left[i]) && juce::exactlyEqual (played.right[i], expected.right[i])
+                            ? 0
+                            : 1;
+                }
+
+                CHECK (unsound == 0);
+                CHECK (different == 0);
+            }
+        }
+    }
+
+    // A curve's gains, asked for a level that isn't one: a gain all the same, from inside its table.
+    devices::curves::Gains gains;
+    gains.update (devices::Compressor::getCurve (getDefaults (devices::Compressor::info)));
+
+    for (const auto level : { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+                              -std::numeric_limits<float>::infinity(), -1.0f, 0.0f, 1.0e30f })
+    {
+        CAPTURE (level);
+        CHECK (std::isfinite (gains.getDecibels (level)));
+    }
+}
+
+TEST_CASE ("At a mix below 100 %, what an effect leaves straight keeps its level to 20 kHz: its filters turn the dry sound as its own")
+{
+    // The saturator, the filter's drive and the compressor's play at twice the rate, through half-band filters that turn the
+    // phase of the top octave. Mixed with what came in merely delayed, that cancelled the highs (the saturator's at 50 %: 10 dB
+    // down at 18 kHz). Each passes what came in through the same filters, so that the two meet in phase: a quiet tone, which
+    // their curves leave straight, comes out as loud as it went in, at any mix.
+    struct Case
+    {
+        const devices::DeviceInfo* info;
+        std::vector<std::pair<std::string_view, float>> settings;
+    };
+
+    const Case cases[] = {
+        { &devices::Saturator::info, { { "drive", 0.0f } } },
+        { &devices::Saturator::info, { { "drive", 12.0f } } },
+        // A high-pass at 20 Hz, which leaves these tones as they are, so that only its drive's filters turn them.
+        { &devices::FilterEffect::info, { { "filterType", 1.0f }, { "cutoff", 20.0f }, { "resonance", 0.0f }, { "drive", 12.0f } } },
+        // No compression, driven: a straight curve from its first point to its last.
+        { &devices::Compressor::info,
+          { { "points", 2.0f }, { "point2X", 1.0f }, { "point2Y", 1.0f }, { "point2Tension", 0.0f }, { "drive", 0.5f } } },
+    };
+
+    for (const auto rate : { 44100.0, 48000.0 })
+    {
+        for (const auto& device : cases)
+        {
+            for (const auto mix : { 1.0f, 0.5f, 0.25f })
+            {
+                for (const auto hertz : { 1000.0, 10000.0, 15000.0, 18000.0, 20000.0 })
+                {
+                    auto values = getDefaults (*device.info);
+
+                    for (const auto& [id, value] : device.settings)
+                        set (values, *device.info, id, value);
+
+                    set (values, *device.info, devices::mixParameterID, mix);
+                    constexpr int numSamples = 19200;
+                    const auto played =
+                        phazite::test::playThroughRunner (*device.info, phazite::createOwnDevice (device.info->typeID), values,
+                                                          phazite::test::makeTone (hertz, numSamples, rate, 0.001f), rate, 480);
+                    const auto level = phazite::test::readTone (played, hertz, rate, numSamples / 2, numSamples).left;
+
+                    INFO (std::string (device.info->typeID) << " at " << rate << " Hz, mix " << mix << ", " << hertz
+                                                            << " Hz: " << phazite::test::inDecibels (level / 0.001) << " dB");
+                    CHECK (std::abs (phazite::test::inDecibels (level / 0.001)) < 0.5);
+                }
+            }
+        }
+    }
 }

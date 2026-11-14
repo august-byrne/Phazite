@@ -80,6 +80,99 @@ namespace
         return holdTheSame (withoutTracks (a), withoutTracks (b));
     }
 
+    // A copy of one of the other side's tracks, a folder's, without the tracks in it, however deep, that the song has
+    // somewhere already: each track is in the song once.
+    void removeTracksHeld (juce::ValueTree copy, const juce::ValueTree& song)
+    {
+        for (int i = copy.getNumChildren(); --i >= 0;)
+        {
+            auto child = copy.getChild (i);
+
+            if (! child.hasType (schema::TRACK))
+                continue;
+
+            if (findTrack (song, readID (child[schema::trackID])).isValid())
+                copy.removeChild (i, nullptr);
+            else
+                removeTracksHeld (child, song);
+        }
+    }
+
+    // Puts a copy of one of the other side's tracks into the song where it is there: in its folder there, if the song has
+    // it, after the track before it there that the song has; with the tracks in it that the song hasn't.
+    juce::ValueTree addTrackCopy (juce::ValueTree song, const juce::ValueTree& theirs)
+    {
+        auto copy = theirs.createCopy();
+        removeTracksHeld (copy, song);
+        auto parent = findTrackParent (song, theirs.getParent());
+        auto index = 0;
+
+        for (auto before = theirs.getSibling (-1); before.isValid(); before = before.getSibling (-1))
+        {
+            if (const auto place = parent.indexOf (findTrack (song, readID (before[schema::trackID]))); place >= 0)
+            {
+                index = place + 1;
+                break;
+            }
+        }
+
+        parent.addChild (copy, index, nullptr);
+        return copy;
+    }
+
+    // Takes a track out of the song, a folder without the tracks in it: lines of their own, they stay where it was, in
+    // their order, as ungrouping a folder leaves them.
+    void removeTrackOwn (juce::ValueTree track)
+    {
+        auto parent = track.getParent();
+        auto place = parent.indexOf (track) + 1;
+
+        for (int i = 0; i < track.getNumChildren();)
+        {
+            if (auto child = track.getChild (i); child.hasType (schema::TRACK))
+            {
+                track.removeChild (child, nullptr);
+                parent.addChild (child, place++, nullptr);
+            }
+            else
+            {
+                ++i;
+            }
+        }
+
+        parent.removeChild (track, nullptr);
+    }
+
+    // What can be somewhere else on one side than in the base: an item among its parent's (a clip on another track, a device
+    // in a container), by its type and ID. Not a track, which the tracks' order places, nor a note, whose ID is its clip's own.
+    using Items = std::map<juce::String, juce::ValueTree>;
+
+    bool canMove (const juce::ValueTree& element)
+    {
+        return ! element.hasType (schema::NOTE) && ! element.hasType (schema::TRACK) && ! element.hasType (schema::MASTER)
+               && element.hasProperty (schema::trackID) && schema::holdsID (element, schema::trackID);
+    }
+
+    void collectMovable (const juce::ValueTree& tree, Items& items)
+    {
+        for (const auto& child : tree)
+        {
+            if (child.hasType (schema::NOTE))
+                continue;
+
+            if (canMove (child))
+                items.emplace (keyOf (child), child);
+
+            collectMovable (child, items);
+        }
+    }
+
+    juce::ValueTree findItem (const Items& items, const juce::String& name)
+    {
+        const auto found = items.find (name);
+        return found != items.end() ? found->second : juce::ValueTree();
+    }
+
     //==============================================================================
     // A copy of the other side's song, what it added since the base given IDs anew, and what names them renamed to match.
     struct Renumbered
@@ -339,7 +432,71 @@ namespace
         juce::String line;
         std::uint64_t trackID = 0;
 
+        // What can be somewhere else on one side (canMove()): the base's, the other side's, and this side's as the merge
+        // began, each of which is in the result where the merge has it now, unless the merge took it away.
+        const Items& baseItems;
+        const Items& theirItems;
+        const Items& ourItems;
+
         void note (const juce::String& text) { result.notes.addIfNotAlreadyThere (line + ": " + text); }
+
+        // This side's item of that type and ID, wherever it is in the result now; invalid for none.
+        juce::ValueTree findOurs (const juce::ValueTree& item) const
+        {
+            if (! canMove (item))
+                return {};
+
+            const auto mine = findItem (ourItems, keyOf (item));
+            return mine.isAChildOf (result.song) ? mine : juce::ValueTree();
+        }
+
+        // Whether this side left an item where the base has it (was): among the same parent's.
+        static bool isWhereItWas (const juce::ValueTree& mine, const juce::ValueTree& was)
+        {
+            return was.isValid() && keyOf (mine.getParent()) == keyOf (was.getParent());
+        }
+
+        // What a copy of the other side's, just put into the result, holds that this side has somewhere else: what the other
+        // side moved into something it added (a device into a new container, a clip onto a new track), or what this side
+        // moved out of something it took away. This side's takes its place in the copy where this side left it where the
+        // base has it, and stays where this side put it otherwise; either way with the other side's changes, and in the
+        // result once.
+        void takeOurs (juce::ValueTree copy)
+        {
+            for (int i = 0; i < copy.getNumChildren(); ++i)
+            {
+                auto child = copy.getChild (i);
+
+                if (child.hasType (schema::NOTE))
+                    continue;
+
+                auto mine = findOurs (child);
+
+                if (! mine.isValid())
+                {
+                    takeOurs (child);
+                    continue;
+                }
+
+                const auto was = findItem (baseItems, keyOf (child));
+                copy.removeChild (i, nullptr);
+
+                if (isWhereItWas (mine, was))
+                {
+                    mine.getParent().removeChild (mine, nullptr);
+                    copy.addChild (mine, i, nullptr);
+                }
+                else
+                {
+                    if (was.isValid() && keyOf (copy) != keyOf (was.getParent()))
+                        note (describeClash (mine, {}) + " moved on both sides: this side's place kept");
+
+                    --i;
+                }
+
+                merge (was, mine, child);
+            }
+        }
 
         void clashOn (const juce::ValueTree& element, const juce::Identifier& property, const juce::var& base, const juce::var& ours,
                       const juce::var& theirs)
@@ -455,9 +612,9 @@ namespace
             return true;
         }
 
-        // Puts a copy of the other side's child in r after the child before it there that r has.
-        static juce::ValueTree insertAfterBefore (juce::ValueTree r, const juce::ValueTree& theirs,
-                                                  const std::map<juce::String, juce::ValueTree>& keyed)
+        // Puts an element in r where the other side's child is there: after the child before it there that r has.
+        static void placeAfterBefore (juce::ValueTree r, juce::ValueTree element, const juce::ValueTree& theirs,
+                                      const std::map<juce::String, juce::ValueTree>& keyed)
         {
             auto index = -1;
 
@@ -483,8 +640,16 @@ namespace
                 }
             }
 
+            r.addChild (element, index, nullptr);
+        }
+
+        // Puts a copy of the other side's child in r, where it is there; what it holds that this side has somewhere else is
+        // this side's (takeOurs()).
+        juce::ValueTree addTheirs (juce::ValueTree r, const juce::ValueTree& theirs, const std::map<juce::String, juce::ValueTree>& keyed)
+        {
             auto copy = theirs.createCopy();
-            r.addChild (copy, index, nullptr);
+            placeAfterBefore (r, copy, theirs, keyed);
+            takeOurs (copy);
             return copy;
         }
 
@@ -543,7 +708,13 @@ namespace
                     return found != children.keyed.end() ? found->second : juce::ValueTree();
                 };
 
-                const auto inBase = findIn (cb), ours = findIn (cr), theirs = findIn (ct);
+                const auto inBase = findIn (cb), theirs = findIn (ct);
+                auto ours = findIn (cr);
+
+                // Not here any more, where the merge took it to where the other side moved it (takeOurs()).
+                if (ours.isValid() && ours.getParent() != r)
+                    ours = {};
+
                 const auto& any = theirs.isValid() ? theirs : ours.isValid() ? ours : inBase;
 
                 if (mergesWhole (any))
@@ -554,10 +725,36 @@ namespace
 
                 if (! inBase.isValid())
                 {
-                    if (theirs.isValid() && ! ours.isValid())
-                        keyed[name] = insertAfterBefore (r, theirs, keyed); // theirs, added
-                    else if (theirs.isValid() && ours.isValid() && ! holdTheSame (ours, theirs))
-                        merge ({}, ours, theirs); // added on both sides under one key: a parameter's value, a tempo at a beat
+                    // Not here in the base: added; or, an item the base has somewhere else, moved here.
+                    const auto was = canMove (any) ? findItem (baseItems, name) : juce::ValueTree();
+
+                    if (theirs.isValid() && ours.isValid())
+                    {
+                        // Moved here on both sides; or added on both under one key: a parameter's value, a tempo at a beat.
+                        if (! holdTheSame (ours, theirs))
+                            merge (was, ours, theirs);
+                    }
+                    else if (auto mine = theirs.isValid() ? findOurs (theirs) : juce::ValueTree(); mine.isValid())
+                    {
+                        // Moved here there, and this side has it somewhere else: it comes here where this side left it where
+                        // the base has it, and stays where this side moved it otherwise, with the other side's changes.
+                        if (isWhereItWas (mine, was))
+                        {
+                            mine.getParent().removeChild (mine, nullptr);
+                            placeAfterBefore (r, mine, theirs, keyed);
+                            keyed[name] = mine;
+                        }
+                        else
+                        {
+                            note (describeClash (mine, {}) + " moved on both sides: this side's place kept");
+                        }
+
+                        merge (was, mine, theirs);
+                    }
+                    else if (theirs.isValid())
+                    {
+                        keyed[name] = addTheirs (r, theirs, keyed); // theirs, added
+                    }
 
                     continue;
                 }
@@ -576,21 +773,31 @@ namespace
                 }
                 else if (ours.isValid())
                 {
-                    // Taken away there: it goes, unless it changed here.
-                    if (holdTheSame (inBase, ours))
+                    // Somewhere else there (a clip moved onto another track), it isn't taken away: the line it went to there
+                    // takes it from here, as it is here, and without that line it stays, rather than be on neither. Taken
+                    // away there: it goes, unless it changed here.
+                    const auto movedThere = canMove (ours) && findItem (theirItems, name).isValid();
+
+                    if (! movedThere && holdTheSame (inBase, ours))
                     {
                         r.removeChild (ours, nullptr);
                         keyed.erase (name);
                     }
-                    else
+                    else if (! movedThere)
                     {
                         note (describeClash (ours, {}) + " changed here and taken away there: kept");
                     }
                 }
+                else if (auto mine = theirs.isValid() ? findOurs (theirs) : juce::ValueTree(); mine.isValid())
+                {
+                    // Somewhere else here, where this side moved it: what changed there goes to it there.
+                    if (! holdTheSame (inBase, theirs))
+                        merge (inBase, mine, theirs);
+                }
                 else if (theirs.isValid() && ! holdTheSame (inBase, theirs))
                 {
                     // Taken away here, changed there: back, as it changed.
-                    keyed[name] = insertAfterBefore (r, theirs, keyed);
+                    keyed[name] = addTheirs (r, theirs, keyed);
                     note (describeClash (theirs, {}) + " taken away here and changed there: kept");
                 }
             }
@@ -672,7 +879,8 @@ namespace
                 {
                     const auto previous = keyed.find (all[i - 1]), child = keyed.find (all[i]);
 
-                    if (previous == keyed.end() || child == keyed.end())
+                    if (previous == keyed.end() || child == keyed.end() || previous->second.getParent() != r
+                        || child->second.getParent() != r)
                         continue;
 
                     auto from = r.indexOf (child->second), to = r.indexOf (previous->second) + 1;
@@ -735,8 +943,9 @@ namespace
     }
 
     // Where the other side's tracks went (into another folder, another place), where this side moved none of them: the tracks
-    // all three have, by their folders and places.
-    void mergeTrackOrder (const juce::ValueTree& base, juce::ValueTree song, const juce::ValueTree& theirs)
+    // all three have, by their folders and places. Whether this side moved any is told by its own song (ours), as the merge
+    // itself moves tracks in the result (song): out of a folder the other side took away.
+    void mergeTrackOrder (const juce::ValueTree& base, const juce::ValueTree& ours, juce::ValueTree song, const juce::ValueTree& theirs)
     {
         const auto placesOf = [] (const juce::ValueTree& tree, const std::set<std::uint64_t>& only)
         {
@@ -749,7 +958,7 @@ namespace
             return places;
         };
 
-        std::set<std::uint64_t> inBase, inAll;
+        std::set<std::uint64_t> inBase, inAll, inOurs;
 
         for (const auto& track : getTrackElements (base))
             inBase.insert (readID (track[schema::trackID]));
@@ -758,9 +967,11 @@ namespace
             if (const auto id = readID (track[schema::trackID]); inBase.count (id) > 0 && findTrack (theirs, id).isValid())
                 inAll.insert (id);
 
-        const auto baseOrder = placesOf (base, inAll), ourOrder = placesOf (song, inAll), theirOrder = placesOf (theirs, inAll);
+        for (const auto& track : getTrackElements (ours))
+            if (const auto id = readID (track[schema::trackID]); inAll.count (id) > 0)
+                inOurs.insert (id);
 
-        if (theirOrder == baseOrder || ourOrder != baseOrder)
+        if (placesOf (theirs, inAll) == placesOf (base, inAll) || placesOf (ours, inOurs) != placesOf (base, inOurs))
             return;
 
         // Each track the other side placed, after the track before it there, in its folder there.
@@ -871,13 +1082,36 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
     for (const auto& [note, to] : renumbered.noteIDs)
         result.renumbered.push_back ({ note.first, note.second, to });
 
+    // What can be somewhere else on one side than in the base, for each side's moves to be told from what it took away and
+    // added: no item is in the result twice.
+    Items baseItems, theirItems, ourItems;
+    collectMovable (base, baseItems);
+    collectMovable (other, theirItems);
+    collectMovable (result.song, ourItems);
+
+    // The lines' tracks in the other side's order, top to bottom, so that a folder it added is here before the tracks it
+    // added in it, which go into it; then those it took away, and the master.
+    std::set<std::uint64_t> wanted;
+
     for (const auto requested : lines.tracks)
     {
         const auto found = renumbered.ids.find (requested);
-        const auto id = found != renumbered.ids.end() ? found->second : requested;
+        wanted.insert (found != renumbered.ids.end() ? found->second : requested);
+    }
+
+    std::vector<std::uint64_t> tracks;
+
+    for (const auto& track : getTrackElements (other))
+        if (const auto id = readID (track[schema::trackID]); wanted.erase (id) > 0)
+            tracks.push_back (id);
+
+    tracks.insert (tracks.end(), wanted.begin(), wanted.end());
+
+    for (const auto id : tracks)
+    {
         const auto b = findTrack (base, id), t = findTrack (other, id);
         auto o = findTrack (result.song, id);
-        Merger merger { result, getTrackNameIn (t.isValid() ? other : base, t.isValid() ? t : b), id };
+        Merger merger { result, getTrackNameIn (t.isValid() ? other : base, t.isValid() ? t : b), id, baseItems, theirItems, ourItems };
 
         auto devices = getAutomatableIDs (b);
         devices.merge (getAutomatableIDs (t));
@@ -885,33 +1119,18 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
 
         if (! b.isValid() && t.isValid() && ! o.isValid())
         {
-            // Added there: here too, after the track before it there, with the tracks in it this side hasn't.
-            auto copy = t.createCopy();
-
-            for (int i = copy.getNumChildren(); --i >= 0;)
-                if (const auto child = copy.getChild (i);
-                    child.hasType (schema::TRACK) && findTrack (result.song, readID (child[schema::trackID])).isValid())
-                    copy.removeChild (i, nullptr);
-
-            auto parent = findTrackParent (result.song, t.getParent());
-            auto index = 0;
-
-            for (auto before = t.getSibling (-1); before.isValid(); before = before.getSibling (-1))
-            {
-                if (const auto place = parent.indexOf (findTrack (result.song, readID (before[schema::trackID]))); place >= 0)
-                {
-                    index = place + 1;
-                    break;
-                }
-            }
-
-            parent.addChild (copy, index, nullptr);
+            // Added there: here too, after the track before it there, with the tracks in it this side hasn't; what it holds
+            // that this side has somewhere else (a clip moved onto it there) is this side's.
+            merger.takeOurs (addTrackCopy (result.song, t));
         }
         else if (b.isValid() && ! t.isValid() && o.isValid())
         {
-            // Taken away there: it goes, unless it changed here.
-            if (holdTheSameOwn (b, o))
-                o.getParent().removeChild (o, nullptr);
+            // Taken away there: it goes, unless it changed here, by this side's own song (the merge may have taken from it
+            // already what went somewhere else there). The tracks in it, a folder's, are lines of their own, and stay.
+            const auto mine = findTrack (ours, id);
+
+            if (holdTheSameOwn (b, mine.isValid() ? mine : o))
+                removeTrackOwn (o);
             else
                 merger.note ("changed here and taken away there: kept");
         }
@@ -924,8 +1143,9 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
         }
         else if (b.isValid() && t.isValid() && ! holdTheSameOwn (b, t))
         {
-            // Taken away here, changed there: back.
-            findTrackParent (result.song, t.getParent()).appendChild (t.createCopy(), nullptr);
+            // Taken away here, changed there: back, where it is there, without the tracks in it that this side has somewhere
+            // (a folder ungrouped here), and without what this side moved out of it, which stays where this side put it.
+            merger.takeOurs (addTrackCopy (result.song, t));
             merger.note ("taken away here and changed there: kept");
         }
 
@@ -934,7 +1154,7 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
 
     if (lines.songOwn)
     {
-        Merger merger { result, "Song", 0 };
+        Merger merger { result, "Song", 0, baseItems, theirItems, ourItems };
         merger.mergeProperties (base, result.song, other);
 
         // Its tempo map's tempos and time signatures, its sections, its chord lane and the key set last.
@@ -961,7 +1181,7 @@ MergeResult mergeSongs (const juce::ValueTree& base, const juce::ValueTree& ours
             }
         }
 
-        mergeTrackOrder (base, result.song, other);
+        mergeTrackOrder (base, ours, result.song, other);
     }
 
     return result;

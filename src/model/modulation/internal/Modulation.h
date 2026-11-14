@@ -93,4 +93,10 @@ void removeModulation (Song&, ModulatorID, const ParameterRef&);
 // each original's to its copy's): for a copy that the modulators aren't in, a container's chain's, whose macros are the
 // container's and whose track's modulators are the track's. In the caller's undo step.
 void copyModulations (Song&, const std::map<std::uint64_t, std::uint64_t>& copied);
+
+// The same for copies on another channel, which its own modulators must move: each of a channel's modulators and macros
+// that modulates one of the originals is copied onto the other channel, set as it is, modulating the copies alone, as
+// much. For a channel that plays in another's place with a fader and sends like its own (a bounce's track:
+// model/mixer/internal/Freeze.h). In the caller's undo step.
+void copyModulators (Song&, TrackID from, TrackID to, const std::map<std::uint64_t, std::uint64_t>& copied);
 } // namespace phazite

@@ -6,7 +6,10 @@
 // itself (its parameters from its window, and the gestures around them, its latency, its state, its list of parameters)
 // is kept for the message thread to tell Phazite (takeNotices()), never told from the thread that changed it, which may
 // be its audio thread. The audio thread is in MMCSS's Pro Audio task, as Phazite's own are
-// (devices/core/AudioThreads.h).
+// (devices/core/AudioThreads.h), and rounds denormal numbers to zero, as a plug-in's host does. It keeps which notes it
+// gave the plug-in that haven't ended, and ends each with a note-off of its own where every note is to end (all notes off
+// or all sound off, as playback stops or jumps, and a reset): a plug-in needn't take those controllers (JUCE's VST3 host
+// hands one on only to a plug-in that maps it to a parameter), and a note-off it always takes.
 #pragma once
 
 #include "sandbox/core/BlockChannel.h"
@@ -14,7 +17,9 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <array>
 #include <atomic>
+#include <bitset>
 #include <memory>
 #include <vector>
 
@@ -60,6 +65,11 @@ private:
     juce::MidiBuffer midi;                            // a piece's MIDI, its room made once
     juce::Array<juce::AudioProcessorParameter*> parameters;
 
+    // The audio thread's: the notes given to the plug-in that haven't ended, on each MIDI channel; and whether they all end
+    // as the block starts, for its reset.
+    std::array<std::bitset<128>, 16> notesOn;
+    bool endsNotes = false;
+
     // What the plug-in changed, for takeNotices(): each parameter's last value and whether it changed, its gestures in
     // the order they came, and whether its latency, state or parameters changed.
     std::unique_ptr<std::atomic<float>[]> changedValues;
@@ -77,6 +87,7 @@ private:
     void run() override;
     void play() noexcept;
     void playPiece (int start, int numSamples) noexcept;
+    void endNotes (int midiChannel, int sample) noexcept; // a note-off into the piece's MIDI for each of a channel's notes
 
     void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
     void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails&) override;

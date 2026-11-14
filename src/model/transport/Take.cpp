@@ -265,7 +265,7 @@ Take::~Take()
     close (false);
 }
 
-std::unique_ptr<Take> Take::start (PlaybackSession& session)
+std::unique_ptr<Take> Take::start (PlaybackSession& session, const std::vector<TrackID>* inputsOf)
 {
     auto& song = session.getSong();
     auto& engine = session.getEngine();
@@ -297,6 +297,9 @@ std::unique_ptr<Take> Take::start (PlaybackSession& session)
 
     for (const auto track : recorder.getArmedTracks())
     {
+        if (inputsOf != nullptr && std::find (inputsOf->begin(), inputsOf->end(), track) == inputsOf->end())
+            continue; // armed since the take before started: its input isn't open yet
+
         auto channels = getInputChannels (findTrackState (song, track)[schema::trackInput].toString());
 
         if (channels.empty() || channels.back() >= session.getNumInputs())
@@ -775,6 +778,16 @@ std::vector<RecordingInProgress> Take::getInProgress()
     }
 
     return shown;
+}
+
+std::vector<TrackID> Take::getInputTracks() const
+{
+    std::vector<TrackID> tracks;
+
+    for (const auto& take : audio)
+        tracks.push_back (take->track);
+
+    return tracks;
 }
 
 bool Take::recordsOnto (TrackID track) const

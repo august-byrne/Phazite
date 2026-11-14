@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The song, or a part of it, played offline by Phazite's engine on a thread of its own: an export's
 // (model/project/Export.h), a freeze's, a bounce's or a consolidation's (model/mixer/FreezeModel.h). Each job plays from the
-// song's start (or a time in it) to an end, and on until its tails fall silent (a block of 512 under -70 dB, so many seconds
-// at most), into a WAV file of 32-bit floats, measured as it goes (EBU R128). What each plays is compiled on the message thread as this is made,
+// song's start (or a time in it) to an end, and on until its tails are over (under -70 dB for as long as the longest tail
+// its devices report, a block at least: a delay is silent between its echoes; so many seconds at most, the silence at the
+// end left out), into a WAV file of 32-bit floats, measured as it goes (EBU R128). What each plays is compiled on the message thread as this is made,
 // with the project's plug-ins, which it has alone while it lives (PlaybackSession::lendToRender()); deleting it, on the
-// message thread, cancels what is left, waits for its thread and gives them back.
+// message thread, cancels what is left, waits for its thread and gives them back. A plug-in that crashes as a job plays,
+// or keeps a block so long that its helper is ended for it (SandboxedProcessor.h), fails the job, which says so: nothing
+// is written without it. Cancelling doesn't wait for a plug-in either.
 #pragma once
 
 #include "SongPlayer.h"
@@ -18,6 +21,7 @@
 namespace phazite
 {
 class PlaybackSession;
+class SandboxedProcessor;
 
 class OfflineRender final : private juce::Thread
 {
@@ -68,6 +72,8 @@ private:
         Job job;
         std::unique_ptr<SongPlayer> player; // what its plan points at, kept to be let go of on the message thread
         std::unique_ptr<engine::Plan> plan;
+        std::vector<SandboxedProcessor*> plugins; // the plug-ins its plan plays, which its player keeps
+        double pluginTailSeconds = 0.0;           // the longest tail its plug-ins report, asked as it was compiled
     };
 
     const Setup setup;

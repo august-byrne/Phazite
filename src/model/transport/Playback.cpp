@@ -154,8 +154,25 @@ void movePlayhead (Song& song, BeatPosition position)
     else
         song.getState().removeProperty (schema::playStart, nullptr);
 
-    if (auto* session = findPlayingSession (song))
+    auto* session = findPlayingSession (song);
+
+    if (session == nullptr)
+        return;
+
+    if (! session->isRecording())
+    {
         session->locate (position);
+        return;
+    }
+
+    // While it records, recording goes on from there, as Ableton Live's does after a jump: what was recorded so far is kept
+    // as Stop keeps it, a Record step of its own, and another take starts where the playhead lands.
+    session->locateWhileRecording (position,
+                                   [&song] (Take& take)
+                                   {
+                                       const UndoStep step (song, "Record");
+                                       take.finish();
+                                   });
 }
 
 void goToStart (Song& song)

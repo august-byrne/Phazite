@@ -31,10 +31,11 @@ class SandboxedInstance final : public juce::AudioPluginInstance,
                                 private juce::AsyncUpdater
 {
 public:
-    // The instance opened in a helper, which this owns from now on, as the plug-in described; what keeps its helper (which
-    // it keeps until the instance has closed there), and what it calls first as it goes.
-    SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance>, const juce::PluginDescription&, std::shared_ptr<void> keepHelper,
-                       std::function<void()> onGone);
+    // The instance opened in a helper, which this owns from now on, as the plug-in described, from a state (the one it has
+    // until it gives or is given another); what keeps its helper (which it keeps until the instance has closed there), and
+    // what it calls first as it goes.
+    SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance>, const juce::PluginDescription&, const juce::MemoryBlock& openedFrom,
+                       std::shared_ptr<void> keepHelper, std::function<void()> onGone);
     ~SandboxedInstance() override;
 
     sandbox::RemoteInstance& getRemote() noexcept { return *remote; }
@@ -126,9 +127,12 @@ public:
     void changeProgramName (int, const juce::String&) override {}
 
     // Its state as the helper gives it: a VST3's as its format's own preset file (.vstpreset), which other hosts and
-    // DAWproject read (sandbox/core/Vst3State.h); another format's as JUCE gives it.
+    // DAWproject read (sandbox/core/Vst3State.h); another format's as JUCE gives it. From one whose helper has gone, or
+    // doesn't give it in time, the state it last had: the one it opened from, was given or gave last. takeState() says
+    // which: true for the plug-in's state now, false for the one it last had.
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
+    bool takeState (juce::MemoryBlock&);
 
 private:
     class Parameter;
@@ -141,7 +145,7 @@ private:
     const juce::PluginDescription description;
     std::atomic<bool> crashed { false }, held { false };
     std::atomic<bool> anyPending { false }; // a value set while a block played, for the next
-    juce::MemoryBlock lastState;            // as it was last taken or given: what a plug-in whose helper has gone keeps
+    juce::MemoryBlock lastState;            // as it opened from, or was last taken or given: what one whose helper has gone keeps
     std::vector<Parameter*> parameters;
     std::unordered_map<juce::String, int> places; // each parameter's, by its own ID
     std::vector<int> movedByEngine;

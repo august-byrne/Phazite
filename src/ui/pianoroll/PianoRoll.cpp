@@ -377,7 +377,8 @@ void PianoRoll::clipsChanged()
 
 std::vector<NoteData> PianoRoll::getAllNotes() const
 {
-    return getNotes (context, clips);
+    // Those that play: a note that a split or a trim left outside its clip isn't shown, selected or edited.
+    return getNotesPlayed (context, clips);
 }
 
 std::vector<TimelineEditor::OverviewMark> PianoRoll::getOverviewMarks() const

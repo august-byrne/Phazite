@@ -242,6 +242,11 @@ public:
     double getGridStepInBeats() const;
     BeatPosition snap (BeatPosition, juce::ModifierKeys) const;     // to the nearest line; Alt places freely
     BeatPosition snapDown (BeatPosition, juce::ModifierKeys) const; // to the line at or before it
+
+    // How far a move takes what started at a place, as the pointer has gone a distance: by the grid's steps, so that what is
+    // moved stays as far from the grid's lines as it was (Ableton Live's snapping of a move: an item off the grid keeps its
+    // offset, and a move up or down alone moves nothing in time; Quantize puts it on a line). With Alt, the distance itself.
+    BeatDuration snapMove (BeatPosition from, BeatDuration distance, juce::ModifierKeys) const;
     void showGridMenu();
     juce::PopupMenu makeGridMenu(); // what the grid's button shows: snapping, adapting, triplets and the fixed sizes
 

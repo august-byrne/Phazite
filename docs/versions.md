@@ -268,7 +268,7 @@ The view is laid out as VS Code's Source Control view, and says what it does in 
 **Staging,** as git's index: the staged song is what the next commit records, the last commit with the lines staged since taken from the song as they were then (`VersionHistory::getStagedSong()`).
 - **Staged Changes** lists what is staged, from the last commit; it shows while anything is. **Changes** lists the working tree's changes, from the staged song to the song, so a line staged and then changed again is in both, as in git.
 - **Stage Changes** (`version.stage`, the plus on a line under the pointer) takes a line into the staged song, with its plug-ins' settings and knobs as they are now; **Unstage Changes** (`version.unstage`, the minus) takes it out again; **Stage All Changes** and **Unstage All Changes** take every line. Not undo steps: they change the staged song, not the song.
-- **Discard Changes** (`version.putBack`, the arrow) makes a line what is staged again (or the last commit's, while nothing is staged), as git restore does; **Discard All Changes** every line. Each is one undo step.
+- **Discard Changes** (`version.putBack`, the arrow) makes a line what is staged again (or the last commit's, while nothing is staged), as git restore does; **Discard All Changes** every line. Each is one undo step. A clip moved between tracks since ends where the last commit has it, once, whichever of the two tracks' lines is discarded; discarding the line of the track it went to sends it back as it is now.
 - The staged song is kept while the project is open, for its branch: a checkout, or opening the project again, starts with nothing staged.
 
 **Changes** lists what the song holds now that the staged song doesn't, by track, as VS Code lists changed files:
@@ -449,7 +449,7 @@ Bring Back, Take, Put Back and Merge all work out the song they want and make th
 
 **Order** (tracks in a folder, devices in a chain) takes the other side's moves where this side made none. Where both sides moved things, this side's order is kept, and the other side's new items go after what they followed.
 
-**Elements moved to another folder** keep their ID, so a moved track that was changed on the other side merges.
+**Elements moved to another folder** keep their ID (a track into another folder, a clip onto another track, a device into a container). One that was changed on the other side merges where it was moved to, once; moved on both sides, it stays where this branch put it, and the window says so. A folder's removal alone moves no track: ungrouped on one side, its tracks stay where it was; deleted there with its tracks, each track follows its own line, so one changed on this side stays. No ID is in the song twice after a merge, a restore or a discard, and the song's count of IDs ends past every ID it holds.
 
 **IDs collide on purpose.** A song counts its IDs up (`Song::makeID()`), and two branches both count on from where they parted, so both give the same new IDs to different things. A merge gives a new ID to everything the other branch added: every ID above the count where they parted, notes included. Schema.h gets one list of every property that holds or names an ID, which `giveNewIDs()` (used for copies, which keep their notes' IDs) and the merge both go through. The project file needs no change for this. Editing together live, later, would need IDs unique across computers. That is a change of format to make then, if ever.
 

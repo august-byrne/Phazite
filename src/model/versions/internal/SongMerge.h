@@ -4,7 +4,10 @@
 // (model/base/internal/Schema.h: getElementKey()), each property on its own. A property changed on one side takes that
 // side's value; changed on both to different values, it is a clash, which keeps this side's value and all three. An element
 // added on one side is added; taken away on one side and unchanged on the other, it goes; taken away on one side and
-// changed on the other, it stays, and a note says so. Order takes the other side's moves where this side made none. What
+// changed on the other, it stays, and a note says so. Order takes the other side's moves where this side made none. An
+// item one side put somewhere else (a clip onto another track, a device into a container) isn't taken away and added: it
+// goes where that side put it, with the other side's changes, and stays where this side put it if both moved it. A folder
+// taken away goes without the tracks in it, lines of their own. So no item is in the merged song twice. What
 // the other side added keeps its IDs where this side has nothing with them, and gets new ones where this side has
 // something else with them (giveNewIDs()'s lists: holdsID(), namesID()), its notes in clips both have too: no ID collides.
 // Curves, the chord lane and a plug-in's state merge whole; view state and how the song plays are always this side's. Plain

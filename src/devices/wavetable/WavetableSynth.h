@@ -332,6 +332,10 @@ private:
         float pitch = 60.0f, target = 60.0f; // in semitones, gliding to the target
         float slidePerSample = 0.0f;         // while it slides there evenly (a slide or portamento note): semitones a sample
         std::uint64_t started = 0;
+
+        // How many unison voices it plays, as its last control step found Unison Voices: the step sets as many readers, so a
+        // count that changes between two steps (a block that ends between them, an event, automation) plays from the next.
+        int unison = 1;
         std::array<OscillatorRun, numOscillators> oscillators;
         dsp::Oscillator sub;
         dsp::Random noise, phases;

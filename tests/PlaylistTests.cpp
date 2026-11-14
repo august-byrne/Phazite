@@ -1831,6 +1831,49 @@ TEST_CASE ("The playhead drags along the ruler to the grid; a song playing is si
     CHECK (playhead() == doctest::Approx (8.0)); // stopped, back where it was let go
 }
 
+TEST_CASE ("While recording, a press in the ruler takes the playhead there once and recording goes on; a drag takes it no further")
+{
+    // Each move of the playhead ends the take where it is and starts another there (phazite::movePlayhead()): the press is
+    // one move, and a drag after it would be one at every line of the grid.
+    PlaylistScreen screen;
+    phazite::test::EnginePlayback playback (phazite::test::EnginePlayback::Input::loopback);
+    auto& song = screen.getSong();
+    phazite::setTrackInput (screen.context, screen.tracks[1], "1");
+    phazite::setInputMonitoring (screen.context, screen.tracks[1], phazite::InputMonitoring::never);
+    phazite::setArmed (screen.context, screen.tracks[1], true);
+    REQUIRE (phazite::isArmed (screen.context, screen.tracks[1]));
+
+    auto* ruler = dynamic_cast<phazite::ui::TimelineRuler*> (phazite::test::findComponentWithTitle (screen.playlist, "Timeline"));
+    REQUIRE (ruler != nullptr);
+    const auto y = ruler->getHeight() - 4;
+    const auto x = [&screen] (double beat) { return juce::roundToInt (screen.playlist.getView().beatToX (beats (beat))); };
+
+    phazite::startRecording (song);
+    REQUIRE (phazite::isRecording (song));
+    playback.play (0.5); // a beat at 120 BPM
+
+    phazite::test::Mouse mouse (*ruler);
+    mouse.press ({ x (8.0), y });
+    CHECK (phazite::isRecording (song));
+    CHECK (phazite::isSongPlaying (song));
+    CHECK (phazite::getPlayStartBeat (song).inBeats() == doctest::Approx (8.0));
+    mouse.dragTo ({ x (10.0), y });
+    mouse.dragTo ({ x (12.0), y });
+    mouse.release();
+    CHECK (phazite::getPlayStartBeat (song).inBeats() == doctest::Approx (8.0));
+    CHECK (phazite::isRecording (song));
+
+    playback.play (0.5);
+    phazite::stopRecording (song);
+    phazite::test::dispatchPendingMessages();
+
+    // What came in before the press, and what came in after it from where the press put the playhead.
+    const auto starts = screen.getClipStarts (1);
+    REQUIRE (starts.size() == 2);
+    CHECK (starts[0] == doctest::Approx (0.0));
+    CHECK (starts[1] == doctest::Approx (8.0));
+}
+
 TEST_CASE ("The playhead is a marker at the foot of the ruler with a line from its point down, in the focus colour")
 {
     PlaylistScreen screen;
@@ -2435,4 +2478,150 @@ TEST_CASE ("A track that isn't heard, muted or kept quiet by another's solo, sho
     phazite::toggleSolo (screen.context, screen.tracks[1]);
     phazite::test::dispatchPendingMessages();
     CHECK (contrast (0) == playing[0]);
+}
+
+TEST_CASE ("With Snap on, a move takes clips by the grid's steps from where they were: a clip off the grid stays as far off it")
+{
+    // A drag to another track pulled a clip off the grid onto it, and every selected clip with it: the start snapped, not
+    // the move.
+    PlaylistScreen screen;
+    REQUIRE (screen.playlist.getGrid().snap);
+    const auto step = screen.playlist.getGridStepInBeats();
+    REQUIRE (step > 0.05);
+    const auto offGrid = 4.0 + step * 0.3; // as a clip placed with Alt, or a split's half, is
+    const auto clip = screen.addClip (0, offGrid, 4.0);
+    phazite::test::dispatchPendingMessages();
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto lower = phazite::ui::TrackHeight::standard / 4;
+
+    // Down a track, and nothing sideways: on the next track, where it was in time.
+    const auto from = screen.at (offGrid + 2.0, 0).translated (0, lower);
+    mouse.press (from);
+    mouse.dragTo (from.translated (0, 5));
+    mouse.dragTo (screen.at (offGrid + 2.0, 1).translated (0, lower));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getClipStarts (0).empty());
+    REQUIRE (screen.getClipStarts (1).size() == 1);
+    CHECK (screen.startOf (clip) == doctest::Approx (offGrid));
+    CHECK (phazite::describeUndo (&screen.getSong()) == juce::String ("Undo Move Clip"));
+    phazite::test::dispatchPendingMessages(); // the playlist shows the clip on its new track
+
+    // Sideways by a bar: a bar later, as far off the grid as it was.
+    const auto grabbed = screen.at (offGrid + 2.0, 1).translated (0, lower);
+    mouse.press (grabbed);
+    mouse.dragTo (grabbed.translated (5, 0));
+    mouse.dragTo (grabbed.translated (screen.at (4.0, 0).x - screen.at (0.0, 0).x, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.startOf (clip) == doctest::Approx (offGrid + 4.0));
+}
+
+TEST_CASE ("A Ctrl+click on a clip whose pointer slips copies nothing, and a drag that ends where it began leaves no undo step")
+{
+    // Ctrl+click toggles a clip, but four pixels of movement began a drag that copied at once: with Snap on the copy stayed
+    // on its original, in a sub-row of its own, playing twice.
+    PlaylistScreen screen;
+    const auto clip = screen.addClip (0, 4.0, 4.0);
+    screen.getSong().getUndoManager().clearUndoHistory();
+    phazite::test::dispatchPendingMessages();
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto from = screen.at (6.0, 0).translated (0, phazite::ui::TrackHeight::standard / 4);
+    auto& selection = screen.context.getSongSelection();
+    REQUIRE_FALSE (selection.isSelected (clip));
+
+    // The pointer slips five pixels during a Ctrl+click: the clip is selected, as a Ctrl+click's is; again, and it isn't.
+    for (const auto selected : { true, false })
+    {
+        mouse.press (from, juce::ModifierKeys::commandModifier);
+        mouse.dragTo (from.translated (5, 0));
+        mouse.release();
+        mouse.pause();
+        CHECK (screen.getClipStarts (0) == std::vector { 4.0 });
+        CHECK (selection.isSelected (clip) == selected);
+        CHECK_FALSE (phazite::canUndo (screen.getSong()));
+    }
+
+    // A Ctrl+drag makes its copy once it moves it; back where it began, the copy goes, and nothing is left to undo or redo.
+    const auto fourBeats = screen.at (4.0, 0).x - screen.at (0.0, 0).x;
+    mouse.press (from, juce::ModifierKeys::commandModifier);
+    mouse.dragTo (from.translated (5, 0));
+    CHECK (screen.getClipStarts (0) == std::vector { 4.0 });
+    mouse.dragTo (from.translated (fourBeats, 0));
+    CHECK (screen.getClipStarts (0) == std::vector { 4.0, 8.0 });
+    mouse.dragTo (from.translated (2, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getClipStarts (0) == std::vector { 4.0 });
+    CHECK (selection.isSelected (clip)); // the click
+    CHECK_FALSE (phazite::canUndo (screen.getSong()));
+    CHECK_FALSE (phazite::canRedo (screen.getSong()));
+
+    // A move there and back leaves no step either.
+    mouse.press (from);
+    mouse.dragTo (from.translated (fourBeats, 0));
+    CHECK (screen.startOf (clip) == 8.0);
+    mouse.dragTo (from.translated (1, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.startOf (clip) == 4.0);
+    CHECK_FALSE (phazite::canUndo (screen.getSong()));
+
+    // And a Ctrl+drag that ends elsewhere copies, as one step.
+    mouse.press (from, juce::ModifierKeys::commandModifier);
+    mouse.dragTo (from.translated (5, 0));
+    mouse.dragTo (from.translated (2 * fourBeats, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getClipStarts (0) == std::vector { 4.0, 12.0 });
+    CHECK (phazite::describeUndo (&screen.getSong()) == juce::String ("Undo Copy Clip"));
+    phazite::undo (screen.getSong());
+    CHECK (screen.getClipStarts (0) == std::vector { 4.0 });
+}
+
+TEST_CASE ("A drag of selected clips that ends where it began keeps them all selected, and a click on one still selects it alone")
+{
+    // A drag by less than half a grid step moves nothing: taken for the click, it selected the clip pressed alone.
+    PlaylistScreen screen;
+    const auto first = screen.addClip (0, 4.0, 4.0), second = screen.addClip (0, 12.0, 4.0);
+    screen.getSong().getUndoManager().clearUndoHistory();
+    phazite::test::dispatchPendingMessages();
+    phazite::test::Mouse mouse (*screen.lanes);
+    const auto lower = phazite::ui::TrackHeight::standard / 4;
+    const auto from = screen.at (6.0, 0).translated (0, lower);
+    auto& selection = screen.context.getSongSelection();
+    mouse.click (from);
+    mouse.click (screen.at (14.0, 0).translated (0, lower), juce::ModifierKeys::commandModifier);
+    REQUIRE (selection.getClips() == std::vector { first, second });
+
+    // The pointer goes five pixels and the mouse goes up: nothing moved, both stay selected, and no undo step.
+    mouse.press (from);
+    mouse.dragTo (from.translated (5, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (selection.getClips() == std::vector { first, second });
+    CHECK_FALSE (phazite::canUndo (screen.getSong()));
+
+    // There and back likewise.
+    mouse.press (from);
+    mouse.dragTo (from.translated (5, 0));
+    mouse.dragTo (from.translated (screen.at (4.0, 0).x - screen.at (0.0, 0).x, 0));
+    CHECK (screen.startOf (first) == 8.0);
+    mouse.dragTo (from.translated (1, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getClipStarts (0) == std::vector { 4.0, 12.0 });
+    CHECK (selection.getClips() == std::vector { first, second });
+    CHECK_FALSE (phazite::canUndo (screen.getSong()));
+
+    // A Ctrl+press that slips still takes the clip out, as its click does; a click without a drag selects one alone.
+    mouse.press (from, juce::ModifierKeys::commandModifier);
+    mouse.dragTo (from.translated (5, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (selection.getClips() == std::vector { second });
+    mouse.click (from, juce::ModifierKeys::commandModifier);
+    REQUIRE (selection.getClips().size() == 2);
+    mouse.click (from);
+    CHECK (selection.getClips() == std::vector { first });
 }

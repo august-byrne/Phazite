@@ -49,6 +49,7 @@ public:
     void process (const ProcessContext&) override;
     double getTailSeconds() const override; // a comb's ring
     int getLatencySamples() const override { return latency; }
+    bool delaysDry() const noexcept override { return true; }
 
 private:
     static constexpr int coefficientStep = 8; // samples between new coefficients while the cutoff glides
@@ -68,6 +69,18 @@ private:
     std::array<dsp::MultimodeFilter, 2> filters;   // [channel]
     std::atomic<float> tailSeconds { 0.0f };
 
+    // The copy of what came in for its mix (ProcessContext::dry): as late as the sound through a plain delay, and, while
+    // the sound goes through the drive and the mix uses the copy, through filters like the drive's with a straight line in
+    // the curve's place, faded as the sound is: the half-band filters turn the phase of the top octave, and the copy is
+    // turned as the sound is, so that the two meet in phase at any mix.
+    std::unique_ptr<juce::dsp::Oversampling<float>> dryOversampling;
+    std::array<dsp::AntialiasedCurve, 2> dryCurves;
+    std::array<dsp::DelayLine, 2> dryUndriven;
+    std::array<std::vector<float>, 2> dryUndrivenOut;
+    float lastMix = 1.0f;   // the mix in its last block
+    bool dryInStep = false; // the copy went through its filters in the last block
+
     void driveBlock (const ProcessContext&, int numChannels, float targetDrive) noexcept;
+    void dryBlock (const ProcessContext&, int numChannels, int numSamples, bool throughDrive, float blendFrom, float blendTarget) noexcept;
 };
 } // namespace phazite::devices

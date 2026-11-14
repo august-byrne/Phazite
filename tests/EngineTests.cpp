@@ -4,6 +4,7 @@
 // map, the transport and its metronome, to the sample, and audio files and the clips that play them.
 #include "TestDevices.h"
 #include "TestHelpers.h"
+#include "devices/delay/Delay.h"
 #include "devices/modulation/Modulators.h"
 #include "devices/motion/Phaser.h"
 #include "devices/synth/Synth.h"
@@ -24,6 +25,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -432,21 +434,22 @@ TEST_CASE ("Runners sleep once what comes in and what they play have been silent
     instrumentBlock.values = toneValues;
     juce::AudioBuffer<float> buffer (2, deviceBlock);
 
-    // A quarter of a second of silence (24 blocks), then each sleeps.
-    for (int b = 0; b < 30; ++b)
+    // A quarter of a second of silence (24 blocks), then the instrument sleeps; the effect, which reports a tail of a second
+    // and a half, once silence has lasted as long as that (141 blocks).
+    for (int b = 0; b < 150; ++b)
     {
         buffer.clear();
         effect.process (buffer, 0, deviceBlock, effectBlock);
         instrument.process (buffer, 0, deviceBlock, instrumentBlock);
     }
 
-    CHECK (gain.processed == 24);
+    CHECK (gain.processed == 141);
     CHECK (tone.processed == 24);
 
     // The first sound wakes the effect, which treats it whole.
     buffer = makeLevel (2, deviceBlock, 1.0f);
     effect.process (buffer, 0, deviceBlock, effectBlock);
-    CHECK (gain.processed == 25);
+    CHECK (gain.processed == 142);
     CHECK (buffer.getSample (0, 0) == doctest::Approx (0.5f).epsilon (0.001));
 
     // A note wakes the instrument, which plays it from its sample.
@@ -457,6 +460,90 @@ TEST_CASE ("Runners sleep once what comes in and what they play have been silent
     CHECK (tone.processed == 25);
     CHECK (buffer.getSample (0, 47) == doctest::Approx (0.0f));
     CHECK (buffer.getSample (0, 48) == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("A runner doesn't take what isn't a number for silence: its effect stays awake for it, however long it lasts")
+{
+    // An effect asleep doesn't look at what comes in. One that slept while what came in was no number would let it by,
+    // where awake it plays silence in its place (devices::silenceWhatIsNotSound()).
+    auto device = std::make_unique<TestGain>();
+    auto& gain = *device;
+    engine::DeviceRunner effect (TestGain::info, std::move (device));
+    effect.prepare (rate, deviceBlock);
+
+    const std::vector<float> gainValues { 0.0f, 0.0f };
+    engine::DeviceRunner::Block block;
+    block.values = gainValues;
+    juce::AudioBuffer<float> buffer (2, deviceBlock);
+    constexpr int numBlocks = 200; // longer than the silence and the tail it sleeps after (141 blocks)
+
+    for (int b = 0; b < numBlocks; ++b)
+    {
+        buffer = makeLevel (2, deviceBlock, std::numeric_limits<float>::quiet_NaN());
+        effect.process (buffer, 0, deviceBlock, block);
+    }
+
+    CHECK (gain.processed == numBlocks);
+}
+
+TEST_CASE ("A delay stays awake through the silence between its echoes: played live, it sounds as a render of it does")
+{
+    // A hit of 50 ms into Phazite's delay, a quarter note at 140 BPM (0.43 s), its echoes alone, at 44.1 kHz in blocks of
+    // 441, then three seconds of silence. Until 2026-11-13 its runner put it to sleep a quarter of a second after the hit,
+    // whatever tail it reported: the echoes never came, or came late, after the next sound woke it.
+    constexpr double sampleRate = 44100.0;
+    constexpr int block = 441, numBlocks = 300;
+    using Delay = dev::Delay;
+
+    const auto play = [] (bool isRendering)
+    {
+        engine::DeviceRunner runner (Delay::info, std::make_unique<Delay>());
+        runner.prepare (sampleRate, block);
+        auto values = getDefaults (Delay::info);
+        values[Delay::time] = 8.0f; // 1/4
+        values[Delay::feedback] = 0.5f;
+        values[Delay::mix] = 1.0f;
+
+        engine::DeviceRunner::Block in;
+        in.values = values;
+        in.tempo = 140.0;
+        in.isRendering = isRendering;
+        std::vector<float> out;
+        juce::AudioBuffer<float> buffer (2, block);
+
+        for (int i = 0; i < numBlocks; ++i)
+        {
+            buffer.clear();
+
+            if (i < 5)
+                for (int channel = 0; channel < 2; ++channel)
+                    for (int sample = 0; sample < block; ++sample)
+                        buffer.setSample (channel, sample, ((i * block + sample) / 20) % 2 == 0 ? 0.5f : -0.5f);
+
+            runner.process (buffer, 0, block, in);
+            in.sample += block;
+            out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + block);
+        }
+
+        return out;
+    };
+
+    const auto live = play (false), rendered = play (true);
+    const auto loudestFrom = [] (const std::vector<float>& sound, double fromSeconds, double toSeconds)
+    {
+        auto loudest = 0.0f;
+
+        for (auto i = (size_t) (fromSeconds * sampleRate); i < (size_t) (toSeconds * sampleRate); ++i)
+            loudest = std::max (loudest, std::abs (sound[i]));
+
+        return loudest;
+    };
+
+    // The render has its first two echoes, 0.43 and 0.86 s after the hit, with silence before each.
+    CHECK (loudestFrom (rendered, 0.1, 0.4) < 1.0e-4f);
+    CHECK (loudestFrom (rendered, 0.43, 0.5) > 0.2f);
+    CHECK (loudestFrom (rendered, 0.86, 0.95) > 0.1f);
+    CHECK (live == rendered);
 }
 
 TEST_CASE ("A continuous parameter that moves between blocks glides there over the next, while choices jump")
@@ -895,6 +982,95 @@ TEST_CASE ("The engine's loop starts again at its start on the sample its end is
     requireSame (player.render (24000), expectClicks (24000, { { 0, false } }));
 }
 
+namespace
+{
+// A plan at a tempo in 4/4 at a rate of its own, with the metronome on.
+std::unique_ptr<engine::Plan> makeClickPlanAt (double sampleRate, double bpm)
+{
+    auto plan = std::make_unique<engine::Plan>();
+    plan->tempo = engine::TempoMap ({ { 0.0, bpm } }, { { 0.0, 4, 4 } }, sampleRate);
+    plan->metronome = true;
+    return plan;
+}
+
+// What the metronome should play at a rate: a click starting at each of these samples, each fourth accented from the first.
+juce::AudioBuffer<float> expectClicksAt (double sampleRate, int numSamples, const std::vector<int>& starts)
+{
+    juce::AudioBuffer<float> expected (2, numSamples);
+    expected.clear();
+
+    for (size_t i = 0; i < starts.size(); ++i)
+    {
+        const auto sound = engine::makeClick (sampleRate, i % 4 == 0);
+        const auto start = starts[i];
+
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            expected.clear (channel, start, numSamples - start); // a click stops where the next starts
+            expected.copyFrom (channel, start, sound, 0, 0, std::min (sound.getNumSamples(), numSamples - start));
+        }
+    }
+
+    return expected;
+}
+} // namespace
+
+TEST_CASE ("The metronome clicks on every beat at a tempo whose beats fall between samples, a block starting on a click's sample or not")
+{
+    // At 128 BPM and 44.1 kHz a beat is 20671.875 samples: beat 1 is first heard on sample 20672, where a block of 64 starts
+    // (323 of them), and every beat after it on a multiple of that. Until 2026-11-13 the block before left such a click to
+    // the next, which looked for its beats after its own first sample: the click was never played.
+    constexpr double sampleRate = 44100.0, beatSamples = 60.0 / 128.0 * sampleRate;
+    const auto length = (int) (8.5 * beatSamples);
+    std::vector<int> starts;
+
+    for (int beat = 0; beat < 9; ++beat)
+        starts.push_back ((int) std::ceil (beat * beatSamples));
+
+    REQUIRE (starts[1] % 64 == 0);
+
+    for (const auto blocks : { 64, 441, 512 })
+    {
+        CAPTURE (blocks);
+        engine::Engine player;
+        player.prepare (sampleRate, blocks);
+        player.setPlan (makeClickPlanAt (sampleRate, 128.0));
+        requireSame (player.render (length), expectClicksAt (sampleRate, length, starts));
+    }
+}
+
+TEST_CASE ("The count-in clicks on every beat of its bar at a tempo whose beats fall between samples")
+{
+    // As above, from bar 2: the count-in's bar, four clicks, then the song's, each on the first sample at or after its beat.
+    constexpr double sampleRate = 44100.0, beatSamples = 60.0 / 128.0 * sampleRate;
+    const auto length = (int) (5.5 * beatSamples);
+    std::vector<int> starts;
+
+    for (int beat = 0; beat < 6; ++beat)
+        starts.push_back ((int) std::ceil (beat * beatSamples));
+
+    for (const auto blocks : { 64, 441 })
+    {
+        CAPTURE (blocks);
+        engine::Engine player;
+        player.prepare (sampleRate, blocks);
+        player.setPlan (makeClickPlanAt (sampleRate, 128.0));
+        player.locate (4.0);
+        player.play (true);
+
+        juce::AudioBuffer<float> played (2, length);
+        played.clear();
+
+        for (int done = 0; done < length; done += blocks)
+        {
+            float* channels[] = { played.getWritePointer (0, done), played.getWritePointer (1, done) };
+            player.process (channels, 2, std::min (blocks, length - done));
+        }
+
+        requireSame (played, expectClicksAt (sampleRate, length, starts));
+    }
+}
+
 TEST_CASE ("The engine stops and locates as the message thread asks, at its next block")
 {
     engine::Engine player;
@@ -1209,6 +1385,42 @@ TEST_CASE ("The engine played from where one note ends and the next starts plays
 
     CHECK (played.getSample (0, 0) == 0.5f); // the second note alone: the first, which ends there, doesn't start again
     CHECK (played.getMagnitude (0, 1, blockSize - 1) == 0.0f);
+}
+
+TEST_CASE ("A note that starts on the loop's end never plays in the loop, however the loop's end rounds to a sample")
+{
+    // At 140 BPM and 48 kHz, beat 2 is at sample 41142.86: the loop ends on sample 41143, a little after the beat, so the
+    // loop's last sample ends past the beat a note of the next bar starts on. Until 2026-11-13 that note played on the
+    // loop's last sample every time round, a drum's hit in full.
+    auto plan = makeClickPlan (engine::Plan::BeatRange { 0.0, 2.0 }, 140.0);
+    plan->metronome = false;
+    const auto loopEnd = std::llround (plan->tempo.toSamples (2.0));
+    REQUIRE (plan->tempo.toBeats ((double) loopEnd) > 2.0);
+
+    auto recorder = std::make_unique<EventRecorder>();
+    auto* recorded = recorder.get();
+    plan->strips.push_back (
+        makeTrack (1, EventRecorder::info, std::move (recorder), { { 0.0, 1.0, 60, 0.8f }, { 2.0, 3.0, 62, 0.8f } }, blockSize));
+    plan->strips.push_back (makeMaster (*plan, blockSize));
+
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (std::move (plan));
+    player.render ((int) (2.5 * (double) loopEnd)); // twice round and a half
+
+    using Type = dev::NoteEvent::Type;
+    std::vector<int> firstNoteStarts;
+
+    for (const auto& event : recorded->events)
+    {
+        CHECK (event.number != 62);
+
+        if (event.type == Type::noteOn && event.number == 60)
+            firstNoteStarts.push_back (event.sample);
+    }
+
+    // The loop's own note starts with it each time round.
+    CHECK (firstNoteStarts == std::vector<int> { 0, (int) loopEnd, 2 * (int) loopEnd });
 }
 
 TEST_CASE ("Playback started or jumping starts from silence: a tail rings on after a stop, but not into what plays next")
@@ -1790,6 +2002,142 @@ TEST_CASE ("A long audio file two clips play at once is read ahead of both, and 
         CHECK (plays (first));
         CHECK (plays (second));
     }
+}
+
+TEST_CASE ("An audio region whose file isn't read yet where it plays is silent, and fades in over 40 samples once it is")
+{
+    // A file of a minute at one level, of which one chunk is read, the one a clip would start in: played from the last 64
+    // samples of that chunk on, as after a jump there, into the next, which the reading thread reads a block late.
+    std::atomic<std::uint64_t> blocks { 0 };
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (1, rate, 60 * 48000, 0.5f), &blocks);
+    const auto region = makeRegion (file, 0, file->getLength());
+    const auto from = (std::int64_t) 6 * engine::AudioFile::chunkSamples - 64;
+    file->keep (from);
+    REQUIRE (file->readNext());
+
+    juce::AudioBuffer<float> out (2, 192), scratch (2, 64);
+    out.clear();
+    const auto play = [&] (int block)
+    {
+        float* channels[] = { out.getWritePointer (0, block * 64), out.getWritePointer (1, block * 64) };
+        region.play (channels, from + block * 64, 64, rate, false, scratch);
+    };
+
+    // What is read, fading in after the jump; then silence where nothing is.
+    play (0);
+    CHECK (out.getSample (0, 0) == doctest::Approx (0.5f / 40.0f));
+    CHECK (out.getSample (0, 63) == doctest::Approx (0.5f));
+    play (1);
+    CHECK (out.getMagnitude (64, 64) == 0.0f);
+
+    // Read: it fades in again, though it played on without a jump.
+    while (file->readNext())
+    {
+    }
+
+    ++blocks;
+    play (2);
+    CHECK (out.getSample (0, 128) == doctest::Approx (0.5f / 40.0f));
+    CHECK (out.getSample (1, 128 + 19) == doctest::Approx (0.25f));
+    CHECK (out.getSample (0, 128 + 39) == doctest::Approx (0.5f));
+    CHECK (out.getSample (0, 191) == doctest::Approx (0.5f));
+}
+
+TEST_CASE ("A long audio file plays from where the playhead was put and from the loop's start each time round, without a gap")
+{
+    // 140 BPM at 44.1 kHz in blocks of 441: a file of 70 s (95 chunks, read ten seconds ahead of where it plays) from the
+    // song's start, and beats 40 to 56 looped, 17 to 24 s into it, nine chunks. Its reading thread is the test's, which
+    // reads all it wants after each block. Until 2026-11-13 it read ahead of where the file last played only: playback from a
+    // new place, and each time round the loop, started with silence until the chunk there was read.
+    constexpr double sampleRate = 44100.0;
+    constexpr int block = 441;
+    constexpr std::int64_t loopStart = 756000, loopEnd = 1058400, playFrom = 982800; // beats 40, 56 and 52
+
+    engine::Engine player;
+    player.prepare (sampleRate, block);
+    auto file = std::make_shared<engine::AudioFile> (std::make_unique<MemoryReader> (1, sampleRate, 70 * 44100), &player.getBlocksPlayed());
+    file->keep (0);
+
+    auto plan = std::make_unique<engine::Plan>();
+    plan->tempo = engine::TempoMap ({ { 0.0, 140.0 } }, { { 0.0, 4, 4 } }, sampleRate);
+    plan->loop = engine::Plan::BeatRange { 40.0, 56.0 };
+    plan->maximumBlockSize = block;
+    REQUIRE (std::llround (plan->tempo.toSamples (40.0)) == loopStart);
+    REQUIRE (std::llround (plan->tempo.toSamples (56.0)) == loopEnd);
+
+    engine::Plan::Strip track, master;
+    track.id = 1;
+
+    for (auto* strip : { &track, &master })
+    {
+        strip->state = std::make_shared<engine::StripState>();
+        strip->state->prepare (sampleRate, block);
+    }
+
+    track.audio.push_back (makeRegion (file, 0, file->getLength(), sampleRate));
+    master.inputs.push_back ({ 0, nullptr });
+    plan->strips.push_back (std::move (track));
+    plan->strips.push_back (std::move (master));
+    player.setPlan (std::move (plan));
+
+    // So many blocks, the reading thread's turn after each: what came out on the left.
+    const auto play = [&player, &file] (int numBlocks)
+    {
+        std::vector<float> out;
+        juce::AudioBuffer<float> buffer (2, block);
+
+        for (int i = 0; i < numBlocks; ++i)
+        {
+            float* channels[] = { buffer.getWritePointer (0), buffer.getWritePointer (1) };
+            player.process (channels, 2, block);
+            out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + block);
+
+            while (file->readNext())
+            {
+            }
+        }
+
+        return out;
+    };
+
+    // Stopped at the song's start, then the playhead put at beat 52, further on than it had read ahead, and played from
+    // there a little later.
+    play (4);
+    player.locate (52.0);
+    play (4);
+    player.play();
+    const auto played = play (1500); // to the loop's end, round it, and most of the way round again
+
+    // Each sample the file's at the song's sample it plays, fading in over 40 samples where playback starts and after each
+    // jump back to the loop's start.
+    auto songSample = playFrom;
+    auto sinceJump = 0;
+    auto wrong = 0, jumps = 0;
+    std::int64_t firstWrong = -1;
+
+    for (size_t i = 0; i < played.size(); ++i)
+    {
+        const auto fade = sinceJump < 40 ? (float) (sinceJump + 1) / 40.0f : 1.0f;
+
+        if (std::abs (played[i] - MemoryReader::at (0, songSample) * fade) > 1.0e-6f)
+        {
+            if (wrong++ == 0)
+                firstWrong = (std::int64_t) i;
+        }
+
+        ++sinceJump;
+
+        if (++songSample == loopEnd)
+        {
+            songSample = loopStart;
+            sinceJump = 0;
+            ++jumps;
+        }
+    }
+
+    CAPTURE (firstWrong);
+    CHECK (wrong == 0);
+    CHECK (jumps == 2);
 }
 
 TEST_CASE ("A lane's line eases as far as it bends: quick or slow at first up to half way, then held at one end, and at the ends a jump")
@@ -2400,6 +2748,94 @@ TEST_CASE ("The engine's loudness meter reads a sine as EBU R128 does, gates sil
     REQUIRE (after.truePeak.has_value());
     CHECK (*after.integrated == doctest::Approx (-30.0f).epsilon (0.005));
     CHECK (*after.truePeak == doctest::Approx (-30.0f).epsilon (0.01));
+}
+
+namespace
+{
+// An instrument gone wrong: while it holds C4 it plays what is no number and no finite one, and while it holds D4 a square
+// wave of 1 kHz at half of full scale.
+class Poison final : public dev::Processor
+{
+public:
+    static inline const dev::DeviceInfo info { .typeID = "testPoison", .name = "Poison", .kind = dev::DeviceKind::instrument };
+
+    void prepare (double, int) override {}
+    void reset() override {}
+
+    void process (const dev::ProcessContext& context) override
+    {
+        size_t next = 0;
+
+        for (int i = 0; i < context.numSamples; ++i, ++played)
+        {
+            for (; next < context.events.size() && context.events[next].sample <= i; ++next)
+            {
+                const auto& event = context.events[next];
+
+                if (event.type == dev::NoteEvent::Type::noteOn)
+                    held = event.number;
+                else if (event.type != dev::NoteEvent::Type::slide)
+                    held = -1;
+            }
+
+            const auto bad = played % 2 == 0 ? std::numeric_limits<float>::quiet_NaN() : std::numeric_limits<float>::infinity();
+            const auto sample = held == 60 ? bad : held == 62 ? ((played / 24) % 2 == 0 ? 0.5f : -0.5f) : 0.0f;
+
+            for (int channel = 0; channel < context.numChannels; ++channel)
+                context.channels[channel][i] = sample;
+        }
+    }
+
+private:
+    int held = -1;
+    std::int64_t played = 0;
+};
+} // namespace
+
+TEST_CASE ("What is no finite number never reaches the engine's outputs, and the loudness meter reads on after it")
+{
+    // Half a second of what is no number from a track's instrument, at 120 BPM, then from beat 2 a square wave at half of
+    // full scale. Until 2026-11-13 the first went out to the audio device as it was, and left the loudness meter's filters
+    // without a number for good.
+    auto plan = makeClickPlan();
+    plan->metronome = false;
+    plan->strips.push_back (
+        makeTrack (1, Poison::info, std::make_unique<Poison>(), { { 0.0, 1.0, 60, 0.8f }, { 2.0, 8.0, 62, 0.8f } }, blockSize));
+    plan->strips.push_back (makeMaster (*plan, blockSize));
+
+    engine::Engine player;
+    player.prepare (rate, blockSize);
+    player.setPlan (std::move (plan));
+    player.play();
+
+    juce::AudioBuffer<float> played (2, 3 * 48000);
+    played.clear();
+
+    for (int done = 0; done < played.getNumSamples(); done += blockSize)
+    {
+        float* channels[] = { played.getWritePointer (0, done), played.getWritePointer (1, done) };
+        player.process (channels, 2, std::min (blockSize, played.getNumSamples() - done));
+    }
+
+    auto notFinite = 0;
+
+    for (int channel = 0; channel < 2; ++channel)
+        for (int i = 0; i < played.getNumSamples(); ++i)
+            notFinite += std::isfinite (played.getSample (channel, i)) ? 0 : 1;
+
+    CHECK (notFinite == 0);
+    CHECK (played.getMagnitude (0, 24000) == 0.0f);         // silence in its place
+    CHECK (std::abs (played.getSample (0, 60000)) == 0.5f); // and the sound after it as it is
+    CHECK (std::abs (played.getSample (1, 100000)) == 0.5f);
+
+    // Two seconds of the square wave: about -3 LUFS (a square's power is its level's, -6 dB, on each of the two sides, and
+    // its harmonics a little louder for the K-weighting's shelf).
+    const auto readings = player.getLoudnessMeter().getReadings();
+    REQUIRE (readings.momentary.has_value());
+    CHECK (*readings.momentary > -6.0f);
+    CHECK (*readings.momentary < 0.0f);
+    REQUIRE (readings.truePeak.has_value());
+    CHECK (std::isfinite (*readings.truePeak));
 }
 
 TEST_CASE ("The engine's workers run each task of a job once, on the audio thread and themselves, job after job")

@@ -339,6 +339,7 @@ void Vinyl::rest (int numSamples) noexcept
 void Vinyl::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
     const auto& values = block.parameters;
     const auto numChannels = std::min (block.numChannels, 2);
 

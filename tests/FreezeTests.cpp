@@ -9,6 +9,7 @@
 #include "devices/dynamics/Compressor.h"
 #include "devices/stereo/StereoExpander.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/Parameters.h"
@@ -16,6 +17,7 @@
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/project/ProjectContext.h"
 #include "model/project/internal/Project.h"
 #include "model/project/internal/ProjectContext.h"
@@ -427,6 +429,94 @@ TEST_CASE ("Bounce in Place renders a track before its fader onto a new audio tr
     phazite::redo (model);
     CHECK (phazite::getTrackIDs (model).size() == 3);
     CHECK (phazite::isTrackMuted (model, song.bass, false));
+}
+
+TEST_CASE ("Bounce in Place takes the automation and the modulation of the track's fader and sends along to the new track")
+{
+    // The render is the track before its fader: a volume fade, a pan move or a send throw is no part of it, and stayed with
+    // the muted original, so the bounce played without it.
+    Song song;
+    auto& model = song.getSong();
+    const auto fader = phazite::getFader (model, song.bass);
+    const auto send = phazite::getSends (model, song.bass).front();
+    const phazite::ParameterRef volume { fader, phazite::getVolumeParameterID (model, song.bass) };
+    const phazite::ParameterRef pan { fader, phazite::getPanParameterID (model, song.bass) };
+    const phazite::ParameterRef level { send, phazite::schema::sendLevelParameter };
+    const phazite::ParameterRef gain { song.expander, "gain" };
+    const auto at = [] (double beat) { return phazite::BeatPosition::fromBeats (beat); };
+
+    phazite::addPoint (model, volume, { at (0.0), 0.7f, 0.0f });
+    phazite::addPoint (model, volume, { at (4.0), 0.2f, 0.5f });
+    phazite::addPoint (model, level, { at (2.0), 0.6f, 0.0f });
+    phazite::addPoint (model, gain, { at (0.0), 6.0f, 0.0f }); // a device's: rendered, not copied
+
+    const auto lfo = phazite::addModulator (model, song.bass, phazite::ModulatorType::lfo);
+    const auto macro = phazite::addModulator (model, song.bass, phazite::ModulatorType::macro);
+    const auto other = phazite::addModulator (model, song.bass, phazite::ModulatorType::random);
+    REQUIRE (lfo.isValid());
+    REQUIRE (macro.isValid());
+    REQUIRE (other.isValid());
+    phazite::setModulation (model, lfo, pan, 0.25f);
+    phazite::setModulation (model, lfo, gain, 0.5f);
+    phazite::setModulation (model, macro, level, -0.5f);
+    phazite::setModulation (model, other, gain, 0.5f); // modulates the devices alone: stays behind
+    model.getUndoManager().clearUndoHistory();
+
+    phazite::bounceSelectedTrack (song.context, song.host);
+    REQUIRE (song.host.render != nullptr);
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&song] { return ! song.host.finished.isEmpty(); }, 60000));
+    REQUIRE (song.host.finished == juce::StringArray { "Bouncing Bass: ok" });
+
+    const auto tracks = phazite::getTrackIDs (model);
+    REQUIRE (tracks.size() == 3);
+    const auto bounced = tracks[1];
+    const auto newFader = phazite::getFader (model, bounced);
+    const auto newSends = phazite::getSends (model, bounced);
+    REQUIRE (newSends.size() == 1);
+    REQUIRE (newFader != fader);
+    const phazite::ParameterRef newVolume { newFader, volume.parameter }, newPan { newFader, pan.parameter };
+    const phazite::ParameterRef newLevel { newSends[0], level.parameter };
+
+    // The fader's and the send's curves, point for point; the originals keep theirs.
+    const auto samePoints = [&model] (const phazite::ParameterRef& a, const phazite::ParameterRef& b)
+    {
+        const auto first = phazite::getPoints (model, a), second = phazite::getPoints (model, b);
+        return first.size() == second.size()
+               && std::equal (first.begin(), first.end(), second.begin(),
+                              [] (const auto& x, const auto& y)
+                              {
+                                  return x.beat == y.beat && juce::approximatelyEqual (x.value, y.value)
+                                         && juce::approximatelyEqual (x.curve, y.curve);
+                              });
+    };
+
+    CHECK (phazite::getPoints (model, newVolume).size() == 2);
+    CHECK (samePoints (newVolume, volume));
+    CHECK (phazite::getPoints (model, newLevel).size() == 1);
+    CHECK (samePoints (newLevel, level));
+    CHECK (phazite::getPoints (model, newPan).empty());
+
+    // The modulators that moved the fader and the send, copied onto the new track with those modulations alone.
+    const auto modulators = phazite::getModulators (model, bounced);
+    REQUIRE (modulators.size() == 2);
+    CHECK (phazite::getModulatorType (model, modulators[0]) == phazite::ModulatorType::lfo);
+    CHECK (phazite::getModulatorType (model, modulators[1]) == phazite::ModulatorType::macro);
+    const auto ofLfo = phazite::getModulations (model, modulators[0]), ofMacro = phazite::getModulations (model, modulators[1]);
+    REQUIRE (ofLfo.size() == 1);
+    CHECK (ofLfo[0].parameter == newPan);
+    CHECK (ofLfo[0].amount == doctest::Approx (0.25f));
+    REQUIRE (ofMacro.size() == 1);
+    CHECK (ofMacro[0].parameter == newLevel);
+    CHECK (ofMacro[0].amount == doctest::Approx (-0.5f));
+    CHECK (phazite::getModulators (model, song.bass).size() == 3);
+    CHECK (phazite::getModulations (model, lfo).size() == 2);
+
+    // All of it in the bounce's one undo step.
+    phazite::undo (model);
+    CHECK (phazite::getTrackIDs (model).size() == 2);
+    CHECK (phazite::getPoints (model, newVolume).empty());
+    CHECK (phazite::getPoints (model, newLevel).empty());
+    CHECK_FALSE (phazite::canUndo (model));
 }
 
 namespace

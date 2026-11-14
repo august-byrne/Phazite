@@ -31,6 +31,7 @@ struct TimelineGesture
     // endStep().
     void beginStep (ProjectContext&, const juce::String& name);
     void endStep() { step = nullptr; }
+    bool hasStep() const noexcept { return step != nullptr; }
 
     // Takes back all the step changed, leaving nothing to redo: Escape during a drag.
     void rollBack();

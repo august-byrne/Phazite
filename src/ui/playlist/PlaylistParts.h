@@ -279,11 +279,19 @@ struct Playlist::Gesture : public TimelineGesture
     BeatDuration moved;       // and how far along
     bool copying = false;     // copies (or aliases) of the clips move, and the originals stay
 
+    // A move that began as a drag (Playlist::beginDrag()): the clip the mouse went down on, also while its copy is what moves;
+    // whether its click waited for the mouse to go up (clickOnMouseUp, as it was); whether the drag began the undo step, so
+    // that one that moves nothing in the end is taken back; and with Ctrl, that copies move, or aliases, made once the drag
+    // moves them, with what was selected until then.
+    ClipID pressed;
+    bool waitedForClick = false, stepIsTheDrags = false, copies = false, aliases = false;
+    std::vector<ClipID> clipsBeforeCopies;
+
     std::optional<CrossfadeSpot> crossfade; // where the mouse went down to draw a crossfade
     double startOffset = 0.0;               // Slip: the clip's offset when the drag began, in seconds
     BeatPosition panViewStart;              // the middle button: where the view started
 
-    // Select with Ctrl: what was selected already.
+    // Select with Ctrl, and a move: what was selected already, as the drag began.
     std::vector<TrackID> tracksBefore;
     std::vector<ClipID> clipsBefore;
     std::vector<SectionID> sectionsBefore;

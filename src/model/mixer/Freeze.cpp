@@ -10,11 +10,13 @@
 #include "model/arrangement/internal/Consolidate.h"
 #include "model/arrangement/internal/Selection.h"
 #include "model/arrangement/internal/Tracks.h"
+#include "model/automation/internal/Automation.h"
 #include "model/base/internal/Schema.h"
 #include "model/commands/CommandRegistry.h"
 #include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/engine/internal/AudioIO.h"
+#include "model/modulation/internal/Modulation.h"
 #include "model/playback/internal/OfflineRender.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
@@ -640,11 +642,23 @@ namespace
 
             setChannelVolume (bouncedSong, bounced, getChannelVolume (bouncedSong, track));
             setChannelPan (bouncedSong, bounced, getChannelPan (bouncedSong, track));
+            CopiedIDs copied { { getFader (bouncedSong, track).getRaw(), getFader (bouncedSong, bounced).getRaw() } };
 
             for (const auto send : getSends (bouncedSong, track))
+            {
                 if (const auto copy = addSend (bouncedSong, bounced, getSendTarget (bouncedSong, send), isPreFader (bouncedSong, send));
                     copy.isValid())
+                {
                     setSendLevel (bouncedSong, copy, getSendLevel (bouncedSong, send));
+                    copied[send.getRaw()] = copy.getRaw();
+                }
+            }
+
+            // The render is the track before its fader: what moves its fader and its sends along the song, their automation
+            // and the track's modulators and macros that modulate them, goes on moving the new track's, which plays in its
+            // place.
+            copyCurves (bouncedSong, copied);
+            copyModulators (bouncedSong, track, bounced, copied);
 
             if (! placeClipState (bouncedSong, makeAudioClipState (bouncedSong, name, target, BeatPosition(), { 0.0, length }), bounced)
                       .isValid())

@@ -52,6 +52,7 @@ public:
     void reset() override;
     void process (const ProcessContext&) override;
     int getLatencySamples() const override { return latency; }
+    bool delaysDry() const noexcept override { return true; }
 
 private:
     double sampleRate = 44100.0;
@@ -62,6 +63,14 @@ private:
     Shape lastShape = Shape::soft;
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
     std::array<dsp::AntialiasedCurve, 2> curves;
+
+    // The copy of what came in for its mix (ProcessContext::dry), through filters like the sound's and a straight line in
+    // the curve's place, while the mix uses it: the half-band filters turn the phase of the top octave, and the copy is
+    // turned and delayed as the sound is, so that the two meet in phase at any mix.
+    std::unique_ptr<juce::dsp::Oversampling<float>> dryOversampling;
+    std::array<dsp::AntialiasedCurve, 2> dryCurves;
+    float lastMix = 1.0f;   // the mix in its last block
+    bool dryInStep = false; // the copy went through its filters in the last block
     std::array<dsp::Filter, 2> dcBlockers {}, lowTilts {}, highTilts {};
 };
 } // namespace phazite::devices

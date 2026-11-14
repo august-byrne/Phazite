@@ -394,6 +394,7 @@ float Multiband::compress (Compressor& c, std::span<const float> values, int ban
 void Multiband::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
     const auto& values = block.parameters;
     const auto numChannels = std::min (block.numChannels, 2);
 
@@ -595,7 +596,7 @@ void Multiband::process (const ProcessContext& block)
         {
             for (size_t channel = 0; channel < 2; ++channel)
             {
-                auto x = keyIn != nullptr ? keyIn[std::min ((int) channel, numKeyChannels - 1)][i] : input[channel];
+                auto x = keyIn != nullptr ? soundOf (keyIn[std::min ((int) channel, numKeyChannels - 1)][i]) : input[channel];
                 x = keyLowCuts[channel].process (x, keyLow);
 
                 if (keyCutsHigh)

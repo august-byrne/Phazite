@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 namespace phazite::test
 {
@@ -78,7 +79,7 @@ namespace
         using juce::AudioProcessor::processBlock;
 
         double getTailLengthSeconds() const override { return 0.0; }
-        bool acceptsMidi() const override { return kind == Kind::synth; }
+        bool acceptsMidi() const override { return kind == Kind::synth || kind == Kind::synthWithInput; }
         bool producesMidi() const override { return false; }
         juce::AudioProcessorEditor* createEditor() override { return new juce::GenericAudioProcessorEditor (*this); }
         bool hasEditor() const override { return true; }
@@ -249,8 +250,11 @@ namespace
     class TestSynth final : public StandIn
     {
     public:
-        TestSynth()
-            : StandIn (Kind::synth, BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+        // Without an input, or (Kind::synthWithInput) with one, which it plays nothing of.
+        explicit TestSynth (Kind which)
+            : StandIn (which, which == Kind::synthWithInput
+                                  ? stereoEffect()
+                                  : BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true))
         {
             level = add ("10", "Level", 0.25f);
         }
@@ -280,8 +284,8 @@ namespace
                     level->endChangeGesture();
                 else if (message.isNoteOn())
                     start (message.getNoteNumber());
-                else if (message.isNoteOff() || message.isAllNotesOff())
-                    stop (message.isNoteOff() ? message.getNoteNumber() : -1);
+                else if (message.isNoteOff()) // and no controller: all notes off ends none of its notes
+                    stop (message.getNoteNumber());
             }
 
             playNotes (buffer, done, buffer.getNumSamples());
@@ -343,17 +347,24 @@ namespace
             : StandIn (Kind::crash, stereoEffect())
         {
             crash = add ("20", "Crash", 0.0f);
+            notNumbers = add ("21", "NaN", 0.0f);
         }
 
         using StandIn::processBlock;
-        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override
+        void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
         {
             if (crash->getValue() > 0.5f)
                 crashNow();
+
+            if (notNumbers->getValue() > 0.5f)
+                for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                    juce::FloatVectorOperations::fill (buffer.getWritePointer (channel), std::numeric_limits<float>::quiet_NaN(),
+                                                       buffer.getNumSamples());
         }
 
     private:
         StandInParameter* crash = nullptr;
+        StandInParameter* notNumbers = nullptr;
     };
 
     class TestHang final : public StandIn
@@ -534,6 +545,8 @@ namespace
                 return { "Test Crash Loading", "PhaziteTestCrashLoading", 0x7e57c2, false };
             case Kind::playhead:
                 return { "Test Playhead", "PhaziteTestPlayhead", 0x7e57b1, false };
+            case Kind::synthWithInput:
+                return { "Test Synth With Input", "PhaziteTestSynthWithInput", 0x7e5753, true };
         }
 
         return { "Test Effect", "PhaziteTestEffect", 0x7e57e5, false };
@@ -603,7 +616,7 @@ juce::PluginDescription TestPlugins::getDescription (Kind kind)
     description.fileOrIdentifier = described.file;
     description.uniqueId = described.uniqueId;
     description.isInstrument = described.isInstrument;
-    description.numInputChannels = described.isInstrument ? 0 : 2;
+    description.numInputChannels = described.isInstrument && kind != Kind::synthWithInput ? 0 : 2;
     description.numOutputChannels = 2;
     return description;
 }
@@ -620,7 +633,8 @@ std::unique_ptr<juce::AudioPluginInstance> TestPlugins::create (Kind kind, int v
         case Kind::effect:
             return std::make_unique<TestEffect> (version);
         case Kind::synth:
-            return std::make_unique<TestSynth>();
+        case Kind::synthWithInput:
+            return std::make_unique<TestSynth> (kind);
         case Kind::crash:
             return std::make_unique<TestCrash>();
         case Kind::hang:

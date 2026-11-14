@@ -101,7 +101,7 @@ aliases stay above hearing, and the oscillator reads them with cubic interpolati
 
 **Fix:**
 - The synth reads saw, triangle and square from factory tables of those shapes.
-- Its pulse becomes the difference of two saws a width apart, so pulse width can still move.
+- Its pulse becomes the difference of two saws a width apart, so pulse width can still move (without the `2 x width - 1` offset it carried until 2026-11-13).
 - The sound stays the same and the aliases go.
 - The cost is about the same as now; check it with the benchmarks. Golden renders change.
 
@@ -356,7 +356,7 @@ which is why the "before" figures differ a little from section 5.3's, which coun
     as it was (run through the half-band filters, the master band's limited peaks rose by 3 dB). The master's saturation
     alike. Its latency is 2 saturations' more, 5 samples each: 490 samples at 48 kHz, where it was 480.
 
-  The compressor's drive still averages at the sound's rate, as it did before the audit.
+  The compressor's drive averaged at the sound's rate, as it did before the audit, until 2026-11-13: that dulled the highs whenever it engaged (5 dB at 15 kHz), so it now runs through `dsp::AntialiasedShaper` at twice the rate, as the Multiband's saturation does.
 - **The tube curve's antiderivative** comes from a table worked out once, as section 3.4 proposed.
 - **The synth's tables keep 32 samples for each cycle of their highest harmonic**, not the wavetable's 4, and the
   oscillator reads them by straight lines between samples rather than cubics: at 4 samples, cubic interpolation left

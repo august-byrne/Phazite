@@ -125,8 +125,10 @@ struct RecordTarget
 std::vector<RecordTarget> getRecordTargets (const ProjectContext&);
 juce::String describeRecordTargets (const ProjectContext&);
 
-// Whether Record is recording onto a track now, from an input or MIDI: its header and strip say so.
+// Whether Record is recording onto a track now, from an input or MIDI: its header and strip say so. And whether it is
+// recording at all (from Record until it stops, the count-in too).
 bool isRecordingOnto (const ProjectContext&, TrackID);
+bool isRecording (const ProjectContext&);
 
 // "Add Audio Track": a track without an instrument after the selected one (or at the end), named "Audio" (then "Audio 2"...),
 // recording one of the audio device's inputs, armed, and selected alone, as one undo step: for a microphone or an instrument

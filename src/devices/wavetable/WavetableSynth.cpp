@@ -990,6 +990,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
             if (newStep || voice.stepPending)
             {
                 voice.stepPending = false;
+                voice.unison = settings.unison;
 
                 // A slide moves evenly until it gets there, a glide part of the way each step.
                 if (voice.slidePerSample > 0.0f)
@@ -1147,9 +1148,11 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
             }
 
             //==================================================================
-            // Each sample.
+            // Each sample: as many unison voices as the step set readers for, spread across the sides if more than one.
             auto& osc1Run = voice.oscillators[0];
             auto& osc2Run = voice.oscillators[1];
+            const auto unison = voice.unison;
+            const auto stereo = unison > 1 && right != nullptr;
 
             // Without FM, which reads the other oscillator sample by sample, each oscillator's unison voices play the stretch
             // first (renderStep()), and are mixed after: the same sums, in the same order (docs/performance-audit.md, A6).
@@ -1158,7 +1161,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
 
             if (blockwise)
             {
-                for (int u = 0; u < settings.unison; ++u)
+                for (int u = 0; u < unison; ++u)
                 {
                     std::array<std::array<float, controlStep>, numOscillators> raws {};
 
@@ -1196,7 +1199,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
             {
                 auto soundLeft = stepLefts[(size_t) i], soundRight = stepRights[(size_t) i];
 
-                for (int u = 0; u < settings.unison && ! blockwise; ++u)
+                for (int u = 0; u < unison && ! blockwise; ++u)
                 {
                     std::array<float, numOscillators> raw {};
 
@@ -1278,7 +1281,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 }
 
                 // Without unison, one sound in the middle.
-                if (! settings.stereo)
+                if (! stereo)
                     soundRight = soundLeft;
 
                 // The sub and the noise, in the middle.
@@ -1296,7 +1299,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                 // The filter, its drive saturating what goes in (its quiet parts keeping their level) at twice the rate so
                 // that it doesn't alias, faded in and out over 32 samples as it comes on or off: both sides through it
                 // while unison spreads the voice, otherwise one.
-                const auto channels = settings.stereo ? 2 : 1;
+                const auto channels = stereo ? 2 : 1;
                 std::array<float, 2> sides { soundLeft, soundRight };
                 const auto driveWanted = voice.filtering && voice.driveGain > 1.0001f ? 1.0f : 0.0f;
                 voice.driveBlend += std::clamp (driveWanted - voice.driveBlend, -1.0f / 32.0f, 1.0f / 32.0f);
@@ -1320,7 +1323,7 @@ void WavetableSynth::render (float* left, float* right, int numSamples, std::spa
                     sides[(size_t) channel] = x;
                 }
 
-                if (! settings.stereo)
+                if (! stereo)
                     sides[1] = sides[0];
 
                 const auto gain = voice.amp.next() * voice.velocityGain * settings.outputGain * voice.fade;

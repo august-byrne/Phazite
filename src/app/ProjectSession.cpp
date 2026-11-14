@@ -555,6 +555,21 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
         return;
     }
 
+    // A save that fails, or an untitled project's save dialog cancelled, leaves the project open.
+    const auto answer = [this, callback] (UnsavedChanges choice)
+    {
+        if (choice == UnsavedChanges::save)
+            saveThen (callback);
+        else
+            callback (choice == UnsavedChanges::discard); // "Don't save" closes; "Cancel" doesn't
+    };
+
+    if (askToSave != nullptr)
+    {
+        askToSave (project->getFile(), answer);
+        return;
+    }
+
     const auto options = juce::MessageBoxOptions()
                              .withIconType (juce::MessageBoxIconType::QuestionIcon)
                              .withTitle ("Save changes?")
@@ -564,16 +579,12 @@ void ProjectSession::closeThen (std::function<void (bool)> callback)
                              .withButton ("Cancel", 0)
                              .withAssociatedComponent (dialogParent);
 
-    // Escape, or closing the window, answers 0, as Cancel does. A save that fails, or an untitled project's save dialog
-    // cancelled, leaves the project open.
-    juce::AlertWindow::showAsync (options,
-                                  [this, callback] (int result)
-                                  {
-                                      if (result == 1)
-                                          saveThen (callback);
-                                      else
-                                          callback (result == 2); // "Don't save" closes; "Cancel" doesn't
-                                  });
+    // Escape, or closing the window, answers 0, as Cancel does.
+    juce::AlertWindow::showAsync (
+        options, [answer] (int result)
+        { answer (result == 1   ? UnsavedChanges::save
+                  : result == 2 ? UnsavedChanges::discard
+                                : UnsavedChanges::cancel); });
 }
 
 void ProjectSession::openWithRestoreQuestion (const juce::File& file)

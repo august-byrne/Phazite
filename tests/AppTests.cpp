@@ -721,6 +721,138 @@ TEST_CASE ("An untitled song's recordings survive a crash before its first autos
     CHECK_FALSE (song.getUndoManager().canUndo());
 }
 
+TEST_CASE ("A project restored after a crash asks before it closes, though nothing changed since, and keeps what it restored")
+{
+    using Answer = phazite::ProjectSession::UnsavedChanges;
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto projects = temp.folder.getChildFile ("Projects");
+    const auto unsaved = temp.folder.getChildFile ("Unsaved");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    const auto other = createClosedProject (projects, "Other");
+
+    // An untitled project with changes saved automatically, as a crash left it, restored at the next start.
+    const auto crashed = leaveUntitledProject (unsaved.getChildFile ("2026-11-13 10-00-00"), true);
+    phazite::ProjectSession session (engine, recent, projects, unsaved);
+    session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (true); };
+    juce::Array<juce::File> asked;
+    auto answer = Answer::cancel;
+    session.askToSave = [&asked, &answer] (const juce::File& file, std::function<void (Answer)> callback)
+    {
+        asked.add (file);
+        callback (answer);
+    };
+
+    session.openAtStartup();
+    REQUIRE (session.getProject() != nullptr);
+    REQUIRE (session.getProject()->getFile() == crashed);
+    phazite::test::settle();
+
+    // Another project opened before anything else changed: what was restored is in no file the user chose, so Phazite
+    // asks. Cancelled, the project stays open, with its folder and its autosave.
+    session.openProject (other);
+    CHECK (asked == juce::Array<juce::File> { crashed });
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.getProject()->getFile() == crashed);
+    CHECK (crashed.existsAsFile());
+    CHECK (phazite::Project::getAutosaveFile (crashed).existsAsFile());
+    CHECK (session.getProject()->hasUnsavedChanges());
+
+    // Asked again the next time; "Don't save" is the user's word that it may go.
+    answer = Answer::discard;
+    session.openProject (other);
+    CHECK (asked.size() == 2);
+    REQUIRE (session.getProject() != nullptr);
+    CHECK (session.getProject()->getFile() == other);
+    CHECK_FALSE (crashed.getParentDirectory().getParentDirectory().exists());
+}
+
+TEST_CASE ("A saved project restored after a crash saves what it restored as it closes with Auto Save, and asks without")
+{
+    using Answer = phazite::ProjectSession::UnsavedChanges;
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto projects = temp.folder.getChildFile ("Projects");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+
+    for (const auto autoSave : { true, false })
+    {
+        // A project in a folder of its own, left by a crash with an autosave that holds an outline its file doesn't.
+        const auto file = leaveUntitledProject (projects.getChildFile (autoSave ? "With" : "Without"), true);
+        REQUIRE_FALSE (file.loadFileAsString().contains ("pop"));
+
+        phazite::ProjectSession session (engine, recent, projects, temp.folder.getChildFile ("Unsaved"));
+        session.setAutoSave (autoSave);
+        session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (true); };
+        auto asked = 0;
+        session.askToSave = [&asked] (const juce::File&, std::function<void (Answer)> callback)
+        {
+            ++asked;
+            callback (Answer::save);
+        };
+
+        session.openProject (file);
+        REQUIRE (session.getProject() != nullptr);
+        REQUIRE_FALSE (session.isUntitled());
+
+        // Closed at once, before Auto Save's timer came by.
+        auto closed = false;
+        session.closeThen ([&closed] (bool wasClosed) { closed = wasClosed; });
+        CHECK (closed);
+        CHECK (asked == (autoSave ? 0 : 1));
+        CHECK (file.loadFileAsString().contains ("pop"));
+        CHECK_FALSE (session.getProject()->hasUnsavedChanges());
+    }
+}
+
+TEST_CASE ("A save that fails says so, and the project stays open with its changes unsaved")
+{
+    auto& engine = phazite::test::getEngineContext();
+    phazite::test::TemporaryFolder temp;
+    const auto file = createClosedProject (temp.folder, "Song");
+    phazite::Settings settings;
+    phazite::RecentProjects recent (settings);
+    phazite::ProjectSession session (engine, recent, temp.folder, temp.folder.getChildFile ("Unsaved"));
+    juce::StringArray errors;
+    session.onError = [&errors] (const juce::String& title, const juce::String& message) { errors.add (title + ": " + message); };
+    phazite::CommandRegistry registry;
+    phazite::test::RenderHost renders;
+    session.addCommands (registry, renders);
+    session.setAutoSave (true);
+    session.openProject (file);
+    REQUIRE (session.getProject() != nullptr);
+    phazite::test::settle();
+
+    session.getProject()->getSong().getState().setProperty (phazite::schema::outline, "pop", nullptr);
+    REQUIRE (session.getProject()->hasUnsavedChanges());
+
+    // A folder where the project file goes, which a file can't take the place of: Save says that it didn't.
+    REQUIRE (file.deleteFile());
+    REQUIRE (file.createDirectory().wasOk());
+    REQUIRE (file.getChildFile ("In the way").replaceWithText ("in the way"));
+    REQUIRE (registry.invoke ("project.save"));
+    REQUIRE (errors.size() == 1);
+    CHECK (errors[0].startsWith ("Phazite couldn't save the project: "));
+    CHECK (errors[0].contains (file.getFullPathName()));
+    CHECK (session.getProject()->hasUnsavedChanges());
+
+    // Closing, which saves with Auto Save, says so too, and leaves the project open.
+    auto closed = true;
+    session.closeThen ([&closed] (bool wasClosed) { closed = wasClosed; });
+    CHECK_FALSE (closed);
+    CHECK (errors.size() == 2);
+    CHECK (session.getProject()->hasUnsavedChanges());
+
+    // Once the file can be written, it is saved.
+    REQUIRE (file.deleteRecursively());
+    REQUIRE (registry.invoke ("project.save"));
+    CHECK (errors.size() == 2);
+    CHECK_FALSE (session.getProject()->hasUnsavedChanges());
+    CHECK (file.loadFileAsString().contains ("pop"));
+}
+
 TEST_CASE ("The run marker tells a start after Phazite didn't close properly")
 {
     phazite::test::TemporaryFolder temp;

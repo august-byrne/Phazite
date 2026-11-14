@@ -193,11 +193,11 @@
     },
     {
       "parent": "TRACK",
-      "type": "LANE"
+      "type": "LANES"
     },
     {
       "parent": "MASTER",
-      "type": "LANE"
+      "type": "LANES"
     }
   ],
   "piecesOfTheirOwn": [

@@ -81,6 +81,12 @@ public:
     std::unique_ptr<Take> releaseTake();
     Take* getTake() noexcept { return take.get(); } // while it records, or nullptr
 
+    // The playhead put elsewhere while it records, as locate() puts it: recording goes on from there, as Ableton Live's does
+    // after a jump. The take ends where the song is (the engine ends what it records at a jump: Engine.h), finished by the
+    // function given, which keeps it as a stop would, in an undo step of its own; and another starts where the playhead
+    // lands, if anything would still record. The engine loops what the take looped all the while.
+    void locateWhileRecording (BeatPosition, const std::function<void (Take&)>& finish);
+
     // What tells the user of a problem with what it recorded that the model can't show itself, a title and a message (a take
     // kept in time with silence where its sound was lost: Take::finish()). The project context that makes the session sets
     // it (model/project/internal/ProjectContext.h: setProblemReporter()); unset, nothing is said.

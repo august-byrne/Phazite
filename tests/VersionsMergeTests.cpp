@@ -2,6 +2,7 @@
 // Merging two lines of a song by IDs (docs/versions.md: Merging by IDs, step V4): each side a song of its own made from the
 // same base, changed through the model, and the other side's lines taken into this side's.
 #include "EnginePlayback.h"
+#include "SongIDs.h"
 #include "TestClips.h"
 #include "TestHelpers.h"
 #include "TestSong.h"
@@ -13,6 +14,7 @@
 #include "model/base/internal/Schema.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
+#include "model/mixer/internal/Containers.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/notes/internal/Notes.h"
 #include "model/project/internal/Project.h"
@@ -74,56 +76,55 @@ juce::ValueTree findTrack (const juce::ValueTree& song, const juce::String& name
     return {};
 }
 
-// Every item's ID once in the song, notes' once in their clips, and what names an item names one the song has.
-void checkIDs (const juce::ValueTree& song)
+// The elements of a type and ID anywhere in a song: one, for what the song holds once.
+std::vector<juce::ValueTree> findItems (const juce::ValueTree& song, const juce::Identifier& type, std::uint64_t id)
 {
-    std::set<std::uint64_t> items;
-    const std::function<void (const juce::ValueTree&)> collect = [&] (const juce::ValueTree& tree)
-    {
-        std::set<std::uint64_t> notes;
-
-        for (const auto& child : tree)
-        {
-            if (child.hasType (schema::NOTE))
-            {
-                INFO ("a note's ID twice in its clip");
-                CHECK (notes.insert (phazite::readID (child[schema::noteID])).second);
-                continue;
-            }
-
-            for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
-            {
-                if (child.hasProperty (*property) && schema::holdsID (child, *property))
-                {
-                    INFO ((child.getType().toString() + " " + child[*property].toString()).toStdString());
-                    CHECK (items.insert (phazite::readID (child[*property])).second);
-                }
-            }
-
-            collect (child);
-        }
-    };
-
-    collect (song);
-
-    const std::function<void (const juce::ValueTree&)> check = [&] (const juce::ValueTree& tree)
+    std::vector<juce::ValueTree> found;
+    const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& tree)
     {
         for (const auto& child : tree)
         {
-            for (int i = 0; i < child.getNumProperties(); ++i)
-            {
-                if (const auto property = child.getPropertyName (i); schema::namesID (child, property) && ! child.hasType (schema::SEND))
-                {
-                    INFO ((child.getType().toString() + "@" + property.toString() + " " + child[property].toString()).toStdString());
-                    CHECK (items.count (phazite::readID (child[property])) == 1);
-                }
-            }
+            if (child.hasType (type) && phazite::readID (child[schema::trackID]) == id)
+                found.push_back (child);
 
-            check (child);
+            visit (child);
         }
     };
 
-    check (song);
+    visit (song);
+    return found;
+}
+
+// A track and the tracks in it, a folder's, however deep.
+size_t countTracks (const juce::ValueTree& track)
+{
+    size_t tracks = 1;
+
+    for (const auto& child : track)
+        if (child.hasType (schema::TRACK))
+            tracks += countTracks (child);
+
+    return tracks;
+}
+
+int countNotes (const juce::ValueTree& clip)
+{
+    int notes = 0;
+
+    for (const auto& child : clip)
+        notes += child.hasType (schema::NOTE) ? 1 : 0;
+
+    return notes;
+}
+
+// The base's two tracks put into a folder named Group, and both sides made from it again.
+phazite::TrackID groupBase (Sides& sides)
+{
+    const auto folder = phazite::groupIntoFolder (*sides.base, sides.tracks, nullptr);
+    phazite::setTrackName (*sides.base, folder, "Group");
+    sides.ours = phazite::makeSong (sides.base->getState().createCopy());
+    sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+    return folder;
 }
 } // namespace
 
@@ -317,19 +318,48 @@ TEST_CASE ("Random edits on two sides always merge into a song whose IDs are eac
 {
     juce::Random random (20261104);
 
-    for (int round = 0; round < 12; ++round)
+    // The tracks and the clips of a song, by their IDs.
+    const auto itemsOf = [] (const juce::ValueTree& song)
+    {
+        std::set<std::pair<juce::String, std::uint64_t>> items;
+
+        for (const auto& track : phazite::getTrackElements (song))
+        {
+            items.insert ({ "track", phazite::readID (track[schema::trackID]) });
+
+            for (const auto& child : track)
+                if (child.hasType (schema::CLIP))
+                    items.insert ({ "clip", phazite::readID (child[schema::clipID]) });
+        }
+
+        return items;
+    };
+
+    for (int round = 0; round < 80; ++round)
     {
         INFO ("round " << round);
         Sides sides;
+
+        // The base with a folder, in half of the rounds.
+        if (round % 2 == 1)
+            groupBase (sides);
 
         for (auto* side : { sides.ours.get(), sides.theirs.get() })
         {
             for (int edit = 0; edit < 8; ++edit)
             {
                 const auto tracks = phazite::getTrackIDs (*side);
-                const auto track = tracks[(size_t) random.nextInt ((int) tracks.size())];
 
-                switch (random.nextInt (6))
+                if (tracks.empty()) // its last folder ungrouped with nothing in it
+                {
+                    phazite::insertTrack (*side, {}, nullptr);
+                    continue;
+                }
+
+                const auto track = tracks[(size_t) random.nextInt ((int) tracks.size())];
+                const auto other = tracks[(size_t) random.nextInt ((int) tracks.size())];
+
+                switch (random.nextInt (9))
                 {
                     case 0:
                         phazite::setChannelVolume (*side, track, -random.nextFloat() * 30.0f);
@@ -341,17 +371,38 @@ TEST_CASE ("Random edits on two sides always merge into a song whose IDs are eac
                         phazite::insertDeviceState (*side, track, phazite::makeOwnDeviceState (*side, phazite::devices::Equalizer::typeID));
                         break;
                     case 3:
-                        if (const auto clip = addMidiClip (*side, track, { at (random.nextInt (16)), at (20.0) }); clip.isValid())
-                            addMidiNote (*side, clip, 40 + random.nextInt (20), at (0.0), lasting (0.5));
+                        if (! phazite::isFolder (*side, track))
+                            if (const auto clip = addMidiClip (*side, track, { at (random.nextInt (16)), at (20.0) }); clip.isValid())
+                                addMidiNote (*side, clip, 40 + random.nextInt (20), at (0.0), lasting (0.5));
                         break;
                     case 4:
                         if (phazite::findClipState (*side, sides.clip).isValid())
-                            addMidiNote (*side, sides.clip, 30 + random.nextInt (40), at (random.nextInt (8)), lasting (0.25));
+                        {
+                            // Each number drawn on its own: the order two calls in one are made in isn't the same everywhere.
+                            const auto key = 30 + random.nextInt (40);
+                            const auto beat = random.nextInt (8);
+                            addMidiNote (*side, sides.clip, key, at (beat), lasting (0.25));
+                        }
                         break;
                     case 5:
-                    default:
-                        if (tracks.size() > 1)
+                        if (tracks.size() > countTracks (phazite::findTrackState (*side, track))) // a folder goes with its tracks
                             phazite::deleteTracks (*side, { track }, nullptr);
+                        break;
+                    case 6:
+                        phazite::groupIntoFolder (*side, track == other ? std::vector { track } : std::vector { track, other }, nullptr);
+                        break;
+                    case 7:
+                        phazite::ungroupFolder (*side, track); // if it is a folder
+                        break;
+                    case 8:
+                    default:
+                        // A clip of the track onto another, at another beat.
+                        if (const auto clips = phazite::getClips (*side, track); ! clips.empty() && ! phazite::isFolder (*side, other))
+                        {
+                            const auto moved = clips[(size_t) random.nextInt ((int) clips.size())];
+                            const auto beat = random.nextInt (16);
+                            phazite::moveClip (*side, moved, at (beat), other);
+                        }
                         break;
                 }
             }
@@ -359,6 +410,22 @@ TEST_CASE ("Random edits on two sides always merge into a song whose IDs are eac
 
         const auto merged = sides.merge();
         checkIDs (merged.song);
+
+        // What all three have, neither side took away, and what this side added, it has still: a track ungrouped, a clip moved.
+        const auto inBase = itemsOf (sides.base->getState()), inOurs = itemsOf (sides.ours->getState()),
+                   inTheirs = itemsOf (sides.theirs->getState()), inMerged = itemsOf (merged.song);
+
+        for (const auto& item : inOurs)
+        {
+            if ((inBase.count (item) > 0) == (inTheirs.count (item) > 0))
+            {
+                INFO ("lost: " << item.first.toStdString() << " " << item.second);
+                CHECK (inMerged.count (item) == 1);
+            }
+        }
+
+        if (round >= 12)
+            continue;
 
         // It opens as a project's song, plays, and saves to open again as it was.
         TestSong s;
@@ -497,4 +564,230 @@ TEST_CASE ("A drum sampler a merge gives a new ID keeps its pads' tracks, which 
     CHECK (phazite::readID (padTrack[schema::trackPadDevice]) == phazite::readID (sampler[schema::deviceID]));
     CHECK ((int) padTrack[schema::trackPad] == 36);
     checkIDs (merged.song);
+}
+
+TEST_CASE (
+    "A folder taken away there goes without its tracks: ungrouped there, they stay, out of it; deleted with it, those changed here stay")
+{
+    // Ungrouped there: the folder goes, and its tracks are where the other side has them.
+    {
+        Sides sides;
+        const auto folder = groupBase (sides);
+        phazite::ungroupFolder (*sides.theirs, folder);
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK (merged.clashes.empty());
+        CHECK_FALSE (findTrack (merged.song, "Group").isValid());
+        REQUIRE (findTrack (merged.song, "Bass").isValid());
+        REQUIRE (findTrack (merged.song, "Drums").isValid());
+        CHECK (findTrack (merged.song, "Bass").getParent().hasType (schema::TRACKS));
+        CHECK (findTrack (merged.song, "Bass").getChildWithName (schema::CLIP).isValid());
+        CHECK (phazite::findChanges (sides.theirs->getState(), merged.song).empty());
+    }
+
+    // Ungrouped there, with its tracks the other way round, while this side changed one of them.
+    {
+        Sides sides;
+        const auto folder = groupBase (sides);
+        phazite::ungroupFolder (*sides.theirs, folder);
+        phazite::moveTracksAfter (*sides.theirs, { sides.tracks[0] }, sides.tracks[1]);
+        phazite::setChannelVolume (*sides.ours, sides.tracks[0], -6.0f);
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        const auto tracks = phazite::getTrackElements (merged.song);
+        REQUIRE (tracks.size() == 2);
+        CHECK (tracks[0][schema::trackName].toString() == "Drums");
+        CHECK (tracks[1][schema::trackName].toString() == "Bass");
+        CHECK ((float) tracks[1][schema::channelVolume] == doctest::Approx (-6.0f));
+    }
+
+    // Deleted there with its tracks: they go with it, but the one that changed here, which stays, with a note.
+    {
+        Sides sides;
+        const auto folder = groupBase (sides);
+        phazite::deleteTracks (*sides.theirs, { folder }, nullptr);
+        phazite::setChannelVolume (*sides.ours, sides.tracks[0], -6.0f);
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK_FALSE (findTrack (merged.song, "Group").isValid());
+        CHECK_FALSE (findTrack (merged.song, "Drums").isValid());
+        REQUIRE (findTrack (merged.song, "Bass").isValid());
+        CHECK (findTrack (merged.song, "Bass").getParent().hasType (schema::TRACKS));
+        CHECK (merged.notes.joinIntoString ("\n").contains ("Bass: changed here and taken away there: kept"));
+    }
+}
+
+TEST_CASE ("A folder ungrouped here and changed there comes back without the tracks this side took out of it, each of them once")
+{
+    Sides sides;
+    const auto folder = groupBase (sides);
+    phazite::ungroupFolder (*sides.ours, folder);
+    phazite::setTrackName (*sides.theirs, folder, "Rhythm");
+
+    const auto merged = sides.merge();
+    checkIDs (merged.song);
+    CHECK (phazite::getTrackElements (merged.song).size() == 3);
+    REQUIRE (findTrack (merged.song, "Rhythm").isValid());
+    REQUIRE (findTrack (merged.song, "Bass").isValid());
+    CHECK (findTrack (merged.song, "Bass").getParent().hasType (schema::TRACKS));
+    CHECK (findTrack (merged.song, "Drums").getParent().hasType (schema::TRACKS));
+    CHECK (merged.notes.joinIntoString ("\n").contains ("Rhythm: taken away here and changed there: kept"));
+}
+
+TEST_CASE ("A track added there in a folder added there is in the folder here, with the track the other side moved into it")
+{
+    Sides sides;
+    const auto keys = phazite::insertTrack (*sides.theirs, sides.tracks[1], nullptr);
+    phazite::setTrackName (*sides.theirs, keys, "Keys");
+    const auto folder = phazite::groupIntoFolder (*sides.theirs, { sides.tracks[1], keys }, nullptr);
+    phazite::setTrackName (*sides.theirs, folder, "Group");
+    REQUIRE (keys.getRaw() < folder.getRaw()); // the track's line before its folder's, by their IDs
+
+    const auto merged = sides.merge();
+    checkIDs (merged.song);
+    REQUIRE (findTrack (merged.song, "Group").isValid());
+    REQUIRE (findTrack (merged.song, "Keys").isValid());
+    CHECK (findTrack (merged.song, "Keys").getParent() == findTrack (merged.song, "Group"));
+    CHECK (findTrack (merged.song, "Drums").getParent() == findTrack (merged.song, "Group"));
+    CHECK (phazite::findChanges (sides.theirs->getState(), merged.song).empty());
+}
+
+TEST_CASE ("A clip moved onto another track on one side and changed on the other is once in the song, where it was moved to, as it changed")
+{
+    const auto clipOf = [] (const juce::ValueTree& song, const juce::String& track)
+    { return findTrack (song, track).getChildWithName (schema::CLIP); };
+
+    // Moved there, changed here.
+    {
+        Sides sides;
+        phazite::moveClip (*sides.theirs, sides.clip, at (4.0), sides.tracks[1]);
+        addMidiNote (*sides.ours, sides.clip, 40, at (2.0), lasting (1.0));
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK (merged.clashes.empty());
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        CHECK_FALSE (clipOf (merged.song, "Bass").isValid());
+        REQUIRE (clipOf (merged.song, "Drums").isValid());
+        CHECK (countNotes (clipOf (merged.song, "Drums")) == 2);
+        CHECK ((double) clipOf (merged.song, "Drums")[schema::clipStart] == doctest::Approx (4.0));
+        CHECK_FALSE (merged.notes.joinIntoString ("\n").contains ("taken away"));
+    }
+
+    // Moved here, changed there.
+    {
+        Sides sides;
+        phazite::moveClip (*sides.ours, sides.clip, at (4.0), sides.tracks[1]);
+        addMidiNote (*sides.theirs, sides.clip, 40, at (2.0), lasting (1.0));
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK (merged.clashes.empty());
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        REQUIRE (clipOf (merged.song, "Drums").isValid());
+        CHECK (countNotes (clipOf (merged.song, "Drums")) == 2);
+        CHECK ((double) clipOf (merged.song, "Drums")[schema::clipStart] == doctest::Approx (4.0));
+    }
+
+    // Moved there onto a track it added, changed here.
+    {
+        Sides sides;
+        const auto keys = phazite::insertTrack (*sides.theirs, sides.tracks[1], nullptr);
+        phazite::setTrackName (*sides.theirs, keys, "Keys");
+        phazite::moveClip (*sides.theirs, sides.clip, at (0.0), keys);
+        addMidiNote (*sides.ours, sides.clip, 40, at (2.0), lasting (1.0));
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        REQUIRE (clipOf (merged.song, "Keys").isValid());
+        CHECK (countNotes (clipOf (merged.song, "Keys")) == 2);
+    }
+
+    // Moved there off a track it then deleted, which this side left as it was: the track goes, the clip is where it went.
+    {
+        Sides sides;
+        phazite::moveClip (*sides.theirs, sides.clip, at (0.0), sides.tracks[1]);
+        phazite::deleteTracks (*sides.theirs, { sides.tracks[0] }, nullptr);
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK_FALSE (findTrack (merged.song, "Bass").isValid());
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        CHECK (clipOf (merged.song, "Drums").isValid());
+        CHECK (merged.notes.isEmpty());
+    }
+
+    // Moved there, and only the line of the track it left taken: it stays where it is here, rather than on neither track.
+    {
+        Sides sides;
+        phazite::moveClip (*sides.theirs, sides.clip, at (4.0), sides.tracks[1]);
+        phazite::MergeLines lines;
+        lines.tracks.insert (sides.tracks[0].getRaw());
+
+        const auto merged = phazite::mergeSongs (sides.base->getState(), sides.ours->getState(), sides.theirs->getState(), lines,
+                                                 [&sides] { return sides.ours->makeID(); });
+        checkIDs (merged.song);
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        CHECK (clipOf (merged.song, "Bass").isValid());
+    }
+
+    // Moved on both sides, to different tracks: where this side put it, with a note.
+    {
+        Sides sides;
+        const auto keys = phazite::insertTrack (*sides.theirs, sides.tracks[1], nullptr);
+        phazite::setTrackName (*sides.theirs, keys, "Keys");
+        phazite::moveClip (*sides.theirs, sides.clip, at (0.0), keys);
+        phazite::moveClip (*sides.ours, sides.clip, at (0.0), sides.tracks[1]);
+
+        const auto merged = sides.merge();
+        checkIDs (merged.song);
+        CHECK (findItems (merged.song, schema::CLIP, sides.clip.getRaw()).size() == 1);
+        CHECK (clipOf (merged.song, "Drums").isValid());
+        CHECK (findTrack (merged.song, "Keys").isValid());
+        CHECK (merged.notes.joinIntoString ("\n").contains ("moved on both sides: this side's place kept"));
+    }
+}
+
+TEST_CASE ("A device grouped into a container on one side and changed on the other is once in the song, in the container, as it changed")
+{
+    const auto makeSides = [] (Sides& sides)
+    {
+        const auto eq = phazite::insertDeviceState (*sides.base, sides.tracks[0],
+                                                    phazite::makeOwnDeviceState (*sides.base, phazite::devices::Equalizer::typeID));
+        sides.ours = phazite::makeSong (sides.base->getState().createCopy());
+        sides.theirs = phazite::makeSong (sides.base->getState().createCopy());
+        return eq;
+    };
+
+    const auto check = [] (const phazite::MergeResult& merged, phazite::DeviceID eq)
+    {
+        checkIDs (merged.song);
+        CHECK (merged.clashes.empty());
+        const auto devices = findItems (merged.song, schema::DEVICE, eq.getRaw());
+        REQUIRE (devices.size() == 1);
+        CHECK (devices.front().getParent().hasType (schema::CHAIN));
+        CHECK ((float) devices.front().getChildWithName (schema::VALUES)["band4Gain"] == doctest::Approx (6.0f));
+    };
+
+    // Grouped here, changed there.
+    {
+        Sides sides;
+        const auto eq = makeSides (sides);
+        REQUIRE (phazite::groupIntoContainer (*sides.ours, { eq }).isValid());
+        phazite::setValueSetByHand (*sides.theirs, { eq, "band4Gain" }, 6.0f);
+        check (sides.merge(), eq);
+    }
+
+    // Grouped there, changed here.
+    {
+        Sides sides;
+        const auto eq = makeSides (sides);
+        REQUIRE (phazite::groupIntoContainer (*sides.theirs, { eq }).isValid());
+        phazite::setValueSetByHand (*sides.ours, { eq, "band4Gain" }, 6.0f);
+        check (sides.merge(), eq);
+    }
 }

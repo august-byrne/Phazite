@@ -45,6 +45,8 @@ struct Plan
     // A strip whose sound another adds up: after its fader, or before it (a send before the fader); at a send's level (or
     // as it is); lined up with the others there by a delay (none when it needs none). Or one of its devices' parts, which
     // that device plays into an output of its own (a drum sampler's pad on a track of its own), from where the device is.
+    // A send after the fader takes the strip's sound before its mute (beforeMute), so that its level's cut alone says
+    // whether it sends (SendLevel): a strip that isn't heard can still send to one that is (Channel::setPlaysOnUnheard()).
     struct Input
     {
         int strip = 0;
@@ -52,6 +54,7 @@ struct Plan
         bool beforeFader = false;
         std::shared_ptr<SendLevel> level {};
         std::shared_ptr<PartOutput> part {};
+        bool beforeMute = false;
     };
 
     // A device, with the parameters its automation moves, which follow the song as late as the sound comes into it (from
@@ -135,8 +138,10 @@ struct Plan
 
         // Whether another strip takes its sound before its fader (a send), or after its fader and before its mute (a
         // sidechain), which it then plays even while it is muted; and whether another adds up one of its devices' parts
-        // (Input::part), which it then plays while it is muted too, so that the part follows its own channel's mute.
-        bool feedsBeforeFader = false, feedsSidechain = false, feedsParts = false;
+        // (Input::part), which it then plays while it is muted too, so that the part follows its own channel's mute. And
+        // whether another takes its sound after its fader and before its mute without making it play on (a send after the
+        // fader, Input::beforeMute): kept while it plays, silence while it doesn't.
+        bool feedsBeforeFader = false, feedsSidechain = false, feedsParts = false, feedsBeforeMute = false;
 
         // Whether its instrument is handed its blocks early (devices::Processor::startsEarly(), without a sidechain), its
         // notes and modulators taken first: the engine's, as it is given the plan.

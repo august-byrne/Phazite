@@ -577,9 +577,10 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
     {
         case Gesture::Kind::move:
         {
-            // The clip under the mouse snaps to the grid, and the others move with it, but no clip moves
-            // before the start of the song.
-            auto delta = snap (gesture->anchorStart + (beat - gesture->startBeat), e.mods) - gesture->anchorStart;
+            // The clips move by the grid's steps from where they were, so that a clip off the grid stays as far off it, and a
+            // drag to another track alone moves none in time (TimelineEditor::snapMove()); no clip moves before the start of
+            // the song.
+            auto delta = snapMove (gesture->anchorStart, beat - gesture->startBeat, e.mods);
 
             for (const auto& moving : gesture->moving)
                 delta = std::max (delta, BeatPosition() - moving.start);
@@ -599,6 +600,15 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
 
                 if (fits)
                     gesture->rowOffset = offset;
+            }
+
+            // Copies are made as the drag first takes them somewhere: until then, nothing changes.
+            if (gesture->copies && ! gesture->copying)
+            {
+                if (delta == BeatDuration() && gesture->rowOffset == 0)
+                    break;
+
+                copyMovingClips();
             }
 
             for (const auto& moving : gesture->moving)
@@ -715,7 +725,8 @@ juce::String Playlist::describeDrag() const
 
 void Playlist::beginDrag (const juce::MouseEvent& e)
 {
-    auto clip = gesture->clip;
+    const auto clip = gesture->clip;
+    const auto waitedForClick = gesture->clickOnMouseUp;
     gesture->clickOnMouseUp = false;
 
     if (getTool() == Tool::select)
@@ -783,40 +794,106 @@ void Playlist::beginDrag (const juce::MouseEvent& e)
     }
 
     // Moving: the clip under the mouse goes with the rest of the selection. With Ctrl, copies of them
-    // move instead, and with Ctrl and Shift, aliases (copies that stay linked to their originals).
+    // move instead, and with Ctrl and Shift, aliases (copies that stay linked to their originals): made once the drag moves
+    // them (copyMovingClips()), so that a Ctrl+click whose pointer slipped a few pixels leaves no copies on the clips.
     gesture->kind = Gesture::Kind::move;
+    gesture->pressed = clip;
+    gesture->waitedForClick = waitedForClick;
+    gesture->tracksBefore = selection.getTracks();
+    gesture->clipsBefore = selection.getClips();
+    gesture->sectionsBefore = selection.getSections();
 
     if (! selection.isSelected (clip))
         selection.add (clip);
 
-    auto clips = selection.getClips();
-    const auto alias = e.mods.isCommandDown() && e.mods.isShiftDown();
-    const auto copy = e.mods.isCommandDown() && ! alias;
+    const auto clips = selection.getClips();
+    gesture->aliases = e.mods.isCommandDown() && e.mods.isShiftDown();
+    gesture->copies = e.mods.isCommandDown();
     const auto many = clips.size() > 1;
-    gesture->beginStep (context, alias  ? (many ? "Make Aliases" : "Make Alias")
-                                 : copy ? (many ? "Copy Clips" : "Copy Clip")
-                                        : (many ? "Move Clips" : "Move Clip"));
+    gesture->stepIsTheDrags = ! gesture->hasStep();
+    gesture->beginStep (context, gesture->aliases  ? (many ? "Make Aliases" : "Make Alias")
+                                 : gesture->copies ? (many ? "Copy Clips" : "Copy Clip")
+                                                   : (many ? "Move Clips" : "Move Clip"));
+    setMovingClips (clips);
+}
 
-    if (copy || alias)
-    {
-        const auto anchorIndex = (size_t) (std::find (clips.begin(), clips.end(), clip) - clips.begin());
-        clips = copyClips (context, clips, alias);
-        clip = anchorIndex < clips.size() ? clips[anchorIndex] : ClipID();
-        gesture->clip = clip;
-        gesture->copying = true;
-
-        selection.clear(); // the copies are what moves
-
-        for (const auto c : clips)
-            selection.add (c);
-    }
-
-    const auto anchor = getClip (context, clip);
+void Playlist::setMovingClips (const std::vector<ClipID>& clips)
+{
+    const auto anchor = getClip (context, gesture->clip);
     gesture->anchorStart = anchor.has_value() ? anchor->range.getStart() : gesture->startBeat;
+    gesture->moving.clear();
 
     for (const auto id : clips)
         if (const auto moving = getClip (context, id))
             gesture->moving.push_back ({ id, moving->range.getStart(), getRowOf (moving->track), { moving->track, moving->range } });
+}
+
+void Playlist::copyMovingClips()
+{
+    // Copies of the clips where they are, which are what is selected and moves from here on.
+    std::vector<ClipID> clips;
+
+    for (const auto& moving : gesture->moving)
+        clips.push_back (moving.clip);
+
+    const auto anchorIndex = (size_t) (std::find (clips.begin(), clips.end(), gesture->clip) - clips.begin());
+    gesture->clipsBeforeCopies = selection.getClips();
+    clips = copyClips (context, clips, gesture->aliases);
+    gesture->clip = anchorIndex < clips.size() ? clips[anchorIndex] : ClipID();
+    gesture->copying = true;
+
+    selection.clear();
+
+    for (const auto c : clips)
+        selection.add (c);
+
+    setMovingClips (clips);
+}
+
+void Playlist::endMoveThatWentNowhere (const juce::ModifierKeys& mods)
+{
+    // The clips are where they began: a step the drag began is taken back, leaving nothing to undo or redo, and copies made
+    // on the way go, which would lie on their originals and play twice.
+    if (gesture->stepIsTheDrags)
+    {
+        gesture->rollBack();
+    }
+    else if (gesture->copying)
+    {
+        std::vector<ClipID> copies;
+
+        for (const auto& moving : gesture->moving)
+            copies.push_back (moving.clip);
+
+        deleteClips (context, copies, false);
+    }
+
+    if (gesture->copying)
+    {
+        selection.clear();
+
+        for (const auto clip : gesture->clipsBeforeCopies)
+            selection.add (clip);
+    }
+
+    // A Ctrl+click or a Shift+click whose pointer slipped still toggles the clip, as its click would. A plain press on a
+    // selected clip that became a drag leaves the selection as it was: a drag by less than half a grid step moves nothing,
+    // and isn't a click that selects the clip alone.
+    if (gesture->waitedForClick && (mods.isCommandDown() || mods.isShiftDown()) && getClip (context, gesture->pressed).has_value())
+    {
+        selection.clear();
+
+        for (const auto track : gesture->tracksBefore)
+            selection.add (track);
+
+        for (const auto clip : gesture->clipsBefore)
+            selection.add (clip);
+
+        for (const auto section : gesture->sectionsBefore)
+            selection.add (section);
+
+        clipClicked (gesture->pressed, mods);
+    }
 }
 
 juce::Point<int> Playlist::getGestureStart() const
@@ -850,6 +927,10 @@ void Playlist::lanesMouseUp (const juce::MouseEvent& e)
     {
         // Zoom to the dragged time.
         zoomTo ({ getView().xToBeat (rubberBand.getX()), getView().xToBeat (rubberBand.getRight()) });
+    }
+    else if (gesture->kind == Gesture::Kind::move && gesture->moved == BeatDuration() && gesture->rowOffset == 0)
+    {
+        endMoveThatWentNowhere (e.mods);
     }
     else if (gesture->kind == Gesture::Kind::move && gesture->rowOffset == 0)
     {

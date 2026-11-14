@@ -148,7 +148,9 @@ bool AudioRecorder::canRecord() const
 //==============================================================================
 void AudioRecorder::update()
 {
-    // While a take records, the inputs stay as they are: changing them opens the device again (Take.h updates them after).
+    // While a take records, the inputs stay as they are: changing them opens the device again. The take updates them as it
+    // ends at Stop (Take.h); one that ends at a jump leaves them to the take that goes on from it, which records the same
+    // tracks' inputs (PlaybackSession::locateWhileRecording()).
     if (updating || session.isRecording())
         return;
 

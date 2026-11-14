@@ -16,6 +16,17 @@ namespace
     {
         return juce::Time::getMillisecondCounterHiRes();
     }
+
+    // Whether every sample is sound, as the devices take it (devices::soundOf()): a number, and none beyond any level, as a
+    // filter gone wrong plays on its way to infinity.
+    bool isFinite (const float* samples, int numSamples) noexcept
+    {
+        for (int i = 0; i < numSamples; ++i)
+            if (! (std::abs (samples[i]) <= devices::loudestSound))
+                return false;
+
+        return true;
+    }
 } // namespace
 
 Engine::Engine()
@@ -220,6 +231,26 @@ void Engine::takeCommands (const Plan& plan) noexcept
         });
 }
 
+void Engine::expectAudio (const Plan& plan) noexcept
+{
+    // Where the audio clips' files play next that what reads them ahead can't see coming (audio/AudioFile.h reads ahead of
+    // where a file plays): while the song waits to play, where the playhead is, from where it will start; and the loop's
+    // start, which follows the loop's end. Each is read ahead of as a place the file plays is.
+    std::array<std::int64_t, 2> places {};
+    size_t numPlaces = 0;
+
+    if (! transport.playing || transport.countIn.left > 0)
+        places[numPlaces++] = transport.sample;
+
+    if (plan.loop.has_value() && plan.loop->end > plan.loop->start)
+        places[numPlaces++] = std::llround (plan.tempo.toSamples (plan.loop->start));
+
+    for (const auto& strip : plan.strips)
+        for (const auto& region : strip.audio)
+            for (size_t i = 0; i < numPlaces; ++i)
+                region.expect (places[i], sampleRate);
+}
+
 void Engine::playLive (std::int64_t track, devices::NoteEvent event, bool recordable) noexcept
 {
     liveQueue.push ({ track, event, getMilliseconds(), recordable });
@@ -338,6 +369,7 @@ void Engine::process (const float* const* inputs, int numInputs, float* const* o
 
             takeCommands (*plan);
             takeLiveEvents (*plan, length, clock + done);
+            expectAudio (*plan);
             const auto startBeat = transport.beat;
             auto counted = 0;
 
@@ -465,7 +497,18 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
 
         // The master's sound goes out (on the first two channels), or while a version is compared with the song, the one of
         // the two that is heard.
-        const auto& master = *plan.strips.back().state;
+        auto& master = *plan.strips.back().state;
+
+        // The last line of defence: a stretch with a sample that is no finite number (a device gone wrong, a plug-in's bad
+        // output that nothing before caught) goes out as silence, rather than to the audio device, and to the loudness
+        // meter, whose filters would keep it.
+        if (! isFinite (master.buffer.getReadPointer (0, offset), numSamples)
+            || ! isFinite (master.buffer.getReadPointer (1, offset), numSamples))
+        {
+            juce::FloatVectorOperations::clear (master.buffer.getWritePointer (0, offset), numSamples);
+            juce::FloatVectorOperations::clear (master.buffer.getWritePointer (1, offset), numSamples);
+        }
+
         const float* out[] = { master.buffer.getReadPointer (0, offset), master.buffer.getReadPointer (1, offset) };
 
         if (plan.comparison.has_value() && numOutputs > 0)
@@ -475,6 +518,11 @@ void Engine::playSpan (const Plan& plan, float* const* outputs, int numOutputs, 
             const auto& comparison = *plan.comparison;
             comparison.state->process (comparison.bounce, plan.tempo, comparison.tempo, out, heard, std::min (numOutputs, 2),
                                        transport.sample, numSamples, transport.playing && transport.countIn.left == 0);
+
+            // The version's bounce, a file's samples, the same.
+            for (auto* side : heard)
+                if (side != nullptr && ! isFinite (side, numSamples))
+                    juce::FloatVectorOperations::clear (side, numSamples);
         }
         else
         {
@@ -599,10 +647,10 @@ bool Engine::isSilent (const Plan::Strip& strip) noexcept
 {
     // A channel muted (or soloed out) plays nothing, and its devices start from silence when it is heard again; but one a
     // sidechain listens to plays on, which hears it before its mute, and so does one whose devices' parts other channels add
-    // up, each of which follows its own mute.
+    // up, each of which follows its own mute, and one whose send is heard without it (Channel::setPlaysOnUnheard()).
     auto& state = *strip.state;
 
-    if (state.getChannel().isSilenced() && ! strip.feedsSidechain && ! strip.feedsParts)
+    if (state.getChannel().isSilenced() && ! state.getChannel().isPlayingOnUnheard() && ! strip.feedsSidechain && ! strip.feedsParts)
     {
         state.wasSilenced = true;
         return true;
@@ -863,7 +911,7 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
         for (const auto& input : strip.inputs)
         {
             const auto& from = *plan.strips[(size_t) input.strip].state;
-            const auto& sound = input.beforeFader ? from.beforeFader : from.buffer;
+            const auto& sound = input.beforeFader ? from.beforeFader : (input.beforeMute ? from.beforeMute : from.buffer);
             const float* sides[] = { input.part != nullptr ? input.part->getChannel (0) + offset : sound.getReadPointer (0, offset),
                                      input.part != nullptr ? input.part->getChannel (1) + offset : sound.getReadPointer (1, offset) };
             const auto [startGain, endGain] = input.level != nullptr ? input.level->moveOn() : std::pair (1.0f, 1.0f);
@@ -874,7 +922,9 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
         if (! startedEarly)
             takeEvents (span, strip);
 
-        if (! (startedEarly ? state.startedSilent : isSilent (strip)))
+        const auto silent = startedEarly ? state.startedSilent : isSilent (strip);
+
+        if (! silent)
         {
             // Its audio clips play into it before its effects, beside its instrument (after it, which plays into a cleared
             // buffer).
@@ -930,13 +980,13 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
                 playAudio();
         }
 
-        // What it sends before its fader (nothing while it is muted).
+        // What it sends before its fader (nothing while it is muted, unless a send of it is heard without it).
         if (strip.feedsBeforeFader)
             for (int channel = 0; channel < 2; ++channel)
             {
                 auto* kept = state.beforeFader.getWritePointer (channel, offset);
 
-                if (state.getChannel().isSilenced())
+                if (state.getChannel().isSilenced() && ! state.getChannel().isPlayingOnUnheard())
                     juce::FloatVectorOperations::clear (kept, numSamples);
                 else
                     juce::FloatVectorOperations::copy (kept, channels[channel], numSamples);
@@ -950,8 +1000,15 @@ void Engine::playStrip (const Span& span, size_t index) noexcept
         faderAutomation.beat = strip.volume != nullptr || strip.pan != nullptr ? getAutomationBeat (strip.latency) : beat;
         faderAutomation.volumeModulation = getFaderModulation (strip, strip.volumeModulation, state.volumeModulation);
         faderAutomation.panModulation = getFaderModulation (strip, strip.panModulation, state.panModulation);
+        // Its sound before its mute, for a sidechain and for its sends after the fader: silence for those while it plays
+        // nothing (what it adds up, without its devices, is no sound of its).
         float* beforeMute[] = { state.beforeMute.getWritePointer (0, offset), state.beforeMute.getWritePointer (1, offset) };
-        state.getChannel().process (channels, 2, numSamples, faderAutomation, strip.feedsSidechain ? beforeMute : nullptr);
+        const auto keepsBeforeMute = strip.feedsSidechain || (strip.feedsBeforeMute && ! silent);
+        state.getChannel().process (channels, 2, numSamples, faderAutomation, keepsBeforeMute ? beforeMute : nullptr);
+
+        if (strip.feedsBeforeMute && ! keepsBeforeMute)
+            for (auto* side : beforeMute)
+                juce::FloatVectorOperations::clear (side, numSamples);
 
         // An envelope follower listens to its track after the fader, for the next block.
         for (const auto& modulator : strip.modulators)
@@ -1074,7 +1131,15 @@ void Engine::addNotes (const Plan::Strip& strip, const Plan& plan, int numSample
     }
 
     const auto from = (double) transport.sample;
-    const auto fromBeat = plan.tempo.toBeats (from), toBeat = plan.tempo.toBeats (from + numSamples);
+    const auto fromBeat = plan.tempo.toBeats (from);
+
+    // As far as the stretch goes, and where it ends at the loop's end, no further than the loop's end in beats: the loop's
+    // last sample can end a little past that beat (a beat falls between two samples), and a note that starts on it is the
+    // next bar's, which the loop never plays.
+    auto toBeat = plan.tempo.toBeats (from + numSamples);
+
+    if (endsAtLoop && plan.loop.has_value())
+        toBeat = std::min (toBeat, plan.loop->end);
 
     // The notes sounding here: those that started before it and end after its first sample. A note that ends where the
     // span starts ends on that sample, however its beat rounds to it, so that a song played from where one note ends
@@ -1186,10 +1251,12 @@ void Engine::playCountIn (float* const* outputs, int numOutputs, int numSamples)
     // counted from the bar the playhead is in: each starts a click, a bar's first the accented one.
     const auto& countIn = transport.countIn;
     const auto from = (double) (countIn.length - countIn.left);
-    const auto now = countIn.firstBeat + from / countIn.samplesPerBeat;
     auto done = 0;
 
-    for (auto count = std::ceil ((now - countIn.barStart) / countIn.beatLength - 1.0e-9);; count += 1.0)
+    // From the first beat after the sample before this stretch, as the song's clicks are (playClicks()).
+    const auto earliest = countIn.firstBeat + std::max (0.0, from - 1.0) / countIn.samplesPerBeat;
+
+    for (auto count = std::ceil ((earliest - countIn.barStart) / countIn.beatLength - 1.0e-9);; count += 1.0)
     {
         const auto beat = countIn.barStart + count * countIn.beatLength;
         const auto at = std::ceil ((beat - countIn.firstBeat) * countIn.samplesPerBeat - 1.0e-6) - from;
@@ -1197,7 +1264,10 @@ void Engine::playCountIn (float* const* outputs, int numOutputs, int numSamples)
         if (at >= numSamples || beat >= countIn.firstBeat + countIn.barLength - 1.0e-9)
             break;
 
-        const auto start = std::max (0, (int) at);
+        if (at < 0.0)
+            continue; // the stretch before played it
+
+        const auto start = (int) at;
         continueClick (outputs, numOutputs, 0, done, start);
         done = start;
         const auto inBar = (beat - countIn.barStart) / countIn.barLength;
@@ -1211,18 +1281,24 @@ void Engine::playCountIn (float* const* outputs, int numOutputs, int numSamples)
 void Engine::playClicks (const Plan& plan, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept
 {
     // Each of the time signature's beats starts a click at the first sample at or after it, a bar's first the accented one.
+    // A beat that falls between the sample before this stretch and its first is first heard on its first, so the beats are
+    // looked for from that sample on: from this stretch's own, such a beat is past already, and the stretch before, which
+    // ends there, leaves its click to this one.
     const auto from = (double) transport.sample;
     const auto to = from + numSamples;
     auto done = 0;
 
-    for (auto beat = plan.tempo.getBeatAtOrAfter (plan.tempo.toBeats (from));; beat = plan.tempo.getNextBeat (beat))
+    for (auto beat = plan.tempo.getBeatAtOrAfter (plan.tempo.toBeats (std::max (0.0, from - 1.0)));; beat = plan.tempo.getNextBeat (beat))
     {
         const auto at = std::ceil (plan.tempo.toSamples (beat) - 1.0e-6);
 
         if (at >= to)
             break;
 
-        const auto start = std::max (0, (int) (at - from));
+        if (at < from)
+            continue; // the stretch before played it
+
+        const auto start = (int) (at - from);
         continueClick (outputs, numOutputs, offset, done, start);
         done = start;
         clicking = std::abs (plan.tempo.getBarStart (beat) - beat) < 1.0e-6 ? &accentClick : &click;

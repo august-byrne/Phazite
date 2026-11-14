@@ -359,11 +359,29 @@ namespace
         return std::numeric_limits<int>::max();
     }
 
+    // The lanes a track keeps (Schema.h: LANES), none while it has kept none. The element that holds them is added after
+    // the track's other elements as its first lane is kept, and stays: the undo history finds those other elements by their
+    // places, which neither a lane nor its holder may move, being changed outside it.
+    juce::ValueTree findLanesState (const Song& song, TrackID track)
+    {
+        return findTrackState (song, track).getChildWithName (schema::LANES);
+    }
+
+    void keepLane (Song& song, TrackID track, const ParameterRef& parameter)
+    {
+        if (auto state = findTrackState (song, track); state.isValid())
+        {
+            juce::ValueTree lane (schema::LANE);
+            writeLane (lane, parameter);
+            state.getOrCreateChildWithName (schema::LANES, nullptr).appendChild (lane, nullptr);
+        }
+    }
+
     juce::ValueTree findLaneState (const Song& song, TrackID track, const ParameterRef& parameter)
     {
-        for (const auto& child : findTrackState (song, track))
-            if (schema::isTrackViewElement (child) && readLane (child) == parameter)
-                return child;
+        for (const auto& lane : findLanesState (song, track))
+            if (readLane (lane) == parameter)
+                return lane;
 
         return {};
     }
@@ -380,14 +398,8 @@ namespace
     void keepShownLanes (Song& song, TrackID track)
     {
         for (const auto& shown : getLanes (song, track))
-        {
-            if (findLaneState (song, track, shown.parameter).isValid())
-                continue;
-
-            juce::ValueTree lane (schema::LANE);
-            writeLane (lane, shown.parameter);
-            findTrackState (song, track).appendChild (lane, nullptr);
-        }
+            if (! findLaneState (song, track, shown.parameter).isValid())
+                keepLane (song, track, shown.parameter);
     }
 
     // A track's write mode as the song keeps it (Schema.h: trackAutomationMode).
@@ -1058,11 +1070,8 @@ std::vector<AutomationLane> getLanes (const Song& song, TrackID track)
 {
     std::vector<AutomationLane> lanes;
 
-    for (const auto& child : findTrackState (song, track))
+    for (const auto& child : findLanesState (song, track))
     {
-        if (! schema::isTrackViewElement (child))
-            continue;
-
         const auto parameter = readLane (child);
         const auto height = juce::jlimit (AutomationLane::minHeight, AutomationLane::maxHeight,
                                           (int) child.getProperty (schema::laneHeight, AutomationLane::defaultHeight));
@@ -1111,15 +1120,14 @@ void showLane (Song& song, TrackID track, const ParameterRef& parameter)
         return;
     }
 
-    juce::ValueTree lane (schema::LANE);
-    writeLane (lane, parameter);
-    findTrackState (song, track).appendChild (lane, nullptr);
+    keepLane (song, track, parameter);
 }
 
 void removeLane (Song& song, TrackID track, const ParameterRef& parameter)
 {
+    // From the element that holds the track's lanes alone, which stays, so that the track's other elements keep their places.
     if (auto lane = findLaneState (song, track, parameter); lane.isValid())
-        findTrackState (song, track).removeChild (lane, nullptr);
+        lane.getParent().removeChild (lane, nullptr);
 }
 
 void replaceLane (Song& song, TrackID track, const ParameterRef& parameter, const ParameterRef& replacement)

@@ -212,18 +212,20 @@ private:
     double sampleRate = 44100.0;
 
     // An effect's mix (DeviceInfo.h, mixParameterID): what came in, turned as the effect turns its phase, then delayed as
-    // much as the effect delays its sound.
+    // much as the effect delays its sound, unless the effect delays and turns it itself (Processor::delaysDry()).
     int mixIndex = -1;
     float appliedMix = 1.0f; // where the last stretch's ramp ended
     juce::AudioBuffer<float> dry;
     std::array<devices::dsp::DelayLine, 2> dryDelays;
     void mixWithDry (float* const* wet, int dryStart, int length, float targetMix); // dry from so far into its buffer
 
-    // Asleep: once what comes in and what it plays have been silent for sleepAfterSeconds (and longer than its latency),
-    // with nothing to play, it skips its work until sound, a note or an event comes in, or something waits in the device to
-    // play (devices::Processor::isWaitingToPlay(): a pad its editor played). Never in a render.
+    // Asleep: once what comes in and what it plays have been silent for sleepAfterSeconds (and longer than its latency,
+    // and as long as the tail it reports then: devices::Processor::getTailSeconds()), with nothing to play, it skips its
+    // work until sound, a note or an event comes in, or something waits in the device to play
+    // (devices::Processor::isWaitingToPlay(): a pad its editor played). Never in a render.
     static constexpr float silence = 1.0e-6f; // -120 dBFS
     static constexpr double sleepAfterSeconds = 0.25;
+    static constexpr int maximumSilentSamples = 1 << 30; // counted no further: longer than any tail
     int silentSamples = 0, sleepAfterSamples = 0;
     bool asleep = false;
 

@@ -345,6 +345,40 @@ TEST_CASE ("A block that asks for a reset plays from silence: what the plug-in s
     helper.forget (*synth);
 }
 
+TEST_CASE ("Where every note is to end, the helper ends each note it gave the plug-in, which needn't take the controller for it")
+{
+    // The stand-in takes no controller, as a VST3 that maps none to a parameter gets none from JUCE's VST3 host: all notes
+    // off (123) and all sound off (120) end its notes by the note-offs the helper puts before them.
+    TestHelper helper;
+    auto synth = helper.open (Kind::synth);
+    const auto* played = synth->getChannel().getChannel (0);
+
+    for (const auto controller : { 123, 120 })
+    {
+        addNote (*synth, 0, 69, true);
+        addNote (*synth, 0, 72, true);
+        REQUIRE (playBlock (*synth, 128, 0.0f) == sandbox::BlockChannel::Played::done);
+        CHECK (juce::FloatVectorOperations::findMaximum (played, 128) > 0.1f);
+
+        // The controller half way through a block: the notes sound until it, and no further.
+        auto& info = synth->getChannel().getInfo();
+        auto& event = synth->getChannel().getEvents()[info.numEvents++];
+        event.sample = 64;
+        event.size = 3;
+        event.bytes[0] = 0xb0;
+        event.bytes[1] = (std::uint8_t) controller;
+        event.bytes[2] = 0;
+        REQUIRE (playBlock (*synth, 128, 0.0f) == sandbox::BlockChannel::Played::done);
+        CHECK (juce::FloatVectorOperations::findMaximum (played, 64) > 0.1f);
+        CHECK (juce::FloatVectorOperations::findMinAndMax (played + 64, 64) == juce::Range<float>());
+
+        REQUIRE (playBlock (*synth, 128, 0.0f) == sandbox::BlockChannel::Played::done);
+        CHECK (juce::FloatVectorOperations::findMinAndMax (played, 128) == juce::Range<float>());
+    }
+
+    helper.forget (*synth);
+}
+
 TEST_CASE ("A plug-in's latency is known as it opens and as it changes; a sidechain reaches its bus")
 {
     TestHelper helper;

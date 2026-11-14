@@ -170,15 +170,20 @@ namespace
         }
     }
 
-    // Where each item is in a song (its parent's type and key), by its own type and ID: notes aside, whose IDs are their
-    // clips' own.
-    std::map<juce::String, juce::String> findPlaces (const juce::ValueTree& tree)
+    // Where each item is in a song, or in a part of it (its parent's type and key), by its own type and ID: notes aside,
+    // whose IDs are their clips' own, and, while withTracks is off, the tracks in it (a folder's, things of their own).
+    using Places = std::map<juce::String, juce::String>;
+
+    Places findPlaces (const juce::ValueTree& tree, bool withTracks = true)
     {
-        std::map<juce::String, juce::String> places;
+        Places places;
         const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
         {
             for (const auto& child : element)
             {
+                if (! withTracks && child.hasType (schema::TRACK))
+                    continue;
+
                 if (! child.hasType (schema::NOTE) && schema::holdsID (child, schema::trackID))
                     places[child.getType().toString() + ":" + child[schema::trackID].toString()] =
                         element.getType().toString() + ":" + schema::getElementKey (element);
@@ -191,12 +196,12 @@ namespace
         return places;
     }
 
-    // The items that are somewhere else in the other song (a track moved into a folder, a clip onto another track, a
-    // device into a container), taken away first, to be put where the other has them: no ID is in the song twice meanwhile.
-    void removeMovedItems (juce::ValueTree live, const juce::ValueTree& other, juce::UndoManager* undo,
+    // The song's items that are somewhere else in the other song, or in the part of it about to be taken (a track moved
+    // into a folder, a clip onto another track, a device into a container), taken away first, to be put where the other
+    // has them: no ID is in the song twice, meanwhile or after.
+    void removeMovedItems (juce::ValueTree live, const Places& otherPlaces, juce::UndoManager* undo,
                            const StandIns& standIns = noStandIns())
     {
-        const auto otherPlaces = findPlaces (other);
         std::vector<juce::ValueTree> moved;
         const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
         {
@@ -223,6 +228,94 @@ namespace
             tree.getParent().removeChild (tree, undo);
     }
 
+    // What holds items in a song, by its type and key as findPlaces() names it ("TRACK:12", "CHAIN:40"): a track, the
+    // master, a chain; invalid if the song has none.
+    juce::ValueTree findHolder (const juce::ValueTree& song, const juce::String& place)
+    {
+        for (const auto& child : song)
+        {
+            if (child.hasType (schema::NOTE))
+                continue;
+
+            if (schema::holdsID (child, schema::trackID) && nameOf (child) == place)
+                return child;
+
+            if (const auto found = findHolder (child, place); found.isValid())
+                return found;
+        }
+
+        return {};
+    }
+
+    // Where an item goes among a holder's children to be where the other song has it among its holder's there: after the
+    // one before it there that this holder has; else before the others of its order (a chain's devices), or last.
+    int findIndexLike (const juce::ValueTree& home, const juce::ValueTree& item, const juce::ValueTree& homeThere)
+    {
+        std::map<juce::String, int> held;
+
+        for (int i = 0; i < home.getNumChildren(); ++i)
+            if (const auto child = home.getChild (i); schema::getElementKey (child).isNotEmpty())
+                held.emplace (nameOf (child), i);
+
+        juce::ValueTree there;
+
+        for (const auto& child : homeThere)
+            if (nameOf (child) == nameOf (item))
+                there = child;
+
+        for (auto before = there.getSibling (-1); before.isValid(); before = before.getSibling (-1))
+            if (const auto found = held.find (nameOf (before)); found != held.end())
+                return found->second + 1;
+
+        if (const auto group = schema::getOrderGroup (item); group.isNotEmpty())
+            for (int i = 0; i < home.getNumChildren(); ++i)
+                if (schema::getOrderGroup (home.getChild (i)) == group)
+                    return i;
+
+        return -1;
+    }
+
+    // What a track holds now that the other song holds somewhere else (a clip moved onto it since, from another track),
+    // sent there, as it is now, before the track is made like the other's or taken away: it would be on neither track
+    // otherwise. Where the song has nothing to hold it now (the track it was on deleted since), it goes with the rest, and
+    // that track's own line brings it back.
+    void sendItemsHome (juce::ValueTree state, const juce::ValueTree& track, const juce::ValueTree& other, juce::UndoManager* undo)
+    {
+        const auto otherPlaces = findPlaces (other);
+        std::vector<std::pair<juce::ValueTree, juce::ValueTree>> going; // each with what holds it there, in the song
+        const std::function<void (const juce::ValueTree&)> visit = [&] (const juce::ValueTree& element)
+        {
+            for (const auto& child : element)
+            {
+                if (child.hasType (schema::TRACK) || child.hasType (schema::NOTE))
+                    continue;
+
+                if (schema::holdsID (child, schema::trackID))
+                {
+                    if (const auto found = otherPlaces.find (nameOf (child));
+                        found != otherPlaces.end() && found->second != nameOf (element))
+                    {
+                        if (const auto home = findHolder (state, found->second); home.isValid() && ! home.isAChildOf (child))
+                            going.emplace_back (child, home);
+
+                        continue;
+                    }
+                }
+
+                visit (child);
+            }
+        };
+
+        visit (track);
+
+        for (auto& [item, home] : going)
+        {
+            const auto index = findIndexLike (home, item, findHolder (other, nameOf (home)));
+            item.getParent().removeChild (item, undo);
+            home.addChild (item, index, undo);
+        }
+    }
+
     juce::ValueTree findTrack (const juce::ValueTree& song, std::uint64_t id)
     {
         if (const auto master = song.getChildWithName (schema::MASTER); master.isValid() && readID (master[schema::trackID]) == id)
@@ -243,6 +336,36 @@ namespace
                 return folder;
 
         return song.getChildWithName (schema::TRACKS);
+    }
+
+    // A copy of a track of the other song's, a folder's, without the tracks in it, however deep, that the song has
+    // somewhere now: each track is in the song once.
+    void removeTracksHeld (juce::ValueTree copy, const juce::ValueTree& song)
+    {
+        for (int i = copy.getNumChildren(); --i >= 0;)
+        {
+            auto child = copy.getChild (i);
+
+            if (! child.hasType (schema::TRACK))
+                continue;
+
+            if (findTrack (song, readID (child[schema::trackID])).isValid())
+                copy.removeChild (i, nullptr);
+            else
+                removeTracksHeld (child, song);
+        }
+    }
+
+    // The song's count of IDs brought past every ID it holds now and past the other's count: what it took from the other
+    // can hold IDs past its own count (a song opened again as it was saved before they were given), and the next item it
+    // makes gets an ID that nothing of either has. Not an undo step, as the count never is.
+    void countIDsPast (Song& song, const juce::ValueTree& other)
+    {
+        auto state = song.getState();
+        const auto next = std::max (findNextID (state), findNextID (other));
+
+        if ((std::uint64_t) (juce::int64) state.getProperty (schema::nextID, (juce::int64) 0) != next)
+            state.setProperty (schema::nextID, (juce::int64) next, nullptr);
     }
 
     // The curves of these devices like the other's.
@@ -318,15 +441,16 @@ void makeSongLike (Song& song, const juce::ValueTree& other)
 {
     auto* undo = &song.getUndoManager();
     const auto standIns = findStandIns (other);
-    removeMovedItems (song.getState(), other, undo, standIns);
+    removeMovedItems (song.getState(), findPlaces (other), undo, standIns);
     makeLike (song.getState(), other, undo, true, Taken::counted, standIns);
+    countIDsPast (song, other);
 }
 
 void makeSongTheSame (Song& song, const juce::ValueTree& other)
 {
     // Its count of IDs the larger of the two: what either branch made keeps an ID of its own.
     const auto next = std::max (findNextID (song.getState()), findNextID (other));
-    removeMovedItems (song.getState(), other, nullptr);
+    removeMovedItems (song.getState(), findPlaces (other), nullptr);
     makeLike (song.getState(), other, nullptr, true, Taken::everything);
     song.getState().setProperty (schema::nextID, (juce::int64) next, nullptr);
     song.getUndoManager().clearUndoHistory();
@@ -352,23 +476,45 @@ namespace
 
         if (live.isValid() && then.isValid())
         {
-            makeLike (live, then, undo, false, Taken::counted, findStandIns (then));
+            // What it held then that is somewhere else now (a clip moved onto another track) comes back from there, and what
+            // it holds now that the other song holds somewhere else goes there.
+            const auto standIns = findStandIns (then);
+            removeMovedItems (state, findPlaces (then, false), undo, standIns);
+            sendItemsHome (state, live, other, undo);
+            makeLike (live, then, undo, false, Taken::counted, standIns);
         }
         else if (live.isValid())
         {
-            // Added since: taken away.
-            live.getParent().removeChild (live, undo);
+            // Added since: taken away. The tracks in it (a folder's) are things of their own, which stay: where it was, in
+            // their order, as ungrouping a folder leaves them. And what it holds that the other song holds somewhere else (a
+            // clip moved onto it) goes there.
+            sendItemsHome (state, live, other, undo);
+            auto parent = live.getParent();
+            auto place = parent.indexOf (live) + 1;
+
+            for (int i = 0; i < live.getNumChildren();)
+            {
+                if (auto child = live.getChild (i); child.hasType (schema::TRACK))
+                {
+                    live.removeChild (child, undo);
+                    parent.addChild (child, place++, undo);
+                }
+                else
+                {
+                    ++i;
+                }
+            }
+
+            parent.removeChild (live, undo);
         }
         else
         {
-            // Gone since: back where it was, after the track before it there, with the tracks it held that aren't elsewhere now.
+            // Gone since: back where it was, after the track before it there, with the tracks it held that aren't elsewhere
+            // now, and what they held that is elsewhere now back from there.
             auto parent = findTrackParent (state, then.getParent());
             auto copy = then.createCopy();
-
-            for (int i = copy.getNumChildren(); --i >= 0;)
-                if (const auto child = copy.getChild (i);
-                    child.hasType (schema::TRACK) && findTrack (state, readID (child[schema::trackID])).isValid())
-                    copy.removeChild (i, nullptr);
+            removeTracksHeld (copy, state);
+            removeMovedItems (state, findPlaces (copy), undo, findStandIns (copy));
 
             int index = 0;
 
@@ -455,7 +601,9 @@ namespace
 
 bool makeTrackLike (Song& song, TrackID id, const juce::ValueTree& other)
 {
-    return makeTrackLikeIn (song.getState(), id, other, &song.getUndoManager());
+    const auto done = makeTrackLikeIn (song.getState(), id, other, &song.getUndoManager());
+    countIDsPast (song, other);
+    return done;
 }
 
 bool makeTrackLike (juce::ValueTree song, TrackID id, const juce::ValueTree& other)
@@ -466,6 +614,7 @@ bool makeTrackLike (juce::ValueTree song, TrackID id, const juce::ValueTree& oth
 void makeSongOwnLike (Song& song, const juce::ValueTree& other)
 {
     makeSongOwnLikeIn (song.getState(), other, &song.getUndoManager());
+    countIDsPast (song, other);
 }
 
 void makeSongOwnLike (juce::ValueTree song, const juce::ValueTree& other)

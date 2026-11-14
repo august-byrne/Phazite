@@ -212,6 +212,73 @@ TEST_CASE ("A take started while the song plays lands as one started from a stop
     CHECK (clicks[1] == clickOn (2.0));
 }
 
+TEST_CASE ("The playhead moved while recording audio: what came in before is kept, and recording goes on from the new place")
+{
+    // Until 2026-11-13 the jump ended the take in the engine while Record stayed lit: nothing after it was recorded.
+    EngineStudio studio;
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (1.2); // to beat 2.4
+    phazite::movePlayhead (studio.song.context, phazite::BeatPosition::fromBeats (8.5));
+    CHECK (studio.isRecording());
+    studio.playback.play (1.2); // to beat 10.9
+    CHECK (studio.isRecording());
+    studio.song.run ("transport.record");
+    CHECK_FALSE (studio.isRecording());
+
+    // A clip for each stretch, the second from where the playhead was put.
+    const auto clips = phazite::getClips (studio.song.context, studio.song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[0].kind == phazite::ClipType::audio);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (clips[0].range.getLength().inBeats() == doctest::Approx (2.4 - 256.0 / 24000.0)); // a block less: it came in late
+    CHECK (clips[1].kind == phazite::ClipType::audio);
+    CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (8.5));
+    CHECK (clips[1].range.getLength().inBeats() == doctest::Approx (2.4 - 256.0 / 24000.0));
+
+    // The metronome's clicks, recorded, each where it played: beats 0 to 2, then 9 and 10.
+    const auto clicks = studio.renderClicks (5.6);
+    REQUIRE (clicks.size() == 5);
+
+    for (size_t i = 0; i < clicks.size(); ++i)
+    {
+        CAPTURE (i);
+        CHECK (clicks[i] == clickOn (i < 3 ? (double) i : (double) i + 6.0));
+    }
+}
+
+TEST_CASE ("A track armed while recording waits for Stop, after the playhead is moved too: nothing is recorded onto it")
+{
+    // The audio device's inputs stay as they are while a take records (AudioRecorder::update()), so a track armed meanwhile has
+    // no input open. Until 2026-11-13 the take that went on after a jump took it with the others, and laid a clip of the
+    // closed input's silence on it.
+    EngineStudio studio;
+    const auto second = studio.song.addTrack ("Second");
+    phazite::setTrackInput (studio.song.context, second, "2");
+    phazite::setInputMonitoring (studio.song.context, second, phazite::InputMonitoring::never);
+    studio.song.context.getUndoManager()->clearUndoHistory();
+
+    studio.song.run ("transport.record");
+    REQUIRE (studio.isRecording());
+    studio.playback.play (0.5);
+    phazite::setArmed (studio.song.context, second, true);
+    REQUIRE (phazite::isArmed (studio.song.context, second));
+    studio.playback.play (0.5);
+    CHECK_FALSE (phazite::isRecordingOnto (studio.song.context, second));
+
+    phazite::movePlayhead (studio.song.context, phazite::BeatPosition::fromBeats (8.0));
+    studio.playback.play (1.0);
+    CHECK (phazite::isRecordingOnto (studio.song.context, studio.song.firstTrack));
+    CHECK_FALSE (phazite::isRecordingOnto (studio.song.context, second));
+    studio.song.run ("transport.record");
+    CHECK_FALSE (studio.isRecording());
+
+    // The first track's two stretches, and the second as it was, armed for the next take.
+    CHECK (phazite::getClips (studio.song.context, studio.song.firstTrack).size() == 2);
+    CHECK (phazite::getClips (studio.song.context, second).empty());
+    CHECK (phazite::isArmed (studio.song.context, second));
+}
+
 TEST_CASE ("Recording round a looped range of any length makes takes of one clip, the last whole one playing")
 {
     EngineStudio studio;

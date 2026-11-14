@@ -67,8 +67,9 @@ struct ExportReport
 // gain: it never limits), or 0 when it met the target, within half an LU, or had none.
 double getLoudnessShortfall (const ExportSettings&, const ExportReport&);
 
-// The song's time that an export covers is from its start to its end; the tails after it last until they fall silent
-// (under -70 dB for a block of 512 samples), up to tailSeconds (internal/Export.h: getExportRange()).
+// The song's time that an export covers is from its start to its end; the tails after it last until they are over (under
+// -70 dB for as long as the longest tail the song's devices report, so that a delay's echoes aren't cut at the silence
+// between them), up to tailSeconds (internal/Export.h: getExportRange()).
 inline constexpr double tailSeconds = 10.0;
 
 // An export in progress, the song's or its stems', rendering on a thread of its own while this lives (stems one after

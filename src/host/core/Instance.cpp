@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <utility>
 
 namespace phazite::host
 {
@@ -165,7 +166,12 @@ void Instance::start (std::unique_ptr<sandbox::BlockChannel> blockChannel, doubl
     plugin->prepareToPlay (rate, limits.maxSamples);
     numPluginChannels = std::min (maximumChannels, std::max (plugin->getTotalNumInputChannels(), plugin->getTotalNumOutputChannels()));
     extra.setSize (std::max (1, numPluginChannels), limits.maxSamples);
-    midi.ensureSize ((size_t) limits.maxEvents * 16);
+    midi.ensureSize ((size_t) (limits.maxEvents + 16 * 128) * 16); // a block's events, and a note-off for every note
+
+    for (auto& notes : notesOn)
+        notes.reset();
+
+    endsNotes = false;
     devices::startAudioThread (*this);
 }
 
@@ -317,6 +323,7 @@ void Instance::takeNotices (const std::function<void (sandbox::MessageWriter&)>&
 void Instance::run()
 {
     const devices::ProAudioTask proAudio;
+    const juce::ScopedNoDenormals noDenormals; // as a host's audio thread has them: a plug-in's tails cost no more as they fade
 
     while (! threadShouldExit())
     {
@@ -341,9 +348,13 @@ void Instance::play() noexcept
     const auto numChanges = juce::jlimit (0, limits.maxChanges, info.numChanges);
 
     // Playback starting from a stop: what the plug-in still rings with stops before it plays (a VST3's setActive() off and
-    // on, which can take longer than a block: this block is late then, and silent, as the song starts).
+    // on, which can take longer than a block: this block is late then, and silent, as the song starts), and the notes it
+    // was given end, for a plug-in whose reset leaves them sounding.
     if (info.reset != 0)
+    {
         plugin->reset();
+        endsNotes = true;
+    }
 
     // In pieces between the parameters' changes, each taking those at its start.
     auto start = 0, next = 0;
@@ -400,8 +411,14 @@ void Instance::playPiece (int start, int numSamples) noexcept
             juce::FloatVectorOperations::clear (channels[(size_t) i], numSamples);
     }
 
-    // Its MIDI in the piece (in the last, any at or past the block's end too).
+    // Its MIDI in the piece (in the last, any at or past the block's end too), with the notes it gives the plug-in kept
+    // count of: where every note is to end, each ends with a note-off of its own, before the controller that says so.
     midi.clear();
+
+    if (std::exchange (endsNotes, false))
+        for (int midiChannel = 0; midiChannel < 16; ++midiChannel)
+            endNotes (midiChannel, 0);
+
     const auto* events = channel->getEvents();
     const auto end = start + numSamples;
     const auto isLast = end >= juce::jlimit (0, limits.maxSamples, info.numSamples);
@@ -410,13 +427,50 @@ void Instance::playPiece (int start, int numSamples) noexcept
     {
         const auto& event = events[i];
 
-        if (event.size > 0 && event.size <= 3 && event.sample >= start && (event.sample < end || isLast))
-            midi.addEvent (event.bytes, event.size, juce::jlimit (0, numSamples - 1, event.sample - start));
+        if (event.size == 0 || event.size > 3 || event.sample < start || (event.sample >= end && ! isLast))
+            continue;
+
+        const auto at = juce::jlimit (0, numSamples - 1, event.sample - start);
+
+        if (event.size == 3)
+        {
+            const auto status = event.bytes[0] & 0xf0;
+            const auto midiChannel = event.bytes[0] & 0x0f;
+            const auto number = (size_t) (event.bytes[1] & 0x7f);
+
+            if (status == 0x90 && event.bytes[2] > 0)
+                notesOn[(size_t) midiChannel].set (number);
+            else if (status == 0x80 || status == 0x90)
+                notesOn[(size_t) midiChannel].reset (number);
+            else if (status == 0xb0 && (number == 123 || number == 120)) // all notes off, all sound off
+                endNotes (midiChannel, at);
+        }
+
+        midi.addEvent (event.bytes, event.size, at);
     }
 
     playHead->set (info, rate, start);
     juce::AudioBuffer<float> buffer (channels.data(), numPluginChannels, numSamples);
     plugin->processBlock (buffer, midi);
+}
+
+void Instance::endNotes (int midiChannel, int sample) noexcept
+{
+    auto& notes = notesOn[(size_t) midiChannel];
+
+    if (notes.none())
+        return;
+
+    for (size_t note = 0; note < notes.size(); ++note)
+    {
+        if (notes[note])
+        {
+            const std::uint8_t noteOff[] = { (std::uint8_t) (0x80 | midiChannel), (std::uint8_t) note, 0 };
+            midi.addEvent (noteOff, 3, sample);
+        }
+    }
+
+    notes.reset();
 }
 
 void Instance::audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& details)

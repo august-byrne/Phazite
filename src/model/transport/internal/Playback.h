@@ -68,7 +68,8 @@ void loopSections (Song&, const std::vector<Section>&);
 BeatPosition getPlayStartBeat (const Song&);
 
 // Puts the playhead somewhere, as a click in a ruler does: playback starts there from now on (and goes on from there,
-// if it is playing).
+// if it is playing). While it records, recording goes on from there too, as Ableton Live's does: what was recorded up to
+// the jump is kept as Stop keeps it (its own Record step), and another take starts there.
 void movePlayhead (Song&, BeatPosition);
 
 // Home: puts the playhead at the song's start, as a click in a ruler would (movePlayhead()): playback starts there.

@@ -217,6 +217,7 @@ private:
     bool brokeTake = false;
 
     void takeCommands (const Plan&) noexcept;
+    void expectAudio (const Plan&) noexcept; // tells the audio clips' files where they play next (AudioRegion::expect())
     void playSpan (const Plan&, float* const* outputs, int numOutputs, int offset, int numSamples) noexcept;
     void playStrips (const Plan&, int offset, int numSamples) noexcept;
 

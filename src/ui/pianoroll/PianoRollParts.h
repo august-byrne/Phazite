@@ -96,8 +96,12 @@ struct PianoRoll::NoteGrid : public juce::Component
     void beginDrag (const juce::MouseEvent&);
     juce::Point<int> getGestureStart() const; // where the mouse went down, in the grid as it is now
     void dragNotes (const juce::MouseEvent&);
-    juce::String describeDrag() const;        // where the drag has the note under the pointer, for the hint bar: "E4 at 3.2.1"
-    void addNoteAt (const juce::MouseEvent&); // or a chord, with a chord stamp chosen
+    void setDraggedNotes (const std::vector<NoteData>&); // what a drag moves or resizes, as it is now
+    void copyDraggedNotes();                             // Ctrl+drag: the copies, which move from here on
+    bool endMoveThatWentNowhere();                       // as the mouse goes up: whether the move left its notes where they began
+    void clickNote (NoteRef, juce::ModifierKeys);        // a click on a note that waited for the mouse to go up
+    juce::String describeDrag() const;                   // where the drag has the note under the pointer, for the hint bar: "E4 at 3.2.1"
+    void addNoteAt (const juce::MouseEvent&);            // or a chord, with a chord stamp chosen
     void eraseOrMuteAt (juce::Point<float>, bool erase);
     void beginPaint (const juce::MouseEvent&);
     void paintAt (const juce::MouseEvent&);
@@ -138,6 +142,19 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
         BeatDuration length;
         int pitch = 60;
         BeatPosition clipStart;
+        std::optional<BeatPosition> latestStart {}; // its clip's NoteClip::latestNoteStart
+
+        // How far back its start can go: to its clip's start, and not at all if it starts before it already (a note that a
+        // split or a trim cut), which then stays where it is rather than being pulled to the clip's start.
+        BeatDuration getRoomBefore() const noexcept { return std::min (BeatDuration(), clipStart - start); }
+
+        // And how far on, where the next clip on the track keeps its clip from growing to hold it: to where its clip still
+        // plays it, so that a drag can't leave it in its clip unplayed, where the piano roll wouldn't show it. None while
+        // its clip can grow.
+        std::optional<BeatDuration> getRoomAfter() const noexcept
+        {
+            return latestStart.has_value() ? std::optional (std::max (BeatDuration(), *latestStart - start)) : std::nullopt;
+        }
     };
 
     // Which ways the grid scrolls when this drags past its edges, if at all.
@@ -169,6 +186,14 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
 
     std::vector<Original> originals;
     Original anchor;                            // the note the mouse went down on, as it was
+    NoteRef pressed {};                         // the note the mouse went down on, also while its copy is what moves
+    bool waitedForClick = false;                // the press's click waited for the mouse to go up (clickOnMouseUp, as it was)
+    bool stepIsTheDrags = false;                // the drag began the undo step: one that moves nothing in the end is taken back
+    bool copies = false;                        // Ctrl+drag: copies of the notes move, made once the drag moves them
+    std::vector<NoteRef> copied;                // the copies, once made,
+    std::vector<NoteRef> selectionBeforeCopies; // and what was selected until then
+    BeatDuration movedBy;                       // a move: how far the notes are from where they began,
+    int movedRows = 0;                          // along and in rows
     std::unordered_set<NoteRef> selectedBefore; // a rectangle with Ctrl adds to these
     std::vector<NoteRef> selectionBefore;       // what was selected when the mouse went down, for Escape
     bool deselectIfNothingDeleted = false;      // a right-click on empty grid

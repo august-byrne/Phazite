@@ -54,6 +54,18 @@ public:
     // cancelled. Unset, a file chooser asks; tests answer themselves.
     std::function<void (const juce::File& suggested, std::function<void (const juce::File&)>)> chooseSaveFile;
 
+    // Asks whether to save the open project's unsaved changes before it closes (closeThen()), and calls back with the
+    // answer: to save them, to close without them, or to leave the project open. Unset, a dialog asks; tests answer
+    // themselves.
+    enum class UnsavedChanges
+    {
+        save,
+        discard,
+        cancel
+    };
+
+    std::function<void (const juce::File& projectFile, std::function<void (UnsavedChanges)>)> askToSave;
+
     // Asks whether to restore a project's changes that Phazite saved automatically before it didn't close properly, and
     // calls back with the answer; untitled if the project was never saved. Unset, a dialog asks; tests answer themselves.
     std::function<void (const juce::File& projectFile, bool untitled, std::function<void (bool restore)>)> askToRestore;

@@ -49,7 +49,7 @@ note.chop: Chop
 edit.mute: Mute
 edit.mute: Mute
 edit.duplicate: Duplicate 6 Notes
-edit.delete: Delete 6 Notes
+edit.delete: Delete 2 Notes
 clip.fadeConvex: Convex Fades
 clip.fadeConcave: Concave Fades
 clip.fadeSCurve: S-Curve Fades

@@ -287,6 +287,7 @@ void Equalizer::update (Band& band, int index, std::span<const float> values, bo
 void Equalizer::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
     const auto numChannels = std::min (block.numChannels, 2);
     const auto targetOutput = dsp::decibelsToGain (block.parameters[(size_t) outputParameter]);
 

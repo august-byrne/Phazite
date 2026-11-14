@@ -2,8 +2,9 @@
 // An audio file as Phazite's engine plays it: its samples read in chunks by a reading thread (FileReader.h), each
 // handed to the audio thread through an atomic pointer once read, so that the audio thread never waits for the disk; a
 // chunk not read yet plays as silence, and a render waits for it. A short file is read whole and kept; a longer one is
-// read ahead of everywhere it plays (two clips can play it at once, in two places), with the start of each clip that plays
-// it kept, and what it played long ago let go of. What reads the file (its format) is the model's, behind SampleReader.
+// read ahead of everywhere it plays (two clips can play it at once, in two places) and of where the engine says it will
+// play next (where playback will start, a loop's start), with the start of each clip that plays it kept, and what it
+// played long ago let go of. What reads the file (its format) is the model's, behind SampleReader.
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -48,6 +49,10 @@ public:
     // Audio thread: the samples of a channel from a sample on, as far as their chunk goes (at most numSamples, which it
     // sets to how many there are), or nullptr if the chunk isn't read yet. Says where it plays, for what is read ahead.
     const float* getSamples (int channel, std::int64_t start, int& numSamples) noexcept;
+
+    // Audio thread: a sample it will play from next though it doesn't play there now (where playback will start, the
+    // start of a loop that plays further on): read ahead of as where it plays is, for as long as it is said in each block.
+    void expect (std::int64_t sample) noexcept;
 
     // Message thread: a sample to keep read whatever plays, as a clip's start in the file is.
     void keep (std::int64_t sample);

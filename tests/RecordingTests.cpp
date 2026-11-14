@@ -596,6 +596,47 @@ TEST_CASE ("A take starts after a bar of count-in")
     CHECK (notes[0].start.inBeats() == doctest::Approx (0.5).epsilon (withinABlock));
 }
 
+TEST_CASE ("The playhead moved while recording: what was played before is kept, and recording goes on from the new place")
+{
+    // As Ableton Live records on after a jump. Until 2026-11-13 the jump ended the take in the engine while Record stayed lit,
+    // and nothing played after it was kept.
+    EngineTake take;
+    take.song.run ("transport.record");
+    take.playNote (60, 0.25, 0.25); // at half a beat
+    take.playback.play (0.25);      // to beat 1.5
+
+    phazite::movePlayhead (take.song.context, phazite::BeatPosition::fromBeats (8.0));
+    CHECK (take.isRecording());
+    CHECK (phazite::isRecording (take.song.context));
+    take.playNote (64, 0.25, 0.25); // half a beat after the new place
+    take.playback.play (0.25);
+    CHECK (take.isRecording());
+    CHECK (phazite::getPlayheadBeat (take.song.context).inBeats() == doctest::Approx (9.5).epsilon (withinABlock));
+    take.song.run ("transport.record");
+    CHECK_FALSE (take.isRecording());
+    CHECK_FALSE (phazite::isRecording (take.song.context));
+
+    // A clip for each stretch recorded, each with its note where it was played.
+    const auto clips = phazite::getClips (take.song.context, take.song.firstTrack);
+    REQUIRE (clips.size() == 2);
+    CHECK (clips[0].range.getStart().inBeats() == doctest::Approx (0.0));
+    CHECK (clips[0].range.getEnd().inBeats() == doctest::Approx (1.5).epsilon (withinABlock));
+    CHECK (clips[1].range.getStart().inBeats() == doctest::Approx (8.0));
+    CHECK (clips[1].range.getEnd().inBeats() == doctest::Approx (9.5).epsilon (withinABlock));
+
+    const auto notes = take.getNotes();
+    REQUIRE (notes.size() == 2);
+    CHECK (notes[0].pitch == 60);
+    CHECK (notes[0].start.inBeats() == doctest::Approx (0.5).epsilon (withinABlock));
+    CHECK (notes[1].pitch == 64);
+    CHECK (notes[1].start.inBeats() == doctest::Approx (8.5).epsilon (withinABlock));
+
+    // Each stretch its own Record step: undone, the last goes and the first stays.
+    CHECK (take.song.context.getUndoManager()->getUndoDescription() == juce::String ("Record"));
+    phazite::undo (*phazite::findSong (take.song.context));
+    CHECK (phazite::getClips (take.song.context, take.song.firstTrack).size() == 1);
+}
+
 TEST_CASE ("Capture while stopped sets the tempo from the notes and puts them at bar 1")
 {
     EngineTake take;

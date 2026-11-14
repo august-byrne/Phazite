@@ -280,8 +280,11 @@ private:
     void lanesDoubleClick (const juce::MouseEvent&);
     void smartToolDown (const juce::MouseEvent&);
     void beginDrag (const juce::MouseEvent&);
-    juce::String describeDrag() const;        // where the drag has the clip under the pointer, for the hint bar
-    juce::Point<int> getGestureStart() const; // where the mouse went down, in the lanes as they are now
+    void setMovingClips (const std::vector<ClipID>&);        // what a drag moves, as it is now
+    void copyMovingClips();                                  // Ctrl+drag: the copies, which move from here on
+    void endMoveThatWentNowhere (const juce::ModifierKeys&); // as the mouse goes up with the clips where they began
+    juce::String describeDrag() const;                       // where the drag has the clip under the pointer, for the hint bar
+    juce::Point<int> getGestureStart() const;                // where the mouse went down, in the lanes as they are now
     std::optional<CrossfadeSpot> findCrossfadeAt (juce::Point<int>);
     void selectRange (BeatPosition from, BeatPosition to, int fromRow, int toRow);
     ClipID placeClip (int row, BeatPosition, bool snapStart);  // a copy of lastClip, for Draw and Paint

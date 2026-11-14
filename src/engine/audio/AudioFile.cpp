@@ -59,6 +59,13 @@ const float* AudioFile::getSamples (int channel, std::int64_t start, int& numSam
     return chunk->samples.getReadPointer (std::min (channel, numChannels - 1), offset);
 }
 
+void AudioFile::expect (std::int64_t sample) noexcept
+{
+    if (sample >= 0 && sample < length)
+        playedIn[(size_t) (sample / chunkSamples)].store ((blocks != nullptr ? blocks->load (std::memory_order_relaxed) : 0) + 1,
+                                                          std::memory_order_relaxed);
+}
+
 void AudioFile::keep (std::int64_t sample)
 {
     const std::lock_guard lock (mutex);
@@ -141,7 +148,8 @@ void AudioFile::findWherePlaying()
 {
     // The chunks the audio thread read in its last few blocks of the file (two clips playing it read in two places), each
     // block counted from the latest it read any in: stopped, where it played last stays where it plays. Before it played
-    // anywhere, from the file's start.
+    // anywhere, from the file's start. And where the audio thread said it will play next (expect(): where playback will
+    // start, and the loop's start).
     playingAt.clear();
     std::uint64_t latest = 0;
 

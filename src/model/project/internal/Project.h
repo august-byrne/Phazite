@@ -168,7 +168,9 @@ private:
     // written again as another type, which changes nothing. So while the project has no unsaved changes, a notification
     // only sets mayHaveChanged, and hasUnsavedChanges() and autosave() compare the song with this copy, once. Never listen
     // to it or change it. Only the elements of the song that notified are compared (the tracks, the tempo map...), unless
-    // the song itself did (docs/performance-audit.md, U3).
+    // the song itself did (docs/performance-audit.md, U3). No song at all while the project file doesn't hold the song that
+    // was opened (a restored autosave, or a song from elsewhere: forgetSavedState()): then the song is unsaved, whatever it
+    // is compared with, until it is saved.
     juce::ValueTree savedState;
     bool mayHaveChanged = false;
     juce::Array<juce::ValueTree> elementsToCompare;
@@ -182,6 +184,7 @@ private:
 
     void backUpProjectFile();
     void rememberSavedState();
+    void forgetSavedState(); // the project file doesn't hold the song: unsaved until a save
     void compareWithSavedState();
     void markChanged (const juce::ValueTree&, const juce::Identifier& property = {});
     void markChildChanged (const juce::ValueTree& parent, const juce::ValueTree& child);

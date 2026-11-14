@@ -284,6 +284,80 @@ TEST_CASE ("An autosave survives a crash and can be restored")
     CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
 }
 
+TEST_CASE ("A restored autosave, or a backup opened in the project's place, is unsaved as closing checks it, until it is saved")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Restored");
+    const auto file = project->getFile();
+    const auto autosaveFile = phazite::Project::getAutosaveFile (file);
+
+    // An autosave as a crash leaves it.
+    project->getSong().getState().setProperty ("take", 2, nullptr);
+    REQUIRE (project->autosave().wasOk());
+    juce::MemoryBlock leftOverAutosave;
+    REQUIRE (autosaveFile.loadFileAsData (leftOverAutosave));
+    project = nullptr;
+    REQUIRE (autosaveFile.replaceWithData (leftOverAutosave.getData(), leftOverAutosave.getSize()));
+
+    // Restored and nothing changed since: closing compares the whole song with what is saved (checkUnsavedChanges()), and
+    // the project file doesn't hold what was restored.
+    auto restored = openProject (file, true);
+    CHECK (restored->checkUnsavedChanges());
+    CHECK (restored->hasUnsavedChanges());
+    CHECK (restored->checkUnsavedChanges()); // asked again, the same
+    CHECK (autosaveFile.existsAsFile());
+
+    REQUIRE (restored->save().wasOk());
+    CHECK_FALSE (restored->checkUnsavedChanges());
+    const auto saved = restored->getSong().getState().createCopy();
+    restored = nullptr;
+
+    // A song from elsewhere opened as the project's, whose file doesn't read: the same.
+    REQUIRE (file.replaceWithText ("<PHAZITE damaged"));
+    juce::String error;
+    auto opened = phazite::Project::openWithSong (file, saved, error);
+    REQUIRE (opened != nullptr);
+    CHECK (opened->checkUnsavedChanges());
+    CHECK (opened->hasUnsavedChanges());
+    REQUIRE (opened->save().wasOk());
+    CHECK_FALSE (opened->checkUnsavedChanges());
+    opened = nullptr;
+    CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
+}
+
+TEST_CASE ("A save that can't replace the project file fails, and leaves the changes unsaved and the autosave in place")
+{
+    TemporaryFolder temp;
+    auto project = createProject (temp.folder, "Unwritable");
+    const auto file = project->getFile();
+    const auto autosaveFile = phazite::Project::getAutosaveFile (file);
+
+    project->getSong().getState().setProperty ("take", 2, nullptr);
+    REQUIRE (project->autosave().wasOk());
+
+    // A folder where the project file goes, which a file can't take the place of.
+    REQUIRE (file.deleteFile());
+    REQUIRE (file.createDirectory().wasOk());
+    REQUIRE (file.getChildFile ("In the way").replaceWithText ("in the way"));
+
+    const auto result = project->save();
+    CHECK (result.failed());
+    CHECK (result.getErrorMessage().contains (file.getFullPathName()));
+    CHECK (project->hasUnsavedChanges());
+    CHECK (project->checkUnsavedChanges());
+    CHECK (autosaveFile.existsAsFile());
+    CHECK (file.isDirectory());
+    CHECK (file.getParentDirectory().findChildFiles (juce::File::findFiles, false, "*_temp*").isEmpty()); // nothing left beside it
+
+    // Once it can be written, the save works.
+    REQUIRE (file.deleteRecursively());
+    REQUIRE (project->save().wasOk());
+    CHECK_FALSE (project->hasUnsavedChanges());
+    CHECK_FALSE (autosaveFile.exists());
+    project = nullptr;
+    CHECK ((int) openProject (file)->getSong().getState()["take"] == 2);
+}
+
 TEST_CASE ("A change is autosaved in the background soon after it is made, and the project says when, until it is saved")
 {
     TemporaryFolder temp;

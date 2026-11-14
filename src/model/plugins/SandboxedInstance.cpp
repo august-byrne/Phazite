@@ -126,12 +126,13 @@ private:
 };
 
 SandboxedInstance::SandboxedInstance (std::unique_ptr<sandbox::RemoteInstance> instance, const juce::PluginDescription& described,
-                                      std::shared_ptr<void> keep, std::function<void()> gone)
+                                      const juce::MemoryBlock& openedFrom, std::shared_ptr<void> keep, std::function<void()> gone)
     : juce::AudioPluginInstance (getBuses (instance->getInfo())),
       keepHelper (std::move (keep)),
       onGone (std::move (gone)),
       remote (std::move (instance)),
       description (described),
+      lastState (openedFrom),
       latency (remote->getLatencySamples())
 {
     const auto& info = remote->getInfo();
@@ -469,11 +470,24 @@ const juce::String SandboxedInstance::getProgramName (int index)
 
 void SandboxedInstance::getStateInformation (juce::MemoryBlock& state)
 {
+    takeState (state);
+}
+
+bool SandboxedInstance::takeState (juce::MemoryBlock& state)
+{
+    auto isNow = false;
+
     if (! hasCrashed())
+    {
         if (auto taken = remote->getState (stateMilliseconds))
+        {
             lastState = std::move (*taken);
+            isNow = true;
+        }
+    }
 
     state = lastState;
+    return isNow;
 }
 
 void SandboxedInstance::setStateInformation (const void* data, int size)

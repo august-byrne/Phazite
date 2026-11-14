@@ -230,8 +230,8 @@ float Vocoder::getCarrierSample (Carrier kind, float voice, const ProcessContext
             if (block.sidechain == nullptr || block.numSidechainChannels <= 0)
                 return 0.0f;
 
-            return block.numSidechainChannels > 1 ? 0.5f * (block.sidechain[0][sample] + block.sidechain[1][sample])
-                                                  : block.sidechain[0][sample];
+            return block.numSidechainChannels > 1 ? 0.5f * (soundOf (block.sidechain[0][sample]) + soundOf (block.sidechain[1][sample]))
+                                                  : soundOf (block.sidechain[0][sample]);
     }
 
     return 0.0f;
@@ -240,6 +240,7 @@ float Vocoder::getCarrierSample (Carrier kind, float voice, const ProcessContext
 void Vocoder::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
     const auto& values = block.parameters;
     const auto numChannels = std::min (block.numChannels, 2);
 

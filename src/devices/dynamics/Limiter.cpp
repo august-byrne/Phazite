@@ -111,6 +111,7 @@ float Limiter::average (float value) noexcept
 void Limiter::process (const ProcessContext& block)
 {
     const juce::ScopedNoDenormals noDenormals;
+    silenceWhatIsNotSound (block);
     const auto& values = block.parameters;
     const auto numChannels = std::min (block.numChannels, 2);
     const auto targetGain = dsp::decibelsToGain (values[gain]);

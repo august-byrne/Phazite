@@ -2,6 +2,7 @@
 #include "internal/Project.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/base/WholeFile.h"
 #include "model/base/internal/Schema.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
@@ -41,16 +42,15 @@ namespace
     // Writes a song into a project file (model/base/internal/SongText.h: writeProjectText()), through a temporary file that
     // takes its place once it is whole: each property on a line of its own, in the order of their names, each value in the
     // one text the song's versions write it in too, so that a tool that compares text (git, say) shows a change as the lines
-    // it changed.
-    bool writeProjectFile (const juce::ValueTree& song, const juce::File& file)
+    // it changed. A write that fails leaves the file as it was, and says why (model/base/WholeFile.h).
+    juce::Result writeProjectFile (const juce::ValueTree& song, const juce::File& file)
     {
         if (! song.isValid())
-            return false;
+            return juce::Result::fail ("There is no song to write.");
 
         juce::MemoryOutputStream text;
         writeProjectText (text, song);
-        juce::TemporaryFile temporary (file);
-        return temporary.getFile().replaceWithData (text.getData(), text.getDataSize()) && temporary.overwriteTargetFileWithTemporary();
+        return writeWholeFile (file, text.getData(), text.getDataSize());
     }
 
     // Makes the folder <parentFolder>/<name>, named as files can be, for a project of that name, or sets error and
@@ -185,7 +185,7 @@ std::unique_ptr<Project> Project::open (const juce::File& projectFile, bool rest
     std::unique_ptr<Project> project (new Project (std::move (song), projectFile));
 
     if (useAutosave)
-        project->changedSinceSave = project->changedSinceAutosave = true; // the restored changes aren't in the project file yet
+        project->forgetSavedState(); // the restored changes aren't in the project file yet
 
     return project;
 }
@@ -203,7 +203,7 @@ std::unique_ptr<Project> Project::openWithSong (const juce::File& projectFile, c
     }
 
     std::unique_ptr<Project> project (new Project (std::move (song), projectFile));
-    project->changedSinceSave = project->changedSinceAutosave = true; // not in the project file until it is saved
+    project->forgetSavedState(); // not in the project file until it is saved
     return project;
 }
 
@@ -275,7 +275,7 @@ private:
 
     void run() override
     {
-        if (writeProjectFile (state, file))
+        if (writeProjectFile (state, file).wasOk())
             writtenAt = juce::Time::currentTimeMillis();
         else
             failed = true;
@@ -355,8 +355,8 @@ juce::Result Project::save()
         const juce::ScopedValueSetter<bool> writing (isWriting, true); // what saving stores isn't a change by the user
         storeForSaving (*song);
 
-        if (! writeProjectFile (song->getState(), file))
-            return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ".");
+        if (const auto written = writeProjectFile (song->getState(), file); written.failed())
+            return juce::Result::fail ("Phazite couldn't save the project to " + file.getFullPathName() + ": " + written.getErrorMessage());
     }
 
     changedSinceSave = false;
@@ -385,8 +385,9 @@ juce::Result Project::autosave()
         const juce::ScopedValueSetter<bool> writing (isWriting, true);
         storeForSaving (*song);
 
-        if (! writeProjectFile (song->getState(), target))
-            return juce::Result::fail ("Phazite couldn't write the autosave " + target.getFullPathName() + ".");
+        if (const auto written = writeProjectFile (song->getState(), target); written.failed())
+            return juce::Result::fail ("Phazite couldn't write the autosave " + target.getFullPathName() + ": "
+                                       + written.getErrorMessage());
     }
 
     changedSinceAutosave = false;
@@ -512,10 +513,10 @@ juce::File Project::saveCopyAs (const juce::File& parentFolder, const juce::Stri
     const juce::ScopedValueSetter<bool> writing (isWriting, true);
     storeForSaving (*song);
 
-    if (! writeProjectFile (song->getState(), newFile))
+    if (const auto written = writeProjectFile (song->getState(), newFile); written.failed())
     {
         newFile.getParentDirectory().deleteRecursively(); // so that the name can be tried again
-        error = "Phazite couldn't write the project file " + newFile.getFullPathName() + ".";
+        error = "Phazite couldn't write the project file " + newFile.getFullPathName() + ": " + written.getErrorMessage();
         return {};
     }
 
@@ -625,6 +626,16 @@ void Project::rememberSavedState()
     savedState = song->getState().createCopy();
     mayHaveChanged = compareAll = false;
     elementsToCompare.clearQuick();
+}
+
+void Project::forgetSavedState()
+{
+    // No song to compare with, so none is the same (holdTheSameProject()): unsaved, whatever closing compares, until a save
+    // remembers what it wrote.
+    savedState = {};
+    mayHaveChanged = compareAll = false;
+    elementsToCompare.clearQuick();
+    changedSinceSave = changedSinceAutosave = true;
 }
 
 void Project::compareWithSavedState()

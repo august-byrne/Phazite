@@ -246,7 +246,7 @@ namespace schema
 
         const std::vector<UncountedElement>& getUncountedElements()
         {
-            static const std::vector<UncountedElement> table { { &PHAZITE, &PIANOROLL }, { &TRACK, &LANE }, { &MASTER, &LANE } };
+            static const std::vector<UncountedElement> table { { &PHAZITE, &PIANOROLL }, { &TRACK, &LANES }, { &MASTER, &LANES } };
             return table;
         }
 

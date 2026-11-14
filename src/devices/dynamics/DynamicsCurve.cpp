@@ -253,8 +253,9 @@ float Gains::getDecibels (float level) const noexcept
     if (decibels >= endDecibels)
         return juce::jlimit (quietest, loudest, dsp::gainToDecibels (lastGain) - decibels);
 
-    const auto along = (decibels - lowestDecibels) / stepDecibels;
-    const auto index = std::min ((int) along, tableSize - 1);
+    // Whatever it is asked, it reads inside its table: what is no level at all (not a number) as silence.
+    const auto along = decibels > lowestDecibels ? (decibels - lowestDecibels) / stepDecibels : 0.0f;
+    const auto index = std::clamp ((int) along, 0, tableSize - 1);
     return gains[(size_t) index] + (along - (float) index) * (gains[(size_t) index + 1] - gains[(size_t) index]);
 }
 } // namespace phazite::devices::curves

@@ -376,22 +376,30 @@ TEST_CASE ("On a track without an instrument, the piano roll asks for one, since
     CHECK (button->getButtonText() == phazite::getDeviceName (screen.song, synth));
 }
 
-TEST_CASE ("A note drawn past its clip, where the next clip on the track starts, doesn't stretch the clip over it")
+TEST_CASE ("A click past its clip, where the next clip on the track starts, adds no note there and doesn't stretch the clip over it")
 {
     PianoRollScreen screen;
     const auto first = screen.addClip (0, 0.0, 4.0);
     const auto next = screen.addClip (0, 4.0, 4.0);
     screen.select (first);
+    const auto undoBefore = phazite::describeUndo (&screen.song);
 
+    // After the clip shown, which can't grow there: a note there wouldn't play, and the piano roll shows the notes that
+    // play alone, so none is added, and no undo step.
     phazite::test::Mouse mouse (*screen.notes);
-    mouse.click (screen.at (4.5)); // after the clip shown: the note goes into it
+    mouse.click (screen.at (4.5));
 
-    REQUIRE (screen.notesOf (first).size() == 1);
-    CHECK (screen.notesOf (first).front().start.inBeats() > 3.999); // snapped to 4 or 4.5
+    CHECK (screen.notesOf (first).empty());
     CHECK (phazite::getClipRange (screen.song, first).getEnd().inBeats() == doctest::Approx (4.0));
     CHECK (phazite::getClipRange (screen.song, next).getStart().inBeats() == doctest::Approx (4.0));
     CHECK (screen.notesOf (next).empty());
+    CHECK (phazite::describeUndo (&screen.song) == undoBefore);
 
+    // In the clip, a click adds its note as before, and the clip stays as long as it was.
+    mouse.click (screen.at (3.6));
+    REQUIRE (screen.notesOf (first).size() == 1);
+    CHECK (phazite::getNotesPlayed (screen.context, { first }).size() == 1);
+    CHECK (phazite::getClipRange (screen.song, first).getEnd().inBeats() == doctest::Approx (4.0));
     phazite::undo (screen.song); // one step
     CHECK (screen.notesOf (first).empty());
 }
@@ -1069,4 +1077,347 @@ TEST_CASE ("Strum, humanize and arpeggiate preview in the transform bar and appl
     strength->setValue (50.0, juce::sendNotificationSync);
     REQUIRE (screen.registry.invoke ("note.applyTransform"));
     CHECK (phazite::getCurrentName (*quantizeCommand) == juce::String ("Quantize (50%)"));
+}
+
+TEST_CASE ("With Snap on, a move takes notes by the grid's steps from where they were: a note off the grid stays as far off it")
+{
+    // A drag up or down pulled a note off the grid onto it, and every selected note with it: the start snapped, not the move.
+    NotesScreen screen;
+    auto& mouse = screen.mouse;
+    REQUIRE (screen.pianoRoll.getGrid().snap);
+    mouse.click (screen.at (1.1));
+    mouse.click (screen.at (3.1));
+    REQUIRE (screen.getNotes().size() == 2);
+    const auto first = screen.getNotes()[0].getRef(), second = screen.getNotes()[1].getRef();
+    const auto pitch = screen.get (first).pitch;
+    const auto step = screen.pianoRoll.getGridStepInBeats();
+    REQUIRE (step > 0.05);
+    const auto offGrid = 1.0 + step * 0.3; // as a note played live is
+    phazite::moveNote (screen.context, first, beats (offGrid), pitch);
+    phazite::test::dispatchPendingMessages();
+    screen.song.getUndoManager().clearUndoHistory();
+    mouse.click (screen.middleOf (first));
+    mouse.click (screen.middleOf (second), juce::ModifierKeys::shiftModifier);
+    REQUIRE (screen.getSelected().size() == 2);
+
+    // Up, and nothing sideways: another pitch at the same time, the other selected note's too.
+    mouse.press (screen.middleOf (first));
+    mouse.dragTo (screen.middleOf (first) + juce::Point<int> (0, -60));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.get (first).pitch != pitch);
+    CHECK (screen.get (first).start.inBeats() == doctest::Approx (offGrid));
+    CHECK (screen.get (second).start.inBeats() == doctest::Approx (3.0));
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Move Notes"));
+
+    // Sideways by a beat: a beat later, as far off the grid as it was.
+    const auto oneBeat = screen.at (1.0).x - screen.at (0.0).x;
+    const auto grabbed = screen.at (offGrid + screen.get (first).length.inBeats() / 2.0) + juce::Point<int> (0, -60);
+    mouse.press (grabbed);
+    mouse.dragTo (grabbed + juce::Point<int> (oneBeat, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.get (first).start.inBeats() == doctest::Approx (offGrid + 1.0));
+    CHECK (screen.get (second).start.inBeats() == doctest::Approx (4.0));
+
+    // With Alt, it goes where the pointer does, as before.
+    const auto before = screen.get (first).start.inBeats();
+    const auto grabbedAgain = grabbed + juce::Point<int> (oneBeat, 0);
+    mouse.press (grabbedAgain, juce::ModifierKeys::altModifier);
+    mouse.dragTo (grabbedAgain + juce::Point<int> (7, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.get (first).start.inBeats() == doctest::Approx (before + 7.0 / oneBeat).epsilon (0.001));
+}
+
+TEST_CASE ("A Ctrl+click whose pointer slips copies nothing, and a drag that ends where it began is the click, without an undo step")
+{
+    // Ctrl+click toggles a note, but four pixels of movement began a drag that copied at once: with Snap on the copies stayed
+    // on their originals, unseen and playing twice.
+    NotesScreen screen;
+    auto& mouse = screen.mouse;
+    mouse.click (screen.at (1.1));
+    mouse.click (screen.at (3.1));
+    REQUIRE (screen.getNotes().size() == 2);
+    const auto first = screen.getNotes()[0].getRef(), second = screen.getNotes()[1].getRef();
+    REQUIRE (screen.getSelected() == std::vector { second });
+    const auto isSelected = [&screen] (phazite::NoteRef note)
+    {
+        const auto all = screen.getSelected();
+        return std::find (all.begin(), all.end(), note) != all.end();
+    };
+
+    // The pointer slips five pixels during a Ctrl+click: the note joins the selection, as a Ctrl+click's does.
+    mouse.press (screen.middleOf (first), juce::ModifierKeys::commandModifier);
+    mouse.dragTo (screen.middleOf (first) + juce::Point<int> (5, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getNotes().size() == 2);
+    CHECK (isSelected (first));
+    CHECK (isSelected (second));
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Add Note"));
+
+    // Again: it leaves the selection.
+    mouse.press (screen.middleOf (first), juce::ModifierKeys::commandModifier);
+    mouse.dragTo (screen.middleOf (first) + juce::Point<int> (5, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getNotes().size() == 2);
+    CHECK_FALSE (isSelected (first));
+    CHECK (isSelected (second));
+
+    // A Ctrl+drag makes its copies once it moves them; back where it began, they go, and nothing is left to undo or redo.
+    const auto fourBeats = screen.at (4.0).x - screen.at (0.0).x;
+    const auto pressed = screen.middleOf (first);
+    mouse.press (pressed, juce::ModifierKeys::commandModifier);
+    mouse.dragTo (pressed + juce::Point<int> (5, 0));
+    CHECK (screen.getNotes().size() == 2);
+    mouse.dragTo (pressed + juce::Point<int> (fourBeats, 0));
+    CHECK (screen.getNotes().size() == 4);
+    mouse.dragTo (pressed + juce::Point<int> (2, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getNotes().size() == 2);
+    CHECK (isSelected (first)); // the click
+    CHECK (isSelected (second));
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Add Note"));
+    CHECK_FALSE (phazite::canRedo (screen.song));
+
+    // A move there and back leaves no step either.
+    const auto start = screen.get (first).start.inBeats();
+    mouse.press (pressed);
+    mouse.dragTo (pressed + juce::Point<int> (fourBeats, 0));
+    CHECK (screen.get (first).start.inBeats() == doctest::Approx (start + 4.0));
+    mouse.dragTo (pressed + juce::Point<int> (1, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.get (first).start.inBeats() == doctest::Approx (start));
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Add Note"));
+    CHECK_FALSE (phazite::canRedo (screen.song));
+
+    // And a Ctrl+drag that ends elsewhere copies, as one step.
+    mouse.press (pressed, juce::ModifierKeys::commandModifier);
+    mouse.dragTo (pressed + juce::Point<int> (fourBeats, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getNotes().size() > 2);
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Copy Notes"));
+    phazite::undo (screen.song);
+    CHECK (screen.getNotes().size() == 2);
+}
+
+TEST_CASE ("Notes that a split or a trim left outside a clip aren't shown, selected or changed by edits of those it plays")
+{
+    // A split's right half keeps every note, and a trimmed clip the notes past its end. Select All took those too: Quantize
+    // then put the notes before the clip on its first beat, a nudge or a drag moved everything right by as much, and the
+    // notes after it made the clip grow back.
+    NotesScreen screen;
+    auto& context = screen.context;
+    const auto length = phazite::BeatDuration::fromBeats (0.5);
+
+    // On the row the mouse clicks in, halfway down the grid.
+    screen.mouse.click (screen.at (5.1));
+    REQUIRE (screen.getNotes().size() == 1);
+    const auto row = screen.getNotes()[0].pitch;
+    phazite::deleteNotes (context, { screen.getNotes()[0].getRef() });
+
+    for (const auto start : { 1.1, 5.1, 7.0 })
+        REQUIRE (phazite::addNote (context, screen.clip, row, beats (start), length, 100).isValid());
+
+    const auto halves = phazite::splitClips (context, { screen.clip }, beats (4.0));
+    REQUIRE (halves.size() == 1);
+    const auto right = halves[0];
+    phazite::trimClipEnd (context, right, beats (6.0));
+    REQUIRE (phazite::getNoteClip (context, right)->range == phazite::BeatRange (beats (4.0), beats (6.0)));
+    screen.select (right);
+    screen.pianoRoll.zoomTo ({ beats (4.0), beats (8.0) });
+    screen.pianoRoll.setActive (true);
+    screen.song.getUndoManager().clearUndoHistory();
+
+    // What the clip holds, by where each note starts in the song, in that order.
+    const auto sameStarts = [&screen, right] (std::vector<double> expected)
+    {
+        std::vector<double> starts;
+
+        for (const auto& note : screen.notesOf (right))
+            starts.push_back (note.start.inBeats());
+
+        std::sort (starts.begin(), starts.end());
+        return starts.size() == expected.size()
+               && std::equal (starts.begin(), starts.end(), expected.begin(),
+                              [] (double a, double b) { return std::abs (a - b) < 1.0e-6; });
+    };
+
+    REQUIRE (sameStarts ({ 1.1, 5.1, 7.0 }));
+    const auto played = phazite::getNotesPlayed (context, { right });
+    REQUIRE (played.size() == 1);
+    const auto note = played[0].getRef();
+
+    // Select All takes the note the clip plays, alone.
+    REQUIRE (screen.registry.invoke ("note.selectAll"));
+    CHECK (screen.getSelected() == std::vector { note });
+
+    // Quantize moves it onto the grid, and the others stay where they are.
+    const auto step = screen.pianoRoll.getGridStepInBeats();
+    REQUIRE (step > 0.05);
+    const auto onGrid = std::round (5.1 / step) * step;
+    REQUIRE (screen.registry.invoke ("edit.quantize"));
+    CHECK (sameStarts ({ 1.1, onGrid, 7.0 }));
+
+    // A nudge moves it a step, and the clip stays as long as it was trimmed.
+    REQUIRE (screen.registry.invoke ("note.selectAll"));
+    REQUIRE (screen.registry.invoke ("edit.nudgeRight"));
+    CHECK (sameStarts ({ 1.1, onGrid + step, 7.0 }));
+    CHECK (phazite::getNoteClip (context, right)->range == phazite::BeatRange (beats (4.0), beats (6.0)));
+    REQUIRE (screen.registry.invoke ("edit.nudgeLeft"));
+    CHECK (sameStarts ({ 1.1, onGrid, 7.0 }));
+
+    // A drag up moves it alone, and not in time.
+    const auto dragUp = [&screen, &length] (double start, int above)
+    {
+        phazite::test::dispatchPendingMessages();
+        const auto middle = screen.at (start + length.inBeats() / 2.0) - juce::Point<int> (0, above);
+        screen.mouse.press (middle);
+        screen.mouse.dragTo (middle + juce::Point<int> (0, -60));
+        screen.mouse.release();
+        screen.mouse.pause();
+    };
+
+    dragUp (onGrid, 0);
+    CHECK (sameStarts ({ 1.1, onGrid, 7.0 }));
+    CHECK (phazite::getNote (context, note)->pitch != row);
+    CHECK (phazite::getNoteClip (context, right)->range == phazite::BeatRange (beats (4.0), beats (6.0)));
+
+    for (const auto& held : screen.notesOf (right))
+        if (! (held.getRef() == note))
+            CHECK (held.pitch == row);
+
+    // A note the clip's start cuts, which starts before the clip and plays from its start: it goes no earlier, it doesn't
+    // pull the others forward, and a move of the others up or down leaves it where it is.
+    const auto cut = phazite::addNote (screen.song, right, row, beats (4.0), length, 100);
+    REQUIRE (cut.isValid());
+    phazite::trimClipStart (context, right, beats (4.25));
+    phazite::test::dispatchPendingMessages();
+    REQUIRE (phazite::getNoteClip (context, right)->range.getStart() == beats (4.25));
+    REQUIRE (phazite::getNote (context, cut)->start.inBeats() == doctest::Approx (4.0));
+    REQUIRE (phazite::getNotesPlayed (context, { right }).size() == 2);
+    REQUIRE (screen.registry.invoke ("note.selectAll"));
+    CHECK (screen.getSelected().size() == 2);
+    REQUIRE (screen.registry.invoke ("edit.nudgeLeft"));
+    CHECK (phazite::getNote (context, cut)->start.inBeats() == doctest::Approx (4.0));
+    CHECK (phazite::getNote (context, note)->start.inBeats() == doctest::Approx (onGrid));
+
+    const auto pitch = phazite::getNote (context, note)->pitch;
+    dragUp (onGrid, 60);
+    CHECK (phazite::getNote (context, note)->pitch != pitch);
+    CHECK (phazite::getNote (context, cut)->pitch != row);
+    CHECK (phazite::getNote (context, cut)->start.inBeats() == doctest::Approx (4.0));
+    CHECK (phazite::getNote (context, note)->start.inBeats() == doctest::Approx (onGrid));
+
+    REQUIRE (screen.registry.invoke ("edit.nudgeRight"));
+    CHECK (phazite::getNote (context, cut)->start.inBeats() == doctest::Approx (4.0 + step));
+    CHECK (phazite::getNote (context, note)->start.inBeats() == doctest::Approx (onGrid + step));
+}
+
+TEST_CASE ("A note dragged or nudged toward the next clip on its track stops where its clip still plays it, and comes back")
+{
+    // Past its clip's end, where the next clip keeps the clip from growing, the note was in the clip without playing: it
+    // vanished from the piano roll, deselected, and only Undo brought it back.
+    PianoRollScreen screen;
+    const auto first = screen.addClip (0, 0.0, 4.0);
+    screen.addClip (0, 4.0, 4.0);
+    screen.select (first);
+    screen.pianoRoll.zoomTo ({ beats (0.0), beats (8.0) });
+    phazite::test::Mouse mouse (*screen.notes);
+    mouse.click (screen.at (2.1));
+    REQUIRE (screen.notesOf (first).size() == 1);
+    const auto note = screen.notesOf (first).front().getRef();
+    const auto shown = [&screen, first] { return phazite::getNotesPlayed (screen.context, { first }); };
+    const auto isSelected = [&screen, note]
+    {
+        const auto all = screen.context.getSongSelection().getNotes();
+        return std::find (all.begin(), all.end(), note) != all.end();
+    };
+    const auto middleOf = [&screen] (const phazite::NoteData& data)
+    { return screen.at (data.start.inBeats() + data.length.inBeats() / 2.0); };
+    const auto oneBeat = screen.at (1.0).x - screen.at (0.0).x;
+
+    // Dragged three beats on, to where the next clip is: it stops just before its clip's end, shown and selected.
+    REQUIRE (shown().size() == 1);
+    auto middle = middleOf (shown()[0]);
+    mouse.press (middle);
+    mouse.dragTo (middle + juce::Point<int> (3 * oneBeat, 0));
+    mouse.release();
+    mouse.pause();
+    REQUIRE (shown().size() == 1);
+    CHECK (shown()[0].start.inBeats() < 4.0);
+    CHECK (shown()[0].start.inBeats() > 3.9);
+    CHECK (isSelected());
+    CHECK (phazite::getClipRange (screen.song, first).getEnd().inBeats() == doctest::Approx (4.0));
+
+    // And is dragged back from there.
+    phazite::test::dispatchPendingMessages();
+    const auto there = shown()[0].start.inBeats();
+    middle = middleOf (shown()[0]);
+    mouse.press (middle);
+    mouse.dragTo (middle - juce::Point<int> (2 * oneBeat, 0));
+    mouse.release();
+    mouse.pause();
+    REQUIRE (shown().size() == 1);
+    CHECK (shown()[0].start.inBeats() == doctest::Approx (there - 2.0));
+
+    // Nudged on with its key, it stops there too.
+    screen.pianoRoll.setActive (true);
+
+    for (int i = 0; i < 40; ++i)
+        screen.registry.invoke ("edit.nudgeRight");
+
+    REQUIRE (shown().size() == 1);
+    CHECK (shown()[0].start.inBeats() < 4.0);
+    CHECK (isSelected());
+    REQUIRE (screen.registry.invoke ("edit.nudgeLeft"));
+    CHECK (shown()[0].start.inBeats() < 3.99);
+}
+
+TEST_CASE ("A drag of selected notes that ends where it began keeps them all selected, and a click on one still selects it alone")
+{
+    // A drag by less than half a grid step moves nothing: taken for the click, it selected the note pressed alone.
+    NotesScreen screen;
+    auto& mouse = screen.mouse;
+    mouse.click (screen.at (1.1));
+    mouse.click (screen.at (3.1));
+    REQUIRE (screen.getNotes().size() == 2);
+    const auto first = screen.getNotes()[0].getRef(), second = screen.getNotes()[1].getRef();
+    mouse.click (screen.middleOf (first), juce::ModifierKeys::shiftModifier);
+    REQUIRE (screen.getSelected().size() == 2);
+    const auto pressed = screen.middleOf (first);
+
+    // The pointer goes five pixels and the mouse goes up: nothing moved, both stay selected, and no undo step.
+    mouse.press (pressed);
+    mouse.dragTo (pressed + juce::Point<int> (5, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getSelected().size() == 2);
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Add Note"));
+
+    // There and back likewise.
+    mouse.press (pressed);
+    mouse.dragTo (pressed + juce::Point<int> (screen.at (4.0).x - screen.at (0.0).x, 0));
+    mouse.dragTo (pressed + juce::Point<int> (1, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getSelected().size() == 2);
+    CHECK (screen.getNotes().size() == 2);
+    CHECK (phazite::describeUndo (&screen.song) == juce::String ("Undo Add Note"));
+
+    // A Shift+press that slips still takes the note out, as its click does; a click without a drag selects one alone.
+    mouse.press (pressed, juce::ModifierKeys::shiftModifier);
+    mouse.dragTo (pressed + juce::Point<int> (5, 0));
+    mouse.release();
+    mouse.pause();
+    CHECK (screen.getSelected() == std::vector { second });
+    mouse.click (screen.middleOf (first), juce::ModifierKeys::shiftModifier);
+    REQUIRE (screen.getSelected().size() == 2);
+    mouse.click (screen.middleOf (first));
+    CHECK (screen.getSelected() == std::vector { first });
 }

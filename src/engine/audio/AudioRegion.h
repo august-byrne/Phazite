@@ -30,7 +30,8 @@ struct FadeCurve
 float getFadeGain (FadeCurve, float along) noexcept;
 
 // What a region keeps from one block to the next, by its clip's ID from plan to plan: where it played to, to tell a jump
-// (after which it fades in over 40 samples rather than click), where it is in its file, and for a file at another rate
+// (after which it fades in over 40 samples rather than click, as it does once its file is read where it wasn't yet),
+// where it is in its file, and for a file at another rate
 // than the engine's, its resampling, from the file's sample it reads next.
 struct RegionState
 {
@@ -49,6 +50,7 @@ struct RegionState
     std::int64_t playedTo = -1; // the song's sample after the last it played; -1 before it first plays
     double filePosition = 0.0;  // the file's sample it plays next (at another rate: it reads next)
     int fadingIn = 0;           // samples left of its fade in after a jump
+    bool missed = false;        // the last stretch it played wasn't read yet: silence, and the next that is fades in
 
     struct Conversion;
     std::unique_ptr<Conversion> conversion; // a file at another rate's, or nullptr
@@ -72,5 +74,9 @@ struct AudioRegion
     // a state made for the two (RegionState's), and otherwise as silence.
     void play (float* const* channels, std::int64_t songSample, int numSamples, double engineRate, bool isRender,
                juce::AudioBuffer<float>& scratch) const noexcept;
+
+    // Audio thread: a sample of the song it will play from next if it plays there, though the song doesn't play there now
+    // (where playback will start, the loop's start): its file reads ahead of there too (AudioFile::expect()).
+    void expect (std::int64_t songSample, double engineRate) const noexcept;
 };
 } // namespace phazite::engine

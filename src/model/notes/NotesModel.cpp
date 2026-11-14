@@ -39,9 +39,13 @@ namespace
         const auto track = getTrackID (clipState.getParent());
         const auto tracks = getTrackIDs (song);
         const auto row = (int) (std::find (tracks.begin(), tracks.end(), track) - tracks.begin());
-        return { getClipID (clipState),         track,
-                 getClipName (song, clipState), getClipRange (clipState),
-                 getContentStart (clipState),   getTrackColour (song, track, row) };
+        return { getClipID (clipState),
+                 track,
+                 getClipName (song, clipState),
+                 getClipRange (clipState),
+                 getContentStart (clipState),
+                 getTrackColour (song, track, row),
+                 getLatestNoteStart (song, getClipID (clipState)) };
     }
 } // namespace
 
@@ -132,6 +136,18 @@ std::vector<NoteData> getNotes (const ProjectContext& context, const std::vector
     return notes;
 }
 
+std::vector<NoteData> getNotesPlayed (const ProjectContext& context, const std::vector<ClipID>& ids)
+{
+    std::vector<NoteData> notes;
+
+    if (auto* song = findSong (context))
+        for (const auto id : ids)
+            for (const auto& note : getClipNotesPlayed (*song, id))
+                notes.push_back (note);
+
+    return notes;
+}
+
 std::optional<NoteData> getNote (const ProjectContext& context, NoteRef ref)
 {
     auto* song = findSong (context);
@@ -153,7 +169,7 @@ std::vector<NoteData> getNotesOfOtherTracks (const ProjectContext& context, cons
 
         for (const auto& clipState : getClipStates (findTrackState (*song, track)))
             if (isMidiState (clipState) && getClipRange (clipState).overlaps (range))
-                for (const auto& note : getClipNotes (*song, getClipID (clipState)))
+                for (const auto& note : getClipNotesPlayed (*song, getClipID (clipState)))
                     notes.push_back (note);
     }
 
@@ -162,8 +178,9 @@ std::vector<NoteData> getNotesOfOtherTracks (const ProjectContext& context, cons
 
 NoteRef addNote (ProjectContext& context, ClipID id, int pitch, BeatPosition start, BeatDuration length, int velocity)
 {
+    // Not one that wouldn't play, which no editor would show (getNotesPlayed()).
     auto* song = findSong (context);
-    return song != nullptr ? addNote (*song, id, pitch, start, length, velocity) : NoteRef();
+    return song != nullptr && canPlayNoteAt (*song, id, start) ? addNote (*song, id, pitch, start, length, velocity) : NoteRef();
 }
 
 void moveNote (ProjectContext& context, NoteRef ref, BeatPosition start, int pitch)

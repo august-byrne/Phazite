@@ -104,10 +104,12 @@ public:
 
             case Waveform::square:
             {
-                // Two saws a width apart, one taken from the other, so that the width can move: high for the width, then low.
+                // Two saws a width apart, one taken from the other, so that the width can move: high for the width, then low,
+                // 2 apart, as far above the middle as below it over a cycle (each saw is), whatever the width: a pulse from
+                // 1 to -1 would carry an offset of twice its width less 1, a thump under each note's envelope.
                 const auto width = pulseWidth < 0.05f ? 0.05f : (pulseWidth > 0.95f ? 0.95f : pulseWidth);
                 const auto behind = t < width ? t - width + 1.0f : t - width;
-                return read (sawLevel, behind) - read (sawLevel, t) + 2.0f * width - 1.0f;
+                return read (sawLevel, behind) - read (sawLevel, t);
             }
         }
 

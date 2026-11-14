@@ -2,15 +2,18 @@
 // Branches and merges of a project's versions (docs/versions.md: Branches, Merging; step V4): through the model, as the
 // Versions view and its commands make them, each switch making the song the other branch's in place.
 #include "EnginePlayback.h"
+#include "SongIDs.h"
 #include "TestPlugin.h"
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/commands/internal/Undo.h"
 #include "model/mixer/FreezeModel.h"
 #include "model/mixer/internal/Freeze.h"
 #include "model/mixer/internal/Mixer.h"
+#include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/plugins/internal/PluginInstances.h"
 #include "model/project/internal/Project.h"
@@ -18,6 +21,7 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/versions/VersionsModel.h"
+#include "model/versions/internal/SongDiff.h"
 #include "model/versions/internal/VersionHistory.h"
 
 namespace
@@ -466,4 +470,78 @@ TEST_CASE ("Merge Branch merges another branch's last commit, and Abort Merge ma
     CHECK (phazite::countCommitsToMerge (b.s.context, idea) == 0);
     CHECK_FALSE (phazite::canMergeBranch (b.s.context, idea));
     CHECK_FALSE (phazite::canMergeAnyBranch (b.s.context));
+}
+
+TEST_CASE ("A branch that ungrouped a folder and moved a clip merges with the folder's tracks kept and the clip once, as it changed here")
+{
+    // main: Bass and Drums in a folder, a clip on Bass.
+    Branches b;
+    auto& song = *phazite::findSong (b.s.context); // the same through each switch, which is made in place
+    const auto clip = b.s.addMidiClip (b.bass, 0.0, 4.0);
+    b.s.addNote (clip, 36, 0.0, 1.0);
+    phazite::TrackID folder;
+
+    {
+        const phazite::UndoStep step (song, "Group");
+        folder = phazite::groupIntoFolder (song, { b.bass, b.drums }, nullptr);
+    }
+
+    keepVersion (b.s.context, "Grouped");
+
+    // idea-2: the folder ungrouped, and the clip onto Drums.
+    REQUIRE (phazite::newBranch (b.s.context, {}, b.s.save));
+
+    {
+        const phazite::UndoStep step (song, "Ungroup");
+        phazite::ungroupFolder (song, folder);
+        phazite::moveClip (song, clip, phazite::BeatPosition::fromBeats (4.0), b.drums);
+    }
+
+    const auto theirs = keepVersion (b.s.context, "Ungrouped");
+
+    // main: a note in the clip.
+    REQUIRE (phazite::switchBranch (b.s.context, findBranch (b.s.context, "main"), b.s.save));
+    REQUIRE (phazite::getTracksInFolder (song, folder) == std::vector { b.bass, b.drums });
+    b.s.addNote (clip, 40, 2.0, 1.0);
+    keepVersion (b.s.context, "Note");
+    const auto before = song.getState().createCopy();
+
+    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    phazite::finishTickedMerge (b.s.context);
+    REQUIRE (phazite::isMerging (b.s.context));
+    checkIDs (song);
+    CHECK_FALSE (phazite::findTrackState (song, folder).isValid());
+    CHECK (phazite::findTrackState (song, b.bass).isValid());
+    CHECK (phazite::findTrackState (song, b.drums).isValid());
+    CHECK (phazite::getParentFolder (song, b.bass) == phazite::TrackID());
+    CHECK (phazite::getClips (song, b.bass).empty());
+    REQUIRE (phazite::getClips (song, b.drums) == std::vector { clip });
+    CHECK (phazite::getNotes (b.s.context, { clip }).size() == 2);
+    CHECK (phazite::getClashes (b.s.context).empty());
+
+    // One undo step: the song as it was before the merge; and redone, as merged.
+    phazite::undo (song);
+    checkIDs (song);
+    CHECK (phazite::findChanges (before, song.getState()).empty());
+    phazite::redo (song);
+    checkIDs (song);
+    CHECK (phazite::getClips (song, b.drums) == std::vector { clip });
+
+    // Aborted: as before it too; then merged again.
+    phazite::cancelMerge (b.s.context);
+    checkIDs (song);
+    CHECK (phazite::findChanges (before, song.getState()).empty());
+    CHECK (phazite::getTracksInFolder (song, folder) == std::vector { b.bass, b.drums });
+    REQUIRE (phazite::startMerge (b.s.context, theirs));
+    phazite::finishTickedMerge (b.s.context);
+    checkIDs (song);
+    CHECK_FALSE (phazite::findTrackState (song, folder).isValid());
+    CHECK (phazite::getClips (song, b.drums) == std::vector { clip });
+
+    // Committed, and opened again: each ID once.
+    keepVersion (b.s.context);
+    b.s.reopen();
+    REQUIRE (waitForVersionHistory (b.s.context));
+    checkIDs (*phazite::findSong (b.s.context));
+    CHECK_FALSE (phazite::hasChangesSinceLastVersion (b.s.context));
 }

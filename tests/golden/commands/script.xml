@@ -2,7 +2,7 @@
 <!-- The project the command script leaves (every model command run where it does something), saved: tests/CommandGoldenTests.cpp. Regenerate with PHAZITE_UPDATE_GOLDEN=1 (CLAUDE.md). -->
 <PHAZITE loop="1"
          loopFollowsSong="1"
-         nextID="58"
+         nextID="54"
          outline="rock"
          playStart="2">
   <MASTER fader="2"

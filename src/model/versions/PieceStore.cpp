@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "internal/PieceStore.h"
 #include "internal/SongPieces.h"
+#include "model/base/WholeFile.h"
 
 #include <juce_cryptography/juce_cryptography.h>
 
@@ -223,23 +224,39 @@ bool PieceStore::write (const std::map<juce::String, juce::MemoryBlock>& pieces)
     if (! folder.createDirectory())
         return false;
 
-    // Written whole beside it, then given its name: a pack is never seen half written.
+    // Written whole beside it, flushed to the disk, then given its name (model/base/WholeFile.h): a pack is never seen half
+    // written. Written only if every piece is found in it as it is read back.
     const auto file = folder.getChildFile (juce::SHA256 (entries.getData(), entries.getDataSize()).toHexString() + ".pack");
-
-    if (! file.existsAsFile())
+    const auto holdsThem = [this, &fresh] // with the lock held
     {
-        juce::TemporaryFile temporary (file);
+        for (const auto& [name, piece] : fresh)
+            if (index.find (name) == index.end())
+                return false;
 
-        if (! temporary.getFile().replaceWithData (pack.getData(), pack.getDataSize()) || ! temporary.overwriteTargetFileWithTemporary())
-            return false;
+        return true;
+    };
+
+    {
+        // One of its name that is there already (another store's) is read, and is enough if it holds them; one that doesn't
+        // read, cut short or damaged, is written again.
+        const juce::ScopedLock sl (lock);
+
+        if (file.existsAsFile() && ! packs.contains (file))
+            readIndex (file);
+
+        if (holdsThem())
+            return true;
     }
+
+    if (writeWholeFile (file, pack.getData(), pack.getDataSize()).failed())
+        return false;
 
     const juce::ScopedLock sl (lock);
 
     if (! packs.contains (file))
         readIndex (file);
 
-    return true;
+    return holdsThem();
 }
 
 juce::int64 PieceStore::getSize() const

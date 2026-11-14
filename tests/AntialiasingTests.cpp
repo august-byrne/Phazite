@@ -163,6 +163,39 @@ TEST_CASE ("The synth's saw, pulse and triangle keep their aliases out of hearin
     }
 }
 
+TEST_CASE ("The pulse wave is as far above the middle as below it, at any width: no offset under it")
+{
+    // High for its width at 1 and low for the rest at -1, it carried an offset of twice its width less 1 (-0.75 at 12.5 %),
+    // which an envelope made a thump of at each note's start and end. Its swing from low to high is still 2, around its mean.
+    constexpr double rate = 48000.0;
+
+    for (const auto width : { 0.05f, 0.125f, 0.25f, 0.5f, 0.75f, 0.95f })
+    {
+        for (const auto samplesPerCycle : { 480, 96, 16 }) // 100 Hz, 500 Hz and 3 kHz: whole cycles in what is measured
+        {
+            dsp::Oscillator oscillator;
+            oscillator.setFrequency (rate / samplesPerCycle, rate);
+            auto sum = 0.0;
+            auto lowest = 0.0f, highest = 0.0f;
+
+            for (int i = 0; i < 48000; ++i)
+            {
+                const auto sample = oscillator.next (dsp::Waveform::square, width);
+                sum += sample;
+                lowest = std::min (lowest, sample);
+                highest = std::max (highest, sample);
+            }
+
+            CAPTURE (width);
+            CAPTURE (samplesPerCycle);
+            CHECK (std::abs (sum / 48000.0) < 0.002);
+
+            if (samplesPerCycle == 480) // low enough for the wave's flat parts to show (with the ripple of its last harmonics)
+                CHECK (highest - lowest == doctest::Approx (2.0f).epsilon (0.15));
+        }
+    }
+}
+
 TEST_CASE ("The saturator, driven hard, keeps its aliases down, and what it leaves straight comes out level to 20 kHz")
 {
     for (const auto rate : { 44100.0, 48000.0 })

@@ -232,6 +232,57 @@ TEST_CASE ("Automation never hides: every automated parameter has a lane, which 
     CHECK (phazite::getAutomationPoints (context, makeup).size() == 1);
 }
 
+TEST_CASE ("A lane shown or removed leaves the undo history's clips and sends where it finds them")
+{
+    // Lanes are view state, changed outside the undo history, which finds a track's clips and sends by their places among
+    // the track's elements: a lane removed from among them made Undo take the wrong clip, or none.
+    Song song;
+    auto& context = song.context;
+    const auto a = song.a;
+    const auto volume = song.volume();
+    const auto clipsOf = [&context, a]
+    {
+        std::vector<phazite::ClipID> ids;
+
+        for (const auto& clip : phazite::getClips (context, a))
+            ids.push_back (clip.id);
+
+        return ids;
+    };
+
+    // A lane, then two clips and a send, each a step; then the lane goes (Delete Automation, with no points to delete).
+    phazite::showAutomationLane (context, volume);
+    const auto first = phazite::addMidiClipAt (context, a, beats (0));
+    const auto second = phazite::addMidiClipAt (context, a, beats (8));
+    REQUIRE (first.isValid());
+    REQUIRE (second.isValid());
+    phazite::addSendToNewReturn (context, a);
+    REQUIRE (phazite::getSends (context, a).size() == 1);
+
+    phazite::removeAutomationLane (context, volume);
+    CHECK (lanesOf (context, a).empty());
+
+    // Each undo takes back its own step, and each redo brings it back.
+    phazite::undo (*song.song);
+    CHECK (phazite::getSends (context, a).empty());
+    CHECK (clipsOf() == std::vector { first, second });
+    phazite::undo (*song.song);
+    CHECK (clipsOf() == std::vector { first });
+    phazite::undo (*song.song);
+    CHECK (clipsOf().empty());
+    CHECK_FALSE (song.song->getUndoManager().canUndo());
+
+    // A lane shown while the steps are undone doesn't move them either.
+    phazite::showAutomationLane (context, song.makeup());
+    phazite::redo (*song.song);
+    CHECK (clipsOf() == std::vector { first });
+    phazite::redo (*song.song);
+    CHECK (clipsOf() == std::vector { first, second });
+    phazite::removeAutomationLane (context, song.makeup());
+    phazite::undo (*song.song);
+    CHECK (clipsOf() == std::vector { first });
+}
+
 TEST_CASE ("Show Automation expands the selected tracks' lanes, or collapses them all while one shows expanded")
 {
     Song song;

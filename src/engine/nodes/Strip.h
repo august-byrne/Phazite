@@ -28,8 +28,8 @@ public:
     Channel& getChannel() noexcept { return channel; }
 
     // The audio thread's: what it plays, on two channels, and on two more what a device's sidechain hears; its sound before
-    // its fader, for sends before the fader; its sound after its fader and before its mute, for sidechains; and what its
-    // audio clips read (AudioRegion::play()).
+    // its fader, for sends before the fader; its sound after its fader and before its mute, for sidechains and for sends
+    // after the fader; and what its audio clips read (AudioRegion::play()).
     juce::AudioBuffer<float> buffer, beforeFader, beforeMute, scratch;
 
     // Where its notes are: the sequence played last, its next event, the pitches sounding, and whether the notes sounding
@@ -82,7 +82,9 @@ private:
 
 // A send's level, which the message thread sets and the audio thread glides to over a block. Kept by the send's ID. Cut, it
 // sends nothing whatever its level, gliding there over a block too: a send's track that isn't heard (muted, or soloed
-// out) sends nothing, also while it plays on for a sidechain that listens to it or to a bus it is in.
+// out) sends nothing, also while it plays on for a sidechain that listens to it or to a bus it is in; but for a send to
+// what is heard without it (a soloed return), which isn't cut, and which its track plays on for
+// (Channel::setPlaysOnUnheard()).
 class SendLevel
 {
 public:

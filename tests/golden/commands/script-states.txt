@@ -541,10 +541,14 @@ after edit.mute:
 after edit.duplicate:
   edit.undo: on "Undo Duplicate 6 Notes"
   edit.undoOrRedo: on "Undo Duplicate 6 Notes"
-  selected: 6 notes (60 at 1.500 for 0.250, 60 at 1.750 for 0.250, 60 at 2.000 for 0.250, 60 at 2.250 for 0.250, 64 at 2.500 for 0.250, 64 at 2.750 for 0.250)
+  edit.delete: on "Delete 2 Notes"
+  edit.duplicate: on "Duplicate 2 Notes"
+  edit.cut: on "Cut 2 Notes"
+  edit.copy: on "Copy 2 Notes"
+  selected: 2 notes (60 at 1.500 for 0.250, 60 at 1.750 for 0.250)
 after edit.delete:
-  edit.undo: on "Undo Delete 6 Notes"
-  edit.undoOrRedo: on "Undo Delete 6 Notes"
+  edit.undo: on "Undo Delete 2 Notes"
+  edit.undoOrRedo: on "Undo Delete 2 Notes"
   edit.delete: off "Delete"
   edit.duplicate: off "Duplicate"
   edit.mute: off "Mute"

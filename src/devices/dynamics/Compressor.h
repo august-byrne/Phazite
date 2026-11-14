@@ -14,7 +14,10 @@
 // down. Each hears what comes in (feed-forward), so that once settled it follows its curve exactly whatever its character; a
 // compressor that listened to what it put out would settle elsewhere than the curve drawn, and run away where the curve
 // expands. Drive saturates what it puts out in the character's colour (FET's odd harmonics, Opto's and Tube's even ones,
-// Clean's and VCA's soft clipping), without aliasing much (antiderivative anti-aliasing). It hears its own sound alone,
+// Clean's and VCA's soft clipping), at twice the sample rate, its curve played by its antiderivative (dsp/Oversampling.h),
+// so that what it adds doesn't fold back as aliasing and what it leaves straight stays level to 20 kHz (at the sound's own
+// rate the antiderivative alone averaged every two samples: 5 dB down at 15 kHz, of the whole sound, whenever the drive or
+// FET's or Tube's colour engaged); undriven, the sound takes a plain delay as long instead. It hears its own sound alone,
 // through the key's low cut so that bass notes don't pump it, as a bus compressor's sidechain high-pass does (the high cut is
 // Duck's): a sidechain it is given isn't heard while it compresses, kept for when it ducks again.
 //
@@ -39,6 +42,7 @@
 #include "devices/dsp/DelayLine.h"
 #include "devices/dsp/Envelopes.h"
 #include "devices/dsp/Filters.h"
+#include "devices/dsp/Oversampling.h"
 
 #include <juce_core/juce_core.h>
 
@@ -126,11 +130,16 @@ public:
     // level before the attack caught it, and then went down: a click under each kick (the owner heard it in Exodus,
     // 2026-11-12), which the kick covers in the mix but not alone. Its attack ends at the hit while it is no longer than this,
     // its hold still counting from the hit; a longer one starts this much before it. Compressing, it doesn't look ahead, and
-    // its sound comes as it goes in. The engine makes up for the latency on the other tracks, and Low Latency leaves the
-    // ducking out while it is on (model/playback/internal/PlaybackHost.h), as it does a limiter's.
+    // its sound comes as late as its drive plays it, a few samples (getDriveLatency()), driven or not. The engine makes up
+    // for the latency on the other tracks, and Low Latency leaves the ducking out while it is on
+    // (model/playback/internal/PlaybackHost.h), as it does a limiter's.
     static constexpr double duckLookaheadSeconds = 0.010;
 
+    // How late the drive plays the sound, in samples, at any rate: its filters to twice the rate and back, and its curve.
+    static int getDriveLatency();
+
     int getLatencySamples() const override { return latency; }
+    bool delaysDry() const noexcept override { return true; }
     int getLatencySamplesFor (std::span<const float> valuesSetByHand) const override;
     void takeValuesBeforePrepare (std::span<const float> valuesSetByHand) override;
 
@@ -170,10 +179,26 @@ private:
     float releaseStart = 0.0f, memory = 0.0f, memoryRise = 0.0001f, memoryFall = 0.0001f;
     float opticalCoefficient = 0.0f; // Opto's slow release stage, per sample, at the release set
 
-    // Drive: each channel's last sample into the curve and its antiderivative there (first-order antiderivative
-    // anti-aliasing: Parker, Zavalishin and Le Bivic, 2016), and the DC that the even harmonics leave, filtered out.
-    std::array<float, 2> lastDriven {}, lastIntegral {};
+    // Drive: each channel's sound into the curve at twice the rate, played by its antiderivative (first-order antiderivative
+    // anti-aliasing: Parker, Zavalishin and Le Bivic, 2016; dsp/Oversampling.h), and the DC that the even harmonics leave,
+    // filtered out. The sound goes through it while Drive is up or the character has a colour of its own (FET, Tube), a
+    // straight line in the curve's place while nothing colours it; otherwise through a plain delay as long, the two faded
+    // between over 64 samples.
+    std::array<dsp::AntialiasedShaper, 2> drives;
+    std::array<dsp::DelayLine, 2> undriven;
+    float driveBlend = 0.0f; // how far the sound goes through the drive
+    float lastEven = 0.0f;   // the curve's share of even harmonics, as last played
+    int driveLatency = 0;
     std::array<dsp::Filter, 2> dcBlockers {};
+
+    // The copy of what came in for its mix (ProcessContext::dry): as late as the sound, through a plain delay, and while the
+    // sound goes through the drive and the mix uses the copy, through filters like the drive's with it, faded alike: the
+    // filters to twice the rate and back turn the phase of the top octave, and the copy is turned as the sound is, so that
+    // the two meet in phase at any mix.
+    std::array<dsp::AntialiasedShaper, 2> dryDrives;
+    std::array<dsp::DelayLine, 2> dryDelays;
+    float lastMix = 1.0f;   // the mix in its last block
+    bool dryInStep = false; // the copy went through its filters in the last block
 
     // Duck's: the key's loudest over the last keyPeakMilliseconds, a millisecond at a time (each finished millisecond's
     // loudest, and the one going on now's); how far it turns the sound down now, in decibels; the samples since the last hit,
@@ -189,10 +214,12 @@ private:
     double releaseAlong = 0.0;
     bool releasing = false, wasOver = false;
 
-    // The look-ahead it plays with (duckLookaheadSeconds while it was given Duck before it was prepared, else none), in
-    // samples, and what it delays by it: the sound and the key it plays, each channel's, and Duck's gain, by the look-ahead
-    // less the attack (so that a short attack ends at the hit). Compressing with a latency (a mode that automation changed),
-    // what it plays comes as late, unchanged.
+    // Its latency, in samples: Duck's look-ahead (duckLookaheadSeconds) while it was given Duck before it was prepared, else
+    // the drive's. What it delays by it: the sound and the key it plays, each channel's, and Duck's gain, by the look-ahead
+    // less the attack (so that a short attack ends at the hit; ducking without having been prepared for it, a mode that
+    // automation changed, it doesn't look ahead). In both modes the sound takes the same way through: the drive's delay (or
+    // the drive), then a delay for the rest of the latency where that is Duck's, so that automation that changes the mode
+    // plays on what is on its way, nothing lost or played again.
     bool ducksAsPrepared = false;
     int latency = 0;
     std::array<dsp::DelayLine, 2> soundDelays, keyDelays;

@@ -333,6 +333,54 @@ TEST_CASE ("A pack cut off midway leaves the store readable, and a damaged piece
     CHECK ((! second.has_value() || ! store.readSong (second->song).isValid()));
 }
 
+TEST_CASE ("A version is written only if its pack reads back: a pack cut short under its own name is written again")
+{
+    TemporaryFolder temporary;
+    PiecesSong made;
+    const auto packs = getVersionsFolder (temporary).getChildFile ("pieces");
+    const auto pieces = phazite::splitSong (made.song->getState());
+    juce::String id;
+
+    {
+        phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
+        id = store.writeVersion ({}, pieces);
+        REQUIRE (id.isNotEmpty());
+    }
+
+    // The pack as a write that failed midway once left it, in place under its name (a full disk, before writes were
+    // checked): no store reads it.
+    const auto found = packs.findChildFiles (juce::File::findFiles, false, "*.pack");
+    REQUIRE (found.size() == 1);
+    juce::MemoryBlock whole;
+    REQUIRE (found[0].loadFileAsData (whole));
+    REQUIRE (found[0].replaceWithData (whole.getData(), whole.getSize() / 2));
+
+    {
+        // The same version saved again: its pack is written again, whole, and the version reads.
+        phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
+        CHECK_FALSE (store.readVersion (id).has_value());
+        CHECK (store.writeVersion ({}, pieces) == id);
+        const auto version = store.readVersion (id);
+        REQUIRE (version.has_value());
+        CHECK (store.readSong (version->song).isValid());
+    }
+
+    CHECK (found[0].getSize() == (juce::int64) whole.getSize());
+    CHECK (packs.findChildFiles (juce::File::findFiles, false).size() == 1); // and nothing left beside it
+
+    // Where the pack can't be put in place (a folder of its name is in the way), the write says so: no version, never one
+    // that can't be read.
+    REQUIRE (found[0].deleteFile());
+    REQUIRE (found[0].createDirectory().wasOk());
+    REQUIRE (found[0].getChildFile ("In the way").replaceWithText ("in the way"));
+
+    phazite::VersionStore store (getVersionsFolder (temporary), thisComputer);
+    const auto written = store.writeVersion ({}, pieces);
+    CHECK (written.isEmpty());
+    CHECK_FALSE (store.readVersion (id).has_value());
+    CHECK (packs.findChildFiles (juce::File::findFiles, false).isEmpty()); // nothing half written left beside it
+}
+
 TEST_CASE ("The branches and the current one are kept, each computer's record of a branch in its file")
 {
     TemporaryFolder temporary;
