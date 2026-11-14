@@ -135,7 +135,7 @@ private:
 };
 
 // An LFO's wave as the synths' LFO views draw it, by its shape's number (in dsp::LfoShape's order): dsp::Lfo's own
-// values, and the random one as steps.
+// values, and the random one as one level across the cycle, as it holds one value a cycle.
 float getDrawnLfoValue (int shape, float phase);
 
 // A filter's response: at its cutoff as set, and, fainter, where the newest note plays it now; a dot at the cutoff, as high

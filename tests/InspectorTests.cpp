@@ -285,6 +285,14 @@ TEST_CASE ("Typing the lowest of several items' values sets every item to it, as
     undo.check ("a step up", [&] { step (findField (screen, "Velocity"), true); });
     CHECK (noteOf (c4).velocity == 65);
     CHECK (noteOf (e4).velocity == 65);
+
+    // A value typed that differs from the field's in its last bits only, which JUCE's slider takes for the same (it compares
+    // them approximately): set, and not left over for the next step, which then set it again instead of stepping (a reviewer,
+    // 2026-11-14).
+    undo.check ("the same velocity typed, but for its last bits", [&] { type (findField (screen, "Velocity"), "65.00000000000001"); });
+    undo.check ("a step up after it", [&] { step (findField (screen, "Velocity"), true); });
+    CHECK (noteOf (c4).velocity == 66);
+    CHECK (noteOf (e4).velocity == 66);
     undo.walkBackAndForth();
 }
 

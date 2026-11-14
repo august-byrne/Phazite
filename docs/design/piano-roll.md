@@ -74,8 +74,8 @@ warp markers. The tab is named for what it shows and follows the selection ([win
 | Click a key | Plays it and selects its notes; Ctrl+click adds them |
 | Drag along the keys | Selects the notes of a range of keys |
 | Double-right-click a ghost note | Shows its clip in the piano roll |
-| Wheel | Scrolls; Shift+wheel sideways; Ctrl+wheel zooms; Alt+wheel makes the rows taller or shorter |
-| Wheel over the velocity lane | Raises or lowers velocities |
+| Wheel | Scrolls by as far as it turns; Shift+wheel sideways; Ctrl+wheel and a trackpad's pinch zoom around the pointer; Alt+wheel makes the rows taller or shorter |
+| Wheel over a note's stem in the velocity lane | Raises or lowers the velocities there, a burst of the wheel one undo step; elsewhere in the lane it scrolls |
 | Middle drag | Moves the view; never edits |
 
 Rules:

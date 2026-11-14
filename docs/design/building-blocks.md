@@ -84,7 +84,6 @@ and its file in [projects-saving-export.md](projects-saving-export.md).
 
 - Effects on a single clip (up to five devices on one clip, for one-shots without a track of their own): Planned.
 - Hybrid tracks that hold audio and notes together: Declined for version 1.
-- Refusing a clip dragged onto a track of the other kind: Planned; today the clip lands there.
 
 ## In the code
 

@@ -413,6 +413,64 @@ void changeNoteVelocities (ProjectContext& context, const std::vector<NoteRef>& 
         changeNoteVelocities (*song, refs, change);
 }
 
+struct VelocityWheel::Impl
+{
+    explicit Impl (ProjectContext& c)
+        : context (c)
+    {
+    }
+
+    ProjectContext& context;
+    std::unique_ptr<Trial> trial; // the burst's, while it is open
+    juce::WeakReference<Song> of; // the song it is of
+};
+
+VelocityWheel::VelocityWheel (ProjectContext& context)
+    : impl (std::make_unique<Impl> (context))
+{
+}
+
+VelocityWheel::~VelocityWheel()
+{
+    end();
+}
+
+void VelocityWheel::change (const std::vector<NoteRef>& refs, int change)
+{
+    auto* song = findSong (impl->context);
+
+    if (song == nullptr || refs.empty() || change == 0)
+        return;
+
+    // A burst kept meanwhile (something else began a step), or of a song that isn't open now, ends; another begins, keeping
+    // a trial of another's first (Swap's), as a step beginning would.
+    if (impl->trial != nullptr && (! impl->trial->isOpen() || impl->of.get() != song))
+        end();
+
+    if (impl->trial == nullptr)
+    {
+        Trial::keepOpenTrial (song->getUndoManager());
+        impl->trial = std::make_unique<Trial> (*song, "Change Velocity", nullptr);
+        impl->of = song;
+    }
+
+    impl->trial->apply ([song, &refs, change] { changeNoteVelocities (*song, refs, change); });
+}
+
+void VelocityWheel::end()
+{
+    if (impl->trial != nullptr)
+        impl->trial->keep ("Change Velocity");
+
+    impl->trial = nullptr;
+    impl->of = nullptr;
+}
+
+bool VelocityWheel::isInBurst() const
+{
+    return impl->trial != nullptr && impl->trial->hasChanges();
+}
+
 //==============================================================================
 std::optional<Key> getTrackKey (const ProjectContext& context, TrackID id)
 {

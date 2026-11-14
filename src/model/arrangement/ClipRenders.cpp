@@ -21,6 +21,12 @@ namespace
         stretch::Settings settings;
     };
 
+    // Whether renders can be written into a folder: it is one, or can be made, and may be written in.
+    bool canWriteInto (const juce::File& folder)
+    {
+        return folder.createDirectory().wasOk() && folder.isDirectory() && folder.hasWriteAccess();
+    }
+
     // The renders the song's clips play, each with what it is made from.
     std::map<juce::File, Recipe> getNeededRenders (const Song& song)
     {
@@ -224,15 +230,18 @@ void ClipRenders::update()
         if (render.existsAsFile() || running.find (render) != running.end())
             continue;
 
-        // One that failed waits for its source to change.
+        // One that failed waits for its source to change, or, for one that failed as its folder couldn't be written, for
+        // the folder to be one that can.
         if (const auto found = failed.find (render); found != failed.end())
         {
-            if (Source::of (recipe.source) == found->second)
+            if (Source::of (recipe.source) == found->second.source
+                && ! (found->second.folderShut && canWriteInto (render.getParentDirectory())))
                 continue;
 
             failed.erase (found);
         }
 
+        ++rendersStarted;
         auto made = std::make_shared<Render>();
         made->length =
             std::max<juce::int64> (1, stretch::getStretchedLength (getAudioFileInfo (recipe.source).lengthInSamples, recipe.settings));
@@ -244,9 +253,34 @@ void ClipRenders::update()
                 const auto source = Source::of (toMake.source);
                 const auto stopping = [&] { return shouldStop() || shared->stopped.load(); };
                 const auto rendered = renderClipAudio (toMake.source, toMake.settings, file, stopping, &shared->written);
-                jobFinished ({ file, ! rendered && ! stopping(), source });
+                const auto failedNow = ! rendered && ! stopping();
+                jobFinished ({ file, failedNow, source, failedNow && ! canWriteInto (file.getParentDirectory()) });
             });
     }
+
+    findFailedClips();
+}
+
+void ClipRenders::findFailedClips()
+{
+    std::vector<ClipID> clips;
+
+    if (! failed.empty())
+        for (const auto clip : getAudioClips (song))
+            if (isRendered (song, clip) && hasFailed (getPlayedFile (song, findClipState (song, clip))))
+                clips.push_back (clip);
+
+    failedClips = std::move (clips);
+}
+
+void ClipRenders::checkFailedAgain()
+{
+    stopTimer();
+    update();
+
+    // While some failed, their sources are looked at now and then: one that changed is tried again.
+    if (! failed.empty())
+        startTimer (failedCheckMilliseconds);
 }
 
 void ClipRenders::jobFinished (Finished job)
@@ -261,12 +295,7 @@ void ClipRenders::jobFinished (Finished job)
 
 void ClipRenders::timerCallback()
 {
-    stopTimer();
-    update();
-
-    // While some failed, their sources are looked at now and then: one that changed is tried again.
-    if (! failed.empty())
-        startTimer (failedCheckMilliseconds);
+    checkFailedAgain();
 }
 
 void ClipRenders::handleAsyncUpdate()
@@ -292,7 +321,7 @@ void ClipRenders::handleAsyncUpdate()
         if (job.render.existsAsFile())
             made.add (job.render);
         else if (job.failed)
-            failed[job.render] = job.source; // not tried again until its source changes
+            failed[job.render] = { job.source, job.folderShut }; // not tried again until its source or its folder changes
     }
 
     announce (song, made);

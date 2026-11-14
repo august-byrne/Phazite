@@ -95,8 +95,13 @@ public:
     static constexpr BoolSetting guide { "phaziteGuide", true, SaveTiming::now };
     static constexpr ListSetting guideStepsDone { "phaziteGuideStepsDone", SaveTiming::now }; // the guide's steps, by name
     static constexpr ListSetting lessonsDone { "phaziteLessonsDone", SaveTiming::now };       // the lessons finished, by id
-    static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon };  // ui/shell/PanelLayout.h
-    static constexpr TextSetting viewPlaces { "phaziteViewPlaces", "", SaveTiming::soon };    // ui/shell/Panels.h: ViewPlaces
+    // The main window's place and size while it isn't maximized, in the desktop's coordinates ("x y width height", as
+    // juce::Rectangle writes it), and whether it is maximized (app/MainWindow.h: placeWindow()): where it opens next time,
+    // if a screen there still exists.
+    static constexpr TextSetting windowPlace { "phaziteWindowPlace", "", SaveTiming::soon };
+    static constexpr BoolSetting windowMaximized { "phaziteWindowMaximized", false, SaveTiming::soon };
+    static constexpr TextSetting panelLayout { "phazitePanelLayout", "", SaveTiming::soon }; // ui/shell/PanelLayout.h
+    static constexpr TextSetting viewPlaces { "phaziteViewPlaces", "", SaveTiming::soon };   // ui/shell/Panels.h: ViewPlaces
     static constexpr NumberSetting playlistHeaderWidth { "phazitePlaylistHeaderWidth", 200.0, SaveTiming::soon }; // ui/playlist/Playlist.h
     // The piano roll's velocity lane: its height as dragged, and whether its chevron folds it (ui/pianoroll/PianoRoll.h).
     static constexpr NumberSetting pianoRollVelocityHeight { "phazitePianoRollVelocityHeight", 72.0, SaveTiming::soon };

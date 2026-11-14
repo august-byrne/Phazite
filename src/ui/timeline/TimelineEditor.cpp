@@ -480,6 +480,8 @@ void TimelineRuler::mouseDown (const juce::MouseEvent& e)
     beginDragAutoRepeat (TimelineEditor::autoRepeatInterval);
     loopDrag = getLoopDragAt (e);
     loopDragged = false;
+    loopAtPress = getLoopState (editor.getContext());
+    playheadAtPress = editor.getPlayheadBeat();
 
     // A press below the loop's lane takes the playhead there, and a drag takes it along, snapping to the grid (Alt places it
     // freely). While it is held the song is silent, paused where it was if it played, and it plays on from where the
@@ -579,6 +581,36 @@ void TimelineRuler::mouseUp (const juce::MouseEvent& e)
 
     loopDrag = LoopDrag::none;
     repaint();
+}
+
+bool TimelineRuler::cancelDrag()
+{
+    if (draggingPlayhead)
+    {
+        draggingPlayhead = false;
+
+        // While a take records, the press alone moved the playhead, ending the take there (phazite::movePlayhead()): taken
+        // back, it would end the next one too.
+        if (! isRecording (editor.getContext()))
+            editor.movePlayheadTo (playheadAtPress);
+
+        if (std::exchange (pausedForDrag, false))
+            resumePlayback (editor.getContext());
+
+        return true;
+    }
+
+    if (loopDrag == LoopDrag::none)
+        return false;
+
+    // Not dragged yet, the press has changed nothing: the click that would turn looping on or off goes too.
+    if (loopDragged)
+        setLoopState (editor.getContext(), loopAtPress);
+
+    loopDrag = LoopDrag::none;
+    loopDragged = false;
+    repaint();
+    return true;
 }
 
 void TimelineRuler::mouseDoubleClick (const juce::MouseEvent& e)
@@ -1187,7 +1219,13 @@ int TimelineEditor::takeWheelSteps (float wheelDelta, double stepsPerNotch, doub
 
 bool TimelineEditor::keyPressed (const juce::KeyPress& key)
 {
-    return key == juce::KeyPress::escapeKey && mouseIsDown && cancelDrag();
+    return key == juce::KeyPress::escapeKey && mouseIsDown && (ruler.cancelDrag() || cancelDrag());
+}
+
+void TimelineEditor::mouseMagnify (const juce::MouseEvent& e, float scaleFactor)
+{
+    if (scaleFactor > 0.0f && std::isfinite (scaleFactor))
+        zoomAround (e.position.x - (float) getTimelineArea().getX(), scaleFactor);
 }
 
 void TimelineEditor::zoomByWheel (float x, float wheelDelta)

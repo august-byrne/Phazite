@@ -314,6 +314,51 @@ std::vector<ClipID> getLinkedClips (const ProjectContext& context, ClipID id)
     return linked;
 }
 
+juce::String whyClipsCantGo (const ProjectContext& context, TrackID id, const std::vector<ClipID>& clips,
+                             const std::vector<ClipID>& leaving)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return {};
+
+    if (! holdsClips (*song, id))
+    {
+        const auto state = findTrackState (*song, id);
+        return state.hasType (schema::MASTER) ? "The master holds no clips"
+               : isReturnState (state)        ? "A return holds no clips"
+               : isFolderState (state)        ? "A folder holds no clips"
+                                              : "This row holds no clips";
+    }
+
+    auto anyMidi = false, anyAudio = false;
+
+    for (const auto clip : clips)
+    {
+        const auto clipState = findClipState (*song, clip);
+        anyMidi = anyMidi || isMidiState (clipState);
+        anyAudio = anyAudio || (clipState.isValid() && ! isMidiState (clipState));
+    }
+
+    if (anyMidi && anyAudio)
+        return "Audio and note clips can't share a track";
+
+    if (anyMidi && ! canTrackHold (*song, id, true, leaving))
+        return "A note clip can't go on a track of audio";
+
+    if (anyAudio && ! canTrackHold (*song, id, false, leaving))
+        return hasInstrument (*song, id) ? "An audio clip can't go on a track with an instrument"
+                                         : "An audio clip can't go on a track of notes";
+
+    return {};
+}
+
+bool canPlaceClips (const ProjectContext& context, TrackID id, const std::vector<ClipID>& clips, const std::vector<ClipID>& leaving)
+{
+    auto* song = findSong (context);
+    return song != nullptr && holdsClips (*song, id) && whyClipsCantGo (context, id, clips, leaving).isEmpty();
+}
+
 bool canHoldClips (const ProjectContext& context, TrackID id)
 {
     auto* song = findSong (context);
@@ -610,6 +655,13 @@ void setCrossfade (ProjectContext& context, const CrossfadeSpot& spot, BeatPosit
 bool canImport (const ProjectContext& context, const juce::File& file)
 {
     return findSong (context) != nullptr && getFileKind (file) != FileKind::other;
+}
+
+bool importsOnto (const ProjectContext& context, const juce::File& file, TrackID track)
+{
+    auto* song = findSong (context);
+    const auto kind = getFileKind (file);
+    return song != nullptr && kind != FileKind::other && canTrackHold (*song, track, kind == FileKind::midi);
 }
 
 std::vector<ClipID> importFiles (ProjectContext& context, const juce::StringArray& paths, TrackID target, BeatPosition start)

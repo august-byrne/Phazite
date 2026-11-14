@@ -168,8 +168,8 @@ namespace
         void setMinimised (bool) override {}
         bool isMinimised() const override { return false; }
         bool isShowing() const override { return true; }
-        void setFullScreen (bool) override {}
-        bool isFullScreen() const override { return false; }
+        void setFullScreen (bool shouldBe) override { fullScreen = shouldBe; } // maximized, as a window says it is
+        bool isFullScreen() const override { return fullScreen; }
         void setIcon (const juce::Image&) override {}
         bool contains (juce::Point<int> p, bool) const override { return bounds.withZeroOrigin().contains (p); }
         OptionalBorderSize getFrameSizeIfPresent() const override { return OptionalBorderSize (juce::BorderSize<int>()); }
@@ -194,6 +194,7 @@ namespace
 
     private:
         juce::Rectangle<int> bounds;
+        bool fullScreen = false;
     };
 } // namespace
 
@@ -359,6 +360,11 @@ void Mouse::dragTo (juce::Point<int> where)
     send (where, keys.withFlags (button.getRawFlags()));
 }
 
+void Mouse::holdKeys (juce::ModifierKeys mods)
+{
+    keys = mods.withoutMouseButtons();
+}
+
 void Mouse::release()
 {
     button = {};
@@ -406,6 +412,41 @@ void Mouse::wheel (juce::Point<int> where, float deltaY, juce::ModifierKeys mods
     peer->handleMouseWheel (juce::MouseInputSource::InputSourceType::mouse,
                             peer->getComponent().getLocalPoint (&relativeTo, where).toFloat(), time, details);
     juce::ModifierKeys::currentModifiers = {};
+}
+
+void Mouse::scroll (juce::Point<int> where, float deltaX, float deltaY, juce::ModifierKeys mods)
+{
+    auto* peer = relativeTo.getPeer();
+    jassert (peer != nullptr);
+
+    if (peer == nullptr)
+        return;
+
+    position = where;
+    time += interval;
+    juce::ModifierKeys::currentModifiers = mods.withoutMouseButtons();
+
+    juce::MouseWheelDetails details {};
+    details.deltaX = deltaX;
+    details.deltaY = deltaY;
+    details.isSmooth = true;
+    peer->handleMouseWheel (juce::MouseInputSource::InputSourceType::mouse,
+                            peer->getComponent().getLocalPoint (&relativeTo, where).toFloat(), time, details);
+    juce::ModifierKeys::currentModifiers = {};
+}
+
+void Mouse::pinch (juce::Point<int> where, float scaleFactor)
+{
+    auto* peer = relativeTo.getPeer();
+    jassert (peer != nullptr);
+
+    if (peer == nullptr)
+        return;
+
+    position = where;
+    time += interval;
+    peer->handleMagnifyGesture (juce::MouseInputSource::InputSourceType::mouse,
+                                peer->getComponent().getLocalPoint (&relativeTo, where).toFloat(), time, scaleFactor);
 }
 
 void Mouse::pause()

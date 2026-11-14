@@ -18,6 +18,8 @@
 
 namespace phazite
 {
+class AutomationWriter;
+
 enum class ParameterSource
 {
     device,      // one of Phazite's own devices' (DeviceInfo.h)
@@ -54,6 +56,21 @@ juce::String getParameterText (const Song&, const ParameterRef&, float value);
 // change.
 float getValueSetByHand (const Song&, const ParameterRef&);
 void setValueSetByHand (Song&, const ParameterRef&, float value);
+
+// While one lives, the values set by hand are a change of many at once (a preset loaded or tried, a sampler's sound with
+// its settings), which writes no automation: a track in Latch or Write punches in for a control moved by itself
+// (model/playback/internal/AutomationWriter.h), not for each of these. Message thread only.
+class ManyValuesSetByHand
+{
+public:
+    explicit ManyValuesSetByHand (const Song&);
+    ~ManyValuesSetByHand();
+
+private:
+    AutomationWriter* writer = nullptr; // the song's session's, if one plays it
+
+    JUCE_DECLARE_NON_COPYABLE (ManyValuesSetByHand)
+};
 
 // The value it plays now, its automation and its modulation included (or without its modulation): while Phazite's engine
 // plays the song, the one it played last, or the one set by hand where nothing moves it; else the one set by hand.

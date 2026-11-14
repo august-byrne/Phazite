@@ -7,6 +7,7 @@
 
 #include "devices/stretch/Stretch.h"
 #include "model/base/BackgroundJobs.h"
+#include "model/base/IDs.h"
 #include "model/base/Song.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -40,9 +41,10 @@ void purgeClipRenders (const Song&);
 // isn't there yet, a short while after the clips last changed (a drag of a clip's tempo makes no render for each value
 // it passes), two at a time. When one is ready, the engine plays it, so that the clip sounds.
 // One that no clip needs any more stops. One that fails (its source can't be read, or the cache folder written) is
-// remembered and not tried again until its source changes (its date or its size, looked at every two seconds while any
-// failed), or the clip needs another render (other
-// settings, or another cache folder) or needs it again after no clip did: its clips stay silent and say so (hasFailed()).
+// remembered and not tried again until its source changes (its date or its size), or, for one whose folder couldn't be
+// written, until the folder can be (both looked at every two seconds while any failed: checkFailedAgain()), or the clip
+// needs another render (other settings, or another cache folder) or needs it again after no clip did: its clips stay
+// silent and say so (hasFailed(), getFailedClips()).
 class ClipRenders : private juce::ValueTree::Listener,
                     private juce::Timer,
                     private juce::AsyncUpdater
@@ -57,6 +59,17 @@ public:
     // Whether a render failed and won't be tried again until what it is made from changes; and whether any did.
     bool hasFailed (const juce::File& render) const;
     bool hasFailures() const noexcept { return ! failed.empty(); }
+
+    // The clips whose renders failed, as last found: again as the clips change and as failures are added or cleared, not
+    // each time this is asked (the playlist asks while it shows any).
+    const std::vector<ClipID>& getFailedClips() const noexcept { return failedClips; }
+
+    // What its timer does every two seconds while any failed: tries again each whose source changed, or whose folder can
+    // be written now. Called by a test, at once.
+    void checkFailedAgain();
+
+    // How many renders it has started, all told: for the tests that one isn't tried again.
+    int getRendersStarted() const noexcept { return rendersStarted; }
 
     // How far the renders being made have come, since none was (for the status bar's bar): how many are being made or wait
     // their turn (clips that play the same render count once), and how much of all their frames is done, from 0 to 1.
@@ -103,21 +116,32 @@ private:
         bool operator== (const Source&) const = default;
     };
 
-    std::map<juce::File, Source> failed;
+    // And whether its folder couldn't be written as it failed.
+    struct Failure
+    {
+        Source source;
+        bool folderShut = false;
+    };
+
+    std::map<juce::File, Failure> failed;
+    std::vector<ClipID> failedClips;
+    int rendersStarted = 0;
 
     // A job that ended, by the jobs, for the message thread to have played: whether it failed (not stopped, and no render),
-    // and its source as it was when it began.
+    // its source as it was when it began, and whether the folder of its render couldn't be written as it failed.
     struct Finished
     {
         juce::File render;
         bool failed = false;
         Source source;
+        bool folderShut = false;
     };
 
     juce::CriticalSection finishedLock;
     std::vector<Finished> finished;
 
     void update();
+    void findFailedClips();
     void jobFinished (Finished); // on its thread
 
     void timerCallback() override;

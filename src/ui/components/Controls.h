@@ -41,6 +41,11 @@ public:
     // that shows it doesn't move the value.
     std::function<void()> onContextMenu;
 
+    // Escape while it is dragged: the value goes back to where it was as the mouse went down, without a change message, and
+    // the drag does nothing more until the mouse goes up, as in Ableton Live and most DAWs. This is called first, to take
+    // back what the drag changed (ParameterAttachment takes back its undo step, leaving nothing to redo).
+    std::function<void()> onDragCancelled;
+
     // Opens the field a value is typed in, with this text (as typed, the caret after it) or, with none, the value's text, all
     // of it selected; nothing while it is off or hidden. A slider with a text box of its own (a NumberField) types there. The
     // field while it is open, else nullptr.
@@ -68,8 +73,12 @@ public:
 private:
     struct ReadoutClicks;
 
-    bool fineDrag = false;   // Shift was held when the drag started
-    bool showedMenu = false; // the press was a right-click that showed the menu
+    bool fineDrag = false;            // Shift was held when the drag started
+    bool showedMenu = false;          // the press was a right-click that showed the menu
+    bool pressed = false;             // the left button is down on it, dragging the value
+    bool cancelled = false;           // and Escape took the drag back
+    double valueAtPress = 0.0;        // which Escape puts back,
+    juce::Range<double> rangeAtPress; // or a slider's of two values
     double dragStep = 0.0;
     std::unique_ptr<TypedField> valueField; // while it is open, and until a message after it closed
     juce::Component::SafePointer<juce::Component> readout;

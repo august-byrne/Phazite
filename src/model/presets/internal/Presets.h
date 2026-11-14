@@ -22,7 +22,8 @@ juce::var makeTrackPreset (Song&, TrackID);
 // saveDevicePreset()), which names them from the file's folder.
 //
 // A preset file's contents, with the sounds it names from its folder ("Kit Sounds/Boom.wav") as full paths, those inside
-// it (one that leaves it by ".." stays as it is, and isn't taken); void for a file that isn't a preset. And writing one as
+// it (one that leaves it by ".." stays as it is, and one written as a full path is cut to its file's name: neither is taken,
+// and each is told as not beside the preset); void for a file that isn't a preset. And writing one as
 // it is, replacing what the file held; true if it did.
 juce::var readPreset (const juce::File&);
 bool writePreset (const juce::var& preset, const juce::File&);

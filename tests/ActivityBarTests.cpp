@@ -669,6 +669,38 @@ TEST_CASE ("The branch picker switches branches, starts one from now named as ty
     CHECK_FALSE (phazite::renameBranch (context, phazite::getCurrentBranch (context)->id, "MAIN"));
 }
 
+TEST_CASE ("A new branch the picker can't make leaves the branch the song is on as it was, named as before")
+{
+    // Known bug 63: the picker renamed the current branch to the name typed even when no branch was made.
+    using phazite::ui::BranchPicker;
+    Screen screen;
+    auto& context = screen.session.getContext();
+    REQUIRE (screen.registry.invoke ("track.add"));
+    REQUIRE (screen.registry.invoke ("view.versions"));
+    screen.saveVersion ("First");
+    REQUIRE (phazite::getCurrentBranch (context)->name == "main");
+
+    // The record of the current branch can't be written: a folder where its file goes.
+    const auto current = phazite::getVersionsFolder (*phazite::findSong (context)).getChildFile ("current");
+    REQUIRE (current.deleteFile());
+    REQUIRE (current.createDirectory());
+
+    {
+        BranchPicker picker (screen.commands, context, BranchPicker::Mode::pick);
+        picker.getSearchField().setText ("Chorus idea");
+        phazite::test::dispatchPendingMessages(); // a text field tells what changed in it after the change
+
+        REQUIRE (picker.getNameForRow (0).startsWith ("Create new branch 'Chorus-idea'"));
+        picker.choose (0);
+        phazite::test::dispatchPendingMessages();
+        screen.waitForVersions();
+    }
+
+    CHECK (phazite::getCurrentBranch (context)->name == "main");
+    CHECK (phazite::getBranches (context).size() == 1);
+    REQUIRE (current.deleteRecursively());
+}
+
 TEST_CASE ("A change's plus stages it into Staged Changes, whose minus unstages it, as in VS Code")
 {
     Screen screen;

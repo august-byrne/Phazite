@@ -428,6 +428,91 @@ TEST_CASE ("A preset's sounds that can't be taken are told by name, those on a n
     CHECK (second.project->getAudioFolder().getChildFile ("Boom.wav").existsAsFile());
 }
 
+TEST_CASE ("A preset that names a sound by a full path or out of its folder takes nothing from there, and tells it")
+{
+    // The reviewer's finding on the first wave: a preset from someone else could name any file on this computer by its full
+    // path (or "~/..."), which loading it copied into the project. Phazite writes only paths from the preset's folder.
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Presets/Kit" + juce::String (phazite::presetExtension));
+    const auto memo = phazite::test::writeSound (temp.folder.getChildFile ("Private/Memo.wav"), 0.2);
+    const auto secret = phazite::test::writeSound (temp.folder.getChildFile ("Secret.wav"), 0.2);
+
+    {
+        Song first (temp.folder, "First");
+        phazite::chooseInstrument (first.context, first.track (0), first.find ("phaziteDrums"));
+        REQUIRE (phazite::saveDevicePreset (first.context, phazite::getInstrument (first.context, first.track (0))->id, file));
+    }
+
+    auto preset = juce::JSON::parse (file);
+    auto* sounds = preset[keys::device][keys::sounds].getDynamicObject();
+
+    if (sounds == nullptr)
+    {
+        preset[keys::device].getDynamicObject()->setProperty (keys::sounds, new juce::DynamicObject());
+        sounds = preset[keys::device][keys::sounds].getDynamicObject();
+    }
+
+    REQUIRE (sounds != nullptr);
+    sounds->setProperty (phazite::schema::getPadSoundFile (0), memo.getFullPathName());
+    sounds->setProperty (phazite::schema::getPadSoundFile (1), "../Secret.wav");
+    REQUIRE (phazite::writePreset (preset, file));
+
+    // Read, neither names a file to take.
+    const auto read = phazite::readPreset (file);
+    CHECK (read[keys::device][keys::sounds][phazite::schema::getPadSoundFile (0)].toString() == juce::String ("Memo.wav"));
+    CHECK (read[keys::device][keys::sounds][phazite::schema::getPadSoundFile (1)].toString() == juce::String ("../Secret.wav"));
+
+    Song second (temp.folder, "Second");
+    juce::StringArray problems;
+    phazite::setProblemReporter (second.context, [&problems] (const juce::String& title, const juce::String& message)
+                                 { problems.add (title + ": " + message); });
+    REQUIRE (phazite::loadPreset (second.context, file, second.track (0)));
+    REQUIRE (problems.size() == 1);
+    INFO (problems[0].toStdString());
+    CHECK (problems[0].contains ("Memo.wav (not beside the preset)"));
+    CHECK (problems[0].contains ("Secret.wav (not beside the preset)"));
+    CHECK_FALSE (second.project->getAudioFolder().getChildFile ("Memo.wav").exists());
+    CHECK_FALSE (second.project->getAudioFolder().getChildFile ("Secret.wav").exists());
+    CHECK (memo.existsAsFile());
+    CHECK (secret.existsAsFile());
+}
+
+TEST_CASE ("A preset whose sound can't be copied beside it isn't saved, leaves nothing behind, and says which sound")
+{
+    // The reviewer's finding on the first wave: the sound was left out of the preset, which was saved as if whole.
+    phazite::test::TemporaryFolder temp;
+    const auto file = temp.folder.getChildFile ("Presets/Kit" + juce::String (phazite::presetExtension));
+    const auto boom = phazite::test::writeSound (temp.folder.getChildFile ("Sounds/Boom.wav"), 0.2);
+
+    // A file where its folder of sounds goes.
+    REQUIRE (file.getParentDirectory().createDirectory());
+    REQUIRE (file.getSiblingFile ("Kit Sounds").replaceWithText ("in the way"));
+
+    Song song (temp.folder, "Song");
+    juce::StringArray problems;
+    phazite::setProblemReporter (song.context, [&problems] (const juce::String& title, const juce::String& message)
+                                 { problems.add (title + ": " + message); });
+    phazite::chooseInstrument (song.context, song.track (0), song.find ("phaziteDrums"));
+    const auto drums = phazite::getInstrument (song.context, song.track (0))->id;
+    auto handle = phazite::makeDeviceHandle (song.getSong(), drums);
+    REQUIRE (handle.setPadSound (0, boom));
+
+    CHECK_FALSE (phazite::saveDevicePreset (song.context, drums, file));
+    CHECK_FALSE (file.exists());
+    CHECK (file.getSiblingFile ("Kit Sounds").existsAsFile()); // the user's, as it was
+    REQUIRE (problems.size() == 1);
+    INFO (problems[0].toStdString());
+    CHECK (problems[0].startsWith ("Phazite couldn't save the preset: "));
+    CHECK (problems[0].contains ("Boom.wav"));
+
+    // Saved where its sounds can go, it holds them.
+    problems.clear();
+    const auto other = file.getSiblingFile ("Other" + juce::String (phazite::presetExtension));
+    REQUIRE (phazite::saveDevicePreset (song.context, drums, other));
+    CHECK (problems.isEmpty());
+    CHECK (other.getSiblingFile ("Other Sounds").getChildFile ("Boom.wav").existsAsFile());
+}
+
 TEST_CASE ("What a preset file holds is read from its first element; other files aren't presets")
 {
     phazite::test::TemporaryFolder temp;

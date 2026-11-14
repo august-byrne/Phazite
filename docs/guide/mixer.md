@@ -44,6 +44,7 @@ Selecting a channel outlines the channels it feeds and those that feed it, throu
 - Pan keeps a sound's loudness wherever it is panned.
 - Every fader and knob takes a typed value: right-click it and choose **Type a Value...**. A double-click puts it back
   where it started.
+- **Escape** while you drag a fader or a knob puts it back where it was when you pressed, leaving nothing to undo.
 
 ## Mute and solo
 
@@ -76,7 +77,8 @@ A return holds effects that several tracks share, such as a reverb.
 
 - A folder is a bus: it mixes its tracks through its own effects, fader and meter.
 - Its **Bus** switch can make it a plain folder, which has no sound of its own and whose fader only scales its tracks'
-  volumes. A plain folder becomes a bus again when it gets an effect.
+  volumes. A plain folder becomes a bus again when it gets an effect. Either way its volume keeps its automation and
+  modulation; a plain folder has no pan, so its pan's go.
 - **Out** on a track's strip offers **Master**, the buses, and **New Bus from the Selected Tracks**. Choosing a bus
   moves the track into that folder.
 

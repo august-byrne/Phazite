@@ -549,11 +549,18 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
     gesture.startPosition = e.getPosition();
     gesture.startBeat = xToBeat (e.position.x);
     start = e.position;
+    valueDrag = 0.0f;
+    lastDragY = e.position.y;
     refreshPoints();
     before = points;
     moving.clear();
     pressed = -1;
     clickSelectsAlone = false;
+
+    // A double-click's second press: what its first click added stays known until its mouseDoubleClick(). Any other press
+    // forgets it.
+    if (e.getNumberOfClicks() < 2)
+        addedByClick.reset();
     steps.clear();
     stroke.clear();
     drawn.reset();
@@ -833,8 +840,11 @@ void Playlist::AutomationLaneView::dragPoints (const juce::MouseEvent& e)
     // time, known bug 19 until 2026-11-14); the others move with it.
     const auto& from = before[(size_t) pressed];
     const auto target = limitBeat (from.beat + playlist.snapMove (from.beat, xToBeat (e.position.x) - xToBeat (start.x), e.mods));
-    const auto dy = (e.position.y - start.y) * (e.mods.isShiftDown() ? fineFactor : 1.0f);
-    const auto value = yToValue (valueToY (from.value) + dy);
+    // Each move up or down a fifth as far while Shift is held: Shift pressed in the middle of a drag scales what follows, not
+    // the whole way from the press, which made the value jump (known bug 56 until 2026-11-14).
+    valueDrag += (e.position.y - lastDragY) * (e.mods.isShiftDown() ? fineFactor : 1.0f);
+    lastDragY = e.position.y;
+    const auto value = yToValue (valueToY (from.value) + valueDrag);
 
     if (juce::isPositiveAndBelow (pressed, (int) points.size()))
     {
@@ -1019,7 +1029,10 @@ void Playlist::AutomationLaneView::addPointAt (juce::Point<float> position, cons
     const auto index = addAutomationPoint (playlist.context, parameter, { beat, yToValue (position.y) });
 
     if (index >= 0)
+    {
         playlist.selection.selectAutomationPoints (parameter, { index });
+        addedByClick = index;
+    }
 
     gesture.endStep();
     refreshPoints();
@@ -1041,10 +1054,17 @@ void Playlist::AutomationLaneView::mouseDoubleClick (const juce::MouseEvent& e)
     clickSelectsAlone = false;
     gesture.endStep();
 
-    // A point goes; a bent line straightens at its handle.
+    // A point goes; a bent line straightens at its handle. A double-click on empty space adds a point, as its first click
+    // did: it doesn't take away what that click added, which made two undo steps for nothing (known bug 56 until
+    // 2026-11-14).
     refreshPoints();
+    const auto added = std::exchange (addedByClick, std::nullopt);
 
-    if (const auto point = getPointAt (e.position))
+    if (const auto point = getPointAt (e.position); point.has_value() && point == added)
+    {
+        // the click's point stays, selected
+    }
+    else if (point.has_value())
     {
         deleteAutomationPoints (playlist.context, parameter, { *point });
         playlist.selection.selectAutomationPoints (parameter, {});

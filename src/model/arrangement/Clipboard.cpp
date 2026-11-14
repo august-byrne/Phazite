@@ -78,8 +78,18 @@ namespace
             clipboard.track = tracks[(size_t) first];
     }
 
-    // Where Paste puts clips: from the selected track down, else the first selected clip's, else where they came from.
-    TrackID getPasteTrack (const Clipboard& clipboard, const Selection& selection)
+    // Where Paste puts clips: from the selected track down (from the first track below a selected folder or return, which
+    // hold no clips, or from a track added for them when none is below), else from the first selected clip's track, else
+    // from where they came from.
+    struct PasteTarget
+    {
+        TrackID track;
+        bool newTrack = false;
+
+        bool isValid() const noexcept { return track.isValid() || newTrack; }
+    };
+
+    PasteTarget getPasteTarget (const Clipboard& clipboard, const Selection& selection)
     {
         auto* song = selection.getSong();
 
@@ -88,15 +98,59 @@ namespace
 
         const auto tracks = getTracksForClips (*song);
 
-        for (const auto track : getSelectedTracks (selection))
-            if (indexOf (tracks, track) >= 0)
-                return track;
+        if (const auto selected = getSelectedTracks (selection); ! selected.empty())
+        {
+            for (const auto track : selected)
+                if (indexOf (tracks, track) >= 0)
+                    return { track };
+
+            const auto states = getTrackStates (*song);
+            const auto from = std::find (states.begin(), states.end(), findTrackState (*song, selected.front()));
+
+            for (auto state = from; state != states.end(); ++state)
+                if (const auto track = getTrackID (*state); indexOf (tracks, track) >= 0)
+                    return { track };
+
+            if (from != states.end())
+                return { {}, true };
+        }
 
         for (const auto clip : getSelectedClips (selection))
             if (const auto track = getClipTrack (*song, clip); indexOf (tracks, track) >= 0)
-                return track;
+                return { track };
 
-        return indexOf (tracks, clipboard.track) >= 0 ? clipboard.track : TrackID();
+        return { indexOf (tracks, clipboard.track) >= 0 ? clipboard.track : TrackID() };
+    }
+
+    // A track added for pasted clips: after the last of the list's own (not in a folder, where a collapsed folder would hide
+    // it), before the returns.
+    TrackID addTrackForPaste (Song& song)
+    {
+        TrackID last;
+        TrackID firstReturn;
+
+        for (const auto& state : getTrackList (song))
+        {
+            if (! state.hasType (schema::TRACK))
+                continue;
+
+            if (isReturnState (state))
+            {
+                if (! firstReturn.isValid())
+                    firstReturn = getTrackID (state);
+            }
+            else
+            {
+                last = getTrackID (state);
+            }
+        }
+
+        const auto added = insertTrack (song, last, nullptr); // at the end with no track before it
+
+        if (added.isValid() && ! last.isValid() && firstReturn.isValid())
+            moveTracksTo (song, { added }, firstReturn, TrackDrop::before);
+
+        return added;
     }
 
     // The MIDI clips the piano roll shows, which notes are pasted into.
@@ -150,11 +204,12 @@ namespace
     {
         auto& selection = getSelection (context);
         auto* song = findSong (context);
-        const auto target = getPasteTrack (clipboard, selection);
+        const auto pasteTarget = getPasteTarget (clipboard, selection);
 
-        if (song == nullptr || ! target.isValid())
+        if (song == nullptr || ! pasteTarget.isValid())
             return;
 
+        const auto target = pasteTarget.newTrack ? addTrackForPaste (*song) : pasteTarget.track;
         auto tracks = getTracksForClips (*song);
         const auto first = indexOf (tracks, target);
         const auto distance = getPlayheadBeat (*song) - clipboard.range.getStart();
@@ -168,13 +223,14 @@ namespace
 
         while (first >= 0 && needed > (int) tracks.size())
         {
-            const auto added = insertTrack (*song, tracks.back(), nullptr);
+            const auto added = addTrackForPaste (*song);
 
             if (! added.isValid())
                 break;
 
             tracks.push_back (added);
         }
+
         const auto isRange = clipboard.kind == Clipboard::Kind::range;
 
         const auto trackAt = [&tracks] (int index)
@@ -369,7 +425,7 @@ bool canPaste (const Clipboard& clipboard, ProjectContext& context)
 
         case Clipboard::Kind::clips:
         case Clipboard::Kind::range:
-            return getPasteTrack (clipboard, getSelection (context)).isValid();
+            return getPasteTarget (clipboard, getSelection (context)).isValid();
 
         case Clipboard::Kind::nothing:
             break;

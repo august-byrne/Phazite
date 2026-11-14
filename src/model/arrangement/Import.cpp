@@ -18,20 +18,11 @@ namespace phazite
 {
 namespace
 {
-    // Whether a dropped file can go on a track. Audio and notes don't share a track in v1 (docs/design.md,
-    // section 5): an instrument would silence the audio.
+    // Whether a dropped file can go on a track (canTrackHold(): audio and notes don't share a track, and a return or a folder
+    // holds no clips; a file dropped on a return went on it, unheard).
     bool suitsTrack (const Song& song, TrackID track, FileKind kind)
     {
-        const auto state = findTrackState (song, track);
-
-        if (! state.hasType (schema::TRACK) || isFolderState (state))
-            return false;
-
-        for (const auto& clipState : getClipStates (state))
-            if (isMidiState (clipState) != (kind == FileKind::midi))
-                return false;
-
-        return kind == FileKind::midi || ! hasInstrument (song, track);
+        return kind != FileKind::other && canTrackHold (song, track, kind == FileKind::midi);
     }
 
     // What a MIDI file holds for a clip: the notes and controller events of its first track with notes, as the song keeps

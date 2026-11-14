@@ -432,7 +432,10 @@ struct Library::Indexer : public juce::Thread
     // A folder's files, and those of its folders where the listing meets them; a folder that links to one
     // the walk is already inside (a loop, which would be followed to the path's limit) is left out. One that links elsewhere,
     // as a folder of samples on another drive, is followed. Folders are told apart by what the file system knows them by
-    // (File::getFileIdentifier(), which follows links), so a loop is found however its links are written.
+    // (File::getFileIdentifier(), which follows links), so a loop is found however its links are written. That identifier is
+    // the inode on Linux and macOS and the file index on Windows, neither with the volume it is on, so two folders on
+    // different volumes can share one (every NTFS volume's root has the same index), and a folder linked from another volume
+    // could be taken for one the walk is inside, and skipped (docs/backlog.md).
     void walk (const juce::File& folder, const juce::File& root, std::vector<juce::uint64>& inside, std::vector<Found>& files)
     {
         const auto id = folder.getFileIdentifier();

@@ -67,4 +67,15 @@ std::optional<BeatRange> getLoop (const ProjectContext&);
 void loopRange (ProjectContext&, BeatRange);
 void toggleLoop (ProjectContext&);
 void loopSong (ProjectContext&);
+
+// The loop whole, as it is now, to put back as it was: Escape in the middle of a drag of it on a ruler. Its range, whether it
+// follows the song, and whether looping is on.
+struct LoopState
+{
+    BeatRange range;
+    bool followsSong = false, on = false;
+};
+
+LoopState getLoopState (const ProjectContext&);
+void setLoopState (ProjectContext&, const LoopState&);
 } // namespace phazite

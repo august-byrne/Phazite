@@ -281,6 +281,7 @@ void removeChain (Song& song, DeviceID chain)
     auto container = state.getParent();
     storeStatesOf (song, container);
     container.removeChild (state, getUndo (song));
+    forgetWhatNamesTheGone (song); // what modulated the chain or its devices
 
     // One chain left is heard: its mute or its solo would be the container's own switch. Switched off in this step, though a
     // switch alone is none, so that undoing it brings the switches back with the chain.
@@ -666,6 +667,7 @@ void ungroupContainer (Song& song, DeviceID id)
     }
 
     channel.removeChild (state, undo);
+    forgetWhatNamesTheGone (song); // what modulated its chain
 }
 
 void setContainerName (Song& song, DeviceID id, const juce::String& name)
@@ -696,6 +698,7 @@ DeviceID insertIntoChain (Song& song, DeviceID chain, juce::ValueTree device, in
         {
             storeStatesOf (song, state);
             state.removeChild (findDeviceState (song, old), undo);
+            forgetWhatNamesTheGone (song);
         }
 
         state.addChild (device, 0, undo);

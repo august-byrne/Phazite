@@ -174,9 +174,14 @@ public:
     // returns nothing; more is copied on a background thread (known bug 90: the message thread copied gigabytes of
     // recordings), which this returns as a TrackRender: its progress window's, whose deletion cancels it, leaving nothing
     // behind and without calling back. Message thread; the project must outlive what it returns.
+    // The copy takes no link inside those folders, nor what it leads to; a file of the Cache folder that goes or changes
+    // while it copies is left behind, as Phazite makes it again. Its "(saving)" folder holds a marker file (copyMarkerName),
+    // which proves it Phazite's: the next first save or Save As into that folder deletes one a run that crashed left there
+    // (marked before this run started), and nothing else.
     std::unique_ptr<TrackRender> moveTo (const juce::File& parentFolder, const juce::String& name,
                                          std::function<void (const juce::Result&)> onFinished);
     static constexpr juce::int64 copyAtOnceBytes = (juce::int64) 8 << 20;
+    static constexpr const char* copyMarkerName = ".phazite-saving";
 
 private:
     Project (Song::Ptr, const juce::File&);

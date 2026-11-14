@@ -91,17 +91,7 @@ TEST_CASE ("The library lists folders, finds sounds and devices, and keeps favor
 
 namespace
 {
-// A folder that links to another: a junction on Windows, which any user may make, and a symbolic link elsewhere.
-bool linkFolder (const juce::File& link, const juce::File& target)
-{
-#if JUCE_WINDOWS
-    juce::ChildProcess mklink;
-    return mklink.start (juce::StringArray { "cmd", "/c", "mklink", "/J", link.getFullPathName(), target.getFullPathName() })
-           && mklink.waitForProcessToFinish (10000) && link.isDirectory();
-#else
-    return target.createSymbolicLink (link, false) && link.isDirectory();
-#endif
-}
+using phazite::test::linkFolder;
 } // namespace
 
 TEST_CASE ("The library's index doesn't follow a folder that links back to where it is")

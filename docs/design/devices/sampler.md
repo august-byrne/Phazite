@@ -216,7 +216,6 @@ the frame every editor shares).
   sound; a reversed sound is drawn forwards, marked "Reversed".
 - A right-click on the drawing plays the sound as a left click does, and a double-click removes a slice where it resets
   a marker.
-- The LFO's Random shape is drawn as four steps a cycle, though it holds one value for a whole cycle.
 
 ## In the code
 

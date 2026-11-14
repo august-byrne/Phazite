@@ -195,7 +195,7 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
     std::vector<NoteRef> selectionBeforeCopies; // and what was selected until then,
     std::vector<Original> originalsOfCopies;    // and the notes they copy, which move again if the copies go
     Original anchorOfCopies;
-    ClipEnds clipEndsAtPress;                   // where the shown clips ended as the drag began, which each step puts back
+    ClipEnds clipEndsAtPress;                   // where the shown clips ended as the mouse went down, which each step puts back
     BeatDuration movedBy;                       // a move: how far the notes are from where they began,
     int movedRows = 0;                          // along and in rows
     std::unordered_set<NoteRef> selectedBefore; // a rectangle with Ctrl adds to these
@@ -218,8 +218,9 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
 // Under the notes: each note's velocity as a bar. Dragging across the lane sets the velocities of the notes under the
 // mouse, of the selected ones if any are there; a drag from a selected note's bar moves every selected note's velocity by
 // as much, as Logic Pro's Velocity tool does; a right drag draws a straight ramp, as in FL Studio; and the wheel raises
-// or lowers them.
-struct PianoRoll::VelocityLane : public juce::Component
+// or lowers those under the pointer, a burst of it one undo step (VelocityWheel), and elsewhere scrolls.
+struct PianoRoll::VelocityLane : public juce::Component,
+                                 private juce::Timer
 {
     explicit VelocityLane (PianoRoll&);
 
@@ -227,7 +228,9 @@ struct PianoRoll::VelocityLane : public juce::Component
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override; // ends the wheel's burst
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void timerCallback() override; // the wheel has rested: its burst ends
 
     enum class Drag
     {
@@ -243,11 +246,14 @@ struct PianoRoll::VelocityLane : public juce::Component
     std::vector<NoteData> before;      // the notes as they were when it began
     float pressY = 0.0f;
     juce::Point<float> rampStart, rampEnd;
-    double wheelRest = 0.0; // the part of a notch the wheel has turned by and not yet changed velocities for
+    double wheelRest = 0.0;                           // the part of a notch the wheel has turned by and not yet changed velocities for
+    VelocityWheel wheel { roll.context };             // the wheel's burst, one undo step
+    static constexpr int wheelRestMilliseconds = 500; // as long as the wheel rests before its burst ends
 
     bool isDragging() const noexcept { return drag != Drag::none; }
     void cancelDrag(); // Escape: as it was before the mouse went down
     void endDrag();    // another project opened: what it did stays, in the song it did it in
+    void endBurst();   // the wheel's: what it changed is one step
 
     int velocityAt (float y) const;
     std::vector<NoteRef> getNotesAt (float x) const; // whose bars the pointer is on: the selected ones, if it is on any

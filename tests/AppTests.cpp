@@ -7,6 +7,7 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "app/AppServices.h"
+#include "app/MainWindow.h"
 #include "app/ProjectSession.h"
 #include "app/RunMarker.h"
 #include "model/arrangement/Outlines.h"
@@ -1184,4 +1185,174 @@ TEST_CASE ("A new project's first save copies its folders in the background, wit
     CHECK (projects.findChildFiles (juce::File::findFilesAndDirectories, false).size() == 1);
     CHECK (recent.getProjects() == juce::Array<juce::File> { file });
     CHECK (errors.isEmpty());
+}
+
+TEST_CASE ("A window opens where it was if that is on the screens, fitted to one if it is partly off, and nowhere if it is off them")
+{
+    // Roadmap S1.15: the main window's place, as the settings keep it, against the screens there are as Phazite starts.
+    using Box = juce::Rectangle<int>;
+    const juce::Array<Box> screens { Box (0, 0, 1920, 1040), Box (1920, 0, 1280, 984) };
+
+    CHECK (phazite::placeWindow ({ 100, 50, 1000, 700 }, screens) == std::optional<Box> (Box (100, 50, 1000, 700)));
+    CHECK (phazite::placeWindow ({ 1500, 50, 1000, 700 }, screens) == std::optional<Box> (Box (1500, 50, 1000, 700))); // across both
+    CHECK (phazite::placeWindow ({ 2000, 50, 1000, 700 }, { screens.getFirst() }) == std::nullopt);                    // its screen gone
+    CHECK (phazite::placeWindow ({ 1900, 980, 1000, 700 }, { screens.getFirst() }) == std::nullopt); // a corner of it shows
+    CHECK (phazite::placeWindow ({ 100, 50, 1000, 700 }, {}) == std::nullopt);                       // no screen at all
+    CHECK (phazite::placeWindow ({}, screens) == std::nullopt);                                      // nothing kept
+
+    // Partly off: moved onto the screen that holds most of it; larger than it, fitted to it.
+    CHECK (phazite::placeWindow ({ 1500, 600, 1000, 700 }, { screens.getFirst() }) == std::optional<Box> (Box (920, 340, 1000, 700)));
+    CHECK (phazite::placeWindow ({ -50, -30, 2500, 1400 }, screens) == std::optional<Box> (screens.getFirst()));
+    CHECK (phazite::placeWindow ({ 2100, -200, 900, 700 }, screens) == std::optional<Box> (Box (2100, 0, 900, 700)));
+}
+
+namespace
+{
+// A session with a new untitled project, whose first save goes to Projects/Beat; with a host for its progress window
+// unless told not to (the session then keeps the copy itself).
+struct FirstSave
+{
+    explicit FirstSave (bool withHost = true)
+    {
+        if (withHost)
+            session.addCommands (registry, renders);
+
+        session.chooseSaveFile = [this] (const juce::File&, std::function<void (const juce::File&)> callback)
+        { callback (projects.getChildFile ("Beat")); };
+        session.onError = [this] (const juce::String& title, const juce::String& message) { errors.add (title + ": " + message); };
+        REQUIRE (session.createProject ({}).wasOk());
+    }
+
+    // A recording in the project's Audio folder, larger than what is copied at once unless told how large.
+    juce::File addRecording (juce::int64 bytes = phazite::Project::copyAtOnceBytes + 4096)
+    {
+        juce::MemoryBlock recording ((size_t) bytes, true);
+        const auto take = session.getProject()->getAudioFolder().getChildFile ("Take 1.wav");
+        REQUIRE (take.replaceWithData (recording.getData(), recording.getSize()));
+        return take;
+    }
+
+    // What is in Projects, by name.
+    juce::StringArray listProjects() const
+    {
+        juce::StringArray names;
+
+        for (const auto& file : projects.findChildFiles (juce::File::findFilesAndDirectories, false))
+            names.add (file.getFileName());
+
+        names.sort (false);
+        return names;
+    }
+
+    phazite::test::TemporaryFolder temp;
+    const juce::File projects = temp.folder.getChildFile ("Projects");
+    phazite::Settings settings;
+    phazite::RecentProjects recent { settings };
+    phazite::ProjectSession session { phazite::test::getEngineContext(), recent, projects, temp.folder.getChildFile ("Unsaved") };
+    phazite::CommandRegistry registry;
+    phazite::test::RenderHost renders;
+    juce::StringArray errors;
+};
+} // namespace
+
+TEST_CASE ("A first save whose background copy fails says why in its progress window, and the project stays untitled")
+{
+    // The reviewer's finding on the first wave: the copy called its callback straight from the member that the progress
+    // window's deletion freed, and the session's callback read the title that went with it.
+    FirstSave s;
+    s.addRecording();
+    REQUIRE (s.registry.invoke ("project.save"));
+    REQUIRE (s.renders.render != nullptr);
+
+    // Its folder made meanwhile: the copy can't take its place.
+    REQUIRE (s.projects.getChildFile ("Beat").createDirectory());
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }, 30000));
+    REQUIRE (s.renders.finished.size() == 1);
+    CHECK (s.renders.finished[0].startsWith ("Saving Beat: "));
+    CHECK_FALSE (s.renders.finished[0].endsWith (": ok"));
+    CHECK (s.session.isUntitled());
+    CHECK (s.listProjects() == juce::StringArray ("Beat")); // the copy gone, the folder made meanwhile left as it was
+}
+
+TEST_CASE ("A first save's copy without a host stops when another project opens in its place")
+{
+    // The reviewer's finding on the first wave: the copy the session keeps itself (the tests') outlived its project.
+    FirstSave s (false);
+    s.addRecording();
+    s.session.saveProject();
+    REQUIRE (s.listProjects() == juce::StringArray ("Beat (saving)"));
+
+    REQUIRE (s.session.createProject ({}).wasOk());
+    CHECK (s.listProjects().isEmpty()); // stopped, and what it had copied gone
+    phazite::test::dispatchPendingMessages();
+    CHECK (s.session.isUntitled());
+}
+
+TEST_CASE ("A first save copies what the project's folders hold, but not what a link in them leads to")
+{
+    // The reviewer's finding on the first wave: the copy followed links, so a folder from someone else with a link inside
+    // copied what it led to.
+    FirstSave s;
+    const auto outside = s.temp.folder.getChildFile ("Private");
+    REQUIRE (outside.createDirectory());
+    REQUIRE (outside.getChildFile ("memo.wav").replaceWithText ("private"));
+    REQUIRE (phazite::test::linkFolder (s.session.getProject()->getAudioFolder().getChildFile ("Linked"), outside));
+    s.addRecording (1024);
+
+    REQUIRE (s.registry.invoke ("project.save"));
+    CHECK (s.renders.render == nullptr); // small: copied at once
+    CHECK (s.errors.isEmpty());
+    const auto audio = s.projects.getChildFile ("Beat").getChildFile ("Audio");
+    CHECK (audio.getChildFile ("Take 1.wav").existsAsFile());
+    CHECK_FALSE (audio.getChildFile ("Linked").exists());
+    CHECK (outside.getChildFile ("memo.wav").existsAsFile());
+}
+
+TEST_CASE ("A first save goes on without a file of the Cache folder that went while it copied")
+{
+    // The reviewer's finding on the first wave: a file of the Cache folder (which holds only what Phazite makes again) that
+    // changed or went during the background copy failed the whole save.
+    FirstSave s;
+    s.addRecording (phazite::Project::copyAtOnceBytes * 4);
+    const auto cached = s.session.getProject()->getCacheFolder().getChildFile ("Frozen.wav");
+    REQUIRE (cached.getParentDirectory().createDirectory());
+    REQUIRE (cached.replaceWithText ("frozen"));
+
+    REQUIRE (s.registry.invoke ("project.save"));
+    REQUIRE (s.renders.render != nullptr);
+    REQUIRE (cached.deleteFile()); // listed, then gone before the copy reaches it, behind the large recording
+    REQUIRE (phazite::test::dispatchMessagesUntil ([&s] { return s.renders.render == nullptr; }, 30000));
+    CHECK (s.renders.finished == juce::StringArray ("Saving Beat: ok"));
+    CHECK_FALSE (s.session.isUntitled());
+    CHECK (s.errors.isEmpty());
+}
+
+TEST_CASE ("A first save removes the copies a crashed save left beside it, and only those Phazite marked as its own")
+{
+    // The reviewer's finding on the first wave: a crash during a copy left "<name> (saving)" beside the user's projects,
+    // with full copies of the audio, and nothing removed it.
+    FirstSave s;
+    const auto makeCopy = [&s] (const juce::String& name, bool marked, juce::Time made)
+    {
+        const auto folder = s.projects.getChildFile (name);
+        REQUIRE (folder.getChildFile ("Audio").createDirectory());
+        REQUIRE (folder.getChildFile ("Audio").getChildFile ("Take 1.wav").replaceWithText ("audio"));
+
+        if (marked)
+        {
+            const auto marker = folder.getChildFile (phazite::Project::copyMarkerName);
+            REQUIRE (marker.replaceWithText ({}));
+            REQUIRE (marker.setLastModificationTime (made));
+        }
+    };
+
+    const auto before = juce::Time::getCurrentTime() - juce::RelativeTime::hours (1);
+    makeCopy ("Old (saving)", true, before);                                                             // left by a crash: goes
+    makeCopy ("Mine (saving)", false, before);                                                           // not Phazite's: stays
+    makeCopy ("Running (saving)", true, juce::Time::getCurrentTime() + juce::RelativeTime::minutes (1)); // as one being written: stays
+    s.addRecording (1024);
+
+    REQUIRE (s.registry.invoke ("project.save"));
+    CHECK (s.errors.isEmpty());
+    CHECK (s.listProjects() == juce::StringArray ("Beat", "Mine (saving)", "Running (saving)"));
 }

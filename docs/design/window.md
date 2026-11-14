@@ -43,6 +43,7 @@ arranged, and the look they share.
 | Status bar with the hint bar | Built | |
 | Notices in place of dialogs | Built | |
 | Panels hidden, maximized, in a window of their own | Built | The upper panel always stays in the main window |
+| The window opens where it was closed | Built | Only on a screen that still exists |
 | Layouts: Beat, Mix, Full | Built | |
 | Layouts of the user's own | Planned | No roadmap step |
 | Dark, light and high-contrast themes, Follow System | Built | |
@@ -270,6 +271,9 @@ The panels are the left panel, the upper panel, the lower panel and the inspecto
   maximized, and comes back docked when Phazite opens.
 - **Sizes are kept.** A panel hidden and shown again comes back at its size, and the window opens with its panels as
   they were left.
+- **The window opens where it was closed,** at its size, maximized if it was, as long as a screen there still exists.
+  One that would open off every screen opens at its first size (1280 by 800) on the main screen, and one larger than
+  its screen, or partly off it, is fitted to it.
 - **Nothing plays out of sight.** A sound the browser previews stops as the browser hides.
 - **Full Screen** fills the screen with the window.
 - **Layouts** arrange the panels in one step. Three ship, and they are layouts, not modes: *Beat* (the playlist, the

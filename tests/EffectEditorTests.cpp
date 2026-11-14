@@ -361,6 +361,17 @@ TEST_CASE ("The stereo expander's editor shows its image and how alike its sides
     scope->pushOutput (noise.data(), noise.data(), (int) noise.size());
     juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
     CHECK (editor.getNumDots() == 512);
+    CHECK (std::abs (editor.getDotsAcross()) < 0.01f); // mono stands straight up
+
+    // Known bug 115: a sound on the left alone lies along the L line, left of the centre; on the right alone, right of it.
+    const std::vector<float> silence (noise.size(), 0.0f);
+    scope->pushOutput (noise.data(), silence.data(), (int) noise.size());
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (editor.getDotsAcross() < -0.05f);
+
+    scope->pushOutput (silence.data(), noise.data(), (int) noise.size());
+    juce::SharedResourcePointer<phazite::ui::DisplayTicker>()->tickNow();
+    CHECK (editor.getDotsAcross() > 0.05f);
 }
 
 TEST_CASE ("The phaser's editor shows where the LFO has each side's notches, and its dot drags the frequency and feedback")

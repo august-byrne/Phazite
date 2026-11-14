@@ -20,6 +20,8 @@
 #include "devices/delay/Delay.h"
 #include "devices/eq/Equalizer.h"
 #include "model/arrangement/PlaylistModel.h"
+#include "model/automation/internal/Automation.h"
+#include "model/base/internal/Selection.h"
 #include "model/base/internal/SongText.h"
 #include "model/commands/internal/Undo.h"
 #include "model/engine/internal/EngineContext.h"
@@ -314,4 +316,44 @@ TEST_CASE ("Performance gate: what an edit and a save allocate grows as the song
     // A save writes the song's text once, with what it keeps of the song beside it (1.34 times the text's allocations
     // measured): the text written twice would make it 2.3.
     CHECK (big.save * 4 < big.text * 7);
+}
+
+TEST_CASE ("Performance gate: selected automation points are found by their beats, the work growing with the points, not with their square")
+{
+    // Each selected point was looked for through the whole curve, and selecting them compared each with every other: a
+    // drawn lane of 10,000 points selected cost about 10^8 comparisons each time a lane painted.
+    const auto comparisonsFor = [] (int numPoints)
+    {
+        phazite::test::TestSong song;
+        auto& document = *phazite::findSong (song.context);
+        const auto volume = song.getVolumeParameter (song.firstTrack);
+        std::vector<phazite::ParameterPoint> points;
+        std::vector<int> all;
+
+        for (int i = 0; i < numPoints; ++i)
+        {
+            points.push_back ({ volume, { phazite::BeatPosition::fromBeats (i * 0.25), (float) (i % 2) * 0.5f } });
+            all.push_back (i);
+        }
+
+        // Two at the last beat, a jump.
+        points.push_back ({ volume, { phazite::BeatPosition::fromBeats ((numPoints - 1) * 0.25), 0.75f } });
+        all.push_back (numPoints);
+        phazite::addAutomationPoints (document, points);
+
+        auto& selection = phazite::getSelection (song.context);
+        const auto before = phazite::Selection::getPointComparisons();
+        phazite::selectPoints (selection, volume, all);
+        const auto selected = phazite::getSelectedPoints (selection);
+        const auto used = phazite::Selection::getPointComparisons() - before;
+        REQUIRE (selected.has_value());
+        CHECK (selected->indices.size() == (size_t) numPoints + 1);
+        CHECK (selection.getNumObjectsSelected() == numPoints + 1);
+        return used;
+    };
+
+    // Ten times the points, about ten times the work (a little more for the sorting); never a hundred.
+    const auto small = comparisonsFor (1000), large = comparisonsFor (10000);
+    INFO ("1,000 points: " << small << " comparisons; 10,000: " << large);
+    CHECK (large < small * 20);
 }

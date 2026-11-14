@@ -804,6 +804,15 @@ void AudioClipEditor::setUpField (NumberField& field, const juce::String& undoNa
     field.onDragStart = [this, undoName] { fieldDrag = std::make_unique<SongGesture> (context, undoName); };
     field.onDragEnd = [this] { fieldDrag = nullptr; };
     field.onValueChange = std::move (change);
+
+    // Escape during the drag: what it changed goes, leaving nothing to redo.
+    field.onDragCancelled = [this]
+    {
+        if (fieldDrag != nullptr)
+            fieldDrag->rollBack();
+
+        fieldDrag = nullptr;
+    };
 }
 
 void AudioClipEditor::changePitch()
@@ -872,8 +881,12 @@ void AudioClipEditor::refresh()
     waveform->hits = hasAudio ? getTransients (context, clip) : std::optional<std::vector<WarpMarker>>();
     waveform->clipChanged();
 
-    // Nothing tells the editor when the audio's render is ready, or its hits are found: look again until they are.
-    if ((info.has_value() && info->state == AudioState::preparing) || (hasAudio && ! waveform->hits.has_value()))
+    // Nothing tells the editor when the audio's render is ready, or its hits are found: look again until they are. A render
+    // that failed is tried again as its source changes (the file fixed), and may come good: look again while it has failed
+    // too, as the playlist's clip does.
+    const auto waitsForRender = info.has_value() && (info->state == AudioState::preparing || info->state == AudioState::failed);
+
+    if (waitsForRender || (hasAudio && ! waveform->hits.has_value()))
     {
         if (! preparingCheck.isTimerRunning())
             preparingCheck.startTimerHz (4);

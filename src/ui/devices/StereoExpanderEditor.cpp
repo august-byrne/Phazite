@@ -48,6 +48,16 @@ public:
     float getInputCorrelation() const noexcept { return inputCorrelation; }
     int getNumDots() const noexcept { return (int) outputs.size(); }
 
+    float getDotsAcross() const
+    {
+        auto sum = 0.0f;
+
+        for (const auto& dot : outputs)
+            sum += dot.x;
+
+        return outputs.empty() ? 0.0f : sum / (float) outputs.size();
+    }
+
     void paint (juce::Graphics& g) override
     {
         const auto& p = getPalette (*this);
@@ -126,10 +136,11 @@ private:
     float correlation = StereoExpander::noReading, inputCorrelation = StereoExpander::noReading;
     DrawnNumbers drawn;
 
-    // A pair as a dot: turned an eighth of a turn, so that mono stands up; the lower half folded up, as a half disc.
+    // A pair as a dot: turned an eighth of a turn, so that mono stands up, the left alone lies along the L line (up and to
+    // the left) and the right alone along the R line; the lower half folded up, as a half disc.
     static Dot toDot (float l, float r)
     {
-        auto x = (l - r) * 0.70710678f, y = (l + r) * 0.70710678f;
+        auto x = (r - l) * 0.70710678f, y = (l + r) * 0.70710678f;
 
         if (y < 0.0f)
         {
@@ -299,6 +310,11 @@ float StereoExpanderEditor::getShownInputCorrelation() const
 int StereoExpanderEditor::getNumDots() const
 {
     return image->getNumDots();
+}
+
+float StereoExpanderEditor::getDotsAcross() const
+{
+    return image->getDotsAcross();
 }
 
 juce::Point<float> StereoExpanderEditor::getDiscCentre() const

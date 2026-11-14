@@ -185,6 +185,7 @@ private:
     SoundView soundView;             // under the tree: the sound selected
     juce::Rectangle<int> statusArea; // under it: what plays
     bool wasPlaying = false;
+    bool wasInView = false;             // at the timer's last look (isInView())
     bool trackDropping = false;         // a track dragged over it, to save as a preset
     const void* justSelected = nullptr; // the row the click being handled selected, if it did
 
@@ -210,9 +211,11 @@ private:
     void noteUsed (const LibraryItem&);
     bool isPreviewing (const LibraryItem&) const;
     bool isPreviewOn() const;
-    void selectionMoved(); // the sound view shows the item selected now
-    void showFilters();    // the filter bar as the filters and the search are now
-    void endSwap();        // once it is kept, put back, or closed by something else: the browser as it was before it
+    void selectionMoved();  // the sound view shows the item selected now
+    void showFilters();     // the filter bar as the filters and the search are now
+    void endSwap();         // once it is kept, put back, or closed by something else: the browser as it was before it
+    void stopWhileHidden(); // no preview plays, and a swap keeps what it tried, as anything else leaves it
+    bool isInView() const;  // it, and everything it is in, visible (the left panel shown, its window open)
     bool canTryInSwap (const LibraryItem&) const;
     std::unique_ptr<RootNode> makeSwapRoot (DeviceID); // a device's presets, its folders open, or a line that it has none
 

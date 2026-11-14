@@ -179,6 +179,11 @@ float LevelHistoryView::getNewestReduction() const
     return readings.empty() ? 0.0f : readings.back().reduction;
 }
 
+float LevelHistoryView::getNewestInput() const
+{
+    return readings.empty() ? lowest : readings.back().input;
+}
+
 graph::LevelAxis LevelHistoryView::getLevels() const
 {
     return { getLocalBounds().toFloat().reduced (1.0f), lowest, 0.0f };

@@ -150,4 +150,27 @@ void loopSong (ProjectContext& context)
     if (auto* song = findSong (context))
         loopSong (*song);
 }
+
+LoopState getLoopState (const ProjectContext& context)
+{
+    auto* song = findSong (context);
+    return song != nullptr ? LoopState { getLoopBeats (*song), doesLoopFollowSong (*song), isLoopOn (*song) } : LoopState();
+}
+
+void setLoopState (ProjectContext& context, const LoopState& state)
+{
+    auto* song = findSong (context);
+
+    if (song == nullptr)
+        return;
+
+    // Each turns looping on.
+    if (state.followsSong)
+        loopSong (*song);
+    else
+        loopBeats (*song, state.range);
+
+    if (isLoopOn (*song) != state.on)
+        toggleLoop (*song);
+}
 } // namespace phazite

@@ -112,7 +112,10 @@ shared memory checked, and a DAWproject written past 4 GB refused (known bugs 10
 - The first save copies its folders across and goes on there with its undo history. The untitled folder is deleted
   when the project closes, saved or not. The folders are copied into "*name* (saving)" beside, which takes the
   project's name only once it is whole; until then the project stays where it was. Past 8 MB the copy runs in the
-  background, in a progress window with Cancel, which leaves nothing behind.
+  background, in a progress window with Cancel, which leaves nothing behind. The copy takes no link inside the
+  folders, nor what it leads to, and leaves behind a file of `Cache` that goes or changes while it copies, as Phazite
+  makes those again. A "(saving)" folder holds a marker of Phazite's; one that a crash left is deleted at the next first
+  save into that folder, and a folder of that name without the marker is never touched.
 - An untitled project is not in Open Recent, and Export Song offers `Documents/Phazite/Exports` for it.
 - A lock keeps a second Phazite running at the same time away from the folders the first one uses.
 - What a new project starts with (its tempo, key and outline) is part of its first save. It is not an undo step and
@@ -217,7 +220,9 @@ what it exports: the song, or its stems.
   peaks can end up under the target; the report then says by how much.
 - **The file** goes into the project's `Renders` folder, named after the project. It is written next to that name
   and replaces a file there only once it is complete, so a cancelled or failed export leaves the old one.
-- **It runs in the background,** with a progress bar and Cancel. Playback stops for it.
+- **It runs in the background,** with a progress bar and Cancel. Playback stops for it. Escape asks before it stops
+  the export ("Stop the export?"), and the window closed while it exports stops it and says so in a notice, so a
+  stray key never throws a long export away without a word.
 - **A plug-in that fails, fails the export.** A plug-in that crashes while the song renders, or that holds a block
   for 30 seconds, fails the render, which names the plug-in. Nothing is written without it. Cancelling does not
   wait for a plug-in either.

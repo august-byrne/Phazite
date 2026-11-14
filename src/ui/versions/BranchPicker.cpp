@@ -362,13 +362,9 @@ void BranchPicker::choose (int index)
             switch (row.kind)
             {
                 case Row::Kind::newBranch:
-                    // From Now, named as typed.
+                    // From Now, named as typed; nothing renamed if it couldn't be made.
                     selectVersion (projectContext, {});
-
-                    if (bridge.invoke ("version.newBranch") && typed.isNotEmpty())
-                        if (const auto made = getCurrentBranch (projectContext))
-                            renameBranch (projectContext, made->id, typed);
-
+                    newBranchNamed (projectContext, typed);
                     break;
 
                 case Row::Kind::branch:

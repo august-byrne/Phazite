@@ -1095,6 +1095,7 @@ void Browser::preview (const LibraryItem& item)
     else if (BrowserModel::canPreview (item) && isPreviewOn())
     {
         previewer.play (item.file, projectContext, BrowserModel::previewsInTime (item));
+        wasInView = isInView(); // so that it stops as the browser goes out of view, even before the timer's next look
     }
     else
     {
@@ -1947,11 +1948,26 @@ void Browser::visibilityChanged()
     else
     {
         stopTimer();
-        previewer.stop();
-
-        if (isSwapping())
-            keepSwap();
+        stopWhileHidden();
     }
+}
+
+void Browser::stopWhileHidden()
+{
+    previewer.stop();
+
+    if (isSwapping())
+        keepSwap();
+}
+
+bool Browser::isInView() const
+{
+    // Visible, and so is everything it is in; a window minimized still counts, as its previews go on.
+    for (const auto* c = static_cast<const juce::Component*> (this); c != nullptr; c = c->getParentComponent())
+        if (! c->isVisible())
+            return false;
+
+    return true;
 }
 
 void Browser::lookAndFeelChanged()
@@ -1965,6 +1981,16 @@ void Browser::timerCallback()
     // was before it.
     if (swap != nullptr && ! swap->isOpen())
         endSwap();
+
+    // Hidden with what holds it (the left panel closed, dragged shut, another panel maximized), which visibilityChanged()
+    // doesn't hear: as hidden, once, as it goes (what plays after, the startup sound, isn't the browser's to stop).
+    if (const auto inView = isInView(); inView != wasInView)
+    {
+        wasInView = inView;
+
+        if (! inView)
+            stopWhileHidden();
+    }
 
     previewer.keepInTime (projectContext);
 

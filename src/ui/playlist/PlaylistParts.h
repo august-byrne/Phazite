@@ -129,6 +129,9 @@ struct Playlist::AutomationLaneView : public juce::Component,
     int pressed = -1;                    // the point, or the line after the point, the mouse went down on
     int hovered = -1;                    // the line, by the point it starts at, whose bend handle shows: the one under the mouse
     bool clickSelectsAlone = false;      // a click on a selected point selects it alone, unless it starts a drag
+    float valueDrag = 0.0f;              // how far a drag has moved the points' values, in pixels, each move a fifth with Shift
+    float lastDragY = 0.0f;              // and where the drag was last
+    std::optional<int> addedByClick;     // the point a click on empty space added, which a double-click it began leaves
     std::map<double, float> steps;       // Draw: each grid cell's value, by its start in beats
     std::vector<AutomationPoint> stroke; // Draw with Alt: the free line, by beat
     std::optional<BeatRange> drawn;      // Draw and Paint: what they have replaced so far
@@ -281,6 +284,7 @@ struct Playlist::Gesture : public TimelineGesture
     std::vector<MovingClip> moving;
     BeatPosition anchorStart; // where the clip under the mouse (or its copy) started; it is the one that snaps
     int rowOffset = 0;        // how many rows the moving clips have moved
+    juce::String refusal;     // why they can't go to the row under the pointer, for the hint bar; empty where they can
     BeatDuration moved;       // and how far along
     bool copying = false;     // copies (or aliases) of the clips move, and the originals stay
 

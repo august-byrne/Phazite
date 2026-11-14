@@ -38,7 +38,7 @@ never past the start of the next clip on the track.
 | **Escape** during a drag | Takes the drag back, leaving nothing to undo |
 | Click a key at the left | Plays it and selects its notes; **Ctrl**+click adds them |
 | Drag along the keys | Selects the notes of a range of keys |
-| Wheel | Scrolls; **Shift**+wheel sideways, **Ctrl**+wheel zooms, **Alt**+wheel makes the rows taller or shorter |
+| Wheel | Scrolls; **Shift**+wheel sideways, **Ctrl**+wheel or a trackpad's pinch zooms, **Alt**+wheel makes the rows taller or shorter |
 | Middle-button drag | Moves the view |
 
 A click and a right-click work this way in every keymap.
@@ -81,7 +81,7 @@ shows a stem for each note.
 | Drag from a selected note's stem | Changes every selected note's velocity by as much, keeping their differences |
 | Drag elsewhere | Sets the velocities under the pointer |
 | Right-drag | Draws a straight ramp |
-| Wheel | Raises or lowers the velocities |
+| Wheel over a note's stem | Raises or lowers the velocities there, a burst of turns one undo step; elsewhere it scrolls |
 | Drag the line over the lane | Makes the lane taller or shorter |
 | The chevron at its top left | Folds the lane to a thin row, or opens it |
 

@@ -205,6 +205,12 @@ using SaveProjectThen = std::function<void (std::function<void (bool saved)>)>;
 // the current branch's last commit, the song with its changes going on there. From a commit, the song becomes that
 // commit's, a checkout. False if it can't be made (before the first commit, while one is being made).
 bool newBranch (ProjectContext&, const juce::String& fromVersion, const SaveProjectThen&);
+
+// The branch picker's "Create new branch": a branch from Now, as newBranch() makes one, named as typed (toBranchName(); the
+// next "idea-" name for an empty one or one another branch has). Its ID, or empty if none could be made: then nothing else
+// changes, the branch the song is on keeping its name.
+juce::String newBranchNamed (ProjectContext&, const juce::String& name);
+
 bool switchBranch (ProjectContext&, const juce::String& branchID, const SaveProjectThen&);
 
 // Whether the song can switch to another branch now: not while it records (a take not finished would be lost), while a

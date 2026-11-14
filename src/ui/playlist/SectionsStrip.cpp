@@ -209,12 +209,13 @@ void SectionsStrip::mouseDown (const juce::MouseEvent& e)
 
     // A plain click selects the section at once, so a drag takes it; Ctrl waits to see whether it is a
     // click (adding it to the selection) or a drag (copying it).
+    auto selectionAtPress = SelectionAtPress::take (context);
     range.clear();
 
     if (! e.mods.isCommandDown())
         selection.selectOnly (section->id);
 
-    drag = Drag { Drag::Kind::pending, section->id, isOnRightEdge (*section, e.getPosition()), {} };
+    drag = Drag { Drag::Kind::pending, section->id, isOnRightEdge (*section, e.getPosition()), {}, std::move (selectionAtPress) };
     beginDragAutoRepeat (TimelineEditor::autoRepeatInterval); // the time line goes on scrolling while the mouse rests past an edge
 }
 
@@ -246,6 +247,18 @@ void SectionsStrip::mouseDrag (const juce::MouseEvent& e)
         drag->target = findNearestBoundary (*section, e.position.x);
 
     dragChanged();
+}
+
+bool SectionsStrip::cancelDrag()
+{
+    if (! drag.has_value())
+        return false;
+
+    const auto cancelled = std::move (*drag);
+    drag.reset();
+    cancelled.selectionAtPress.putBack (context);
+    dragChanged();
+    return true;
 }
 
 void SectionsStrip::mouseUp (const juce::MouseEvent& e)

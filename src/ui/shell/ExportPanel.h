@@ -35,6 +35,16 @@ public:
     // Close (or Cancel before an export), which also closes the dialog window it is in.
     std::function<void()> onClose;
 
+    // While it exports, Escape asks whether to stop (an alert window, unless replaced: tests), and stops it only if told to,
+    // saying so; Cancel stops it at once, as it says. Escape closes the window as any dialog's once nothing exports.
+    std::function<void (std::function<void (bool stop)>)> askToStop;
+
+    // Its window closed while it exported (the close button, another project opening): the export stopped, which the window
+    // that has gone can't say.
+    std::function<void()> onClosedWhileExporting;
+
+    void parentHierarchyChanged() override; // listens for Escape in the window it is in
+
     ExportSettings getSettings() const; // as the controls show them
     bool isExportingStems() const;      // what the What box shows
     juce::File getFile() const noexcept { return file; }
@@ -81,6 +91,22 @@ private:
     NumberField targetField, ceilingField;
     juce::TextButton changeFileButton { "Change..." }, showButton, closeButton { "Cancel" }, exportButton { "Export" };
     juce::ProgressBar progressBar { progress };
+
+    // Escape in its window, which the window would close on.
+    struct EscapeKeys : public juce::KeyListener
+    {
+        explicit EscapeKeys (ExportPanel& p)
+            : panel (p)
+        {
+        }
+        bool keyPressed (const juce::KeyPress&, juce::Component*) override;
+        ExportPanel& panel;
+    };
+
+    EscapeKeys escapeKeys { *this };
+    juce::Component::SafePointer<juce::Component> keysWindow; // the window it listens to
+    bool asking = false;                                      // whether to stop, after Escape
+    bool escapePressed (const juce::KeyPress&);               // true if it took the key
 
     void readSettings();
     void writeSettings();

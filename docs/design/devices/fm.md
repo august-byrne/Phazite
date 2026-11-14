@@ -206,8 +206,7 @@ plays, a modulator's how bright it makes what it bends.
 - When several notes each take a busy voice on the same sample, only the last taken fades out; the others stop at once
   and can click.
 - An operator's settings can't be copied onto another, and there is no randomizer.
-- The editor shows three of the four groups of operator controls only behind their tabs, and draws the LFO's Random
-  shape as four steps a cycle, though it holds one value for a whole cycle.
+- The editor shows three of the four groups of operator controls only behind their tabs.
 
 ## In the code
 

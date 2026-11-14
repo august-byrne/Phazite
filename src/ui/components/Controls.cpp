@@ -213,6 +213,21 @@ bool ValueSlider::keyPressed (const juce::KeyPress& key)
     const auto mods = key.getModifiers();
     const auto typed = key.getTextCharacter();
 
+    if (key == juce::KeyPress::escapeKey && pressed && ! cancelled)
+    {
+        cancelled = true;
+
+        if (onDragCancelled != nullptr)
+            onDragCancelled();
+
+        if (isTwoValue() || isThreeValue())
+            setMinAndMaxValues (rangeAtPress.getStart(), rangeAtPress.getEnd(), juce::dontSendNotification);
+        else
+            setValue (valueAtPress, juce::dontSendNotification);
+
+        return true;
+    }
+
     if (canTypeValue() && ! mods.isCtrlDown() && ! mods.isAltDown() && ! mods.isCommandDown()
         && (juce::CharacterFunctions::isDigit (typed) || typed == '-' || typed == '+' || typed == '.'))
     {
@@ -226,6 +241,7 @@ bool ValueSlider::keyPressed (const juce::KeyPress& key)
 void ValueSlider::mouseDown (const juce::MouseEvent& e)
 {
     showedMenu = e.mods.isPopupMenu() && onContextMenu != nullptr;
+    pressed = cancelled = false;
 
     if (showedMenu)
     {
@@ -234,18 +250,24 @@ void ValueSlider::mouseDown (const juce::MouseEvent& e)
     }
 
     fineDrag = e.mods.isShiftDown();
+    pressed = isEnabled();
+    cancelled = false;
+    valueAtPress = isTwoValue() || isThreeValue() ? 0.0 : getValue();
+    rangeAtPress = isTwoValue() || isThreeValue() ? juce::Range<double> (getMinValue(), getMaxValue()) : juce::Range<double>();
     juce::Slider::mouseDown (e);
 }
 
 void ValueSlider::mouseUp (const juce::MouseEvent& e)
 {
+    pressed = false;
+
     if (! showedMenu)
-        juce::Slider::mouseUp (e);
+        juce::Slider::mouseUp (e); // after Escape, at the value it had as the mouse went down: no change, and the drag ends
 }
 
 void ValueSlider::mouseDrag (const juce::MouseEvent& e)
 {
-    if (showedMenu)
+    if (showedMenu || cancelled)
         return;
 
     if (fineDrag)
@@ -646,9 +668,13 @@ ParameterAttachment::ParameterAttachment (juce::Slider& s)
     // During a drag it moves the gesture's value; a key press or a double-click is a step of its own.
     slider.onValueChange = [this] { handle.setValue ((float) slider.getValue()); };
 
-    // A right-click offers to automate the parameter, or modulate it (docs/design.md, section 10).
+    // A right-click offers to automate the parameter, or modulate it (docs/design.md, section 10); Escape during a drag
+    // takes back its undo step, leaving nothing to redo.
     if (auto* valueSlider = dynamic_cast<ValueSlider*> (&slider))
+    {
         valueSlider->onContextMenu = [this] { showMenu(); };
+        valueSlider->onDragCancelled = [this] { handle.cancelGesture(); };
+    }
 
     // A knob's ring changes the amount of its first modulation, and a modulator dropped on it modulates it.
     if (auto* knob = dynamic_cast<Knob*> (&slider))

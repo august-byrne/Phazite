@@ -1043,7 +1043,8 @@ void deleteTracks (Song& song, const std::vector<TrackID>& tracks, Selection* se
         if (const auto state = findTrackState (song, track); state.isValid())
             state.getParent().removeChild (state, &song.getUndoManager());
 
-    unlinkLoneClips (song); // a clip linked only to clips of the tracks gone
+    unlinkLoneClips (song);        // a clip linked only to clips of the tracks gone
+    forgetWhatNamesTheGone (song); // a send to a return gone, a pad's track whose sampler went with its track
 
     if (selection != nullptr)
         if (const auto remaining = getTrackIDs (song); ! remaining.empty())

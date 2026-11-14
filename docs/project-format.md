@@ -112,7 +112,7 @@ isn't XML, or whose element isn't `PHAZITE`, is refused with a reason. Any other
 (`makeConsistent()`, in [`src/model/project/Project.cpp`](../src/model/project/Project.cpp)), with no undo step; a
 file Phazite wrote is consistent already and comes through unchanged, and so does what Phazite doesn't know:
 - **Places and kinds:** an element Phazite knows, where `Schema.h` doesn't put it, or a device or modulator of a type
-  Phazite hasn't, is left out with all it holds; an element of a type Phazite doesn't know stays where it is, untouched; a property that should be one of a set of words
+  Phazite hasn't, is left out with all it holds (a clip anywhere but on a track: a folder or a return holds none); an element of a type Phazite doesn't know stays where it is, untouched; a property that should be one of a set of words
   (a track's kind, a clip's) and isn't is left out, a track without a kind becoming a track or a folder; text between
   tags is dropped.
 - **Numbers:** each number `Schema.h` gives a range is brought within it, made whole where it is an integer, and one
@@ -121,7 +121,8 @@ file Phazite wrote is consistent already and comes through unchanged, and so doe
   hand and every automation point to its parameter's range, and a parameter its device hasn't is left out.
 - **IDs:** an item without an ID, or with one another item holds, gets a new one; IDs stay below 2^62, and `nextID`
   is set past every ID the song holds.
-- **References:** a lane, a curve or a modulation of a device the song hasn't is left out, and a sidechain or a pad's
+- **References:** a lane, a curve or a modulation of a device the song hasn't, and a send to a return it hasn't, is left
+  out, and a sidechain or a pad's
   track that names a device the song hasn't is cleared. Of two elements of one parent with one key (two curves of one
   parameter, two tempos on one beat), the first stays.
 - **Sound files:** a sound file named on a network path, or by a path that climbs out of the project's folder with

@@ -129,11 +129,17 @@ public:
     void press (juce::Point<int>, juce::ModifierKeys = {});
     void dragTo (juce::Point<int>);
     void release();
+    void holdKeys (juce::ModifierKeys); // the modifier keys held from now on, in the middle of a drag (the button stays down)
 
     void click (juce::Point<int>, juce::ModifierKeys = {});
     void doubleClick (juce::Point<int>, juce::ModifierKeys = {});
     void moveTo (juce::Point<int>);
     void wheel (juce::Point<int>, float deltaY, juce::ModifierKeys = {}); // deltaY: as JUCE reports it
+
+    // A trackpad's scroll, both ways at once, as JUCE reports a precision touchpad's (smooth, parts of a notch); and its
+    // pinch, by a factor (above 1 spreading the fingers).
+    void scroll (juce::Point<int>, float deltaX, float deltaY, juce::ModifierKeys = {});
+    void pinch (juce::Point<int>, float scaleFactor);
 
     // Lets time pass, long enough that the next click isn't part of a double-click with the last press (clicks and
     // double-clicks pause after themselves; a drag doesn't).

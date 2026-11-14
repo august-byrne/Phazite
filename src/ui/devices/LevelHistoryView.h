@@ -75,8 +75,9 @@ public:
     juce::String getKeyName() const { return keyName; }
     bool showsReduction() const noexcept { return keyName.isEmpty(); }
 
-    // The newest reading's reduction, as shown.
+    // The newest reading's reduction, and what came in then, as shown.
     float getNewestReduction() const;
+    float getNewestInput() const;
 
     float getYForLevel (float decibels) const; // in its own coordinates
 

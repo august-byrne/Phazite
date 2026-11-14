@@ -8,12 +8,16 @@
 #include "AppScreen.h"
 #include "EditorScreens.h"
 #include "model/arrangement/AudioClipModel.h"
+#include "model/arrangement/TimelineModel.h"
+#include "model/chords/ChordModel.h"
 #include "model/mixer/MixerModel.h"
 #include "model/mixer/internal/Mixer.h"
 #include "model/transport/TempoModel.h"
 #include "model/transport/TransportModel.h"
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/components/Controls.h"
+#include "ui/playlist/ChordLane.h"
+#include "ui/playlist/SectionsStrip.h"
 #include "ui/theme/DesignTokens.h"
 
 namespace
@@ -822,6 +826,161 @@ TEST_CASE ("Escape in the middle of a drag takes back all it did in every editor
 }
 
 //==============================================================================
+namespace
+{
+bool isSameLoop (const phazite::LoopState& a, const phazite::LoopState& b)
+{
+    return a.range == b.range && a.followsSong == b.followsSong && a.on == b.on;
+}
+
+// Presses, drags (checking the drag did something), presses Escape, drags on and lets go.
+template <typename DidSomething>
+void dragThenEscape (phazite::test::TestWindow& window, Mouse& mouse, juce::Point<int> from, juce::Point<int> to, DidSomething didSomething,
+                     juce::ModifierKeys mods = {})
+{
+    mouse.press (from, mods);
+    mouse.dragTo (from.translated (to.x > from.x ? 10 : -10, 0));
+    mouse.dragTo (to);
+    CHECK (didSomething());
+    window.pressKey (escape);
+    mouse.dragTo (to.translated (40, 0)); // the mouse does nothing more until it goes up
+    mouse.release();
+    mouse.pause();
+    phazite::test::deliverChanges();
+}
+} // namespace
+
+TEST_CASE ("Escape in the middle of a drag of the ruler's loop or playhead, a section, a chord's edge or a control puts back what "
+           "was there, leaving nothing to undo or redo (known bug 140)")
+{
+    const auto checkNothingLeft = [] (phazite::Song& song)
+    {
+        CHECK_FALSE (song.getUndoManager().canUndo());
+        CHECK_FALSE (song.getUndoManager().canRedo());
+    };
+
+    PlaylistScreen screen;
+    screen.playlist.zoomTo ({ beatAt (0.0), beatAt (16.0) });
+    phazite::test::deliverChanges();
+
+    SUBCASE ("The ruler: a loop made, moved and stretched, a click in its lane, and the playhead")
+    {
+        auto* ruler = phazite::test::findComponentWithTitle (screen.playlist, "Timeline");
+        REQUIRE (ruler != nullptr);
+        Mouse mouse (*ruler);
+        const auto inLane = [&screen] (double beat) { return juce::Point<int> (screen.xOf (beat), 3); };
+        const auto below = [&screen, ruler] (double beat) { return juce::Point<int> (screen.xOf (beat), ruler->getHeight() - 4); };
+
+        phazite::loopRange (screen.context, { beatAt (4.0), beatAt (8.0) });
+        const auto before = phazite::getLoopState (screen.context);
+        const auto loopChanged = [&screen, &before] { return ! isSameLoop (phazite::getLoopState (screen.context), before); };
+
+        dragThenEscape (screen.window, mouse, inLane (1.0), inLane (3.0), loopChanged, ctrl); // a new one
+        CHECK (isSameLoop (phazite::getLoopState (screen.context), before));
+        dragThenEscape (screen.window, mouse, inLane (6.0), inLane (10.0), loopChanged); // moved by its middle
+        CHECK (isSameLoop (phazite::getLoopState (screen.context), before));
+        dragThenEscape (screen.window, mouse, inLane (8.0), inLane (12.0), loopChanged); // its end
+        CHECK (isSameLoop (phazite::getLoopState (screen.context), before));
+
+        // A click in the lane turns looping off as the mouse goes up: Escape before that, nothing.
+        mouse.press (inLane (6.0));
+        screen.window.pressKey (escape);
+        mouse.release();
+        mouse.pause();
+        CHECK (phazite::getLoopState (screen.context).on);
+
+        // Looping off, a loop made: off again.
+        phazite::toggleLoop (screen.context);
+        const auto off = phazite::getLoopState (screen.context);
+        REQUIRE_FALSE (off.on);
+        dragThenEscape (screen.window, mouse, inLane (1.0), inLane (3.0), [&] { return phazite::getLoopState (screen.context).on; });
+        CHECK (isSameLoop (phazite::getLoopState (screen.context), off));
+
+        screen.playlist.movePlayheadTo (beatAt (2.0));
+        dragThenEscape (screen.window, mouse, below (5.0), below (9.0),
+                        [&screen] { return screen.playlist.getPlayheadBeat().inBeats() > 8.0; });
+        CHECK (screen.playlist.getPlayheadBeat().inBeats() == doctest::Approx (2.0));
+        checkNothingLeft (screen.getSong());
+    }
+
+    SUBCASE ("A section moved and stretched, and what was selected as the mouse went down")
+    {
+        const auto section = phazite::addSectionAt (screen.context, beatAt (4.0));
+        REQUIRE (section.isValid());
+        phazite::test::deliverChanges();
+        const auto range = phazite::getSongSection (screen.context, section).value().range;
+        screen.playlist.zoomTo ({ beatAt (0.0), range.getEnd() + phazite::BeatDuration::fromBeats (16.0) }); // all of it, and room
+        const auto clip = screen.addMidiClip (0, 0.0, 2.0);
+        screen.selection().selectOnly (clip);
+        screen.getSong().getUndoManager().clearUndoHistory();
+        phazite::test::deliverChanges();
+
+        auto* strip = dynamic_cast<phazite::ui::SectionsStrip*> (phazite::test::findComponentWithTitle (screen.playlist, "Sections"));
+        REQUIRE (strip != nullptr);
+        Mouse mouse (*strip);
+        const auto y = strip->getHeight() / 2;
+        const auto middle = (range.getStart().inBeats() + range.getEnd().inBeats()) / 2.0;
+        const auto dragging = [strip] { return strip->getDragTarget().has_value(); };
+
+        dragThenEscape (screen.window, mouse, { screen.xOf (middle), y }, { screen.xOf (middle + 8.0), y }, dragging);
+        dragThenEscape (screen.window, mouse, { screen.xOf (range.getEnd().inBeats()) - 1, y },
+                        { screen.xOf (range.getEnd().inBeats() + 4.0), y }, dragging);
+
+        CHECK (phazite::getSongSection (screen.context, section).value().range == range);
+        CHECK_FALSE (strip->getDragTarget().has_value());
+        CHECK (screen.selection().getClips() == std::vector { clip }); // not the section the press selected
+        CHECK (screen.selection().getSections().empty());
+        checkNothingLeft (screen.getSong());
+    }
+
+    SUBCASE ("A chord's edge")
+    {
+        phazite::addLaneChord (screen.context, { beatAt (0.0), beatAt (4.0) }, { 1, 0, phazite::ChordType::major, 0 });
+        screen.getSong().getUndoManager().clearUndoHistory();
+        phazite::test::deliverChanges();
+
+        auto* lane = dynamic_cast<phazite::ui::ChordLane*> (phazite::test::findComponentWithTitle (screen.playlist, "Chords"));
+        REQUIRE (lane != nullptr);
+        REQUIRE (lane->isShowing());
+        Mouse mouse (*lane);
+        const auto y = lane->getHeight() / 2;
+
+        dragThenEscape (screen.window, mouse, { screen.xOf (4.0) - 1, y }, { screen.xOf (8.0), y },
+                        [lane] { return lane->getDragTarget().has_value(); });
+
+        REQUIRE (phazite::getLaneChords (screen.context).size() == 1);
+        CHECK (phazite::getLaneChords (screen.context)[0].range.getEnd().inBeats() == doctest::Approx (4.0));
+        CHECK_FALSE (lane->getDragTarget().has_value());
+        checkNothingLeft (screen.getSong());
+    }
+
+    SUBCASE ("A track's volume fader, as the mixer and the devices' knobs link theirs (ParameterAttachment)")
+    {
+        phazite::ui::Fader fader (phazite::ui::Fader::Direction::vertical, "Volume", 0.0);
+        phazite::ui::ParameterAttachment attachment (fader);
+        attachment.setParameter (phazite::getVolume (screen.context, screen.tracks[0]));
+        phazite::test::TestWindow window (fader, 60, 300);
+        const auto before = phazite::getVolume (screen.context, screen.tracks[0]).getValue();
+        const auto shownBefore = fader.getValue();
+        Mouse mouse (fader);
+        const juce::Point<int> middle (30, 150);
+
+        dragThenEscape (window, mouse, middle, middle.translated (0, -80), [&]
+                        { return ! juce::approximatelyEqual (phazite::getVolume (screen.context, screen.tracks[0]).getValue(), before); });
+
+        CHECK (phazite::getVolume (screen.context, screen.tracks[0]).getValue() == doctest::Approx (before));
+        CHECK (fader.getValue() == doctest::Approx (shownBefore));
+        checkNothingLeft (screen.getSong());
+
+        // And a drag let go is one step, as before.
+        mouse.press (middle);
+        mouse.dragTo (middle.translated (0, -80));
+        mouse.release();
+        CHECK (screen.getSong().getUndoManager().canUndo());
+    }
+}
+
+//==============================================================================
 TEST_CASE ("The copies of a Ctrl+drag go as soon as the drag comes back to where it began, and come again as it leaves")
 {
     SUBCASE ("Clips")
@@ -994,26 +1153,61 @@ TEST_CASE ("Automation points and tempo changes off the grid keep their offset f
 //==============================================================================
 TEST_CASE ("A trackpad's parts of a notch add up over each place the wheel acts in the editors, as whole notches would")
 {
-    SUBCASE ("The velocity lane: whole notches' steps, an undo step for each, not one for each part")
+    SUBCASE ("The velocity lane: whole notches' steps, a burst one undo step, and over no note a scroll")
     {
         PianoRollScreen screen;
         const auto note = screen.addNote (1.0, 0, 1.0, 60);
+        const auto other = screen.addNote (5.0, 0, 1.0, 60);
+        screen.selection().selectNotes ({ other });
         screen.getSong().getUndoManager().clearUndoHistory();
+        phazite::test::deliverChanges();
         Mouse mouse (*screen.velocity);
         UndoCheck undo (screen.getSong());
 
-        // Five notches in 80 parts: five steps of 4. Taken by its direction, each part raised the velocity a step and made an
-        // undo step of its own: to 127, in 80 steps (known bug 55 until 2026-11-14).
-        undo.checkSeveral ("a trackpad's scroll",
-                           [&]
-                           {
-                               for (int i = 0; i < 80; ++i)
-                                   mouse.wheel ({ screen.xOf (1.0), 20 }, partOfNotch (16));
-                           });
+        // Five notches in 80 parts: five steps of 4, one undo step for the burst. Taken by its direction, each part raised the
+        // velocity a step and made an undo step of its own: to 127, in 80 steps; then each whole notch made one (known bug 55
+        // until 2026-11-14).
+        undo.check ("a trackpad's scroll",
+                    [&]
+                    {
+                        for (int i = 0; i < 80; ++i)
+                            mouse.scroll ({ screen.xOf (1.0), 20 }, 0.0f, partOfNotch (16));
+
+                        mouse.moveTo ({ screen.xOf (1.0), -20 }); // the pointer leaves the lane: the burst ends
+                    });
         phazite::test::deliverChanges();
 
         CHECK (screen.get (note).velocity == 80);
-        CHECK (undo.getNumSteps() == 5);
+        CHECK (screen.describeUndo() == "Undo Change Velocity");
+
+        // The next burst is a step of its own; so is one that a command's step interrupts.
+        undo.check ("another burst, down",
+                    [&]
+                    {
+                        mouse.wheel ({ screen.xOf (1.0), 20 }, -(float) phazite::ui::wheelNotch);
+                        mouse.moveTo ({ screen.xOf (1.0), -20 });
+                    });
+        CHECK (screen.get (note).velocity == 76);
+
+        undo.checkSeveral ("a burst, another note transposed in the middle of it (a step of its own), and the burst going on",
+                           [&]
+                           {
+                               mouse.wheel ({ screen.xOf (1.0), 20 }, (float) phazite::ui::wheelNotch);
+                               phazite::changeNotes (screen.context, { other }, phazite::NoteProperty::pitch, 1.0);
+                               mouse.wheel ({ screen.xOf (1.0), 20 }, (float) phazite::ui::wheelNotch);
+                               mouse.moveTo ({ screen.xOf (1.0), -20 });
+                           });
+        CHECK (screen.get (note).velocity == 84);
+        CHECK (screen.getSong().getUndoManager().getUndoDescriptions().joinIntoString (", ").toStdString()
+               == "Change Velocity, Transpose Notes, Change Velocity, Change Velocity, Change Velocity");
+
+        // Over no note's stem it scrolls, as over the notes: it changed the selected note's velocity, unseen.
+        const auto scrollBefore = screen.pianoRoll.getScrollY();
+        undo.check ("the wheel where no note is", [&] { mouse.wheel ({ screen.xOf (7.5), 20 }, (float) phazite::ui::wheelNotch); });
+        CHECK (screen.get (other).velocity == 60);
+        CHECK (screen.pianoRoll.getScrollY() == scrollBefore - 48);
+        CHECK (screen.getSong().getUndoManager().getUndoDescriptions().joinIntoString (", ").toStdString()
+               == "Change Velocity, Transpose Notes, Change Velocity, Change Velocity, Change Velocity");
         undo.walkBackAndForth();
     }
 
@@ -1089,6 +1283,82 @@ TEST_CASE ("A trackpad's parts of a notch add up over each place the wheel acts 
 
         CHECK ((screen.playlist.getView().start.inBeats() - startBefore) * screen.playlist.getView().pixelsPerBeat
                == doctest::Approx (48.0));
+    }
+}
+
+TEST_CASE ("A precision touchpad scrolls the editors by its own distance, either way, and its pinch zooms around the pointer "
+           "(roadmap S1.14)")
+{
+    const auto notch = (float) phazite::ui::wheelNotch;
+
+    SUBCASE ("The playlist: a small move and a large one, sideways and down, each by its distance, not by its count")
+    {
+        PlaylistScreen screen;
+        phazite::ensureTracks (screen.getSong(), 24);
+        phazite::test::dispatchPendingMessages();
+        Mouse mouse (*screen.lanes);
+        const auto pixelsPerBeat = screen.playlist.getView().pixelsPerBeat;
+        const auto sideways = [&screen, pixelsPerBeat] { return screen.playlist.getView().start.inBeats() * pixelsPerBeat; };
+        const auto down = [&screen]
+        {
+            for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
+                if (bar->isVertical())
+                    return bar->getCurrentRangeStart();
+
+            return -1.0;
+        };
+
+        // Three notches in one move sideways (a fast swipe), then a quarter of one in each of four: 3 and 1 notches of 48
+        // pixels, left to right, as the fingers moved.
+        mouse.scroll (screen.at (2.0, 0), -3.0f * notch, 0.0f);
+        CHECK (sideways() == doctest::Approx (144.0));
+
+        for (int i = 0; i < 4; ++i)
+            mouse.scroll (screen.at (2.0, 0), -0.25f * notch, 0.0f);
+
+        CHECK (sideways() == doctest::Approx (192.0));
+
+        mouse.scroll (screen.at (2.0, 0), 0.0f, -2.0f * notch);
+        CHECK (down() == doctest::Approx (96.0));
+
+        for (int i = 0; i < 8; ++i)
+            mouse.scroll (screen.at (2.0, 0), 0.0f, -0.125f * notch);
+
+        CHECK (down() == doctest::Approx (144.0));
+    }
+
+    SUBCASE ("The playlist and the piano roll: a pinch zooms by its factor, the beat under the pointer staying under it")
+    {
+        PlaylistScreen playlistScreen;
+        PianoRollScreen pianoRollScreen;
+
+        const auto check = [] (phazite::ui::TimelineEditor& editor, juce::Component& over, int x)
+        {
+            Mouse mouse (over);
+            const auto before = editor.getView();
+            const auto beatUnder = before.xToBeat (x).inBeats();
+            mouse.pinch ({ x, over.getHeight() / 2 }, 1.25f);
+            mouse.pinch ({ x, over.getHeight() / 2 }, 1.2f);
+            CHECK (editor.getView().pixelsPerBeat == doctest::Approx (before.pixelsPerBeat * 1.5));
+            CHECK (editor.getView().xToBeat (x).inBeats() == doctest::Approx (beatUnder).epsilon (0.01)); // within a pixel
+
+            mouse.pinch ({ x, over.getHeight() / 2 }, 1.0f / 1.5f);
+            CHECK (editor.getView().pixelsPerBeat == doctest::Approx (before.pixelsPerBeat));
+        };
+
+        check (playlistScreen.playlist, *playlistScreen.lanes, playlistScreen.xOf (6.0));
+        check (pianoRollScreen.pianoRoll, *pianoRollScreen.notes, pianoRollScreen.xOf (3.0));
+        CHECK (playlistScreen.getSong().getUndoManager().getNumActionsInCurrentTransaction() == 0);
+    }
+
+    SUBCASE ("The audio clip editor, which shows its clip whole, as Ctrl and the wheel leave it")
+    {
+        AudioScreen screen;
+        const auto before = screen.editor.getView();
+        Mouse mouse (screen.waveform());
+        mouse.pinch ({ screen.xOf (6.0), screen.waveform().getHeight() / 2 }, 1.5f);
+        CHECK (screen.editor.getView().pixelsPerBeat == doctest::Approx (before.pixelsPerBeat));
+        CHECK (screen.editor.getView().start == before.start);
     }
 }
 
@@ -1215,6 +1485,50 @@ TEST_CASE ("While the mouse drags in the playlist or the piano roll, no command 
             REQUIRE (screen.registry.invoke ("transport.playStop"));
 
         CHECK (phazite::getClips (context, tracks[0]).size() == 2);
+    }
+
+    // A loop dragged out along the playlist's ruler, and a section moved in its time bar (known bug 140's drags).
+    {
+        auto& playlist = screen.showView<phazite::ui::Playlist> ("view.playlist");
+        const auto x = [&playlist] (double beat) { return juce::roundToInt (playlist.getView().beatToX (beatAt (beat))); };
+        auto* ruler = phazite::test::findComponentWithTitle (playlist, "Timeline");
+        REQUIRE (ruler != nullptr);
+        Mouse rulerMouse (*ruler);
+
+        undo.check ("a loop dragged with every command's key pressed in it",
+                    [&]
+                    {
+                        rulerMouse.press ({ x (1.0), 3 });
+                        rulerMouse.dragTo ({ x (1.0) + 10, 3 });
+                        rulerMouse.dragTo ({ x (6.0) + 10, 3 });
+                        pressEveryCommandsKey();
+                        rulerMouse.release();
+                        rulerMouse.pause();
+                    });
+
+        const auto section = phazite::addSectionAt (context, beatAt (8.0));
+        REQUIRE (section.isValid());
+        phazite::test::dispatchPendingMessages();
+        const auto range = phazite::getSongSection (context, section).value().range;
+        auto* strip = phazite::test::findComponentWithTitle (playlist, "Sections");
+        REQUIRE (strip != nullptr);
+        Mouse stripMouse (*strip);
+        const auto middle = juce::Point<int> (x ((range.getStart().inBeats() + range.getEnd().inBeats()) / 2.0), strip->getHeight() / 2);
+
+        undo.check ("a section dragged with every command's key pressed in it",
+                    [&]
+                    {
+                        stripMouse.press (middle);
+                        stripMouse.dragTo (middle.translated (10, 0));
+                        stripMouse.dragTo (middle.translated (x (16.0) - x (0.0), 0));
+                        pressEveryCommandsKey();
+                        stripMouse.release();
+                        stripMouse.pause();
+                    });
+        phazite::test::deliverChanges();
+
+        if (phazite::isPlaying (context))
+            REQUIRE (screen.registry.invoke ("transport.playStop"));
     }
 
     // A note dragged in the piano roll.

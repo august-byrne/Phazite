@@ -29,15 +29,12 @@ inline bool isKnownElementType (const juce::ValueTree& element)
 }
 
 // Each problem with a song's IDs, as a line: "id: ..." for an ID held twice (an item's in the song, a note's in its clip),
-// "names: ..." for what names an item the song hasn't (a sidechain, a lane's, a curve's and a modulation's device, a pad's
-// drum sampler); but a send's return, which the song keeps for an undo that brings the return back. The items' IDs, if
-// asked.
+// "names: ..." for what names an item the song hasn't (a send's return, a sidechain, a lane's, a curve's and a
+// modulation's device, a pad's drum sampler). The items' IDs, if asked.
 //
 // A song as it is being edited (not asLoaded) keeps more that names what is gone, which opening it leaves out (Project.h:
 // makeConsistent()): the curves and lanes of a device taken away, as Schema.h says (AUTOMATION, LANE), so that an undo
-// brings them back with it; and, as known exceptions (docs/known-bugs.md), what modulated a device taken away, which
-// removing it leaves too (Mixer.cpp: removeDeviceState()), and the track of a drum sampler's pad whose sampler went
-// (model-mixer 14: a pad's track is left when its sampler is removed or replaced).
+// brings them back with it. What else named it goes with it (Mixer.h: forgetWhatNamesTheGone()).
 inline std::vector<std::string> findIDProblems (const juce::ValueTree& song, std::set<std::uint64_t>* itemsFound = nullptr,
                                                 bool asLoaded = true)
 {
@@ -81,10 +78,7 @@ inline std::vector<std::string> findIDProblems (const juce::ValueTree& song, std
 
             for (int i = 0; i < child.getNumProperties(); ++i)
                 if (const auto property = child.getPropertyName (i);
-                    schema::namesID (child, property) && ! child.hasType (schema::SEND)
-                    && (asLoaded
-                        || ! (child.hasType (schema::CURVE) || child.hasType (schema::LANE) || child.hasType (schema::MODULATES)
-                              || property == schema::trackPadDevice)))
+                    schema::namesID (child, property) && (asLoaded || ! (child.hasType (schema::CURVE) || child.hasType (schema::LANE))))
                     if (items.count (readID (child[property])) != 1)
                         problems.push_back (
                             "names: names nothing: "

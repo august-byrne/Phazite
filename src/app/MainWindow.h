@@ -30,6 +30,7 @@ struct MainWindowSurroundings
     bool addToDesktop = true; // false: whoever made it adds it, once it is made
     std::function<juce::DialogWindow*(juce::DialogWindow::LaunchOptions&)> launchDialog {}; // null: launchAsync()
     std::function<void()> quit {}; // null: the application's systemRequestedQuit(), which asks to save first (Main.cpp)
+    std::function<juce::Array<juce::Rectangle<int>>()> screens {}; // the screens' areas for windows; null: the desktop's
 };
 
 class MainWindow : public juce::DocumentWindow,
@@ -69,8 +70,12 @@ public:
     // parts move it, and Windows hears that it has the buttons the bar draws.
     WindowControlKind findControlAtPoint (juce::Point<float>) const override;
     int getDesktopWindowStyleFlags() const override;
-    void resized() override; // the panels keep out of the band along a restored window's sides
+    void resized() override;                // the panels keep out of the band along a restored window's sides; and keepPlace()
+    void moved() override;                  // keepPlace()
+    void parentHierarchyChanged() override; // put on the desktop: maximized if it was closed so
     juce::BorderSize<int> getBorderThickness() const override { return {}; }
+
+    static constexpr int defaultWidth = 1280, defaultHeight = 800; // as it first opens, centred on the main screen
 
 private:
     const Surroundings surroundings;
@@ -96,6 +101,16 @@ private:
 
     juce::DialogWindow* launch (juce::DialogWindow::LaunchOptions&); // a dialog, modal, over this window
     void requestQuit();                                              // as the close button and Quit do
+
+    // Where the window opens: where the settings say it was closed, maximized if it was, if that is on a screen that still
+    // exists (placeWindow()); otherwise its default size, centred on the main screen, fitted to it. And the place kept in the
+    // settings as it moves or changes size, or is maximized (not while it is minimized or fills the screen).
+    void restorePlace();
+    void keepPlace();
+    bool placeRestored = false;         // keepPlace() keeps nothing until then
+    bool maximizeWhenOnDesktop = false; // closed maximized: maximized once it is on the desktop
+    void maximizeIfWaiting();
+    juce::Array<juce::Rectangle<int>> getScreens() const;
 
     void showSettings (std::optional<ui::SettingsPanel::Tab>); // no tab: Audio, or the open window's tab
     void showPluginList();                                     // the plug-ins scanning found, with a scan for VST3s
@@ -146,4 +161,11 @@ private:
 
 // The window's menus, as its title bar names them (MainWindow's, and the README's picture's: tests/ReadmePicture.cpp).
 juce::StringArray getMainMenuNames();
+
+// Where a window that was at saved opens, given the screens' areas for windows (each display's, without its task bar): as it
+// was, if it lies on them (across two side by side, too); fitted to the screen that holds most of it (no larger, and moved
+// onto it) if part of it is off them; and nowhere (the caller's default) if too little of it is on any screen to take it by
+// its title bar (windowShownAtLeast pixels each way), as when the screen it was on is gone, or if saved is empty.
+std::optional<juce::Rectangle<int>> placeWindow (juce::Rectangle<int> saved, const juce::Array<juce::Rectangle<int>>& screens);
+inline constexpr int windowShownAtLeast = 64;
 } // namespace phazite

@@ -1346,6 +1346,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/ReadmePicture.cpp
         tests/RealTimePlayback.h
         tests/RealtimeAuditTests.cpp
+        tests/ReferencesTests.cpp
         tests/RenderHarness.cpp
         tests/RenderHarness.h
         tests/RecordingTests.cpp

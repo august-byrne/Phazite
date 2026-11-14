@@ -26,19 +26,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 - **20. Duplicate and Paste make fewer notes than they say** where some would land past a clip that the next clip keeps
   from growing: no note is made where it wouldn't play, but the undo step is still named for all of them ("Duplicate 6
   Notes" for 2). Fix: name the step for what was made, or say in the hint bar that some didn't fit.
-- **54. Shift or Ctrl and a click on a distant track scrolls the playlist back to the first selected track,** hiding
-  what was clicked. Why: every change of the selection ends in `scrollToShow()` of the first selected track's row
-  (`src/ui/playlist/Playlist.cpp`). Fix: scroll for selections made by keys and commands only, to the track that
-  changed. Not yet checked (ui-timeline-editors 5).
-- **55. A trackpad's burst over the velocity lane makes an undo step for each whole notch,** not one for the burst;
-  with no note under the pointer the wheel changes every selected note; and there is no pinch zoom. Parts of a notch
-  now add up (`TimelineEditor::takeWheelSteps()`), so a slow scroll no longer pins velocities. Fix: hold one
-  `SongGesture` across a burst, ended by a short timer or the next other event; decide whether velocity needs a note
-  under the pointer; add `mouseMagnify`.
-- **56. Small ones in the lanes' gestures.** A double-click on an empty part of an automation lane adds a point, then
-  deletes it: two undo steps for nothing. Draw places the clip selected first, where the code's comment says last.
-  Shift pressed in the middle of a point's drag makes its value jump (`src/ui/playlist/PlaylistAutomation.cpp`,
-  `src/ui/playlist/Playlist.cpp`). Not yet checked (ui-timeline-editors 12).
 
 ## Versions
 
@@ -79,10 +66,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`src/model/versions/VersionHistory.cpp`) isn't refused while a commit saves, and both write the branch's record. Fix:
   on a read that fails, try the other packs and forget the bad entry; refuse the rename meanwhile. Not yet checked
   (model-versions 13).
-- **63. "Create new branch" that fails renames the branch the song is on.** Why: the picker runs the command, which
-  says only that it ran, then renames the current branch to the name typed (`src/ui/versions/BranchPicker.cpp`). It
-  needs a write that fails. Fix: one model function that makes a named branch and says whether it did. Not yet checked
-  (ui-shell-browser 13).
 
 ## Plug-ins
 
@@ -181,10 +164,19 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 
-- **140. Escape doesn't take a drag back** in the chord lane, the sections strip, the ruler's loop and playhead drags,
-  the devices' graphs or the mixer's controls. It does in the playlist, its automation and tempo lanes, the piano roll
-  and the audio clip editor (`TimelineEditor::cancelDrag()`); and no key runs a command that changes the song while a
-  mouse button is down, anywhere.
+- **140. Escape doesn't take a drag back in the devices' graphs, on a device's Mix knob, or on a knob's modulation
+  ring.** It does in every part of the time line's editors (`TimelineEditor::keyPressed()`) and on every control linked
+  to a parameter (`ValueSlider`'s `onDragCancelled`, which `ParameterAttachment` answers with
+  `ParameterHandle::cancelGesture()`), the inspector's fields and a chain's key and velocity ranges; and no key runs a
+  command that changes the song while a mouse button is down, anywhere. Why: the graphs have no shared drag code, each
+  editor in `src/ui/devices/` begins its handles' gestures itself (`EqEditor.cpp`, `FilterEditor.cpp`,
+  `DynamicsCurve.cpp`, `DelayEditor.cpp`, `ReverbEditor.cpp`, `SamplerEditor.cpp`, `DrumSamplerEditor.cpp`,
+  `ModulatorEditor.cpp`, `MultibandEditor.cpp`, `LevelHistoryView.cpp` and the effects with one dot); the Mix knob's
+  `MixHandle` (`src/model/mixer/MixHandle.h`) and the ring's `ModulationDrag` (`src/model/modulation/`) have no way to
+  take their step back. Fix: a `graph::HandleDrag` in `DeviceGraph.h` that holds the handles a drag moves, with
+  `keyPressed()` calling `ParameterHandle::cancelGesture()` on each, used by every graph; `cancelGesture()` on
+  `MixHandle` and `ModulationDrag`, called from `MixAttachment` (`src/ui/mixer/StripParts.cpp`) and `Knob`'s ring drag.
+  Found by the stage-2 tests; narrowed on 2026-11-14.
 
 ## Saving
 
@@ -218,58 +210,11 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Mixer and automation
 
-- **96. Time edits and clip moves leave behind the automation of plug-ins that aren't loaded.** With plug-ins off
-  after a crash, or missing on this computer, Insert Time, Remove Time and automation that follows its clips skip those
-  curves, which are out of step with the song when the plug-in loads again. Why: they go through
-  `getParametersWithCurves()` (`src/model/automation/Automation.cpp`), which keeps the curves whose parameter is found,
-  and a plug-in's is found through its instance. Fix: for time edits, every curve whose device is in the song. Not yet
-  checked (model-mixer 4).
-- **97. Switching a folder between a bus and a plain folder loses its volume and pan automation and modulation**
-  (Undo brings them back; the next opening deletes them). Why: `makePlainFolder()` and `makeBus()`
-  (`src/model/mixer/Buses.cpp`) give the folder's fader a new ID, and curves and modulations are kept by the old one.
-  Fix: one ID for both, or move the curves and modulations in the same undo step. Not yet checked (model-mixer 5).
-- **98. Moving clips with their automation changes the shape of bent automation outside what moved;** Paste and the
-  time edits do the same. Why: `addEdge()` (`src/model/automation/Automation.cpp`) splits a segment with a straight
-  point, so the first part keeps its bend over a shorter span and the rest is a straight line. Fix: give both parts
-  bends that keep the shape. Not yet checked (model-mixer 6).
-- **99. A preset loaded while a track writes automation in Latch or Write writes a lane for every parameter of the
-  device;** a Swap that is put back leaves the preset it tried as automation. Why: loading sets each value by hand, and
-  `AutomationWriter::parameterChanged()` (`src/model/playback/AutomationWriter.cpp`) punches in for each. Fix: let
-  what sets many values at once (a preset, a swap, a sampler's sound) say so, and the writer leave those alone. Not yet
-  checked (model-mixer 7).
-- **100. Deleting a return leaves the sends to it in the song:** each is still offered for automation and modulation,
-  does nothing, and is written into a DAWproject as a send to a channel the file doesn't have. Why: `deleteTracks()`
-  (`src/model/arrangement/Tracks.cpp`) forgets sidechains, not sends. Fix: remove them in the same undo step. Not yet
-  checked (model-mixer 8).
-- **101. A device on a drum sampler's track can be given one of its own pads' tracks as its sidechain,** which the
-  engine can't play: the pad isn't separated any more, its track is silent, and the device never ducks. Why:
-  `isFedBy()` (`src/model/mixer/Sidechain.cpp`) doesn't know that a pad's track takes its sound from its sampler's
-  track. Fix: add that rule. Not yet checked (model-mixer 11).
-- **102. Pads' tracks are left behind when their drum sampler is removed or replaced:** until the project is opened
-  again they play nothing, and Bring Pad Back can't be reached. Opening it clears the pad properties that name a
-  sampler the song hasn't (`makeConsistent()`, `src/model/project/Project.cpp`), so the tracks become plain tracks
-  then. Why: `removeDevice()` and `setInstrument()` (`src/model/mixer/Mixer.cpp`) and `deleteTracks()` leave the
-  tracks' pad properties. Fix: clear them, or delete the empty tracks, in the same undo step. `tests/SongIDs.h` lists it
-  as a known exception (model-mixer 14).
 - **103. Automation is written at the engine's playhead, not where it is heard,** so what is written lands late by
   the output's latency and the song's delay compensation; and a jump back while writing with the loop on is taken for
   the loop's wrap, which writes the held value through to the loop's end. Why: `AutomationWriter`
   (`src/model/playback/AutomationWriter.cpp`) stamps points with the session's playhead. Fix: stamp them with the heard
   playhead, and end the pass at a jump. Not yet checked (model-playback 13).
-- **104. Small ones in the mixer's model.** Every new ID sets a property on the song's root, after which the freeze
-  keeper compares every frozen track in full (`src/model/mixer/Freeze.cpp`), which a large MIDI import with frozen
-  tracks may feel (not measured); Write mode's punch-in as playback starts sets a value without an undo step of its
-  own; "dry level" and "wet level" are names no device has (`src/model/automation/Automation.cpp`); the cache of
-  wavetables read
-  never lets one go (`src/model/devices/Wavetables.cpp`). Not yet checked (model-mixer 15).
-- **143. Removing a device leaves the modulations that name it.** A modulator's or a macro's `MODULATES` element
-  that names a parameter of the removed device stays in the song, modulating nothing, until the project is opened
-  again, when `makeConsistent()` (`src/model/project/Project.cpp`) drops it. Why: `removeDeviceState()`
-  (`src/model/mixer/Mixer.cpp`) removes the device's element alone. Its automation curves stay on purpose, so that Undo
-  brings them back with the device (`AUTOMATION` in `Schema.h`), but nothing says the same of modulations. Fix: remove
-  them in the same undo step, or keep them on purpose as the curves are and say so in `Schema.h`. Found by the random
-  songs (`tests/RandomSongTests.cpp`), which leave them out before they compare (`leaveOutWhatNamesNothing()`);
-  `tests/SongIDs.h` lists it as a known exception.
 
 ## Files from others, and privacy
 
@@ -296,26 +241,15 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Window, shell and keys
 
-- **108. The first lesson's second step hides the piano roll it asks for.** The step says to press F7; the lower panel
-  already shows the piano roll, and showing a view that shows hides its panel, so the step counts as done and the next
-  asks for clicks in a piano roll that is gone (`src/ui/shell/Lessons.cpp`, `src/ui/shell/AppShell.cpp`). Fix: count
-  the step as done while the clip editor shows; run the lesson through the whole window in a test. Confirmed by a
-  second reading (ui-shell-browser 1).
-- **109. Hiding the left panel leaves a looping preview playing and a swap open,** with nothing in view to stop it.
-  Why: the browser stops them in `visibilityChanged()` (`src/ui/browser/Browser.cpp`), which JUCE calls for its own
-  switch, not when the panel around it is hidden. Fix: tell the browser when it stops showing. Not yet checked
-  (ui-shell-browser 3).
 - **110. The shortcuts editor takes away keys that commands share on purpose.** Giving a command a key that another
   has removes it from every other command; Phazite's keymap shares ten keys by design (Esc, Up and Down among them),
   and a shared key can't be set up again. There is no search either. Why: the editor is JUCE's
   `KeyMappingEditorComponent` (`src/ui/shell/SettingsPanel.h`). Fix: a list of Phazite's own, searched by name and
-  key, that shows every command on a key and allows the keys that priorities tell apart. Not yet checked
-  (ui-shell-browser 4).
-- **111. In a panel's own window the note keys run shortcuts instead of playing notes.** With the lower panel in a
-  window of its own and the computer keyboard on, A S D F run single-key shortcuts there, Shift and a letter does
-  nothing, and nothing lets held keys go as the window loses the focus. Why: the panel's window has the key dispatcher
-  alone as its key listener (`src/ui/shell/AppShell.cpp`), not what the main window has (`src/ui/input/WindowKeys.cpp`).
-  Fix: give it the same. Not yet checked (ui-shell-browser 5).
+  key, that shows every command on a key and allows the keys that priorities tell apart. Checked in the code
+  (2026-11-14, stage 1): JUCE's `ChangeKeyButton` asks to reassign a key another command has, then calls
+  `removeKeyPress (key)`, which takes it from every command, and the editor has no hook to change that (only
+  `shouldCommandBeIncluded()`, `isCommandReadOnly()` and `getDescriptionForKeyPress()` are virtual), so the fix is the
+  editor of Phazite's own the entry describes, larger than a small bug's fix (ui-shell-browser 4).
 - **112. On keyboards other than the US layout the musical keyboard is scrambled and some shortcuts can't be
   reached.** On AZERTY the piano's shape breaks; on QWERTZ Y and Z swap and the top note needs Shift; "=" needs Shift
   on German and French layouts, so Zoom In and its like never match. Why: the note keys are characters, mapped through
@@ -331,10 +265,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Device editors
 
-- **115. The Stereo Expander's scope is mirrored:** a sound on the left alone is drawn along the line marked R. Why:
-  `toDot()` (`src/ui/devices/StereoExpanderEditor.cpp`) takes left less right for the dot's place across. Fix: right
-  less left, and a test that a left-only block's dots lie left of the centre. Confirmed by a second reading
-  (ui-device-editors 0).
 - **116. Several graphs' handles jump to the pointer as they are taken,** so a click, or a move of one pixel, changes a
   value: an EQ's dot taken at its edge moves by up to 12 pixels, a Multiband's crossover by up to half as much again,
   and a click near one of the reverb's cut lines moves it. Why: these drags set the value from where the pointer is,
@@ -352,20 +282,12 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   anywhere on the graph.** Why: `mouseWheelMove()` (`src/ui/devices/EqEditor.cpp`) sets the value outside a gesture;
   the other graphs turn through `graph::WheelGesture`. Fix: the same here, and only over a dot. Not yet checked
   (ui-device-editors 4).
-- **119. The compressor's history draws the detector's level as what came in,** after the input gain and the
-  sidechain's low cut, and for some characters an average: on drums the output can draw several decibels above the
-  "input" while the device turns down (`src/ui/devices/CompressorEditor.cpp`, `src/devices/dynamics/Compressor.cpp`).
-  Fix: draw the input's peak, as Duck does. Not yet checked (ui-device-editors 6).
 - **120. The analyzers transform the two channels' average, and the stereo tap is too small at high sample rates.**
   Sound that is out of phase between the channels shows nothing, and sound panned hard reads 6 dB low
   (`src/ui/devices/DeviceGraph.cpp`); the tap holds 8,192 pairs, 43 ms at 192 kHz against a tick of 33 ms, so a tick
   that comes a little late loses samples, which shows as a flash (`src/devices/core/SampleTap.h`). Fix: analyze each
   channel and draw the louder; size the taps for a quarter of a second at the device's rate. Not yet checked
   (ui-device-editors 8).
-- **121. The random LFO is drawn as four steps a cycle, where it holds one value a cycle** (`getDrawnLfoValue()` in
-  `src/ui/devices/SynthParts.cpp`, against `src/devices/dsp/Oscillators.h`), in the synth's, the FM synth's, the
-  sampler's and the wavetable synth's editors. Fix: draw one level across the cycle, or the value the device holds. Not
-  yet checked (ui-device-editors 11).
 
 ## Slow on the message thread
 

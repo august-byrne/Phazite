@@ -66,6 +66,10 @@ public:
     void endGesture();
     bool isInGesture() const;
 
+    // Takes back all the gesture changed, leaving nothing to redo: Escape during a drag, as in Ableton Live and most DAWs. A
+    // gesture that joined another's (above) only ends: that one's owner keeps or takes back the whole step.
+    void cancelGesture();
+
     struct Impl; // the device and the parameter's ID (internal/ParameterHandle.h makes handles)
     explicit ParameterHandle (std::unique_ptr<Impl>);
     const Impl* getImpl() const noexcept { return impl.get(); } // nullptr for a handle of nothing

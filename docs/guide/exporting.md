@@ -31,8 +31,9 @@ up under the target; the window then says by how much.
 name, and a button beside it chooses another file. A file that is there already is replaced only after you say so,
 and only once the new one is complete, so a cancelled or failed export leaves the old one as it was.
 
-The export runs in the background, with a progress bar and **Cancel**, and playback stops for it. When it is done, a
-button shows the file in its folder.
+The export runs in the background, with a progress bar and **Cancel**, and playback stops for it. Escape asks before
+it stops the export, and closing the window while it exports stops it and says so. When it is done, a button shows the
+file in its folder.
 
 A plug-in that crashes while the song renders fails the export, which names the plug-in: reload it and export again.
 Nothing is written without it.

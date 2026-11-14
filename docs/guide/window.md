@@ -157,7 +157,8 @@ seconds while Phazite is in front; a problem stays until you close it.
   Layout menu and **View > Panels**.
 - **Full Screen** (**F11**) fills the screen with the window.
 
-Phazite keeps the panels' sizes and opens with them as you left them.
+Phazite keeps the panels' sizes and opens with them as you left them. The window opens where you closed it, at its
+size, maximized if it was, unless the screen it was on is gone: then it opens on the main screen.
 
 ## Themes and interface size
 

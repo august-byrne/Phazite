@@ -68,6 +68,11 @@ juce::ValueTree copyClipState (Song&, const juce::ValueTree& clipState);
 // isn't there or holds no clips (a folder or a return: Schema.h, trackKind).
 ClipID placeClipState (Song&, juce::ValueTree clipState, TrackID);
 
+// Whether a track can hold clips of a kind, MIDI or audio: audio and notes don't share a track (docs/design/building-blocks.md).
+// A track that holds clips (not a folder or a return), whose clips, but for those named in leaving, are all of that kind; and
+// for audio, one without an instrument, which would silence it.
+bool canTrackHold (const Song&, TrackID, bool midi, const std::vector<ClipID>& leaving = {});
+
 // Where a clip is, in the caller's undo step: its start, its length, and how far into its notes it starts.
 void setClipPlace (Song&, juce::ValueTree clipState, BeatPosition start, BeatDuration length, BeatDuration offset);
 

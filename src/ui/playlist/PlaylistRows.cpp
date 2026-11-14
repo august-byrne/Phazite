@@ -244,6 +244,16 @@ void Playlist::scrollToShow (int row)
         setScrollY (r.top + r.getTotalHeight() - visibleHeight);
 }
 
+bool Playlist::isRowInView (int row) const
+{
+    if (! juce::isPositiveAndBelow (row, (int) rows.size()))
+        return false;
+
+    const auto& r = rows[(size_t) row];
+    const auto visibleHeight = lanes->getHeight() - pinnedHeight;
+    return r.track.pinned || (r.top + r.getTotalHeight() > scrollY && r.top < scrollY + visibleHeight);
+}
+
 void Playlist::updateVerticalScrollBar()
 {
     const auto visibleHeight = std::max (1, lanes->getHeight() - pinnedHeight);

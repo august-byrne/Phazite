@@ -6,6 +6,7 @@
 #include "TestSong.h"
 #include "UiTestHelpers.h"
 #include "devices/dsp/Envelopes.h"
+#include "devices/dsp/Oscillators.h"
 #include "devices/dynamics/Compressor.h"
 #include "devices/stereo/StereoExpander.h"
 #include "devices/synth/Synth.h"
@@ -161,6 +162,31 @@ TEST_CASE ("An LFO's picture sets its depth with a drag up or down, and its rate
     const auto rate = valueOf (song, synth, "lfoRate");
     mouse.wheel (centre, notchUp);
     CHECK (valueOf (song, synth, "lfoRate") == doctest::Approx (rate * 1.1f).epsilon (0.01));
+}
+
+TEST_CASE ("The random LFO is drawn as it plays: one value held for the whole cycle")
+{
+    // Known bug 121: it was drawn as four steps a cycle, where dsp::Lfo holds one random value a cycle.
+    using phazite::devices::dsp::LfoShape;
+    const auto first = phazite::ui::getDrawnLfoValue ((int) LfoShape::random, 0.0f);
+    CHECK (std::abs (first) <= 1.0f);
+
+    for (int step = 1; step < 20; ++step)
+    {
+        const auto phase = (float) step * 0.05f;
+        CAPTURE (phase);
+        CHECK (phazite::ui::getDrawnLfoValue ((int) LfoShape::random, phase) == doctest::Approx (first));
+    }
+
+    // As the LFO plays it: one value until its cycle ends.
+    phazite::devices::dsp::Lfo lfo;
+    lfo.prepare (1000.0);
+    lfo.setRate (10.0); // a cycle in 100 samples
+    lfo.reset();
+    const auto held = lfo.next (LfoShape::random);
+
+    for (int i = 1; i < 100; ++i)
+        REQUIRE (lfo.next (LfoShape::random) == doctest::Approx (held));
 }
 
 TEST_CASE ("A compressor's curve is the multiband's: a point drags, a line bends by its handle, and the wheel changes nothing")

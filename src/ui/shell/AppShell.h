@@ -39,8 +39,9 @@ class AppShell : public juce::Component,
 {
 public:
     // The commands, as menus and keys see them, the open project and the services (settings, Phazite Sounds, the library
-    // and the previewer: app/AppServices.h) are the app's, and outlive this. Detached panels' windows run shortcuts through
-    // the dispatcher. The views show the project the context has open, and none while it has none.
+    // and the previewer: app/AppServices.h) are the app's, and outlive this. Detached panels' windows take keys as the main
+    // window does (ui/input/WindowKeys.h): the computer keyboard first, then the dispatcher's shortcuts. The views show the
+    // project the context has open, and none while it has none.
     AppShell (EngineContext&, CommandBridge&, KeyDispatcher&, ComputerKeyboard&, ProjectContext&, Settings&, SoundPack&, Library&,
               Previewer&);
     ~AppShell() override;

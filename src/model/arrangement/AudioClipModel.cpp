@@ -333,18 +333,9 @@ std::map<ClipID, double> getClipsBeingRendered (const ProjectContext& context)
 
 std::vector<ClipID> getClipsWhoseRenderFailed (const ProjectContext& context)
 {
-    std::vector<ClipID> clips;
+    // As the renders keep the answer, found again only as what failed or the clips change, not each time it is asked.
     const auto* renders = getClipRenders (context);
-    auto* song = findSong (context);
-
-    if (renders == nullptr || song == nullptr || ! renders->hasFailures())
-        return clips;
-
-    for (const auto clip : getAudioClips (*song))
-        if (isRendered (*song, clip) && renders->hasFailed (getPlayedFile (*song, findClipState (*song, clip))))
-            clips.push_back (clip);
-
-    return clips;
+    return renders != nullptr ? renders->getFailedClips() : std::vector<ClipID>();
 }
 
 namespace

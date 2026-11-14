@@ -30,6 +30,7 @@
 #include "ui/devices/DeviceWindowContent.h"
 #include "ui/input/Keymap.h"
 #include "ui/input/KeymapStore.h"
+#include "ui/shell/ExportPanel.h"
 #include "ui/theme/LookAndFeel.h"
 
 #include <array>
@@ -88,8 +89,15 @@ protected:
 // suggests, and the question about unsaved changes gives answerToSave.
 struct MainScreen
 {
-    MainScreen()
+    // setUp: what to do before the window is made (the settings it starts with); screens: the screens' areas it sees (none:
+    // one of 1920 by 1040, so that the window is as large on every machine).
+    explicit MainScreen (std::function<void (phazite::Settings&)> setUp = {}, juce::Array<juce::Rectangle<int>> screensToUse = {})
+        : screens (screensToUse.isEmpty() ? juce::Array<juce::Rectangle<int>> { juce::Rectangle<int> (0, 0, 1920, 1040) }
+                                          : std::move (screensToUse))
     {
+        if (setUp != nullptr)
+            setUp (services.settings);
+
         session.chooseSaveFile = [] (const juce::File& suggested, std::function<void (const juce::File&)> callback)
         { callback (suggested); };
         session.askToRestore = [] (const juce::File&, bool, std::function<void (bool)> callback) { callback (false); };
@@ -106,7 +114,8 @@ struct MainScreen
             phazite::MainWindow::Surroundings { .addToDesktop = false,
                                                 .launchDialog = [this] (juce::DialogWindow::LaunchOptions& options)
                                                 { return launch (options); },
-                                                .quit = [this] { quit(); } });
+                                                .quit = [this] { quit(); },
+                                                .screens = [this] { return screens; } });
         window->putOnDesktop();
         phazite::addSongCommands (registry, session.getContext(), *window);
         session.addCommands (registry, *window);
@@ -202,6 +211,7 @@ struct MainScreen
     phazite::ProjectSession session { phazite::test::getEngineContext(), services.recentProjects, temp.folder.getChildFile ("Projects"),
                                       temp.folder.getChildFile ("Unsaved") };
     juce::Array<juce::Component::SafePointer<juce::DialogWindow>> dialogs;
+    juce::Array<juce::Rectangle<int>> screens;
     std::unique_ptr<HeadlessMainWindow> window;
 
     phazite::ProjectSession::UnsavedChanges answerToSave = phazite::ProjectSession::UnsavedChanges::cancel;
@@ -619,5 +629,125 @@ TEST_CASE ("A device's window and a plug-in's window open, show their device, an
     phazite::removeDevice (song.context, plugin);
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return windows.findWindow (plugin) == nullptr; }));
     CHECK_FALSE (phazite::isDeviceWindowOpen (song.context, plugin));
+}
+
+TEST_CASE ("Escape while the song exports asks before it stops; the window closed while it exports stops it and says so")
+{
+    // Escape closed the export's window, which threw a long export away without a word (the audit, ui-shell-browser 8).
+    MainScreen screen;
+    screen.addNotes();
+    auto* dialog = openDialog (screen, "project.export");
+    auto* panel = dynamic_cast<phazite::ui::ExportPanel*> (dialog->getContentComponent());
+    REQUIRE (panel != nullptr);
+    int asked = 0;
+    auto stop = false;
+    panel->askToStop = [&asked, &stop] (std::function<void (bool)> answer)
+    {
+        ++asked;
+        answer (stop);
+    };
+    panel->askToReplace = [] (const juce::File&, std::function<void (bool)> answer) { answer (true); };
+
+    const auto pressEscape = [] (juce::DialogWindow& window)
+    {
+        REQUIRE (window.getPeer() != nullptr);
+        window.getPeer()->handleKeyPress (juce::KeyPress (juce::KeyPress::escapeKey));
+    };
+
+    // Exporting (nothing is dispatched, so it is still going): Escape asks, and kept, it goes on, its window open.
+    panel->getExportButton().onClick();
+    REQUIRE (panel->isExporting());
+    pressEscape (*dialog);
+    CHECK (asked == 1);
+    CHECK (panel->isExporting());
+    CHECK (dialog->isVisible());
+
+    // Told to stop: stopped, and the window says so.
+    stop = true;
+    pressEscape (*dialog);
+    CHECK (asked == 2);
+    CHECK_FALSE (panel->isExporting());
+    CHECK (panel->getStatus() == "Export cancelled.");
+    CHECK (dialog->isVisible());
+
+    // With nothing exporting, Escape closes the window, as any dialog's.
+    juce::Component::SafePointer<juce::DialogWindow> closing (dialog);
+    pressEscape (*dialog);
+    dispatchPendingMessages();
+    CHECK (asked == 2);
+    CHECK (closing == nullptr);
+
+    // Its window gone while it exports (as its close button, or another project opening, closes it): stopped, and a notice
+    // says so.
+    auto& notices = screen.window->getShell().getNotices();
+    const auto before = notices.getNumNotices();
+    dialog = openDialog (screen, "project.export");
+    panel = dynamic_cast<phazite::ui::ExportPanel*> (dialog->getContentComponent());
+    REQUIRE (panel != nullptr);
+    panel->askToReplace = [] (const juce::File&, std::function<void (bool)> answer) { answer (true); };
+    panel->getExportButton().onClick();
+    REQUIRE (panel->isExporting());
+    delete dialog;
+    REQUIRE (notices.getNumNotices() == before + 1);
+    CHECK (notices.getTitle (before) == "Export cancelled");
+    CHECK_FALSE (notices.isProblem (before));
+}
+
+TEST_CASE ("The main window opens where it was closed, maximized if it was, and only on a screen that still exists")
+{
+    // Roadmap S1.15: it opened at 1280 by 800 on the main screen every time.
+    using phazite::Settings;
+    const juce::Array<juce::Rectangle<int>> twoScreens { juce::Rectangle<int> (0, 0, 1920, 1040),
+                                                         juce::Rectangle<int> (1920, 0, 1280, 984) };
+    const auto startingWith = [] (const juce::String& place, bool maximized)
+    {
+        return [place, maximized] (Settings& settings)
+        {
+            settings.set (Settings::windowPlace, place);
+            settings.set (Settings::windowMaximized, maximized);
+        };
+    };
+
+    juce::String place;
+    auto maximized = false;
+
+    {
+        // The first time: its default size, centred on the main screen.
+        MainScreen screen ({}, twoScreens);
+        CHECK (screen.window->getBounds() == juce::Rectangle<int> (320, 120, 1280, 800));
+        CHECK_FALSE (screen.window->isFullScreen());
+
+        // Moved onto the second screen, and smaller: kept as it goes.
+        screen.window->setBounds (2000, 40, 1000, 700);
+        CHECK (screen.services.settings.get (Settings::windowPlace) == "2000 40 1000 700");
+
+        // Maximized there, and closed so: the place it goes back to stays.
+        screen.window->setFullScreen (true);
+        screen.window = nullptr;
+        place = screen.services.settings.get (Settings::windowPlace);
+        maximized = screen.services.settings.get (Settings::windowMaximized);
+        CHECK (place == "2000 40 1000 700");
+        CHECK (maximized);
+    }
+
+    {
+        // Opened again: maximized, going back to where it was.
+        MainScreen screen (startingWith (place, maximized), twoScreens);
+        CHECK (screen.window->isFullScreen());
+        REQUIRE (screen.window->getPeer() != nullptr);
+        CHECK (screen.window->getPeer()->getNonFullScreenBounds() == juce::Rectangle<int> (2000, 40, 1000, 700));
+    }
+
+    {
+        // The second screen gone: the default place on the main one.
+        MainScreen screen (startingWith (place, false), { twoScreens.getFirst() });
+        CHECK (screen.window->getBounds() == juce::Rectangle<int> (320, 120, 1280, 800));
+    }
+
+    {
+        // Larger than the screen it is mostly on, and partly off it: fitted to it.
+        MainScreen screen (startingWith ("-50 -30 2500 1400", false), { twoScreens.getFirst() });
+        CHECK (screen.window->getBounds() == twoScreens.getFirst());
+    }
 }
 #endif

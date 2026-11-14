@@ -83,7 +83,7 @@ On empty space:
 | Double-click under the last track | Adds a track |
 | Right-click | Opens the menu |
 | Middle-button drag | Moves the view, sideways and up and down |
-| Wheel | Scrolls; **Shift**+wheel scrolls sideways, **Ctrl**+wheel zooms around the pointer, **Alt**+wheel makes every track taller or shorter |
+| Wheel | Scrolls; **Shift**+wheel scrolls sideways, **Ctrl**+wheel or a trackpad's pinch zooms around the pointer, **Alt**+wheel makes every track taller or shorter |
 
 Hold **Alt** during a drag to leave the grid. With Snap on, a clip moves by whole steps of the grid from where it was,
 so a clip that is off the grid stays as far off it; **Quantize** (**Ctrl+U**) puts it on the grid. Dragging near the

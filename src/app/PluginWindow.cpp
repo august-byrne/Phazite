@@ -147,10 +147,9 @@ namespace
                                           if (! isInOpenProject())
                                               return;
 
+                                          // A save that failed says why itself (PresetModel.h: saveDevicePreset()).
                                           if (saveDevicePreset (services->context, id, file))
                                               services->library.notePresetSaved(); // the browser shows it
-                                          else
-                                              showProblem ("Phazite couldn't save the preset as " + file.getFullPathName() + ".");
                                       });
         }
 

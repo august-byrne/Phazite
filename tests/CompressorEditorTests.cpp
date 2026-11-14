@@ -313,6 +313,43 @@ TEST_CASE ("The compressor's editor lights its curve up to the level it hears, a
     CHECK (editor.getShownBoost() > 3.0f);
 }
 
+TEST_CASE ("Compressing, the history draws what came in as it came in, not as the detector hears it after the input gain")
+{
+    // Known bug 119: the history drew the detector's level as what came in.
+    Song song;
+    const auto device = song.getDevice();
+    auto* compressor = device.getProcessor<Compressor>();
+    REQUIRE (compressor != nullptr);
+    compressor->prepare (48000.0, 24000);
+    phazite::ui::CompressorEditor editor (device);
+    phazite::test::TestWindow window (editor, editor.getWidth(), editor.getHeight());
+    editor.refresh(); // it listens from now on
+    auto* scope = device.getScope();
+    REQUIRE (scope != nullptr);
+    REQUIRE (scope->isListening());
+
+    // -12 dB comes in, which the input gain turns up 12 dB before the detector hears it.
+    auto values = getDefaults();
+    auto found = false;
+
+    for (size_t i = 0; i < values.size(); ++i)
+    {
+        if (Compressor::info.parameters[i].id == "inputGain")
+        {
+            values[i] = 12.0f;
+            found = true;
+        }
+    }
+
+    REQUIRE (found);
+    std::vector<float> in (4800, juce::Decibels::decibelsToGain (-12.0f));
+    scope->pushInput (in.data(), in.data(), (int) in.size());
+    play (*compressor, -12.0f, 24000, values);
+    editor.refresh();
+    CHECK (editor.getShownLevel() > -3.0f); // what the detector heard
+    CHECK (editor.getHistory().getNewestInput() == doctest::Approx (-12.0f).epsilon (0.01));
+}
+
 TEST_CASE ("The compressor's characters are a row of buttons: a click picks one as one undo step, and the one in use is lit")
 {
     Song song;

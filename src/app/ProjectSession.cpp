@@ -842,6 +842,7 @@ void ProjectSession::askWhichCopyToOpen (const juce::String& error, const juce::
 void ProjectSession::setProject (std::unique_ptr<Project> newProject, std::unique_ptr<UnsavedFolder> newUnsavedFolder)
 {
     autosaveTimer = nullptr;
+    firstSave = nullptr; // a first save's copy of the project closing stops, and goes (it would move that project)
 
     // What holds the song (an export, a render, the devices' windows, which store what their plug-ins changed) goes while
     // it is still open and playing, before the context lets go of it.

@@ -551,6 +551,21 @@ void setValueSetByHand (Song& song, const ParameterRef& ref, float value)
         setValueSetByHand (song, *parameter, value);
 }
 
+ManyValuesSetByHand::ManyValuesSetByHand (const Song& song)
+{
+    if (auto* session = findSession (song))
+    {
+        writer = &session->getWriter();
+        writer->beginManyValues();
+    }
+}
+
+ManyValuesSetByHand::~ManyValuesSetByHand()
+{
+    if (writer != nullptr)
+        writer->endManyValues();
+}
+
 float getCurrentValue (const Song& song, const ParameterRef& ref, bool withModulation)
 {
     const auto parameter = locateParameter (song, ref);

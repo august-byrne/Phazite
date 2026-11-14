@@ -137,6 +137,27 @@ TEST_CASE ("A loop playing stops at a click on it, a one-shot plays again, and s
     CHECK (screen.previewer.getFile().getFileName() == juce::String ("Kick.wav"));
 }
 
+TEST_CASE ("A loop playing stops when what holds the browser hides it, though the browser itself stays visible")
+{
+    // Known bug 109: hiding the left panel, which holds the browser, left a looping preview playing with nothing in view to
+    // stop it.
+    BrowserScreen screen;
+    phazite::test::Mouse mouse (screen.browser.getTree());
+
+    for (const auto* row : { "Loops", "Break 120 BPM" })
+    {
+        mouse.click (screen.getRow (row).getCentre());
+        phazite::test::dispatchPendingMessages();
+    }
+
+    REQUIRE (screen.previewer.isPlaying());
+
+    // Its window hidden, as the left panel is: the browser's own flag doesn't change.
+    screen.window.setVisible (false);
+    CHECK (screen.browser.isVisible());
+    CHECK (phazite::test::runTimersUntil ([&screen] { return ! screen.previewer.isPlaying(); }, 2000));
+}
+
 TEST_CASE ("The sound selected shows under the tree: its waveform, whether it is a loop, how long it lasts and its format")
 {
     BrowserScreen screen;

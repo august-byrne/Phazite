@@ -28,12 +28,14 @@ public:
     // result shows in the song, whether it is done. Its target is the control the card rings, by its component ID: a
     // control that runs a command has the command's ID ("view.mixer", "transport.record"), others a name of their own
     // ("chordLane", "pianoRoll"); "playlist/track.add" is one inside another. Without one, the first of doneBy's commands'.
+    // A step about showing something is done while the control with the ID doneWhenShown shows (isShown).
     struct Step
     {
         const char* text;
         std::vector<const char*> doneBy {};
         std::function<bool (const ProjectContext&)> isDone {};
         const char* target = nullptr;
+        const char* doneWhenShown = nullptr;
     };
 
     struct Lesson
@@ -85,6 +87,9 @@ public:
     // Called when a lesson starts or stops, or goes to another step.
     std::function<void()> onChange;
 
+    // Whether the control with that ID (a Step's doneWhenShown) shows now, which the window knows (AppShell); unset, none does.
+    std::function<bool (const juce::String& id)> isShown;
+
     // "help.lesson." and each lesson's id, and "help.stopLesson".
     void addCommands (CommandRegistry&);
 
@@ -96,6 +101,7 @@ private:
     int step = 0;
 
     void setStep (int);
+    bool isStepDone (const Step&) const; // the song or the window shows it done
     void commandAdded (const Command&) override {}
     void commandInvoked (const Command&) override; // a step's command
 };

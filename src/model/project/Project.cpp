@@ -145,8 +145,20 @@ namespace
 
             list.folders.push_back (folder);
 
-            for (const auto& entry : juce::RangedDirectoryIterator (folder, true, "*", juce::File::findFilesAndDirectories))
+            // Never through a link: a project from someone else may hold one to anywhere (its home folder, or the project
+            // itself, a loop). A folder that is a link is left out, with what is in it; so is a file that is one, except on
+            // Windows, where JUCE can't tell a link to a file from a file the cloud keeps (OneDrive's), which is the user's.
+            for (const auto& entry :
+                 juce::RangedDirectoryIterator (folder, true, "*", juce::File::findFilesAndDirectories, juce::File::FollowSymlinks::no))
             {
+#if JUCE_WINDOWS
+                if (entry.isDirectory() && entry.getFile().isSymbolicLink())
+                    continue;
+#else
+                if (entry.getFile().isSymbolicLink())
+                    continue;
+#endif
+
                 if (entry.isDirectory())
                 {
                     list.folders.push_back (entry.getFile());
@@ -217,14 +229,31 @@ namespace
             if (! to.getChildFile (folder.getRelativePathFrom (from)).createDirectory())
                 return juce::Result::fail ("Phazite couldn't make the folder " + folder.getRelativePathFrom (from) + " of the copy.");
 
+        const auto cache = from.getChildFile ("Cache");
+
         for (const auto& file : list.files)
         {
             if (shouldStop())
                 return juce::Result::fail ("The copy was cancelled.");
 
-            if (! copyFile (file, to.getChildFile (file.getRelativePathFrom (from)), shouldStop, copied))
-                return juce::Result::fail ("Phazite couldn't copy " + file.getRelativePathFrom (from).replaceCharacter ('\\', '/')
-                                           + " into the project's new folder.");
+            const auto target = to.getChildFile (file.getRelativePathFrom (from));
+
+            if (copyFile (file, target, shouldStop, copied))
+                continue;
+
+            if (shouldStop())
+                return juce::Result::fail ("The copy was cancelled.");
+
+            // The Cache folder holds only what Phazite makes again (a frozen track's file, a render's): one of its files that
+            // went or changed while the copy ran is left behind, as if it hadn't been made yet.
+            if (file.isAChildOf (cache))
+            {
+                target.deleteFile();
+                continue;
+            }
+
+            return juce::Result::fail ("Phazite couldn't copy " + file.getRelativePathFrom (from).replaceCharacter ('\\', '/')
+                                       + " into the project's new folder.");
         }
 
         for (const auto* name : { "Audio", "Generated", "Renders", "Cache", "Backups" })
@@ -234,14 +263,40 @@ namespace
         return juce::Result::ok();
     }
 
-    // Where the copy goes until it is whole, beside the folder it becomes: "<name> (saving)".
+    // When this Phazite started: a copy marked before then was left by another run, which can't be writing it any more (one
+    // Phazite runs at a time: PhaziteRunning, src/app/Main.cpp).
+    const juce::Time processStart = juce::Time::getCurrentTime();
+
+    // The copies a save that never finished left in a folder (a crash in the middle of one): "(saving)" folders that hold
+    // Phazite's marker, made before this run started. Nothing else is deleted: a folder without the marker may be the user's.
+    void removeLeftoverCopies (const juce::File& parentFolder)
+    {
+        for (const auto& folder : parentFolder.findChildFiles (juce::File::findDirectories, false, "* (saving)*"))
+        {
+            const auto marker = folder.getChildFile (Project::copyMarkerName);
+
+            if (! folder.isSymbolicLink() && marker.existsAsFile() && marker.getLastModificationTime() < processStart)
+                folder.deleteRecursively();
+        }
+    }
+
+    // Where the copy goes until it is whole, beside the folder it becomes: "<name> (saving)", with Phazite's marker in it, which
+    // says that it is Phazite's to delete if it is ever left behind (removeLeftoverCopies()).
     juce::File makeCopyFolder (const juce::File& folder, juce::String& error)
     {
+        removeLeftoverCopies (folder.getParentDirectory());
         const auto copy = folder.getParentDirectory().getNonexistentChildFile (folder.getFileName() + " (saving)", {}, true);
 
         if (const auto result = copy.createDirectory(); result.failed())
         {
             error = "Phazite couldn't create the project folder: " + result.getErrorMessage();
+            return {};
+        }
+
+        if (! copy.getChildFile (Project::copyMarkerName).create())
+        {
+            copy.deleteRecursively();
+            error = "Phazite couldn't write into the project folder's parent, " + folder.getParentDirectory().getFullPathName() + ".";
             return {};
         }
 
@@ -258,6 +313,7 @@ namespace
         if (! copy.moveFileTo (folder))
             return juce::Result::fail ("Phazite couldn't name the project's folder \"" + folder.getFileName() + "\".");
 
+        folder.getChildFile (Project::copyMarkerName).deleteFile(); // a project's folder now, the user's
         return juce::Result::ok();
     }
 
@@ -521,22 +577,21 @@ namespace
                                            child.getChildWithName (schema::TRACK).isValid() ? schema::trackIsFolder : schema::trackIsTrack,
                                            nullptr);
 
-                    const auto belongs =
-                        found != places.end() && found->second.contains (type)
-                        && ! (child.hasType (schema::TRACK) && parent.hasType (schema::TRACK)
-                              && parent[schema::trackKind].toString() != schema::trackIsFolder)
-                        && ! (child.hasType (schema::CLIP) && parent[schema::trackKind].toString() == schema::trackIsFolder)
-                        && ! (child.hasType (schema::CLIP)
-                              && ! juce::StringArray { schema::clipIsMidi, schema::clipIsAudio }.contains (
-                                  child[schema::clipKind].toString()))
-                        && ! ((child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
-                              && parent[schema::clipKind].toString() != schema::clipIsMidi)
-                        && ! (child.hasType (schema::WARP) && parent[schema::clipKind].toString() != schema::clipIsAudio)
-                        && ! (child.hasType (schema::CONTROL)
-                              && ! juce::StringArray { schema::controlIsController, schema::controlIsPitchWheel,
-                                                       schema::controlIsChannelPressure, schema::controlIsAftertouch,
-                                                       schema::controlIsProgramChange }
-                                       .contains (child[schema::controlKind].toString()));
+                    const auto belongs = found != places.end() && found->second.contains (type)
+                                         && ! (child.hasType (schema::TRACK) && parent.hasType (schema::TRACK)
+                                               && parent[schema::trackKind].toString() != schema::trackIsFolder)
+                                         && ! (child.hasType (schema::CLIP) && parent[schema::trackKind].toString() != schema::trackIsTrack)
+                                         && ! (child.hasType (schema::CLIP)
+                                               && ! juce::StringArray { schema::clipIsMidi, schema::clipIsAudio }.contains (
+                                                   child[schema::clipKind].toString()))
+                                         && ! ((child.hasType (schema::NOTE) || child.hasType (schema::CONTROL))
+                                               && parent[schema::clipKind].toString() != schema::clipIsMidi)
+                                         && ! (child.hasType (schema::WARP) && parent[schema::clipKind].toString() != schema::clipIsAudio)
+                                         && ! (child.hasType (schema::CONTROL)
+                                               && ! juce::StringArray { schema::controlIsController, schema::controlIsPitchWheel,
+                                                                        schema::controlIsChannelPressure, schema::controlIsAftertouch,
+                                                                        schema::controlIsProgramChange }
+                                                        .contains (child[schema::controlKind].toString()));
 
                     if (! belongs)
                         parent.removeChild (i, nullptr);
@@ -710,8 +765,30 @@ namespace
             }
 
             //==============================================================================
-            // What names an item naming one the song has (a send's return aside, which the song keeps for an undo): a lane,
-            // a curve and a modulation of what isn't there go, and so does a sidechain or a pad's track's sampler.
+            // A send to a return the song hasn't goes, as deleting the return takes its sends (model/mixer/internal/Mixer.h:
+            // forgetWhatNamesTheGone()), and so does its ID, so that what names the send goes too (keepNames()).
+            void keepSends (juce::ValueTree tree, std::set<std::uint64_t>& items)
+            {
+                for (auto i = tree.getNumChildren(); --i >= 0;)
+                {
+                    auto child = tree.getChild (i);
+
+                    if (! isKnown (child))
+                        continue;
+
+                    if (child.hasType (schema::SEND) && items.count (readID (child[schema::sendTo])) == 0)
+                    {
+                        items.erase (readID (child[schema::sendID]));
+                        tree.removeChild (i, nullptr);
+                        continue;
+                    }
+
+                    keepSends (child, items);
+                }
+            }
+
+            // What names an item naming one the song has: a lane, a curve and a modulation of what isn't there go, and so does
+            // a sidechain or a pad's track's sampler.
             void keepNames (juce::ValueTree tree, const std::set<std::uint64_t>& items)
             {
                 for (auto i = tree.getNumChildren(); --i >= 0;)
@@ -730,8 +807,7 @@ namespace
 
                     for (const auto& property : properties)
                     {
-                        if (! schema::namesID (child, property) || child.hasType (schema::SEND)
-                            || items.count (readID (child[property])) > 0)
+                        if (! schema::namesID (child, property) || items.count (readID (child[property])) > 0)
                             continue;
 
                         if (child.hasType (schema::LANE) || child.hasType (schema::CURVE) || child.hasType (schema::MODULATES))
@@ -882,6 +958,7 @@ namespace
                 std::set<std::uint64_t> items;
                 keepIDs (state, items);
                 countIDs (song);
+                keepSends (state, items);
                 keepNames (state, items);
                 keepKeys (state);
                 keepCurves();
@@ -1408,7 +1485,9 @@ private:
         if (moved.failed())
             copy.deleteRecursively();
 
-        onFinished (moved); // last: the progress window may delete this
+        // Last, through a copy: the progress window may delete this, and the function with it, as it is told.
+        if (const auto callback = onFinished; callback != nullptr)
+            callback (moved);
     }
 };
 

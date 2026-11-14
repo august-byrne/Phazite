@@ -9,8 +9,9 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/playback/internal/PlaybackSession.h"
 
-#include <map>
+#include <algorithm>
 #include <optional>
+#include <vector>
 
 namespace phazite
 {
@@ -153,14 +154,35 @@ std::shared_ptr<const devices::Wavetable> getWavetable (const Song& song, Device
     // Else what its sounds name: a file read once while it stays the same, or a factory table.
     if (const auto file = getTableFile (song, *sounds, osc); file.existsAsFile())
     {
-        static std::map<juce::String, std::pair<juce::Time, std::shared_ptr<const devices::Wavetable>>> read; // message thread
-        auto& kept = read[file.getFullPathName()];
+        // The last few read, the one used last at the back: an editor shows a synth's three oscillators at most, so that a
+        // project's many tables, or a browser's worth tried one after another, aren't all kept.
+        struct Read
+        {
+            juce::String path;
+            juce::Time written;
+            std::shared_ptr<const devices::Wavetable> table;
+        };
 
-        if (kept.second == nullptr || kept.first != file.getLastModificationTime())
-            kept = { file.getLastModificationTime(), readWavetable (file) };
+        constexpr size_t kept = 8;
+        static std::vector<Read> read; // message thread
+        const auto path = file.getFullPathName();
+        const auto written = file.getLastModificationTime();
+        auto found = std::find_if (read.begin(), read.end(), [&path] (const Read& each) { return each.path == path; });
+        auto entry = found != read.end() ? *found : Read { path, {}, nullptr };
 
-        if (kept.second != nullptr)
-            return kept.second;
+        if (found != read.end())
+            read.erase (found);
+
+        if (entry.table == nullptr || entry.written != written)
+            entry = { path, written, readWavetable (file) };
+
+        if (read.size() >= kept)
+            read.erase (read.begin());
+
+        read.push_back (entry);
+
+        if (entry.table != nullptr)
+            return entry.table;
     }
 
     return devices::getFactoryWavetable (getFactoryTable (*sounds, osc));

@@ -102,10 +102,12 @@ leveled.
 **A pad on a track of its own.** Own Track gives the selected pad a track right after the sampler's, named after what
 the pad plays and in the sampler's track's colour. The pad's sound then leaves the sampler's track and plays through
 its own track's effects, sends and fader, not through the sampler's Output, and any device's
-[sidechain](../devices.md) can listen to it as to any track. The engine has the sampler play that pad into a buffer of
-its own, which the pad's track adds up (`src/engine/nodes/PartOutput.h`). The sampler's track's mute and solo cover its
+[sidechain](../devices.md) can listen to it as to any track but the sampler's own, whose sound it comes from. The
+engine has the sampler play that pad into a buffer of its own, which the pad's track adds up (`src/engine/nodes/PartOutput.h`). The sampler's track's mute and solo cover its
 pads on tracks of their own, and a pad's track has its own mute and solo too. Clicking Own Track again brings the pad
-back and deletes its track. Each is one undo step. A track whose drum sampler has pads on tracks of their own can't be
+back and deletes its track. Each is one undo step. Removing or replacing the sampler, or deleting its track, deletes
+its pads' tracks in the same step, as a Drum Rack's chains go with it in Ableton Live; a pad's track that holds clips
+stays, a plain track. A track whose drum sampler has pads on tracks of their own can't be
 frozen or bounced, since that would leave those pads out.
 
 **In the piano roll,** a drum track's rows are the sampler's pads that play a sound, named after what they play, and

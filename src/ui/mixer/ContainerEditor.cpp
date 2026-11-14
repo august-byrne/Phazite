@@ -194,6 +194,15 @@ RangeBar::RangeBar (ProjectContext& projectContext, DeviceID id, Kind k)
         gesture = nullptr;
     };
 
+    // Escape during a drag: the range as it was, nothing to redo.
+    onDragCancelled = [this]
+    {
+        if (gesture != nullptr)
+            gesture->rollBack();
+
+        gesture = nullptr;
+    };
+
     onValueChange = [this]
     {
         const NoteRange chosen { (int) std::lround (getMinValue()), (int) std::lround (getMaxValue()) };

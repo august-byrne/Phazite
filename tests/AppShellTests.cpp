@@ -515,6 +515,42 @@ TEST_CASE ("A panel moved to a window of its own fills it at once, and keeps fil
         CHECK_FALSE (screen.shell.isDetached (which));
     }
 }
+
+TEST_CASE ("In a panel's own window the computer keyboard plays its letters, and Shift and a letter runs that letter's shortcut")
+{
+    // Known bug 111: there the letters ran their single-key shortcuts, and Shift and a letter nothing.
+    using phazite::ui::Panel;
+    Screen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+
+    struct Invoked : public phazite::CommandRegistry::Listener
+    {
+        void commandAdded (const phazite::Command&) override {}
+        void commandInvoked (const phazite::Command& command) override { ids.add (command.id); }
+        juce::StringArray ids;
+    } invoked;
+
+    screen.registry.addListener (&invoked);
+    screen.keyboard.setEnabled (true);
+    screen.shell.setDetached (Panel::editor, true);
+    auto* window = screen.shell.getPanel (Panel::editor).getParentComponent();
+    REQUIRE (window != nullptr);
+    REQUIRE (window->getPeer() != nullptr);
+
+    // O, a black key here, and the metronome's key: a note, no shortcut.
+    window->getPeer()->handleKeyPress (juce::KeyPress ('o'));
+    CHECK (invoked.ids.isEmpty());
+
+    // Shift and O: the metronome, as in the main window.
+    window->getPeer()->handleKeyPress (juce::KeyPress ('O', juce::ModifierKeys::shiftModifier, 'O'));
+    CHECK (invoked.ids == juce::StringArray ("transport.metronome"));
+
+    screen.keyboard.releaseAll();
+    screen.keyboard.setEnabled (false);
+    screen.shell.setDetached (Panel::editor, false);
+    screen.registry.removeListener (&invoked);
+}
 #endif
 
 TEST_CASE ("The hint bar shows the guide's next step, which a note on the computer keyboard moves on")

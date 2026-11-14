@@ -280,7 +280,7 @@ juce::Button& CompressorEditor::getCharacterButton (int character)
 
 void CompressorEditor::modeShown (int)
 {
-    // Compressing, what the detector hears and what goes out, how far it turns down from the top over half the height;
+    // Compressing, what comes in and what goes out, how far it turns down from the top over half the height;
     // ducking, the sound it ducks as it comes in and goes out, with the key (without one, how far it turns down, on the
     // levels' own scale) and the threshold's line.
     const auto ducking = isDucking();
@@ -332,14 +332,15 @@ void CompressorEditor::refresh()
     shownReduction = std::max (reduction, shownReduction - meterFall);
     shownBoost = std::max (boost, shownBoost - meterFall);
 
-    // Compressing, what the detector heard of the sound (after the input gain and the key's low cut), against the curve;
-    // ducking, the sound as it came in, and the key as the detector heard it, against the threshold.
+    // The sound's peak as it came in and as it went out, as each mode's page shows them; ducking, also the key as the
+    // detector heard it, against the threshold. Compressing, the detector's level is the curve's dot and the meter's alone:
+    // after the input gain and the key's low cut, and for some characters an average, it isn't what came in.
     const auto now = juce::Time::getMillisecondCounterHiRes();
 
     if (isDucking())
         history->push (now, device.getSongTime(), input, output, reduction, level);
     else
-        history->push (now, device.getSongTime(), level, output, reduction);
+        history->push (now, device.getSongTime(), input, output, reduction);
 
     // What it listens to, in its colour and named in the history, and in the picker: again as the song changes (its own
     // undo, Duck Under, a track renamed or recoloured).

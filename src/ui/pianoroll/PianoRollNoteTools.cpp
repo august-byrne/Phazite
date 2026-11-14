@@ -29,6 +29,18 @@ void PianoRoll::NoteGrid::mouseDown (const juce::MouseEvent& e)
     gesture->startScrollY = roll.scrollY;
     gesture->selectionBefore = roll.getSelectedRefsHere();
     gesture->selectionAtPress = SelectionAtPress::take (roll.context);
+
+    // Where the shown clips end, before the press adds anything: a note the Draw tool's click adds past a clip's end grows the
+    // clip, which a drag that brings it back takes back too.
+    {
+        std::vector<ClipID> shownClips;
+
+        for (const auto& clip : roll.getShownClips())
+            shownClips.push_back (clip.id);
+
+        gesture->clipEndsAtPress = getClipEnds (roll.context, shownClips);
+    }
+
     beginDragAutoRepeat (TimelineEditor::autoRepeatInterval); // so the grid goes on scrolling while the mouse rests past an edge
 
     // A middle drag moves the view, whatever the tool, as in FL Studio: it never edits.
@@ -362,13 +374,6 @@ void PianoRoll::NoteGrid::beginDrag (const juce::MouseEvent& e)
     gesture->stepIsTheDrags = ! gesture->hasStep();
     gesture->beginStep (roll.context, gesture->zone != Zone::body ? "Resize Notes" : (gesture->copies ? "Copy Notes" : "Move Notes"));
     setDraggedNotes (roll.getSelectedNotesHere());
-
-    std::vector<ClipID> shownClips;
-
-    for (const auto& clip : roll.getShownClips())
-        shownClips.push_back (clip.id);
-
-    gesture->clipEndsAtPress = getClipEnds (roll.context, shownClips);
 
     if (gesture->anchor.note.isValid())
         gesture->kind = gesture->zone == Zone::body ? Gesture::Kind::move

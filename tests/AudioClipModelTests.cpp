@@ -493,3 +493,39 @@ TEST_CASE ("A slip keeps the part a clip plays inside its file, as long as it wa
     CHECK (song.get().clip.range.getEnd().inBeats() == doctest::Approx (6.0));
     undo.walkBackAndForth();
 }
+
+TEST_CASE ("A clip that plays more than its whole file can't slip: the part it plays stays as it is, backwards too")
+{
+    // Its part longer than its file: a slip held it at the file's start, and reversed cut it at the file's start
+    // (part.start below 0).
+    Song song;
+    auto& context = song.context;
+    auto clipState = phazite::findClipState (*song.song, song.audio);
+    const auto fileLength = phazite::getClipFileLength (*song.song, clipState);
+    REQUIRE (fileLength == doctest::Approx (4.0));
+    phazite::setAudioPart (*song.song, clipState, phazite::getClipRange (clipState).getStart(), { 0.0, fileLength + 1.0 });
+    song.song->getUndoManager().clearUndoHistory();
+
+    const auto part = [&song] { return phazite::getFilePart (phazite::findClipState (*song.song, song.audio)); };
+    const auto slip = [&song, &context] (double beats)
+    {
+        const phazite::UndoStep step (*song.song, "Slip Clip");
+        phazite::slipClip (context, song.audio, phazite::getSlipOffset (context, song.audio), beat (20.0), beat (20.0 + beats));
+    };
+
+    const auto checkPart = [&part, fileLength]
+    {
+        CHECK (part().start == doctest::Approx (0.0));
+        CHECK (part().end == doctest::Approx (fileLength + 1.0));
+    };
+
+    for (const auto reversed : { false, true })
+    {
+        CAPTURE (reversed);
+        phazite::setClipReversed (context, song.audio, reversed);
+        slip (-3.0);
+        checkPart();
+        slip (3.0);
+        checkPart();
+    }
+}

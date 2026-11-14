@@ -7,7 +7,7 @@ is in the `phazite_app` static library, which the tests link too; the `Phazite` 
 | File | What it holds |
 |---|---|
 | `Main.cpp` | Startup: the engine context, the services and the main window; and the `PhaziteRunning` inter-process lock (a mutex on Windows) that the installer's silent update waits on. |
-| `MainWindow.*` | The main window, with its menus and dialogs. |
+| `MainWindow.*` | The main window, with its menus and dialogs; where it opens (`placeWindow()`: where it was closed, on a screen that still exists). |
 | `ProjectSession.*` | The open project: it owns the `ProjectContext` and is the only code (with the tests) that changes which song it holds. |
 | `AppServices.*` | The services the app owns and hands to what needs them: the engine as the UI reaches it, the settings, recent projects, the Phazite Sounds download, the library and the previewer. |
 | `PluginWindow.*` | Devices' windows: a plug-in's own editor, with the Plug-in menu's presets and its Send All Keys to the Plug-in switch (whose services the main window sets), and beside the menu, for a plug-in with a sidechain, its key's picker; and, when the user wants one, one of Phazite's own devices' editors out of the Devices view. Containers show in the Devices view only. |

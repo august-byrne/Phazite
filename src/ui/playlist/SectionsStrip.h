@@ -9,6 +9,7 @@
 
 #include "model/arrangement/PlaylistModel.h"
 #include "ui/timeline/TimelineEditor.h"
+#include "ui/timeline/TimelineGesture.h"
 
 #include <optional>
 
@@ -44,6 +45,11 @@ public:
     std::optional<BeatPosition> getDragTarget() const;
     std::function<void()> onDragChanged;
 
+    // Escape while the mouse is down here (TimelineEditor::keyPressed()): the drag, which changes the song only as the mouse
+    // goes up, comes to nothing, and what was selected as the mouse went down is selected again. Returns whether there was
+    // one.
+    bool cancelDrag();
+
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
@@ -67,6 +73,7 @@ private:
         SectionID section;
         bool onEdge = false;
         std::optional<BeatPosition> target; // move: the boundary it would go to; resize: the new end
+        SelectionAtPress selectionAtPress;  // which Escape puts back
     };
 
     TimelineEditor& editor;

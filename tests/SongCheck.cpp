@@ -222,8 +222,8 @@ namespace
                     add ("place", child, "not a child of " + type);
                 else if (childType == "TRACK" && type == "TRACK" && parent[schema::trackKind].toString() != schema::trackIsFolder)
                     add ("place", child, "a track in a track that isn't a folder");
-                else if (childType == "CLIP" && parent[schema::trackKind].toString() == schema::trackIsFolder)
-                    add ("place", child, "a clip in a folder (a track or a return holds clips: PlaylistModel.cpp, holdsClips())");
+                else if (childType == "CLIP" && parent[schema::trackKind].toString() != schema::trackIsTrack)
+                    add ("place", child, "a clip in a folder or a return (only a track holds clips: PlaylistModel.cpp, holdsClips())");
                 else if ((childType == "NOTE" || childType == "CONTROL") && parent[schema::clipKind].toString() != schema::clipIsMidi)
                     add ("place", child, "in a clip that isn't a MIDI clip");
                 else if (childType == "WARP" && parent[schema::clipKind].toString() != schema::clipIsAudio)

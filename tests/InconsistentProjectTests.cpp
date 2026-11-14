@@ -163,6 +163,26 @@ TEST_CASE ("A clip where no track holds clips, and a note outside a MIDI clip, a
     CHECK (findAll (project->getSong().getState(), schema::NOTE).size() == 1);
 }
 
+TEST_CASE ("A clip on a return or a folder is left out, as only a track holds clips")
+{
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* clip = Edited::findTrack (song, "Lead")->getChildByName ("CLIP");
+            REQUIRE (clip != nullptr);
+            Edited::findTrack (song, "Audio")->setAttribute ("kind", "return"); // with its audio clip
+            auto* folder = song.getChildByName ("TRACKS")->createNewChildElement ("TRACK");
+            folder->setAttribute ("id", "777780");
+            folder->setAttribute ("kind", "folder");
+            folder->addChildElement (new juce::XmlElement (*clip));
+        });
+    REQUIRE (project != nullptr);
+    const auto clips = findAll (project->getSong().getState(), schema::CLIP);
+    REQUIRE (clips.size() == 1); // the lead's MIDI clip alone
+    CHECK (clips.front().getParent()[schema::trackName].toString() == juce::String ("Lead"));
+}
+
 TEST_CASE ("Two tracks with one ID both open, each with an ID of its own")
 {
     Edited edited;
@@ -284,6 +304,31 @@ TEST_CASE ("A curve, a lane and a sidechain of what the song hasn't are left out
     const auto curves = findAll (project->getSong().getState(), schema::CURVE);
     REQUIRE (curves.size() == 1);
     CHECK ((float) curves.front().getChild (0)[schema::pointValue] == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("A send to a return the song hasn't is left out, with what modulated it")
+{
+    Edited edited;
+    const auto project = edited.open (
+        [] (juce::XmlElement& song)
+        {
+            auto* lead = Edited::findTrack (song, "Lead");
+            auto* send = lead->createNewChildElement ("SEND");
+            send->setAttribute ("id", "777770");
+            send->setAttribute ("to", "777771");
+            auto* modulator = lead->createNewChildElement ("MODULATOR");
+            modulator->setAttribute ("id", "777772");
+            modulator->setAttribute ("type", "lfo");
+            auto* modulates = modulator->createNewChildElement ("MODULATES");
+            modulates->setAttribute ("device", "777770");
+            modulates->setAttribute ("parameter", "send level");
+            modulates->setAttribute ("amount", 0.5);
+        });
+    REQUIRE (project != nullptr);
+    const auto state = project->getSong().getState();
+    CHECK (findAll (state, schema::SEND).empty());
+    CHECK (findAll (state, schema::MODULATES).empty());
+    CHECK (findAll (state, schema::MODULATOR).size() == 1);
 }
 
 TEST_CASE ("A track preset's volume beyond any fader's loads at the top of its range, and its sounds that aren't audio files stay out")

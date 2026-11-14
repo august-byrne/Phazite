@@ -7,6 +7,8 @@
 #include "ui/input/CommandUI.h"
 #include "ui/theme/LookAndFeel.h"
 
+#include <map>
+
 namespace phazite::ui
 {
 namespace
@@ -586,18 +588,34 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
             for (const auto& moving : gesture->moving)
                 delta = std::max (delta, BeatPosition() - moving.start);
 
-            // Up or down by whole rows, as long as every clip lands on a track that holds clips (not a folder, nor the
-            // master's row).
+            // Up or down by whole rows, as long as every clip lands on a track that can hold it: not a folder, a return or the
+            // master's row, and of its kind (audio and notes don't share a track: model/arrangement/PlaylistModel.h,
+            // canPlaceClips()). Where they can't go, they stay on the rows they can, and the hint bar says why.
+            gesture->refusal.clear();
+
             if (const auto row = rowAtPointer; row >= 0 && gesture->startRow >= 0)
             {
                 const auto offset = row - gesture->startRow;
-                const auto fits = std::all_of (gesture->moving.begin(), gesture->moving.end(),
-                                               [this, offset] (const Gesture::MovingClip& moving)
-                                               {
-                                                   const auto target = moving.row + offset;
-                                                   return juce::isPositiveAndBelow (target, (int) rows.size())
-                                                          && canHoldClips (context, rows[(size_t) target].track.id);
-                                               });
+                std::map<int, std::vector<ClipID>> byTarget;
+                std::vector<ClipID> leaving;
+                auto fits = true;
+
+                for (const auto& moving : gesture->moving)
+                {
+                    leaving.push_back (moving.clip);
+                    const auto target = moving.row + offset;
+                    fits = fits && juce::isPositiveAndBelow (target, (int) rows.size());
+                    byTarget[target].push_back (moving.clip);
+                }
+
+                for (const auto& [target, clips] : byTarget)
+                {
+                    if (! fits)
+                        break;
+
+                    gesture->refusal = whyClipsCantGo (context, rows[(size_t) target].track.id, clips, leaving);
+                    fits = gesture->refusal.isEmpty();
+                }
 
                 if (fits)
                     gesture->rowOffset = offset;
@@ -720,7 +738,8 @@ juce::String Playlist::describeDrag() const
         case Gesture::Kind::move:
         {
             const auto track = getTrackRow (context, clip->track);
-            return "Starts at " + describePlace (start) + (track.has_value() && gesture->rowOffset != 0 ? " on " + track->name : "");
+            return "Starts at " + describePlace (start) + (track.has_value() && gesture->rowOffset != 0 ? " on " + track->name : "")
+                   + (gesture->refusal.isNotEmpty() ? " (" + gesture->refusal + ")" : "");
         }
 
         case Gesture::Kind::trimStart:
@@ -942,7 +961,7 @@ bool Playlist::cancelDrag()
 {
     // Escape: what the press and its drag did goes, leaving nothing to undo or redo, what was selected and the view as they
     // were when the mouse went down; the mouse does nothing more until it goes up. In a lane, or the tempo lane, theirs.
-    if (tempoLane.cancelDrag())
+    if (tempoLane.cancelDrag() || sectionsStrip.cancelDrag() || chordLane.cancelDrag()) // theirs too
         return true;
 
     for (auto* laneView : laneViews)

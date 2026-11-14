@@ -159,7 +159,19 @@ void Playlist::Lanes::paintOverChildren (juce::Graphics& g)
                               ? getRowArea (playlist.rows[(size_t) playlist.fileDropRow])
                               : getLocalBounds();
         g.setColour (p.accent);
-        g.fillRect (x - 1, area.getY(), 3, area.getHeight());
+
+        // On a track that doesn't suit it, it goes on a new track below: a line along the row's foot, where that track comes,
+        // and the time from there down.
+        if (playlist.fileDropOnNewTrack)
+        {
+            const auto shown = getShownTimeline (*this).toNearestInt();
+            g.fillRect (shown.getX(), area.getBottom() - 2, shown.getWidth(), 3);
+            g.fillRect (x - 1, area.getBottom() - 2, 3, area.getHeight() / 2);
+        }
+        else
+        {
+            g.fillRect (x - 1, area.getY(), 3, area.getHeight());
+        }
     }
 
     // Where a device dragged from the browser would go: onto a track, or onto a new track under the last. Across what shows of the
@@ -390,6 +402,8 @@ void Playlist::showProject()
     headersFaded = false;
     selectionAnchor = {};
     lastClip = {};
+    clipsSelectedBefore.clear();
+    tracksSelectedBefore.clear();
     gesture = nullptr;
     setDragReadout ({});
     rubberBand = {};
@@ -744,11 +758,32 @@ void Playlist::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (focusMode)
         layOutRows(); // what is in focus changed
 
-    // The clip selected last is the one the Draw and Paint tools place (not a section, which is a clip too).
-    if (const auto clips = selection.getClips(); ! clips.empty())
-        lastClip = clips.front();
+    // The clip selected last is the one the Draw and Paint tools place (not a section, which is a clip too): of those this
+    // change selected, the last in the playlist's order. (The selection lists clips in that order, not as they were
+    // selected: the first of them was taken, known bug 56 until 2026-11-14.)
+    const auto clips = selection.getClips();
 
-    if (const auto tracks = selection.getTracks(); ! tracks.empty())
-        scrollToShow (getRowOf (tracks.front()));
+    for (const auto clip : clips)
+        if (std::find (clipsSelectedBefore.begin(), clipsSelectedBefore.end(), clip) == clipsSelectedBefore.end())
+            lastClip = clip;
+
+    clipsSelectedBefore = clips;
+
+    // A track selected out of view, by a key or a command, is brought into view; none is when what the change selected shows
+    // already (a click, a Shift+click on a track far from the first selected), or it selected no track anew (a clip clicked,
+    // a track taken out). Every change scrolled back to the first selected track, hiding what was clicked (known bug 54
+    // until 2026-11-14).
+    const auto tracks = selection.getTracks();
+    std::vector<int> newRows;
+
+    for (const auto track : tracks)
+        if (std::find (tracksSelectedBefore.begin(), tracksSelectedBefore.end(), track) == tracksSelectedBefore.end())
+            if (const auto row = getRowOf (track); row >= 0)
+                newRows.push_back (row);
+
+    tracksSelectedBefore = tracks;
+
+    if (! newRows.empty() && std::none_of (newRows.begin(), newRows.end(), [this] (int row) { return isRowInView (row); }))
+        scrollToShow (*std::min_element (newRows.begin(), newRows.end()));
 }
 } // namespace phazite::ui

@@ -5,6 +5,7 @@
 #include "model/presets/PresetModel.h"
 #include "ui/browser/PluginPicker.h"
 #include "ui/input/CommandUI.h"
+#include "ui/input/WindowKeys.h"
 #include "ui/theme/LookAndFeel.h"
 
 namespace phazite::ui
@@ -29,16 +30,44 @@ namespace
 
         return bounds.withCentre (mainCentre);
     }
+
+    // A component with that ID that shows, depth first, inside within.
+    juce::Component* findShowingChild (juce::Component& within, const juce::String& id)
+    {
+        for (auto* child : within.getChildren())
+        {
+            if (child->getComponentID() == id && child->isShowing())
+                return child;
+
+            if (auto* found = findShowingChild (*child, id))
+                return found;
+        }
+
+        return nullptr;
+    }
+
+    // The same by a path ("playlist/track.add"), each part inside the one before it.
+    juce::Component* findShowingWithID (juce::Component& within, const juce::String& path)
+    {
+        auto* found = &within;
+
+        for (const auto& id : juce::StringArray::fromTokens (path, "/", {}))
+            if (found = findShowingChild (*found, id); found == nullptr)
+                return nullptr;
+
+        return found;
+    }
 } // namespace
 
 //==============================================================================
-// A panel in a window of its own. The shortcuts work there too, and closing the window puts the panel
-// back into the main window.
+// A panel in a window of its own. Its keys are the main window's (ui/input/WindowKeys.h): the computer keyboard plays notes
+// there first, then the shortcuts run, and while it plays them Shift and a letter run that letter's shortcut; and the notes
+// held end as the window loses the keyboard. Closing the window puts the panel back into the main window.
 struct AppShell::PanelWindow : public juce::DocumentWindow
 {
-    PanelWindow (juce::Component& panel, juce::Rectangle<int> bounds, juce::KeyListener& keys, std::function<void()> onClose)
+    PanelWindow (juce::Component& panel, juce::Rectangle<int> bounds, KeyDispatcher& shortcuts, ComputerKeyboard& keyboard,
+                 std::function<void()> onClose)
         : juce::DocumentWindow (panel.getTitle() + " - Phazite", getPalette (panel).background, juce::DocumentWindow::allButtons),
-          shortcuts (keys),
           close (std::move (onClose))
     {
         setUsingNativeTitleBar (true);
@@ -46,19 +75,33 @@ struct AppShell::PanelWindow : public juce::DocumentWindow
         setResizable (true, false);
         setResizeLimits (240, 240, 16384, 16384);
         setBounds (bounds);
-        addKeyListener (&shortcuts);
+        keys = std::make_unique<WindowKeys> (*this, shortcuts, keyboard);
         setVisible (true);
     }
 
     ~PanelWindow() override
     {
-        removeKeyListener (&shortcuts);
+        keys = nullptr;
         clearContentComponent(); // the panel belongs to the main window
     }
 
     void closeButtonPressed() override { close(); }
 
-    juce::KeyListener& shortcuts;
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        return (keys != nullptr && keys->keyPressedAfterListeners (key)) || juce::DocumentWindow::keyPressed (key);
+    }
+
+    void activeWindowStatusChanged() override
+    {
+        juce::DocumentWindow::activeWindowStatusChanged();
+
+        // Keys let go in another window would never reach this one.
+        if (! isActiveWindow() && keys != nullptr)
+            keys->releaseKeys();
+    }
+
+    std::unique_ptr<WindowKeys> keys;
     std::function<void()> close;
 };
 
@@ -112,6 +155,19 @@ AppShell::AppShell (EngineContext& engine, CommandBridge& bridge, KeyDispatcher&
     {
         lessonCard.update();
         keepOverlaysInFront();
+    };
+
+    // A step done while a view shows: here, or in a panel's own window.
+    lessons.isShown = [this] (const juce::String& target)
+    {
+        if (findLessonTarget (target) != nullptr)
+            return true;
+
+        for (auto* window : { leftWindow.get(), inspectorWindow.get(), editorWindow.get() })
+            if (window != nullptr && findShowingWithID (*window, target) != nullptr)
+                return true;
+
+        return false;
     };
 
     // Double-clicking a clip opens it in its editor, a MIDI clip in the piano roll and an audio clip in the audio clip
@@ -657,7 +713,7 @@ void AppShell::setDetached (Panel which, bool detached)
             panels.isMaximized (which) && which == Panel::editor ? panels.getEditorHeight (centre.getHeight()) : panel.getHeight();
         const juce::Point<int> size (juce::jmax (width, 360), juce::jmax (height, 400));
 
-        window = std::make_unique<PanelWindow> (panel, choosePanelWindowBounds (*this, size), shortcutKeys,
+        window = std::make_unique<PanelWindow> (panel, choosePanelWindowBounds (*this, size), shortcutKeys, computerKeyboard,
                                                 [safeThis = juce::Component::SafePointer<AppShell> (this), which]
                                                 {
                                                     // Closing deletes the window, so dock the panel once the click is over.
@@ -1128,29 +1184,7 @@ std::unique_ptr<juce::ComponentTraverser> AppShell::createKeyboardFocusTraverser
 
 juce::Component* AppShell::findLessonTarget (const juce::String& target)
 {
-    // A component with that ID that shows, depth first; each part of a path inside the one before it.
-    const std::function<juce::Component*(juce::Component&, const juce::String&)> findShowing =
-        [&findShowing] (juce::Component& within, const juce::String& id) -> juce::Component*
-    {
-        for (auto* child : within.getChildren())
-        {
-            if (child->getComponentID() == id && child->isShowing())
-                return child;
-
-            if (auto* found = findShowing (*child, id))
-                return found;
-        }
-
-        return nullptr;
-    };
-
-    juce::Component* found = this;
-
-    for (const auto& id : juce::StringArray::fromTokens (target, "/", {}))
-        if (found = findShowing (*found, id); found == nullptr)
-            return nullptr;
-
-    return found;
+    return findShowingWithID (*this, target);
 }
 
 void AppShell::layOutCentre()

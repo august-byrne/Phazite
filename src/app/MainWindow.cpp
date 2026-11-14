@@ -124,7 +124,7 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
 
     setResizable (true, false);
     setResizeLimits (800, 500, 16384, 16384);
-    centreWithSize (1280, 800);
+    restorePlace();
 
     // Menus, tooltips and the pickers open inside this window, on frosted glass, unless the system reduces transparency
     // (ui/theme/Popups.h).
@@ -206,11 +206,17 @@ MainWindow::MainWindow (ui::CommandBridge& bridge, ProjectSession& s, ui::LookAn
 
     updateTitle();
     startTimerHz (1); // the title shows unsaved changes
+
+    // Maximized as it was closed, before it shows: it opens so, on the screen its place is on.
+    maximizeWhenOnDesktop = services.settings.get (Settings::windowMaximized);
+    maximizeIfWaiting();
+    placeRestored = true;
     setVisible (true);
 }
 
 MainWindow::~MainWindow()
 {
+    keepPlace(); // as it closes, maximized or not
     stopTimer();
     juce::Desktop::getInstance().removeDarkModeSettingListener (this);
     services.updates.removeChangeListener (this);
@@ -224,7 +230,11 @@ MainWindow::~MainWindow()
 
     // Close the dialogs: they point into the engine context and the commands, which are destroyed after this window, and
     // an export, a freeze or a bounce into the project's song. And the devices' windows, which use the keys and services
-    // that go next.
+    // that go next. An export that stops as Phazite quits isn't told.
+    if (auto* window = exportWindow.getComponent())
+        if (auto* panel = dynamic_cast<ui::ExportPanel*> (window->getContentComponent()))
+            panel->onClosedWhileExporting = nullptr;
+
     delete exportWindow.getComponent();
     delete renderWindow.getComponent();
     delete progressionsWindow.getComponent();
@@ -329,6 +339,121 @@ void MainWindow::resized()
     if (shell != nullptr)
         shell->setEdgeInset (isFullScreen() || isKioskMode() ? 0 : ui::Shell::edgeInset);
 #endif
+
+    keepPlace();
+}
+
+void MainWindow::moved()
+{
+    juce::DocumentWindow::moved();
+    keepPlace();
+}
+
+juce::Array<juce::Rectangle<int>> MainWindow::getScreens() const
+{
+    if (surroundings.screens != nullptr)
+        return surroundings.screens();
+
+    juce::Array<juce::Rectangle<int>> screens;
+
+    for (const auto& display : juce::Desktop::getInstance().getDisplays().displays)
+        screens.add (display.userBounds.getLargestIntegerWithin());
+
+    return screens;
+}
+
+void MainWindow::restorePlace()
+{
+    const auto screens = getScreens();
+
+    if (const auto place = placeWindow (juce::Rectangle<int>::fromString (services.settings.get (Settings::windowPlace)), screens))
+    {
+        setBounds (*place);
+        return;
+    }
+
+    // The main screen (JUCE lists it first), with its default size, fitted to a small one.
+    if (! screens.isEmpty())
+    {
+        if (const auto place =
+                placeWindow (juce::Rectangle<int> (defaultWidth, defaultHeight).withCentre (screens.getFirst().getCentre()), screens))
+        {
+            setBounds (*place);
+            return;
+        }
+    }
+
+    centreWithSize (defaultWidth, defaultHeight);
+}
+
+void MainWindow::maximizeIfWaiting()
+{
+    auto* peer = isOnDesktop() ? getPeer() : nullptr;
+
+    if (! maximizeWhenOnDesktop || peer == nullptr)
+        return;
+
+    // As JUCE puts a maximized window on the desktop again: maximized, then where it goes back to.
+    maximizeWhenOnDesktop = false;
+    const auto restored = getBounds();
+    setFullScreen (true);
+    peer->setNonFullScreenBounds (restored);
+}
+
+void MainWindow::parentHierarchyChanged()
+{
+    juce::DocumentWindow::parentHierarchyChanged();
+    maximizeIfWaiting(); // put on the desktop by whoever made it (Surroundings::addToDesktop)
+}
+
+void MainWindow::keepPlace()
+{
+    // Not while it is made, minimized, or fills the screen (View > Full Screen, which isn't kept).
+    if (! placeRestored || isMinimised() || isKioskMode())
+        return;
+
+    if (isFullScreen())
+    {
+        services.settings.set (Settings::windowMaximized, true);
+        return;
+    }
+
+    services.settings.set (Settings::windowMaximized, false);
+    services.settings.set (Settings::windowPlace, getBounds().toString());
+}
+
+std::optional<juce::Rectangle<int>> placeWindow (juce::Rectangle<int> saved, const juce::Array<juce::Rectangle<int>>& screens)
+{
+    if (saved.isEmpty())
+        return std::nullopt;
+
+    // The screen that holds most of it, and how much of it they all hold (screens don't overlap).
+    const juce::Rectangle<int>* best = nullptr;
+    juce::int64 bestArea = 0, onScreens = 0;
+
+    for (const auto& screen : screens)
+    {
+        const auto shared = screen.getIntersection (saved);
+        const auto area = (juce::int64) shared.getWidth() * shared.getHeight();
+        onScreens += area;
+
+        if (area > bestArea && shared.getWidth() >= windowShownAtLeast && shared.getHeight() >= windowShownAtLeast)
+        {
+            best = &screen;
+            bestArea = area;
+        }
+    }
+
+    if (best == nullptr)
+        return std::nullopt;
+
+    // All on the screens: where it was.
+    if (onScreens == (juce::int64) saved.getWidth() * saved.getHeight())
+        return saved;
+
+    // Partly off them: no larger than that screen, and on it.
+    return saved.withSize (juce::jmin (saved.getWidth(), best->getWidth()), juce::jmin (saved.getHeight(), best->getHeight()))
+        .constrainedWithin (*best);
 }
 
 int MainWindow::getDesktopWindowStyleFlags() const
@@ -736,6 +861,16 @@ void MainWindow::showExport()
         { return startExport (song, file, settings, std::move (onFinished)); });
     panel->setSize (560, 660);
 
+    // Its window closed while it exports (its close button: Escape asks first): the export stops, which a notice says, as the
+    // window that would have said so has gone.
+    panel->onClosedWhileExporting = [this]
+    {
+        tell ("Export cancelled",
+              "The export stopped as its window closed, before it finished: nothing was written, and a file "
+              "that was there is as it was.",
+              false);
+    };
+
     juce::DialogWindow::LaunchOptions o;
     o.dialogTitle = "Export";
     o.dialogBackgroundColour = lookAndFeel.getPalette().surface;
@@ -790,10 +925,14 @@ void MainWindow::runRender (std::unique_ptr<TrackRender> render)
 
 void MainWindow::renderFinished (const juce::String& title, const juce::Result& result)
 {
+    // What it says, taken first: the title and the result may be the render's, which goes with its window.
+    const auto shownTitle = title;
+    const auto failed = result.failed();
+    const auto error = result.getErrorMessage();
     delete renderWindow.getComponent(); // and the render, which is calling back: it lets go of itself last
 
-    if (result.failed())
-        tell (title, result.getErrorMessage(), true);
+    if (failed)
+        tell (shownTitle, error, true);
 }
 
 void MainWindow::renderWrote (const juce::String& title, const juce::File& file)

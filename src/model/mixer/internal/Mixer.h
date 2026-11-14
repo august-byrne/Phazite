@@ -85,8 +85,18 @@ DeviceID setInstrument (Song&, TrackID, juce::ValueTree instrument);
 // Removes a device, as one undo step named after it: a container with what it holds (Containers.h), and a device in a
 // container from its row, what it holds of its own stored first (Song::storeDeviceStates()), so that an undo brings it
 // back as it was.
-// A bus left without devices becomes a plain folder again, unless it was made a bus on purpose.
+// A bus left without devices becomes a plain folder again, unless it was made a bus on purpose. What named the device goes
+// with it (forgetWhatNamesTheGone()).
 void removeDevice (Song&, DeviceID);
+
+// Takes what names an item the song no longer holds out of it, in the caller's undo step: the modulations of a device's, a
+// chain's, a send's or a fader's parameters; the sends to a return; and the tracks of a drum sampler's pads, which go with
+// their sampler as a Drum Rack's chains go with it in Ableton Live (one holding clips stays, a plain track, so that no clip
+// is lost). Their automation curves and lanes stay while an undo could bring them back, and go as the project opens
+// (Schema.h: AUTOMATION, LANE); the sidechains that listened to a track are forgotten as it goes (Sidechain.h). Every change
+// that takes a device, a chain, a send, a fader or a track out of the song calls it, so that the song stays as
+// makeConsistent() (model/project/internal/Project.h) would leave it.
+void forgetWhatNamesTheGone (Song&);
 
 // Moves a device to another place among its channel's devices, as one undo step.
 void moveDevice (Song&, DeviceID, int newIndex);

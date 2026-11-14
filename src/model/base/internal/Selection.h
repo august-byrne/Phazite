@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// What is selected in the open project, held as IDs (roadmap A5, 2026-10-30): tracks, clips, sections and devices, in
-// the order they were selected; or notes of the clips an editor shows; or automation points of one parameter. One kind
-// of thing at a time, as the commands act on one: selecting devices deselects anything else and the other way round,
-// and notes and points are each all that is selected while they are. An ID of an item that is gone names nothing and is
-// left out. The model's commands act on what it names in its song (the project context's), and the UI reaches it by IDs
+// What is selected in the open project (roadmap A5, 2026-10-30): tracks, clips, sections and devices by their IDs, in the
+// order they were selected; or notes of the clips an editor shows, by their references (a clip's ID and the note's); or
+// automation points of one parameter, by their elements in the song, which a project saves without IDs. One kind of thing
+// at a time, as the commands act on one: selecting devices deselects anything else and the other way round, and notes and
+// points are each all that is selected while they are. What is gone (an item, a note, a point) is left out. The model's commands act on what it names in its song (the project context's), and the UI reaches it by IDs
 // (model/arrangement/SongSelection.h). It tells its listeners after each change, on the message thread. Message thread
 // only.
 #pragma once
@@ -75,9 +75,15 @@ public:
     // are added or removed around them, moved, or undone and redone around them, so that the selection follows them where
     // indices would go stale; the elements' order and which are still there are the curve's to say
     // (automation/internal/Automation.h: getSelectedPoints()). Selecting anything else deselects them.
-    const ParameterRef& getPointsParameter() const noexcept { return pointsParameter; } // invalid while none are selected
-    const std::vector<juce::ValueTree>& getPoints() const noexcept { return points; }   // as selected: some may be gone
-    void selectPoints (const ParameterRef&, const std::vector<juce::ValueTree>& pointStates);
+    const ParameterRef& getPointsParameter() const noexcept { return pointsParameter; }       // invalid while none are selected
+    const std::vector<juce::ValueTree>& getPoints() const noexcept { return points; }         // as selected: some may be gone
+    void selectPoints (const ParameterRef&, const std::vector<juce::ValueTree>& pointStates); // each once, by their beats
+
+    // How many times points have been compared with each other or looked for by their beats, here and by
+    // getSelectedPoints(), since Phazite started: for the test that this grows with the points selected, not with their
+    // square. Message thread only.
+    static std::uint64_t getPointComparisons() noexcept;
+    static void countPointComparisons (std::uint64_t) noexcept;
 
 private:
     // A track, a clip or a device by its kind and its ID.

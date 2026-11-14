@@ -564,6 +564,7 @@ namespace
     // none.
     void loadInto (Song& song, DeviceID id, const devices::DeviceInfo& info, const juce::var& saved, bool copyFiles = true)
     {
+        const ManyValuesSetByHand many (song); // no automation writes them
         const auto values = saved[keys::parameters];
 
         for (const auto& parameter : info.parameters)
@@ -666,8 +667,9 @@ namespace
         }
     }
 
-    // A sound copied into the preset's folder of sounds, or the file there that is the same, or none if it couldn't be.
-    juce::File copyBeside (const juce::File& source, const juce::File& folder)
+    // A sound copied into the preset's folder of sounds, or the file there that is the same, or none if it couldn't be. Adds
+    // the file it copied to made.
+    juce::File copyBeside (const juce::File& source, const juce::File& folder, juce::Array<juce::File>& made)
     {
         if (source.isAChildOf (folder))
             return source;
@@ -685,14 +687,24 @@ namespace
             target = folder.getNonexistentChildFile (source.getFileNameWithoutExtension(), source.getFileExtension(), false);
         }
 
-        return source.copyFileTo (target) ? target : juce::File();
+        if (! source.copyFileTo (target))
+        {
+            target.deleteFile(); // what it may have begun
+            return {};
+        }
+
+        made.add (target);
+        return target;
     }
 
     // A preset made by makeDevicePreset() or makeTrackPreset() as its file keeps it: its sounds copied beside it and named
     // from there, those that can't be taken left out; and a plug-in installed for the user alone (its file under their home
-    // folder) named by its file's name, which finds it as its ID, maker and name do (findKnownPlugin()).
-    void prepareForFile (const juce::var& preset, const juce::File& presetFile)
+    // folder) named by its file's name, which finds it as its ID, maker and name do (findKnownPlugin()). Returns the names
+    // of the sounds it should have taken and couldn't copy (a full disk, a file where the folder goes, a source that can't be
+    // read), and adds the files it copied to made.
+    juce::StringArray prepareForFile (const juce::var& preset, const juce::File& presetFile, juce::Array<juce::File>& made)
     {
+        juce::StringArray notCopied;
         const auto folder = getSoundsFolder (presetFile);
         const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
 
@@ -711,19 +723,57 @@ namespace
                            for (const auto& name : getSoundFileNames (*sounds))
                            {
                                const auto path = sounds->getProperty (name).toString();
-                               const auto copied = isSoundFileToTake (path) ? copyBeside (juce::File (path), folder) : juce::File();
 
-                               if (copied == juce::File())
+                               if (! isSoundFileToTake (path))
+                               {
                                    sounds->removeProperty (name);
-                               else
+                                   continue;
+                               }
+
+                               if (const auto copied = copyBeside (juce::File (path), folder, made); copied != juce::File())
                                    sounds->setProperty (
                                        name, copied.getRelativePathFrom (presetFile.getParentDirectory()).replaceCharacter ('\\', '/'));
+                               else
+                                   notCopied.addIfNotAlreadyThere (juce::File (path).getFileName());
                            }
                        });
+
+        return notCopied;
     }
 
-    // A preset's sounds named from its folder as full paths, as the model takes them; one that would leave the folder (by
-    // "..") stays as it is, and isn't taken.
+    // A preset of the song's written to its file, its sounds copied beside it, whole or not at all: a sound it can't keep
+    // fails the save, as a file it can't write does, and leaves nothing it made, its copies and the folder of sounds if it
+    // made that. A failure is told as a problem with the song (internal/ProjectContext.h: reportProblem()), which the app
+    // shows, naming what couldn't be kept.
+    bool savePresetFile (const ProjectContext& context, const juce::var& preset, const juce::File& file)
+    {
+        const auto folder = getSoundsFolder (file);
+        const auto folderWasThere = folder.exists();
+        juce::Array<juce::File> made;
+        const auto notCopied = prepareForFile (preset, file, made);
+
+        if (notCopied.isEmpty() && writePreset (preset, file))
+            return true;
+
+        for (const auto& copy : made)
+            copy.deleteFile();
+
+        if (! folderWasThere && folder.isDirectory())
+            folder.deleteFile(); // empty again: only an empty folder goes
+
+        const auto name = "\"" + file.getFileNameWithoutExtension() + "\"";
+        reportProblem (context, "Phazite couldn't save the preset",
+                       notCopied.isEmpty()
+                           ? "Phazite couldn't write " + name + " into " + file.getParentDirectory().getFullPathName() + "."
+                           : "Phazite couldn't copy " + notCopied.joinIntoString (", ") + " into " + folder.getFullPathName() + ", so "
+                                 + name + " would play without " + (notCopied.size() == 1 ? "it" : "them") + ". Nothing was saved.");
+        return false;
+    }
+
+    // A preset's sounds named from its folder as full paths, as the model takes them. A preset file is someone else's as often
+    // as not, and Phazite writes only paths from its folder: one that would leave the folder (by "..") stays as it is, and one
+    // written whole (a path of another computer's, "C:\Users\...", "/home/...", "~/...") is cut to its file's name, so
+    // that neither is taken, and each is told as not beside the preset (getWhySoundNotTaken()).
     void findSoundsBeside (const juce::var& preset, const juce::File& presetFile)
     {
         const auto folder = presetFile.getParentDirectory();
@@ -732,11 +782,22 @@ namespace
                        [&folder] (juce::DynamicObject& object)
                        {
                            if (auto* sounds = object.getProperty (keys::sounds).getDynamicObject())
+                           {
                                for (const auto& name : getSoundFileNames (*sounds))
-                                   if (const auto path = sounds->getProperty (name).toString();
-                                       path.isNotEmpty() && ! juce::File::isAbsolutePath (path))
-                                       if (const auto file = folder.getChildFile (path); file.isAChildOf (folder))
-                                           sounds->setProperty (name, file.getFullPathName());
+                               {
+                                   const auto path = sounds->getProperty (name).toString();
+
+                                   if (path.isEmpty())
+                                       continue;
+
+                                   if (juce::File::isAbsolutePath (path) || path.startsWithChar ('~') || path.startsWithChar ('/')
+                                       || path.startsWithChar ('\\'))
+                                       sounds->setProperty (
+                                           name, path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false));
+                                   else if (const auto file = folder.getChildFile (path); file.isAChildOf (folder))
+                                       sounds->setProperty (name, file.getFullPathName());
+                               }
+                           }
                        });
     }
 
@@ -1184,9 +1245,7 @@ bool saveDevicePreset (const ProjectContext& context, DeviceID id, const juce::F
     if (song == nullptr || ! id.isValid() || ! findDeviceState (*song, id).isValid())
         return false;
 
-    const auto preset = makeDevicePreset (*song, id);
-    prepareForFile (preset, file);
-    return writePreset (preset, file);
+    return savePresetFile (context, makeDevicePreset (*song, id), file);
 }
 
 bool saveTrackPreset (const ProjectContext& context, TrackID id, const juce::File& file)
@@ -1197,9 +1256,7 @@ bool saveTrackPreset (const ProjectContext& context, TrackID id, const juce::Fil
     if (! state.hasType (schema::TRACK) || isFolderState (state) || isReturnState (state))
         return false;
 
-    const auto preset = makeTrackPreset (*song, id);
-    prepareForFile (preset, file);
-    return writePreset (preset, file);
+    return savePresetFile (context, makeTrackPreset (*song, id), file);
 }
 
 bool loadPreset (ProjectContext& context, const juce::File& file, TrackID target)

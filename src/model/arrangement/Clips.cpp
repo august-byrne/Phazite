@@ -405,6 +405,20 @@ ClipID placeClipState (Song& song, juce::ValueTree clipState, TrackID track)
     return getClipID (clipState);
 }
 
+bool canTrackHold (const Song& song, TrackID track, bool midi, const std::vector<ClipID>& leaving)
+{
+    const auto trackState = findTrackState (song, track);
+
+    if (! trackState.hasType (schema::TRACK) || isFolderState (trackState) || isReturnState (trackState))
+        return false;
+
+    for (const auto& clipState : getClipStates (trackState))
+        if (isMidiState (clipState) != midi && std::find (leaving.begin(), leaving.end(), getClipID (clipState)) == leaving.end())
+            return false;
+
+    return midi || ! hasInstrument (song, track);
+}
+
 void setClipPlace (Song& song, juce::ValueTree clipState, BeatPosition start, BeatDuration length, BeatDuration offset)
 {
     auto* undo = &song.getUndoManager();
@@ -662,8 +676,9 @@ ClipID addMidiClipAt (Song& song, TrackID track, BeatPosition start, Selection* 
 
 ClipID placeClip (Song& song, TrackID track, BeatPosition start, ClipID lastUsed)
 {
-    // The clip used last counts while it is still on one of the song's tracks.
-    if (const auto used = findClipState (song, lastUsed); used.isValid())
+    // The clip used last counts while it is still on one of the song's tracks, and on a track it suits (canTrackHold()): an
+    // audio clip went on a track with an instrument, silenced by it, and notes on one of audio, unheard.
+    if (const auto used = findClipState (song, lastUsed); used.isValid() && canTrackHold (song, track, isMidiState (used)))
     {
         const auto copies = copyClips (song, { lastUsed }, isMidiState (used));
 
@@ -706,6 +721,9 @@ void slipClip (Song& song, ClipID clip, double startOffset, double distance)
 
         if (reversed && fileLength <= 0.0)
             return; // backwards, from the end of a file that can't be read
+
+        if (fileLength > 0.0 && length >= fileLength)
+            return; // the whole file already, or more: no other part of it is as long
 
         const auto latest = fileLength > 0.0 ? std::max (0.0, fileLength - length) : std::numeric_limits<double>::max();
         const auto from = juce::jlimit (0.0, latest, getPartStartFor (song, clipState, offset));

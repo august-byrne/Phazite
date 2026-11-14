@@ -44,6 +44,11 @@ public:
     // curve's one point then (model/devices/internal/Parameters.h).
     bool isWriting (const ParameterRef&) const;
 
+    // What sets many values at once sets them meanwhile (model/devices/internal/Parameters.h: ManyValuesSetByHand): no pass
+    // punches in for them, and those already writing take none of them.
+    void beginManyValues() noexcept { ++settingManyValues; }
+    void endManyValues() noexcept { --settingManyValues; }
+
 private:
     struct Pass
     {
@@ -59,6 +64,7 @@ private:
     PlaybackSession& session;
     std::vector<Pass> passes;
     bool settingValue = false; // as a pass starts from its lane's value
+    int settingManyValues = 0; // as beginManyValues() and endManyValues() count
 
     Pass* findPass (const ParameterRef&);
     Pass* punchIn (const ParameterRef&, AutomationMode, bool byMove);

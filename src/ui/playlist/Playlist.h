@@ -135,6 +135,8 @@ private:
     IconButton addTrackButton { "Add track", Icon::plus };              // over the track headers, left of the time bar
     IconButton collapseAllButton { "Collapse all", Icon::collapseAll }; // beside it: every row thin, or every one expanded
     ClipID lastClip;                                                    // the clip the Draw and Paint tools place copies of
+    std::vector<ClipID> clipsSelectedBefore;                            // as the selection was last heard of: what a change selected anew
+    std::vector<TrackID> tracksSelectedBefore;                          // (changeListenerCallback())
     bool loopsSelection = false; // with a keymap whose selection loops: the loop is the selected time range's
 
     // The header column holds the pinned headers in a band at the top, and below it the scrolling
@@ -186,8 +188,10 @@ private:
     std::optional<BeatPosition> fileDropBeat; // where files dragged over the playlist would go
     int fileDropX = 0;                        // the pointer, in the lanes: where the beat is found again as the view moves
     int fileDropRow = -1;
-    bool deviceDropping = false; // a device from the browser is dragged over the playlist, to fileDropRow
-    TrackID selectionAnchor;     // where Shift-click ranges start
+    bool fileDropOnNewTrack = false; // the file doesn't suit fileDropRow's track: it goes on a new track below it
+    bool deviceDropping = false;     // a device from the browser is dragged over the playlist, to fileDropRow
+    void showFileDrop (const juce::File& first, juce::Point<int> inLanes); // where a file dragged over the lanes would go
+    TrackID selectionAnchor;                                               // where Shift-click ranges start
 
     // While tracks are dragged by a header: where they would go, at a row's track (TrackDrop, model/arrangement/PlaylistModel.h);
     // nothing where they can't go. Before or after a track by the half of it the pointer is in; on a folder, into it in its
@@ -259,6 +263,7 @@ private:
     TrackHeader* getHeaderFor (TrackID) const;
     void setScrollY (int);
     void scrollToShow (int row);
+    bool isRowInView (int row) const; // any of it, between the pinned rows and the lanes' foot (or a pinned row)
     void updateVerticalScrollBar();
 
     // The clips.

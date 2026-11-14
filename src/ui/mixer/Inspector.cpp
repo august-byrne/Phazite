@@ -284,9 +284,13 @@ namespace
             {
                 typed = parse (text);
 
-                // A value typed equal to the field's (the lowest item's) changes no slider value, so JUCE's slider tells
-                // no one (Slider::setValue() sends only a change): set the items to it here.
-                if (typed.has_value() && juce::exactlyEqual (getNormalisableRange().snapToLegalValue (*typed), getValue()))
+                // A value typed that JUCE's slider takes for the field's (the lowest item's) changes no slider value, so the
+                // slider tells no one: it compares them approximately, before and after keeping the value to its range
+                // (Slider::Pimpl::textChanged() and setValue()). Set the items to it here; any other value the slider's
+                // change sets (onValueChange), so that it is never left over for the next step or drag.
+                if (typed.has_value()
+                    && (juce::approximatelyEqual (*typed, getValue())
+                        || juce::approximatelyEqual (getNormalisableRange().snapToLegalValue (*typed), getValue())))
                     set (*std::exchange (typed, std::nullopt));
 
                 return typed.value_or (getValue());
@@ -301,7 +305,21 @@ namespace
                     gesture = std::make_unique<SongGesture> (context, dragName);
             };
 
-            onDragEnd = [this] { gesture = nullptr; };
+            onDragEnd = [this]
+            {
+                gesture = nullptr;
+                typed.reset(); // a value typed is set within its "drag", or not at all
+            };
+
+            // Escape during a drag: the items as they were, nothing to redo.
+            onDragCancelled = [this]
+            {
+                if (gesture != nullptr)
+                    gesture->rollBack();
+
+                gesture = nullptr;
+                shown = dragFrom;
+            };
 
             onValueChange = [this]
             {

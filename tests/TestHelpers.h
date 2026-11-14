@@ -58,10 +58,12 @@ struct RenderHost : public TrackRenderHost
 
     void runRender (std::unique_ptr<TrackRender> r) override { render = std::move (r); }
 
+    // As the main window's: the render goes first (it is calling back, and lets go of itself last), and what it said is used
+    // after, so that a render whose title or result goes with it fails here too.
     void renderFinished (const juce::String& title, const juce::Result& result) override
     {
+        render = nullptr;
         finished.add (title + ": " + (result.wasOk() ? juce::String ("ok") : result.getErrorMessage()));
-        render = nullptr; // it is calling back, and lets go of itself last
     }
 
     juce::Array<juce::File> wrote; // the files renders wrote for the user
@@ -78,6 +80,19 @@ struct TemporaryFolder
     const juce::File folder =
         juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("PhaziteTests", {}, false);
 };
+
+// A folder that links to another: a junction on Windows, which any user may make, and a symbolic link elsewhere. True if
+// it was made.
+inline bool linkFolder (const juce::File& link, const juce::File& target)
+{
+#if JUCE_WINDOWS
+    juce::ChildProcess mklink;
+    return mklink.start (juce::StringArray { "cmd", "/c", "mklink", "/J", link.getFullPathName(), target.getFullPathName() })
+           && mklink.waitForProcessToFinish (10000) && link.isDirectory();
+#else
+    return target.createSymbolicLink (link, false) && link.isDirectory();
+#endif
+}
 
 // The presets that come with Phazite: resources/presets in the source tree, above the test program, as the golden tests
 // find tests/ (the app finds them next to itself).

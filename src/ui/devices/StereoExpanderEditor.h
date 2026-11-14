@@ -24,6 +24,9 @@ public:
     float getShownInputCorrelation() const;
     int getNumDots() const;
 
+    // Where the dots of what goes out lie across the disc on average, from -1 (along the L line) to 1 (along the R line).
+    float getDotsAcross() const;
+
     // Where the half disc's centre is in the image, at its bottom: the fan opens from there, as wide as the pointer's angle
     // from straight up when it is dragged.
     juce::Point<float> getDiscCentre() const;

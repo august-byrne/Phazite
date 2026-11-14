@@ -34,6 +34,10 @@ public:
     // Where a chord's dragged edge would go, while it is dragged.
     std::optional<BeatPosition> getDragTarget() const;
 
+    // Escape while the mouse is down here (TimelineEditor::keyPressed()): the drag, which changes the song only as the mouse
+    // goes up, or the click, comes to nothing. Returns whether there was one.
+    bool cancelDrag();
+
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;

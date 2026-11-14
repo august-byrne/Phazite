@@ -31,7 +31,7 @@ clip is edited in the lower panel ([piano-roll.md](piano-roll.md)).
 | Overview strip as the horizontal scroll bar | Built | |
 | Zoom to Selection, Zoom Back | Built | |
 | Clip picker (a searchable list of every clip) | Planned | No roadmap step |
-| Audio and MIDI clips kept on separate tracks | Partly built | Dropped files go to a track of their kind; dragging a clip to a track of the other kind is not refused |
+| Audio and MIDI clips kept on separate tracks | Built | Dropped files go to a track of their kind, or a new one below, which the lanes show and the hint bar says; a clip dragged or drawn onto a track of the other kind (or a folder, a return, the master) stays where it can go, and the hint bar says why |
 
 ## What it shows
 
@@ -67,7 +67,7 @@ On empty space:
 | Double-click a clip | Shows it in its editor |
 | Middle drag | Moves the view, sideways and up and down; never edits |
 | Right-click | Opens the menu; in FL Studio's keymap it deletes clips, and Shift+right-click opens the menu |
-| Wheel | Scrolls; Shift+wheel sideways; Ctrl+wheel zooms around the pointer; Alt+wheel makes every track taller or shorter |
+| Wheel | Scrolls; Shift+wheel sideways; Ctrl+wheel and a trackpad's pinch zoom around the pointer; Alt+wheel makes every track taller or shorter |
 
 Right-click deleting and click placing are settings of a keymap (`rightClickDeletes`, `clickPlacesClips`).
 
@@ -321,8 +321,6 @@ commands act on the editor used last.
 
 - A clip picker, a searchable list of every clip to drag from or to choose what the Draw tool places: Planned.
 - A CPU readout on each track header: Planned.
-- Refusing a clip dragged onto a track of the other kind (audio onto an instrument's track, notes onto an audio
-  track): Planned; today the clip lands there.
 - Audio and MIDI clips meant to share one track: Declined for version 1.
 
 ## In the code

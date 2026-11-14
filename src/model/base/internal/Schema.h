@@ -161,7 +161,7 @@ inline const juce::Identifier channelPan { "pan" };
 // automation and the modulation of its volume and pan name. A track's, a return's, a bus's (a folder that mixes its
 // tracks) and the master's is a fader (channelFader: its volume and pan, with its meter after it); a plain folder's is a
 // VCA (channelVCA), which sets its tracks' volume. A folder that becomes a bus or plain again gets one of the other kind,
-// with an ID of its own.
+// with an ID of its own, which its volume's automation and modulation then name; its pan's, which a VCA hasn't, go.
 inline const juce::Identifier channelFader { "fader" };
 inline const juce::Identifier channelVCA { "vca" };
 
@@ -375,8 +375,8 @@ inline constexpr const char* crossoverParameter = "crossover";
 // Child of a track's TRACK: a send to a return, in the order the track's sends were added (model/mixer/internal/Mixer.h).
 // On SEND: its ID (DeviceID, of the song's); the return it sends to, by the return's track's ID (sendTo); its level in
 // decibels, as a fader's (sendLevel; -100 for silence; none for 0 dB); and sendPreFader, true for a send before the
-// track's fader, none for one after it. A send to a return the song hasn't any more stays, for an undo that brings the
-// return back.
+// track's fader, none for one after it. A send goes with its return, in the same undo step; one to a return the song
+// hasn't goes as the project opens.
 inline const juce::Identifier SEND { "SEND" };
 inline const juce::Identifier sendID { "id" };
 inline const juce::Identifier sendTo { "to" };

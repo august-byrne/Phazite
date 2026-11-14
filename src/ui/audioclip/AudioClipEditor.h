@@ -44,6 +44,10 @@ public:
     void showClip (ClipID);
     ClipID getClip() const; // the clip shown, while it is still an audio clip in the song
 
+    // The state of the clip's audio as it shows now (ready, preparing, failed, missing), which it says over the waveform when
+    // not ready; nothing while no clip shows (for tests).
+    std::optional<AudioState> getShownState() const { return info.has_value() ? std::optional (info->state) : std::nullopt; }
+
     // The handles on the clip's audio, and where each is, in the waveform's coordinates (for tests); empty while no clip
     // shows.
     enum class Handle

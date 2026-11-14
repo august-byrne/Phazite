@@ -47,10 +47,14 @@ namespace
     }
 
     // Whether a track's sound comes from any of these tracks: a folder mixes the tracks inside it, a return takes in what
-    // is sent to it, and a device can listen to a sidechain.
+    // is sent to it, a drum pad's track plays what its sampler's track's sampler plays for it (DrumKit.h), and a device can
+    // listen to a sidechain.
     bool isFedBy (const Song& song, const juce::ValueTree& state, const std::vector<TrackID>& feeding)
     {
         const auto track = getTrackID (state);
+
+        if (const auto pad = getPlayedPad (song, track); pad.has_value() && contains (feeding, getDeviceChannel (song, pad->first)))
+            return true;
 
         if (isFolderState (state))
             for (const auto inside : getTracksInFolder (song, track))

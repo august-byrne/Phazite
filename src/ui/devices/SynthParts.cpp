@@ -12,6 +12,7 @@ namespace phazite::ui
 namespace
 {
     constexpr float lowestGain = -36.0f, highestGain = 24.0f; // a filter's response, in decibels
+    constexpr float heldRandomLevel = 0.6f;                   // the random LFO's picture: one value it might hold
 
     void paintFrame (juce::Graphics& g, const juce::Component& c)
     {
@@ -404,8 +405,9 @@ float getDrawnLfoValue (int shape, float phase)
     using devices::dsp::LfoShape;
     const auto lfoShape = (LfoShape) juce::jlimit (0, (int) LfoShape::random, shape);
 
+    // A random value held for the whole cycle, as dsp::Lfo plays it: one level across the cycle the picture shows.
     if (lfoShape == LfoShape::random)
-        return std::sin (37.0f * std::floor (phase * 4.0f)) * 0.8f; // held values, a step at a time
+        return heldRandomLevel;
 
     return devices::dsp::Lfo::getValue (lfoShape, phase);
 }

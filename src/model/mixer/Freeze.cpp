@@ -418,7 +418,11 @@ void FreezeKeeper::compare (TrackID track)
 
 void FreezeKeeper::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // How tracks show and where windows were change nothing that plays.
+    // How tracks show and where windows were change nothing that plays; nor does the song's count of IDs, which every new
+    // ID moves, or how it plays and its grid, on its root.
+    if (tree == state && schema::isUncountedProperty (tree, property))
+        return;
+
     if (! schema::isTrackViewProperty (property) && ! isIgnoredProperty (property))
         check (tree);
 }

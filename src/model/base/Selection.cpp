@@ -33,6 +33,29 @@ namespace
         return false;
     }
 
+    // Whether the song holds what a curve's points belong to (Schema.h: CURVE, curveDevice): a device, a container's chain, a
+    // send, or a channel's fader or VCA, as model/automation/ finds a curve's owner.
+    bool holdsCurveOwner (const juce::ValueTree& parent, std::uint64_t id)
+    {
+        for (const auto& child : parent)
+        {
+            if (child.hasType (schema::CLIP) || child.hasType (schema::AUTOMATION))
+                continue;
+
+            for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
+                if (child.hasProperty (*property) && schema::holdsID (child, *property)
+                    && (std::uint64_t) (juce::int64) child[*property] == id)
+                    return true;
+
+            if (holdsCurveOwner (child, id))
+                return true;
+        }
+
+        return false;
+    }
+
+    std::uint64_t pointComparisons = 0; // message thread
+
     // How many of these notes are still in their clips: by their IDs in the song's clips.
     int countNotesThere (const juce::ValueTree& song, const std::vector<ClipID>& clips, const std::vector<NoteRef>& notes)
     {
@@ -70,6 +93,16 @@ namespace
         return count;
     }
 } // namespace
+
+void Selection::countPointComparisons (std::uint64_t count) noexcept
+{
+    pointComparisons += count;
+}
+
+std::uint64_t Selection::getPointComparisons() noexcept
+{
+    return pointComparisons;
+}
 
 void Selection::setSong (Song* newSong)
 {
@@ -192,10 +225,23 @@ int Selection::getNumObjectsSelected() const
     if (auto* song = getSong(); song != nullptr && ! notes.empty())
         count += countNotesThere (song->getState(), noteClips, notes);
 
-    if (auto* song = getSong())
-        for (const auto& point : points)
-            if (point.isAChildOf (song->getState()))
-                ++count;
+    // Points still in the parameter's curve, of a device the song holds, as getSelectedPoints() (automation/internal/
+    // Automation.h) finds them.
+    if (auto* song = getSong(); song != nullptr && ! points.empty())
+    {
+        const auto automation = song->getState().getChildWithName (schema::AUTOMATION);
+        const auto device = juce::String ((juce::int64) pointsParameter.device.getRaw());
+        const auto isTheCurve = [&] (const juce::ValueTree& curve)
+        {
+            return curve.hasType (schema::CURVE) && curve.getParent() == automation && curve[schema::curveDevice].toString() == device
+                   && curve[schema::curveParameter].toString() == pointsParameter.parameter;
+        };
+
+        if (holdsCurveOwner (song->getState(), pointsParameter.device.getRaw()))
+            for (const auto& point : points)
+                if (isTheCurve (point.getParent()))
+                    ++count;
+    }
 
     return count;
 }
@@ -303,11 +349,45 @@ void Selection::selectNotes (const std::vector<NoteRef>& refs, bool addToSelecti
 //==============================================================================
 void Selection::selectPoints (const ParameterRef& parameter, const std::vector<juce::ValueTree>& pointStates)
 {
+    // Each once, in the order given: sorted by beat first, so that only points at one beat are compared with each other.
+    std::vector<size_t> order;
+
+    for (size_t i = 0; i < pointStates.size(); ++i)
+        if (pointStates[i].isValid())
+            order.push_back (i);
+
+    const auto beatOf = [&pointStates] (size_t i) { return (double) pointStates[i][schema::pointBeat]; };
+    std::uint64_t comparisons = 0;
+    std::stable_sort (order.begin(), order.end(),
+                      [&] (size_t a, size_t b)
+                      {
+                          ++comparisons;
+                          return beatOf (a) < beatOf (b);
+                      });
+
+    std::vector<bool> repeated (pointStates.size(), false);
+
+    for (size_t run = 0; run < order.size();)
+    {
+        auto end = run + 1;
+
+        while (end < order.size() && juce::exactlyEqual (beatOf (order[end]), beatOf (order[run])))
+            ++end;
+
+        for (auto i = run + 1; i < end; ++i)
+            for (auto j = run; j < i && ! repeated[order[i]]; ++j)
+                if (++comparisons; ! repeated[order[j]] && pointStates[order[i]] == pointStates[order[j]])
+                    repeated[order[i]] = true; // stable: the later of the two as given
+
+        run = end;
+    }
+
+    countPointComparisons (comparisons);
     std::vector<juce::ValueTree> chosen;
 
-    for (const auto& point : pointStates)
-        if (point.isValid() && std::find (chosen.begin(), chosen.end(), point) == chosen.end())
-            chosen.push_back (point);
+    for (size_t i = 0; i < pointStates.size(); ++i)
+        if (pointStates[i].isValid() && ! repeated[i])
+            chosen.push_back (pointStates[i]);
 
     if (! parameter.isValid() || chosen.empty())
     {

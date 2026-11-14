@@ -147,6 +147,18 @@ ExportPanel::ExportPanel (Settings& s, const juce::File& defaultFile, double sec
             [callback = std::move (callback)] (int result) { callback (result == 1); });
     };
 
+    askToStop = [this] (std::function<void (bool)> callback)
+    {
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                          .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                          .withTitle ("Stop the export?")
+                                          .withMessage ("What it has written so far is thrown away; a file that was there stays as it was.")
+                                          .withButton ("Stop Exporting", 1)
+                                          .withButton ("Keep Exporting", 0)
+                                          .withAssociatedComponent (this),
+                                      [callback = std::move (callback)] (int result) { callback (result == 1); });
+    };
+
     for (auto* c : std::initializer_list<juce::Component*> {
              &heading,       &about,         &whatLabel,   &whatBox,       &formatLabel, &formatBox,        &sampleRateLabel,
              &sampleRateBox, &bitDepthLabel, &bitDepthBox, &loudnessLabel, &loudnessBox, &targetLabel,      &targetField,
@@ -165,8 +177,61 @@ ExportPanel::ExportPanel (Settings& s, const juce::File& defaultFile, double sec
 
 ExportPanel::~ExportPanel()
 {
+    if (keysWindow != nullptr)
+        keysWindow->removeKeyListener (&escapeKeys);
+
     stopTimer();
-    running = nullptr; // cancels an export that is still going
+
+    // Its window closed with an export still going (the window's close button, another project opening): it stops, and says
+    // so where the window was.
+    if (std::exchange (running, nullptr) != nullptr && onClosedWhileExporting != nullptr)
+        onClosedWhileExporting();
+}
+
+void ExportPanel::parentHierarchyChanged()
+{
+    // Escape reaches the dialog window's key listeners before the window, which closes on it.
+    if (auto* window = getTopLevelComponent(); window != keysWindow.getComponent())
+    {
+        if (keysWindow != nullptr)
+            keysWindow->removeKeyListener (&escapeKeys);
+
+        keysWindow = window != this ? window : nullptr;
+
+        if (keysWindow != nullptr)
+            keysWindow->addKeyListener (&escapeKeys);
+    }
+}
+
+bool ExportPanel::EscapeKeys::keyPressed (const juce::KeyPress& key, juce::Component*)
+{
+    return panel.escapePressed (key);
+}
+
+bool ExportPanel::escapePressed (const juce::KeyPress& key)
+{
+    // While it exports, Escape doesn't close the window and throw the export away: it asks first, as Cancel's tooltip says
+    // what Cancel does. Otherwise it closes the window, as in any dialog.
+    if (key != juce::KeyPress::escapeKey || ! isExporting())
+        return false;
+
+    if (! asking && askToStop != nullptr)
+    {
+        asking = true;
+        askToStop (
+            [safeThis = juce::Component::SafePointer<ExportPanel> (this)] (bool stop)
+            {
+                if (safeThis == nullptr)
+                    return;
+
+                safeThis->asking = false;
+
+                if (stop && safeThis->isExporting())
+                    safeThis->cancel();
+            });
+    }
+
+    return true;
 }
 
 bool ExportPanel::isExportingStems() const

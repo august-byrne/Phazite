@@ -288,6 +288,16 @@ void ChordLane::mouseUp (const juce::MouseEvent& e)
         getMenuAt (e.getMouseDownPosition()).showMenuAsync (juce::PopupMenu::Options());
 }
 
+bool ChordLane::cancelDrag()
+{
+    if (! drag.has_value())
+        return false;
+
+    drag.reset();
+    repaint();
+    return true;
+}
+
 //==============================================================================
 juce::PopupMenu ChordLane::getMenuAt (juce::Point<int> position)
 {

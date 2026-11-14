@@ -9,7 +9,7 @@ executable once for each test file. The rules for writing tests are in `CLAUDE.m
 | File | What it gives a test |
 |---|---|
 | `TestMain.cpp` | The test runner: doctest inside a JUCE environment. |
-| `TestHelpers.h` | The shared includes and helpers; every test file includes it. |
+| `TestHelpers.h` | The shared includes and helpers; every test file includes it: among them `RenderHost` (runs freezes, bounces and large first saves as the main window does, letting go of the render before it uses what the render said) and `linkFolder()` (a junction on Windows, a symbolic link elsewhere). |
 | `TestSong.h` | A project in a temporary folder, open in a project context of its own, with the app's commands, for building a song through the model as the UI does. |
 | `TestClips.h` | MIDI clips, audio clips and notes made through the model, by the song and IDs, for a song made without a project (`phazite::createSong()`). |
 | `SongIDs.h` | A song's IDs checked: every item's once in the song, a note's once in its clip, and what names an item naming one the song has; with the known exceptions of a song being edited (known bugs 102 and 143). |

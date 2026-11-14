@@ -122,6 +122,14 @@ std::vector<ClipInfo> getClips (const ProjectContext&, TrackID); // left to righ
 std::optional<ClipInfo> getClip (const ProjectContext&, ClipID);
 bool canHoldClips (const ProjectContext&, TrackID); // a track, not a folder or a return
 
+// Whether clips can go on a track together, as a drag moves them there: audio and notes don't share a track
+// (docs/design/building-blocks.md). A track that holds clips, the clips all of one kind, and the track's other clips, but for
+// those named in leaving (the rest of what the drag moves), of that kind too; audio only on a track without an instrument,
+// which would silence it. And why not, for the hint bar ("An audio clip can't go on a track with an instrument"), or nothing
+// where they can.
+bool canPlaceClips (const ProjectContext&, TrackID, const std::vector<ClipID>& clips, const std::vector<ClipID>& leaving = {});
+juce::String whyClipsCantGo (const ProjectContext&, TrackID, const std::vector<ClipID>& clips, const std::vector<ClipID>& leaving = {});
+
 // The clips linked to a clip, its aliases, which play the same notes, the clip itself first; the clip alone while it has
 // none, and none while it isn't in the song.
 std::vector<ClipID> getLinkedClips (const ProjectContext&, ClipID);
@@ -220,6 +228,10 @@ void setCrossfade (ProjectContext&, const CrossfadeSpot&, BeatPosition pointer);
 // Files dropped on the playlist, or placed from the browser (Import.h): audio and MIDI files, onto a track that suits
 // them or onto new tracks, starting at a place in the song. Returns the clips added.
 bool canImport (const ProjectContext&, const juce::File&);
+
+// Whether a file dropped on a track goes on it, rather than on a new track below it: an audio or MIDI file on a track that
+// suits it (audio and notes don't share a track; a folder, a return and the master hold no clips).
+bool importsOnto (const ProjectContext&, const juce::File&, TrackID);
 std::vector<ClipID> importFiles (ProjectContext&, const juce::StringArray& paths, TrackID target, BeatPosition start);
 
 // The song's sections (Sections.h), in its order, as the playlist draws them in its time bar and behind the tracks.

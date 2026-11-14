@@ -7,6 +7,7 @@
 #include "model/arrangement/Outlines.h"
 #include "model/arrangement/PlaylistModel.h"
 #include "model/arrangement/internal/AudioClips.h"
+#include "model/arrangement/internal/ClipRenders.h"
 #include "model/arrangement/internal/Clips.h"
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Outlines.h"
@@ -25,6 +26,7 @@
 #include "model/transport/internal/Playback.h"
 #include "model/transport/internal/Recording.h"
 #include "model/transport/internal/Tempo.h"
+#include "ui/audioclip/AudioClipEditor.h"
 #include "ui/components/Controls.h"
 #include "ui/components/DisplayTicker.h"
 #include "ui/components/TrackSwitch.h"
@@ -2115,7 +2117,8 @@ TEST_CASE ("While an audio clip's render is being made it shows faint, with how 
     CHECK (phazite::test::dispatchMessagesUntil ([&shownRendering] { return ! shownRendering().value_or (0.0).has_value(); }, 120000));
 }
 
-TEST_CASE ("An audio clip whose render fails says so in place of waiting, and the render is tried again only once its file changes")
+TEST_CASE (
+    "An audio clip whose render fails says so in place of waiting, and the render is tried again only once its file or its folder changes")
 {
     // A cache folder that can't be written: where it should be, a file. The render failed, was taken off the list and
     // queued again, for ever (known bug 86).
@@ -2157,18 +2160,33 @@ TEST_CASE ("An audio clip whose render fails says so in place of waiting, and th
     CHECK (stateOf() == phazite::AudioState::failed);
     CHECK (phazite::getClipsWhoseRenderFailed (screen.context) == std::vector { id });
 
-    // It isn't tried again while nothing changed: through as many rounds of messages as made it fail.
-    for (int round = 0; round < 50; ++round)
+    // The audio clip editor shows it too, and sees it come good below: it looked again only while the audio was being
+    // prepared, and said "couldn't be prepared" for good (a reviewer, 2026-11-14).
+    phazite::ui::AudioClipEditor editor { screen.commands, screen.context };
+    phazite::test::TestWindow editorWindow { editor, 800, 300 };
+    editor.showClip (id);
+    CHECK (editor.getShownState() == phazite::AudioState::failed);
+
+    // It isn't tried again while nothing changed: the check the renders make every two seconds while one has failed, made
+    // at once, starts nothing. (Rounds of messages alone, which pass in microseconds, never reached that check.)
+    auto* renders = phazite::getClipRenders (screen.context);
+    REQUIRE (renders != nullptr);
+    const auto started = renders->getRendersStarted();
+
+    for (int round = 0; round < 3; ++round)
     {
+        renders->checkFailedAgain();
         phazite::test::dispatchPendingMessages();
-        REQUIRE (phazite::getClipRenderProgress (screen.context).renders == 0);
+        REQUIRE (renders->getRendersStarted() == started);
         REQUIRE (stateOf() == phazite::AudioState::failed);
     }
 
-    // The cache can be written now; once the file changes, the render is made and played, and the clip no longer says so.
+    // The cache can be written now, the file unchanged: the next check tries it again (it was never tried again while the
+    // file stayed the same), and the render is made and played, and the clip no longer says so.
     REQUIRE (cache.deleteFile());
     REQUIRE (cache.createDirectory());
-    REQUIRE (source.setLastModificationTime (source.getLastModificationTime() + juce::RelativeTime::seconds (10.0)));
+    renders->checkFailedAgain();
+    CHECK (renders->getRendersStarted() == started + 1);
     REQUIRE (phazite::test::dispatchMessagesUntil (
         [&findComponent, &stateOf]
         {
@@ -2177,6 +2195,7 @@ TEST_CASE ("An audio clip whose render fails says so in place of waiting, and th
         },
         60000));
     CHECK (phazite::getClipsWhoseRenderFailed (screen.context).empty());
+    CHECK (phazite::test::dispatchMessagesUntil ([&editor] { return editor.getShownState() == phazite::AudioState::ready; }, 5000));
 }
 
 TEST_CASE ("A track without an instrument has an arm switch: with an input, a click arms it, and its header says what it records")

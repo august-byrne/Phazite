@@ -54,14 +54,21 @@ TEST_CASE ("A lesson shows one step at a time with the keymap's keys, each going
     CHECK_FALSE (s.lessons.waitsForNext()); // the song shows it done
     CHECK (s.changes == 1);
 
-    // Skip goes on past a step not done; another command leaves a step, and its own goes on, however it is run. Its control
-    // is the one of the command that does it.
+    // Skip goes on past a step not done; a command leaves a step about showing something; the window showing it goes on.
+    // Its control is the one of the command that shows it.
     s.lessons.next();
     CHECK (s.lessons.getText() == "Press F7 to show the track's notes in the piano roll.");
     CHECK (s.lessons.getTarget() == juce::String ("view.pianoRoll"));
+    CHECK_FALSE (s.lessons.waitsForNext());
     REQUIRE (s.registry.invoke ("transport.playStop"));
-    CHECK (s.lessons.getStep() == 1);
     REQUIRE (s.registry.invoke ("view.pianoRoll"));
+    CHECK (s.lessons.getStep() == 1);
+    auto pianoRollShows = false;
+    s.lessons.isShown = [&pianoRollShows] (const juce::String& id) { return id == "pianoRoll" && pianoRollShows; };
+    s.lessons.update();
+    CHECK (s.lessons.getStep() == 1);
+    pianoRollShows = true;
+    s.lessons.update();
     CHECK (s.lessons.getStep() == 2);
 
     // A step that only the mouse does waits for Next; Back goes to the one before.
@@ -71,6 +78,7 @@ TEST_CASE ("A lesson shows one step at a time with the keymap's keys, each going
     CHECK (s.lessons.getStep() == 1);
     s.lessons.next();
     s.lessons.next();
+    s.lessons.isShown = nullptr;
     CHECK (s.lessons.getText() == "Press Space to hear them, and again to stop.");
 
     for (const auto* id : { "transport.playStop", "edit.duplicate" })
@@ -121,6 +129,47 @@ TEST_CASE ("A lesson's step that the song shows done goes on by itself, and a co
     REQUIRE (s.registry.invoke ("help.stopLesson"));
     CHECK_FALSE (s.lessons.isRunning());
     setSong (s.context, nullptr);
+}
+
+TEST_CASE ("Make a Beat in the whole window: the piano roll its second step shows stays for the step after, which clicks in it")
+{
+    // Known bug 108: the lower panel shows the piano roll at first, so F7, as the step said, hid it, and the step after asked
+    // for clicks in a piano roll that was gone.
+    phazite::test::AppScreen screen;
+    screen.session.openAtStartup();
+    phazite::test::dispatchPendingMessages();
+    auto& lessons = screen.shell.getLessons();
+    const auto pressF7IfAsked = [&screen, &lessons]
+    {
+        // The user does what the step says, if it still says it once the card has looked (update()).
+        lessons.update();
+
+        if (lessons.getStep() == 1)
+            REQUIRE (screen.registry.invoke ("view.pianoRoll"));
+
+        lessons.update();
+    };
+
+    // The piano roll showing as the step comes: on at once, and still showing.
+    REQUIRE (screen.registry.invoke ("help.lesson.beat"));
+    lessons.next(); // the instrument, skipped
+    REQUIRE (lessons.getStep() == 1);
+    REQUIRE (screen.shell.findLessonTarget ("pianoRoll") != nullptr);
+    pressF7IfAsked();
+    CHECK (lessons.getStep() == 2);
+    CHECK (screen.shell.findLessonTarget (lessons.getTarget()) != nullptr);
+
+    // Hidden as the step comes: F7 shows it, and the step goes on.
+    lessons.back();
+    REQUIRE (screen.registry.invoke ("view.pianoRoll")); // hides the lower panel, which shows it
+    REQUIRE (screen.shell.findLessonTarget ("pianoRoll") == nullptr);
+    lessons.back();
+    lessons.next();
+    REQUIRE (lessons.getStep() == 1);
+    pressF7IfAsked();
+    CHECK (lessons.getStep() == 2);
+    CHECK (screen.shell.findLessonTarget (lessons.getTarget()) != nullptr);
+    REQUIRE (screen.registry.invoke ("help.stopLesson"));
 }
 
 TEST_CASE ("The lesson card shows the step and rings its control, and its buttons go back, on and stop the lesson")

@@ -11,6 +11,7 @@
 #include <juce_graphics/juce_graphics.h>
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -100,6 +101,29 @@ std::vector<NoteRef> replaceNotes (ProjectContext&, const std::vector<NoteRef>& 
 std::vector<NoteRef> replaceNotes (ProjectContext&, const std::vector<NoteRef>& old, const std::vector<NoteData>& replacements,
                                    const juce::String& undoName);
 void changeNoteVelocities (ProjectContext&, const std::vector<NoteRef>&, int change);
+
+// The wheel raising or lowering notes' velocity over the piano roll's velocity lane: a burst of its moves (a trackpad sends
+// many a second) is one step, "Change Velocity", from its first change until end() (the wheel rested, the pointer left the
+// lane), or until a step, a gesture, an undo or a redo begins meanwhile, which keeps it first, so that what comes next is a
+// step of its own (Undo.h: Trial). Each move of a burst was a step of its own (known bug 55 until 2026-11-14). Message
+// thread only.
+class VelocityWheel
+{
+public:
+    explicit VelocityWheel (ProjectContext&);
+    ~VelocityWheel(); // keeps what the burst changed
+
+    void change (const std::vector<NoteRef>&, int change); // as changeNoteVelocities() does
+    void end();
+    bool isInBurst() const; // a change made since the burst's start, not kept yet
+
+    struct Impl;
+
+private:
+    std::unique_ptr<Impl> impl;
+
+    JUCE_DECLARE_NON_COPYABLE (VelocityWheel)
+};
 
 // The inspector's edits of notes (docs/design.md, section 4), as Logic Pro's and Bitwig's inspectors edit several at once.
 // Each is a step of its own ("Move Notes", "Change Note Length", "Transpose Notes", "Change Velocity"), unless a gesture

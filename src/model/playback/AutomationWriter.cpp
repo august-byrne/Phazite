@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace phazite
 {
@@ -69,12 +70,23 @@ AutomationWriter::AutomationWriter (Song& s, PlaybackSession& owner)
 
 void AutomationWriter::playbackStarted()
 {
-    // In write mode, every automated parameter of the track, from its lane's value where playback starts.
+    // In write mode, every automated parameter of the track, from its lane's value where playback starts: the values set
+    // by hand that go there are a step of their own, which no change before them takes along as it is undone.
+    std::optional<RecordingStep> step;
 
     for (const auto& curve : getCurveStates (song))
+    {
         if (const auto ref = getCurveParameter (curve); locateParameter (song, ref).has_value())
+        {
             if (getModeOf (song, ref) == AutomationMode::write && findPass (ref) == nullptr)
+            {
+                if (! step.has_value())
+                    step.emplace (song, "Record Automation");
+
                 punchIn (ref, AutomationMode::write, false);
+            }
+        }
+    }
 }
 
 void AutomationWriter::playbackStopped()
@@ -234,7 +246,7 @@ void AutomationWriter::pluginGestureChanged (const ParameterRef& parameter, bool
 void AutomationWriter::parameterChanged (const ParameterRef& parameter, float valueSetByHand)
 {
     // A control moved by hand: written if its pass is on, or if its track is in latch or write (touch needs it grabbed).
-    if (settingValue || ! session.isPlaying() || ! parameter.isValid())
+    if (settingValue || settingManyValues > 0 || ! session.isPlaying() || ! parameter.isValid())
         return;
 
     auto* pass = findPass (parameter);

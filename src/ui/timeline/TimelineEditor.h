@@ -66,6 +66,11 @@ public:
     juce::Rectangle<int> getLoopLane() const;                   // along the top
     bool isLoopLaneLit() const noexcept { return laneHovered; } // under the pointer (for tests)
 
+    // Escape while the mouse is down here (TimelineEditor::keyPressed()): the loop, or the playhead, goes back to where it was
+    // as the mouse went down, the song playing on from there if it played; the mouse does nothing more until it goes up.
+    // Returns whether the press was doing anything.
+    bool cancelDrag();
+
 private:
     // What a press in the loop's lane does once it drags.
     enum class LoopDrag
@@ -85,6 +90,8 @@ private:
     bool laneHovered = false;      // the loop's lane, under the pointer
     double loopAnchor = 0.0;       // the beat where the press was, snapped
     double loopStartAtPress = 0.0, loopEndAtPress = 0.0;
+    LoopState loopAtPress;        // all of it, for Escape
+    BeatPosition playheadAtPress; // where the playhead was, for Escape
 
     void movePlayhead (const juce::MouseEvent&);
     double getBeatAt (const juce::MouseEvent&) const; // snapped, unless Alt is held
@@ -303,6 +310,10 @@ public:
     // to undo or redo, as in Ableton Live, Bitwig, Logic Pro and REAPER; the mouse does nothing more until it goes up.
     // Otherwise the key is the commands' (KeyDispatcher), Escape among them.
     bool keyPressed (const juce::KeyPress&) override;
+
+    // A trackpad's pinch, anywhere over the editor: zooms around the pointer by as much as the fingers spread or close, as
+    // Ctrl and the wheel zoom (nothing in a view the editor keeps fixed, isViewFixed()).
+    void mouseMagnify (const juce::MouseEvent&, float scaleFactor) override;
 
 protected:
     // What Escape does to what the mouse is doing in the derived editor (keyPressed()): takes it back, and returns whether

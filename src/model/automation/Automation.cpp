@@ -63,6 +63,129 @@ namespace
     }
 
     //==========================================================================
+    // A point put on a curve where it plays as it did, so that what lies on either side keeps its shape whatever becomes of
+    // the other (engine/automation/Curve.h). Within a line, the point before it bends to it, and it to the next, each
+    // part as the whole line bent there: up to half a bend, a line eases as a curve of e (devices/dsp/Math.h:
+    // getEasedProgress()), whose two parts are that curve again over a part of its span, so the bend shares out by the
+    // parts' lengths. A stronger bend holds at one end, then eases all the way: a part that holds and eases a part of the
+    // way only, which no one bend draws, ends its hold at a point of its own.
+    struct PointsOnLine
+    {
+        int from = -1;                       // the point the line starts at, whose bend changes; none outside a line
+        float fromCurve = 0.0f;              // its bend then
+        std::vector<AutomationPoint> points; // added, in time order: the one at the beat, and before or after it where a hold ends
+        size_t atBeat = 0;                   // which of them is at the beat
+    };
+
+    PointsOnLine planPointOnLine (const std::vector<AutomationPoint>& points, BeatPosition beat)
+    {
+        PointsOnLine plan;
+
+        // The last point at or before the beat, and the next after it.
+        auto before = -1;
+
+        while (before + 1 < (int) points.size() && points[(size_t) before + 1].beat <= beat)
+            ++before;
+
+        // Before the first point or after the last the curve holds: a straight line holds it there too.
+        if (before < 0 || before + 1 >= (int) points.size())
+        {
+            const auto value = points.empty() ? 0.0f : points[(size_t) std::max (0, before)].value;
+            plan.points.push_back ({ beat, value, 0.0f });
+            return plan;
+        }
+
+        const auto& from = points[(size_t) before];
+        const auto& to = points[(size_t) before + 1];
+        const auto length = (to.beat - from.beat).inBeats();
+        const auto along = std::clamp ((beat - from.beat).inBeats() / length, 0.0, 1.0);
+        const auto bend = (double) juce::jlimit (-1.0f, 1.0f, from.curve);
+        const auto valueAlong = [&] (double place)
+        { return from.value + (float) engine::getCurveProgress (place, bend) * (to.value - from.value); };
+        const auto beatAlong = [&] (double place) { return from.beat + BeatDuration::fromBeats (place * length); };
+
+        plan.from = before;
+        plan.fromCurve = from.curve;
+
+        // At the line's start, a second point where the first is, bending as it does.
+        if (along <= 0.0)
+        {
+            plan.points.push_back ({ beat, from.value, from.curve });
+            return plan;
+        }
+
+        const auto amount = std::abs (bend);
+        const auto at = AutomationPoint { beat, valueAlong (along), 0.0f };
+
+        if (amount <= 0.5)
+        {
+            plan.fromCurve = (float) (bend * along);
+            plan.points.push_back ({ at.beat, at.value, (float) (bend * (1.0 - along)) });
+            return plan;
+        }
+
+        const auto held = (amount - 0.5) * 2.0; // how much of the line holds: at its start bent up, at its end bent down
+
+        if (bend > 0.0)
+        {
+            // Still holding: the first part holds, the rest holds for what is left of the hold, then eases all the way.
+            if (along <= held)
+            {
+                plan.fromCurve = 0.0f;
+                plan.points.push_back ({ at.beat, at.value, (float) (0.5 + 0.5 * (held - along) / (1.0 - along)) });
+                return plan;
+            }
+
+            // Past the hold: a point where it ends, then each part eases over its share of the rest.
+            const auto eased = (along - held) / (1.0 - held);
+            plan.fromCurve = 0.0f;
+            plan.points.push_back ({ beatAlong (held), from.value, (float) (0.5 * eased) });
+            plan.points.push_back ({ at.beat, at.value, (float) (0.5 * (1.0 - eased)) });
+            plan.atBeat = 1;
+            return plan;
+        }
+
+        const auto easing = 1.0 - held; // bent down, it eases first, then holds the next point's value
+
+        if (along >= easing)
+        {
+            plan.fromCurve = (float) -(0.5 + 0.5 * (along - easing) / along);
+            plan.points.push_back ({ at.beat, at.value, 0.0f });
+            return plan;
+        }
+
+        const auto eased = along / easing;
+        plan.fromCurve = (float) (-0.5 * eased);
+        plan.points.push_back ({ at.beat, at.value, (float) (-0.5 * (1.0 - eased)) });
+        plan.points.push_back ({ beatAlong (easing), to.value, 0.0f });
+        return plan;
+    }
+
+    // The same, on points of the model's own: where the one at the beat is among them.
+    int addPointOnLine (std::vector<AutomationPoint>& points, BeatPosition beat)
+    {
+        const auto plan = planPointOnLine (points, beat);
+
+        if (plan.from >= 0)
+            points[(size_t) plan.from].curve = plan.fromCurve;
+
+        auto index = -1;
+
+        for (size_t i = 0; i < plan.points.size(); ++i)
+        {
+            const auto& point = plan.points[i];
+            const auto place = std::upper_bound (points.begin(), points.end(), point.beat,
+                                                 [] (BeatPosition b, const AutomationPoint& each) { return b < each.beat; });
+            const auto added = (int) (points.insert (place, point) - points.begin());
+
+            if (i == plan.atBeat)
+                index = added;
+        }
+
+        return index;
+    }
+
+    //==========================================================================
     // The song's curves (Schema.h: AUTOMATION).
 
     juce::ValueTree findCurveIn (const juce::ValueTree& automation, const ParameterRef& ref)
@@ -96,6 +219,65 @@ namespace
 
         // As Phazite's engine plays it; without points, the parameter's value set by hand.
         float getValueAt (BeatPosition beat) const { return getCurveValueAt (song, ref, state, beat); }
+
+        std::vector<AutomationPoint> getPoints() const
+        {
+            std::vector<AutomationPoint> points;
+
+            for (int i = 0; i < getNumPoints(); ++i)
+                points.push_back ({ getPointBeat (i), getPointValue (i), getPointCurve (i) });
+
+            return points;
+        }
+
+        // A point at a beat, after any there, where the curve plays as it did on both sides of it (planPointOnLine()): its
+        // index.
+        int addPointOnLine (BeatPosition beat)
+        {
+            if (getNumPoints() == 0)
+                return addPoint (beat, getValueAt (beat), 0.0f); // the value set by hand
+
+            const auto plan = planPointOnLine (getPoints(), beat);
+
+            if (plan.from >= 0)
+                setCurve (plan.from, plan.fromCurve);
+
+            auto index = -1;
+
+            for (size_t i = 0; i < plan.points.size(); ++i)
+                if (const auto added = addPoint (plan.points[i].beat, plan.points[i].value, plan.points[i].curve); i == plan.atBeat)
+                    index = added;
+
+            return index;
+        }
+
+        // The same, only inside a bent line: a straight one keeps its shape however its ends move apart or together. Whether
+        // it cut one.
+        bool cutBentLineAt (BeatPosition beat)
+        {
+            auto before = -1;
+
+            while (before + 1 < getNumPoints() && getPointBeat (before + 1) <= beat)
+                ++before;
+
+            if (before < 0 || before + 1 >= getNumPoints() || getPointBeat (before) >= beat
+                || juce::exactlyEqual (getPointCurve (before), 0.0f))
+                return false;
+
+            addPointOnLine (beat);
+            return true;
+        }
+
+        // The bend of the line that plays at a beat, after any points there: none before the first point or after the last.
+        float getCurveAt (BeatPosition beat) const
+        {
+            auto before = -1;
+
+            while (before + 1 < getNumPoints() && getPointBeat (before + 1) <= beat)
+                ++before;
+
+            return before >= 0 && before + 1 < getNumPoints() ? getPointCurve (before) : 0.0f;
+        }
 
         int addPoint (BeatPosition beat, float value, float curve)
         {
@@ -196,14 +378,23 @@ namespace
         JUCE_DECLARE_NON_COPYABLE (SongCurve)
     };
 
-    // The parameters the song has curves for that are there, not those of devices gone (whose curves the song keeps for
-    // undo).
+    // Whether what a curve names is in the song: a device's, a fader's, a send's or a container's chain's (its volume, pan
+    // and crossover), each an automated parameter's owner as locateParameter() finds it, whether or not it knows the
+    // parameter now (a plug-in that isn't installed, or doesn't load, knows none of its own).
+    bool isCurveOwnerThere (const Song& song, DeviceID owner)
+    {
+        return findDeviceState (song, owner).isValid() || findSendState (song, owner).isValid()
+               || findChannelOfFader (song, owner).isValid() || findContainerChain (song, owner).isValid();
+    }
+
+    // The parameters the song has curves for whose devices are there, a plug-in's that isn't loaded too; not those of
+    // devices gone (whose curves the song keeps for undo).
     std::vector<ParameterRef> getParametersWithCurves (const Song& song)
     {
         std::vector<ParameterRef> parameters;
 
         for (const auto& curve : getCurveStates (song))
-            if (const auto ref = getCurveParameter (curve); locateParameter (song, ref).has_value())
+            if (const auto ref = getCurveParameter (curve); curve.getNumChildren() > 0 && isCurveOwnerThere (song, ref.device))
                 parameters.push_back (ref);
 
         return parameters;
@@ -257,12 +448,10 @@ namespace
     // on either side keeps its shape whatever becomes of the other.
     void addEdge (SongCurve& curve, BeatPosition beat)
     {
-        const auto before = curve.getValueAt (beat - justBefore), at = curve.getValueAt (beat);
-
         if (beat - justBefore > BeatPosition())
-            curve.addPoint (beat - justBefore, before, 0.0f);
+            curve.addPointOnLine (beat - justBefore);
 
-        curve.addPoint (beat, at, 0.0f);
+        curve.addPointOnLine (beat);
     }
 
     // Afterwards, the points at the edges that change nothing go (SongCurve::removeRedundantPoints()).
@@ -272,13 +461,19 @@ namespace
             curve.removeRedundantPoints ({ beat - justBefore * 2.0, beat + justBefore });
     }
 
+    std::vector<DeviceID> getLaneDevices (const Song&, TrackID);
+
+    // The parameters with points of the devices on a track (its fader, its sends, its devices and its containers' chains):
+    // those of a plug-in that isn't loaded too, whose parameters only its instance knows.
     std::vector<ParameterRef> getAutomatedParameters (const Song& song, TrackID track)
     {
         std::vector<ParameterRef> automated;
+        const auto devices = getLaneDevices (song, track);
 
-        for (const auto& parameter : getAutomatableParameters (song, track))
-            if (hasPoints (song, parameter))
-                automated.push_back (parameter);
+        for (const auto& curve : getCurveStates (song))
+            if (const auto ref = getCurveParameter (curve);
+                curve.getNumChildren() > 0 && std::find (devices.begin(), devices.end(), ref.device) != devices.end())
+                automated.push_back (ref);
 
         return automated;
     }
@@ -873,21 +1068,19 @@ std::vector<AutomationCopy> copyAutomation (const Song& song, const std::vector<
     {
         for (const auto& ref : getAutomatedParameters (song, track))
         {
-            const auto curveState = findCurveState (song, ref);
-            const auto valueAt = [&] (BeatPosition beat) { return getCurveValueAt (song, ref, curveState, beat); };
-
-            // As moveAutomation() takes a stretch: its edges' values, and the points between them, from its start.
+            // As moveAutomation() takes a stretch: points at its edges, which keep the shape of the lines they cut, and the
+            // points between them, from its start.
             for (const auto& range : ranges)
             {
-                AutomationCopy copy { ref, range.getLength(), { { BeatPosition(), valueAt (range.getStart()), 0.0f } }, range.getStart() };
+                auto points = getPoints (song, ref);
+                const auto first = addPointOnLine (points, range.getStart());
+                const auto last = addPointOnLine (points, range.getEnd() - justBefore);
+                AutomationCopy copy { ref, range.getLength(), {}, range.getStart() };
 
-                for (const auto& point : curveState)
-                    if (const auto beat = BeatPosition::fromBeats (point[schema::pointBeat]);
-                        beat >= range.getStart() && beat < range.getEnd() - justBefore)
-                        copy.points.push_back ({ BeatPosition() + (beat - range.getStart()), point[schema::pointValue],
-                                                 point.getProperty (schema::pointCurve, 0.0f) });
+                for (auto i = first; i <= last; ++i)
+                    copy.points.push_back ({ BeatPosition() + (points[(size_t) i].beat - range.getStart()), points[(size_t) i].value,
+                                             i < last ? points[(size_t) i].curve : 0.0f });
 
-                copy.points.push_back ({ BeatPosition() + (range.getLength() - justBefore), valueAt (range.getEnd() - justBefore), 0.0f });
                 copies.push_back (std::move (copy));
             }
         }
@@ -900,7 +1093,7 @@ void pasteAutomation (Song& song, const std::vector<AutomationCopy>& copies, Bea
 {
     for (const auto& copy : copies)
     {
-        if (! locateParameter (song, copy.parameter).has_value())
+        if (! isCurveOwnerThere (song, copy.parameter.device))
             continue;
 
         // Where it lands, in place of what is there, what lies around it keeping its shape, as moveAutomation() copies.
@@ -949,14 +1142,16 @@ void insertAutomationTime (Song& song, BeatPosition at, BeatDuration length)
 {
     for (const auto& parameter : getParametersWithCurves (song))
     {
+        // A bent line across the time cut first, so that each part keeps its shape (addPointOnLine()).
         SongCurve curve (song, parameter);
+        const auto cut = curve.cutBentLineAt (at);
         const auto valueThere = curve.getValueAt (at);
 
         for (auto i = curve.getNumPoints(); --i >= 0;)
             if (const auto beat = curve.getPointBeat (i); beat >= at)
                 curve.setPoint (i, beat + length, curve.getPointValue (i));
 
-        if (! juce::approximatelyEqual (valueThere, curve.getValueAt (at)))
+        if (cut || ! juce::approximatelyEqual (valueThere, curve.getValueAt (at))) // a bent line's first part ends there
             curve.addPoint (at, valueThere, 0.0f);
 
         if (! juce::approximatelyEqual (valueThere, curve.getValueAt (at + length)))
@@ -968,8 +1163,13 @@ void removeAutomationTime (Song& song, BeatRange range)
 {
     for (const auto& parameter : getParametersWithCurves (song))
     {
+        // Bent lines across its ends cut first, so that what lies before it and after it keeps its shape, what is after it
+        // bending from its start as it did from its end.
         SongCurve curve (song, parameter);
+        const auto cut = curve.cutBentLineAt (range.getStart());
+        curve.cutBentLineAt (range.getEnd());
         const auto valueAtStart = curve.getValueAt (range.getStart()), valueAtEnd = curve.getValueAt (range.getEnd());
+        const auto curveAtEnd = curve.getCurveAt (range.getEnd());
 
         for (auto i = curve.getNumPoints(); --i >= 0;)
             if (const auto beat = curve.getPointBeat (i); beat >= range.getStart() && beat <= range.getEnd())
@@ -979,11 +1179,11 @@ void removeAutomationTime (Song& song, BeatRange range)
             if (const auto beat = curve.getPointBeat (i); beat >= range.getEnd())
                 curve.setPoint (i, beat - range.getLength(), curve.getPointValue (i));
 
-        if (! juce::exactlyEqual (curve.getValueAt (range.getStart()), valueAtStart))
+        if (cut || ! juce::exactlyEqual (curve.getValueAt (range.getStart()), valueAtStart)) // as above
             curve.addPoint (range.getStart(), valueAtStart, 0.0f);
 
-        if (! juce::exactlyEqual (valueAtStart, valueAtEnd))
-            curve.addPoint (range.getStart(), valueAtEnd, 0.0f);
+        if (! juce::exactlyEqual (valueAtStart, valueAtEnd) || ! juce::exactlyEqual (curveAtEnd, 0.0f))
+            curve.addPoint (range.getStart(), valueAtEnd, curveAtEnd);
     }
 }
 
@@ -994,14 +1194,7 @@ void addAutomationEdges (Song& song, const std::vector<BeatPosition>& beats)
         SongCurve curve (song, parameter);
 
         for (const auto beat : beats)
-        {
-            const auto value = curve.getValueAt (beat);
-
-            if (beat - justBefore > BeatPosition())
-                curve.addPoint (beat - justBefore, value, 0.0f);
-
-            curve.addPoint (beat, value, 0.0f);
-        }
+            addEdge (curve, beat);
     }
 }
 
@@ -1040,7 +1233,7 @@ void addAutomationPoints (Song& song, const std::vector<ParameterPoint>& points)
 
     for (const auto& ref : parameters)
     {
-        if (locateParameter (song, ref).has_value())
+        if (isCurveOwnerThere (song, ref.device))
         {
             SongCurve curve (song, ref);
 
@@ -1059,9 +1252,7 @@ void forgetCurvesOfGoneDevices (Song& song)
     auto automation = song.getState().getChildWithName (schema::AUTOMATION);
 
     for (auto i = automation.getNumChildren(); --i >= 0;)
-        if (const auto owner = getCurveParameter (automation.getChild (i)).device;
-            ! findDeviceState (song, owner).isValid() && ! findSendState (song, owner).isValid()
-            && ! findChannelOfFader (song, owner).isValid() && ! findContainerChain (song, owner).isValid())
+        if (! isCurveOwnerThere (song, getCurveParameter (automation.getChild (i)).device))
             automation.removeChild (i, nullptr);
 }
 
@@ -1091,8 +1282,7 @@ std::vector<AutomationLane> getLanes (const Song& song, TrackID track)
         const auto device = std::find (devices.begin(), devices.end(), ref.device);
 
         if (device == devices.end() || curve.getNumChildren() == 0
-            || ref.parameter == juce::String (devices::mixParameterID.data(), devices::mixParameterID.size())
-            || ref.parameter == "dry level" || ref.parameter == "wet level")
+            || ref.parameter == juce::String (devices::mixParameterID.data(), devices::mixParameterID.size()))
             continue;
 
         if (std::none_of (lanes.begin(), lanes.end(), [&ref] (const AutomationLane& lane) { return lane.parameter == ref; }))
@@ -1232,18 +1422,62 @@ std::optional<PointSelection> getSelectedPoints (const Selection& selection)
     auto* song = selection.getSong();
     const auto& parameter = selection.getPointsParameter();
 
-    if (song == nullptr || ! locateParameter (*song, parameter).has_value())
+    // Of a curve whose device is there (one of a plug-in that isn't loaded too), as Selection::getNumObjectsSelected()
+    // counts them.
+    if (song == nullptr || ! parameter.isValid() || ! isCurveOwnerThere (*song, parameter.device))
         return {};
 
-    // Where each selected point is in its curve now: one that is gone (removed, or its curve with it) is left out.
+    // Where each selected point is in its curve now: one that is gone (removed, or its curve with it) is left out. Found
+    // by its beat, as the curve keeps its points in time order, then among those at that beat: not by looking through the
+    // whole curve for each.
     const auto curve = findCurveState (*song, parameter);
+    const auto numPoints = curve.getNumChildren();
+    const auto beatOf = [&curve] (int index) { return (double) curve.getChild (index)[schema::pointBeat]; };
+    std::uint64_t comparisons = 0;
     std::vector<int> indices;
 
     for (const auto& point : selection.getPoints())
-        if (const auto index = curve.indexOf (point); index >= 0)
-            indices.push_back (index);
+    {
+        if (! curve.isValid() || point.getParent() != curve)
+            continue;
 
+        const auto beat = (double) point[schema::pointBeat];
+        auto low = 0, high = numPoints;
+
+        while (low < high)
+        {
+            ++comparisons;
+            const auto middle = low + (high - low) / 2;
+
+            if (beatOf (middle) < beat)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        auto found = -1;
+
+        for (auto index = low; index < numPoints && found < 0 && juce::exactlyEqual (beatOf (index), beat); ++index)
+        {
+            ++comparisons;
+
+            if (curve.getChild (index) == point)
+                found = index;
+        }
+
+        // In its curve, yet not where its beat puts it: points out of their order, which the model doesn't leave them in.
+        if (found < 0)
+        {
+            comparisons += (std::uint64_t) numPoints;
+            found = curve.indexOf (point);
+        }
+
+        indices.push_back (found);
+    }
+
+    Selection::countPointComparisons (comparisons);
     std::sort (indices.begin(), indices.end());
+    indices.erase (std::unique (indices.begin(), indices.end()), indices.end());
 
     if (indices.empty())
         return {};

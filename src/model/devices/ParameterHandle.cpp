@@ -432,6 +432,25 @@ void ParameterHandle::endGesture()
     impl->joined = false;
 }
 
+void ParameterHandle::cancelGesture()
+{
+    if (! isInGesture())
+        return;
+
+    // What automation wrote meanwhile joined the step (endGesture()), and goes with it.
+    if (auto* song = impl->song.get())
+        if (auto* session = findPlayingSession (*song))
+            session->getWriter().gestureEnded (impl->findRef());
+
+    if (impl->gesture != nullptr)
+    {
+        impl->gesture->rollBack();
+        impl->gesture.reset();
+    }
+
+    impl->joined = false;
+}
+
 bool ParameterHandle::isInGesture() const
 {
     return impl != nullptr && (impl->gesture != nullptr || impl->joined);

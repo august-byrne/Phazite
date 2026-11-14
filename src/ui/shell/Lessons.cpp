@@ -71,7 +71,11 @@ const std::vector<Lessons::Lesson>& Lessons::getAll()
           { { .text = "{run:device.add}, type Drum Sampler and press Enter: it plays on a new track.",
               .isDone = hasInstrument,
               .target = "view.commandPalette" },
-            { .text = "{run:view.pianoRoll} to show the track's notes in the piano roll.", .doneBy = { "view.pianoRoll" } },
+            // Done while the piano roll shows: as F7 hides the lower panel when it shows the piano roll already (FL Studio's
+            // F7), pressing it then would hide what the next step asks for.
+            { .text = "{run:view.pianoRoll} to show the track's notes in the piano roll.",
+              .target = "view.pianoRoll",
+              .doneWhenShown = "pianoRoll" },
             { .text = "Click in the piano roll to add drum hits, a row for each drum; a right-click takes one away. Click Next when you "
                       "have a few.",
               .target = "pianoRoll" },
@@ -245,7 +249,13 @@ bool Lessons::waitsForNext() const
         return false;
 
     const auto& current = lesson->steps[(size_t) step];
-    return current.doneBy.empty() && current.isDone == nullptr;
+    return current.doneBy.empty() && current.isDone == nullptr && current.doneWhenShown == nullptr;
+}
+
+bool Lessons::isStepDone (const Step& current) const
+{
+    return (current.isDone != nullptr && current.isDone (context))
+           || (current.doneWhenShown != nullptr && isShown != nullptr && isShown (current.doneWhenShown));
 }
 
 void Lessons::next()
@@ -286,8 +296,7 @@ void Lessons::setStep (int newStep)
 
 void Lessons::update()
 {
-    while (lesson != nullptr && ! isFinished() && lesson->steps[(size_t) step].isDone != nullptr
-           && lesson->steps[(size_t) step].isDone (context))
+    while (lesson != nullptr && ! isFinished() && isStepDone (lesson->steps[(size_t) step]))
         setStep (step + 1);
 }
 

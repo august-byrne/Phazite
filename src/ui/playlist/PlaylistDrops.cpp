@@ -68,26 +68,54 @@ bool Playlist::isInterestedInFileDrag (const juce::StringArray& paths)
                         { return canImport (context, juce::File (path)) || isPresetFile (juce::File (path)); });
 }
 
-void Playlist::fileDragMove (const juce::StringArray&, int x, int y)
+void Playlist::showFileDrop (const juce::File& first, juce::Point<int> position)
 {
-    // Where importFiles() would put them.
-    const auto position = lanes->getLocalPoint (this, juce::Point<int> (x, y));
+    // Where importFiles() would put the first file: on the track under the pointer if it suits it, or else on a new track
+    // below, which the lanes show and the hint bar says, with why (an audio clip on a track with an instrument went there,
+    // silenced by it, until 2026-11-14).
     fileDropRow = getRowAt (position.y);
-    fileDropX = position.x;
-    fileDropBeat = getFileDropBeat (position.x);
+    fileDropX = std::max (0, position.x);
+    fileDropBeat = getFileDropBeat (fileDropX);
+
+    const auto onRow =
+        juce::isPositiveAndBelow (fileDropRow, (int) rows.size()) && rows[(size_t) fileDropRow].track.kind != TrackType::master;
+    const auto track = onRow ? rows[(size_t) fileDropRow].track.id : TrackID();
+    fileDropOnNewTrack = onRow && canImport (context, first) && ! importsOnto (context, first, track); // not a preset
+
+    if (fileDropOnNewTrack)
+    {
+        const auto midi = first.hasFileExtension ("mid;midi");
+        const auto row = rows[(size_t) fileDropRow].track;
+        const auto why = row.kind == TrackType::returnTrack ? juce::String ("a return holds no clips")
+                         : row.kind == TrackType::folder    ? juce::String ("a folder holds no clips")
+                         : midi                             ? juce::String ("notes can't go on a track of audio")
+                                                            : juce::String ("audio can't go on a track of notes or with an instrument");
+        setDragReadout ("Goes on a new track below " + row.name + ": " + why);
+    }
+    else
+    {
+        setDragReadout ({});
+    }
+
     lanes->repaint();
+}
+
+void Playlist::fileDragMove (const juce::StringArray& paths, int x, int y)
+{
+    showFileDrop (juce::File (paths[0]), lanes->getLocalPoint (this, juce::Point<int> (x, y)));
 }
 
 void Playlist::fileDragExit (const juce::StringArray&)
 {
     fileDropBeat.reset();
+    fileDropOnNewTrack = false;
+    setDragReadout ({});
     lanes->repaint();
 }
 
 void Playlist::filesDropped (const juce::StringArray& paths, int x, int y)
 {
-    fileDropBeat.reset();
-    lanes->repaint();
+    fileDragExit (paths);
     importFiles (paths, lanes->getLocalPoint (this, juce::Point<int> (x, y)));
 }
 
@@ -106,23 +134,27 @@ void Playlist::itemDragMove (const SourceDetails& details)
 {
     // Where it would go, as for files from Explorer: a file at a beat, a device or a preset onto a track.
     const auto position = lanes->getLocalPoint (this, details.localPosition);
-    fileDropRow = getRowAt (position.y);
     deviceDropping = getDraggedDevice (details.description).has_value() || getDraggedPreset (details.description).has_value();
 
+    if (const auto file = getDraggedFile (details.description); file.has_value() && ! deviceDropping)
+    {
+        showFileDrop (*file, position);
+        return;
+    }
+
+    fileDropRow = getRowAt (position.y);
     fileDropX = std::max (0, position.x);
-
-    if (deviceDropping)
-        fileDropBeat.reset();
-    else
-        fileDropBeat = getFileDropBeat (fileDropX);
-
+    fileDropBeat.reset();
+    fileDropOnNewTrack = false;
     lanes->repaint();
 }
 
 void Playlist::itemDragExit (const SourceDetails&)
 {
     fileDropBeat.reset();
+    fileDropOnNewTrack = false;
     deviceDropping = false;
+    setDragReadout ({});
     lanes->repaint();
 }
 

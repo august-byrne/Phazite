@@ -36,6 +36,7 @@ namespace
     // markers on the whole sound, its loop (the file's own, or off where it starts), and no slices changed by hand.
     void setSoundSettings (Song& song, DeviceID id, int root, float fine, std::optional<std::pair<float, float>> loop)
     {
+        const ManyValuesSetByHand many (song); // no automation writes them
         const auto set = [&song, id] (const char* parameter, float value) { setValueSetByHand (song, { id, parameter }, value); };
         set ("root", (float) root);
         set ("fine", fine);

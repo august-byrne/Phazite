@@ -50,14 +50,12 @@ std::string findDifference (const juce::String& a, const juce::String& b)
 }
 
 // What opening a song leaves out of it as it was edited, which names what is gone (SongIDs.h): the curves and lanes of
-// devices taken away, what modulated them, and a pad's track's sampler.
+// devices taken away, which the song keeps for an undo. Nothing else names what is gone.
 void leaveOutWhatNamesNothing (phazite::Song& song)
 {
     phazite::forgetCurvesOfGoneDevices (song);
     std::set<std::uint64_t> items;
     findIDProblems (song.getState(), &items);
-    const auto names = [&items] (const juce::ValueTree& element, const juce::Identifier& property)
-    { return items.count (phazite::readID (element[property])) > 0; };
 
     const std::function<void (juce::ValueTree)> visit = [&] (juce::ValueTree tree)
     {
@@ -65,17 +63,10 @@ void leaveOutWhatNamesNothing (phazite::Song& song)
         {
             auto child = tree.getChild (i);
 
-            if ((child.hasType (phazite::schema::LANE) && ! names (child, phazite::schema::laneDevice))
-                || (child.hasType (phazite::schema::MODULATES) && ! names (child, phazite::schema::modulatesDevice)))
+            if (child.hasType (phazite::schema::LANE) && items.count (phazite::readID (child[phazite::schema::laneDevice])) == 0)
             {
                 tree.removeChild (i, nullptr);
                 continue;
-            }
-
-            if (child.hasProperty (phazite::schema::trackPadDevice) && ! names (child, phazite::schema::trackPadDevice))
-            {
-                child.removeProperty (phazite::schema::trackPadDevice, nullptr);
-                child.removeProperty (phazite::schema::trackPad, nullptr);
             }
 
             visit (child);

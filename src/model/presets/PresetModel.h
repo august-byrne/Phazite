@@ -51,8 +51,10 @@ inline constexpr const char* trackPresetsFolder = "Tracks";
 // sampler's pads', a wavetable synth's tables, a sampler's sound) go with it, copied into a folder beside it named after it
 // ("Kit Sounds", the one there that is the same taken as it is), and it names each by its path from its own folder ("Kit
 // Sounds/Boom.wav"): copied with that folder, a preset works on any computer, and it holds no path of this one's, the
-// user's name in it (known bug 107). One that can't be taken (internal/DeviceFiles.h: isSoundFileToTake()) is left out. A
-// plug-in installed for the user alone, under their home folder, is named by its file's name, not where it is.
+// user's name in it (known bug 107). One that can't be taken (internal/DeviceFiles.h: isSoundFileToTake()) is left out; one
+// that should be taken and can't be copied (a full disk, a file where the folder goes) fails the save, which leaves nothing
+// it made. A failure is told as a problem with the song (internal/ProjectContext.h: reportProblem()), naming what couldn't be
+// kept. A plug-in installed for the user alone, under their home folder, is named by its file's name, not where it is.
 bool saveDevicePreset (const ProjectContext&, DeviceID, const juce::File&);
 bool saveTrackPreset (const ProjectContext&, TrackID, const juce::File&);
 

@@ -6,6 +6,10 @@
 // drag, and a drag let go outside the window.
 #include "EditorScreens.h"
 #include "model/arrangement/AudioClipModel.h"
+#include "model/mixer/MixerModel.h"
+#include "ui/components/Controls.h"
+#include "ui/playlist/TrackHeader.h"
+#include "ui/theme/DesignTokens.h"
 
 namespace
 {
@@ -34,6 +38,279 @@ juce::Point<int> leftOfWindow (const phazite::test::TestWindow& window, const ju
     return component.getLocalPoint (&window, juce::Point<int> (-40, inWindow.y));
 }
 } // namespace
+
+//==============================================================================
+namespace
+{
+// A track's header in the playlist, and a place on it that no button, field, edge or the color strip at its left takes: where a
+// click selects the track.
+juce::Component* findHeader (phazite::ui::Playlist& playlist, phazite::TrackID track)
+{
+    for (auto* header : phazite::test::findAll<phazite::ui::TrackHeader> (playlist))
+        if (header->getTrack() == track)
+            return header;
+
+    return nullptr;
+}
+
+juce::Point<int> getPlainSpot (juce::Component& component)
+{
+    for (int y = 4; y < component.getHeight() - 8; y += 2)
+        for (int x = component.getWidth() / 3; x < component.getWidth() - 4; x += 2)
+            if (component.getComponentAt (x, y) == &component)
+                return { x, y };
+
+    return {};
+}
+
+double getRowsScroll (phazite::ui::Playlist& playlist)
+{
+    for (auto* bar : phazite::test::findAll<juce::ScrollBar> (playlist))
+        if (bar->isVertical())
+            return bar->getCurrentRangeStart();
+
+    return -1.0;
+}
+} // namespace
+
+TEST_CASE ("A Shift+click or Ctrl+click on a track far from the one selected leaves the playlist where it is; a command that "
+           "selects a track out of view brings it into view (known bug 54)")
+{
+    // Every change of the selection scrolled back to the first selected track's row, hiding what was clicked.
+    PlaylistScreen screen;
+    const auto tracks = phazite::ensureTracks (screen.getSong(), 40);
+    phazite::test::dispatchPendingMessages();
+    Mouse mouse (screen.playlist);
+    const auto onHeader = [&screen] (phazite::TrackID track)
+    {
+        auto* header = findHeader (screen.playlist, track);
+        REQUIRE (header != nullptr);
+        REQUIRE (header->isShowing());
+        return screen.playlist.getLocalPoint (header, getPlainSpot (*header));
+    };
+    // The rows scrolled as their scroll bar scrolls them.
+    const auto scrollTo = [&screen] (double y)
+    {
+        for (auto* bar : phazite::test::findAll<juce::ScrollBar> (screen.playlist))
+            if (bar->isVertical())
+                bar->setCurrentRangeStart (y, juce::sendNotificationSync);
+    };
+    auto scrolled = 0.0;
+
+    for (const auto mods : { juce::ModifierKeys (juce::ModifierKeys::shiftModifier), ctrl })
+    {
+        // The first track clicked, in view; the view scrolled down a long way.
+        mouse.click (onHeader (tracks[0]));
+        phazite::test::deliverChanges();
+        REQUIRE (screen.selection().getTracks() == std::vector { tracks[0] });
+        scrollTo (960.0);
+        scrolled = getRowsScroll (screen.playlist);
+        REQUIRE (scrolled > 0.0);
+
+        mouse.click (onHeader (tracks[24]), mods);
+        phazite::test::deliverChanges();
+
+        CHECK (screen.selection().isSelected (tracks[24]));
+        CHECK (screen.selection().isSelected (tracks[0]));
+        CHECK (getRowsScroll (screen.playlist) == doctest::Approx (scrolled));
+
+        // Back to the top for the next round: the first track's row in view.
+        scrollTo (0.0);
+    }
+
+    // A command that selects the next track, the first's, out of view: it comes into view.
+    mouse.click (onHeader (tracks[0]));
+    phazite::test::deliverChanges();
+    scrollTo (960.0);
+    scrolled = getRowsScroll (screen.playlist);
+    REQUIRE (scrolled > 0.0);
+    REQUIRE (screen.registry.invoke ("track.selectNext"));
+    phazite::test::deliverChanges();
+    CHECK (screen.selection().getTracks() == std::vector { tracks[1] });
+    CHECK (getRowsScroll (screen.playlist) < scrolled);
+}
+
+TEST_CASE ("A clip dragged onto a track of the other kind, a folder or a return stays on a track it can go on, the hint bar saying "
+           "why; a file dropped there goes on a new track below; Draw places the clip selected last, where it suits")
+{
+    // Audio and notes don't share a track (docs/design/building-blocks.md): an audio clip landed on a track of notes or with an
+    // instrument, silenced, and notes on a track of audio, unheard (the audit's ui-timeline-editors 8).
+    PlaylistScreen screen;
+    const auto audio = screen.addAudioClip (0, 0.0, 1.0); // track 0: audio, beats 0 to 2
+    const auto notes = screen.addMidiClip (1, 0.0, 2.0);  // track 1: notes
+    const auto folder = phazite::insertFolder (screen.getSong(), screen.tracks[2], nullptr);
+    const auto returnTrack = phazite::insertReturnTrack (screen.getSong(), "Reverb", nullptr);
+    screen.getSong().getUndoManager().clearUndoHistory();
+    screen.selection().clear();
+    phazite::test::deliverChanges();
+
+    // The middle of a row's lower half, where the Smart Tool moves a clip: the rows as the model lists them, as tall as they show.
+    const auto rowAt = [&screen] (phazite::TrackID track, double beat)
+    {
+        auto y = 0;
+
+        for (const auto& row : phazite::getPlaylistRows (screen.context))
+        {
+            if (row.pinned)
+                continue;
+
+            const auto height = phazite::ui::getTrackHeight (row);
+
+            if (row.id == track)
+                return juce::Point<int> (screen.xOf (beat), y + height * 3 / 4);
+
+            y += height;
+        }
+
+        FAIL ("no such row");
+        return juce::Point<int>();
+    };
+
+    Mouse mouse (*screen.lanes);
+    UndoCheck undo (screen.getSong());
+
+    const auto dragOnto = [&] (phazite::ClipID clip, phazite::TrackID from, phazite::TrackID onto, const juce::String& why)
+    {
+        undo.check ("a clip dragged onto a track it can't go on",
+                    [&]
+                    {
+                        const auto start = screen.get (clip).range.getStart().inBeats();
+                        mouse.press (rowAt (from, start + 0.5));
+                        mouse.dragTo (rowAt (from, start + 1.0));
+                        mouse.dragTo (rowAt (onto, start + 2.5));
+                        CHECK (screen.get (clip).track == from);
+                        CHECK (screen.playlist.getDragReadout().contains (why));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        phazite::test::deliverChanges();
+        CHECK (screen.get (clip).track == from);
+    };
+
+    dragOnto (audio, screen.tracks[0], screen.tracks[1], "An audio clip can't go on a track of notes");
+    dragOnto (notes, screen.tracks[1], screen.tracks[0], "A note clip can't go on a track of audio");
+    dragOnto (audio, screen.tracks[0], folder, "A folder holds no clips");
+
+    // An empty track without an instrument takes either; then it is the audio's.
+    undo.check ("an audio clip onto an empty track",
+                [&]
+                {
+                    const auto start = screen.get (audio).range.getStart().inBeats();
+                    mouse.press (rowAt (screen.tracks[0], start + 0.5));
+                    mouse.dragTo (rowAt (screen.tracks[2], start + 0.5));
+                    mouse.release();
+                    mouse.pause();
+                });
+    phazite::test::deliverChanges();
+    CHECK (screen.get (audio).track == screen.tracks[2]);
+    dragOnto (notes, screen.tracks[1], screen.tracks[2], "A note clip can't go on a track of audio");
+
+    // The model refuses the same: Draw and Paint place a copy of the clip used last only where it suits.
+    CHECK_FALSE (phazite::placeClip (screen.context, screen.tracks[1], beatAt (8.0), audio).isValid());
+    CHECK_FALSE (phazite::placeClip (screen.context, returnTrack, beatAt (8.0), notes).isValid());
+
+    // Draw places the clip selected last: the audio, Ctrl+clicked after the notes, which are first in the playlist's order.
+    mouse.click (rowAt (screen.tracks[1], screen.get (notes).range.getStart().inBeats() + 0.5));
+    mouse.click (rowAt (screen.tracks[2], screen.get (audio).range.getStart().inBeats() + 0.5), ctrl);
+    phazite::test::deliverChanges();
+    REQUIRE (screen.selection().getClips().size() == 2);
+    REQUIRE (screen.selection().getClips().front() == notes);
+    screen.playlist.setTool (Tool::draw);
+    undo.check ("Draw on the audio's track", [&] { mouse.click (rowAt (screen.tracks[2], 12.0)); });
+    phazite::test::deliverChanges();
+    const auto onAudioTrack = phazite::getClips (screen.context, screen.tracks[2]);
+    REQUIRE (onAudioTrack.size() == 2);
+    CHECK (onAudioTrack[1].kind == phazite::ClipType::audio);
+    screen.playlist.setTool (Tool::smart);
+
+    // A file of audio dragged over the notes' track or the folder: the hint bar says it goes on a new track below, and it does.
+    const auto sound = phazite::test::writeSound (screen.temp.folder.getChildFile ("Dropped.wav"), 1.0);
+    const auto overRow = [&] (phazite::TrackID track) { return screen.playlist.getLocalPoint (screen.lanes, rowAt (track, 12.0)); };
+    auto& dropTarget = static_cast<juce::FileDragAndDropTarget&> (screen.playlist); // as Explorer reaches it
+
+    for (const auto track : { screen.tracks[1], folder })
+    {
+        const auto at = overRow (track);
+        const auto tracksBefore = phazite::getAllPlaylistTracks (screen.context).size();
+        dropTarget.fileDragMove ({ sound.getFullPathName() }, at.x, at.y);
+        CHECK (screen.playlist.getDragReadout().startsWith ("Goes on a new track below"));
+        undo.check ("a file dropped on a track it doesn't suit",
+                    [&] { dropTarget.filesDropped ({ sound.getFullPathName() }, at.x, at.y); });
+        phazite::test::deliverChanges();
+        CHECK (screen.playlist.getDragReadout().isEmpty());
+        CHECK (phazite::getAllPlaylistTracks (screen.context).size() == tracksBefore + 1);
+        CHECK (phazite::getClips (screen.context, track).size() == (track == folder ? 0u : 1u));
+    }
+
+    // A return, which the playlist doesn't show, takes none either: a file dropped on it went on it, unheard.
+    CHECK_FALSE (phazite::importsOnto (screen.context, sound, returnTrack));
+    undo.check ("a file put on a return",
+                [&] { phazite::importFiles (screen.context, { sound.getFullPathName() }, returnTrack, beatAt (0.0)); });
+    CHECK (phazite::getClips (screen.context, returnTrack).empty());
+
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("In an automation lane, a double-click on empty space adds a point, one undo step; Shift in the middle of a point's drag "
+           "makes what follows finer, without a jump (known bug 56)")
+{
+    PlaylistScreen screen;
+    const auto volume = phazite::getVolume (screen.context, screen.tracks[0]);
+    phazite::showAutomationLane (phazite::getVolume (screen.context, screen.tracks[0]));
+    screen.getSong().getUndoManager().clearUndoHistory();
+    phazite::test::dispatchPendingMessages();
+    auto* lane = phazite::test::findComponentWithTitle (screen.playlist, "Automation of Volume");
+    REQUIRE (lane != nullptr);
+    const auto inLane = [&] (double beat, float value)
+    {
+        const auto area =
+            lane->getLocalBounds().toFloat().withTrimmedBottom (1.0f).reduced (0.0f, phazite::ui::LaneTint::selectedPointRadius + 1.0f);
+        return juce::Point<int> (screen.xOf (beat), juce::roundToInt (area.getBottom() - value * area.getHeight()));
+    };
+    const auto points = [&] { return phazite::getAutomationPoints (screen.context, volume.getRef()); };
+    Mouse mouse (*lane);
+    UndoCheck undo (screen.getSong());
+
+    // The click added a point, and the double-click it began deleted it: two undo steps for nothing.
+    undo.check ("a double-click on empty space", [&] { mouse.doubleClick (inLane (4.0, 0.5f)); });
+    phazite::test::deliverChanges();
+    REQUIRE (points().size() == 1);
+    CHECK (points()[0].beat.inBeats() == doctest::Approx (4.0));
+    CHECK (screen.describeUndo() == "Undo Add Automation Point");
+
+    // A double-click on a point still deletes it.
+    undo.check ("a double-click on the point", [&] { mouse.doubleClick (inLane (4.0, 0.5f)); });
+    phazite::test::deliverChanges();
+    CHECK (points().empty());
+
+    // Shift pressed in the middle of a drag: the value went where the whole drag, a fifth as far, put it.
+    phazite::addAutomationPoint (screen.context, volume.getRef(), { beatAt (8.0), 0.5f });
+    phazite::test::deliverChanges();
+    const auto from = inLane (8.0, 0.5f);
+    const auto valueOf = [&] { return points().at (0).value; };
+    const auto step = std::max (4, lane->getHeight() / 10); // pixels, past the drag's threshold, the value well inside its range
+    undo.check ("a point dragged, Shift pressed in the middle",
+                [&]
+                {
+                    mouse.press (from);
+                    mouse.dragTo (from.translated (0, -step));
+                    mouse.dragTo (from.translated (0, -2 * step));
+                    const auto beforeShift = valueOf();
+                    CHECK (beforeShift > 0.5f);
+
+                    // Shift goes down, the pointer where it was: the value stays; then it moves a fifth as far.
+                    mouse.holdKeys (juce::ModifierKeys::shiftModifier);
+                    mouse.dragTo (from.translated (0, -2 * step));
+                    CHECK (valueOf() == doctest::Approx (beforeShift));
+                    mouse.dragTo (from.translated (0, -4 * step));
+                    const auto fine = valueOf();
+                    CHECK (fine > beforeShift);
+                    CHECK (fine - beforeShift < (beforeShift - 0.5f) / 2.0f); // as far again, a fifth as far: a fifth of it
+                    mouse.release();
+                    mouse.pause();
+                });
+    undo.walkBackAndForth();
+}
 
 //==============================================================================
 TEST_CASE ("The playlist's Slice tool splits a clip on the grid where it is clicked, off it with Alt, each click one undo step")
@@ -805,6 +1082,56 @@ TEST_CASE ("A note dragged past its clip's end and back leaves the clip as it wa
 
         CHECK (screen.get (note).length.inBeats() == doctest::Approx (2.0)); // to the clip's end
         CHECK (clipEnd() == doctest::Approx (8.0));
+    }
+
+    SUBCASE ("Added by the click past the clip's end, and dragged back in the same press")
+    {
+        // A note two beats long is the next note (the note pressed last), so a click at beat 7 adds one past the clip's end,
+        // which grows the clip. The ends were taken as the drag began, after the click had grown the clip: dragged back, the
+        // clip stayed 12 beats long (a reviewer, 2026-11-14).
+        const auto twoBeats = screen.addNote (0.0, 2, 2.0);
+        mouse.click (screen.middleOf (twoBeats));
+        phazite::test::deliverChanges();
+        REQUIRE (screen.pianoRoll.getNextNoteLength().inBeats() == doctest::Approx (2.0));
+        const juce::Point<int> at (screen.xOf (7.0) + 2, screen.yOf (screen.middlePitch() - 3));
+
+        undo.check ("a note added past the end, dragged back",
+                    [&]
+                    {
+                        mouse.press (at);
+                        phazite::test::deliverChanges();
+                        CHECK (clipEnd() == doctest::Approx (12.0));
+                        mouse.dragTo (at.translated (-screen.widthOf (5.0), 0));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        phazite::test::deliverChanges();
+
+        CHECK (screen.getAll().size() == 3);
+        CHECK (clipEnd() == doctest::Approx (8.0));
+        CHECK (screen.describeUndo() == "Undo Add Note");
+
+        // Let go past the end, it keeps the growth; and Escape takes it all back, the note and the growth.
+        undo.check ("a note added past the end, dragged on",
+                    [&]
+                    {
+                        mouse.press (at.translated (0, screen.rowHeight() * 2));
+                        mouse.dragTo (at.translated (screen.widthOf (1.0), screen.rowHeight() * 2));
+                        mouse.release();
+                        mouse.pause();
+                    });
+        CHECK (clipEnd() == doctest::Approx (12.0));
+
+        const auto steps = undo.getNumSteps();
+        mouse.press (at.translated (0, screen.rowHeight() * 4));
+        mouse.dragTo (at.translated (-screen.widthOf (5.0), screen.rowHeight() * 4));
+        screen.window.pressKey (juce::KeyPress (juce::KeyPress::escapeKey));
+        mouse.release();
+        mouse.pause();
+        phazite::test::deliverChanges();
+        CHECK (screen.getAll().size() == 4);
+        CHECK (clipEnd() == doctest::Approx (12.0));
+        CHECK (undo.getNumSteps() == steps);
     }
 
     undo.walkBackAndForth();

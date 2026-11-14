@@ -394,6 +394,8 @@ void PianoRoll::VelocityLane::drawRamp (const juce::MouseEvent& e)
 
 void PianoRoll::VelocityLane::mouseDown (const juce::MouseEvent& e)
 {
+    endBurst();
+
     if (! roll.hasProject() || roll.getClips().empty() || e.mods.isMiddleButtonDown())
         return;
 
@@ -465,29 +467,48 @@ void PianoRoll::VelocityLane::cancelDrag()
     repaint();
 }
 
-void PianoRoll::VelocityLane::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
+void PianoRoll::VelocityLane::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& details)
 {
-    // The wheel raises or lowers the velocities of the notes under the pointer (the selected ones, if it is on any), or else
-    // of the selected notes, each turn a step of its own. With a modifier it zooms and scrolls, as over the notes.
-    if (e.mods.isCommandDown() || e.mods.isShiftDown() || e.mods.isAltDown() || ! roll.hasProject())
+    // The wheel raises or lowers the velocities of the notes under the pointer (the selected ones, if it is on any), a burst
+    // of it one undo step. Elsewhere in the lane, sideways, or with a modifier, it scrolls and zooms, as over the notes: a
+    // scroll that passed over the lane changed every selected note's velocity, unseen (known bug 55 until 2026-11-14).
+    const auto notes = roll.hasProject() ? getNotesAt (e.position.x) : std::vector<NoteRef>();
+
+    if (e.mods.isCommandDown() || e.mods.isShiftDown() || e.mods.isAltDown() || notes.empty()
+        || std::abs (details.deltaX) > std::abs (details.deltaY))
     {
-        juce::Component::mouseWheelMove (e, wheel); // the piano roll's
+        endBurst();
+        juce::Component::mouseWheelMove (e, details); // the piano roll's
         return;
     }
 
-    auto notes = getNotesAt (e.position.x);
-
-    if (notes.empty())
-        notes = roll.getSelectedRefsHere();
-
     // By whole notches: a trackpad's parts of one are added up, rather than each moving the velocities a whole step, which ran
-    // them to 127 or 1 in a short scroll, with an undo step for each.
-    if (const auto notches = takeWheelSteps (wheel.deltaY, 1.0, wheelRest); ! notes.empty() && notches != 0)
-        changeNoteVelocities (roll.context, notes, notches * velocityPerNotch);
+    // them to 127 or 1 in a short scroll.
+    if (const auto notches = takeWheelSteps (details.deltaY, 1.0, wheelRest); notches != 0)
+        wheel.change (notes, notches * velocityPerNotch);
+
+    startTimer (wheelRestMilliseconds);
+}
+
+void PianoRoll::VelocityLane::endBurst()
+{
+    stopTimer();
+    wheel.end();
+}
+
+void PianoRoll::VelocityLane::timerCallback()
+{
+    endBurst();
+}
+
+void PianoRoll::VelocityLane::mouseExit (const juce::MouseEvent&)
+{
+    endBurst();
 }
 
 void PianoRoll::VelocityLane::endDrag()
 {
+    endBurst();
     drag = Drag::none;
     step = nullptr;
     before.clear();

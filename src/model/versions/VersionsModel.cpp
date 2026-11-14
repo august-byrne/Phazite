@@ -931,6 +931,21 @@ void selectBranch (ProjectContext& context, const juce::String& branchID)
         history->selectedBranch = branchID;
 }
 
+juce::String newBranchNamed (ProjectContext& context, const juce::String& name)
+{
+    auto* history = findHistory (context);
+
+    if (history == nullptr || ! canMakeBranch (context))
+        return {};
+
+    const auto made = history->makeBranch ({}, true);
+
+    if (made.isNotEmpty() && name.trim().isNotEmpty())
+        history->renameBranch (made, name);
+
+    return made;
+}
+
 void newBranchFromSelection (ProjectContext& context, const SaveProjectThen& saveProjectThen)
 {
     // On the commit checked out, a branch here, which keeps what changed.

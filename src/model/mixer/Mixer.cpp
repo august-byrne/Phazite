@@ -15,7 +15,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <optional>
+#include <set>
 
 namespace phazite
 {
@@ -68,6 +70,46 @@ namespace
         {
             song.storeDeviceStates (getDeviceChannel (song, id).getRaw());
             state.getParent().removeChild (state, getUndo (song));
+            forgetWhatNamesTheGone (song);
+        }
+    }
+
+    // The IDs of the items that tracks, devices, chains and sends are (Schema.h: holdsID()), as what names one names it.
+    // Clips and automation hold none that these name.
+    std::set<std::uint64_t> getItemIDs (const Song& song)
+    {
+        std::set<std::uint64_t> ids;
+        const std::function<void (const juce::ValueTree&)> visit = [&ids, &visit] (const juce::ValueTree& tree)
+        {
+            for (const auto& child : tree)
+            {
+                if (child.hasType (schema::CLIP) || child.hasType (schema::AUTOMATION))
+                    continue;
+
+                for (const auto* property : { &schema::trackID, &schema::channelFader, &schema::channelVCA })
+                    if (child.hasProperty (*property) && schema::holdsID (child, *property))
+                        ids.insert (readID (child[*property]));
+
+                visit (child);
+            }
+        };
+
+        visit (song.getState());
+        return ids;
+    }
+
+    // Every element of a type under one, those in clips and the automation aside.
+    void findAll (const juce::ValueTree& tree, const juce::Identifier& type, std::vector<juce::ValueTree>& found)
+    {
+        for (const auto& child : tree)
+        {
+            if (child.hasType (schema::CLIP) || child.hasType (schema::AUTOMATION))
+                continue;
+
+            if (child.hasType (type))
+                found.push_back (child);
+
+            findAll (child, type, found);
         }
     }
 
@@ -361,6 +403,54 @@ void removeDevice (Song& song, DeviceID id)
     if (const auto folder = findTrackState (song, channel);
         isFolderState (folder) && isBus (song, channel) && getDevices (song, channel).empty() && ! (bool) folder[schema::folderBus])
         makePlainFolder (song, channel);
+}
+
+void forgetWhatNamesTheGone (Song& song)
+{
+    auto* undo = getUndo (song);
+    auto ids = getItemIDs (song);
+
+    // A send to a return that is gone, with the ID it is known by.
+    std::vector<juce::ValueTree> sends;
+    findAll (song.getState(), schema::SEND, sends);
+
+    for (auto& send : sends)
+    {
+        if (ids.contains (readID (send[schema::sendTo])))
+            continue;
+
+        ids.erase (readID (send[schema::sendID]));
+        send.getParent().removeChild (send, undo);
+    }
+
+    // A modulation of a parameter of what is gone, a send's among them.
+    std::vector<juce::ValueTree> modulations;
+    findAll (song.getState(), schema::MODULATES, modulations);
+
+    for (auto& modulates : modulations)
+        if (! ids.contains (readID (modulates[schema::modulatesDevice])))
+            modulates.getParent().removeChild (modulates, undo);
+
+    // A pad's track whose drum sampler is gone: deleted, or, holding clips, a plain track.
+    std::vector<TrackID> padTracks;
+
+    for (auto state : getTrackStates (song))
+    {
+        if (! state.hasProperty (schema::trackPad) || ids.contains (readID (state[schema::trackPadDevice])))
+            continue;
+
+        if (getClipStates (state).empty())
+        {
+            padTracks.push_back (getTrackID (state));
+            continue;
+        }
+
+        state.removeProperty (schema::trackPadDevice, undo);
+        state.removeProperty (schema::trackPad, undo);
+    }
+
+    if (! padTracks.empty())
+        deleteTracks (song, padTracks, nullptr); // which forgets what named them in turn
 }
 
 void moveDevice (Song& song, DeviceID id, int newIndex)
@@ -822,6 +912,7 @@ void removeSend (Song& song, DeviceID send)
     {
         const UndoStep step (song, "Remove Send");
         state.getParent().removeChild (state, getUndo (song));
+        forgetWhatNamesTheGone (song);
     }
 }
 

@@ -266,3 +266,74 @@ TEST_CASE ("Another project empties the clipboard")
     setSong (song.context, song.songPtr.get());
     CHECK_FALSE (song.isEnabled ("edit.paste"));
 }
+
+TEST_CASE ("Tracks added for pasted clips go after the last track, outside any folder and before the returns")
+{
+    // The last track in a folder: the tracks added for the clips went into the folder after it, a collapsed one too.
+    Song song;
+    auto& document = song.getSong();
+    const auto folder = phazite::insertFolder (document, song.tracks[1], nullptr);
+    phazite::moveTracksTo (document, { song.tracks[1] }, folder, phazite::TrackDrop::into);
+    const auto reverb = phazite::insertReturnTrack (document, "Reverb", nullptr);
+    const auto second = phazite::insertMidiClip (document, song.tracks[1], { at (0.0), at (2.0) }, nullptr);
+    REQUIRE (phazite::getParentFolder (document, song.tracks[1]) == folder);
+    document.getUndoManager().clearUndoHistory();
+
+    auto& selection = getSelection (song.context);
+    selection.selectOnly (song.clip);
+    selection.addToSelection (second);
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    selection.selectOnly (song.tracks[1]);
+    song.playheadAt (8.0);
+    const auto before = phazite::getTrackIDs (document);
+    phazite::test::UndoCheck undo (document);
+    undo.command (song.registry, "edit.paste");
+
+    const auto after = phazite::getTrackIDs (document);
+    REQUIRE (after.size() == before.size() + 1);
+    const auto added = after[after.size() - 2]; // before the return, which stays last
+    CHECK (after.back() == reverb);
+    CHECK_FALSE (phazite::getParentFolder (document, added).isValid());
+    CHECK (phazite::getClips (document, added).size() == 1);
+    CHECK (song.clipsOf (1).size() == 2);
+    undo.walkBackAndForth();
+}
+
+TEST_CASE ("With a folder or a return selected, Paste puts clips from the first track below it, or on a track added at the end")
+{
+    // A folder or a return holds no clips: with one selected, Paste did nothing.
+    Song song;
+    auto& document = song.getSong();
+    const auto folder = phazite::insertFolder (document, song.tracks[0], nullptr);
+    phazite::moveTracksTo (document, { song.tracks[1] }, folder, phazite::TrackDrop::into);
+    const auto reverb = phazite::insertReturnTrack (document, "Reverb", nullptr);
+    document.getUndoManager().clearUndoHistory();
+
+    auto& selection = getSelection (song.context);
+    selection.selectOnly (song.clip);
+    REQUIRE (song.registry.invoke ("edit.copy"));
+    song.playheadAt (8.0);
+    phazite::test::UndoCheck undo (document);
+
+    // The folder: onto the first track in it.
+    selection.selectOnly (folder);
+    REQUIRE (song.isEnabled ("edit.paste"));
+    undo.command (song.registry, "edit.paste");
+    REQUIRE (song.clipsOf (1).size() == 1);
+    CHECK (song.rangeOf (song.clipsOf (1)[0]).getStart().inBeats() == doctest::Approx (8.0));
+
+    // The return, below which no track holds clips: onto a track added for them before it.
+    const auto before = phazite::getTrackIDs (document);
+    selection.selectOnly (reverb);
+    REQUIRE (song.isEnabled ("edit.paste"));
+    undo.command (song.registry, "edit.paste");
+    const auto after = phazite::getTrackIDs (document);
+    REQUIRE (after.size() == before.size() + 1);
+    CHECK (after.back() == reverb);
+    const auto added = after[after.size() - 2];
+    CHECK_FALSE (phazite::isReturnTrack (document, added));
+    CHECK_FALSE (phazite::getParentFolder (document, added).isValid());
+    REQUIRE (phazite::getClips (document, added).size() == 1);
+    CHECK (song.rangeOf (phazite::getClips (document, added)[0]).getStart().inBeats() == doctest::Approx (8.0));
+    undo.walkBackAndForth();
+}
