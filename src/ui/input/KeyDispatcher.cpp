@@ -5,6 +5,22 @@
 
 namespace phazite::ui
 {
+namespace
+{
+    // Whether a command would change the song, or step through its history, which a drag in progress holds a step of: Ctrl+Z
+    // in the middle of a clip's drag took the drag's step back and left the rest of the drag in a step without a name, redo's
+    // history gone (known bug 45 until 2026-11-14). Undo and Redo name no undoTarget: they are the history's own.
+    bool changesSong (const Command& command)
+    {
+        return command.undoTarget != nullptr || command.id == "edit.undo" || command.id == "edit.redo" || command.id == "edit.undoOrRedo";
+    }
+
+    bool isMouseButtonDown()
+    {
+        return juce::Desktop::getInstance().getNumDraggingMouseSources() > 0;
+    }
+} // namespace
+
 KeyDispatcher::KeyDispatcher (CommandBridge& bridge)
     : commands (bridge)
 {
@@ -66,6 +82,10 @@ bool KeyDispatcher::keyPressedOverPlugin (const juce::KeyPress& key)
 
 bool KeyDispatcher::runForKey (const Command& command, const juce::KeyPress& key)
 {
+    // With a mouse button down, the key is used up: what the mouse does goes on as it began.
+    if (isMouseButtonDown() && changesSong (command))
+        return true;
+
     // A held key repeats. Only commands that take a step run again; for the others the repeat is used up.
     const auto held = std::find_if (heldKeys.begin(), heldKeys.end(),
                                     [&key, &command] (const auto& entry) { return entry.first == key && entry.second == command.id; });

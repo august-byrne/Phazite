@@ -571,8 +571,10 @@ void Playlist::AutomationLaneView::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (const auto selected = playlist.selection.getSelectedAutomationPoints(); selected.parameter == parameter)
-        selectedBefore = selected.indices;
+    pointsAtPress = playlist.selection.getSelectedAutomationPoints();
+
+    if (pointsAtPress.parameter == parameter)
+        selectedBefore = pointsAtPress.indices;
     else
         selectedBefore.clear();
 
@@ -816,13 +818,23 @@ void Playlist::AutomationLaneView::dragPoints (const juce::MouseEvent& e)
     if (! juce::isPositiveAndBelow (pressed, (int) before.size()))
         return;
 
-    // The pressed point goes where the mouse takes it, on the grid unless Alt is held; the others move with it.
+    // The points are held by their places in the lane: if something else added or took one away meanwhile, those pressed may
+    // be others now, and the drag stops.
+    refreshPoints();
+
+    if (points.size() != before.size())
+    {
+        drag = Drag::none;
+        return;
+    }
+
+    // The pressed point goes where the mouse takes it, by the grid's steps from where it was unless Alt is held
+    // (TimelineEditor::snapMove(): a point off the grid stays as far off it, and a drag up or down alone moves it nothing in
+    // time, known bug 19 until 2026-11-14); the others move with it.
     const auto& from = before[(size_t) pressed];
-    const auto target = limitBeat (playlist.snap (from.beat + (xToBeat (e.position.x) - xToBeat (start.x)), e.mods));
+    const auto target = limitBeat (from.beat + playlist.snapMove (from.beat, xToBeat (e.position.x) - xToBeat (start.x), e.mods));
     const auto dy = (e.position.y - start.y) * (e.mods.isShiftDown() ? fineFactor : 1.0f);
     const auto value = yToValue (valueToY (from.value) + dy);
-
-    refreshPoints();
 
     if (juce::isPositiveAndBelow (pressed, (int) points.size()))
     {
@@ -972,6 +984,33 @@ void Playlist::AutomationLaneView::mouseUp (const juce::MouseEvent& e)
     playlist.setDragReadout ({});
     refreshPoints();
     setHovered (playlist.getTool() == Tool::smart && getLocalBounds().contains (e.getPosition()) ? getLineUnder (e.position.x) : -1);
+}
+
+bool Playlist::AutomationLaneView::cancelDrag()
+{
+    if (drag == Drag::none)
+        return false;
+
+    if (drag == Drag::forward)
+    {
+        drag = pendingDrag = Drag::none;
+        return false; // the playlist's own gesture, which it takes back
+    }
+
+    gesture.rollBack();
+
+    // The points selected as they were: those of the press's lane, or none, if the press selected some here.
+    if (const auto now = playlist.selection.getSelectedAutomationPoints();
+        now.parameter != pointsAtPress.parameter || now.indices != pointsAtPress.indices)
+        playlist.selection.selectAutomationPoints (pointsAtPress.parameter.isValid() ? pointsAtPress.parameter : parameter,
+                                                   pointsAtPress.indices);
+
+    drag = pendingDrag = Drag::none;
+    clickSelectsAlone = false;
+    rubberBand = {};
+    playlist.setDragReadout ({});
+    refreshPoints();
+    return true;
 }
 
 void Playlist::AutomationLaneView::addPointAt (juce::Point<float> position, const juce::ModifierKeys& mods)

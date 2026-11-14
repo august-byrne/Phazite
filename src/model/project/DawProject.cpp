@@ -1266,9 +1266,11 @@ namespace
             if (index < 0 || song.getFile() == juce::File())
                 return {};
 
-            const auto target =
-                folder.getNonexistentChildFile (juce::File::createLegalFileName (juce::File (path).getFileNameWithoutExtension()),
-                                                juce::File (path).getFileExtension(), false);
+            // The entry's name, from its path inside the archive: relative, which a juce::File made from it asserts against.
+            const auto entry = juce::File::createFileWithoutCheckingPath (
+                path.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false));
+            const auto target = folder.getNonexistentChildFile (juce::File::createLegalFileName (entry.getFileNameWithoutExtension()),
+                                                                entry.getFileExtension(), false);
             const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (index));
             folder.createDirectory();
 

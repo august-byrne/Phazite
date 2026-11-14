@@ -12,6 +12,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <thread>
@@ -75,6 +77,7 @@ public:
                         capturedSamples.store (at + length, std::memory_order_release);
                     }
 
+                    blocksPlayed.fetch_add (1, std::memory_order_release);
                     std::this_thread::sleep_until (nextBlock);
                 }
             });
@@ -99,6 +102,21 @@ public:
     {
         dispatchMessagesUntil ([] { return false; }, milliseconds);
     }
+
+    // How many blocks the device's thread has played so far (any thread).
+    std::int64_t getBlocksPlayed() const noexcept { return blocksPlayed.load (std::memory_order_acquire); }
+
+    // Delivers the message thread's messages until the device's thread has played so many more blocks: so much of the
+    // song played, however long a busy machine takes to play it. False if it hadn't within the time limit, which only a
+    // thread that stopped playing misses. Message thread.
+    bool waitForBlocks (std::int64_t count, int timeoutMilliseconds = 60000) const
+    {
+        const auto until = getBlocksPlayed() + count;
+        return dispatchMessagesUntil ([this, until] { return getBlocksPlayed() >= until; }, timeoutMilliseconds);
+    }
+
+    // The number of blocks that play for so many seconds of audio, rounded up.
+    static std::int64_t blocksFor (double seconds) { return (std::int64_t) std::ceil (seconds * sampleRate / blockSize); }
 
     // Keeps what it plays from the next block on, in stereo, until stopCapture() or the captureSeconds it was made with,
     // which returns it. Message thread.
@@ -158,6 +176,7 @@ private:
     juce::AudioBuffer<float> captured; // made at once, so the audio thread never allocates
     TestAudioDevice* device;
     std::atomic<int> capturedSamples { 0 };
+    std::atomic<std::int64_t> blocksPlayed { 0 };
     std::atomic<bool> capturing { false };
     std::atomic<std::chrono::steady_clock::rep> longestCall { 0 };
     std::unique_ptr<AudioThread> audioThread;

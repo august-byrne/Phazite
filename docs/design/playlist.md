@@ -297,6 +297,10 @@ commands act on the editor used last.
 
 ## Decisions
 
+- While a mouse button is down, no key runs a command that changes the song, Undo and Redo included, and Escape takes
+  the drag back, leaving nothing to undo or redo: a command in the middle of a drag left the undo history wrong. A tool
+  chosen in the middle of a drag takes over when the mouse goes up.
+
 - The Smart Tool is the default: one pointer does the everyday edits by where it is on a clip.
 - A clip's upper half selects time, so a clip is not dragged by a name strip, and clips have none; a name shows only
   where it adds something.
@@ -320,7 +324,6 @@ commands act on the editor used last.
 - Refusing a clip dragged onto a track of the other kind (audio onto an instrument's track, notes onto an audio
   track): Planned; today the clip lands there.
 - Audio and MIDI clips meant to share one track: Declined for version 1.
-- Escape taking back a drag in the playlist: Planned; the piano roll has it.
 
 ## In the code
 

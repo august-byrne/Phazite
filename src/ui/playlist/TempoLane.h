@@ -33,6 +33,10 @@ public:
     void showProject();
     void tempoChanged();
 
+    // Escape while the mouse is down (TimelineEditor::keyPressed()): what the press and its drag did goes, leaving nothing to
+    // redo, and the mouse does nothing more until it goes up. False if nothing was being done.
+    bool cancelDrag();
+
     // Where each tempo's point is, and the bend handle of the ramp from one to the next (nothing for a step, or a ramp too
     // narrow or flat to bend); the point and the handle at a position, if any; and the menu a right-click there shows
     // (tests run its items).

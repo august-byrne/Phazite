@@ -10,19 +10,36 @@
 # where the first ten frames say nothing of who made it: its leaks are grouped instead by the first five frames outside
 # them (the code that made what leaked), with how many leaks and bytes each group has, direct leaks first (a cycle of
 # references leaks indirectly only), over as many annotations as they take.
+#
+# UndefinedBehaviorSanitizer's reports start with their place ("src/x.cpp:12:5: runtime error: ..."), not a WARNING or
+# ERROR line: they run from there to their SUMMARY line too.
+#
+# It exits with 1 if the output held any report (each an error annotation), so that CI fails on a report in a test that
+# passed: a plug-in's helper process, whose reports reach the test's output (src/sandbox/client/Helper.cpp), doesn't fail
+# the test it runs in. ctest's own log (Testing/Temporary/LastTest.log) keeps every test's output, passed or failed.
 # Usage: sh tools/ci-sanitizer-reports.sh <the tests' output>
 set -eu
 
+if [ ! -f "$1" ]; then
+    echo "No test output at $1: nothing to read."
+    exit 0
+fi
+
 awk '
     function emit(body) {
-        if (count >= 5 || body == "")
+        if (body == "")
+            return
+
+        found++
+
+        if (count >= 5)
             return
 
         count++
         gsub(/%/, "%25", body)
         gsub(/\r/, "%0D", body)
         gsub(/\n/, "%0A", body)
-        print "::warning title=Sanitizer report " count "::" substr(body, 1, 4096)
+        print "::error title=Sanitizer report " count "::" substr(body, 1, 4096)
     }
 
     # A leak group ends: counted under its frames.
@@ -74,7 +91,7 @@ awk '
         numKeys = 0
     }
 
-    /^(==[0-9]+==)?(WARNING|ERROR): [A-Za-z]+Sanitizer/ {
+    /^(==[0-9]+==)?(WARNING|ERROR): [A-Za-z]+Sanitizer/ || (! inReport && /:[0-9]+(:[0-9]+)?: runtime error: /) {
         inReport = 1
         isLeak = $0 ~ /LeakSanitizer/
         text = ""
@@ -152,6 +169,11 @@ awk '
             emitLeaks()
         } else if (inReport) {
             emit(text)
+        }
+
+        if (found > 0) {
+            print found " sanitizer report(s) in the tests'"'"' output (the first five annotated): see the log."
+            exit 1
         }
     }
 ' "$1"

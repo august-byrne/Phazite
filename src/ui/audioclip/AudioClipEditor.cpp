@@ -580,15 +580,31 @@ struct AudioClipEditor::Waveform : public juce::Component
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        gesture = nullptr; // keeps the drag's change as its undo step
+        endDrag(); // keeps the drag's change as its undo step
+        hover (e.position);
+    }
+
+    // The drag ends where it is, keeping what it did (another project opened: it did it in the song before); or, with Escape,
+    // what the press and the drag did goes, leaving nothing to redo, and the mouse does nothing more until it goes up.
+    void endDrag()
+    {
+        gesture = nullptr;
         dragging = Zone::none;
         editor.setDragReadout ({});
 
         // The view fits the clip's audio again, as it is now.
         if (std::exchange (editor.viewHeld, false))
             editor.refresh();
+    }
 
-        hover (e.position);
+    bool cancelDrag()
+    {
+        if (gesture == nullptr)
+            return false;
+
+        gesture->rollBack();
+        endDrag();
+        return true;
     }
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
@@ -802,8 +818,14 @@ void AudioClipEditor::projectChanged()
 
     shownProject = context.getProjectNumber();
     fieldDrag = nullptr;
+    waveform->endDrag(); // a drag going on ends, holding the clip by an ID that the new project's clips can have too
     showProject();
     setClip ({});
+}
+
+bool AudioClipEditor::cancelDrag()
+{
+    return waveform->cancelDrag();
 }
 
 void AudioClipEditor::songChanged (const SongChanges& changes)

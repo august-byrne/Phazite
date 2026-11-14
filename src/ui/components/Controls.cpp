@@ -161,14 +161,14 @@ juce::Rectangle<int> ValueSlider::getValueFieldTarget (const juce::Component& pa
     if (readout != nullptr && readout->isShowing())
         return parent.getLocalArea (readout.getComponent(), readout->getLocalBounds());
 
-    // A fader's: where its thumb is.
+    // A fader's: where its thumb is (JUCE has a thumb's place for a linear slider only); a knob's: the knob.
     auto area = getLocalBounds();
-    const auto thumb = juce::roundToInt (getPositionOfValue (getValue()));
+    const auto thumb = [this] { return juce::roundToInt (getPositionOfValue (getValue())); };
 
     if (getSliderStyle() == LinearVertical)
-        area = juce::Rectangle<int> (getWidth(), controlHeight).withCentre ({ getWidth() / 2, thumb });
+        area = juce::Rectangle<int> (getWidth(), controlHeight).withCentre ({ getWidth() / 2, thumb() });
     else if (getSliderStyle() == LinearHorizontal)
-        area = juce::Rectangle<int> (TypedField::getMinimumWidth(), getHeight()).withCentre ({ thumb, getHeight() / 2 });
+        area = juce::Rectangle<int> (TypedField::getMinimumWidth(), getHeight()).withCentre ({ thumb(), getHeight() / 2 });
 
     return parent.getLocalArea (this, area);
 }

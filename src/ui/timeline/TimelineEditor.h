@@ -262,7 +262,8 @@ public:
 
     // The tool commands. Tool keys spring back, as in Bitwig and Live: tapping a tool's key switches to the
     // tool, but holding the key while using the mouse keeps the tool only until the key is let go (or, if a
-    // drag is still going on then, until it ends). Buttons and the palette switch for good.
+    // drag is still going on then, until it ends). Buttons and the palette switch for good. A tool chosen while the mouse is
+    // down in the editor takes over once it goes up: what the mouse is doing goes on with the tool it began with.
     void pressTool (Tool);
     void releaseTool(); // the key that pressed it was let go
 
@@ -298,7 +299,21 @@ public:
     // nothing is dragged.
     const juce::String& getDragReadout() const noexcept { return dragReadout; }
 
+    // Escape while the mouse is down takes back all the press and its drag did, in any part of the editor, leaving nothing
+    // to undo or redo, as in Ableton Live, Bitwig, Logic Pro and REAPER; the mouse does nothing more until it goes up.
+    // Otherwise the key is the commands' (KeyDispatcher), Escape among them.
+    bool keyPressed (const juce::KeyPress&) override;
+
 protected:
+    // What Escape does to what the mouse is doing in the derived editor (keyPressed()): takes it back, and returns whether
+    // there was anything to take back.
+    virtual bool cancelDrag() { return false; }
+
+    // The whole steps the wheel turned by, at so many steps a notch, the rest kept in rest for its next move: a trackpad
+    // sends parts of a notch, many a second, which taken by their direction alone each made a whole step (known bug 55 until
+    // 2026-11-14), and rounded each on its own were lost or doubled.
+    static int takeWheelSteps (float wheelDelta, double stepsPerNotch, double& rest);
+
     // Says where what a drag moves is now (getDragReadout()), or nothing, as the drag ends; and the words for it: a clip's or a
     // note's start and end, and a place with a value at it.
     void setDragReadout (const juce::String& text) { dragReadout = text; }

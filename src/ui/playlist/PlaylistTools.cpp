@@ -338,6 +338,13 @@ void Playlist::lanesMouseDown (const juce::MouseEvent& e)
     gesture->startBeat = getView().xToBeat (e.position.x);
     gesture->startRow = getRowAt (e.y);
     gesture->startScrollY = scrollY;
+    gesture->tracksAtPress = selection.getTracks();
+    gesture->clipsAtPress = selection.getClips();
+    gesture->sectionsAtPress = selection.getSections();
+
+    if (! range.isEmpty())
+        gesture->rangeAtPress = std::pair (range.getRange(), range.getTracks());
+
     beginDragAutoRepeat (autoRepeatInterval); // so the lanes go on scrolling while the mouse rests past an edge
 
     const auto* hit = getClipAt (e.getPosition());
@@ -602,7 +609,16 @@ void Playlist::lanesMouseDrag (const juce::MouseEvent& e)
                     gesture->rowOffset = offset;
             }
 
-            // Copies are made as the drag first takes them somewhere: until then, nothing changes.
+            // Copies are made as the drag first takes them somewhere: until then, nothing changes. Back where they began, they go
+            // again, rather than lying on their originals, playing twice, until the mouse goes up (known bug 21 until
+            // 2026-11-14).
+            if (gesture->copies && gesture->copying && delta == BeatDuration() && gesture->rowOffset == 0)
+            {
+                removeCopies();
+                gesture->moved = {};
+                break;
+            }
+
             if (gesture->copies && ! gesture->copying)
             {
                 if (delta == BeatDuration() && gesture->rowOffset == 0)
@@ -850,6 +866,25 @@ void Playlist::copyMovingClips()
     setMovingClips (clips);
 }
 
+void Playlist::removeCopies()
+{
+    // In the drag's step, which a drag that ends where it began takes back whole; the originals move again from here on.
+    std::vector<ClipID> copies;
+
+    for (const auto& moving : gesture->moving)
+        copies.push_back (moving.clip);
+
+    deleteClips (context, copies, false);
+    gesture->copying = false;
+    gesture->clip = gesture->pressed;
+    selection.clear();
+
+    for (const auto clip : gesture->clipsBeforeCopies)
+        selection.add (clip);
+
+    setMovingClips (gesture->clipsBeforeCopies);
+}
+
 void Playlist::endMoveThatWentNowhere (const juce::ModifierKeys& mods)
 {
     // The clips are where they began: a step the drag began is taken back, leaving nothing to undo or redo, and copies made
@@ -894,6 +929,53 @@ void Playlist::endMoveThatWentNowhere (const juce::ModifierKeys& mods)
 
         clipClicked (gesture->pressed, mods);
     }
+}
+
+bool Playlist::cancelDrag()
+{
+    // Escape: what the press and its drag did goes, leaving nothing to undo or redo, what was selected and the view as they
+    // were when the mouse went down; the mouse does nothing more until it goes up. In a lane, or the tempo lane, theirs.
+    if (tempoLane.cancelDrag())
+        return true;
+
+    for (auto* laneView : laneViews)
+        if (laneView->cancelDrag())
+            return true;
+
+    if (gesture == nullptr)
+        return false;
+
+    gesture->rollBack();
+
+    if (gesture->kind == Gesture::Kind::pan)
+    {
+        setViewStart (gesture->panViewStart);
+        setScrollY (gesture->startScrollY);
+    }
+    else
+    {
+        selection.clear();
+
+        for (const auto track : gesture->tracksAtPress)
+            selection.add (track);
+
+        for (const auto clip : gesture->clipsAtPress)
+            selection.add (clip);
+
+        for (const auto section : gesture->sectionsAtPress)
+            selection.add (section);
+
+        if (gesture->rangeAtPress.has_value())
+            range.set (gesture->rangeAtPress->first, gesture->rangeAtPress->second);
+        else
+            range.clear();
+    }
+
+    gesture = nullptr;
+    setDragReadout ({});
+    rubberBand = {};
+    lanes->repaint();
+    return true;
 }
 
 juce::Point<int> Playlist::getGestureStart() const

@@ -33,6 +33,18 @@
       ]
     },
     {
+      "owner": "ubsan",
+      "pattern": [
+        {
+          "regexp": "^/home/runner/work/Phazite/Phazite/((?:src|tests|external)/[^:]+):(\\d+):(\\d+): runtime error: (.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "message": 4
+        }
+      ]
+    },
+    {
       "owner": "sanitizers",
       "pattern": [
         {

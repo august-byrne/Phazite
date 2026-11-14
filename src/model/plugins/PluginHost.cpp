@@ -233,17 +233,24 @@ bool PluginHost::reload (SandboxedInstance& instance, juce::String& error)
         return false;
 
     // As it was: at its rate with its channel's limits, from the state it last had (the values it tells as it opens are
-    // those), and its program, where the state left another.
+    // those); where that left another program, its program, then the state again, so that the program never overrides the
+    // settings (as PluginInstances opens one).
     const auto limits = instance.getRemote().getChannel().getLimits();
     const auto programNow = instance.getRemote().getProgram();
-    auto remote = open (*running, description, instance.getLastState(),
-                        instance.getPreparedRate() > 0.0 ? instance.getPreparedRate() : 44100.0, limits, error);
+    const auto& state = instance.getLastState();
+    auto remote =
+        open (*running, description, state, instance.getPreparedRate() > 0.0 ? instance.getPreparedRate() : 44100.0, limits, error);
 
     if (remote == nullptr)
         return false;
 
     if (! remote->getInfo().programs.empty() && remote->getProgram() != programNow)
+    {
         remote->setProgram (programNow, stateMilliseconds);
+
+        if (state.getSize() > 0)
+            remote->setState (state, stateMilliseconds);
+    }
 
     const auto id = remote->getID();
     instance.replaceRemote (std::move (remote), running, running->unlist (id));

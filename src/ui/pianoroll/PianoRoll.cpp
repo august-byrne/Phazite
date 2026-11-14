@@ -152,6 +152,11 @@ void PianoRoll::projectChanged()
     if (shownProject == context.getProjectNumber())
         return;
 
+    // A drag going on ends, what it did staying in the song it did it in: it holds the notes it moves by IDs, which the new
+    // project's notes can have too.
+    grid->cancelGesture();
+    velocityLane->endDrag();
+
     stopAudition();
     closeTransform();
     setClips ({});
@@ -773,13 +778,14 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
         return;
     }
 
+    // A pixel of the rows' height a notch, and the parts of a notch a trackpad sends added up.
     if (e.mods.isAltDown())
     {
-        if (const auto notches = getWheelNotches (wheel.deltaY); ! juce::exactlyEqual (notches, 0.0))
+        if (const auto steps = takeWheelSteps (wheel.deltaY, 1.0, rowsWheelRest); steps != 0)
         {
             const auto y = e.getEventRelativeTo (grid.get()).y;
             const auto row = getRowAt (y);
-            rowHeight = juce::jlimit (minRowHeight, maxRowHeight, rowHeight + (notches > 0.0 ? 1 : -1));
+            rowHeight = juce::jlimit (minRowHeight, maxRowHeight, rowHeight + steps);
             setScrollY (row >= 0 ? row * getRowHeight() - y : scrollY);
         }
 
@@ -793,21 +799,18 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
         scrollByWheel (sideways);
 
     if (! juce::exactlyEqual (upDown, 0.0f))
-        setScrollY (scrollY - juce::roundToInt (getWheelNotches (upDown) * scrollPerNotch));
+        setScrollY (scrollY - takeWheelSteps (upDown, scrollPerNotch, scrollWheelRest));
 }
 
-bool PianoRoll::keyPressed (const juce::KeyPress& key)
+bool PianoRoll::cancelDrag()
 {
-    // Escape during a drag takes back what it did, as a part of the drag, as Alt and Shift are: with the mouse down, no
-    // command runs. Otherwise the key is the commands' (KeyDispatcher), Escape among them.
-    if (key == juce::KeyPress::escapeKey && (grid->isDragging() || velocityLane->isDragging()))
-    {
-        grid->cancelDrag();
-        velocityLane->cancelDrag();
-        return true;
-    }
+    // Escape during a drag takes back what it did, as a part of the drag, as Alt and Shift are.
+    if (! grid->isDragging() && ! velocityLane->isDragging())
+        return false;
 
-    return false;
+    grid->cancelDrag();
+    velocityLane->cancelDrag();
+    return true;
 }
 
 //==============================================================================

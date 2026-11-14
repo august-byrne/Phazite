@@ -25,6 +25,7 @@ jobs:
   checks:
     name: Checks
     runs-on: ubuntu-24.04
+    timeout-minutes: 20 # a few minutes as a rule; a hang ends here rather than at GitHub's six hours
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,10 +63,13 @@ jobs:
   windows:
     name: Windows (${{ matrix.preset }})
     runs-on: windows-2025-vs2026 # Visual Studio 2026, which cmake/toolchains/windows-msvc.cmake requires
+    # A build without the compiler cache and the tests take about an hour at most; a hang ends here.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        preset: [windows-debug, windows-release]
+        # windows-profile, the build to play and profile with, has compiler and linker flags of its own (CMakeLists.txt).
+        preset: [windows-debug, windows-release, windows-profile]
     env:
       CMAKE_C_COMPILER_LAUNCHER: ccache # every compile, JUCE's juceaide helper's in the configure step too
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
@@ -136,6 +140,8 @@ jobs:
   linux:
     name: Linux (${{ matrix.preset }})
     runs-on: ubuntu-24.04
+    # The sanitizers' builds play the tests several times slower than the others; a hang ends here.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -207,7 +213,9 @@ jobs:
           ctest --preset ${{ matrix.preset }} 2>&1 | tee "$RUNNER_TEMP/tests.log"
 
       # Each sanitizer report whole, every frame of every stack, as one annotation: the API serves annotations without a
-      # login, unlike the log, and the matchers' annotations of single frames stop at ten a step.
+      # login, unlike the log, and the matchers' annotations of single frames stop at ten a step. Read from ctest's own log,
+      # which keeps what every test wrote, passed or failed: a report from a plug-in's helper process (its stderr is passed
+      # on to the test's, src/sandbox/client/Helper.cpp) can come in a test that passes, and fails the job here.
       - name: Sanitizer reports
-        if: failure() && (matrix.preset == 'linux-asan' || matrix.preset == 'linux-tsan')
-        run: sh tools/ci-sanitizer-reports.sh "$RUNNER_TEMP/tests.log"
+        if: ${{ !cancelled() && (matrix.preset == 'linux-asan' || matrix.preset == 'linux-tsan') }}
+        run: sh tools/ci-sanitizer-reports.sh "build/${{ matrix.preset }}/Testing/Temporary/LastTest.log"

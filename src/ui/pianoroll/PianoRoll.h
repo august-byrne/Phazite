@@ -79,10 +79,12 @@ public:
     void resized() override;
     void lookAndFeelChanged() override; // another theme: its scroll bar's colours, and its instrument button's, in it
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
-    bool keyPressed (const juce::KeyPress&) override; // Escape during a drag takes it back
 
 private:
     static constexpr double scrollPerNotch = 48.0;
+    double rowsWheelRest = 0.0, scrollWheelRest = 0.0; // the parts of a step the wheel has turned the rows' height and scroll by
+
+    bool cancelDrag() override; // Escape: in the notes or the velocity lane
 
     // Its parts (PianoRollParts.h).
     struct Keys;         // the piano keys, or the drums' names, down the left

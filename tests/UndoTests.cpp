@@ -479,6 +479,8 @@ TEST_CASE ("The undo check fails a change that Undo doesn't take back whole, and
         kept.check.check ("Add SECOND", [&add] { add ("SECOND"); });
         CHECK (kept.failures.isEmpty());
 
+        // JUCE asserts as its undo finds another element than it added at the place it kept: the fault this makes.
+        const phazite::test::ExpectedAssertion wrongElement ("values/juce_ValueTree.cpp:569");
         state.removeChild (state.getChildWithName (phazite::schema::PIANOROLL), nullptr);
         kept.check.walkBackAndForth();
 

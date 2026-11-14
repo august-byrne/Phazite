@@ -641,6 +641,11 @@ target_compile_definitions(phazite_core PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
+# In Debug builds a JUCE assertion goes through juce::Logger::writeToLog() (JUCE_LOG_ASSERTIONS, documented in
+# juce_core.h), so that the current logger hears it: the app's log file records it, and the tests' harness fails the
+# test it fires in (tests/TestMain.cpp). Release builds keep JUCE's default, no assertions at all.
+target_compile_definitions(phazite_core PRIVATE $<$<CONFIG:Debug>:JUCE_LOG_ASSERTIONS=1>)
+
 if(WIN32)
     # JUCE's headers define these anyway; defining them here as well keeps any code that includes
     # <windows.h> before JUCE consistent.
@@ -1176,6 +1181,9 @@ if(PHAZITE_BUILD_TESTS)
         tests/DspProbe.cpp
         tests/DspProbe.h
         tests/DspTests.cpp
+        tests/EditorDragTests.cpp
+        tests/EditorScreens.h
+        tests/EditorToolTests.cpp
         tests/EnginePlayback.h
         tests/EnginePlaybackTests.cpp
         tests/EngineTests.cpp
@@ -1268,6 +1276,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/SectionTests.cpp
         tests/SelectionTests.cpp
         tests/SettingsTests.cpp
+        tests/ShippedProgramsTests.cpp
         tests/ShortcutTests.cpp
         tests/SidechainPresetTests.cpp
         tests/SidechainTests.cpp
@@ -1323,6 +1332,7 @@ if(PHAZITE_BUILD_TESTS)
         tests/VersionsTests.cpp
         tests/VinylTests.cpp
         tests/VocoderTests.cpp
+        tests/Vst3PluginTests.cpp
         tests/Vst3StateTests.cpp
         tests/WarpTests.cpp
         tests/WavetableEditorTests.cpp
@@ -1362,6 +1372,71 @@ if(PHAZITE_BUILD_TESTS)
     add_dependencies(phazite_tests phazite_test_host)
     target_compile_definitions(phazite_tests PRIVATE PHAZITE_TEST_HOST="$<TARGET_FILE:phazite_test_host>")
 
+    # The tests' real VST3s (tests/vst3/TestVst3s.h): a small effect and a small instrument, built by JUCE's own plug-in
+    # client, which the tests scan, load and play in the tests' helper as a user's plug-in loads (tests/Vst3PluginTests.cpp),
+    # so that JUCE's VST3 host is tested as the app uses it. They are the one exception to "only phazite_core links JUCE's
+    # modules": a VST3 is a library of its own that another process loads, with JUCE's plug-in client in it, and JUCE
+    # compiles that client and every module under it (juce_audio_processors, the GUI modules it needs, juce_core...) with
+    # the plug-in's own definitions (JucePlugin_*, JUCE_SHARED_CODE), so each plug-in compiles those modules once more for
+    # itself: about twenty more units each, a minute or two more of a full build. They are test code: built only because
+    # phazite_tests needs them (never by the Phazite or installer targets), left in their own folders under the build
+    # (COPY_PLUGIN_AFTER_BUILD off), never next to the app or in the installer. Without the VST3 manifest step
+    # (VST3_AUTO_MANIFEST off), which would build a helper of JUCE's at build time and load the plug-in into it (and can't
+    # load a plug-in built with a sanitizer); hosts don't need the manifest. Without JUCE's MIDI controllers as parameters
+    # (JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0), as many VST3s are: JUCE's host hands such a plug-in no controller.
+    function(phazite_add_test_vst3 target)
+        juce_add_plugin(${target} ${ARGN}
+            COMPANY_NAME "Phazite Tests"
+            PLUGIN_MANUFACTURER_CODE Phzt
+            FORMATS VST3
+            VST3_AUTO_MANIFEST FALSE
+            COPY_PLUGIN_AFTER_BUILD FALSE
+            NEEDS_CURL FALSE
+            NEEDS_WEB_BROWSER FALSE)
+        target_compile_features(${target} PRIVATE cxx_std_20)
+        target_compile_definitions(${target} PUBLIC
+            JUCE_VST3_CAN_REPLACE_VST2=0
+            JUCE_VST3_EMULATE_MIDI_CC_WITH_PARAMETERS=0
+            JUCE_USE_CURL=0
+            JUCE_WEB_BROWSER=0)
+        target_link_libraries(${target} PRIVATE juce::juce_audio_processors juce::juce_recommended_warning_flags)
+
+        if(NOT MSVC) # as for phazite_core: JUCE workaround B2 (docs/juce-workarounds.md)
+            target_link_libraries(${target} PRIVATE juce::juce_recommended_config_flags)
+        endif()
+
+        add_dependencies(phazite_tests ${target}_VST3)
+    endfunction()
+
+    phazite_add_test_vst3(phazite_test_vst3_effect
+        PRODUCT_NAME "PhaziteTestVst3Effect"
+        PLUGIN_NAME "Test VST3 Effect"
+        BUNDLE_ID "io.github.august-byrne.phazite.tests.vst3-effect"
+        PLUGIN_CODE Tvfx
+        IS_SYNTH FALSE
+        NEEDS_MIDI_INPUT FALSE)
+    target_sources(phazite_test_vst3_effect PRIVATE tests/vst3/TestVst3Effect.cpp tests/vst3/TestVst3s.h)
+
+    phazite_add_test_vst3(phazite_test_vst3_synth
+        PRODUCT_NAME "PhaziteTestVst3Synth"
+        PLUGIN_NAME "Test VST3 Synth"
+        BUNDLE_ID "io.github.august-byrne.phazite.tests.vst3-synth"
+        PLUGIN_CODE Tvsy
+        IS_SYNTH TRUE
+        NEEDS_MIDI_INPUT TRUE)
+    target_sources(phazite_test_vst3_synth PRIVATE tests/vst3/TestVst3Synth.cpp tests/vst3/TestVst3s.h)
+
+    # Where each .vst3 is (a bundle: a folder on every system), which the tests scan.
+    target_compile_definitions(phazite_tests PRIVATE
+        PHAZITE_TEST_VST3_EFFECT="$<GENEX_EVAL:$<TARGET_PROPERTY:phazite_test_vst3_effect_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>"
+        PHAZITE_TEST_VST3_SYNTH="$<GENEX_EVAL:$<TARGET_PROPERTY:phazite_test_vst3_synth_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
+
+    # The helper that ships, which the tests start as well (tests/ShippedProgramsTests.cpp): built with the tests. Phazite
+    # itself (PhaziteStarts, below) isn't: a build of phazite_tests alone must not link Phazite.exe, which can't be
+    # replaced while the app runs, so its smoke test needs a full build of the preset, as ctest does anyway.
+    add_dependencies(phazite_tests PhaziteHost)
+    target_compile_definitions(phazite_tests PRIVATE PHAZITE_HOST_PROGRAM="$<TARGET_FILE:PhaziteHost>")
+
     # The licences' folder as the build writes it for the app (cmake/PhaziteNotices.cmake), which the tests check against the
     # list of notices.
     target_compile_definitions(phazite_tests PRIVATE PHAZITE_NOTICES_DIR="${CMAKE_BINARY_DIR}/notices")
@@ -1397,4 +1472,16 @@ if(PHAZITE_BUILD_TESTS)
     # minutes in a local Debug build and three times that in linux-asan, where they ran past 10 minutes now and then. They
     # get twice as long; a hang still ends there.
     set_tests_properties(FactoryPresetTests PROPERTIES TIMEOUT 1200)
+
+    # It asserts that each of the audio device's calls played its block within a block's length, by the wall clock while the
+    # song plays in real time: a test file beside it, busy on every core, could keep its device's thread from a core that
+    # long (known bug 139). It runs alone. The other files that play in real time wait for blocks played rather than time
+    # (tests/RealTimePlayback.h: waitForBlocks()), and count what the audio thread does, not how long it takes.
+    set_tests_properties(VersionsHearingTests PROPERTIES RUN_SERIAL TRUE)
+
+    # Phazite itself, started as the user starts it, in its smoke test (src/app/Main.cpp: --smoke-test): its window shows,
+    # painted, with a new project open, and it quits by itself, failing on a JUCE assertion in a Debug build. Where there is
+    # no display (Linux without X11 or Wayland, as on CI) it exits with 77, which ctest reports as skipped.
+    add_test(NAME PhaziteStarts COMMAND Phazite --smoke-test)
+    set_tests_properties(PhaziteStarts PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 endif()

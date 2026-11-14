@@ -70,6 +70,7 @@ public:
 private:
     class Pipe;
     class Watch;
+    class Relay;
 
     struct Waiting
     {
@@ -80,6 +81,7 @@ private:
 
     const juce::File program;
     juce::ChildProcess process;
+    std::unique_ptr<Relay> relay; // built with a sanitizer, the helper's stderr passed on to this process's (Helper.cpp)
     std::unique_ptr<Pipe> pipe;
     std::unique_ptr<Watch> watch; // stopped before the process and the pipe go
     std::atomic<bool> running { false }, lost { false }, hung { false }, endedForHanging { false };

@@ -625,7 +625,7 @@ TEST_CASE ("The Instrument page shows the track's instrument in the column, its 
     REQUIRE (presets != nullptr);
     CHECK (presets->isShowing());
     CHECK (phazite::test::findComponentWithTitle (*panel, "Open in a window") != nullptr);
-    CHECK (dynamic_cast<phazite::ui::SynthEditor*> (view.getShownBody()) != nullptr);
+    REQUIRE (dynamic_cast<phazite::ui::SynthEditor*> (view.getShownBody()) != nullptr);
     CHECK (view.getShownBody()->getWidth() > 1000);
     CHECK (view.getPageOf (instrument->id) == Page::instrument);
     CHECK (view.getPageOf (effects[0]) == Page::effects);
@@ -862,7 +862,9 @@ TEST_CASE ("The Devices view shows its track's modulators as chips, a macro with
     // room. A click on the chip again closes it.
     auto* lfo = dynamic_cast<juce::Button*> (phazite::test::findComponentWithTitle (*group, "LFO 1"));
     REQUIRE (lfo != nullptr);
-    const auto devicesBefore = phazite::test::findComponentWithTitle (view, "Controls")->getBounds();
+    auto* devicesPart = phazite::test::findComponentWithTitle (view, "Controls");
+    REQUIRE (devicesPart != nullptr);
+    const auto devicesBefore = devicesPart->getBounds();
     phazite::test::Mouse mouse (*lfo);
     mouse.click (lfo->getLocalBounds().getCentre());
     auto* editor = dynamic_cast<phazite::ui::ModulatorEditor*> (slots->getOpenEditor());
@@ -870,7 +872,9 @@ TEST_CASE ("The Devices view shows its track's modulators as chips, a macro with
     CHECK (editor->isShowing());
     CHECK (editor->findParentComponentOfClass<juce::CallOutBox>() != nullptr);
     CHECK (lfo->getToggleState());
-    CHECK (phazite::test::findComponentWithTitle (view, "Controls")->getBounds() == devicesBefore);
+    devicesPart = phazite::test::findComponentWithTitle (view, "Controls");
+    REQUIRE (devicesPart != nullptr);
+    CHECK (devicesPart->getBounds() == devicesBefore);
     juce::Thread::sleep (250); // a call-out takes a click on what opened it only after a moment, as a touch screen still sends one
     mouse.click (lfo->getLocalBounds().getCentre());
     CHECK (phazite::test::dispatchMessagesUntil ([&] { return slots->getOpenEditor() == nullptr; }));
@@ -1226,7 +1230,10 @@ TEST_CASE ("Beside a container, its chains side by side, each a card with its sw
     CHECK (firstCard->getRight() < secondCard->getX());
     CHECK (firstCard->getY() == secondCard->getY());
     CHECK (firstCard->getHeight() == secondCard->getHeight());
-    CHECK (findChains (view)->findDevice (effects[0])->getParentComponent() == firstCard);
+    REQUIRE (findChains (view) != nullptr);
+    auto* firstEq = findChains (view)->findDevice (effects[0]);
+    REQUIRE (firstEq != nullptr);
+    CHECK (firstEq->getParentComponent() == firstCard);
     auto adds = 0;
 
     for (auto* button : phazite::test::findAll<juce::TextButton> (*frame))
@@ -1255,7 +1262,7 @@ TEST_CASE ("Beside a container, its chains side by side, each a card with its sw
     REQUIRE (split != nullptr);
     split->setSelectedId ((int) phazite::ContainerSplit::bands + 1, juce::sendNotificationSync);
     CHECK (phazite::getContainerSplit (context, container) == phazite::ContainerSplit::bands);
-    CHECK (phazite::test::dispatchMessagesUntil (
+    REQUIRE (phazite::test::dispatchMessagesUntil (
         [&]
         {
             auto* shown = view.getShownBody();
@@ -1263,19 +1270,26 @@ TEST_CASE ("Beside a container, its chains side by side, each a card with its sw
             return card != nullptr && showingKnobs (*card).contains ("Crossover");
         }));
     secondCard = phazite::test::findComponentWithTitle (*view.getShownBody(), "Chain 2");
+    REQUIRE (secondCard != nullptr);
     const auto texts = phazite::test::findAll<juce::Label> (*secondCard);
     CHECK (std::any_of (texts.begin(), texts.end(),
                         [] (juce::Label* label) { return label->isShowing() && label->getText().startsWith ("Above"); }));
 
     // The chain's step, from a device of it, shows its card.
     view.setOpen (effects[0], true);
+    REQUIRE (view.getShownBody() != nullptr);
+    REQUIRE (view.getShownBody()->getParentComponent() != nullptr);
     auto* step = phazite::test::findComponentWithTitle (*view.getShownBody()->getParentComponent(), "Back to Chain 1");
     REQUIRE (step != nullptr);
     phazite::test::Mouse stepMouse (*step);
     stepMouse.click (step->getLocalBounds().getCentre());
     CHECK (view.isOpen (container));
     REQUIRE (findChains (view) != nullptr);
-    CHECK (findChains (view)->findChain (phazite::getChains (context, container)[0].id)->isShowing());
+    const auto chains = phazite::getChains (context, container);
+    REQUIRE (! chains.empty());
+    auto* firstChain = findChains (view)->findChain (chains[0].id);
+    REQUIRE (firstChain != nullptr);
+    CHECK (firstChain->isShowing());
 }
 
 TEST_CASE ("An effect dragged by its name onto another chain of its container moves there")
@@ -1308,9 +1322,11 @@ TEST_CASE ("An effect dragged by its name onto another chain of its container mo
     CHECK_FALSE (target->isInterestedInDragSource (outside));
 
     // Dragged with the mouse, back before the EQ in the first chain.
-    REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return findChains (view)->findDevice (effects[1]) != nullptr; }));
+    REQUIRE (phazite::test::dispatchMessagesUntil (
+        [&] { return findChains (view) != nullptr && findChains (view)->findDevice (effects[1]) != nullptr; }));
     auto* line = findChains (view)->findDevice (effects[1]);
     auto* eq = findChains (view)->findDevice (effects[0]);
+    REQUIRE (line != nullptr);
     REQUIRE (eq != nullptr);
     auto* name = findNameButton (*line, "Compressor");
     REQUIRE (name != nullptr);
@@ -1375,6 +1391,7 @@ TEST_CASE (
     REQUIRE (phazite::test::dispatchMessagesUntil ([&] { return ! chooseShows(); }));
 
     // The chains' cards, with their keys and velocities.
+    REQUIRE (findChains (view) != nullptr);
     auto* card = findChains (view)->findChain (second);
     REQUIRE (card != nullptr);
     CHECK (phazite::test::findComponentWithTitle (*card, "Keys") != nullptr);

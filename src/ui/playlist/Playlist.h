@@ -84,6 +84,7 @@ public:
 private:
     int headerWidth = defaultHeaderWidth;
     static constexpr double scrollPerNotch = 48.0;
+    double heightWheelRest = 0.0, scrollWheelRest = 0.0; // the parts of a step the wheel has turned the tracks' height and scroll by
 
     // Its parts (PlaylistParts.h).
     struct HeaderEdge; // the headers' column's right edge, which drags its width
@@ -206,6 +207,7 @@ private:
 
     std::unique_ptr<Gesture> gesture; // what the mouse is doing in the lanes, from mouse down to mouse up
     juce::Rectangle<int> rubberBand;  // the Select and Zoom tools' rectangle, in the lanes
+    bool cancelDrag() override;       // Escape: in the lanes, an automation lane or the tempo lane
 
     // A drag past an edge scrolled the view, laying the clips out where the song had them, and then changed them, which the
     // playlist hears of a message later: the clips are brought up to date before the next frame is painted (frameComing()),
@@ -282,6 +284,7 @@ private:
     void beginDrag (const juce::MouseEvent&);
     void setMovingClips (const std::vector<ClipID>&);        // what a drag moves, as it is now
     void copyMovingClips();                                  // Ctrl+drag: the copies, which move from here on
+    void removeCopies();                                     // and back where they began, the copies go
     void endMoveThatWentNowhere (const juce::ModifierKeys&); // as the mouse goes up with the clips where they began
     juce::String describeDrag() const;                       // where the drag has the clip under the pointer, for the hint bar
     juce::Point<int> getGestureStart() const;                // where the mouse went down, in the lanes as they are now

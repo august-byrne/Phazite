@@ -46,6 +46,7 @@
 #include "model/arrangement/internal/Import.h"
 #include "model/arrangement/internal/Tracks.h"
 #include "model/automation/internal/Automation.h"
+#include "model/commands/internal/Undo.h"
 #include "model/devices/internal/DrumKit.h"
 #include "model/devices/internal/Parameters.h"
 #include "model/devices/internal/SamplerSound.h"
@@ -63,6 +64,7 @@
 #include "model/mixer/internal/Mixer.h"
 #include "model/mixer/internal/Sidechain.h"
 #include "model/modulation/internal/Modulation.h"
+#include "model/notes/NotesModel.h"
 #include "model/playback/internal/PlaybackHost.h"
 #include "model/playback/internal/PlaybackSession.h"
 #include "model/project/internal/ProjectContext.h"
@@ -86,34 +88,22 @@ namespace
 {
 constexpr double auditSampleRate = 48000.0;
 constexpr int auditBlockSize = 256;
-constexpr double warmUpSeconds = 0.25;   // the first blocks after starting playback, at least,
-constexpr double quietSeconds = 0.25;    // and on until the audio thread has gone this long without allocating or freeing,
-constexpr double maxWarmUpSeconds = 2.0; // but no longer
-constexpr double steadySeconds = 1.0;    // then steady playback
+constexpr int steadyBlocks = 188; // a second at 48 kHz: what plays after the warm-up, which must allocate nothing
 
-// Runs the warm-up through processFor (seconds) and returns how long it took. What plays may first allocate some way into
-// playback (what starts with a note, the first time one comes): steady playback starts once a quiet stretch shows that
-// everything has started. Something that keeps allocating still shows in the steady second after the longest warm-up.
-template <typename ProcessFor>
-double warmUp (ProcessFor& processFor)
+// The blocks from the start of playback that may allocate or free: none, unless a scenario says which and why. Every
+// block after them is measured, whatever comes in it (a note's start, an edit, a loop's wrap): an allocation there fails
+// a guarded scenario, with where it came from.
+constexpr int noWarmUp = 0;
+
+// An edit made on the message thread while the song plays, as the user makes one: before the block it is due at, the
+// audio thread waits for it to be made and for the message thread to deliver what it posted (the song's new plan, handed
+// to the engine), so that every edit is played, at the same block every time, however fast the machine is.
+struct Edit
 {
-    processFor (warmUpSeconds);
-    auto elapsed = warmUpSeconds, quietFor = 0.0;
-    auto events = AudioThreadMonitor::getNumEvents();
-
-    while (quietFor < quietSeconds && elapsed < maxWarmUpSeconds)
-    {
-        constexpr double step = 0.05;
-        processFor (step);
-        elapsed += step;
-
-        const auto now = AudioThreadMonitor::getNumEvents();
-        quietFor = now == events ? quietFor + step : 0.0;
-        events = now;
-    }
-
-    return elapsed;
-}
+    int atBlock = 0;
+    const char* what = "";
+    std::function<void()> make;
+};
 
 //==============================================================================
 // A stereo sine wave file, two seconds long or as long as asked, so audio clips have something to play; at the engine's rate,
@@ -191,18 +181,43 @@ struct Measurement
     juce::StringArray callSites;       // of every allocation and free measured
     juce::StringArray steadyCallSites; // of those after the warm-up
     int firstSteadyEvent = 0;
-    double warmUpTaken = 0.0; // how long the warm-up took, in seconds (warmUp())
+    int warmUpBlocks = noWarmUp; // the blocks that may allocate, from the first
+    int blocksPlayed = 0;
+    int firstBusyBlock = -1, lastBusyBlock = -1; // the first and last blocks that allocated or freed, or -1
     float peakLevel = 0.0f;
+};
+
+// How a scenario plays: what is done once the engine has the song, before it plays; whether it records a take instead,
+// while another thread plays a note every twentieth of a second into a track live, as a MIDI driver would; the blocks
+// that may allocate as it starts (noWarmUp, or a number with its reason where the scenario gives it); and the edits made
+// while it plays.
+struct Playing
+{
+    std::function<void()> before = {};
+    bool recording = false;
+    phazite::TrackID liveTrack = {};
+    int warmUpBlocks = noWarmUp;
+    std::vector<Edit> edits = {};
 };
 
 // Plays the open project from its start through Phazite's engine as the app plays it, in real time on a separate "audio"
 // thread that drives the tests' audio device (TestAudioDevice.h), whose callback is Phazite's
-// (model/playback/internal/PlaybackHost.h), and measures that thread; a tone comes into the device's two inputs. What is
-// given is done once the engine has the song, before it plays. Recording, it records a take instead, while another thread
-// plays a note every twentieth of a second into a track live, as a MIDI driver would; stopping keeps the take.
-Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::function<void()>& before = {}, bool recording = false,
-                                   phazite::TrackID liveTrack = {})
+// (model/playback/internal/PlaybackHost.h), and measures that thread; a tone comes into the device's two inputs. It plays
+// the warm-up's blocks, then a second, or on until a block after the last edit's. Recording, stopping keeps the take.
+Measurement playProjectAndMeasure (phazite::ProjectContext& context, const Playing& playing)
 {
+    const auto& before = playing.before;
+    const auto recording = playing.recording;
+    const auto liveTrack = playing.liveTrack;
+    const auto& edits = playing.edits;
+    auto lastEditBlock = -1;
+
+    for (const auto& edit : edits)
+    {
+        REQUIRE (edit.atBlock > lastEditBlock); // in their order, one at each block at most
+        lastEditBlock = edit.atBlock;
+    }
+
     auto* openSong = phazite::findSong (context);
     REQUIRE (openSong != nullptr);
     auto& song = *openSong;
@@ -211,6 +226,17 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::
     REQUIRE (device != nullptr);
     phazite::test::dispatchPendingMessages(); // the song for the device's rate
     phazite::movePlayhead (song, phazite::BeatPosition());
+
+    // JUCE's AudioDeviceManager sizes a buffer of its own in the first block it plays with a device's block size, once in
+    // the program's life (juce_AudioDeviceManager.cpp, audioDeviceIOCallbackInt(): tempBuffer.setSize()): the app's first
+    // audio block allocates that once, which Phazite can't change (docs/realtime-audit.md). A block played here, the song
+    // stopped, gives it that before anything is measured, so that every scenario measures its own blocks alike, whichever
+    // runs first.
+    {
+        juce::AudioBuffer<float> stopped (2, auditBlockSize);
+        stopped.clear();
+        device->process (stopped);
+    }
 
     if (before)
         before();
@@ -245,9 +271,20 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::
     engine.setNumThreads (1);
 
     Measurement m;
-    juce::AudioBuffer<float> buffer (2, auditBlockSize); // allocated before the thread is marked as an audio thread
+    m.warmUpBlocks = playing.warmUpBlocks;
+
+    // A second after the warm-up, and at least what follows the last edit for a while (a device removed is let go of by the
+    // message thread after the engine has played on without it).
+    const auto totalBlocks = std::max (playing.warmUpBlocks + steadyBlocks, lastEditBlock + 64);
+    std::vector<AudioThreadMonitor::Counts> countsAfter ((size_t) totalBlocks); // made before the thread is an audio thread
+    juce::AudioBuffer<float> buffer (2, auditBlockSize);
     const auto blockDuration =
         std::chrono::duration_cast<std::chrono::steady_clock::duration> (std::chrono::duration<double> (auditBlockSize / auditSampleRate));
+
+    // The edits asked for by the audio thread, and made by the message thread; and whether the audio thread is done, or
+    // must stop early (a check on the message thread failed).
+    std::atomic<int> editsDue { 0 }, editsMade { 0 };
+    std::atomic<bool> finished { false }, abandoned { false };
 
     AudioThreadMonitor::reset();
 
@@ -255,36 +292,99 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::
         [&]
         {
             const AudioThreadMonitor::ScopedAudioThread marker;
+            size_t nextEdit = 0;
 
-            const auto processFor = [&] (double seconds)
+            for (int block = 0; block < totalBlocks && ! abandoned.load(); ++block)
             {
-                const auto numBlocks = juce::roundToInt (seconds * auditSampleRate / auditBlockSize);
-
-                for (int i = 0; i < numBlocks; ++i)
+                // The edits due now, made on the message thread while this one waits (outside the device's call, which
+                // is what is measured).
+                for (; nextEdit < edits.size() && edits[nextEdit].atBlock == block; ++nextEdit)
                 {
-                    const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
+                    editsDue = (int) nextEdit + 1;
 
-                    for (int channel = 0; channel < 2; ++channel)
-                        buffer.copyFrom (channel, 0, tone, 0, 0, auditBlockSize);
-
-                    device->process (buffer);
-                    m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
-                    std::this_thread::sleep_until (blockEnd);
+                    while (editsMade.load() <= (int) nextEdit && ! abandoned.load())
+                        std::this_thread::sleep_for (std::chrono::milliseconds (1));
                 }
-            };
 
-            m.warmUpTaken = warmUp (processFor);
-            m.warmUp = AudioThreadMonitor::getCounts();
-            m.firstSteadyEvent = AudioThreadMonitor::getNumEvents();
+                const auto blockEnd = std::chrono::steady_clock::now() + blockDuration;
 
-            processFor (steadySeconds);
-            const auto total = AudioThreadMonitor::getCounts();
-            m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
+                for (int channel = 0; channel < 2; ++channel)
+                    buffer.copyFrom (channel, 0, tone, 0, 0, auditBlockSize);
+
+                device->process (buffer);
+                countsAfter[(size_t) block] = AudioThreadMonitor::getCounts();
+                m.blocksPlayed = block + 1;
+                m.peakLevel = std::max (m.peakLevel, buffer.getMagnitude (0, auditBlockSize));
+                std::this_thread::sleep_until (blockEnd);
+            }
+
+            finished = true;
         });
+
+    // Meanwhile the message thread does its usual work as the song plays (the session's timer, what threads post to it), and
+    // makes each edit when it is due. A check that fails in an edit stops the audio thread before it goes on.
+    try
+    {
+        while (! finished.load())
+        {
+            if (const auto due = editsDue.load(); due > editsMade.load())
+            {
+                const auto& edit = edits[(size_t) due - 1];
+                INFO ("making the edit at block " << edit.atBlock << ": " << edit.what);
+                edit.make();
+                phazite::test::dispatchPendingMessages(); // the song's new plan, handed to the engine
+                editsMade = due;
+            }
+            else
+            {
+                phazite::test::dispatchPendingMessages();
+                std::this_thread::sleep_for (std::chrono::milliseconds (1));
+            }
+        }
+    }
+    catch (...)
+    {
+        abandoned = true;
+        audioThread.join();
+        playingNotes = false;
+        notes.join();
+        engine.setNumThreads (threads);
+        phazite::test::TestAudioDeviceType::close (devices);
+        throw;
+    }
+
     audioThread.join();
     playingNotes = false;
     notes.join();
     engine.setNumThreads (threads);
+    REQUIRE (m.blocksPlayed == totalBlocks);
+
+    // Where the audio thread allocated or freed, block by block.
+    AudioThreadMonitor::Counts previous;
+
+    for (int block = 0; block < totalBlocks; ++block)
+    {
+        const auto& now = countsAfter[(size_t) block];
+
+        if (now.allocations != previous.allocations || now.frees != previous.frees)
+        {
+            if (m.firstBusyBlock < 0)
+                m.firstBusyBlock = block;
+
+            m.lastBusyBlock = block;
+        }
+
+        if (block == m.warmUpBlocks - 1)
+        {
+            m.warmUp = now;
+            m.firstSteadyEvent = now.allocations + now.frees;
+        }
+
+        previous = now;
+    }
+
+    const auto total = AudioThreadMonitor::getCounts();
+    m.steady = { total.allocations - m.warmUp.allocations, total.frees - m.warmUp.frees };
 
     phazite::stopAndReturn (song);
     m.callSites = AudioThreadMonitor::describeCallSites();
@@ -293,6 +393,13 @@ Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::
     // So that later tests start without the device.
     phazite::test::TestAudioDeviceType::close (devices);
     return m;
+}
+
+// As above, with only what is to be done before it plays, or a take recorded with notes played live into a track.
+Measurement playProjectAndMeasure (phazite::ProjectContext& context, const std::function<void()>& before = {}, bool recording = false,
+                                   phazite::TrackID liveTrack = {})
+{
+    return playProjectAndMeasure (context, Playing { .before = before, .recording = recording, .liveTrack = liveTrack });
 }
 
 // Plays a test song as playProjectAndMeasure() does, with what is to be done once Phazite's engine has it, before it plays,
@@ -314,17 +421,23 @@ void report (const juce::String& scenario, const Measurement& m)
 
     if (AudioThreadMonitor::isAvailable())
     {
-        text << "  audio thread, warm-up of " << m.warmUpTaken << " s: " << m.warmUp.allocations << " allocations, " << m.warmUp.frees
+        text << "  audio thread, " << m.blocksPlayed << " blocks of " << auditBlockSize << " samples: ";
+
+        if (m.firstBusyBlock < 0)
+            text << "none allocated or freed\n";
+        else
+            text << "the first to allocate or free was block " << m.firstBusyBlock << ", the last block " << m.lastBusyBlock << "\n";
+
+        text << "  in the warm-up's " << m.warmUpBlocks << " blocks: " << m.warmUp.allocations << " allocations, " << m.warmUp.frees
              << " frees\n";
-        text << "  audio thread, next " << steadySeconds << " s: " << m.steady.allocations << " allocations, " << m.steady.frees
-             << " frees\n";
+        text << "  after it: " << m.steady.allocations << " allocations, " << m.steady.frees << " frees\n";
 
         for (const auto& site : m.callSites)
             text << "    " << site << "\n";
 
         if (! m.steadyCallSites.isEmpty())
         {
-            text << "  of those, in the next " << steadySeconds << " s:\n";
+            text << "  of those, after the warm-up:\n";
 
             for (const auto& site : m.steadyCallSites)
                 text << "    " << site << "\n";
@@ -338,14 +451,21 @@ void report (const juce::String& scenario, const Measurement& m)
     MESSAGE (text.toStdString());
 }
 
-// For playback paths that must stay clean: once playing, nothing is allocated or freed on the audio
-// thread. (Only measured in Windows Debug builds.)
+// For playback paths that must stay clean: after the warm-up's blocks (none, unless the scenario gave some, with why),
+// nothing is allocated or freed on the audio thread, whatever comes. (Only measured in Windows Debug builds.)
 void checkSteadyPlaybackDoesNotAllocate (const Measurement& m)
 {
     if (AudioThreadMonitor::isAvailable())
     {
+        INFO ("blocks that allocated or freed: from " << m.firstBusyBlock << " to " << m.lastBusyBlock << ", the warm-up's "
+                                                      << m.warmUpBlocks << " allowed; where:\n"
+                                                      << m.steadyCallSites.joinIntoString ("\n").toStdString());
         CHECK (m.steady.allocations == 0);
         CHECK (m.steady.frees == 0);
+
+        // A warm-up allowed that nothing needs any more goes: the scenario then guards every block.
+        if (m.warmUpBlocks > 0)
+            CHECK (m.firstBusyBlock >= 0);
     }
 }
 
@@ -1780,5 +1900,112 @@ TEST_SUITE ("realtime-audit")
         const auto m = playAndMeasure (song);
         report ("Two tracks in a folder bus with a compressor", m);
         CHECK (m.peakLevel > 0.01f);
+    }
+
+    //==============================================================================
+    // Edited while it plays, as the user edits: each edit made on the message thread between two blocks (Edit), the song's
+    // new plan handed to the engine, and every block after the first measured. A block is 256 samples at 48 kHz: a beat at
+    // 120 BPM is about 94 blocks.
+
+    TEST_CASE ("Real-time audit: edited while it plays: a parameter and a fader turned, a note added, a clip moved, undo and redo")
+    {
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto filter = song.addEffect (keys, phazite::devices::FilterEffect::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        const auto bass = song.addTrack ("Bass");
+        song.setInstrument (bass, phazite::devices::Synth::typeID);
+        const auto line = song.addMidiClip (bass, 8.0, 4.0);
+        song.addNote (line, 36, 8.0, 2.0);
+        song.addNote (line, 43, 10.0, 2.0);
+        auto& played = getSong (song);
+
+        const auto m = playProjectAndMeasure (
+            song.context, Playing { .edits = {
+                                        { 10, "the filter's cutoff turned by hand", [&] { song.setParameter (filter, "cutoff", 900.0f); } },
+                                        { 20, "the bass track's fader moved", [&] { song.setVolume (bass, -9.0f); } },
+                                        { 30, "a note added just ahead of the playhead", [&] { song.addNote (chords, 72, 0.5, 0.25); } },
+                                        { 50, "the bass clip moved under the playhead",
+                                          [&] { phazite::moveClip (song.context, line, phazite::BeatPosition::fromBeats (0.5), bass); } },
+                                        { 70, "undone", [&] { phazite::undo (played); } },
+                                        { 80, "redone", [&] { phazite::redo (played); } },
+                                        { 90, "undone twice",
+                                          [&]
+                                          {
+                                              phazite::undo (played);
+                                              phazite::undo (played);
+                                          } },
+                                        { 110, "the cutoff turned again", [&] { song.setParameter (filter, "cutoff", 4000.0f); } },
+                                    } });
+        report ("Edited while it plays: values, notes, a clip, undo and redo", m);
+        CHECK (m.peakLevel > 0.01f);                                                   // it plays
+        CHECK (phazite::getNotes (song.context, std::vector { chords }).size() == 48); // the note undone
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: edited while it plays: effects added, removed, undone and redone, and the instrument replaced")
+    {
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int beat = 0; beat < 16; ++beat)
+            song.addChord (chords, { 60 + beat % 3, 64, 67 }, beat, 0.75);
+
+        auto& played = getSong (song);
+        phazite::DeviceID eq;
+
+        const auto m = playProjectAndMeasure (
+            song.context,
+            Playing { .edits = {
+                          { 10, "an EQ added after the synth", [&] { eq = song.addEffect (keys, phazite::devices::Equalizer::typeID); } },
+                          { 30, "a compressor added after it", [&] { song.addEffect (keys, phazite::devices::Compressor::typeID); } },
+                          { 50, "the EQ removed", [&] { phazite::removeDevice (song.context, eq); } },
+                          { 70, "undone: the EQ back", [&] { phazite::undo (played); } },
+                          { 90, "redone: the EQ removed again", [&] { phazite::redo (played); } },
+                          { 110, "the instrument replaced by the FM synth",
+                            [&] { song.setInstrument (keys, phazite::devices::FmSynth::typeID); } },
+                          { 140, "undone: the synth back", [&] { phazite::undo (played); } },
+                      } });
+        report ("Edited while it plays: effects and the instrument", m);
+        CHECK (m.peakLevel > 0.01f);                                  // it plays
+        CHECK (phazite::getEffects (song.context, keys).size() == 1); // the compressor
+        checkSteadyPlaybackDoesNotAllocate (m);
+    }
+
+    TEST_CASE ("Real-time audit: edited while it plays: a short loop wrapping, moved, turned off, and the playhead moved")
+    {
+        using phazite::BeatPosition;
+        TestSong song;
+        const auto keys = song.firstTrack;
+        song.setInstrument (keys, phazite::devices::Synth::typeID);
+        const auto chords = song.addMidiClip (keys, 0.0, 16.0);
+
+        for (int i = 0; i < 64; ++i)
+            song.addChord (chords, { 60 + i % 3, 64, 67 }, i * 0.25, 0.2);
+
+        auto& played = getSong (song);
+
+        const auto m = playProjectAndMeasure (
+            song.context,
+            Playing {
+                .edits = {
+                    { 10, "a quarter-beat loop around the playhead, wrapping every 23 blocks",
+                      [&] { phazite::loopBeats (played, { BeatPosition(), BeatPosition::fromBeats (0.25) }); } },
+                    { 80, "the loop moved later",
+                      [&] { phazite::loopBeats (played, { BeatPosition::fromBeats (2.0), BeatPosition::fromBeats (2.5) }); } },
+                    { 150, "looping turned off", [&] { phazite::toggleLoop (played); } },
+                    { 170, "the playhead moved while it plays", [&] { phazite::movePlayhead (played, BeatPosition::fromBeats (6.0)); } },
+                } });
+        report ("Edited while it plays: the loop and the playhead", m);
+        CHECK (m.peakLevel > 0.01f); // it plays
+        CHECK_FALSE (phazite::isLoopOn (played));
+        checkSteadyPlaybackDoesNotAllocate (m);
     }
 }

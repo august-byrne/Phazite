@@ -32,6 +32,23 @@ juce::File getSystemTemporaryFolder();
 // condition holds. Returns false if it still doesn't after timeoutMilliseconds.
 bool runTimersUntil (const std::function<bool()>& condition, int timeoutMilliseconds = 2000);
 
+// While one lives, a JUCE assertion at this place (JUCE's file and line as its log names them,
+// "values/juce_ValueTree.cpp:569") doesn't fail the test it fires in (TestMain.cpp fails a test for any other): for a
+// test that makes, on purpose, the very fault JUCE asserts against. One at a time, on the test's own thread.
+class ExpectedAssertion
+{
+public:
+    explicit ExpectedAssertion (const char* place);
+    ~ExpectedAssertion();
+
+    // How often it fired while this lived: none in a build without JUCE's assertions.
+    int getCount() const;
+
+private:
+    ExpectedAssertion (const ExpectedAssertion&) = delete;
+    ExpectedAssertion& operator= (const ExpectedAssertion&) = delete;
+};
+
 // Runs freezes and bounces as the app's main window does, without a window: it keeps the render while it runs, and
 // what came of each.
 struct RenderHost : public TrackRenderHost

@@ -92,11 +92,12 @@ juce::String AboutPanel::describeRow (int row) const
 
 juce::String AboutPanel::getNoticeText (int row) const
 {
-    // Each row's heading lines, then its licence's text as the build put it next to the app.
+    // Each row's heading lines, then its licence's text as the build put it next to the app, without the page breaks (form
+    // feeds) of a licence written for printing, as the GPL's text is: no font has a glyph for one, which shows as a box.
     const auto readFile = [this] (const juce::String& fileName)
     {
         const auto file = licences.getChildFile (fileName);
-        return file.existsAsFile() ? file.loadFileAsString()
+        return file.existsAsFile() ? file.loadFileAsString().removeCharacters ("\f")
                                    : "The license's text should be in " + file.getFullPathName() + ", but that file isn't there.";
     };
 

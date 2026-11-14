@@ -393,6 +393,8 @@ void PianoRoll::NoteGrid::setDraggedNotes (const std::vector<NoteData>& notes)
 void PianoRoll::NoteGrid::copyDraggedNotes()
 {
     // Copies of the notes as they are, where they are, which are what is selected and moves from here on.
+    gesture->originalsOfCopies = gesture->originals;
+    gesture->anchorOfCopies = gesture->anchor;
     std::vector<NoteData> notes;
 
     for (const auto& original : gesture->originals)
@@ -415,6 +417,20 @@ void PianoRoll::NoteGrid::copyDraggedNotes()
             notes.push_back (*note);
 
     setDraggedNotes (notes);
+}
+
+void PianoRoll::NoteGrid::removeCopies()
+{
+    if (gesture->copied.empty())
+        return;
+
+    // In the drag's step, which a drag that ends where it began takes back whole.
+    deleteNotes (roll.context, gesture->copied);
+    gesture->copied.clear();
+    gesture->originals = gesture->originalsOfCopies;
+    gesture->anchor = gesture->anchorOfCopies;
+    gesture->note = gesture->pressed;
+    roll.selectNotes (gesture->selectionBeforeCopies, false);
 }
 
 void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
@@ -452,12 +468,18 @@ void PianoRoll::NoteGrid::dragNotes (const juce::MouseEvent& e)
             if (const auto row = roll.getRowForPitch (original.pitch); row >= 0)
                 rowDelta = juce::jlimit (-row, roll.getNumRows() - 1 - row, rowDelta);
 
-        // Copies are made as the drag first takes them somewhere: until then, nothing changes.
+        // Copies are made as the drag first takes them somewhere: until then, nothing changes. Back where they began, they go
+        // again, rather than lying on their originals, unseen and playing twice, until the mouse goes up.
+        if (gesture->copies && delta == BeatDuration() && rowDelta == 0)
+        {
+            removeCopies();
+            gesture->movedBy = {};
+            gesture->movedRows = 0;
+            return;
+        }
+
         if (gesture->copies && gesture->copied.empty())
         {
-            if (delta == BeatDuration() && rowDelta == 0)
-                return;
-
             copyDraggedNotes();
 
             if (! anchor.note.isValid())

@@ -691,13 +691,13 @@ void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
         return;
     }
 
-    // Alt+wheel makes every track taller or shorter.
+    // Alt+wheel makes every track taller or shorter, by whole pixels, the parts of a notch a trackpad sends added up.
     if (e.mods.isAltDown())
     {
-        if (context.hasProject())
+        if (const auto pixels = takeWheelSteps (wheel.deltaY, TrackHeight::step / 2.0, heightWheelRest);
+            context.hasProject() && pixels != 0)
         {
-            resizeTracks (context, getAllPlaylistTracks (context),
-                          juce::roundToInt (getWheelNotches (wheel.deltaY) * TrackHeight::step / 2));
+            resizeTracks (context, getAllPlaylistTracks (context), pixels);
             trackHeightChanged();
         }
 
@@ -711,7 +711,7 @@ void Playlist::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
         scrollByWheel (sideways);
 
     if (! juce::exactlyEqual (upDown, 0.0f))
-        setScrollY (scrollY - juce::roundToInt (getWheelNotches (upDown) * scrollPerNotch));
+        setScrollY (scrollY - takeWheelSteps (upDown, scrollPerNotch, scrollWheelRest));
 }
 
 //==============================================================================

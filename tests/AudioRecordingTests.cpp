@@ -833,7 +833,7 @@ TEST_CASE ("The audio settings' correction moves what an input records earlier")
     audioIO.setRecordingCorrection (256.0 / 48.0); // a block, in milliseconds
 
     song.run ("transport.record");
-    RealTimePlayback::wait (1200);
+    REQUIRE (playback.waitForBlocks (RealTimePlayback::blocksFor (1.2))); // played, however long a busy machine takes
     song.run ("transport.record");
     audioIO.setRecordingCorrection (0.0);
 

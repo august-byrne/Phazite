@@ -107,5 +107,6 @@ private:
     juce::Rectangle<int> getTimelineArea() const override;
     BeatRange getContentRange() const override;
     void timelineChanged() override;
+    bool cancelDrag() override; // Escape: a handle's or the audio's drag
 };
 } // namespace phazite::ui

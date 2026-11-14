@@ -98,6 +98,7 @@ struct PianoRoll::NoteGrid : public juce::Component
     void dragNotes (const juce::MouseEvent&);
     void setDraggedNotes (const std::vector<NoteData>&); // what a drag moves or resizes, as it is now
     void copyDraggedNotes();                             // Ctrl+drag: the copies, which move from here on
+    void removeCopies();                                 // and back where they began, the copies go
     bool endMoveThatWentNowhere();                       // as the mouse goes up: whether the move left its notes where they began
     void clickNote (NoteRef, juce::ModifierKeys);        // a click on a note that waited for the mouse to go up
     juce::String describeDrag() const;                   // where the drag has the note under the pointer, for the hint bar: "E4 at 3.2.1"
@@ -191,7 +192,9 @@ struct PianoRoll::NoteGrid::Gesture : public TimelineGesture
     bool stepIsTheDrags = false;                // the drag began the undo step: one that moves nothing in the end is taken back
     bool copies = false;                        // Ctrl+drag: copies of the notes move, made once the drag moves them
     std::vector<NoteRef> copied;                // the copies, once made,
-    std::vector<NoteRef> selectionBeforeCopies; // and what was selected until then
+    std::vector<NoteRef> selectionBeforeCopies; // and what was selected until then,
+    std::vector<Original> originalsOfCopies;    // and the notes they copy, which move again if the copies go
+    Original anchorOfCopies;
     BeatDuration movedBy;                       // a move: how far the notes are from where they began,
     int movedRows = 0;                          // along and in rows
     std::unordered_set<NoteRef> selectedBefore; // a rectangle with Ctrl adds to these
@@ -238,9 +241,11 @@ struct PianoRoll::VelocityLane : public juce::Component
     std::vector<NoteData> before;      // the notes as they were when it began
     float pressY = 0.0f;
     juce::Point<float> rampStart, rampEnd;
+    double wheelRest = 0.0; // the part of a notch the wheel has turned by and not yet changed velocities for
 
     bool isDragging() const noexcept { return drag != Drag::none; }
     void cancelDrag(); // Escape: as it was before the mouse went down
+    void endDrag();    // another project opened: what it did stays, in the song it did it in
 
     int velocityAt (float y) const;
     std::vector<NoteRef> getNotesAt (float x) const; // whose bars the pointer is on: the selected ones, if it is on any

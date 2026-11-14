@@ -22,27 +22,15 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
 
 ## Editing
 
-- **19. Automation and tempo points snap to the grid's lines as they are dragged.** A point off the grid jumps onto it at
-  the first move, also a move straight up or down, as notes and clips did before 2026-11-13. Why: the drag snaps the
-  point's place, not its move (`src/ui/playlist/PlaylistAutomation.cpp`, `src/ui/playlist/TempoLane.cpp`). Fix: snap the
-  move with `TimelineEditor::snapMove()`, as the piano roll and the playlist do.
 - **20. Duplicate and Paste make fewer notes than they say** where some would land past a clip that the next clip keeps
   from growing: no note is made where it wouldn't play, but the undo step is still named for all of them ("Duplicate 6
   Notes" for 2). Fix: name the step for what was made, or say in the hint bar that some didn't fit.
-- **21. Copies of a copying drag that came back to its start lie on their originals until the mouse goes up,** and a tool
-  change in the middle of the drag keeps them (`cancelGesture`). Fix: take the copies away as the drag returns.
 - **44. A note dragged past its clip's end and back leaves the clip longer for good.** A clip of bars 1 to 4 whose note
   is dragged to beat 9 and back to beat 3 ends at beat 12 after the release, so the song's end and the loop move; drags
   that paint or copy notes do the same. Why: each step of the drag sets the notes, and `growToHold()`
   (`src/model/notes/Notes.cpp`) only lengthens (`src/ui/pianoroll/PianoRollNoteTools.cpp`). Fix: keep each shown clip's
   length from the press and restore it before each step, or grow once at the release. Confirmed by a second reading
   (ui-timeline-editors 1).
-- **45. Undo, or any command, runs in the middle of a drag.** Ctrl+Z while a clip is dragged undoes the drag's step and
-  starts one without a name, which the rest of the drag goes into; redo's history is gone. Before the drag's first
-  change it undoes the step before. Why: `undo()` (`src/model/commands/Undo.cpp`) doesn't ask `Gesture::isInProgress()`,
-  and the key dispatcher runs commands while a mouse button is down (`src/ui/input/KeyDispatcher.cpp`). Fix: switch
-  Undo and Redo off while a gesture is in progress, and run no command that changes the song then. Not yet checked
-  (tests-ui 3).
 - **46. A start typed or dragged in the inspector for several notes can put them all on their clip's start.** In a clip
   that starts at beat 32, notes at 33 and 34 moved back 3 beats both land on 32. Why: `changeNotes()` and
   `setNotesTo()` (`src/model/notes/NotesModel.cpp`) limit the move by the song's start, not the clip's, and each note is
@@ -84,12 +72,11 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   what was clicked. Why: every change of the selection ends in `scrollToShow()` of the first selected track's row
   (`src/ui/playlist/Playlist.cpp`). Fix: scroll for selections made by keys and commands only, to the track that
   changed. Not yet checked (ui-timeline-editors 5).
-- **55. The wheel is read by its direction, not by how far it turned.** A two-finger scroll over the velocity lane
-  runs velocities to 127 or 1, an undo step for each event, also for every selected note when none is under the
-  pointer; slow trackpad scrolls are lost to rounding; there is no pinch zoom. Why: `VelocityLane::mouseWheelMove()`
-  (`src/ui/pianoroll/PianoRollLanes.cpp`) and the row heights (`src/ui/pianoroll/PianoRoll.cpp`) take the sign alone.
-  Fix: add up parts of a notch, one gesture for a burst, a note under the pointer for velocity. Not yet checked
-  (ui-timeline-editors 7).
+- **55. A trackpad's burst over the velocity lane makes an undo step for each whole notch,** not one for the burst;
+  with no note under the pointer the wheel changes every selected note; and there is no pinch zoom. Parts of a notch
+  now add up (`TimelineEditor::takeWheelSteps()`), so a slow scroll no longer pins velocities. Fix: hold one
+  `SongGesture` across a burst, ended by a short timer or the next other event; decide whether velocity needs a note
+  under the pointer; add `mouseMagnify`.
 - **56. Small ones in the lanes' gestures.** A double-click on an empty part of an automation lane adds a point, then
   deletes it: two undo steps for nothing. Draw places the clip selected first, where the code's comment says last.
   Shift pressed in the middle of a point's drag makes its value jump (`src/ui/playlist/PlaylistAutomation.cpp`,
@@ -166,11 +153,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   Why: `SandboxedInstance::getDeadlineNanoseconds()` (`src/model/plugins/SandboxedInstance.cpp`) is the part's length.
   Fix: take the deadline from the device's block, with a floor near a millisecond. Not measured. Partly confirmed by a
   second reading (plugin-hosting 5).
-- **65. A mono plug-in: an effect leaves the right channel dry, and an instrument plays on the left only.** Why: for a
-  plug-in that refuses stereo the helper falls back to the plug-in's own layout and plays channel 0 alone, and Phazite
-  copies both channels back (`chooseLayout()` and `playPiece()` in `src/host/core/Instance.cpp`). Fix: in the helper,
-  add the input up to mono and copy a mono output to both channels, by the plug-in's own channel counts. Not yet
-  checked (plugin-hosting 8).
 - **66. Phazite trusts counts that a helper can write.** After a block it copies as many channels as the shared
   memory's header says, read again from memory the helper writes (`src/model/plugins/SandboxedProcessor.cpp`), and
   `readParameters()` and `readPluginInfo()` (`src/sandbox/core/PluginInfo.cpp`) size their lists from a count in the
@@ -178,11 +160,6 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   thread. The helper keeps what it reads within limits; Phazite doesn't. Fix: use the count Phazite handed over, cap a
   message's counts by the bytes it has left, and take a malformed message for a lost helper. Not yet checked
   (plugin-hosting 9).
-- **67. As a project opens, and as a plug-in reloads, the plug-in's program is set after its state,** the order the
-  code's own comment warns against: a plug-in whose state doesn't bring its program back gets the factory program over
-  the saved settings. Why: `setCurrentProgram()` after the instance is made with its state
-  (`src/model/plugins/PluginInstances.cpp`). Which plug-ins it harms isn't known. Fix: never set a program after a
-  state. Not yet checked (plugin-hosting 11).
 - **68. A plug-in's editor has the wrong size whenever Interface Size isn't 100 %:** cropped below it, with black
   margins above it, and a resizable editor is made larger at each opening. Why: `SandboxedEditor`
   (`src/app/SandboxedEditor.cpp`) takes the plug-in's size in pixels for its own size in the scaled window, and the
@@ -319,6 +296,15 @@ What is open and is not a bug (quality gaps, design changes, missing features, t
   (`runsFree` in `tests/GoldenModulationTests.cpp`) and aren't compared live against their render. Whether Play starts
   Free modulators again is the owner's to decide ([open-questions.md](open-questions.md)).
 - **138. Bounce in Place collapses the original track outside its undo step** (view state), so Undo leaves it collapsed.
+
+- **140. Escape doesn't take a drag back** in the chord lane, the sections strip, the ruler's loop and playhead drags,
+  the devices' graphs or the mixer's controls. It does in the playlist, its automation and tempo lanes, the piano roll
+  and the audio clip editor (`TimelineEditor::cancelDrag()`); and no key runs a command that changes the song while a
+  mouse button is down, anywhere.
+- **141. JUCE's VST3 host describes a VST3's switch as a parameter of two steps, not as a switch,** so
+  `ParameterInfo::isBoolean` is false for every VST3 switch and Phazite shows it as a knob.
+- **142. The CPU meter's test checks against the wall clock** (`tests/MixerModelTests.cpp`), as the real-time checks
+  did before they waited for blocks played.
 
 ## Saving
 
@@ -563,18 +549,6 @@ None of these is measured: each is the audit's reading of the code, and each nee
   Fix: keep the curve until a value changes. Not yet checked (ui-device-editors 13).
 
 ## Tests
-
-- **131. Some checks that fail would end the test program instead of reporting.** A `REQUIRE` that throws while a
-  thread can still be joined, or inside a thread, ends the process (`tests/SandboxTests.cpp`); and pointers are used
-  after a `CHECK`, or unchecked (`tests/DevicesViewTests.cpp`), so a real regression there hides the file's other
-  cases behind a crash. Fix: a guard that joins, `CHECK` inside threads, `REQUIRE` before a pointer is used. Not yet
-  checked (tests-infrastructure 15).
-
-- **139. A real-time check fails under a loaded full run.** "The song plays in real time while an old version renders in
-  the background, no block held up" (`tests/VersionsHearingTests.cpp`) measures playback against the wall clock and,
-  with three other test files running beside it, sometimes sees no block played in its window (`longestBlock > 0`
-  fails). It passes alone. The full run is heavier since the golden songs are also played live. Fix: wait for the
-  first block before measuring, or run the wall-clock files one at a time in ctest (`RUN_SERIAL`).
 
 ## Build and packaging
 

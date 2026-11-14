@@ -480,8 +480,17 @@ void PianoRoll::VelocityLane::mouseWheelMove (const juce::MouseEvent& e, const j
     if (notes.empty())
         notes = roll.getSelectedRefsHere();
 
-    if (const auto notches = getWheelNotches (wheel.deltaY); ! notes.empty() && ! juce::exactlyEqual (notches, 0.0))
-        changeNoteVelocities (roll.context, notes, notches > 0.0 ? velocityPerNotch : -velocityPerNotch);
+    // By whole notches: a trackpad's parts of one are added up, rather than each moving the velocities a whole step, which ran
+    // them to 127 or 1 in a short scroll, with an undo step for each.
+    if (const auto notches = takeWheelSteps (wheel.deltaY, 1.0, wheelRest); ! notes.empty() && notches != 0)
+        changeNoteVelocities (roll.context, notes, notches * velocityPerNotch);
+}
+
+void PianoRoll::VelocityLane::endDrag()
+{
+    drag = Drag::none;
+    step = nullptr;
+    before.clear();
 }
 
 //==============================================================================

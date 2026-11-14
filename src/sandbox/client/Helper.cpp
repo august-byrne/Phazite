@@ -2,6 +2,20 @@
 #include "Helper.h"
 
 #include <algorithm>
+#include <cstdio>
+
+// Built with a sanitizer (the linux-asan and linux-tsan presets): GCC says so by these, Clang by __has_feature.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+ #define PHAZITE_SANITIZED 1
+#elif defined(__has_feature)
+ #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(undefined_behavior_sanitizer)
+  #define PHAZITE_SANITIZED 1
+ #endif
+#endif
+
+#ifndef PHAZITE_SANITIZED
+ #define PHAZITE_SANITIZED 0
+#endif
 
 namespace phazite::sandbox
 {
@@ -14,7 +28,44 @@ namespace
     constexpr int quitMilliseconds = 1000;
     constexpr int watchMilliseconds = 200;
     constexpr double heartbeatMilliseconds = 1000.0; // how often the message thread is asked whether it answers
+
+    // What a helper writes to stderr. Built with a sanitizer, the helper's reports (a race, a leak, undefined behaviour,
+    // a bad access) are written there, and kept: passed on whole to Phazite's own stderr, where the tests' output shows
+    // them as it shows the tests' own (tools/ci-sanitizer-reports.sh). Otherwise it goes nowhere, as JUCE's ChildProcess
+    // sends what it isn't asked to read: a reader of the helper's output would wait on a pipe that a process the plug-in
+    // started could hold open after the helper went.
+    constexpr int helperStreams = PHAZITE_SANITIZED ? juce::ChildProcess::wantStdErr : 0;
 } // namespace
+
+// Reads what the helper writes to stderr until it goes (the pipe's end), and passes it on to this process's.
+class Helper::Relay final : private juce::Thread
+{
+public:
+    explicit Relay (juce::ChildProcess& p)
+        : juce::Thread ("Phazite helper output"),
+          process (p)
+    {
+        startThread (juce::Thread::Priority::low);
+    }
+
+    // Waits for the end of the helper's output, which comes as the helper goes: called once it has.
+    ~Relay() override { stopThread (-1); }
+
+private:
+    juce::ChildProcess& process;
+
+    void run() override
+    {
+        // One byte at a time, as it comes (a read of more waits for all of it): a report is a few kilobytes, once.
+        for (char byte = 0; process.readProcessOutput (&byte, 1) > 0;)
+        {
+            std::fputc (byte, stderr);
+
+            if (byte == '\n')
+                std::fflush (stderr);
+        }
+    }
+};
 
 class Helper::Pipe final : public juce::InterprocessConnection
 {
@@ -143,6 +194,7 @@ Helper::~Helper()
             process.kill();
     }
 
+    relay = nullptr; // what it wrote to the end, now that it has gone
     closePipe();
     watch = nullptr;
     pipe = nullptr;
@@ -174,9 +226,13 @@ bool Helper::start (int timeoutMilliseconds)
     {
         const juce::ScopedLock held (processLock);
 
-        if (! process.start (juce::StringArray { program.getFullPathName(), juce::String ("--") + helperProcessID + ":" + pipeName }, 0))
+        if (! process.start (juce::StringArray { program.getFullPathName(), juce::String ("--") + helperProcessID + ":" + pipeName },
+                             helperStreams))
             return false;
     }
+
+    if (helperStreams != 0)
+        relay = std::make_unique<Relay> (process);
 
     // Until it has answered, a loss isn't told (a start that fails says so itself), and the watching thread ends a helper
     // that doesn't answer in time: one that never connects to the pipe would keep the hello's write waiting for ever.
@@ -207,6 +263,7 @@ bool Helper::start (int timeoutMilliseconds)
     killProcess();
     closePipe();
     watch = nullptr;
+    relay = nullptr; // the helper's output to its end, which comes as it goes
     return false;
 }
 

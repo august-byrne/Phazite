@@ -131,10 +131,11 @@
       "name": "linux-asan",
       "inherits": "linux-test-base",
       "configurePreset": "linux-asan",
-      "description": "Known leaks in JUCE, which Phazite can't change, would be suppressed in tools/lsan-suppressions.txt (none now). A crash is reported by AddressSanitizer, with its stack, not by doctest's signal handler (allow_user_segv_handler=0), so that CI annotates where it was.",
+      "description": "Known leaks in JUCE, which Phazite can't change, would be suppressed in tools/lsan-suppressions.txt (none now). A crash is reported by AddressSanitizer, with its stack, not by doctest's signal handler (allow_user_segv_handler=0), so that CI annotates where it was. Undefined behaviour ends the test program at its first report, with its stack (halt_on_error=1): by default UndefinedBehaviorSanitizer only prints and carries on, which no test would notice; tests/TestMain.cpp names the test that ran.",
       "environment": {
         "LSAN_OPTIONS": "suppressions=${sourceDir}/tools/lsan-suppressions.txt",
-        "ASAN_OPTIONS": "allow_user_segv_handler=0"
+        "ASAN_OPTIONS": "allow_user_segv_handler=0",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"
       }
     },
     {

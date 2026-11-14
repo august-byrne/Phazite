@@ -119,6 +119,36 @@ public:
 private:
     const char* name;
 };
+
+// A thread of a test's, told to finish and joined however the test ends: a REQUIRE that throws while a std::thread can
+// still be joined would end the whole test program (std::terminate) instead of failing the one test. Checks inside the
+// thread are CHECKs, which never throw.
+class JoinedThread
+{
+public:
+    JoinedThread (std::atomic<bool>& finishFlag, std::function<void()> run)
+        : finish (finishFlag),
+          thread (std::move (run))
+    {
+    }
+
+    ~JoinedThread() { join(); }
+
+    void join()
+    {
+        finish = true;
+
+        if (thread.joinable())
+            thread.join();
+    }
+
+    JoinedThread (const JoinedThread&) = delete;
+    JoinedThread& operator= (const JoinedThread&) = delete;
+
+private:
+    std::atomic<bool>& finish;
+    std::thread thread;
+};
 } // namespace
 
 TEST_CASE ("A block channel hands a block over and gets it back played, one round trip")
@@ -131,22 +161,22 @@ TEST_CASE ("A block channel hands a block over and gets it back played, one roun
 
     // The helper doubles what comes in.
     std::atomic<bool> stop { false };
-    std::thread helper (
-        [&]
-        {
-            while (! stop)
-            {
-                if (! helperSide->waitForBlock (10'000'000))
-                    continue;
+    JoinedThread helper (stop,
+                         [&]
+                         {
+                             while (! stop)
+                             {
+                                 if (! helperSide->waitForBlock (10'000'000))
+                                     continue;
 
-                const auto& info = helperSide->getInfo();
+                                 const auto& info = helperSide->getInfo();
 
-                for (int channel = 0; channel < info.numChannels; ++channel)
-                    juce::FloatVectorOperations::multiply (helperSide->getChannel (channel), 2.0f, info.numSamples);
+                                 for (int channel = 0; channel < info.numChannels; ++channel)
+                                     juce::FloatVectorOperations::multiply (helperSide->getChannel (channel), 2.0f, info.numSamples);
 
-                helperSide->finish();
-            }
-        });
+                                 helperSide->finish();
+                             }
+                         });
 
     for (int block = 0; block < 100; ++block)
     {
@@ -161,7 +191,6 @@ TEST_CASE ("A block channel hands a block over and gets it back played, one roun
         CHECK (engineSide->getChannel (1)[127] == doctest::Approx (2.0f * (float) block));
     }
 
-    stop = true;
     helper.join();
 }
 
@@ -174,16 +203,18 @@ TEST_CASE ("A block answered late stays the helper's: the next finds the channel
     REQUIRE (helperSide != nullptr);
 
     std::atomic<bool> release { false };
-    std::thread helper (
-        [&]
-        {
-            REQUIRE (helperSide->waitForBlock (-1));
+    JoinedThread helper (release,
+                         [&]
+                         {
+                             const auto got = helperSide->waitForBlock (-1);
+                             CHECK (got);
 
-            while (! release)
-                std::this_thread::sleep_for (std::chrono::milliseconds (1));
+                             while (! release)
+                                 std::this_thread::sleep_for (std::chrono::milliseconds (1));
 
-            helperSide->finish();
-        });
+                             if (got)
+                                 helperSide->finish();
+                         });
 
     engineSide->getInfo().numSamples = 128;
     CHECK (engineSide->play (0, 2'000'000) == sandbox::BlockChannel::Played::late); // 2 ms

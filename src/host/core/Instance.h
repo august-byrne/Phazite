@@ -61,6 +61,7 @@ private:
     std::unique_ptr<PlayHead> playHead;
     double rate = 44100.0;
     int numPluginChannels = 0, sidechainChannel = -1; // where the sidechain bus's channels are in the plug-in's buffer
+    bool monoIn = false, monoOut = false;             // its main buses, where it would take neither in stereo
     juce::AudioBuffer<float> extra;                   // channels the plug-in has beyond the channel's: made once, as prepared
     juce::MidiBuffer midi;                            // a piece's MIDI, its room made once
     juce::Array<juce::AudioProcessorParameter*> parameters;

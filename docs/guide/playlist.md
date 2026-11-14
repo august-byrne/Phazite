@@ -227,8 +227,12 @@ The grid's button, in the tab row, names its size and opens its menu.
 thumb: it is the playlist's horizontal scroll bar. Drag the thumb to scroll, drag either of its ends to zoom, or press
 elsewhere to bring that part into view.
 
+## While you drag
+
+**Escape** takes a drag back and leaves nothing to undo. Keys that would change the song, Undo and Redo among them, do
+nothing until you let go; Play, the tools' keys and zoom still work, and a tool you pick takes over when you let go.
+
 ## Not yet
 
 - A searchable list of every clip, to drag from: planned.
 - A clip dragged onto a track of the other kind (audio onto an instrument's track) is not refused yet: planned.
-- Escape taking back a drag in the playlist: planned (the piano roll has it).

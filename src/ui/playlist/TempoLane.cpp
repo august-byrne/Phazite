@@ -82,6 +82,18 @@ void TempoLane::tempoChanged()
     refresh();
 }
 
+bool TempoLane::cancelDrag()
+{
+    if (drag == Drag::none)
+        return false;
+
+    gesture.rollBack();
+    drag = pendingDrag = Drag::none;
+    pressed = -1;
+    refresh();
+    return true;
+}
+
 void TempoLane::refresh()
 {
     tempos = getTempoChanges (context);
@@ -475,15 +487,27 @@ void TempoLane::movePoint (const juce::MouseEvent& e)
     if (! juce::isPositiveAndBelow (pressed, (int) before.size()))
         return;
 
+    // The tempo changes are held by their places in the song's list: if something else added or took one away meanwhile, the
+    // one pressed may be another now, and the drag stops.
+    refresh();
+
+    if (tempos.size() != before.size())
+    {
+        drag = Drag::none;
+        return;
+    }
+
     editor.autoScroll (e, getShownTimeline (*this).toNearestInt(), TimelineEditor::ScrollDirections::sideways);
     const auto& from = before[(size_t) pressed];
     auto beat = BeatPosition();
 
-    // The first stays at the song's start; the others go where the mouse takes them, on the grid unless Alt is held, between
-    // the tempos before and after them, which keep their order.
+    // The first stays at the song's start; the others go where the mouse takes them, by the grid's steps from where they were
+    // unless Alt is held (TimelineEditor::snapMove(): a tempo change off the grid stays as far off it, and a drag up or down
+    // alone moves it nothing in time, known bug 19 until 2026-11-14), between the tempos before and after them, which keep
+    // their order.
     if (pressed > 0)
     {
-        const auto target = editor.snap (from.beat + (xToBeat (e.position.x) - gesture.startBeat), e.mods).inBeats();
+        const auto target = (from.beat + editor.snapMove (from.beat, xToBeat (e.position.x) - gesture.startBeat, e.mods)).inBeats();
         const auto earliest = before[(size_t) pressed - 1].beat.inBeats() + minimumGap;
         const auto latest = pressed + 1 < (int) before.size() ? before[(size_t) pressed + 1].beat.inBeats() - minimumGap
                                                               : std::numeric_limits<double>::max();

@@ -165,6 +165,8 @@ void Instance::start (std::unique_ptr<sandbox::BlockChannel> blockChannel, doubl
     plugin->setRateAndBufferSizeDetails (rate, limits.maxSamples);
     plugin->prepareToPlay (rate, limits.maxSamples);
     numPluginChannels = std::min (maximumChannels, std::max (plugin->getTotalNumInputChannels(), plugin->getTotalNumOutputChannels()));
+    monoIn = plugin->getMainBusNumInputChannels() == 1;
+    monoOut = plugin->getMainBusNumOutputChannels() == 1;
     extra.setSize (std::max (1, numPluginChannels), limits.maxSamples);
     midi.ensureSize ((size_t) (limits.maxEvents + 16 * 128) * 16); // a block's events, and a note-off for every note
 
@@ -449,9 +451,23 @@ void Instance::playPiece (int start, int numSamples) noexcept
         midi.addEvent (event.bytes, event.size, at);
     }
 
+    // A plug-in in mono (one that would take neither of its main buses in stereo) between Phazite's two sides: it hears
+    // both, half each, on its one input, and its one output goes to both, so that no side is left as it came (or silent).
+    const auto stereo = numChannels >= 2 && limits.maxChannels >= 2 && numPluginChannels >= 1;
+    auto* right = stereo ? channel->getChannel (1) + start : nullptr;
+
+    if (stereo && monoIn)
+    {
+        juce::FloatVectorOperations::multiply (channels[0], 0.5f, numSamples);
+        juce::FloatVectorOperations::addWithMultiply (channels[0], right, 0.5f, numSamples);
+    }
+
     playHead->set (info, rate, start);
     juce::AudioBuffer<float> buffer (channels.data(), numPluginChannels, numSamples);
     plugin->processBlock (buffer, midi);
+
+    if (stereo && monoOut)
+        juce::FloatVectorOperations::copy (right, channels[0], numSamples);
 }
 
 void Instance::endNotes (int midiChannel, int sample) noexcept

@@ -1177,6 +1177,19 @@ double TimelineEditor::getWheelNotches (float wheelDelta)
     return wheelDelta / wheelNotch;
 }
 
+int TimelineEditor::takeWheelSteps (float wheelDelta, double stepsPerNotch, double& rest)
+{
+    const auto steps = getWheelNotches (wheelDelta) * stepsPerNotch + rest;
+    const auto whole = std::trunc (steps);
+    rest = steps - whole;
+    return (int) whole;
+}
+
+bool TimelineEditor::keyPressed (const juce::KeyPress& key)
+{
+    return key == juce::KeyPress::escapeKey && mouseIsDown && cancelDrag();
+}
+
 void TimelineEditor::zoomByWheel (float x, float wheelDelta)
 {
     zoomAround (x, std::pow (zoomPerNotch, getWheelNotches (wheelDelta)));
@@ -1336,6 +1349,15 @@ void TimelineEditor::setTool (Tool newTool)
 {
     if (! canUseTool (newTool) || usesSmartToolFor (newTool))
         newTool = Tool::smart;
+
+    // While the mouse is down, what it is doing goes on with the tool it began with, and the tool chosen takes over as it goes
+    // up: changed in the middle of a drag, the tool ended the drag where it was, keeping copies a Ctrl+drag had just made on
+    // their originals (known bug 21 until 2026-11-14).
+    if (mouseIsDown)
+    {
+        toolAfterDrag = newTool != tool ? std::optional (newTool) : std::nullopt;
+        return;
+    }
 
     // A held key repeats its command: choosing the tool in use again must not end what the mouse is doing.
     if (newTool == tool)

@@ -158,10 +158,11 @@ PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTre
         return &entry;
     }
 
-    // From the state the song keeps of it, then its program, if the state left another; then the values the song sets by
-    // hand under its automation.
-    std::unique_ptr<SandboxedInstance> made =
-        host.createInstance (*known, readPluginState (device), sampleRate, openBlockSize, entry.error);
+    // From the state the song keeps of it; where that left another program than the song's, the song's program, then the
+    // state again, so that the settings are never overridden by a program set after them (a plug-in's state needn't say
+    // which program it is on); then the values the song sets by hand under its automation.
+    const auto stored = readPluginState (device);
+    std::unique_ptr<SandboxedInstance> made = host.createInstance (*known, stored, sampleRate, openBlockSize, entry.error);
 
     if (made == nullptr)
     {
@@ -170,8 +171,15 @@ PluginInstances::Entry* PluginInstances::open (DeviceID id, const juce::ValueTre
     }
 
     if (const auto* program = device.getPropertyPointer (schema::pluginProgram); program != nullptr && made->getNumPrograms() > 1)
+    {
         if (const auto wanted = (int) *program; wanted != made->getCurrentProgram())
+        {
             made->setCurrentProgram (wanted);
+
+            if (! stored.isEmpty())
+                made->setStateInformation (stored.getData(), (int) stored.getSize());
+        }
+    }
 
     for (const auto& child : device)
         if (child.hasType (schema::VALUE))
